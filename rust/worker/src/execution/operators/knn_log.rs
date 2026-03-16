@@ -5,7 +5,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::ChromaError;
 use chroma_segment::{
-    blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    blockfile_record::{RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError},
     types::{materialize_logs, LogMaterializerError},
 };
 use chroma_system::Operator;
@@ -54,6 +54,7 @@ impl Operator<KnnLogInput, KnnOutput> for Knn {
         let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
+            None,
         ))
         .await
         {
@@ -64,7 +65,13 @@ impl Operator<KnnLogInput, KnnOutput> for Knn {
             Err(e) => Err(*e),
         }?;
 
-        let logs = materialize_logs(&record_segment_reader, input.logs.clone(), None).await?;
+        let logs = materialize_logs(
+            &record_segment_reader,
+            input.logs.clone(),
+            None,
+            &RecordSegmentPlan::default(),
+        )
+        .await?;
 
         let target_vector;
         let target_embedding = if let DistanceFunction::Cosine = input.distance_function {

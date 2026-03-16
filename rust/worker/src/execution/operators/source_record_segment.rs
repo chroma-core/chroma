@@ -100,6 +100,7 @@ mod tests {
         let reader = Box::pin(RecordSegmentReader::from_segment(
             &test_segment.record_segment,
             &test_segment.blockfile_provider,
+            None,
         ))
         .await
         .expect("Record segment reader should be initialized");

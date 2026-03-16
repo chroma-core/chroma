@@ -74,6 +74,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
         let segment_reader = Box::pin(RecordSegmentReader::from_segment(
             &input.record_segment_definition,
             &input.blockfile_provider,
+            None,
         ))
         .await;
         let reader = match segment_reader {
@@ -208,7 +209,8 @@ mod tests {
     use chroma_blockstore::provider::BlockfileProvider;
     use chroma_segment::{
         blockfile_record::{
-            RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
+            RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError,
+            RecordSegmentWriter,
         },
         types::materialize_logs,
     };
@@ -281,7 +283,7 @@ mod tests {
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
             let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
-                RecordSegmentReader::from_segment(&record_segment, &in_memory_provider),
+                RecordSegmentReader::from_segment(&record_segment, &in_memory_provider, None),
             )
             .await
             {
@@ -311,10 +313,15 @@ mod tests {
                     }
                 }
             };
-            let mat_records = materialize_logs(&record_segment_reader, data, None)
-                .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
-                .await
-                .expect("Log materialization failed");
+            let mat_records = materialize_logs(
+                &record_segment_reader,
+                data,
+                None,
+                &RecordSegmentPlan::default(),
+            )
+            .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
+            .await
+            .expect("Log materialization failed");
             segment_writer
                 .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await

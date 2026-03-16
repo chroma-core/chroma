@@ -114,7 +114,9 @@ impl Operator<PrefetchSegmentInput, PrefetchSegmentOutput> for PrefetchSegmentOp
 mod tests {
     use super::*;
     use chroma_blockstore::test_arrow_blockfile_provider;
-    use chroma_segment::blockfile_record::{RecordSegmentReader, RecordSegmentWriter};
+    use chroma_segment::blockfile_record::{
+        RecordSegmentPlan, RecordSegmentReader, RecordSegmentWriter,
+    };
     use chroma_segment::types::materialize_logs;
     use chroma_types::{
         Chunk, CollectionUuid, DatabaseUuid, LogRecord, Operation, OperationRecord, SegmentUuid,
@@ -185,9 +187,14 @@ mod tests {
             let data: Chunk<LogRecord> = Chunk::new(data.into());
             let record_segment_reader: Option<RecordSegmentReader> = None;
 
-            let mat_records = materialize_logs(&record_segment_reader, data, None)
-                .await
-                .expect("Log materialization failed");
+            let mat_records = materialize_logs(
+                &record_segment_reader,
+                data,
+                None,
+                &RecordSegmentPlan::default(),
+            )
+            .await
+            .expect("Log materialization failed");
             segment_writer
                 .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await

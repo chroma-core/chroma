@@ -9,7 +9,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::metadata::types::MetadataIndexError;
 use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentReader},
-    blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    blockfile_record::{RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError},
     types::{materialize_logs, LogMaterializerError, MaterializeLogsResult},
 };
 use chroma_system::Operator;
@@ -410,7 +410,10 @@ impl MetadataProvider<'_> {
                                     if let KeyWrapper::String(user_id) = kw {
                                         return Ok(match record_segment_reader {
                                             Some(reader) => reader
-                                                .get_offset_id_for_user_id(user_id)
+                                                .get_offset_id_for_user_id(
+                                                    user_id,
+                                                    &RecordSegmentPlan::default(),
+                                                )
                                                 .await?
                                                 .iter()
                                                 .collect(),
@@ -612,6 +615,7 @@ impl Operator<FilterInput, FilterOutput> for Filter {
             match Box::pin(RecordSegmentReader::from_segment(
                 &input.record_segment,
                 &input.blockfile_provider,
+                None,
             ))
             .instrument(
                 tracing::trace_span!(parent: Span::current(), "Create record segment reader"),
@@ -642,10 +646,14 @@ impl Operator<FilterInput, FilterOutput> for Filter {
             tokio::try_join!(record_segment_reader_fut, metadata_segment_reader_fut)?;
 
         let cloned_record_segment_reader = record_segment_reader.clone();
-        let materialized_logs =
-            materialize_logs(&cloned_record_segment_reader, input.logs.clone(), None)
-                .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
-                .await?;
+        let materialized_logs = materialize_logs(
+            &cloned_record_segment_reader,
+            input.logs.clone(),
+            None,
+            &RecordSegmentPlan::default(),
+        )
+        .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
+        .await?;
         let metadata_log_reader =
             MetadataLogReader::create(&materialized_logs, &record_segment_reader)
                 .instrument(
@@ -682,7 +690,13 @@ impl Operator<FilterInput, FilterOutput> for Filter {
                 let compact_offset_ids = if let Some(reader) = record_segment_reader.as_ref() {
                     let mut offset_ids = RoaringBitmap::new();
                     for user_id in user_allowed_ids {
-                        match reader.get_offset_id_for_user_id(user_id.as_str()).await {
+                        match reader
+                            .get_offset_id_for_user_id(
+                                user_id.as_str(),
+                                &RecordSegmentPlan::default(),
+                            )
+                            .await
+                        {
                             Ok(Some(offset_id)) => {
                                 offset_ids.insert(offset_id);
                             }
@@ -756,7 +770,8 @@ mod tests {
     use chroma_segment::{
         blockfile_metadata::{MetadataSegmentReader, MetadataSegmentWriter},
         blockfile_record::{
-            RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
+            RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError,
+            RecordSegmentWriter,
         },
         test::TestDistributedSegment,
         types::materialize_logs,
@@ -1403,7 +1418,7 @@ mod tests {
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
             let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
-                RecordSegmentReader::from_segment(&record_segment, &blockfile_provider),
+                RecordSegmentReader::from_segment(&record_segment, &blockfile_provider, None),
             )
             .await
             {
@@ -1431,9 +1446,14 @@ mod tests {
                     }
                 }
             };
-            let mat_records = materialize_logs(&record_segment_reader, data, None)
-                .await
-                .expect("Log materialization failed");
+            let mat_records = materialize_logs(
+                &record_segment_reader,
+                data,
+                None,
+                &RecordSegmentPlan::default(),
+            )
+            .await
+            .expect("Log materialization failed");
             metadata_writer
                 .apply_materialized_log_chunk(&record_segment_reader, &mat_records, None)
                 .await
@@ -1488,6 +1508,7 @@ mod tests {
         let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
             &record_segment,
             &blockfile_provider,
+            None,
         ))
         .await
         .expect("Reader should be initialized by now");
@@ -1511,7 +1532,7 @@ mod tests {
         .await
         .expect("Error creating segment writer");
         let some_reader = Some(record_segment_reader);
-        let mat_records = materialize_logs(&some_reader, data, None)
+        let mat_records = materialize_logs(&some_reader, data, None, &RecordSegmentPlan::default())
             .await
             .expect("Log materialization failed");
         metadata_writer
@@ -1547,6 +1568,7 @@ mod tests {
         let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
             &record_segment,
             &blockfile_provider,
+            None,
         ))
         .await
         .expect("Reader should be initialized by now");
@@ -1567,6 +1589,7 @@ mod tests {
         let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
             &filter_input.record_segment,
             &filter_input.blockfile_provider,
+            None,
         ))
         .await
         {
@@ -1582,6 +1605,7 @@ mod tests {
             &cloned_record_segment_reader,
             filter_input.logs.clone(),
             None,
+            &RecordSegmentPlan::default(),
         )
         .await
         .unwrap();

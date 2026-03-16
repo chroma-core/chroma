@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
-    blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    blockfile_record::{RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError},
     types::{materialize_logs, LogMaterializerError},
 };
 use chroma_system::Operator;
@@ -117,6 +117,7 @@ impl Operator<RankedGroupByInput, RankedGroupByOutput> for GroupBy {
         let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
+            None,
         ))
         .await
         {
@@ -125,9 +126,14 @@ impl Operator<RankedGroupByInput, RankedGroupByOutput> for GroupBy {
             Err(e) => return Err((*e).into()),
         };
 
-        let materialized_logs = materialize_logs(&record_segment_reader, input.logs.clone(), None)
-            .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
-            .await?;
+        let materialized_logs = materialize_logs(
+            &record_segment_reader,
+            input.logs.clone(),
+            None,
+            &RecordSegmentPlan::default(),
+        )
+        .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
+        .await?;
 
         let offset_id_to_log = materialized_logs
             .iter()
