@@ -66,22 +66,16 @@ jobs:
           DEV_TAG="dev.${COMMIT_SHA}-${GITHUB_RUN_ID}"
           echo "DEV_TAG=${DEV_TAG}" >> "$GITHUB_ENV"
 
-          # Update each package's version with dev tag
-          for PKG_DIR in packages/chromadb; do
-            PKG_PATH="./${PKG_DIR}/package.json"
-            # Get current version
-            CURRENT_VERSION=$(node -p "require('${PKG_PATH}').version")
-            # Create full version with dev tag
-            BASE_VERSION=$(echo $CURRENT_VERSION | cut -f1,2 -d.)
-            PATCH_VERSION=$(echo $CURRENT_VERSION | cut -f3 -d.)
-            # bump patch version
-            NEW_PATCH_VERSION=$((PATCH_VERSION + 1))
-            NEW_VERSION="${BASE_VERSION}.${NEW_PATCH_VERSION}-${DEV_TAG}"
+          # Update chromadb package version with dev tag
+          PKG_PATH="./packages/chromadb/package.json"
+          CURRENT_VERSION=$(node -p "require('${PKG_PATH}').version")
+          BASE_VERSION=$(echo $CURRENT_VERSION | cut -f1,2 -d.)
+          PATCH_VERSION=$(echo $CURRENT_VERSION | cut -f3 -d.)
+          NEW_PATCH_VERSION=$((PATCH_VERSION + 1))
+          NEW_VERSION="${BASE_VERSION}.${NEW_PATCH_VERSION}-${DEV_TAG}"
 
-            # Update package.json with new version
-            jq --arg version "$NEW_VERSION" '.version = $version' $PKG_PATH > tmp.$$.json && mv tmp.$$.json $PKG_PATH
-            echo "Updated ${PKG_DIR} to version ${NEW_VERSION}"
-          done
+          jq --arg version "$NEW_VERSION" '.version = $version' $PKG_PATH > tmp.$$.json && mv tmp.$$.json $PKG_PATH
+          echo "Updated chromadb to version ${NEW_VERSION}"
         working-directory: ./clients/js/
 
       - name: Update package.json with organization scope
