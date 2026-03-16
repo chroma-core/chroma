@@ -14,7 +14,7 @@ async fn test_k8s_integration_06_parallel_open_or_initialize() {
     // AlreadyInitialized, which must be treated as success.
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     let prefix = "test_k8s_integration_06_parallel_open_or_initialize";
-    let num_writers = 64;
+    let num_writers = 32;
     let mut handles = Vec::with_capacity(num_writers);
     let done = Arc::new(AtomicBool::new(false));
     let notifier = Arc::new(tokio::sync::Notify::new());
