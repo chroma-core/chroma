@@ -198,7 +198,6 @@ impl Dispatcher {
             let total_cores = std::thread::available_parallelism()
                 .map(|n| n.get())
                 .unwrap_or(1);
-            let affinity_count = affinity_count.max(1);
             let thread_index = Arc::new(AtomicU64::new(0));
             builder.on_thread_start(move || {
                 let idx = thread_index.fetch_add(1, Ordering::Relaxed) as usize;
