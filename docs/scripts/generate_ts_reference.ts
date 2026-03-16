@@ -17,7 +17,7 @@ import { parseArgs } from "util";
 // Configuration
 // =============================================================================
 
-const SDK_SOURCE_PATH = "../../clients/js/packages/chromadb/src";
+const SDK_SOURCE_PATH = "../../clients/new-js/packages/chromadb/src";
 
 const TYPE_SIMPLIFICATIONS: Record<string, string> = {
   "number[][]": "Embeddings",

@@ -17,6 +17,6 @@ jobs:
         with:
           version: "9"
       - name: Install dependencies
-        run: cd clients/js && pnpm install --no-frozen-lockfile
+        run: cd clients/new-js && pnpm install --no-frozen-lockfile
       - name: Test
         run: bin/ts-integration-test.sh
