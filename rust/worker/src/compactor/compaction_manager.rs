@@ -28,6 +28,7 @@ use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_index::usearch::USearchIndexProvider;
 use chroma_log::Log;
 use chroma_memberlist::memberlist_provider::Memberlist;
+use chroma_segment::bloom_filter::BloomFilterManager;
 use chroma_segment::spann_provider::SpannProvider;
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
@@ -104,6 +105,7 @@ pub(crate) struct CompactionManagerContext {
     use_fragment_fetch: bool,
     fragment_fetcher: Option<Arc<FragmentFetcher>>,
     collections_for_fragment_fetch: HashSet<CollectionUuid>,
+    bloom_filter_manager: Option<BloomFilterManager>,
 }
 
 pub(crate) struct CompactionManager {
@@ -157,6 +159,7 @@ impl CompactionManager {
         use_fragment_fetch: bool,
         fragment_fetcher: Option<Arc<FragmentFetcher>>,
         collections_for_fragment_fetch: HashSet<CollectionUuid>,
+        bloom_filter_manager: Option<BloomFilterManager>,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (compact_awaiter_tx, compact_awaiter_rx) =
             mpsc::channel::<CompactionTask>(compaction_manager_queue_size);
@@ -194,6 +197,7 @@ impl CompactionManager {
                 use_fragment_fetch,
                 fragment_fetcher,
                 collections_for_fragment_fetch,
+                bloom_filter_manager,
             },
             on_next_memberlist_signal: None,
             compact_awaiter_channel: compact_awaiter_tx,
@@ -449,6 +453,7 @@ impl CompactionManagerContext {
             dispatcher.clone(),
             is_function_disabled,
             fragment_fetcher,
+            self.bloom_filter_manager.clone(),
             #[cfg(test)]
             None,
         ))
@@ -631,6 +636,12 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             None
         };
 
+        let bloom_filter_manager = BloomFilterManager::try_from_config(
+            &(config.bloom_filter_manager.clone(), storage.clone()),
+            registry,
+        )
+        .await?;
+
         CompactionManager::new(
             system.clone(),
             scheduler,
@@ -654,6 +665,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             config.compactor.use_fragment_fetch,
             fragment_fetcher,
             collections_for_fragment_fetch,
+            Some(bloom_filter_manager),
         )
     }
 }
