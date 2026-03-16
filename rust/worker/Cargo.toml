@@ -67,6 +67,8 @@ s3heap = { workspace = true }
 s3heap-service = { workspace = true }
 wal3 = { workspace = true }
 
+rand = { workspace = true }
+
 fastrace = "0.7"
 fastrace-opentelemetry = "0.8"
 

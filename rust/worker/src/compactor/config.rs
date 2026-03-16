@@ -1,3 +1,4 @@
+use crate::compactor::scheduler_policy::SchedulerPolicyConfig;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -115,6 +116,9 @@ pub struct CompactorConfig {
     #[serde(default = "CompactorConfig::default_max_failure_count")]
     pub max_failure_count: i32,
 
+    #[serde(default)]
+    pub(crate) scheduler_policy: SchedulerPolicyConfig,
+
     /// When true, use pointer-based fetch (ScoutLogFragments + direct storage reads)
     /// instead of gRPC PullLogs for log fetching.
     #[serde(default)]
@@ -209,6 +213,7 @@ impl Default for CompactorConfig {
             repair_log_offsets_timeout_seconds:
                 CompactorConfig::default_repair_log_offsets_timeout_seconds(),
             max_failure_count: CompactorConfig::default_max_failure_count(),
+            scheduler_policy: SchedulerPolicyConfig::default(),
             use_fragment_fetch: CompactorConfig::default_use_fragment_fetch(),
             collections_for_fragment_fetch: Vec::new(),
             fragment_fetcher_cache: chroma_cache::CacheConfig::default(),
