@@ -1,4 +1,6 @@
 - [Intro to Large Index Benchmarking](#intro-to-large-index-benchmarking)
+- [TODO](#todo)
+- [Key Results](#key-results)
 - [RaBitQ Implementation (Core Functions)](#rabitq-implementation-core-functions)
   - [1-Bit (vs 4-Bit) Performance Comparison](#1-bit-vs-4-bit-performance-comparison)
     - [r6i.8xlarge](#r6i8xlarge)
@@ -7,7 +9,7 @@
   - [Error Bound](#error-bound)
 - [Comparing Different Central Indices](#comparing-different-central-indices)
   - [Summary](#summary)
-  - [Usearch 1 bit](#usearch-1-bit)
+  - [Usearch - 1 Bit](#usearch---1-bit)
     - [Parallelism (blockers)](#parallelism-blockers)
       - [Our global lock](#our-global-lock)
       - [Usearch global lock](#usearch-global-lock)
@@ -16,10 +18,14 @@
       - [Recall: 1 bit centroids + Reranking](#recall-1-bit-centroids--reranking)
       - [Note: USearch ef/k coupling](#note-usearch-efk-coupling)
     - [Thread scaling](#thread-scaling-1)
-  - [Usearch 1 bit - Improved Concurrency](#usearch-1-bit---improved-concurrency)
+  - [Usearch - 1 Bit, Improved Concurrency](#usearch---1-bit-improved-concurrency)
     - [USearch only benchmark](#usearch-only-benchmark)
     - [Full Quantized SPANN benchmark](#full-quantized-spann-benchmark)
       - [Specifics](#specifics)
+  - [USearch - Reranked, Improved Concurrency, Improved Concurrency](#usearch---reranked-improved-concurrency-improved-concurrency)
+    - [1 Bit build + search](#1-bit-build--search)
+    - [4 Bit build + search](#4-bit-build--search)
+    - [FP build + 1 Bit search](#fp-build--1-bit-search)
   - [Flat / Brute Force](#flat--brute-force)
   - [Hierarchical SPANN](#hierarchical-spann)
     - [Design](#design)
@@ -65,6 +71,20 @@ To do this we need to address these core components/bottle necks:
 
 This document contains benchmarks for most of the above components.
 
+# TODO
+
+- [X] 1 Bit RaBitQ Performance
+- [ ] USearch
+- [ ] Data vector rerank performance
+- [ ] E2E Quantized SPANN
+
+
+# Key Results
+
+- USearch sans global locks: 2X+ speedup
+- USearch 1 Bit (add 1M data vectors): 96.07% Recall, 4.74ms latency (vs 4 bit: WIP)
+- E2E Quantized SPANN 1M data vectors: X% Recall, Y latency
+
 # RaBitQ Implementation (Core Functions)
 
 ## 1-Bit (vs 4-Bit) Performance Comparison
@@ -101,11 +121,11 @@ is the cost of the preparation pipeline and cache pressure, not the quantization
 
 Hot-scan benchmark: 1 query vs 2048 vectors, dim=1024, query in L1.
 
-| Benchmark | Function                     | Time   | Per vector | vs exact        |
-| --------- | ---------------------------- | ------ | ---------- | --------------- |
-| dq-exact  | f32 x f32, no quantization   | 290 us | 141 ns     | 1.0x            |
-| dq-4f     | 4-bit code x f32 query       | 762 us | 372 ns     | 2.6x slower     |
-| dq-bw     | 1-bit code x 4 bit query     | 40 us  | 19.5 ns    | **7.2x faster** |
+| Benchmark | Function                   | Time   | Per vector | vs exact        |
+| --------- | -------------------------- | ------ | ---------- | --------------- |
+| dq-exact  | f32 x f32, no quantization | 290 us | 141 ns     | 1.0x            |
+| dq-4f     | 4-bit code x f32 query     | 762 us | 372 ns     | 2.6x slower     |
+| dq-bw     | 1-bit code x 4 bit query   | 40 us  | 19.5 ns    | **7.2x faster** |
 
 
 Benchmark data from `cargo bench -p chroma-index --bench quantization_performance -- dq-`
@@ -189,18 +209,18 @@ What central index will give us the fastest index build times?
 **Benchmarks**
 
 
-| Index                                 | Standalone Query @1M                                                                    | Synthetic Nav @1M                                                             | SPANN Nav @27k                                   |
-| ------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------ |
-| USearch - 4 bit (baseline)            | [2.75ms (R=86.07%)](saved_benchmarks/usearch_4bit.txt)                                  | [3.28ms](saved_benchmarks/usearch_4bit.txt)                                   | [444.7µs](saved_benchmarks/quant_spann_4bit.txt) |
-| USearch - 1 bit                       | [3.16ms (R=94.49%)](saved_benchmarks/usearch_1bit.txt)                                  | [568.0µs](saved_benchmarks/usearch_1bit.txt)                                  | [122.1µs](saved_benchmarks/quant_spann_1bit.txt) |
-| USearch - 1 bit, Threadsafe           | [2.58ms (R=94.95%)](saved_benchmarks/usearch_forked_1bit.txt)                           | [210.5µs](saved_benchmarks/usearch_forked_1bit.txt)                           | [90.7µs](quant_spann_1bit_forked_usearch.txt)    |
-| USearch - 1 bit, Threadsafe, Reranked | [2.39ms (R=91.25%)](saved_benchmarks/usearch_rerank_1bit.txt)   |   ?   |   [100.9µs](saved_benchmarks/quant_spann_1bit_forked_usearch.txt)   |
-| Flat - Full Precision (5k Centroids)  | [11.05ms (R=100%)](saved_benchmarks/flat_full_precision.txt)                            | [6.13ms](saved_benchmarks/flat_full_precision.txt)                            | -                                                |
-| Flat - 1 bit + rerank (10k Centroids) | [4.77ms (R=96.41%)](saved_benchmarks/flat_1bit_rerank.txt)                              | [5.89ms](saved_benchmarks/flat_1bit_rerank.txt)                               | -                                                |
-| Hierarchical SPANN - Full Precision   | [58.98ms (R=98.47%)](saved_benchmarks/hierarchical_centroid_profile_full_precision.txt) | [102.45ms](saved_benchmarks/hierarchical_centroid_profile_full_precision.txt) | -                                                |
-| Hierarchical SPANN - 1 bit, Reranked  | [5.32ms (R=93.37%)](saved_benchmarks/hierarchical_centroid_profile_1bit.txt)            | [9.39ms](saved_benchmarks/hierarchical_centroid_profile_1bit.txt)             | -                                                |
-|                                       |                                                                                         |                                                                               |                                                  |
-| USearch - 1 bit, Reranked             | [2.39ms (R=91.25%)](saved_benchmarks/usearch_rerank_1bit.txt)                           | ?                                                                             | ?                                                |
+| Index                                 | Standalone Query @1M                                                                    | Synthetic Nav @1M                                                             | SPANN Nav @27k                                                  |
+| ------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| USearch - 4 bit (baseline)            | [2.75ms (R=86.07%)](saved_benchmarks/usearch_4bit.txt)                                  | [3.28ms](saved_benchmarks/usearch_4bit.txt)                                   | [444.7µs](saved_benchmarks/quant_spann_4bit.txt)                |
+| USearch - 1 bit                       | [3.16ms (R=94.49%)](saved_benchmarks/usearch_1bit.txt)                                  | [568.0µs](saved_benchmarks/usearch_1bit.txt)                                  | [122.1µs](saved_benchmarks/quant_spann_1bit.txt)                |
+| USearch - 1 bit, Threadsafe           | [2.58ms (R=94.95%)](saved_benchmarks/usearch_forked_1bit.txt)                           | [210.5µs](saved_benchmarks/usearch_forked_1bit.txt)                           | [90.7µs](quant_spann_1bit_forked_usearch.txt)                   |
+| USearch - 1 bit, Threadsafe, Reranked | [2.39ms (R=91.25%)](saved_benchmarks/usearch_rerank_1bit.txt)                           | ?                                                                             | [100.9µs](saved_benchmarks/quant_spann_1bit_forked_usearch.txt) |
+| Flat - Full Precision (5k Centroids)  | [11.05ms (R=100%)](saved_benchmarks/flat_full_precision.txt)                            | [6.13ms](saved_benchmarks/flat_full_precision.txt)                            | -                                                               |
+| Flat - 1 bit + rerank (10k Centroids) | [4.77ms (R=96.41%)](saved_benchmarks/flat_1bit_rerank.txt)                              | [5.89ms](saved_benchmarks/flat_1bit_rerank.txt)                               | -                                                               |
+| Hierarchical SPANN - Full Precision   | [58.98ms (R=98.47%)](saved_benchmarks/hierarchical_centroid_profile_full_precision.txt) | [102.45ms](saved_benchmarks/hierarchical_centroid_profile_full_precision.txt) | -                                                               |
+| Hierarchical SPANN - 1 bit, Reranked  | [5.32ms (R=93.37%)](saved_benchmarks/hierarchical_centroid_profile_1bit.txt)            | [9.39ms](saved_benchmarks/hierarchical_centroid_profile_1bit.txt)             | -                                                               |
+|                                       |                                                                                         |                                                                               |                                                                 |
+| USearch - 1 bit, Reranked             | [2.39ms (R=91.25%)](saved_benchmarks/usearch_rerank_1bit.txt)                           | ?                                                                             | ?                                                               |
 
 
 Legend:
@@ -219,7 +239,7 @@ Legend:
   - ~27k centroids, 4M existing data vectors, 1M new data vectors
   - Uses the [quantized_spann.rs](../../../benches/quantized_spann.rs) benchmark.
 
-## Usearch 1 bit
+## Usearch - 1 Bit
 
 navigate latency = 568.0µs (@32 threads)
 
@@ -332,7 +352,7 @@ Using usearch only benchmark. (usearch_spann_profile)
 | 32      | 568.0µs  | 1.17ms  | 4.05ms |
 
 
-Scaling is poor: 4x threads yields 2.6x navigate latency, 1.7x spawn latency. Four layers of lock contention stack up:
+Four layers of lock contention stack up:
 
 1. **Rust `RwLock`** -- `Arc<RwLock<usearch::Index>>` wraps all operations. Spawns/drops take exclusive locks and block all concurrent navigates. Removing this lock gave 10-18% faster navigate and 24-33% faster spawn with no recall impact (see `usearch_concurrency_findings.md`).
 2. `**global_mutex_**` (USearch `index.hpp`) -- A `std::mutex` protecting `max_level`_ and `entry_slot`_. Every `add()` holds it exclusively, blocking all concurrent `add()` and `search()` calls. This is the single biggest bottleneck because navigate dominates runtime and every spawn serializes against all navigates.
@@ -348,7 +368,7 @@ Improvement options (by estimated impact):
 5. **Double-buffered indices** -- Frozen read index for navigate (zero locking), separate write index for spawns/drops, merge during commit.
 
 
-## Usearch 1 bit - Improved Concurrency
+## Usearch - 1 Bit, Improved Concurrency
 
 Forked USearch (`@USearch/include/usearch/index.hpp`) with two changes:
 
@@ -359,7 +379,7 @@ Full details in [usearch_concurrency.md](usearch_concurrency.md)
 
 ### USearch only benchmark
 
-Operates only on the USearch index, not the SPANN index.
+Simulate adding 1M data vectors. Operates only on the USearch index.
 
 Navigate latency at 32 threads dropped from 568us to 211.8us (2.68x improvement), recovering the single-thread baseline. Recall improved slightly (+2.3pp @10, +4.9pp @100).
 
@@ -369,11 +389,11 @@ Navigate latency at 32 threads dropped from 568us to 211.8us (2.68x improvement)
 | Metric             | Before (upstream) | After (forked) | Change       |
 | ------------------ | ----------------- | -------------- | ------------ |
 | Navigate avg (32t) | 568.0us           | 211.8us        | 2.68x faster |
-| Phase 2 wall       | 56.35s            | 25.58s         | 2.2x faster  |
-| Recall@10          | 92.80%            | 95.10%         | +2.3pp       |
-| Recall@100         | 59.69%            | 64.58%         | +4.9pp       |
+| Phase 2 wall clock | 56.35s            | 25.58s         | 2.2x faster  |
 | Spawn avg          | 1.17ms            | 7.82ms         | 6.7x slower  |
 | Drop avg           | 4.05ms            | 11.31ms        | 2.8x slower  |
+| Recall@10          | 92.80%            | 95.10%         | +2.3pp       |
+| Recall@100         | 59.69%            | 64.58%         | +4.9pp       |
 
 
 Spawn/drop slowdown is expected: before, `add()`/`remove()` held an exclusive RwLock that blocked all concurrent navigates, effectively getting exclusive access. Now they run under shared locks competing with 32 threads of concurrent navigates for per-node locks and `available_threads_mutex`_. Wall time still dropped 2.2x because navigates dominate (3.05M navigates vs 17K spawns+drops).
@@ -396,8 +416,6 @@ At CP 5 (5M vectors, 16 threads, 1-bit data, 1-bit centroids):
 | navigate avg | 416.2us          | 90.7us         | 4.6x faster |
 | spawn avg    | 2.04ms           | 1.23ms         | 1.7x faster |
 | drop avg     | 48.69ms          | 40.20ms        | 1.2x faster |
-
-
 
 #### Specifics
 
@@ -429,6 +447,37 @@ TODO Original needs to be updated - task counts don't match so Total Time is not
 | original | 5   | 2.05ms | 416.2µs  | 6.8µs    | 2.04ms | 92.8µs | 320.12ms | 67.53ms  | 591.5µs  | 48.69ms | 9.3µs | 35.84ms  | 2.3µs    | -      |         |        |         |       |
 | forked   | 5   | 1.81ms | 90.7µs   | -        | 1.23ms | 72.1µs | 367.96ms | 167.16ms | 257.3µs  | 40.20ms | 8.1µs | 35.25ms  | 1.8µs    | -      | 991.4µs | 8.4µs  | 238.0µs | 7.9µs |
 
+## USearch - Reranked, Improved Concurrency, Improved Concurrency
+
+### 1 Bit build + search
+Dim: 1024 | Metric: L2 | Centroid bits: 1 | ef_search: 128 | Centroids: 1.00M | Queries: 200 | k=100
+
+| Rerank | Fetch | Recall@10 | Recall@100 | Avg lat | search  | fetch   | rerank  |
+| ------ | ----- | --------- | ---------- | ------- | ------- | ------- | ------- |
+| 1x     | 100   | 84.75%    | 50.88%     | 354.5µs | 354.5µs | 0ns     | 0ns     |
+| 2x     | 200   | 90.50%    | 68.18%     | 638.8µs | 510.5µs | 20.4µs  | 107.9µs |
+| 4x     | 400   | 95.70%    | 81.98%     | 1.23ms  | 982.1µs | 39.4µs  | 209.9µs |
+| 8x     | 800   | 98.20%    | 91.25%     | 2.37ms  | 1.88ms  | 73.3µs  | 417.7µs |
+| 16x    | 1600  | 99.20%    | 96.07%     | 4.74ms  | 3.73ms  | 138.9µs | 876.0µs |
+
+### 4 Bit build + search
+
+Dim: 1024 | Metric: L2 | Centroid bits: 4 | ef_search: 128 | Centroids: 1.00M | Queries: 200 | k=100
+
+
+| Rerank | Fetch | Recall@10 | Recall@100 | Avg lat | search  | fetch   | rerank  |
+| ------ | ----- | --------- | ---------- | ------- | ------- | ------- | ------- |
+| 1x     | 100   | 94.25%    | 81.56%     | 2.67ms  | 2.67ms  | 0ns     | 0ns     |
+| 2x     | 200   | 96.15%    | 89.45%     | 3.95ms  | 3.82ms  | 22.5µs  | 107.9µs |
+| 4x     | 400   | 98.60%    | 94.98%     | 7.25ms  | 7.00ms  | 42.5µs  | 213.3µs |
+| 8x     | 800   | 99.65%    | 97.80%     | 13.00ms | 12.49ms | 77.6µs  | 427.0µs |
+| 16x    | 1600  | 99.85%    | 99.17%     | 24.50ms | 23.45ms | 153.4µs | 899.7µs |
+
+### FP build + 1 Bit search
+
+TODO
+
+Will require major modifications to USearch fork.
 
 ## Flat / Brute Force
 

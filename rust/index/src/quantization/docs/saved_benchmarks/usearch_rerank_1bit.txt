@@ -26,7 +26,7 @@ Loading cached ground truth from target/usearch_cache/gt_WikipediaEn_1000000_L2_
 |     4x |        400 |      95.70% |      81.98% |     1.23ms |    982.1µs |     39.4µs |    209.9µs |
 |     8x |        800 |      98.20% |      91.25% |     2.37ms |     1.88ms |     73.3µs |    417.7µs |
 |    16x |       1600 |      99.20% |      96.07% |     4.74ms |     3.73ms |    138.9µs |    876.0µs |
-ubuntu@ip-172-31-75-166:~/chroma$
+
 
 
 with normal usearch
