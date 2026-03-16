@@ -235,6 +235,11 @@ impl Scheduler {
         match collections {
             Ok(mut collections) => {
                 tracing::info!("Collections with new data: {collections:?}");
+                let collection_ids: HashSet<_> =
+                    collections.iter().map(|c| c.collection_id).collect();
+                let one_off_collections = one_off_collections
+                    .into_iter()
+                    .filter(|c| !collection_ids.contains(&c.collection_id));
                 collections.extend(one_off_collections);
                 collections
             }
@@ -1119,6 +1124,33 @@ mod tests {
         );
         println!("records[0].offset = {}", records[0].offset);
         println!("records[0].collection_id = {}", records[0].collection_id);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn oneoff_collection_does_not_overwrite_log_metadata() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+
+        f.scheduler
+            .add_oneoff_collections(vec![f.collection_uuid_1])
+            .await;
+
+        let collections = f.scheduler.get_collections_with_new_data().await;
+        let matching: Vec<_> = collections
+            .into_iter()
+            .filter(|c| c.collection_id == f.collection_uuid_1)
+            .collect();
+
+        assert_eq!(
+            matching.len(),
+            1,
+            "one-off collections should be filtered out when log-derived data already exists"
+        );
+        assert_eq!(
+            matching[0].first_log_ts, 1,
+            "log-derived metadata must be preserved instead of being reset by the one-off entry"
+        );
     }
 
     #[tokio::test]
