@@ -156,7 +156,7 @@ class Settings(BaseSettings):  # type: ignore
     # Server config
     # ==================
 
-    is_persistent: bool = False
+    is_persistent: bool = True
     persist_directory: str = "./chroma"
 
     chroma_memory_limit_bytes: int = 0
