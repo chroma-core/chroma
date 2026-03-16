@@ -154,7 +154,10 @@ impl Scheduler {
             {
                 Ok(collections) => collections,
                 Err(e) => {
-                    tracing::error!("Error fetching one-off collections from sysdb: {:?}", e);
+                    tracing::error!(
+                        error = ?e,
+                        "Error fetching one-off collections from sysdb"
+                    );
                     self.pending_oneoff_ids.extend(batch.iter().copied());
                     continue;
                 }
@@ -173,8 +176,8 @@ impl Scheduler {
             for collection in collections {
                 let Some(database_name) = DatabaseName::new(collection.database) else {
                     tracing::warn!(
-                        "Invalid database name for one-off collection {}",
-                        collection.collection_id
+                        collection_id = %collection.collection_id,
+                        "Invalid database name for one-off collection"
                     );
                     continue;
                 };
