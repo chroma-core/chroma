@@ -55,6 +55,7 @@ async fn test_k8s_integration_06_parallel_open_or_initialize() {
         }));
     }
     done.store(true, Ordering::Relaxed);
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     notifier.notify_waiters();
     for handle in handles {
         notifier.notify_one();
