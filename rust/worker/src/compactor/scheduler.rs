@@ -432,7 +432,6 @@ impl Scheduler {
             }
         }
         let mut dropped_jobs_count = 0;
-        let job_queue_at_start = self.job_queue.len();
         let mut rem_capacity = self
             .max_concurrent_jobs
             .saturating_sub(self.in_progress_jobs.len());
@@ -480,7 +479,6 @@ impl Scheduler {
         let job_ids: Vec<_> = self
             .job_queue
             .iter()
-            .skip(job_queue_at_start)
             .map(|j| (j.collection_id, j.database_name.clone()))
             .collect();
         for (collection_id, database_name) in job_ids {
