@@ -1329,6 +1329,31 @@ fn validate_embeddings(embeddings: &[Vec<f32>]) -> Result<(), ValidationError> {
         return Err(ValidationError::new("embedding_minimum_dimensions")
             .with_message("Each embedding must have at least 1 dimension".into()));
     }
+    if embeddings
+        .iter()
+        .any(|e| e.iter().any(|&v| !v.is_finite()))
+    {
+        return Err(ValidationError::new("embedding_non_finite")
+            .with_message("Embeddings must not contain NaN or Infinity values".into()));
+    }
+    Ok(())
+}
+
+fn validate_update_embeddings(
+    embeddings: &[Option<Vec<f32>>],
+) -> Result<(), ValidationError> {
+    for e in embeddings.iter().flatten() {
+        if e.is_empty() {
+            return Err(ValidationError::new("embedding_minimum_dimensions")
+                .with_message("Each embedding must have at least 1 dimension".into()));
+        }
+        if e.iter().any(|&v| !v.is_finite()) {
+            return Err(ValidationError::new("embedding_non_finite")
+                .with_message(
+                    "Embeddings must not contain NaN or Infinity values".into(),
+                ));
+        }
+    }
     Ok(())
 }
 
@@ -1385,6 +1410,7 @@ pub struct UpdateCollectionRecordsRequest {
     pub database_name: String,
     pub collection_id: CollectionUuid,
     pub ids: Vec<String>,
+    #[validate(custom(function = "validate_update_embeddings"))]
     pub embeddings: Option<Vec<Option<Vec<f32>>>>,
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
@@ -2751,6 +2777,66 @@ mod test {
         );
 
         // Should fail because sparse vector is not sorted
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_request_rejects_nan_embedding() {
+        let result = AddCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            CollectionUuid(uuid::Uuid::new_v4()),
+            vec!["id1".to_string()],
+            vec![vec![1.0, f32::NAN, 3.0]],
+            None,
+            None,
+            None,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_request_rejects_infinity_embedding() {
+        let result = AddCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            CollectionUuid(uuid::Uuid::new_v4()),
+            vec!["id1".to_string()],
+            vec![vec![1.0, f32::INFINITY]],
+            None,
+            None,
+            None,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_update_request_rejects_nan_embedding() {
+        let result = UpdateCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            CollectionUuid(uuid::Uuid::new_v4()),
+            vec!["id1".to_string()],
+            Some(vec![Some(vec![1.0, f32::NAN])]),
+            None,
+            None,
+            None,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_upsert_request_rejects_nan_embedding() {
+        let result = UpsertCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            CollectionUuid(uuid::Uuid::new_v4()),
+            vec!["id1".to_string()],
+            vec![vec![f32::NEG_INFINITY, 2.0]],
+            None,
+            None,
+            None,
+        );
         assert!(result.is_err());
     }
 }
