@@ -5,7 +5,7 @@ use std::{sync::atomic::Ordering, time::Instant};
 use crate::types::{MeteringAtomicU64, MeteringInstant};
 
 fn default_region() -> String {
-    "aws-us-east-1".to_string()
+    String::new()
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Hash, Serialize)]

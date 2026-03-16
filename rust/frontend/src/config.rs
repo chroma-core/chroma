@@ -156,7 +156,7 @@ pub fn default_min_records_for_invocation() -> u64 {
 }
 
 fn default_region() -> String {
-    "aws-us-east-1".to_string()
+    String::new()
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
