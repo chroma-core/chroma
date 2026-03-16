@@ -651,6 +651,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
                     &message.record_segment,
                     &self.output_context.blockfile_provider,
                     cmek.clone(),
+                    None,
                 )
                 .await,
                 ctx,

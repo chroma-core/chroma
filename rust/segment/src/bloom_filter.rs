@@ -1,12 +1,18 @@
-use chroma_cache::Weighted;
+use async_trait::async_trait;
+use chroma_cache::{Cache, CacheConfig, Weighted};
+use chroma_config::{registry::Registry, Configurable};
+use chroma_error::ChromaError;
 use fastbloom::AtomicBloomFilter;
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use chroma_storage::{GetOptions, PutOptions, Storage, StorageError};
+use chroma_storage::{
+    admissioncontrolleds3::StorageRequestPriority, GetOptions, PutOptions, Storage, StorageError,
+};
 use thiserror::Error;
 
 const DEFAULT_FALSE_POSITIVE_RATE: f64 = 0.001;
@@ -30,21 +36,27 @@ struct BloomFilterRepr {
 }
 
 /// A bloom filter that has been serialized to bytes, ready for I/O.
-/// Produced by `BloomFilter::serialize()` during commit; written
+/// Produced by `BloomFilter::into_bytes()` during commit; written
 /// to storage by calling `save()` during flush.
+/// Carries the pre-determined storage path from the `BloomFilter`.
 pub struct SerializedBloomFilter {
     bytes: Vec<u8>,
     storage: Arc<Storage>,
+    path: String,
 }
 
 impl SerializedBloomFilter {
-    /// Write the serialized bloom filter bytes to storage.
-    pub async fn save(self, path: &str) -> Result<(), BloomFilterError> {
+    /// Write the serialized bloom filter bytes to its pre-determined storage path.
+    pub async fn save(&self) -> Result<(), BloomFilterError> {
         self.storage
-            .put_bytes(path, self.bytes, PutOptions::default())
+            .put_bytes(&self.path, self.bytes.clone(), PutOptions::default())
             .await
             .map_err(BloomFilterError::Storage)?;
         Ok(())
+    }
+
+    pub fn path(&self) -> &str {
+        &self.path
     }
 }
 
@@ -69,6 +81,8 @@ struct BloomFilterInner {
 /// Wraps an `Arc<Inner>` so clones share the same underlying filter.
 pub struct BloomFilter<T: Hash + ?Sized> {
     inner: Arc<BloomFilterInner>,
+    path: Option<String>,
+    manager: Option<BloomFilterManager>,
     _phantom: PhantomData<fn(&T)>,
 }
 
@@ -76,6 +90,8 @@ impl<T: Hash + ?Sized> Clone for BloomFilter<T> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
+            path: self.path.clone(),
+            manager: self.manager.clone(),
             _phantom: PhantomData,
         }
     }
@@ -103,13 +119,18 @@ pub enum BloomFilterError {
     Serialization(String),
     #[error("Deserialization error: {0}")]
     Deserialization(String),
-    #[error("No storage backend configured")]
-    NoStorage,
 }
 
 impl<T: Hash + ?Sized> BloomFilter<T> {
-    /// Create a new bloom filter sized for `expected_items` with a 0.1% false positive rate.
-    pub fn new(expected_items: u64, storage: Option<Arc<Storage>>) -> Self {
+    /// Create a new bloom filter sized for `expected_items` with a 0.001% false positive rate.
+    /// Generates a unique storage path under `prefix_path` automatically.
+    /// Pass `None` for `storage` / `prefix_path` for in-memory-only filters (e.g. tests).
+    pub fn new(
+        expected_items: u64,
+        storage: Option<Arc<Storage>>,
+        prefix_path: Option<&str>,
+        manager: Option<BloomFilterManager>,
+    ) -> Self {
         let capacity = expected_items.max(1);
         let filter = AtomicBloomFilter::with_false_pos(DEFAULT_FALSE_POSITIVE_RATE)
             .seed(&BLOOM_FILTER_SEED)
@@ -122,6 +143,8 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
                 capacity,
                 storage,
             }),
+            path: prefix_path.map(BloomFilterManager::format_key),
+            manager,
             _phantom: PhantomData,
         }
     }
@@ -184,6 +207,16 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
         self.inner.capacity
     }
 
+    pub fn path(&self) -> Option<&str> {
+        self.path.as_deref()
+    }
+
+    /// Return a new handle with a freshly generated storage path under the given prefix.
+    fn with_fresh_path(mut self, prefix_path: &str) -> Self {
+        self.path = Some(BloomFilterManager::format_key(prefix_path));
+        self
+    }
+
     /// Approximate memory used by this bloom filter in bytes.
     pub fn memory_size(&self) -> usize {
         let bit_vector_bytes = self.inner.filter.num_bits() / 8;
@@ -194,20 +227,18 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
         bit_vector_bytes + live_count_bytes + stale_count_bytes + capacity_bytes + storage_bytes
     }
 
-    /// Consume the bloom filter and return a `SerializedBloomFilter`
-    /// that can be persisted via `save()`. Must be called after all concurrent writers
-    /// are done (e.g. during `commit`).
-    /// Fails if other clones of this handle still exist.
+    /// Consume the bloom filter and return a `SerializedBloomFilter` ready for I/O.
+    /// Returns `None` if storage or path is not configured.
     pub fn into_bytes(self) -> Result<Option<SerializedBloomFilter>, BloomFilterError> {
-        let storage = match &self.inner.storage {
-            Some(s) => s.clone(),
-            None => return Ok(None),
+        let (storage, path) = match (self.inner.storage.clone(), self.path) {
+            (Some(s), Some(p)) => (s, p),
+            _ => return Ok(None),
         };
         let num_u64s = self.inner.filter.num_bits() / 64;
         let mut bits = Vec::with_capacity(num_u64s);
         bits.extend(self.inner.filter.iter());
         let repr = BloomFilterRepr {
-            bits,
+            bits: self.inner.filter.iter().collect(),
             num_hashes: self.inner.filter.num_hashes(),
             live_count: self.inner.live_count.load(Ordering::SeqCst),
             stale_count: self.inner.stale_count.load(Ordering::SeqCst),
@@ -215,7 +246,11 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
         };
         let bytes = bincode::serialize(&repr)
             .map_err(|e| BloomFilterError::Serialization(e.to_string()))?;
-        Ok(Some(SerializedBloomFilter { bytes, storage }))
+        Ok(Some(SerializedBloomFilter {
+            bytes,
+            storage,
+            path,
+        }))
     }
 
     #[cfg(test)]
@@ -236,6 +271,8 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
     pub fn from_bytes(
         bytes: &[u8],
         storage: Option<Arc<Storage>>,
+        path: Option<String>,
+        manager: Option<BloomFilterManager>,
     ) -> Result<Self, BloomFilterError> {
         let repr: BloomFilterRepr = bincode::deserialize(bytes)
             .map_err(|e| BloomFilterError::Deserialization(e.to_string()))?;
@@ -250,17 +287,10 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
                 capacity: repr.capacity,
                 storage,
             }),
+            path,
+            manager,
             _phantom: PhantomData,
         })
-    }
-
-    /// Load a bloom filter from storage, embedding the storage reference for future saves.
-    pub async fn load(storage: Arc<Storage>, path: &str) -> Result<Self, BloomFilterError> {
-        let bytes = storage
-            .get(path, GetOptions::default())
-            .await
-            .map_err(BloomFilterError::Storage)?;
-        Self::from_bytes(&bytes, Some(storage))
     }
 }
 
@@ -270,13 +300,143 @@ impl<T: Hash + ?Sized> Weighted for BloomFilter<T> {
     }
 }
 
+/// Configuration for the `BloomFilterManager`, which caches bloom filter
+/// instances across queries to avoid redundant loads from storage.
+#[derive(Deserialize, Debug, Clone, Serialize)]
+pub struct BloomFilterManagerConfig {
+    #[serde(default)]
+    pub cache_config: CacheConfig,
+}
+
+impl Default for BloomFilterManagerConfig {
+    fn default() -> Self {
+        Self {
+            cache_config: CacheConfig::Nop,
+        }
+    }
+}
+
+struct BloomFilterManagerInner {
+    cache: Box<dyn Cache<String, BloomFilter<str>>>,
+    storage: Arc<Storage>,
+}
+
+/// Manages a shared cache of bloom filter instances across queries.
+/// Keyed by segment storage path so a filter is loaded from storage at most once.
+/// Cheaply cloneable via an internal `Arc`.
+#[derive(Clone)]
+pub struct BloomFilterManager {
+    inner: Arc<BloomFilterManagerInner>,
+}
+
+impl Debug for BloomFilterManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BloomFilterManager").finish()
+    }
+}
+
+#[async_trait]
+impl Configurable<(BloomFilterManagerConfig, Storage)> for BloomFilterManager {
+    async fn try_from_config(
+        config: &(BloomFilterManagerConfig, Storage),
+        _registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let (manager_config, storage) = config;
+        let cache = chroma_cache::from_config(&manager_config.cache_config).await?;
+        Ok(Self {
+            inner: Arc::new(BloomFilterManagerInner {
+                cache,
+                storage: Arc::new(storage.clone()),
+            }),
+        })
+    }
+}
+
+impl BloomFilterManager {
+    pub fn format_key(prefix_path: &str) -> String {
+        let id = uuid::Uuid::new_v4();
+        if prefix_path.is_empty() {
+            format!("bloom_filter/{}", id)
+        } else {
+            format!("{}/bloom_filter/{}", prefix_path, id)
+        }
+    }
+
+    /// Cache the bloom filter under its path and return the serialized form
+    /// ready for flush. Mirrors `BlockManager::commit`.
+    pub async fn commit(
+        &self,
+        bf: BloomFilter<str>,
+    ) -> Result<Option<SerializedBloomFilter>, BloomFilterError> {
+        if let Some(path) = bf.path() {
+            self.inner.cache.insert(path.to_string(), bf.clone()).await;
+        }
+        bf.into_bytes()
+    }
+
+    /// Look up a bloom filter by its storage path. Returns from cache if present,
+    /// otherwise loads from storage, caches it, and returns it.
+    pub async fn get(&self, path: &str) -> Result<BloomFilter<str>, BloomFilterError> {
+        let key = path.to_string();
+        if let Ok(Some(cached)) = self.inner.cache.get(&key).await {
+            return Ok(cached);
+        }
+        let storage_for_bf = self.inner.storage.clone();
+        let key_for_bf = key.clone();
+        let manager_for_bf = self.clone();
+        let (bf, _) = self
+            .inner
+            .storage
+            .fetch(
+                path,
+                GetOptions::new(StorageRequestPriority::P0).with_parallelism(),
+                move |bytes_result| async move {
+                    let bytes = bytes_result?;
+                    BloomFilter::<str>::from_bytes(
+                        &bytes,
+                        Some(storage_for_bf),
+                        Some(key_for_bf),
+                        Some(manager_for_bf),
+                    )
+                    .map_err(|e| StorageError::Message {
+                        message: e.to_string(),
+                    })
+                },
+            )
+            .await
+            .map_err(BloomFilterError::Storage)?;
+        self.inner.cache.insert(key, bf.clone()).await;
+        Ok(bf)
+    }
+
+    /// Load an existing bloom filter and fork it for a new compaction cycle.
+    /// Generates a fresh storage path under `prefix_path` for the new copy.
+    pub async fn fork(
+        &self,
+        old_path: &str,
+        prefix_path: &str,
+    ) -> Result<BloomFilter<str>, BloomFilterError> {
+        let bf = self.get(old_path).await?;
+        Ok(bf.with_fresh_path(prefix_path))
+    }
+
+    pub fn new_for_test(storage: Arc<Storage>) -> Self {
+        Self {
+            inner: Arc::new(BloomFilterManagerInner {
+                cache: chroma_cache::new_non_persistent_cache_for_test(),
+                storage,
+            }),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_insert_and_contains() {
-        let bf = BloomFilter::<str>::new(1000, None);
+        let bf = BloomFilter::<str>::new(1000, None, None, None);
         bf.insert("user_1");
         bf.insert("user_2");
 
@@ -289,7 +449,7 @@ mod tests {
 
     #[test]
     fn test_mark_deleted() {
-        let bf = BloomFilter::<str>::new(1000, None);
+        let bf = BloomFilter::<str>::new(1000, None, None, None);
         bf.insert("user_1");
         bf.insert("user_2");
         bf.mark_deleted();
@@ -300,7 +460,7 @@ mod tests {
 
     #[test]
     fn test_serialization_roundtrip() {
-        let bf = BloomFilter::<str>::new(1000, None);
+        let bf = BloomFilter::<str>::new(1000, None, None, None);
         for i in 0..100 {
             bf.insert(&format!("user_{}", i));
         }
@@ -312,7 +472,7 @@ mod tests {
         let expected_capacity = bf.capacity();
 
         let bytes = bf.into_bytes_for_test().unwrap();
-        let restored = BloomFilter::<str>::from_bytes(&bytes, None).unwrap();
+        let restored = BloomFilter::<str>::from_bytes(&bytes, None, None, None).unwrap();
 
         assert_eq!(restored.live_count(), expected_live);
         assert_eq!(restored.stale_count(), expected_stale);
@@ -326,7 +486,7 @@ mod tests {
 
     #[test]
     fn test_needs_rebuild_stale_ratio() {
-        let bf = BloomFilter::<str>::new(1000, None);
+        let bf = BloomFilter::<str>::new(1000, None, None, None);
         for i in 0..10 {
             bf.insert(&format!("user_{}", i));
         }
@@ -342,7 +502,7 @@ mod tests {
 
     #[test]
     fn test_needs_rebuild_over_capacity() {
-        let bf = BloomFilter::<str>::new(10, None);
+        let bf = BloomFilter::<str>::new(10, None, None, None);
         for i in 0..11 {
             bf.insert(&format!("user_{}", i));
         }
