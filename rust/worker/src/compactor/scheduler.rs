@@ -160,6 +160,16 @@ impl Scheduler {
                 }
             };
 
+            let found_ids: HashSet<_> = collections.iter().map(|c| c.collection_id).collect();
+            for collection_id in batch {
+                if !found_ids.contains(collection_id) {
+                    tracing::warn!(
+                        collection_id = %collection_id,
+                        "Requested one-off compaction for collection not found in sysdb"
+                    );
+                }
+            }
+
             for collection in collections {
                 let Some(database_name) = DatabaseName::new(collection.database) else {
                     tracing::warn!(
@@ -441,7 +451,8 @@ impl Scheduler {
             .into_iter()
             .map(|(_, record)| record)
             .collect();
-        let selected = self.policy.determine(records.clone(), rem_capacity as i32);
+        let mut selected = self.policy.determine(records.clone(), rem_capacity as i32);
+        selected.truncate(rem_capacity);
         let seen: HashSet<CollectionUuid> = selected.iter().map(|r| r.collection_id).collect();
         for record in &records {
             if !seen.contains(&record.collection_id) {
