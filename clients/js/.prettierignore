@@ -1,4 +1,3 @@
 dist
 node_modules
 src/generated
-*.gen.ts

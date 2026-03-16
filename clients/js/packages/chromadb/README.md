@@ -1,55 +1,97 @@
-## chromadb
+# ChromaDB JavaScript Client
 
 Chroma is the open-source embedding database. Chroma makes it easy to build LLM apps by making knowledge, facts, and skills pluggable for LLMs.
 
-This package gives you a JS/TS interface to talk to a backend Chroma DB over REST.
+**This package includes all embedding libraries as bundled dependencies**, providing a simple installation experience without worrying about dependency management. For a thin client, install `chromadb-client`
 
-[Learn more about Chroma](https://github.com/chroma-core/chroma)
+## Features
 
-- [💬 Community Discord](https://discord.gg/MMeYNTmh3x)
-- [📖 Documentation](https://docs.trychroma.com/)
-- [💡 Colab Example](https://colab.research.google.com/drive/1QEzFyqnoFxq7LUGyP1vzR4iLt9PpCDXv?usp=sharing)
-- [🏠 Homepage](https://www.trychroma.com/)
+- ✅ Complete TypeScript support
+- ✅ All embedding libraries included as bundled dependencies
+- ✅ Works in both Node.js and browser environments
+- ✅ Simple installation with no peer dependency requirements
 
-## Chroma Cloud
-
-Our hosted service, Chroma Cloud, powers serverless vector and full-text search. It's extremely fast, cost-effective, scalable and painless. Create a DB and try it out in under 30 seconds with $5 of free credits.
-
-[Get started with Chroma Cloud](https://trychroma.com/signup)
-
-## Getting started
-
-First, start a Chroma server using the Chroma CLI:
+## Installation
 
 ```bash
-chroma run
+# npm
+npm install chromadb
+
+# pnpm
+pnpm add chromadb
+
+# yarn
+yarn add chromadb
 ```
 
-See more examples on our [docs](https://docs.trychroma.com/docs/overview/getting-started)
+## Getting Started
 
-## Small example
+Chroma needs to be running in order for this client to talk to it. Please see the [Usage Guide](https://docs.trychroma.com/guides) to learn how to quickly stand this up.
 
 ```js
 import { ChromaClient } from "chromadb";
 
-const chroma = new ChromaClient();
-const collection = await chroma.createCollection({ name: "test-from-js" });
-for (let i = 0; i < 20; i++) {
-  await collection.add({
-    ids: ["test-id-" + i.toString()],
-    embeddings: [[1, 2, 3, 4, 5]],
-    documents: ["test"],
-  });
-}
-const queryData = await collection.query({
-  queryEmbeddings: [[1, 2, 3, 4, 5]],
-  queryTexts: ["test"],
+// Initialize the client
+const chroma = new ChromaClient({ path: "http://localhost:8000" });
+
+// Create a collection
+const collection = await chroma.createCollection({ name: "my-collection" });
+
+// Add documents to the collection
+await collection.add({
+  ids: ["id1", "id2"],
+  embeddings: [
+    [1.1, 2.3, 3.2],
+    [4.5, 6.9, 4.4],
+  ],
+  metadatas: [{ source: "doc1" }, { source: "doc2" }],
+  documents: ["Document 1 content", "Document 2 content"],
+});
+
+// Query the collection
+const results = await collection.query({
+  queryEmbeddings: [1.1, 2.3, 3.2],
+  nResults: 2,
 });
 ```
 
-## Local development
+## Using Embedding Functions
 
-[View the Development Readme](./DEVELOP.md)
+This package includes all embedding libraries as bundled dependencies, so you can use them directly:
+
+```js
+import { ChromaClient, OpenAIEmbeddingFunction } from "chromadb";
+
+const embedder = new OpenAIEmbeddingFunction({
+  openai_api_key: "your-api-key",
+  model_name: "text-embedding-ada-002",
+});
+
+const chroma = new ChromaClient({ path: "http://localhost:8000" });
+const collection = await chroma.createCollection({
+  name: "my-collection",
+  embeddingFunction: embedder,
+});
+
+// Now you can add documents without providing embeddings
+await collection.add({
+  ids: ["id1"],
+  documents: ["Document content"],
+});
+
+// And query with text
+const results = await collection.query({
+  queryTexts: ["similar document"],
+  nResults: 2,
+});
+```
+
+## Additional Resources
+
+- [📖 Documentation](https://docs.trychroma.com/)
+- [💬 Community Discord](https://discord.gg/MMeYNTmh3x)
+- [🏠 Homepage](https://www.trychroma.com/)
+- [GitHub Repository](https://github.com/chroma-core/chroma)
 
 ## License
 
