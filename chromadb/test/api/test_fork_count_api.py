@@ -87,7 +87,7 @@ def test_fork_count_after_multiple_forks(
     # Create 5 forks
     num_forks = 5
     forked_collections = []
-    for i in range(num_forks):
+    for _ in range(num_forks):
         fork_name = f"forked_collection_{uuid4().hex}"
         forked_collection = collection.fork(fork_name)
         forked_collections.append(forked_collection)
