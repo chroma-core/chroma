@@ -1,13 +1,34 @@
-- [RaBitQ](#rabitq)
+- [Intro to Large Index Benchmarking](#intro-to-large-index-benchmarking)
+- [RaBitQ Implementation (Core Functions)](#rabitq-implementation-core-functions)
   - [1-Bit (vs 4-Bit) Performance Comparison](#1-bit-vs-4-bit-performance-comparison)
     - [r6i.8xlarge](#r6i8xlarge)
-    - [MacBook Pro M1](#macbook-pro-m1)
-  - [vs Exact f32 Distance Query](#vs-exact-f32-distance-query)
-  - [Thread Scaling](#thread-scaling)
-  - [Cross-Machine Comparison](#cross-machine-comparison)
-- [Error Bound](#error-bound)
+    - [vs Exact f32 Distance Query](#vs-exact-f32-distance-query)
+    - [Thread Scaling](#thread-scaling)
+  - [Error Bound](#error-bound)
+- [Comparing Different Central Indices](#comparing-different-central-indices)
+  - [Summary](#summary)
+  - [Usearch 1 bit](#usearch-1-bit)
+    - [Parallelism (blockers)](#parallelism-blockers)
+      - [Our global lock](#our-global-lock)
+      - [Usearch global lock](#usearch-global-lock)
+    - [Performance](#performance)
+      - [1-bit vs 4-bit](#1-bit-vs-4-bit)
+      - [Recall: 1 bit centroids + Reranking](#recall-1-bit-centroids--reranking)
+      - [Note: USearch ef/k coupling](#note-usearch-efk-coupling)
+    - [Thread scaling](#thread-scaling-1)
+  - [Usearch 1 bit - Improved Concurrency](#usearch-1-bit---improved-concurrency)
+    - [USearch only benchmark](#usearch-only-benchmark)
+    - [Full Quantized SPANN benchmark](#full-quantized-spann-benchmark)
+      - [Specifics](#specifics)
+  - [Flat / Brute Force](#flat--brute-force)
+  - [Hierarchical SPANN](#hierarchical-spann)
+    - [Design](#design)
+    - [Hierarchical Tree Config vs SPANN Config](#hierarchical-tree-config-vs-spann-config)
+    - [10K Centroid Experiments (wikipedia-en, f32, 1K data vectors)](#10k-centroid-experiments-wikipedia-en-f32-1k-data-vectors)
+    - [Balanced k-means (100K centroids, wikipedia-en, f32, eps=1.0, r=4)](#balanced-k-means-100k-centroids-wikipedia-en-f32-eps10-r4)
+    - [Dynamic beam / tau sweep (100K centroids, wikipedia-en, no replication, bf=100)](#dynamic-beam--tau-sweep-100k-centroids-wikipedia-en-no-replication-bf100)
 - [Recall](#recall)
-  - [USearch](#usearch)
+  - [USearch Recall](#usearch-recall)
     - [1-bit centroids](#1-bit-centroids)
     - [4-bit centroids](#4-bit-centroids)
     - [full precision centroids](#full-precision-centroids)
@@ -17,46 +38,34 @@
     - [1-bit, 1-bit query (1bit-code-1bit-query)](#1-bit-1-bit-query-1bit-code-1bit-query)
     - [4-bit (4bit-code-full-query)](#4-bit-4bit-code-full-query)
     - [1-bit, f32 query (1bit-code-full-query)](#1-bit-f32-query-1bit-code-full-query)
-  - [Synthetic SPANN / Centroid Recall](#synthetic-spann--centroid-recall)
-  - [Quantized KMeans Clustering Recall](#quantized-kmeans-clustering-recall)
+  - [Quantized KMeans Clustering Recall (Needs Redo)](#quantized-kmeans-clustering-recall-needs-redo)
   - [Synthetic Index - Reranking with both 1-bit and 4-bit centroids](#synthetic-index---reranking-with-both-1-bit-and-4-bit-centroids)
-- [SPANN](#spann)
-  - [Performance](#performance)
-    - [1bit vs 4bit](#1bit-vs-4bit)
-- [USearch](#usearch-1)
-  - [Parallelism](#parallelism)
-    - [Our global lock](#our-global-lock)
-    - [Usearch global lock](#usearch-global-lock)
-  - [Performance](#performance-1)
-    - [Note: USearch ef/k coupling](#note-usearch-efk-coupling)
-    - [1-bit vs 4-bit](#1-bit-vs-4-bit)
-    - [Navigate() using 1 bit quantized centroids](#navigate-using-1-bit-quantized-centroids)
-    - [Reranking](#reranking)
-  - [Thread scaling](#thread-scaling-1)
-- [Appendix](#appendix)
-  - [Sources of performance differences between r6i.8xlarge and MacBook Pro M1](#sources-of-performance-differences-between-r6i8xlarge-and-macbook-pro-m1)
-    - [Decode width and instruction window](#decode-width-and-instruction-window)
-    - [FP/SIMD execution ports](#fpsimd-execution-ports)
-    - [Why M1 wins on signed\_dot despite losing on simsimd\_dot](#why-m1-wins-on-signed_dot-despite-losing-on-simsimd_dot)
-    - [Memory bandwidth per core](#memory-bandwidth-per-core)
-    - [Why dq-bw/scan ties](#why-dq-bwscan-ties)
-    - [Thread scaling](#thread-scaling-2)
-- [Central Index Options](#central-index-options)
-  - [Summary](#summary)
-  - [Usearch 1 bit](#usearch-1-bit)
-  - [Usearch 1 bit - Improved Concurrency](#usearch-1-bit---improved-concurrency)
-    - [USearch only benchmark](#usearch-only-benchmark)
-    - [Quantized SPANN benchmark](#quantized-spann-benchmark)
-      - [Specifics](#specifics)
-  - [Flat / Brute Force](#flat--brute-force)
-  - [Hierarchical SPANN](#hierarchical-spann)
-    - [Design](#design)
-    - [Hierarchical Tree Config vs SPANN Config](#hierarchical-tree-config-vs-spann-config)
-    - [10K Centroid Experiments (wikipedia-en, f32, 1K data vectors)](#10k-centroid-experiments-wikipedia-en-f32-1k-data-vectors)
-    - [Balanced k-means (100K centroids, wikipedia-en, f32, eps=1.0, r=4)](#balanced-k-means-100k-centroids-wikipedia-en-f32-eps10-r4)
-    - [Dynamic beam / tau sweep (100K centroids, wikipedia-en, no replication, bf=100)](#dynamic-beam--tau-sweep-100k-centroids-wikipedia-en-no-replication-bf100)
+- [Older Benchmarks](#older-benchmarks)
+  - [SPANN](#spann)
+  - [Synthetic SPANN / Centroid Recall (Obsolete)](#synthetic-spann--centroid-recall-obsolete)
 
-# RaBitQ
+# Intro to Large Index Benchmarking
+
+We want a vector index that can support 1B+ vectors. This means:
+- Read + Write latency
+  - Can index 1M vectors in < 2 minutes
+  - < ~100ms queries
+- Recall
+  - /> 90%
+- Reasonable Memory, Disk, and Network usage
+
+To do this we need to address these core components/bottle necks:
+- Performance of core functions: quantize, distance_code, distance_query, and their variants
+- Recall (at both levels: central index and posting lists)
+- Central index performance
+- Index build time
+- Rerank time (of both centroid and data vectors)
+- Data vector (S3) load time
+- Thread scaling in general
+
+This document contains benchmarks for most of the above components.
+
+# RaBitQ Implementation (Core Functions)
 
 ## 1-Bit (vs 4-Bit) Performance Comparison
 
@@ -85,33 +94,18 @@ effects from cycling 512 distinct queries (~2.55 us/query). `quant-query/full` i
 `QuantizedQuery::new` with a single hot-cache vector (568 ns). The 4.5x per-query gap
 is the cost of the preparation pipeline and cache pressure, not the quantization itself.
 
-### MacBook Pro M1
 
-
-| Function       | Benchmark                                                | 4-bit                   | 1-bit                  | Speedup |
-| -------------- | -------------------------------------------------------- | ----------------------- | ---------------------- | ------- |
-| quantize data  | quantize/quant-4bit/1024 vs quantize/quant-1bit/1024     | 28 ms, 144 MiB/s        | 365–390 µs, 10.1 GiB/s | ~71x    |
-| quantize query | primitives/quant-query/full/1024                         | N/A                     | 568 ns, 6.73 GiB/s     | —       |
-| distance_code  | distance_code/dc-4bit/1024 vs distance_code/dc-1bit/1024 | 174 µs, 1.43 GiB/s      | 2.45 µs, 28 GiB/s      | ~71x    |
-| distance_query | distance_query/dq-4f/scan vs distance_query/dq-bw/scan   | 1.01 ms, 965–1012 MiB/s | 39 µs, 6.9 GiB/s       | ~25x    |
-
-
-[performance_mb_pro_m1.txt](performance_mb_pro_m1.txt)
-
----
-
-## vs Exact f32 Distance Query
+### vs Exact f32 Distance Query
 
 [../../../benches/vector/quantization.rs](../../../benches/vector/quantization.rs)
 
 Hot-scan benchmark: 1 query vs 2048 vectors, dim=1024, query in L1.
 
-
 | Benchmark | Function                     | Time   | Per vector | vs exact        |
 | --------- | ---------------------------- | ------ | ---------- | --------------- |
 | dq-exact  | f32 x f32, no quantization   | 290 us | 141 ns     | 1.0x            |
-| dq-4f     | 4-bit code, unpack + f32 dot | 762 us | 372 ns     | 2.6x slower     |
-| dq-bw     | 1-bit code, AND+popcount     | 40 us  | 19.5 ns    | **7.2x faster** |
+| dq-4f     | 4-bit code x f32 query       | 762 us | 372 ns     | 2.6x slower     |
+| dq-bw     | 1-bit code x 4 bit query     | 40 us  | 19.5 ns    | **7.2x faster** |
 
 
 Benchmark data from `cargo bench -p chroma-index --bench quantization_performance -- dq-`
@@ -119,7 +113,7 @@ on r6i.8xlarge.
 
 ---
 
-## Thread Scaling
+### Thread Scaling
 
 [thread_scaling_r6i.8xlarge.txt](thread_scaling_r6i.8xlarge.txt)
 
@@ -158,82 +152,10 @@ production scans (1 query, many codes), this build cost amortizes away and dq-bw
 (1-bit code, same f32 query as dq-4f, no query quantization) to dq-4f to isolate
 the code-size advantage of 1-bit vs 4-bit without the query build overhead.
 
----
-
-## Cross-Machine Comparison
-
-Full raw output in `saved_benchmarks/performance_r6i.8xlarge.txt` (Intel) and
-`saved_benchmarks/performance_mb_pro_m1.txt` (Apple Silicon).
-
-- **r6i.8xlarge**: Intel Ice Lake, 16 physical cores / 32 vCPUs, AVX-512
-- **MacBook Pro M1**: Apple Silicon, 8 performance cores, NEON
-
-**Batch benchmarks** (512 embeddings/queries, dim=1024):
-
-
-| Benchmark                    | M1                  | r6i.8xlarge         | Ratio (r6i/M1) |
-| ---------------------------- | ------------------- | ------------------- | -------------- |
-| quant-4bit (data encode)     | 27.6 ms, 145 MiB/s  | 43.2 ms, 93 MiB/s   | 1.6x slower    |
-| quant-1bit (data encode)     | 361 us, 10.8 GiB/s  | 576 us, 6.8 GiB/s   | 1.6x slower    |
-| dc-1bit (256 pairs)          | 2.69 us, 25.5 GiB/s | 3.99 us, 17.2 GiB/s | 1.5x slower    |
-| dc-4bit (256 pairs)          | 182 us, 1.37 GiB/s  | 166 us, 1.50 GiB/s  | 1.1x faster    |
-| dq-exact (f32 ground truth)  | 53.6 us, 72.9 GiB/s | 120 us, 32.7 GiB/s  | 2.2x slower    |
-| dq-4f (4-bit, cold query)    | 1.17 ms, 1.88 GiB/s | 1.71 ms, 1.29 GiB/s | 1.5x slower    |
-| dq-float (1-bit, cold query) | 1.06 ms, 1.91 GiB/s | 1.46 ms, 1.39 GiB/s | 1.4x slower    |
-| dq-bw (AND+popcount, cold)   | 1.26 ms, 1.60 GiB/s | 2.38 ms, 870 MiB/s  | 1.9x slower    |
-| d-lut (nibble LUT, cold)     | 5.28 ms, 393 MiB/s  | 3.48 ms, 594 MiB/s  | 1.5x faster    |
-
-
-**Hot-scan benchmarks** (1 query, 2048 codes, dim=1024):
-
-
-| Benchmark     | M1                  | r6i.8xlarge         | Ratio (r6i/M1) |
-| ------------- | ------------------- | ------------------- | -------------- |
-| dq-exact/scan | 172 us, 45.3 GiB/s  | 290 us, 27.0 GiB/s  | 1.7x slower    |
-| dq-4f/scan    | 1.03 ms, 995 MiB/s  | 762 us, 1.31 GiB/s  | 1.4x faster    |
-| dq-float/scan | 456 us, 616 MiB/s   | 933 us, 301 MiB/s   | 2.0x slower    |
-| dq-bw/scan    | 40.8 us, 6.74 GiB/s | 40.0 us, 6.86 GiB/s | ~same          |
-| d-lut/scan    | 371 us, 759 MiB/s   | 265 us, 1.03 GiB/s  | 1.4x faster    |
-
-
-**Key primitive differences** (single-vector, hot cache):
-
-
-| Primitive           | M1                  | r6i.8xlarge         | Ratio (r6i/M1)  |
-| ------------------- | ------------------- | ------------------- | --------------- |
-| simsimd_dot         | 260 ns, 29.3 GiB/s  | 63 ns, 121 GiB/s    | **4.1x faster** |
-| signed_dot          | 198 ns, 19.9 GiB/s  | 443 ns, 8.9 GiB/s   | 2.2x slower     |
-| sign_pack           | 143 ns, 26.7 GiB/s  | 320 ns, 11.9 GiB/s  | 2.2x slower     |
-| fused_reductions    | 547 ns, 14.0 GiB/s  | 695 ns, 11.0 GiB/s  | 1.3x slower     |
-| hamming/simsimd     | 6.54 ns, 36.2 GiB/s | 4.77 ns, 50.0 GiB/s | 1.4x faster     |
-| QuantizedQuery::new | 566 ns, 6.74 GiB/s  | 2.21 us, 1.73 GiB/s | **3.9x slower** |
-
-
-**Observations:**
-
-- **M1 wins on scalar/FP-intensive work.** Data quantization (both 1-bit and 4-bit),
-fused reductions, sign packing, and signed_dot are all 1.3-2.2x faster on M1.
-Apple Silicon's wide FP pipeline and memory bandwidth advantage over Ice Lake show
-clearly in these single-threaded benchmarks.
-- **r6i wins on simsimd operations.** AVX-512 gives a 4.1x advantage on raw f32 dot
-products (simsimd_dot) and 1.4x on hamming distance. This matters for dq-4f/scan
-and d-lut/scan which are both ~1.4x slower on M1.
-- **AND+popcount (dq-bw/scan) is identical** on both (~40 us). NEON CNT and AVX-512
-VPOPCNTDQ are equally effective for this workload. This is the production-path kernel.
-- **QuantizedQuery::new is 3.9x faster on M1** (566 ns vs 2.21 us). The fused
-min/max + quantize + bit-plane scatter path benefits from M1's stronger single-core
-throughput. This is a per-query cost that amortizes across codes.
-- **d-lut is consistently slower on M1** (1.4-1.5x). The nibble LUT approach likely
-benefits from AVX-512 gather/scatter instructions not available on NEON.
-- **Thread scaling data is only meaningful on r6i** (16 physical cores + HT). The M1
-has 8 performance cores with no hyperthreading; the 16t/32t results on M1 are just
-contention noise. See the Thread Scaling section for r6i scaling analysis.
-
-Full details below.
 
 ---
 
-# Error Bound
+## Error Bound
 
 [error.txt](saved_benchmarks/error.txt)
 
@@ -256,9 +178,370 @@ RSME: "Root Mean Square Error".
 - Quantizing the query side adds negligible error for1-bit (identical rows) and only ~40% more variance for 4-bit.
 - The fully quantized 1-bit-vs-1-bit path is the noisiest (RMSE 0.036) but 90% of samples still fall within +/-6% relative error.
 
+
+
+# Comparing Different Central Indices
+
+What central index will give us the fastest index build times?
+
+## Summary
+
+**Benchmarks**
+
+
+| Index                                 | Standalone Query @1M                                                                    | Synthetic Nav @1M                                                             | SPANN Nav @27k                                   |
+| ------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------ |
+| USearch - 4 bit (baseline)            | [2.75ms (R=86.07%)](saved_benchmarks/usearch_4bit.txt)                                  | [3.28ms](saved_benchmarks/usearch_4bit.txt)                                   | [444.7µs](saved_benchmarks/quant_spann_4bit.txt) |
+| USearch - 1 bit                       | [3.16ms (R=94.49%)](saved_benchmarks/usearch_1bit.txt)                                  | [568.0µs](saved_benchmarks/usearch_1bit.txt)                                  | [122.1µs](saved_benchmarks/quant_spann_1bit.txt) |
+| USearch - 1 bit, Threadsafe           | [2.58ms (R=94.95%)](saved_benchmarks/usearch_forked_1bit.txt)                           | [210.5µs](saved_benchmarks/usearch_forked_1bit.txt)                           | [90.7µs](quant_spann_1bit_forked_usearch.txt)    |
+| USearch - 1 bit, Threadsafe, Reranked | [2.39ms (R=91.25%)](saved_benchmarks/usearch_rerank_1bit.txt)   |   ?   |   [100.9µs](saved_benchmarks/quant_spann_1bit_forked_usearch.txt)   |
+| Flat - Full Precision (5k Centroids)  | [11.05ms (R=100%)](saved_benchmarks/flat_full_precision.txt)                            | [6.13ms](saved_benchmarks/flat_full_precision.txt)                            | -                                                |
+| Flat - 1 bit + rerank (10k Centroids) | [4.77ms (R=96.41%)](saved_benchmarks/flat_1bit_rerank.txt)                              | [5.89ms](saved_benchmarks/flat_1bit_rerank.txt)                               | -                                                |
+| Hierarchical SPANN - Full Precision   | [58.98ms (R=98.47%)](saved_benchmarks/hierarchical_centroid_profile_full_precision.txt) | [102.45ms](saved_benchmarks/hierarchical_centroid_profile_full_precision.txt) | -                                                |
+| Hierarchical SPANN - 1 bit, Reranked  | [5.32ms (R=93.37%)](saved_benchmarks/hierarchical_centroid_profile_1bit.txt)            | [9.39ms](saved_benchmarks/hierarchical_centroid_profile_1bit.txt)             | -                                                |
+|                                       |                                                                                         |                                                                               |                                                  |
+| USearch - 1 bit, Reranked             | [2.39ms (R=91.25%)](saved_benchmarks/usearch_rerank_1bit.txt)                           | ?                                                                             | ?                                                |
+
+
+Legend:
+
+- Standalone Query:
+  - Query latency over the index alone
+  - k=100, 32 threads, >90% Recall@100, which might include implicit reranking or high nprobe counts
+  - 1M centroids
+- Synthetic: Navigate latency when synthetically inserting 1M data vectors
+  - Uses synthetic SPANN workload on the index alone, so intentionally produces *a tiny bit* of thread contention
+  - Doesn't care about recall
+  - 1M centroids
+- SPANN: Navigate latency when inserting 1M data vectors
+  - Uses full SPANN index.
+  - Doesn't care about recall
+  - ~27k centroids, 4M existing data vectors, 1M new data vectors
+  - Uses the [quantized_spann.rs](../../../benches/quantized_spann.rs) benchmark.
+
+## Usearch 1 bit
+
+navigate latency = 568.0µs (@32 threads)
+
+[usearch_1bit.txt](saved_benchmarks/usearch_1bit.txt)
+
+
+### Parallelism (blockers)
+
+#### Our global lock
+
+We have a global read/write lock on the USearch index. Without it we get a 1.3x speedup in throughput.
+
+
+| lock? | CP  | add    | navigate | register | spawn  | scrub  | split    | merge   | reassign | drop    | load  | load_raw | quantize | search | raw_add | raw_rm | q_add   | q_rm  |
+| ----- | --- | ------ | -------- | -------- | ------ | ------ | -------- | ------- | -------- | ------- | ----- | -------- | -------- | ------ | ------- | ------ | ------- | ----- |
+| yes   | 5   | 2.05ms | 416.2µs  | 6.8µs    | 2.04ms | 92.8µs | 320.12ms | 67.53ms | 591.5µs  | 48.69ms | 9.3µs | 35.84ms  | 2.3µs    | -      |         |        |         |       |
+| no    | 5   | 1.85ms | 370.2µs  | 6.6µs    | 1.55ms | 95.3µs | 292.97ms | 52.95ms | 528.5µs  | 46.76ms | 9.5µs | 34.75ms  | 2.2µs    | -      | 980.2µs | 7.8µs  | 563.5µs | 7.5µs |
+
+
+overall throughput: 7476 vec/s vs 5800 vec/s (1.3x speedup) mostly due to faster split (-30ms) and merge (-15ms)
+
+cargo bench -p chroma-index --bench quantized_spann -- --dataset wikipedia-en --checkpoint 1 --threads 16 --data-bits 1 --centroid-bits 1
+
+#### Usearch global lock
+
+Usearch also has a global lock internally. If we chose to fork Usearch and make this lock more granular, we could see an additional speedup.
+
+---
+
+### Performance
+
+#### 1-bit vs 4-bit
+
+=== USearch SPANN Profile Benchmark ===
+Dim: 1024 | Metric: L2 | Centroid bits: 4 | ef_search: 128 | Threads: 32
+Initial centroids: 1.00M | Data vectors: 1.00M | Queries: 200
+Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
+
+Task Counts (identical for both):
+
+
+| navigate | spawn | drop |
+| -------- | ----- | ---- |
+| 3.05M    | 11.5K | 5.6K |
+
+
+Task Total Time:
+
+
+| bits | navigate | spawn  | drop   | wall   |
+| ---- | -------- | ------ | ------ | ------ |
+| 1    | 28.9m    | 13.51s | 22.82s | 56.35s |
+| 4    | 166.8m   | 1.4m   | 41.01s | 5.4m   |
+
+
+Task Avg Time:
+
+
+| bits | navigate | spawn  | drop   |
+| ---- | -------- | ------ | ------ |
+| 1    | 568.0µs  | 1.17ms | 4.05ms |
+| 4    | 3.28ms   | 7.26ms | 7.33ms |
+
+
+#### Recall: 1 bit centroids + Reranking
+
+Dim: 1024 | Metric: L2 | Centroid bits: 1 | ef_search: 128 | Centroids: 1.00M | Queries: 200
+
+=== Rerank Sweep (k=100) ===
+
+
+| Rerank | Fetch | Recall@10 | Recall@100 | Avg lat | search  | fetch   | rerank  |
+| ------ | ----- | --------- | ---------- | ------- | ------- | ------- | ------- |
+| 1x     | 100   | 84.75%    | 50.88%     | 383.3µs | 383.3µs | 0ns     | 0ns     |
+| 2x     | 200   | 90.50%    | 68.18%     | 647.6µs | 519.8µs | 20.2µs  | 107.6µs |
+| 4x     | 400   | 95.70%    | 81.98%     | 1.25ms  | 1.00ms  | 39.1µs  | 209.8µs |
+| 8x     | 800   | 98.20%    | 91.25%     | 2.39ms  | 1.90ms  | 71.3µs  | 418.1µs |
+| 16x    | 1600  | 99.20%    | 96.07%     | 4.82ms  | 3.80ms  | 139.1µs | 880.5µs |
+
+
+`cargo bench -p chroma-index --bench usearch_rerank -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 1000000`
+[usearch_rerank_1bit.txt](saved_benchmarks/usearch_rerank_1bit.txt)
+
+#### Note: USearch ef/k coupling
+
+USearch increases the beam width when `k > ef_search`:
+
+```cpp
+std::size_t expansion = (std::max)(config.expansion, wanted);
+```
+
+The original HNSW paper (Malkov & Yashunin, Algorithm 5) treats `ef` and `K` as independent parameters: `ef` controls beam width (search effort), `K` controls how many results to extract from the `ef` candidates. USearch conflates them, so requesting k=200 with ef_search=128 silently widens the beam to 200.
+
+This means rerank sweep rows (2x, 4x, etc.) show inflated latency -- each row runs a progressively wider search, not just extracts more from the same candidate set. The 1x row (k <= ef_search) is the true ef_search performance.
+
+Tested decoupling (using static `expansion = config.expansion`): recall plateaus at the 2x row since all rerank factors return the same ef=128 candidates. Latency becomes flat as expected. However, the coupling is the right default -- for SPANN we control both k and ef, so we can set ef appropriately rather than relying on the automatic widening.
+
+### Thread scaling
+
+Using usearch only benchmark. (usearch_spann_profile)
+`cargo bench -p chroma-index --bench usearch_spann_profile -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 1000000 --threads <threads> --data-vectors 1000000`
+
+
+| threads | navigate | spawn   | drop   |
+| ------- | -------- | ------- | ------ |
+| 1       | 218.2µs  | 6.59ms  | 3.39ms |
+| 4       | 221.8µs  | 682.6µs | 3.56ms |
+| 8       | 264.4µs  | 788.3µs | 3.57ms |
+| 16      | 356.7µs  | 933.1µs | 3.74ms |
+| 32      | 568.0µs  | 1.17ms  | 4.05ms |
+
+
+Scaling is poor: 4x threads yields 2.6x navigate latency, 1.7x spawn latency. Four layers of lock contention stack up:
+
+1. **Rust `RwLock`** -- `Arc<RwLock<usearch::Index>>` wraps all operations. Spawns/drops take exclusive locks and block all concurrent navigates. Removing this lock gave 10-18% faster navigate and 24-33% faster spawn with no recall impact (see `usearch_concurrency_findings.md`).
+2. `**global_mutex_**` (USearch `index.hpp`) -- A `std::mutex` protecting `max_level`_ and `entry_slot`_. Every `add()` holds it exclusively, blocking all concurrent `add()` and `search()` calls. This is the single biggest bottleneck because navigate dominates runtime and every spawn serializes against all navigates.
+3. `**slot_lookup_mutex_**` (USearch `index_dense.hpp`) -- A `std::shared_mutex` protecting the key-to-slot hash map. `add()`/`remove()` take exclusive locks; `search()` takes shared. Creates write-side contention that blocks searches during spawns/drops.
+4. `**available_threads_mutex_**` (USearch `index_dense.hpp`) -- A `std::mutex` guarding a fixed-size thread-slot pool (size = `hardware_concurrency()`). Acquired on every `search()` and `add()` call, creating a serialization point even for pure-read workloads.
+
+Improvement options (by estimated impact):
+
+1. **Atomic entry point** -- Replace `global_mutex`_ with `std::atomic` for `max_level`*/`entry_slot*`. Searches do acquire loads (zero contention); adds use CAS (contention only on the rare new-max-level event). Eliminates the biggest serialization point.
+2. **Remove Rust `RwLock`** -- USearch already has internal thread safety; the outer lock is redundant.
+3. **Thread-local context pool** -- Cache thread slot IDs in TLS instead of acquiring `available_threads_mutex`_ on every call.
+4. **Disable key lookups** -- SPANN tracks membership externally; disabling `enable_key_lookups` eliminates `slot_lookup_mutex`_.
+5. **Double-buffered indices** -- Frozen read index for navigate (zero locking), separate write index for spawns/drops, merge during commit.
+
+
+## Usearch 1 bit - Improved Concurrency
+
+Forked USearch (`@USearch/include/usearch/index.hpp`) with two changes:
+
+1. Replaced `global_mutex`_ with `std::atomic<level_t> max_level`_ and `std::atomic<size_t> entry_slot`_. Searches and adds read atomically (no lock). The rare new-max-level update uses a mutex with double-checked locking.
+2. Changed Rust `RwLock` usage: `add()` and `remove()` now take shared (read) locks instead of exclusive (write) locks. Only `reserve()` takes the exclusive lock.
+
+Full details in [usearch_concurrency.md](usearch_concurrency.md)
+
+### USearch only benchmark
+
+Operates only on the USearch index, not the SPANN index.
+
+Navigate latency at 32 threads dropped from 568us to 211.8us (2.68x improvement), recovering the single-thread baseline. Recall improved slightly (+2.3pp @10, +4.9pp @100).
+
+`cargo bench -p chroma-index --bench usearch_spann_profile -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 1000000 --threads 32 --data-vectors 1000000`
+
+
+| Metric             | Before (upstream) | After (forked) | Change       |
+| ------------------ | ----------------- | -------------- | ------------ |
+| Navigate avg (32t) | 568.0us           | 211.8us        | 2.68x faster |
+| Phase 2 wall       | 56.35s            | 25.58s         | 2.2x faster  |
+| Recall@10          | 92.80%            | 95.10%         | +2.3pp       |
+| Recall@100         | 59.69%            | 64.58%         | +4.9pp       |
+| Spawn avg          | 1.17ms            | 7.82ms         | 6.7x slower  |
+| Drop avg           | 4.05ms            | 11.31ms        | 2.8x slower  |
+
+
+Spawn/drop slowdown is expected: before, `add()`/`remove()` held an exclusive RwLock that blocked all concurrent navigates, effectively getting exclusive access. Now they run under shared locks competing with 32 threads of concurrent navigates for per-node locks and `available_threads_mutex`_. Wall time still dropped 2.2x because navigates dominate (3.05M navigates vs 17K spawns+drops).
+
+[usearch_forked_1bit.txt](saved_benchmarks/usearch_forked_1bit.txt)
+
+### Full Quantized SPANN benchmark
+
+Creates a real SPANN index with 5M data vectors
+
+[quant_spann_1bit_forked_usearch.txt](saved_benchmarks/quant_spann_1bit_forked_usearch.txt)
+vs
+[quant_spann_1bit.txt](saved_benchmarks/quant_spann_1bit.txt)
+
+At CP 5 (5M vectors, 16 threads, 1-bit data, 1-bit centroids):
+
+
+| Metric       | Original USearch | Forked USearch | Delta       |
+| ------------ | ---------------- | -------------- | ----------- |
+| navigate avg | 416.2us          | 90.7us         | 4.6x faster |
+| spawn avg    | 2.04ms           | 1.23ms         | 1.7x faster |
+| drop avg     | 48.69ms          | 40.20ms        | 1.2x faster |
+
+
+
+#### Specifics
+
+TODO Original needs to be updated - task counts don't match so Total Time is not comparable
+
+=== Task Counts ===
+
+
+| scenario | CP  | add   | navigate | register | spawn | scrub  | split | merge | reassign | drop | load   | load_raw | quantize | search | raw_add | raw_rm | q_add | q_rm |
+| -------- | --- | ----- | -------- | -------- | ----- | ------ | ----- | ----- | -------- | ---- | ------ | -------- | -------- | ------ | ------- | ------ | ----- | ---- |
+| original | 5   | 1.00M | 3.05M    | 2.08M    | 11.0K | 190.3K | 5.6K  | 28    | 2.05M    | 5.6K | 190.3K | 11.1K    | 6.94M    | 0      |         |        |       |      |
+| forked   | 5   | 1.00M | 4.01M    | 0        | 11.0K | 191.8K | 5.6K  | 12    | 3.01M    | 5.6K | 191.8K | 11.0K    | 7.33M    | 0      | 11.0K   | 5.6K   | 11.0K | 5.6K |
+
+
+=== Task Total Time ===
+
+
+| scenario | CP  | add      | navigate | register | spawn  | scrub  | split    | merge | reassign | drop    | load  | load_raw | quantize | search | raw_pts | raw/pt  |
+| -------- | --- | -------- | -------- | -------- | ------ | ------ | -------- | ----- | -------- | ------- | ----- | -------- | -------- | ------ | ------- | ------- |
+| original | 5   | 2046.80s | 1270.90s | 14.06s   | 22.49s | 17.65s | 1779.57s | 1.89s | 1214.73s | 272.04s | 1.77s | 396.20s  | 15.68s   | 0ns    | 2.31M   | 171.2µs |
+| forked   | 5   | 1806.45s | 363.32s  | 0ns      | 13.56s | 13.83s | 2044.78s | 2.01s | 773.86s  | 223.88s | 1.55s | 388.69s  | 13.22s   | 0ns    | 10.92s  | 46.72ms |
+
+
+=== Task Avg Time ===
+
+
+| scenario | CP  | add    | navigate | register | spawn  | scrub  | split    | merge    | reassign | drop    | load  | load_raw | quantize | search | raw_add | raw_rm | q_add   | q_rm  |
+| -------- | --- | ------ | -------- | -------- | ------ | ------ | -------- | -------- | -------- | ------- | ----- | -------- | -------- | ------ | ------- | ------ | ------- | ----- |
+| original | 5   | 2.05ms | 416.2µs  | 6.8µs    | 2.04ms | 92.8µs | 320.12ms | 67.53ms  | 591.5µs  | 48.69ms | 9.3µs | 35.84ms  | 2.3µs    | -      |         |        |         |       |
+| forked   | 5   | 1.81ms | 90.7µs   | -        | 1.23ms | 72.1µs | 367.96ms | 167.16ms | 257.3µs  | 40.20ms | 8.1µs | 35.25ms  | 1.8µs    | -      | 991.4µs | 8.4µs  | 238.0µs | 7.9µs |
+
+
+## Flat / Brute Force
+
+benchmark code: [../../../benches/flat_centroid_profile.rs](../../../benches/flat_centroid_profile.rs)
+results: [flat_1bit.txt](saved_benchmarks/flat_1bit.txt)
+
+**tl;dr:** Not competitve with USearch navigate latency, even at 10k centroid scale. The advantage of flat scan is zero graph maintenance, lock-free reads, and simpler code.
+
+**Flat vs USearch HNSW (forked) -- 1-bit code-to-code, wikipedia-en dim=1024:**
+
+
+| Metric          | Flat (1M, 32t) | HNSW (1M, 32t) | Flat (10K, 32t) | HNSW (5.7K, 8t) |
+| --------------- | -------------- | -------------- | --------------- | --------------- |
+| Navigate avg    | 94.06ms        | 210.5us        | 593.5us         | 81.6us          |
+| Recall@10 (1x)  | 89.60%         | 98.50%         | 93.50%          | 99.80%          |
+| Recall@100 (1x) | 49.53%         | 64.96%         | 55.60%          | 78.78%          |
+| Recall@10 (4x)  | 97.50%         | 99.10%         | 99.20%          | 100.00%         |
+| Recall@100 (4x) | 80.01%         | 89.25%         | 88.44%          | 99.60%          |
+| Total lat (4x)  | 236.3ms        | 1.23ms         | 3.88ms          | 496.0us         |
+
+
+## Hierarchical SPANN
+
+### Design
+
+Indexing
+
+- hierarchical spann
+- branching factor 100 (3 levels for 100k centroids, 4 levels for 1M centroids)
+- balanced k-means clustering
+- Boundary vector Replication
+Querying
+- Dynamic beam width
+
+### Hierarchical Tree Config vs SPANN Config
+
+
+| Hierarchical Tree       | Value   | SPANN (quantized_spann.rs) | Value   | Notes                                                                                                                                                              |
+| ----------------------- | ------- | -------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `bf` (branching_factor) | 100     | N/A                        | N/A     | SPANN uses HNSW for centroid lookup, not a tree. No branching factor.                                                                                              |
+| `beam_width`            | 10      | `ef_search`                | **128** | Both control search quality. beam_width = candidates kept per tree level. ef_search = HNSW beam width.                                                             |
+| `distance_fn`           | L2      | L2                         | L2      | Same                                                                                                                                                               |
+| `centroid_bits`         | None/1  | `centroid_bits`            | None/1  | Same -- controls whether centroid index uses 1-bit RaBitQ                                                                                                          |
+| `expansion_factor`      | 0.0-1.0 | `write_rng_epsilon`        | **8.0** | Both control boundary replication radius. Conceptually analogous but different mechanisms -- tree expansion uses distance ratio, SPANN uses RNG rule with epsilon. |
+| `max_replicas`          | 1-4     | `nreplica_count`           | **2**   | Max clusters a vector can be assigned to                                                                                                                           |
+| `kmeans_iters`          | 10      | N/A                        | N/A     | SPANN doesn't use k-means for the centroid index; it uses HNSW. K-means is used internally for cluster splits.                                                     |
+| N/A                     |         | `ef_construction`          | **256** | HNSW build-time parameter. No tree analog.                                                                                                                         |
+| N/A                     |         | `max_neighbors` (M)        | **24**  | HNSW graph connectivity. No tree analog.                                                                                                                           |
+| N/A                     |         | `write_nprobe`             | **64**  | How many centroids to probe when assigning a new vector to clusters. Analogous to how the tree's `search()` is called with k=NPROBE=64 during the workload sim.    |
+| N/A                     |         | `split_threshold`          | **512** | Max posting list size before splitting. No direct tree analog.                                                                                                     |
+| N/A                     |         | `merge_threshold`          | **128** | Min posting list size before merging. No direct tree analog.                                                                                                       |
+| N/A                     |         | `write_rng_factor`         | **4.0** | RNG rule factor for selecting replica clusters. No tree analog.                                                                                                    |
+
+
+### 10K Centroid Experiments (wikipedia-en, f32, 1K data vectors)
+
+
+| Test     | Config                       | R@10      | R@100     | Nav Latency | Tree Entries | Depth |
+| -------- | ---------------------------- | --------- | --------- | ----------- | ------------ | ----- |
+| Baseline | bf=100, beam=10              | 80.0%     | 34.7%     | 672us       | 10K          | 3     |
+| Test 1   | bf=1000, beam=20             | 86.2%     | 63.0%     | 608us       | 10K          | 2     |
+| Test 2   | bf=100, beam=10, eps=1, r=4  | **97.1%** | **98.4%** | 10.6ms      | 40K (4x)     | 2     |
+| Test 3   | bf=1000, beam=20, eps=1, r=4 | 94.4%     | 85.6%     | 1.9ms       | 39.3K (3.9x) | 2     |
+
+
+### Balanced k-means (100K centroids, wikipedia-en, f32, eps=1.0, r=4)
+
+See `--balanced` flag in [hierarchical_centroid_profile.rs](../../../benches/hierarchical_centroid_profile.rs)
+
+
+| Metric             | Unbalanced | Balanced (lambda=100) |
+| ------------------ | ---------- | --------------------- |
+| R@10 (beam=10)     | 78.7%      | 66.5%                 |
+| R@100 (beam=10)    | 62.1%      | 48.7%                 |
+| Nav latency        | 2.37ms     | 1.09ms                |
+| Leaf max size      | 851        | 520                   |
+| Leaf p50 size      | 22         | 27                    |
+| Avg replication    | 3.94x      | 3.67x                 |
+| Phase 2 wall clock | 338ms      | 172ms                 |
+
+
+Balanced clustering produces more uniform leaf sizes (max 520 vs 851) and ~2x faster
+navigate, but loses ~12% recall at beam=10. The gap narrows at high beam widths
+(beam=1000: both ~98% R@10). At iso-recall, balanced does not win on latency because
+the wider beam needed to recover recall cancels out the per-step savings.
+
+### Dynamic beam / tau sweep (100K centroids, wikipedia-en, no replication, bf=100)
+
+Best configurations from tau sweep (tau=1.0, min=10, max=5000). No replication (eps=0, r=1).
+**f32 (full precision):**
+
+
+| Precision | Config   | R@10      | R@100     | Avg Latency | Leaves | Vecs scanned |
+| --------- | -------- | --------- | --------- | ----------- | ------ | ------------ |
+| f32       | tau=1.00 | **97.9%** | **98.5%** | 59.0ms      | 4098   | 53.9K        |
+| 1-bit     | tau=1.00 | **97.6%** | **70.7%** | 17.9ms      | 4153   | 54.5K        |
+
+
+1-bit quantization gives ~3-4x latency reduction but R@100 degrades significantly
+(98.5% -> 70.7% at tau=1.0) because quantization error compounds over thousands of
+leaf vectors. R@10 is preserved (97.9% -> 97.6%) since top-10 neighbors tend to be
+well-separated.
+
+
 # Recall
 
-## USearch
+Our question: What recall and performance can we get with what latency and quantization level?
+
+Many approaches are used to
+- estimate what recall @1B would be
+- isolate recall at various sub-stages (e.g. in central index)
+
+## USearch Recall
 
 usearch_spann_profile benchmark.
 
@@ -414,45 +697,9 @@ Run on r6i.8xlarge (16 physical cores, Intel Ice Lake).
 
 ---
 
-## Synthetic SPANN / Centroid Recall
+## Quantized KMeans Clustering Recall (Needs Redo)
 
-This measures centroid selection recall: what fraction of the true top-K neighbors reside in the probed clusters. Centroids are quantized with 1-bit RaBitQ relative to a global centroid (centroid-of-centroids), matching the production quantized HNSW pipeline. Centroid search is brute-force over quantized codes (isolating quantization error from HNSW graph approximation).
-
-The gap without reranking (`centroid_rerank=1x`) is at most 1.4% (0.895 vs 0.909 at
-nprobe=64) and is consistently closed by 2x reranking.
-
-
-| nprobe | centroid_rerank | centroid_recall | centroid_recall_ceiling |
-| ------ | --------------- | --------------- | ----------------------- |
-| 16     | 1x              | 0.743           | 0.754                   |
-| 16     | 2x              | 0.755           | 0.754                   |
-| 16     | 4x              | 0.754           | 0.754                   |
-| 32     | 1x              | 0.826           | 0.830                   |
-| 32     | 2x              | 0.833           | 0.830                   |
-| 32     | 4x              | 0.830           | 0.830                   |
-| 64     | 1x              | 0.895           | 0.909                   |
-| 64     | 2x              | 0.904           | 0.909                   |
-| 64     | 4x              | 0.909           | 0.909                   |
-| 128    | 1x              | 0.944           | 0.953                   |
-| 128    | 2x              | 0.950           | 0.953                   |
-| 128    | 4x              | 0.953           | 0.953                   |
-
-
-Benchmark data from `cargo bench -p chroma-index --bench quantization_recall_ivf -- --size 1000000`
-(cohere_wiki, N=1M, 1000 clusters via KMeans, K=10, 1-bit data, 1-bit centroids,
-r6i.8xlarge). Full raw output in `saved_benchmarks/recall_ivf_r6i.8xlarge.txt`.
-
-**centroid_recall** = fraction of true top-K in the nprobe clusters selected by the
-quantized centroid pipeline (quantized search for `nprobe * centroid_rerank` candidates,
-then exact-distance rerank to nprobe). **centroid_recall_ceiling** = same metric using
-exact centroid distance (no quantization) -- the maximum recall achievable at this nprobe.
-
-**Findings:** Centroid quantization error is small. At every nprobe, `centroid_rerank=2x`
-is sufficient to close the gap between quantized and exact centroid recall completely
-
----
-
-## Quantized KMeans Clustering Recall
+EDIT: A more useful version of this benchmark would be one that uses our SPANN code
 
 This measures how much end-to-end recall degrades when KMeans uses quantized
 code-vs-code distances instead of exact f32 distances for cluster assignment.
@@ -493,6 +740,9 @@ Full raw output in `saved_benchmarks/recall_ivf_1M_quantized_clustering_k10.txt`
 
 ## Synthetic Index - Reranking with both 1-bit and 4-bit centroids
 
+Our question: how effective is reranking with 4 bit centroids instead of full precision centroids?
+Answer: Very!
+
 [two_stage_rerank.txt](saved_benchmarks/two_stage_rerank.txt)
 
 100k data vectors, 100 queries, 316 clusters, no USearch, cohere_wiki dataset.
@@ -519,11 +769,19 @@ Sources:
 
 - [two_stage_rerank.txt](saved_benchmarks/two_stage_rerank.txt)
 
-# SPANN
 
-## Performance
 
-### 1bit vs 4bit
+# Older Benchmarks
+
+But still valid! Just less relevant to the current decisions
+
+
+## SPANN
+
+Early benchmark showing that
+- quantization does not help much with indexing as many steps use full precision embeddings anyway
+- recall suffers without reranking
+
 
 Dataset: wikipedia-en (1024 dims)
 4bit: cargo bench -p chroma-index --bench quantized_spann -- --dataset wikipedia-en --checkpoint 5 --threads 16 --data-bits 4 --centroid-bits 4
@@ -578,379 +836,42 @@ Overall throughput: 5814 vec/s
 | 4bit         | 5   | 5.00M   | 3.0m  | 14.76s | 100     | 0.77 0.72 20ms                | 0.84 0.80 21ms                | 0.88 0.86 33ms                | 0.90 0.89 51ms                 | 0.93 0.91 85ms                 |
 | 1bit         | 5   | 5.00M   | 2.3m  | 7.47s  | 100     | 0.75 0.62 12ms                | 0.81 0.68 12ms                | 0.87 0.72 20ms                | 0.91 0.75 36ms                 | 0.93 0.76 67ms                 |
 
+## Synthetic SPANN / Centroid Recall (Obsolete)
 
-# USearch
+EDIT: Instead of this benchmark, we now use quantized_spann.rs to measure the real SPANN implementation.
 
-## Parallelism
+This measures centroid selection recall: what fraction of the true top-K neighbors reside in the probed clusters. Centroids are quantized with 1-bit RaBitQ relative to a global centroid (centroid-of-centroids), matching the production quantized HNSW pipeline. Centroid search is brute-force over quantized codes (isolating quantization error from HNSW graph approximation).
 
-### Our global lock
-
-We have a global read/write lock on the USearch index. Without it we get a 1.3x speedup in throughput.
-
-
-| lock? | CP  | add    | navigate | register | spawn  | scrub  | split    | merge   | reassign | drop    | load  | load_raw | quantize | search | raw_add | raw_rm | q_add   | q_rm  |
-| ----- | --- | ------ | -------- | -------- | ------ | ------ | -------- | ------- | -------- | ------- | ----- | -------- | -------- | ------ | ------- | ------ | ------- | ----- |
-| yes   | 5   | 2.05ms | 416.2µs  | 6.8µs    | 2.04ms | 92.8µs | 320.12ms | 67.53ms | 591.5µs  | 48.69ms | 9.3µs | 35.84ms  | 2.3µs    | -      |         |        |         |       |
-| no    | 5   | 1.85ms | 370.2µs  | 6.6µs    | 1.55ms | 95.3µs | 292.97ms | 52.95ms | 528.5µs  | 46.76ms | 9.5µs | 34.75ms  | 2.2µs    | -      | 980.2µs | 7.8µs  | 563.5µs | 7.5µs |
+The gap without reranking (`centroid_rerank=1x`) is at most 1.4% (0.895 vs 0.909 at
+nprobe=64) and is consistently closed by 2x reranking.
 
 
-overall throughput: 7476 vec/s vs 5800 vec/s (1.3x speedup) mostly due to faster split (-30ms) and merge (-15ms)
-
-cargo bench -p chroma-index --bench quantized_spann -- --dataset wikipedia-en --checkpoint 1 --threads 16 --data-bits 1 --centroid-bits 1
-
-### Usearch global lock
-
-Usearch also has a global lock internally. If we chose to fork Usearch and make this lock more granular, we could see an additional speedup.
-
-
----
-
-## Performance
-
-### Note: USearch ef/k coupling
-
-USearch increases the beam width when `k > ef_search`:
-
-```cpp
-std::size_t expansion = (std::max)(config.expansion, wanted);
-```
-
-The original HNSW paper (Malkov & Yashunin, Algorithm 5) treats `ef` and `K` as independent parameters: `ef` controls beam width (search effort), `K` controls how many results to extract from the `ef` candidates. USearch conflates them, so requesting k=200 with ef_search=128 silently widens the beam to 200.
-
-This means rerank sweep rows (2x, 4x, etc.) show inflated latency -- each row runs a progressively wider search, not just extracts more from the same candidate set. The 1x row (k <= ef_search) is the true ef_search performance.
-
-Tested decoupling (using static `expansion = config.expansion`): recall plateaus at the 2x row since all rerank factors return the same ef=128 candidates. Latency becomes flat as expected. However, the coupling is the right default -- for SPANN we control both k and ef, so we can set ef appropriately rather than relying on the automatic widening.
-
-### 1-bit vs 4-bit
-
-=== USearch SPANN Profile Benchmark ===
-Dim: 1024 | Metric: L2 | Centroid bits: 4 | ef_search: 128 | Threads: 32
-Initial centroids: 1.00M | Data vectors: 1.00M | Queries: 200
-Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
-
-Task Counts (identical for both):
+| nprobe | centroid_rerank | centroid_recall | centroid_recall_ceiling |
+| ------ | --------------- | --------------- | ----------------------- |
+| 16     | 1x              | 0.743           | 0.754                   |
+| 16     | 2x              | 0.755           | 0.754                   |
+| 16     | 4x              | 0.754           | 0.754                   |
+| 32     | 1x              | 0.826           | 0.830                   |
+| 32     | 2x              | 0.833           | 0.830                   |
+| 32     | 4x              | 0.830           | 0.830                   |
+| 64     | 1x              | 0.895           | 0.909                   |
+| 64     | 2x              | 0.904           | 0.909                   |
+| 64     | 4x              | 0.909           | 0.909                   |
+| 128    | 1x              | 0.944           | 0.953                   |
+| 128    | 2x              | 0.950           | 0.953                   |
+| 128    | 4x              | 0.953           | 0.953                   |
 
 
-| navigate | spawn | drop |
-| -------- | ----- | ---- |
-| 3.05M    | 11.5K | 5.6K |
+Benchmark data from `cargo bench -p chroma-index --bench quantization_recall_ivf -- --size 1000000`
+(cohere_wiki, N=1M, 1000 clusters via KMeans, K=10, 1-bit data, 1-bit centroids,
+r6i.8xlarge). Full raw output in `saved_benchmarks/recall_ivf_r6i.8xlarge.txt`.
 
+**centroid_recall** = fraction of true top-K in the nprobe clusters selected by the
+quantized centroid pipeline (quantized search for `nprobe * centroid_rerank` candidates,
+then exact-distance rerank to nprobe). **centroid_recall_ceiling** = same metric using
+exact centroid distance (no quantization) -- the maximum recall achievable at this nprobe.
 
-Task Total Time:
-
-
-| bits | navigate | spawn  | drop   | wall   |
-| ---- | -------- | ------ | ------ | ------ |
-| 1    | 28.9m    | 13.51s | 22.82s | 56.35s |
-| 4    | 166.8m   | 1.4m   | 41.01s | 5.4m   |
-
-
-Task Avg Time:
-
-
-| bits | navigate | spawn  | drop   |
-| ---- | -------- | ------ | ------ |
-| 1    | 568.0µs  | 1.17ms | 4.05ms |
-| 4    | 3.28ms   | 7.26ms | 7.33ms |
-
-
-### Navigate() using 1 bit quantized centroids
-
-Overall 1.8x speedup: 10597 vec/s vs 5814 vec/s
-
-- Top items:
-  - 41% faster adds (1.22ms vs 2.05ms),
-  - 41% faster split (219.72ms vs 320.12ms),
-  - 22% faster merge (55.50ms vs 67.53ms)
-
-=== Task Avg Time ===
-
-
-| nav   | CP  | add    | navigate | register | spawn  | scrub  | split    | merge   | reassign | drop    | load  | load_raw | quantize | search | raw_add | raw_rm  | q_add   | q_rm    |
-| ----- | --- | ------ | -------- | -------- | ------ | ------ | -------- | ------- | -------- | ------- | ----- | -------- | -------- | ------ | ------- | ------- | ------- | ------- |
-| quant | 5   | 1.23ms | 122.1µs  | 5.2µs    | 1.79ms | 77.3µs | 219.72ms | 55.50ms | 221.0µs  | 42.59ms | 8.3µs | 37.08ms  | 1.9µs    | -      | 1.22ms  | 114.4µs | 572.5µs | 379.6µs |
-| full  | 5   | 2.05ms | 416.2µs  | 6.8µs    | 2.04ms | 92.8µs | 320.12ms | 67.53ms | 591.5µs  | 48.69ms | 9.3µs | 35.84ms  | 2.3µs    | -      |         |         |         |         |
-
-
-### Reranking
-
-Dim: 1024 | Metric: L2 | Centroid bits: 1 | ef_search: 128 | Centroids: 1.00M | Queries: 200
-
-
-=== Rerank Sweep (k=100) ===
-| Rerank | Fetch | Recall@10 | Recall@100 | Avg lat | search  | fetch   | rerank  |
-| ------ | ----- | --------- | ---------- | ------- | ------- | ------- | ------- |
-| 1x     | 100   | 84.75%    | 50.88%     | 383.3µs | 383.3µs | 0ns     | 0ns     |
-| 2x     | 200   | 90.50%    | 68.18%     | 647.6µs | 519.8µs | 20.2µs  | 107.6µs |
-| 4x     | 400   | 95.70%    | 81.98%     | 1.25ms  | 1.00ms  | 39.1µs  | 209.8µs |
-| 8x     | 800   | 98.20%    | 91.25%     | 2.39ms  | 1.90ms  | 71.3µs  | 418.1µs |
-| 16x    | 1600  | 99.20%    | 96.07%     | 4.82ms  | 3.80ms  | 139.1µs | 880.5µs |
-
-
-`cargo bench -p chroma-index --bench usearch_rerank -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 1000000`
-[usearch_rerank_1bit.txt](saved_benchmarks/usearch_rerank_1bit.txt)
-
-## Thread scaling
-
-Using usearch only benchmark. (usearch_spann_profile)
-`cargo bench -p chroma-index --bench usearch_spann_profile -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 1000000 --threads <threads> --data-vectors 1000000`
-
-
-| threads | navigate | spawn   | drop   |
-| ------- | -------- | ------- | ------ |
-| 1       | 218.2µs  | 6.59ms  | 3.39ms |
-| 4       | 221.8µs  | 682.6µs | 3.56ms |
-| 8       | 264.4µs  | 788.3µs | 3.57ms |
-| 16      | 356.7µs  | 933.1µs | 3.74ms |
-| 32      | 568.0µs  | 1.17ms  | 4.05ms |
-
-
-Scaling is poor: 4x threads yields 2.6x navigate latency, 1.7x spawn latency. Four layers of lock contention stack up:
-
-1. **Rust `RwLock**` -- `Arc<RwLock<usearch::Index>>` wraps all operations. Spawns/drops take exclusive locks and block all concurrent navigates. Removing this lock gave 10-18% faster navigate and 24-33% faster spawn with no recall impact (see `usearch_concurrency_findings.md`).
-2. `**global_mutex_**` (USearch `index.hpp`) -- A `std::mutex` protecting `max_level`_ and `entry_slot_`. Every `add()` holds it exclusively, blocking all concurrent `add()` and `search()` calls. This is the single biggest bottleneck because navigate dominates runtime and every spawn serializes against all navigates.
-3. `**slot_lookup_mutex_**` (USearch `index_dense.hpp`) -- A `std::shared_mutex` protecting the key-to-slot hash map. `add()`/`remove()` take exclusive locks; `search()` takes shared. Creates write-side contention that blocks searches during spawns/drops.
-4. `**available_threads_mutex_**` (USearch `index_dense.hpp`) -- A `std::mutex` guarding a fixed-size thread-slot pool (size = `hardware_concurrency()`). Acquired on every `search()` and `add()` call, creating a serialization point even for pure-read workloads.
-
-Improvement options (by estimated impact):
-
-1. **Atomic entry point** -- Replace `global_mutex_` with `std::atomic` for `max_level_`/`entry_slot_`. Searches do acquire loads (zero contention); adds use CAS (contention only on the rare new-max-level event). Eliminates the biggest serialization point.
-2. **Remove Rust `RwLock`** -- USearch already has internal thread safety; the outer lock is redundant.
-3. **Thread-local context pool** -- Cache thread slot IDs in TLS instead of acquiring `available_threads_mutex_` on every call.
-4. **Disable key lookups** -- SPANN tracks membership externally; disabling `enable_key_lookups` eliminates `slot_lookup_mutex_`.
-5. **Double-buffered indices** -- Frozen read index for navigate (zero locking), separate write index for spawns/drops, merge during commit.
+**Findings:** Centroid quantization error is small. At every nprobe, `centroid_rerank=2x`
+is sufficient to close the gap between quantized and exact centroid recall completely
 
 ---
-
-# Appendix
-
-## Sources of performance differences between r6i.8xlarge and MacBook Pro M1
-
-### Decode width and instruction window
-
-The M1's Firestorm performance cores are 8-wide decode with a reorder buffer of ~630 entries. Ice Lake Sunny Cove cores are 5-wide decode with ~352 ROB entries. The wider decode means M1 can dispatch more instructions per cycle, and the larger ROB means it can look further ahead to find independent work. This shows up most in operations with mixed integer/FP work and complex data dependencies -- like QuantizedQuery::new (min/max reduction + float-to-int quantization + bit-plane scatter), where M1 is 3.9x faster. Ice Lake simply cannot keep as many operations in flight to hide latencies in these dependency chains.
-
-### FP/SIMD execution ports
-
-M1 has 4 NEON pipes, each 128 bits wide (4 x 128 = 512 bits of FP throughput per cycle). Ice Lake has 2 AVX-512 FMA units, each 512 bits wide (2 x 512 = 1024 bits per cycle). For a pure dot product (simsimd_dot), AVX-512 processes 16 f32s per FMA instruction and does a fused multiply-add (2 FLOPs per element), while each NEON pipe handles 4 f32s. Even with 4 pipes, M1 tops out at 16 f32s/cycle without fused multiply-add, versus Ice Lake's 32 f32s/cycle with FMA. That is the 4.1x gap.
-But AVX-512 has a cost: Ice Lake Xeon throttles its clock frequency under sustained AVX-512 workloads (the "AVX-512 downclocking" penalty). This partially erodes the theoretical 2x FLOP advantage, and it means mixed workloads that alternate between AVX-512 and scalar code pay a frequency transition penalty. M1's NEON runs at full clock speed always.
-
-### Why M1 wins on signed_dot despite losing on simsimd_dot
-
-signed_dot is not a pure FP dot product. It first does a table lookup to expand sign bits into +/-1.0 f32 values, then dots the result. The expansion step is a sequence of byte loads and stores with irregular access patterns -- it benefits from M1's wider issue width and much larger L1 data cache (128 KB vs 48 KB on Ice Lake). By the time the dot product starts, the expanded data is hot in L1 and the dot itself is over a small vector. AVX-512's raw throughput advantage does not have enough data to amortize over.
-
-### Memory bandwidth per core
-
-M1 uses unified memory (on-package LPDDR, 68 GB/s) shared across 4 performance cores. A single thread can consume a large fraction of total bandwidth. Ice Lake Xeon in r6i.8xlarge uses DDR4 across multiple channels (200 GB/s aggregate), but shared across 16 physical cores. Per-core available bandwidth is roughly 68/4 = 17 GB/s on M1 vs 200/16 = 12.5 GB/s on Ice Lake. M1 also has much lower memory latency because the DRAM is on-package rather than on DIMMs through a memory controller. This per-core bandwidth advantage explains why dq-exact (pure f32 distance, bandwidth-bound) is 2.2x faster on M1: it is limited by how fast one core can stream vectors from memory, not by compute.
-
-### Why dq-bw/scan ties
-
-AND+popcount over packed bit vectors is both compute-light and memory-light (128 bytes per 1024-dim code). The working set fits in L1 on both architectures, and the popcount instruction is single-cycle on both (NEON CNT, AVX-512 VPOPCNTDQ). Neither core is bottlenecked on decode width, ROB depth, or memory bandwidth -- the operation is just too simple and small to differentiate the architectures.
-
-### Thread scaling
-
-M1 has 4 performance + 4 efficiency cores, no hyperthreading. Ice Lake has 16 physical cores with 2-way SMT (32 vCPUs). For single-threaded benchmarks M1 wins on per-core performance, but r6i has 4x the physical core count for parallel workloads, which is what matters in production. That is why the thread scaling section only uses r6i data.
-
-# Central Index Options
-
-## Summary
-
-| Index | Standalone |  Synthetic | SPANN |
-| ----- | ---------- | ---------- | ----- |
-| USearch 4 bit (baseline) | >2.75ms | 3.28ms? | 51ms |
-| USearch 1 bit | <3.16ms | X | 67ms+ (R=76%) |
-| USearch 1 bit - Improved Concurrency | <2.58ms | X | X |
-| USearch 1 bit - Reranked | 2.39ms | X | X |
-| Flat - Full Precision (5k Centroids) | X | 6.13ms | - |
-| Flat - 1 bit + rerank (10K Centroids) | ? | 4.77ms | ? |
-| Hierarchical SPANN - Full Precision | 17.07ms - 58.98ms | 102.45ms | ? |
-| Hierarchical SPANN - 1 bit | 12.62ms (R=71.01%) | 10.18ms (R=70.68% ) | ? |
-
-Legend:
-- Standalone:
-  - Navigate latency over the index alone
-  - 1M centroids
-- Synthetic: Navigate latency:
-  - Uses synthetic SPANN workload on the index without actually using the SPANN index, so intentionally produces _a tiny bit_ of thread contention
-  - 1M centroids
-- SPANN: Navigate latency: Average navigate latency of the index when used in a full SPANN index.
-  - Uses the [quantized_spann.rs](../../../benches/quantized_spann.rs) benchmark.
-  - ~5.7k centroids
-  - 4M existing data vectors, 1M new data vectors
-
-All numbers represent:
-  - \>= 90% Recall@100 at k=100, which might include implicit reranking or high nprobe counts
-  - 32 threads
-
-## Usearch 1 bit
-
-navigate latency = 568.0µs (@32 threads)
-
-[usearch_1bit.txt](saved_benchmarks/usearch_1bit.txt)
-
-Potential improvements:
-- Linear Thread Scaling - 2.6x speedup: 218µs (@1 thread)
-  - No global lock - 1.3x speedup
-
-## Usearch 1 bit - Improved Concurrency
-
-Forked USearch (`@USearch/include/usearch/index.hpp`) with two changes:
-1. Replaced `global_mutex_` with `std::atomic<level_t> max_level_` and `std::atomic<size_t> entry_slot_`. Searches and adds read atomically (no lock). The rare new-max-level update uses a mutex with double-checked locking.
-2. Changed Rust `RwLock` usage: `add()` and `remove()` now take shared (read) locks instead of exclusive (write) locks. Only `reserve()` takes the exclusive lock.
-
-Full details in [usearch_concurrency.md](usearch_concurrency.md)
-
-
-### USearch only benchmark
-
-Operates only on the USearch index, not the SPANN index.
-
-Navigate latency at 32 threads dropped from 568us to 211.8us (2.68x improvement), recovering the single-thread baseline. Recall improved slightly (+2.3pp @10, +4.9pp @100).
-
-`cargo bench -p chroma-index --bench usearch_spann_profile -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 1000000 --threads 32 --data-vectors 1000000`
-
-
-| Metric             | Before (upstream) | After (forked) | Change       |
-| ------------------ | ----------------- | -------------- | ------------ |
-| Navigate avg (32t) | 568.0us           | 211.8us        | 2.68x faster |
-| Phase 2 wall       | 56.35s            | 25.58s         | 2.2x faster  |
-| Recall@10          | 92.80%            | 95.10%         | +2.3pp       |
-| Recall@100         | 59.69%            | 64.58%         | +4.9pp       |
-| Spawn avg          | 1.17ms            | 7.82ms         | 6.7x slower  |
-| Drop avg           | 4.05ms            | 11.31ms        | 2.8x slower  |
-
-
-Spawn/drop slowdown is expected: before, `add()`/`remove()` held an exclusive RwLock that blocked all concurrent navigates, effectively getting exclusive access. Now they run under shared locks competing with 32 threads of concurrent navigates for per-node locks and `available_threads_mutex_`. Wall time still dropped 2.2x because navigates dominate (3.05M navigates vs 17K spawns+drops).
-
-[usearch_forked_1bit.txt](saved_benchmarks/usearch_forked_1bit.txt)
-
-### Quantized SPANN benchmark
-
-Creates a real SPANN index with 5M data vectors
-
-[quant_spann_1bit_forked_usearch.txt](saved_benchmarks/quant_spann_1bit_forked_usearch.txt)
-vs
-[quant_spann_1bit.txt](saved_benchmarks/quant_spann_1bit.txt)
-
-At CP 5 (5M vectors, 16 threads, 1-bit data, 1-bit centroids):
-
-| Metric       | Original USearch | Forked USearch | Delta       |
-| ------------ | ---------------- | -------------- | ----------- |
-| navigate avg | 416.2us          | 90.7us         | 4.6x faster |
-| spawn avg    | 2.04ms           | 1.23ms         | 1.7x faster |
-| drop avg     | 48.69ms          | 40.20ms        | 1.2x faster |
-
-TODO also compare wall clock index build time and vectors/second
-
-#### Specifics
-Original needs to be updated - task counts don't match so Total Time is not comparable
-
-=== Task Counts ===
-| scenario | CP  | add   | navigate | register | spawn | scrub  | split | merge | reassign | drop | load   | load_raw | quantize | search | raw_add | raw_rm | q_add | q_rm |
-| -------- | --- | ----- | -------- | -------- | ----- | ------ | ----- | ----- | -------- | ---- | ------ | -------- | -------- | ------ | ------- | ------ | ----- | ---- |
-| original | 5   | 1.00M | 3.05M    | 2.08M    | 11.0K | 190.3K | 5.6K  | 28    | 2.05M    | 5.6K | 190.3K | 11.1K    | 6.94M    | 0      |
-| forked   | 5   | 1.00M | 4.01M    | 0        | 11.0K | 191.8K | 5.6K  | 12    | 3.01M    | 5.6K | 191.8K | 11.0K    | 7.33M    | 0      | 11.0K   | 5.6K   | 11.0K | 5.6K |
-
-
-=== Task Total Time ===
-| scenario | CP  | add      | navigate | register | spawn  | scrub  | split    | merge | reassign | drop    | load  | load_raw | quantize | search | raw_pts | raw/pt  |
-| -------- | --- | -------- | -------- | -------- | ------ | ------ | -------- | ----- | -------- | ------- | ----- | -------- | -------- | ------ | ------- | ------- |
-| original | 5   | 2046.80s | 1270.90s | 14.06s   | 22.49s | 17.65s | 1779.57s | 1.89s | 1214.73s | 272.04s | 1.77s | 396.20s  | 15.68s   | 0ns    | 2.31M   | 171.2µs |
-| forked   | 5   | 1806.45s | 363.32s  | 0ns      | 13.56s | 13.83s | 2044.78s | 2.01s | 773.86s  | 223.88s | 1.55s | 388.69s  | 13.22s   | 0ns    | 10.92s  | 46.72ms | 2.62s | 43.77ms | 2.52M | 154.3µs | 153.38s |
-
-=== Task Avg Time ===
-| scenario | CP  | add    | navigate | register | spawn  | scrub  | split    | merge    | reassign | drop    | load  | load_raw | quantize | search | raw_add | raw_rm | q_add   | q_rm  |
-| -------- | --- | ------ | -------- | -------- | ------ | ------ | -------- | -------- | -------- | ------- | ----- | -------- | -------- | ------ | ------- | ------ | ------- | ----- |
-| original | 5   | 2.05ms | 416.2µs  | 6.8µs    | 2.04ms | 92.8µs | 320.12ms | 67.53ms  | 591.5µs  | 48.69ms | 9.3µs | 35.84ms  | 2.3µs    | -      |
-| forked   | 5   | 1.81ms | 90.7µs   | -        | 1.23ms | 72.1µs | 367.96ms | 167.16ms | 257.3µs  | 40.20ms | 8.1µs | 35.25ms  | 1.8µs    | -      | 991.4µs | 8.4µs  | 238.0µs | 7.9µs |
-
-
-## Flat / Brute Force
-
-benchmark code: [../../../benches/flat_centroid_profile.rs](../../../benches/flat_centroid_profile.rs)
-results: [flat_1bit.txt](saved_benchmarks/flat_1bit.txt)
-
-**tl;dr:** Not competitve with USearch navigate latency, even at 10k centroid scale. The advantage of flat scan is zero graph maintenance, lock-free reads, and simpler code.
-
-**Flat vs USearch HNSW (forked) -- 1-bit code-to-code, wikipedia-en dim=1024:**
-
-| Metric               | Flat (1M, 32t)  | HNSW (1M, 32t)     | Flat (10K, 32t) | HNSW (5.7K, 8t)    |
-| -------------------- | --------------- | ------------------- | --------------- | ------------------- |
-| Navigate avg         | 94.06ms         | 210.5us             | 593.5us         | 81.6us              |
-| Recall@10 (1x)       | 89.60%          | 98.50%              | 93.50%          | 99.80%              |
-| Recall@100 (1x)      | 49.53%          | 64.96%              | 55.60%          | 78.78%              |
-| Recall@10 (4x)       | 97.50%          | 99.10%              | 99.20%          | 100.00%             |
-| Recall@100 (4x)      | 80.01%          | 89.25%              | 88.44%          | 99.60%              |
-| Total lat (4x)       | 236.3ms         | 1.23ms              | 3.88ms          | 496.0us             |
-
-## Hierarchical SPANN
-
-### Design
-Indexing
-- hierarchical spann
-- branching factor 100 (3 levels for 100k centroids, 4 levels for 1M centroids)
-- balanced k-means clustering
-- Boundary vector Replication
-Querying
-- Dynamic beam width
-
-### Hierarchical Tree Config vs SPANN Config
-
-| Hierarchical Tree | Value | SPANN (quantized_spann.rs) | Value | Notes |
-|---|---|---|---|---|
-| `bf` (branching_factor) | 100 | N/A | N/A | SPANN uses HNSW for centroid lookup, not a tree. No branching factor. |
-| `beam_width` | 10 | `ef_search` | **128** | Both control search quality. beam_width = candidates kept per tree level. ef_search = HNSW beam width. |
-| `distance_fn` | L2 | L2 | L2 | Same |
-| `centroid_bits` | None/1 | `centroid_bits` | None/1 | Same -- controls whether centroid index uses 1-bit RaBitQ |
-| `expansion_factor` | 0.0-1.0 | `write_rng_epsilon` | **8.0** | Both control boundary replication radius. Conceptually analogous but different mechanisms -- tree expansion uses distance ratio, SPANN uses RNG rule with epsilon. |
-| `max_replicas` | 1-4 | `nreplica_count` | **2** | Max clusters a vector can be assigned to |
-| `kmeans_iters` | 10 | N/A | N/A | SPANN doesn't use k-means for the centroid index; it uses HNSW. K-means is used internally for cluster splits. |
-| N/A | | `ef_construction` | **256** | HNSW build-time parameter. No tree analog. |
-| N/A | | `max_neighbors` (M) | **24** | HNSW graph connectivity. No tree analog. |
-| N/A | | `write_nprobe` | **64** | How many centroids to probe when assigning a new vector to clusters. Analogous to how the tree's `search()` is called with k=NPROBE=64 during the workload sim. |
-| N/A | | `split_threshold` | **512** | Max posting list size before splitting. No direct tree analog. |
-| N/A | | `merge_threshold` | **128** | Min posting list size before merging. No direct tree analog. |
-| N/A | | `write_rng_factor` | **4.0** | RNG rule factor for selecting replica clusters. No tree analog. |
-
-### 10K Centroid Experiments (wikipedia-en, f32, 1K data vectors)
-
-| Test | Config | R@10 | R@100 | Nav Latency | Tree Entries | Depth |
-|------|--------|------|-------|-------------|-------------|-------|
-| Baseline | bf=100, beam=10 | 80.0% | 34.7% | 672us | 10K | 3 |
-| Test 1 | bf=1000, beam=20 | 86.2% | 63.0% | 608us | 10K | 2 |
-| Test 2 | bf=100, beam=10, eps=1, r=4 | **97.1%** | **98.4%** | 10.6ms | 40K (4x) | 2 |
-| Test 3 | bf=1000, beam=20, eps=1, r=4 | 94.4% | 85.6% | 1.9ms | 39.3K (3.9x) | 2 |
-
-### Balanced k-means (100K centroids, wikipedia-en, f32, eps=1.0, r=4)
-
-See `--balanced` flag in [hierarchical_centroid_profile.rs](../../../benches/hierarchical_centroid_profile.rs)
-
-| Metric | Unbalanced | Balanced (lambda=100) |
-|---|---|---|
-| R@10 (beam=10) | 78.7% | 66.5% |
-| R@100 (beam=10) | 62.1% | 48.7% |
-| Nav latency | 2.37ms | 1.09ms |
-| Leaf max size | 851 | 520 |
-| Leaf p50 size | 22 | 27 |
-| Avg replication | 3.94x | 3.67x |
-| Phase 2 wall clock | 338ms | 172ms |
-
-Balanced clustering produces more uniform leaf sizes (max 520 vs 851) and ~2x faster
-navigate, but loses ~12% recall at beam=10. The gap narrows at high beam widths
-(beam=1000: both ~98% R@10). At iso-recall, balanced does not win on latency because
-the wider beam needed to recover recall cancels out the per-step savings.
-
-### Dynamic beam / tau sweep (100K centroids, wikipedia-en, no replication, bf=100)
-
-Best configurations from tau sweep (tau=1.0, min=10, max=5000). No replication (eps=0, r=1).
-**f32 (full precision):**
-
-| Precision | Config | R@10 | R@100 | Avg Latency | Leaves | Vecs scanned |
-|----|--------|------|-------|-------------|--------|-------------|
-|f32| tau=1.00 | **97.9%** | **98.5%** | 59.0ms | 4098 | 53.9K |
-|1-bit| tau=1.00 | **97.6%** | **70.7%** | 17.9ms | 4153 | 54.5K |
-
-1-bit quantization gives ~3-4x latency reduction but R@100 degrades significantly
-(98.5% -> 70.7% at tau=1.0) because quantization error compounds over thousands of
-leaf vectors. R@10 is preserved (97.9% -> 97.6%) since top-10 neighbors tend to be
-well-separated.

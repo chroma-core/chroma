@@ -55,7 +55,7 @@ struct Args {
     checkpoint: Option<usize>,
 
     /// Number of threads for parallel indexing
-    #[arg(long, default_value = "16")]
+    #[arg(long, default_value = "32")]
     threads: usize,
 
     /// Data vector quantization bit-width (1 or 4, default 1)
@@ -73,6 +73,10 @@ struct Args {
     /// Number of vectors for synthetic dataset (default 1M)
     #[arg(long, default_value = "1000000")]
     synthetic_size: usize,
+
+    /// Centroid rerank factors to sweep, comma-separated (e.g. "1,2,4,8")
+    #[arg(long, default_value = "1,2,4,8")]
+    rerank_factors: String,
 
     /// Extra arguments (ignored, for compatibility with cargo bench)
     #[arg(hide = true, allow_hyphen_values = true)]
@@ -96,6 +100,7 @@ struct CheckpointResult {
     index_time: Duration,
     commit_time: Duration,
     num_queries: usize,
+    rerank_factor: u32,
     recall_10_np16: f64,
     recall_100_np16: f64,
     latency_np16: Duration,
@@ -117,7 +122,11 @@ struct CheckpointResult {
 // SPANN Configuration
 // =============================================================================
 
-fn spann_config(data_bits: u8, centroid_bits: Option<u8>) -> SpannIndexConfig {
+fn spann_config(
+    data_bits: u8,
+    centroid_bits: Option<u8>,
+    centroid_rerank_factor: Option<u32>,
+) -> SpannIndexConfig {
     let quantize = match data_bits {
         4 => Quantization::FourBitRabitQWithUSearch,
         _ => Quantization::OneBitRabitQWithUSearch,
@@ -145,6 +154,7 @@ fn spann_config(data_bits: u8, centroid_bits: Option<u8>) -> SpannIndexConfig {
 
         quantize,
         centroid_bits,
+        centroid_rerank_factor,
 
         // Other
         ..Default::default()
@@ -295,10 +305,11 @@ fn format_latency(d: Duration) -> String {
 
 /// Print the recall summary table.
 fn print_recall_summary(results: &[CheckpointResult]) {
-    println!("\n=== Recall Summary ===");
+    println!("\n=== Recall Summary (Rerank Sweep) ===");
     println!(
-        "| {:>3} | {:>8} | {:>8} | {:>8} | {:>7} | {:^19} | {:^19} | {:^19} | {:^19} | {:^19} |",
+        "| {:>3} | {:>6} | {:>8} | {:>8} | {:>8} | {:>7} | {:^19} | {:^19} | {:^19} | {:^19} | {:^19} |",
         "CP",
+        "Rerank",
         "Vectors",
         "Index",
         "Commit",
@@ -310,18 +321,19 @@ fn print_recall_summary(results: &[CheckpointResult]) {
         "nprobe=256"
     );
     println!(
-        "| {:>3} | {:>8} | {:>8} | {:>8} | {:>7} | {:>5} {:>5} {:>6} | {:>5} {:>5} {:>6} | {:>5} {:>5} {:>6} | {:>5} {:>5} {:>6} | {:>5} {:>5} {:>6} |",
-        "", "", "", "", "", "R@10", "R@100", "Lat", "R@10", "R@100", "Lat", "R@10", "R@100", "Lat", "R@10", "R@100", "Lat", "R@10", "R@100", "Lat"
+        "| {:>3} | {:>6} | {:>8} | {:>8} | {:>8} | {:>7} | {:>5} {:>5} {:>6} | {:>5} {:>5} {:>6} | {:>5} {:>5} {:>6} | {:>5} {:>5} {:>6} | {:>5} {:>5} {:>6} |",
+        "", "", "", "", "", "", "R@10", "R@100", "Lat", "R@10", "R@100", "Lat", "R@10", "R@100", "Lat", "R@10", "R@100", "Lat", "R@10", "R@100", "Lat"
     );
     println!(
-        "|{:-^5}|{:-^10}|{:-^10}|{:-^10}|{:-^9}|{:-^21}|{:-^21}|{:-^21}|{:-^21}|{:-^21}|",
-        "", "", "", "", "", "", "", "", "", ""
+        "|{:-^5}|{:-^8}|{:-^10}|{:-^10}|{:-^10}|{:-^9}|{:-^21}|{:-^21}|{:-^21}|{:-^21}|{:-^21}|",
+        "", "", "", "", "", "", "", "", "", "", ""
     );
 
     for r in results {
         println!(
-            "| {:>3} | {:>8} | {:>8} | {:>8} | {:>7} | {:>5.2} {:>5.2} {:>6} | {:>5.2} {:>5.2} {:>6} | {:>5.2} {:>5.2} {:>6} | {:>5.2} {:>5.2} {:>6} | {:>5.2} {:>5.2} {:>6} |",
+            "| {:>3} | {:>4}x | {:>8} | {:>8} | {:>8} | {:>7} | {:>5.2} {:>5.2} {:>6} | {:>5.2} {:>5.2} {:>6} | {:>5.2} {:>5.2} {:>6} | {:>5.2} {:>5.2} {:>6} | {:>5.2} {:>5.2} {:>6} |",
             r.checkpoint,
+            r.rerank_factor,
             format_count(r.vectors),
             format_duration(r.index_time),
             format_duration(r.commit_time),
@@ -374,7 +386,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .unwrap_or(max_checkpoints)
         .min(max_checkpoints);
 
-    let config = spann_config(args.data_bits, args.centroid_bits);
+    let rerank_factors: Vec<u32> = args
+        .rerank_factors
+        .split(',')
+        .map(|s| s.trim().parse().expect("invalid rerank factor"))
+        .collect();
+
+    let config = spann_config(args.data_bits, args.centroid_bits, None);
 
     println!("=== QuantizedSpannIndexWriter Benchmark ===");
     println!(
@@ -390,6 +408,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         num_threads,
         args.data_bits,
         config.centroid_bits()
+    );
+    println!(
+        "Rerank factors: {:?}",
+        rerank_factors
     );
     println!(
         "Total vectors to index: {}",
@@ -625,150 +647,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         total_vectors += actual_count;
 
         // === Step 7: Evaluate recall for this checkpoint ===
-        // Use actual total_vectors count (not theoretical checkpoint boundary)
-        // to match ground truth queries which are computed against actual data size
         let checkpoint_queries = queries_by_checkpoint
             .get(&(total_vectors as u64))
             .map(|v| v.as_slice())
             .unwrap_or(&[]);
-
-        let (
-            recall_10_np16,
-            recall_100_np16,
-            latency_np16,
-            recall_10_np32,
-            recall_100_np32,
-            latency_np32,
-            recall_10_np64,
-            recall_100_np64,
-            latency_np64,
-            recall_10_np128,
-            recall_100_np128,
-            latency_np128,
-            recall_10_np256,
-            recall_100_np256,
-            latency_np256,
-        ) = if !checkpoint_queries.is_empty() {
-            // Re-open index for search (need fresh providers)
-            let block_cache = new_cache_for_test();
-            let sparse_index_cache = new_cache_for_test();
-            let arrow_blockfile_provider = ArrowBlockfileProvider::new(
-                storage.clone(),
-                BLOCK_SIZE_BYTES,
-                block_cache,
-                sparse_index_cache,
-                16,
-            );
-            let blockfile_provider =
-                BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
-
-            let usearch_cache = new_non_persistent_cache_for_test();
-            let usearch_provider = USearchIndexProvider::new(storage.clone(), usearch_cache);
-
-            let raw_reader = blockfile_provider
-                .read::<u32, DataRecord<'static>>(BlockfileReaderOptions::new(
-                    raw_embedding_id.unwrap(),
-                    "".to_string(),
-                ))
-                .await
-                .expect("Failed to open raw embedding reader");
-
-            let search_index = QuantizedSpannIndexWriter::<USearchIndex>::open(
-                BLOCK_SIZE_BYTES,
-                collection_id,
-                config.clone(),
-                dimension,
-                distance_function.clone(),
-                file_ids.clone().unwrap(),
-                None,
-                "".to_string(),
-                Some(raw_reader),
-                &blockfile_provider,
-                &usearch_provider,
-            )
-            .await
-            .expect("Failed to open index for search");
-
-            let search_index = Arc::new(search_index);
-
-            let (r10_16, r100_16, lat_16) = evaluate_recall(
-                Arc::clone(&search_index),
-                checkpoint_queries,
-                k,
-                16,
-                num_threads,
-                checkpoint_idx,
-                num_checkpoints,
-            )
-            .await;
-
-            let (r10_32, r100_32, lat_32) = evaluate_recall(
-                Arc::clone(&search_index),
-                checkpoint_queries,
-                k,
-                32,
-                num_threads,
-                checkpoint_idx,
-                num_checkpoints,
-            )
-            .await;
-
-            let (r10_64, r100_64, lat_64) = evaluate_recall(
-                Arc::clone(&search_index),
-                checkpoint_queries,
-                k,
-                64,
-                num_threads,
-                checkpoint_idx,
-                num_checkpoints,
-            )
-            .await;
-
-            let (r10_128, r100_128, lat_128) = evaluate_recall(
-                Arc::clone(&search_index),
-                checkpoint_queries,
-                k,
-                128,
-                num_threads,
-                checkpoint_idx,
-                num_checkpoints,
-            )
-            .await;
-
-            let (r10_256, r100_256, lat_256) = evaluate_recall(
-                search_index,
-                checkpoint_queries,
-                k,
-                256,
-                num_threads,
-                checkpoint_idx,
-                num_checkpoints,
-            )
-            .await;
-
-            (
-                r10_16, r100_16, lat_16, r10_32, r100_32, lat_32, r10_64, r100_64, lat_64, r10_128,
-                r100_128, lat_128, r10_256, r100_256, lat_256,
-            )
-        } else {
-            (
-                0.0,
-                0.0,
-                Duration::ZERO,
-                0.0,
-                0.0,
-                Duration::ZERO,
-                0.0,
-                0.0,
-                Duration::ZERO,
-                0.0,
-                0.0,
-                Duration::ZERO,
-                0.0,
-                0.0,
-                Duration::ZERO,
-            )
-        };
 
         let throughput = actual_count as f64 / index_time.as_secs_f64();
 
@@ -782,42 +664,167 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             format_duration(commit_time),
             throughput,
         );
-        println!(
-            "  Recall: np16={:.2}/{:.2} np32={:.2}/{:.2} np64={:.2}/{:.2} np128={:.2}/{:.2} np256={:.2}/{:.2}",
-            recall_10_np16,
-            recall_100_np16,
-            recall_10_np32,
-            recall_100_np32,
-            recall_10_np64,
-            recall_100_np64,
-            recall_10_np128,
-            recall_100_np128,
-            recall_10_np256,
-            recall_100_np256,
-        );
 
-        checkpoint_results.push(CheckpointResult {
-            checkpoint: checkpoint_idx + 1,
-            vectors: total_vectors,
-            index_time,
-            commit_time,
-            num_queries: checkpoint_queries.len(),
-            recall_10_np16,
-            recall_100_np16,
-            latency_np16,
-            recall_10_np32,
-            recall_100_np32,
-            latency_np32,
-            recall_10_np64,
-            recall_100_np64,
-            latency_np64,
-            recall_10_np128,
-            recall_100_np128,
-            latency_np128,
-            recall_10_np256,
-            recall_100_np256,
-            latency_np256,
-        });
+        for &rerank_factor in &rerank_factors {
+            let (
+                recall_10_np16, recall_100_np16, latency_np16,
+                recall_10_np32, recall_100_np32, latency_np32,
+                recall_10_np64, recall_100_np64, latency_np64,
+                recall_10_np128, recall_100_np128, latency_np128,
+                recall_10_np256, recall_100_np256, latency_np256,
+            ) = if !checkpoint_queries.is_empty() {
+                let search_config = spann_config(
+                    args.data_bits,
+                    args.centroid_bits,
+                    Some(rerank_factor),
+                );
+
+                let block_cache = new_cache_for_test();
+                let sparse_index_cache = new_cache_for_test();
+                let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+                    storage.clone(),
+                    BLOCK_SIZE_BYTES,
+                    block_cache,
+                    sparse_index_cache,
+                    16,
+                );
+                let blockfile_provider =
+                    BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+
+                let usearch_cache = new_non_persistent_cache_for_test();
+                let usearch_provider =
+                    USearchIndexProvider::new(storage.clone(), usearch_cache);
+
+                let raw_reader = blockfile_provider
+                    .read::<u32, DataRecord<'static>>(BlockfileReaderOptions::new(
+                        raw_embedding_id.unwrap(),
+                        "".to_string(),
+                    ))
+                    .await
+                    .expect("Failed to open raw embedding reader");
+
+                let search_index = QuantizedSpannIndexWriter::<USearchIndex>::open(
+                    BLOCK_SIZE_BYTES,
+                    collection_id,
+                    search_config,
+                    dimension,
+                    distance_function.clone(),
+                    file_ids.clone().unwrap(),
+                    None,
+                    "".to_string(),
+                    Some(raw_reader),
+                    &blockfile_provider,
+                    &usearch_provider,
+                )
+                .await
+                .expect("Failed to open index for search");
+
+                let search_index = Arc::new(search_index);
+
+                let (r10_16, r100_16, lat_16) = evaluate_recall(
+                    Arc::clone(&search_index),
+                    checkpoint_queries,
+                    k,
+                    16,
+                    num_threads,
+                    checkpoint_idx,
+                    num_checkpoints,
+                )
+                .await;
+
+                let (r10_32, r100_32, lat_32) = evaluate_recall(
+                    Arc::clone(&search_index),
+                    checkpoint_queries,
+                    k,
+                    32,
+                    num_threads,
+                    checkpoint_idx,
+                    num_checkpoints,
+                )
+                .await;
+
+                let (r10_64, r100_64, lat_64) = evaluate_recall(
+                    Arc::clone(&search_index),
+                    checkpoint_queries,
+                    k,
+                    64,
+                    num_threads,
+                    checkpoint_idx,
+                    num_checkpoints,
+                )
+                .await;
+
+                let (r10_128, r100_128, lat_128) = evaluate_recall(
+                    Arc::clone(&search_index),
+                    checkpoint_queries,
+                    k,
+                    128,
+                    num_threads,
+                    checkpoint_idx,
+                    num_checkpoints,
+                )
+                .await;
+
+                let (r10_256, r100_256, lat_256) = evaluate_recall(
+                    search_index,
+                    checkpoint_queries,
+                    k,
+                    256,
+                    num_threads,
+                    checkpoint_idx,
+                    num_checkpoints,
+                )
+                .await;
+
+                (
+                    r10_16, r100_16, lat_16, r10_32, r100_32, lat_32,
+                    r10_64, r100_64, lat_64, r10_128, r100_128, lat_128,
+                    r10_256, r100_256, lat_256,
+                )
+            } else {
+                (
+                    0.0, 0.0, Duration::ZERO,
+                    0.0, 0.0, Duration::ZERO,
+                    0.0, 0.0, Duration::ZERO,
+                    0.0, 0.0, Duration::ZERO,
+                    0.0, 0.0, Duration::ZERO,
+                )
+            };
+
+            println!(
+                "  Rerank {}x: np16={:.2}/{:.2} np32={:.2}/{:.2} np64={:.2}/{:.2} np128={:.2}/{:.2} np256={:.2}/{:.2}",
+                rerank_factor,
+                recall_10_np16, recall_100_np16,
+                recall_10_np32, recall_100_np32,
+                recall_10_np64, recall_100_np64,
+                recall_10_np128, recall_100_np128,
+                recall_10_np256, recall_100_np256,
+            );
+
+            checkpoint_results.push(CheckpointResult {
+                checkpoint: checkpoint_idx + 1,
+                vectors: total_vectors,
+                index_time,
+                commit_time,
+                num_queries: checkpoint_queries.len(),
+                rerank_factor,
+                recall_10_np16,
+                recall_100_np16,
+                latency_np16,
+                recall_10_np32,
+                recall_100_np32,
+                latency_np32,
+                recall_10_np64,
+                recall_100_np64,
+                latency_np64,
+                recall_10_np128,
+                recall_100_np128,
+                latency_np128,
+                recall_10_np256,
+                recall_100_np256,
+                latency_np256,
+            });
+        }
     }
 
     let total_time = total_start.elapsed();

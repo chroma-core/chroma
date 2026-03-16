@@ -716,12 +716,17 @@ fn main() {
             num_queries, args.beam_min, args.beam_max
         );
 
-        let sweep_taus: &[f64] = &[0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0];
+        let sweep_taus: &[f64] = &[0.1, 0.5, 0.75, 1.0];
+        let rerank_factors: &[usize] = if centroid_bits.is_some() {
+            &[1, 2, 4, 8]
+        } else {
+            &[1]
+        };
 
         // Build header dynamically based on tree depth
         let mut header = format!(
-            "| {:>6} | {:>11} | {:>11} | {:>10}",
-            "Tau", "Recall@10", "Recall@100", "Avg lat"
+            "| {:>6} | {:>6} | {:>11} | {:>11} | {:>10}",
+            "Tau", "Rerank", "Recall@10", "Recall@100", "Avg lat"
         );
         for l in 1..=num_levels {
             header.push_str(&format!(" | L{} beam | L{} R@100", l, l));
@@ -729,7 +734,7 @@ fn main() {
         header.push_str(" | Leaves |   Vecs |");
         println!("{}", header);
 
-        let mut sep = String::from("|--------|-------------|-------------|------------|");
+        let mut sep = String::from("|--------|--------|-------------|-------------|------------|");
         for _ in 1..=num_levels {
             sep.push_str("---------|---------|");
         }
@@ -737,72 +742,99 @@ fn main() {
         println!("{}", sep);
 
         for &tau in sweep_taus {
-            let mut r10_sum = 0.0f64;
-            let mut r100_sum = 0.0f64;
-            let mut lat_total = Duration::ZERO;
-            // Per-level accumulators: (beam_sum, reach10_sum, count)
+            // Collect per-level stats once per tau (same tree traversal regardless of rerank)
             let mut level_accum: Vec<(usize, f64, usize)> = vec![(0, 0.0, 0); num_levels];
             let mut leaves_sum = 0usize;
             let mut vectors_sum = 0usize;
+            let mut stats_collected = false;
 
-            for (qi, query) in query_vecs.iter().enumerate() {
-                let gt = &ground_truths[qi];
-                let gt_10: HashSet<u32> = gt.iter().take(10).copied().collect();
-                let gt_100: HashSet<u32> = gt.iter().take(k).copied().collect();
+            for &rf in rerank_factors {
+                let mut r10_sum = 0.0f64;
+                let mut r100_sum = 0.0f64;
+                let mut lat_total = Duration::ZERO;
 
-                let t = Instant::now();
-                let result = index.search_with_beam(query, k, cfg.beam_width, Some(tau));
-                lat_total += t.elapsed();
+                for (qi, query) in query_vecs.iter().enumerate() {
+                    let gt = &ground_truths[qi];
+                    let gt_10: HashSet<u32> = gt.iter().take(10).copied().collect();
+                    let gt_100: HashSet<u32> = gt.iter().take(k).copied().collect();
 
-                let predicted: HashSet<u32> =
-                    result.iter().map(|&(key, _)| key).collect();
+                    let t = Instant::now();
+                    let result = if rf == 1 {
+                        index.search_with_beam(query, k, cfg.beam_width, Some(tau))
+                    } else {
+                        index.search_with_rerank(
+                            query,
+                            k,
+                            k * rf,
+                            cfg.beam_width,
+                            Some(tau),
+                        )
+                    };
+                    lat_total += t.elapsed();
 
-                r10_sum +=
-                    predicted.intersection(&gt_10).count() as f64 / gt_10.len().max(1) as f64;
-                r100_sum += predicted.intersection(&gt_100).count() as f64
-                    / gt_100.len().max(1) as f64;
+                    let predicted: HashSet<u32> =
+                        result.iter().map(|&(key, _)| key).collect();
 
-                let lr = index.diagnose_level_recall(
-                    query,
-                    cfg.beam_width,
-                    &gt_10,
-                    &gt_100,
-                    Some(tau),
-                );
-                for entry in &lr {
-                    let idx = entry.level - 1;
-                    if idx < num_levels {
-                        level_accum[idx].0 += entry.beam_size;
-                        level_accum[idx].1 += entry.reachable_100;
-                        level_accum[idx].2 += 1;
+                    r10_sum += predicted.intersection(&gt_10).count() as f64
+                        / gt_10.len().max(1) as f64;
+                    r100_sum += predicted.intersection(&gt_100).count() as f64
+                        / gt_100.len().max(1) as f64;
+
+                    if !stats_collected {
+                        let lr = index.diagnose_level_recall(
+                            query,
+                            cfg.beam_width,
+                            &gt_10,
+                            &gt_100,
+                            Some(tau),
+                        );
+                        for entry in &lr {
+                            let idx = entry.level - 1;
+                            if idx < num_levels {
+                                level_accum[idx].0 += entry.beam_size;
+                                level_accum[idx].1 += entry.reachable_100;
+                                level_accum[idx].2 += 1;
+                            }
+                            leaves_sum += entry.leaves_scanned;
+                            vectors_sum += entry.vectors_scanned;
+                        }
                     }
-                    leaves_sum += entry.leaves_scanned;
-                    vectors_sum += entry.vectors_scanned;
                 }
-            }
+                stats_collected = true;
 
-            let n_q = query_vecs.len() as f64;
-            let avg_leaves = leaves_sum / query_vecs.len();
-            let avg_vectors = vectors_sum / query_vecs.len();
-            let mut row = format!(
-                "| {:>6.2} | {:>10.2}% | {:>10.2}% | {:>10}",
-                tau,
-                r10_sum / n_q * 100.0,
-                r100_sum / n_q * 100.0,
-                format_duration(lat_total / query_vecs.len() as u32),
-            );
-            for l in 0..num_levels {
-                let (beam_sum, reach_sum, count) = level_accum[l];
-                if count > 0 {
-                    let avg_beam = beam_sum / count;
-                    let avg_reach = reach_sum / count as f64 * 100.0;
-                    row.push_str(&format!(" | {:>7} | {:>6.1}%", avg_beam, avg_reach));
+                let n_q = query_vecs.len() as f64;
+                let avg_leaves = leaves_sum / query_vecs.len();
+                let avg_vectors = vectors_sum / query_vecs.len();
+                let rerank_label = if rf == 1 {
+                    "1x".to_string()
                 } else {
-                    row.push_str(" |       - |      -");
+                    format!("{}x", rf)
+                };
+                let mut row = format!(
+                    "| {:>6.2} | {:>6} | {:>10.2}% | {:>10.2}% | {:>10}",
+                    tau,
+                    rerank_label,
+                    r10_sum / n_q * 100.0,
+                    r100_sum / n_q * 100.0,
+                    format_duration(lat_total / query_vecs.len() as u32),
+                );
+                for l in 0..num_levels {
+                    let (beam_sum, reach_sum, count) = level_accum[l];
+                    if count > 0 {
+                        let avg_beam = beam_sum / count;
+                        let avg_reach = reach_sum / count as f64 * 100.0;
+                        row.push_str(&format!(" | {:>7} | {:>6.1}%", avg_beam, avg_reach));
+                    } else {
+                        row.push_str(" |       - |      -");
+                    }
                 }
+                row.push_str(&format!(
+                    " | {:>6} | {:>6} |",
+                    avg_leaves,
+                    format_count(avg_vectors)
+                ));
+                println!("{}", row);
             }
-            row.push_str(&format!(" | {:>6} | {:>6} |", avg_leaves, format_count(avg_vectors)));
-            println!("{}", row);
         }
     } else {
         println!(

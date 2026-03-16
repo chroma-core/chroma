@@ -106,6 +106,7 @@ harness = false
 [[bench]]
 name = "quantized_spann"
 harness = false
+required-features = ["usearch"]
 
 [[bench]]
 name = "usearch_spann_profile"

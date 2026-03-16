@@ -1,3 +1,84 @@
+Added reranking
+cargo bench -p chroma-index --bench hierarchical_centroid_profile --  --dataset wikipedia-en --initial-centroids 100000 --threads 32   --data-vectors 1000 --num-queries 100 --branching-factor 100 --beam-width 10  --expansion-factor 0 --max-replicas 1 --beam-tau 1.0 --centroid-bits 1 --beam-max 50000
+   Compiling chroma-index v0.1.0 (/home/ubuntu/chroma/rust/index)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 21.08s
+     Running benches/hierarchical_centroid_profile.rs (target/release/deps/hierarchical_centroid_profile-2d0bb9373c1dad52)
+Loading Wikipedia EN from HuggingFace Hub...
+Loading 101.1K vectors from wikipedia-en (dim=1024)...
+
+=== Hierarchical Centroid Tree Profile ===
+Dim: 1024 | Metric: L2 | Centroid bits: 1 | Threads: 32
+Initial centroids: 100.0K | Data vectors: 1.0K | Queries: 100
+Branching factor: 100 | Beam: dynamic (tau=1.00, min=10, max=50000) | K-means: 10 iters
+Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
+
+--- Phase 1: Loading cached tree from target/hierarchical_cache/tree_WikipediaEn_100000_bf100_ki10_L2_1.bin ---
+Loaded 100.0K centroids in 504.25ms (depth=3)
+
+--- Tree Structure ---
+  *  Level 0 : 1 internal node, 100 total children (fan-out: min=100, avg=100, max=100)
+  |
+  |  Level 1 : 100 internal nodes, 10.0K total children (fan-out: min=100, avg=100, max=100)
+  |
+  |  Level 2 : 10.0K leaves, 100.0K total vectors (size: min=1, p25=4, p50=8, p75=13, max=88)
+
+Total entries: 100.0K | Unique centroids: 100.0K | Avg replication: 1.00x
+Phase 1 wall clock: 525.90ms
+
+--- Phase 2: SPANN workload (1.0K data vectors, 32 threads) ---
+Completed in 1.21s | Index size: 100003
+
+=== Phase 2: Task Counts ===
+|   navigate |      spawn |       drop |
+|------------|------------|------------|
+|       3.1K |         11 |          8 |
+
+=== Phase 2: Task Total Time ===
+|   navigate |      spawn |       drop |       wall |
+|------------|------------|------------|------------|
+|     28.70s |     17.4µs |      4.9µs |      1.21s |
+
+=== Phase 2: Task Avg Time ===
+|   navigate |      spawn |       drop |
+|------------|------------|------------|
+|     9.39ms |      1.6µs |      608ns |
+
+=== Recall Summary ===
+Corpus size: 100.0K | Queries: 100 | k: 100
+Recall@10: 97.50% | Recall@100: 70.68% | Avg latency: 11.12ms
+
+=== Phase 3: Tau sweep (100 queries, min=10, max=50000) ===
+|    Tau | Rerank |   Recall@10 |  Recall@100 |    Avg lat | L1 beam | L1 R@100 | L2 beam | L2 R@100 | Leaves |   Vecs |
+|--------|--------|-------------|-------------|------------|---------|---------|---------|---------|--------|--------|
+|   0.02 |     1x |      56.90% |      32.29% |    130.2µs |      10 |   89.1% |      10 |   32.3% |     10 |    175 |
+|   0.02 |     2x |      56.90% |      32.30% |    176.2µs |      10 |   89.1% |      10 |   32.3% |     10 |    175 |
+|   0.02 |     4x |      56.90% |      32.30% |    168.4µs |      10 |   89.1% |      10 |   32.3% |     10 |    175 |
+|   0.02 |     8x |      56.90% |      32.30% |    164.8µs |      10 |   89.1% |      10 |   32.3% |     10 |    175 |
+|   0.10 |     1x |      57.90% |      33.34% |    131.9µs |      10 |   89.4% |      11 |   33.4% |     11 |    196 |
+|   0.10 |     2x |      57.90% |      33.40% |    169.4µs |      10 |   89.4% |      11 |   33.4% |     11 |    196 |
+|   0.10 |     4x |      57.90% |      33.40% |    174.2µs |      10 |   89.4% |      11 |   33.4% |     11 |    196 |
+|   0.10 |     8x |      57.90% |      33.40% |    173.8µs |      10 |   89.4% |      11 |   33.4% |     11 |    196 |
+|   0.50 |     1x |      92.30% |      64.40% |     2.00ms |      76 |   99.7% |     688 |   83.4% |    688 |  10.5K |
+|   0.50 |     2x |      92.40% |      77.53% |     2.03ms |      76 |   99.7% |     688 |   83.4% |    688 |  10.5K |
+|   0.50 |     4x |      92.50% |      82.25% |     2.07ms |      76 |   99.7% |     688 |   83.4% |    688 |  10.5K |
+|   0.50 |     8x |      92.50% |      83.28% |     2.19ms |      76 |   99.7% |     688 |   83.4% |    688 |  10.5K |
+|   0.75 |     1x |      96.30% |      69.31% |     5.46ms |      96 |   99.8% |    2851 |   95.2% |   2851 |  38.2K |
+|   0.75 |     2x |      96.50% |      86.81% |     5.24ms |      96 |   99.8% |    2851 |   95.2% |   2851 |  38.2K |
+|   0.75 |     4x |      96.70% |      93.37% |     5.32ms |      96 |   99.8% |    2851 |   95.2% |   2851 |  38.2K |
+|   0.75 |     8x |      96.70% |      94.93% |     5.48ms |      96 |   99.8% |    2851 |   95.2% |   2851 |  38.2K |
+|   1.00 |     1x |      97.50% |      70.68% |     8.89ms |      99 |   99.8% |    5591 |   98.8% |   5591 |  66.7K |
+|   1.00 |     2x |      97.70% |      89.72% |     8.53ms |      99 |   99.8% |    5591 |   98.8% |   5591 |  66.7K |
+|   1.00 |     4x |      97.90% |      96.82% |     8.60ms |      99 |   99.8% |    5591 |   98.8% |   5591 |  66.7K |
+|   1.00 |     8x |      97.90% |      98.51% |     8.80ms |      99 |   99.8% |    5591 |   98.8% |   5591 |  66.7K |
+Phase 3 wall clock: 16.90s
+
+
+
+
+
+
+
+
 cargo bench -p chroma-index --bench hierarchical_centroid_profile --   --dataset wikipedia-en --initial-centroids 100000 --threads 32   --data-vectors 1000 --num-queries 100 --branching-factor 100 --beam-width 10   --expansion-factor 0 --max-replicas 1 --beam-tau 1.0 --centroid-bits 1 --beam-max 50000
    Compiling chroma-index v0.1.0 (/home/ubuntu/chroma/rust/index)
     Finished `bench` profile [optimized + debuginfo] target(s) in 20.70s

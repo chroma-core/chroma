@@ -31,7 +31,7 @@ use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::{
-    quantization::{self, Code},
+    quantization,
     spann::utils,
     usearch::{USearchIndex, USearchIndexConfig, USearchIndexProvider},
     IndexUuid, OpenMode, SearchResult, VectorIndex, VectorIndexProvider,
@@ -579,7 +579,12 @@ pub struct QuantizedSpannIndexWriter<I: VectorIndex> {
 }
 
 impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
+    fn data_bits(&self) -> u8 {
+        self.config.quantize.data_bits().unwrap_or(4)
+    }
+
     pub async fn add(&self, id: u32, embedding: &[f32]) -> Result<(), QuantizedSpannError> {
+        let _guard = stats::TimedGuard::new(&self.stats.add);
         if embedding.len() != self.dimension {
             return Err(QuantizedSpannError::DimensionMismatch {
                 expected: self.dimension,
@@ -739,15 +744,28 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
         self.distance_function.distance(a, b)
     }
 
+    /// Quantize a vector relative to a centroid, recording time in stats.
+    fn timed_quantize(&self, bits: u8, embedding: &[f32], centroid: &[f32]) -> Arc<[u8]> {
+        let _guard = stats::TimedGuard::new(&self.stats.quantize);
+        quantization::quantize(bits, embedding, centroid)
+    }
+
     /// Remove a cluster from both centroid indexes and register as tombstone.
     /// Load raw embeddings and returns the delta if the cluster existed.
     async fn drop(&self, cluster_id: u32) -> Result<Option<QuantizedDelta>, QuantizedSpannError> {
-        self.raw_centroid
-            .remove(cluster_id)
-            .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
-        self.quantized_centroid
-            .remove(cluster_id)
-            .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
+        let _guard = stats::TimedGuard::new(&self.stats.drop);
+        {
+            let _g = stats::TimedGuard::new(&self.stats.raw_rm);
+            self.raw_centroid
+                .remove(cluster_id)
+                .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
+        }
+        {
+            let _g = stats::TimedGuard::new(&self.stats.q_rm);
+            self.quantized_centroid
+                .remove(cluster_id)
+                .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
+        }
         self.tombstones.insert(cluster_id);
 
         let Some((_, delta)) = self.cluster_deltas.remove(&cluster_id) else {
@@ -774,6 +792,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
 
     /// Load cluster data from reader into deltas.
     async fn load(&self, cluster_id: u32) -> Result<(), QuantizedSpannError> {
+        let _guard = stats::TimedGuard::new(&self.stats.load);
         let Some(reader) = &self.quantized_cluster_reader else {
             return Ok(());
         };
@@ -794,7 +813,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             return Ok(());
         };
 
-        let code_size = Code::<4, &[u8]>::size(self.dimension);
+        let code_size = quantization::code_size(self.data_bits(), self.dimension);
         if let Some(mut delta) = self.cluster_deltas.get_mut(&cluster_id) {
             if delta.ids.len() < delta.length {
                 for ((id, version), code) in persisted
@@ -815,6 +834,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
 
     /// Load raw embeddings for given ids into the embeddings cache.
     async fn load_raw(&self, ids: &[u32]) -> Result<(), QuantizedSpannError> {
+        let _guard = stats::TimedGuard::new(&self.stats.load_raw);
         let Some(reader) = &self.raw_embedding_reader else {
             return Ok(());
         };
@@ -844,6 +864,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
 
     /// Merge a small cluster into a nearby cluster.
     async fn merge(&self, cluster_id: u32, depth: u32) -> Result<(), QuantizedSpannError> {
+        let _guard = stats::TimedGuard::new(&self.stats.merge);
         if depth > MAX_BALANCE_DEPTH {
             return Ok(());
         }
@@ -880,9 +901,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             let dist_to_source = self.distance(&embedding, &source_center);
 
             if dist_to_target <= dist_to_source {
-                let code = Code::<4>::quantize(&embedding, &target_center)
-                    .as_ref()
-                    .into();
+                let code = self.timed_quantize(self.data_bits(), &embedding, &target_center);
                 if self
                     .append(nearest_cluster_id, *id, *version, code)
                     .is_none()
@@ -947,6 +966,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
         embedding: Arc<[f32]>,
         depth: u32,
     ) -> Result<(), QuantizedSpannError> {
+        let _guard = stats::TimedGuard::new(&self.stats.reassign);
         if !self.is_valid(id, version) {
             return Ok(());
         }
@@ -998,7 +1018,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
                 continue;
             };
 
-            let code = Code::<4>::quantize(&embedding, &centroid).as_ref().into();
+            let code = self.timed_quantize(self.data_bits(), &embedding, &centroid);
 
             let Some(len) = self.append(*cluster_id, id, version, code) else {
                 continue;
@@ -1016,7 +1036,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
         }
 
         if !registered {
-            let code = Code::<4>::quantize(&embedding, &embedding).as_ref().into();
+            let code = self.timed_quantize(self.data_bits(), &embedding, &embedding);
             let delta = QuantizedDelta {
                 center: embedding,
                 codes: vec![code],
@@ -1095,6 +1115,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
     /// Does NOT trigger split/merge - use balance() for that.
     /// Returns the new length after scrubbing, or None if cluster not found.
     async fn scrub(&self, cluster_id: u32) -> Result<Option<usize>, QuantizedSpannError> {
+        let _guard = stats::TimedGuard::new(&self.stats.scrub);
         self.load(cluster_id).await?;
 
         let new_len = if let Some(mut delta) = self.cluster_deltas.get_mut(&cluster_id) {
@@ -1120,20 +1141,28 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
 
     /// Spawn a new cluster and register it in the centroid index.
     fn spawn(&self, delta: QuantizedDelta) -> Result<u32, QuantizedSpannError> {
+        let _guard = stats::TimedGuard::new(&self.stats.spawn);
         let cluster_id = self.next_cluster_id.fetch_add(1, Ordering::Relaxed);
         let center = delta.center.clone();
         self.cluster_deltas.insert(cluster_id, delta);
-        self.raw_centroid
-            .add(cluster_id, &center)
-            .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
-        self.quantized_centroid
-            .add(cluster_id, &center)
-            .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
+        {
+            let _g = stats::TimedGuard::new(&self.stats.raw_add);
+            self.raw_centroid
+                .add(cluster_id, &center)
+                .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
+        }
+        {
+            let _g = stats::TimedGuard::new(&self.stats.q_add);
+            self.quantized_centroid
+                .add(cluster_id, &center)
+                .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
+        }
         Ok(cluster_id)
     }
 
     /// Split a large cluster into two smaller clusters using 2-means clustering.
     async fn split(&self, cluster_id: u32, depth: u32) -> Result<(), QuantizedSpannError> {
+        let _guard = stats::TimedGuard::new(&self.stats.split);
         let Some(delta) = self.drop(cluster_id).await? else {
             return Ok(());
         };
@@ -1170,7 +1199,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             center: left_center.clone(),
             codes: left_group
                 .iter()
-                .map(|(_, _, emb)| Code::<4>::quantize(emb, &left_center).as_ref().into())
+                .map(|(_, _, emb)| self.timed_quantize(self.data_bits(), emb, &left_center))
                 .collect(),
             ids: left_group.iter().map(|(id, _, _)| *id).collect(),
             length: left_group.len(),
@@ -1182,7 +1211,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             center: right_center.clone(),
             codes: right_group
                 .iter()
-                .map(|(_, _, emb)| Code::<4>::quantize(emb, &right_center).as_ref().into())
+                .map(|(_, _, emb)| self.timed_quantize(self.data_bits(), emb, &right_center))
                 .collect(),
             ids: right_group.iter().map(|(id, _, _)| *id).collect(),
             length: right_group.len(),
@@ -1307,40 +1336,29 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
                     continue;
                 }
 
-                let code = Code::<4, &[u8]>::new(code.as_ref());
+                let code_bytes = code.as_ref();
+                let bits = self.data_bits();
 
-                let left_dist = code.distance_query(
-                    &self.distance_function,
-                    &left_r_q,
-                    c_norm,
-                    left_c_dot_q,
-                    left_q_norm,
+                let left_dist = quantization::distance_query(
+                    bits, code_bytes, &self.distance_function,
+                    &left_r_q, c_norm, left_c_dot_q, left_q_norm,
                 );
-                let right_dist = code.distance_query(
-                    &self.distance_function,
-                    &right_r_q,
-                    c_norm,
-                    right_c_dot_q,
-                    right_q_norm,
+                let right_dist = quantization::distance_query(
+                    bits, code_bytes, &self.distance_function,
+                    &right_r_q, c_norm, right_c_dot_q, right_q_norm,
                 );
-                let neighbor_dist = code.distance_query(
-                    &self.distance_function,
-                    &neighbor_r_q,
-                    c_norm,
-                    neighbor_c_dot_q,
-                    neighbor_q_norm,
+                let neighbor_dist = quantization::distance_query(
+                    bits, code_bytes, &self.distance_function,
+                    &neighbor_r_q, c_norm, neighbor_c_dot_q, neighbor_q_norm,
                 );
 
                 if neighbor_dist <= left_dist && neighbor_dist <= right_dist {
                     continue;
                 }
 
-                let old_dist = code.distance_query(
-                    &self.distance_function,
-                    &old_r_q,
-                    c_norm,
-                    old_c_dot_q,
-                    old_q_norm,
+                let old_dist = quantization::distance_query(
+                    bits, code_bytes, &self.distance_function,
+                    &old_r_q, c_norm, old_c_dot_q, old_q_norm,
                 );
 
                 if old_dist <= left_dist && old_dist <= right_dist {
@@ -1993,12 +2011,18 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             // Re-add all cluster centers to both indexes
             for entry in self.cluster_deltas.iter() {
                 let cluster_id = *entry.key();
-                self.raw_centroid
-                    .add(cluster_id, &entry.center)
-                    .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
-                self.quantized_centroid
-                    .add(cluster_id, &entry.center)
-                    .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
+                {
+                    let _g = stats::TimedGuard::new(&self.stats.raw_add);
+                    self.raw_centroid
+                        .add(cluster_id, &entry.center)
+                        .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
+                }
+                {
+                    let _g = stats::TimedGuard::new(&self.stats.q_add);
+                    self.quantized_centroid
+                        .add(cluster_id, &entry.center)
+                        .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
+                }
             }
 
             // Update center

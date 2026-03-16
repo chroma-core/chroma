@@ -724,6 +724,114 @@ impl HierarchicalCentroidIndex {
         }
     }
 
+    /// 1-bit quantized tree traversal followed by f32 reranking of the top candidates.
+    /// `fetch` is the number of candidates to collect via 1-bit scoring before reranking.
+    pub fn search_with_rerank(
+        &self,
+        query: &[f32],
+        k: usize,
+        fetch: usize,
+        beam: usize,
+        tau_override: Option<f64>,
+    ) -> Vec<(u32, f32)> {
+        if self.quantization_center.is_none() {
+            return self.search_f32(query, k, beam, tau_override);
+        }
+
+        let dim = self.dim;
+        let df = &self.distance_fn;
+        let center = self.quantization_center.as_ref().unwrap();
+        let cs = self.code_size;
+
+        let r_q: Vec<f32> = query.iter().zip(center.iter()).map(|(q, c)| q - c).collect();
+        let c_norm = center.iter().map(|c| c * c).sum::<f32>().sqrt();
+        let c_dot_q: f32 = center.iter().zip(query.iter()).map(|(c, q)| c * q).sum();
+        let q_norm = query.iter().map(|q| q * q).sum::<f32>().sqrt();
+        let padded_bytes = Code::<1>::packed_len(dim);
+        let qq = QuantizedQuery::new(&r_q, padded_bytes, c_norm, c_dot_q, q_norm);
+
+        // Phase 1: traverse tree with 1-bit, collecting (key, quantized_dist, leaf_ref_index)
+        // We need the leaf centroids for reranking, so collect leaf references.
+        let mut leaf_refs: Vec<(&[f32], u32)> = Vec::new(); // (centroid_slice, key)
+        let mut quant_scores: Vec<(usize, f32)> = Vec::new(); // (index into leaf_refs, dist)
+
+        let mut current: Vec<&CentroidTreeNode> = vec![&self.root];
+
+        loop {
+            let mut child_scores: Vec<(&CentroidTreeNode, f32)> = Vec::new();
+
+            for node in &current {
+                if let CentroidTreeNode::Internal {
+                    codes,
+                    children,
+                    ..
+                } = node
+                {
+                    let codes_buf = codes.as_ref().unwrap();
+                    for (i, child) in children.iter().enumerate() {
+                        let code_slice = &codes_buf[i * cs..(i + 1) * cs];
+                        let code = Code::<1, &[u8]>::new(code_slice);
+                        let dist = code.distance_quantized_query(df, &qq);
+                        child_scores.push((child, dist));
+                    }
+                }
+            }
+
+            if child_scores.is_empty() {
+                break;
+            }
+
+            child_scores.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            let effective = self.effective_beam(&child_scores, beam, tau_override);
+            child_scores.truncate(effective);
+
+            let mut next_internals: Vec<&CentroidTreeNode> = Vec::new();
+            for (node, _) in &child_scores {
+                match node {
+                    CentroidTreeNode::Leaf {
+                        keys,
+                        centroids,
+                        codes,
+                        ..
+                    } => {
+                        let codes_buf = codes.as_ref().unwrap();
+                        let base = leaf_refs.len();
+                        for (i, &key) in keys.iter().enumerate() {
+                            leaf_refs.push((&centroids[i * dim..(i + 1) * dim], key));
+                            let code_slice = &codes_buf[i * cs..(i + 1) * cs];
+                            let code = Code::<1, &[u8]>::new(code_slice);
+                            let dist = code.distance_quantized_query(df, &qq);
+                            quant_scores.push((base + i, dist));
+                        }
+                    }
+                    CentroidTreeNode::Internal { .. } => {
+                        next_internals.push(node);
+                    }
+                }
+            }
+
+            if next_internals.is_empty() {
+                break;
+            }
+            current = next_internals;
+        }
+
+        // Phase 2: pick top `fetch` by quantized distance, then rerank with f32
+        quant_scores.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        quant_scores.truncate(fetch);
+
+        let mut results: Vec<(u32, f32)> = quant_scores
+            .iter()
+            .map(|&(idx, _)| {
+                let (centroid, key) = leaf_refs[idx];
+                let dist = compute_distance(query, centroid, df);
+                (key, dist)
+            })
+            .collect();
+
+        dedup_and_topk(&mut results, k)
+    }
+
     /// Compute effective beam from sorted (node, dist) pairs.
     /// Fixed mode (tau=None): use `beam` directly.
     /// Dynamic mode: include children with dist <= d_best * (1 + tau), clamped to [beam_min, beam_max].
