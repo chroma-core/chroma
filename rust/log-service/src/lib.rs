@@ -1440,13 +1440,6 @@ impl LogServer {
                 }
             }
         }
-        let ready_uncompacted: u64 = selected_rollups
-            .iter()
-            .map(|(_, x)| x.limit_log_position - x.start_log_position)
-            .sum();
-        self.metrics
-            .log_ready_uncompacted_records_count
-            .record(ready_uncompacted as f64, &[]);
         self.metrics
             .log_likely_needs_purge_dirty
             .record(needs_purge_dirty as f64, &[]);
@@ -1653,9 +1646,25 @@ impl LogServer {
     > {
         let mut markers = vec![];
         let mut backpressure = vec![];
+        let mut total_uncompacted = 0;
+        let mut ready_uncompacted = 0;
         for ((_, collection_id), rollup) in rollup.rollups.iter() {
             if rollup.is_empty() {
                 continue;
+            }
+            total_uncompacted += rollup
+                .limit_log_position
+                .offset()
+                .saturating_sub(rollup.start_log_position.offset());
+            if rollup.should_compact(
+                self.config.suggested_compaction_threshold,
+                self.config.reinsert_threshold,
+                self.config.timeout_us,
+            ) {
+                ready_uncompacted += rollup
+                    .limit_log_position
+                    .offset()
+                    .saturating_sub(rollup.start_log_position.offset());
             }
             let marker = rollup.dirty_marker(*collection_id);
             markers.push(serde_json::to_string(&marker).map(Vec::from)?);
@@ -1685,6 +1694,12 @@ impl LogServer {
         } else {
             cursors.init(&STABLE_PREFIX, new_cursor).await?;
         }
+        self.metrics
+            .log_total_uncompacted_records_count
+            .record(total_uncompacted as f64, &[]);
+        self.metrics
+            .log_ready_uncompacted_records_count
+            .record(ready_uncompacted as f64, &[]);
         let after = rollup.rollups.clone();
         // NOTE(rescrv):  This is protection against a collection hopping from one log to another
         // permanently.  Every reinsert_threshold reinserts it will remove the cached compaction
@@ -3244,6 +3259,8 @@ pub struct LogServerConfig {
     pub num_records_before_backpressure: u64,
     #[serde(default = "LogServerConfig::default_reinsert_threshold")]
     pub reinsert_threshold: u64,
+    #[serde(default = "LogServerConfig::default_suggested_compaction_threshold")]
+    pub suggested_compaction_threshold: u64,
     #[serde(default = "LogServerConfig::default_rollup_interval")]
     pub rollup_interval: Duration,
     #[serde(default = "LogServerConfig::default_timeout_us")]
@@ -3315,6 +3332,10 @@ impl LogServerConfig {
         10
     }
 
+    /// force compaction if a candidate comes up ten times.
+    fn default_suggested_compaction_threshold() -> u64 {
+        250
+    }
     /// rollup every ten seconds
     fn default_rollup_interval() -> Duration {
         Duration::from_secs(10)
@@ -3375,6 +3396,7 @@ impl Default for LogServerConfig {
             record_count_threshold: Self::default_record_count_threshold(),
             num_records_before_backpressure: Self::default_num_records_before_backpressure(),
             reinsert_threshold: Self::default_reinsert_threshold(),
+            suggested_compaction_threshold: Self::default_suggested_compaction_threshold(),
             rollup_interval: Self::default_rollup_interval(),
             timeout_us: Self::default_timeout_us(),
             proxy_to: None,
