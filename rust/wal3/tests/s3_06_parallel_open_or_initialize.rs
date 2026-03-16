@@ -34,6 +34,11 @@ async fn test_k8s_integration_06_parallel_open_or_initialize() {
                 Arc::new(()),
                 Arc::new(()),
             );
+            // I reasoned through this.  It is _possible_ for a bunch of hardware threads to get
+            // trapped behind this notify, paused at the instructions between load and notified.
+            //
+            // For all 32 threads to hit that case would be rare.  It would be even rarer for them
+            // to ignore the notify_one in the loop below.  It's hacky, but it works.
             if !done.load(Ordering::Relaxed) {
                 notifier.notified().await;
             }
@@ -51,8 +56,8 @@ async fn test_k8s_integration_06_parallel_open_or_initialize() {
     }
     done.store(true, Ordering::Relaxed);
     notifier.notify_waiters();
-    let mut writers = Vec::with_capacity(num_writers);
     for handle in handles {
-        writers.push(handle.await.expect("task should not panic"));
+        notifier.notify_one();
+        handle.await.expect("task should not panic");
     }
 }
