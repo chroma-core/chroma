@@ -61,6 +61,14 @@ def http_api_factory(
                         return cls
                     finally:
                         if created_loop:
+                            # Cancel all pending tasks before closing the loop
+                            pending = asyncio.all_tasks(loop)
+                            if pending:
+                                for task in pending:
+                                    task.cancel()
+                                loop.run_until_complete(
+                                    asyncio.gather(*pending, return_exceptions=True)
+                                )
                             loop.close()
                             asyncio.set_event_loop(None)
 
