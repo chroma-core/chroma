@@ -1133,6 +1133,7 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
 #[cfg(test)]
 mod tests {
     use super::build_versions_to_mark;
+    use super::GarbageCollectorError;
     use super::GarbageCollectorOrchestrator;
     use crate::operators::compute_versions_to_delete_from_graph::CollectionVersionAction;
     use chroma_blockstore::RootManager;
@@ -1205,6 +1206,59 @@ mod tests {
             delete_collection_id.to_string()
         );
         assert_eq!(versions_to_mark[0].versions, vec![3]);
+    }
+
+    #[test]
+    fn build_versions_to_mark_errors_on_missing_version_file() {
+        let collection_id = CollectionUuid::new();
+
+        let versions = HashMap::from([(
+            collection_id,
+            HashMap::from([(1, CollectionVersionAction::Delete)]),
+        )]);
+
+        let version_files = HashMap::new();
+
+        let err = build_versions_to_mark(&versions, &version_files)
+            .expect_err("should error on missing version file");
+        println!("build_versions_to_mark_errors_on_missing_version_file: {err:?}");
+        match err {
+            GarbageCollectorError::MissingVersionFile(id) => {
+                assert_eq!(id, collection_id);
+            }
+            other => panic!("expected MissingVersionFile, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn build_versions_to_mark_errors_on_missing_collection_info() {
+        let collection_id = CollectionUuid::new();
+
+        let versions = HashMap::from([(
+            collection_id,
+            HashMap::from([(1, CollectionVersionAction::Delete)]),
+        )]);
+
+        let version_files = HashMap::from([(
+            collection_id,
+            Arc::new(CollectionVersionFile {
+                collection_info_immutable: None,
+                ..Default::default()
+            }),
+        )]);
+
+        let err = build_versions_to_mark(&versions, &version_files)
+            .expect_err("should error on missing collection_info_immutable");
+        println!("build_versions_to_mark_errors_on_missing_collection_info: {err:?}");
+        match err {
+            GarbageCollectorError::InvariantViolation(msg) => {
+                assert!(
+                    msg.contains("Expected collection_info_immutable to be set"),
+                    "unexpected message: {msg}"
+                );
+            }
+            other => panic!("expected InvariantViolation, got: {other:?}"),
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]
