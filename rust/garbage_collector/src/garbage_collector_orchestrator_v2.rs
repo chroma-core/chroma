@@ -1132,7 +1132,9 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
 
 #[cfg(test)]
 mod tests {
+    use super::build_versions_to_mark;
     use super::GarbageCollectorOrchestrator;
+    use crate::operators::compute_versions_to_delete_from_graph::CollectionVersionAction;
     use chroma_blockstore::RootManager;
     use chroma_cache::nop::NopCache;
     use chroma_log::Log;
