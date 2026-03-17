@@ -97,7 +97,8 @@ describe("collections", () => {
     expect(collection4.metadata).toEqual({ test: "test2" });
   });
 
-  test("it should fork collection", async () => {
+  // Skip: forking is only supported on Chroma Cloud, not local Chroma
+  test.skip("it should fork collection", async () => {
     const collection = await client.createCollection({
       name: "original",
       embeddingFunction: new DefaultEmbeddingFunction(),
@@ -124,7 +125,8 @@ describe("collections", () => {
     expect(names).toContain("forked");
   });
 
-  test("it should get fork count", async () => {
+  // Skip: forking is only supported on Chroma Cloud, not local Chroma
+  test.skip("it should get fork count", async () => {
     const collection = await client.createCollection({
       name: "original",
       embeddingFunction: new DefaultEmbeddingFunction(),
