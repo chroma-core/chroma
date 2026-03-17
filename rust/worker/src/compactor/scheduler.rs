@@ -327,6 +327,7 @@ impl Scheduler {
                 }
             }
             for (id, info) in info_map {
+                self.oneoff_collections.remove(&id);
                 self.deleted_collections.insert(id, info.topology_name);
             }
             for (collection, info) in with_infos.into_iter() {
@@ -1122,8 +1123,6 @@ mod tests {
             "one-off collection with log_position=-1 must not be dropped; \
              first_log_offset=0 avoids false positive in the invariant check"
         );
-        println!("records[0].offset = {}", records[0].offset);
-        println!("records[0].collection_id = {}", records[0].collection_id);
     }
 
     #[tokio::test]
@@ -1196,6 +1195,54 @@ mod tests {
             deleted[0].0, f.collection_uuid_2,
             "the deleted collection should be collection_2"
         );
+    }
+
+    #[tokio::test]
+    async fn missing_sysdb_oneoff_collections_removed_from_oneoff_tracking() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+
+        f.scheduler
+            .add_oneoff_collections(vec![f.collection_uuid_2])
+            .await;
+        assert!(
+            f.scheduler
+                .oneoff_collections
+                .contains_key(&f.collection_uuid_2),
+            "one-off collection should be tracked before sysdb deletion"
+        );
+
+        match f.scheduler.sysdb {
+            SysDb::Test(ref mut test_sysdb) => {
+                test_sysdb.remove_collection(f.collection_uuid_2);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
+
+        let records = f
+            .scheduler
+            .verify_and_enrich_collections(vec![CollectionInfo {
+                collection_id: f.collection_uuid_2,
+                topology_name: None,
+                first_log_offset: 0,
+                first_log_ts: 1,
+            }])
+            .await;
+
+        assert!(
+            records.is_empty(),
+            "deleted one-off collection should not be enriched"
+        );
+        assert!(
+            !f.scheduler
+                .oneoff_collections
+                .contains_key(&f.collection_uuid_2),
+            "deleted one-off collection must be removed from oneoff_collections"
+        );
+
+        let deleted = f.scheduler.drain_deleted_collections();
+        assert_eq!(deleted.len(), 1, "collection should be marked as deleted");
+        assert_eq!(deleted[0].0, f.collection_uuid_2);
     }
 
     #[tokio::test]
