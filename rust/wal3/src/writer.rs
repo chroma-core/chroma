@@ -145,7 +145,10 @@ impl<
         match this.ensure_open().await {
             Ok(_) => {}
             Err(Error::UninitializedLog) => {
-                Self::initialize(&this.new_manifest_publisher, &this.writer).await?;
+                match Self::initialize(&this.new_manifest_publisher, &this.writer).await {
+                    Ok(_) | Err(Error::AlreadyInitialized) => {}
+                    Err(err) => return Err(err),
+                };
                 this.ensure_open().await?;
             }
             Err(err) => {
