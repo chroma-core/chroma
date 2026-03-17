@@ -35,7 +35,7 @@ export class AuthenticationService {
             ...options
         });
     }
-
+    
 }
 
 export class CollectionService {
@@ -55,7 +55,7 @@ export class CollectionService {
             ...options
         });
     }
-
+    
     /**
      * List collections
      * Lists all collections in a database.
@@ -72,7 +72,7 @@ export class CollectionService {
             ...options
         });
     }
-
+    
     /**
      * Create collection
      * Creates a new collection in a database.
@@ -93,7 +93,7 @@ export class CollectionService {
             }
         });
     }
-
+    
     /**
      * Delete collection
      * Deletes a collection in a database.
@@ -110,7 +110,7 @@ export class CollectionService {
             ...options
         });
     }
-
+    
     /**
      * Get collection
      * Returns a collection by ID or name.
@@ -127,7 +127,7 @@ export class CollectionService {
             ...options
         });
     }
-
+    
     /**
      * Update collection
      * Updates an existing collection's name or metadata.
@@ -148,7 +148,7 @@ export class CollectionService {
             }
         });
     }
-
+    
     /**
      * Fork collection
      * Creates a fork of an existing collection.
@@ -169,7 +169,7 @@ export class CollectionService {
             }
         });
     }
-
+    
     /**
      * Get fork count
      * Returns the number of forks for a collection.
@@ -186,7 +186,7 @@ export class CollectionService {
             ...options
         });
     }
-
+    
     /**
      * Get number of collections
      * Returns the total number of collections in a database.
@@ -203,7 +203,7 @@ export class CollectionService {
             ...options
         });
     }
-
+    
 }
 
 export class SystemService {
@@ -217,7 +217,7 @@ export class SystemService {
             ...options
         });
     }
-
+    
     /**
      * Heartbeat
      * Returns a nanosecond timestamp of the current time.
@@ -228,7 +228,7 @@ export class SystemService {
             ...options
         });
     }
-
+    
     /**
      * Pre-flight checks
      * Returns basic readiness information.
@@ -239,7 +239,7 @@ export class SystemService {
             ...options
         });
     }
-
+    
     /**
      * Reset database
      * Resets the database. Requires authorization.
@@ -256,7 +256,7 @@ export class SystemService {
             ...options
         });
     }
-
+    
     /**
      * Get version
      * Returns the version of the server.
@@ -267,7 +267,7 @@ export class SystemService {
             ...options
         });
     }
-
+    
 }
 
 export class TenantService {
@@ -291,7 +291,7 @@ export class TenantService {
             }
         });
     }
-
+    
     /**
      * Get tenant
      * Returns an existing tenant by name.
@@ -308,7 +308,7 @@ export class TenantService {
             ...options
         });
     }
-
+    
     /**
      * Update tenant
      * Updates an existing tenant by name.
@@ -329,7 +329,7 @@ export class TenantService {
             }
         });
     }
-
+    
 }
 
 export class DatabaseService {
@@ -349,7 +349,7 @@ export class DatabaseService {
             ...options
         });
     }
-
+    
     /**
      * Create database
      * Creates a new database for a tenant.
@@ -370,7 +370,7 @@ export class DatabaseService {
             }
         });
     }
-
+    
     /**
      * Delete database
      * Deletes a database by name.
@@ -387,7 +387,7 @@ export class DatabaseService {
             ...options
         });
     }
-
+    
     /**
      * Get database
      * Returns a database by name.
@@ -404,7 +404,7 @@ export class DatabaseService {
             ...options
         });
     }
-
+    
 }
 
 export class RecordService {
@@ -428,7 +428,7 @@ export class RecordService {
             }
         });
     }
-
+    
     /**
      * Get number of records
      * Returns the number of records in a collection.
@@ -445,7 +445,7 @@ export class RecordService {
             ...options
         });
     }
-
+    
     /**
      * Delete records
      * Deletes records in a collection. Can filter by IDs or metadata.
@@ -466,7 +466,7 @@ export class RecordService {
             }
         });
     }
-
+    
     /**
      * Get records
      * Returns records from a collection by ID or metadata filter.
@@ -487,7 +487,7 @@ export class RecordService {
             }
         });
     }
-
+    
     /**
      * Get indexing status
      * Returns the indexing status of a collection.
@@ -504,7 +504,7 @@ export class RecordService {
             ...options
         });
     }
-
+    
     /**
      * Query collection
      * Queries a collection using dense vector search with metadata and full-text search filtering.
@@ -525,7 +525,7 @@ export class RecordService {
             }
         });
     }
-
+    
     /**
      * Search records
      * Searches records from a collection with dense, sparse, or hybrid vector search.
@@ -546,7 +546,7 @@ export class RecordService {
             }
         });
     }
-
+    
     /**
      * Update records
      * Updates records in a collection by ID.
@@ -567,7 +567,7 @@ export class RecordService {
             }
         });
     }
-
+    
     /**
      * Upsert records
      * Upserts records in a collection (create if not exists, otherwise update).
@@ -588,7 +588,7 @@ export class RecordService {
             }
         });
     }
-
+    
 }
 
 export class FunctionService {
@@ -612,7 +612,7 @@ export class FunctionService {
             }
         });
     }
-
+    
     /**
      * Attach function
      * Attaches a function to a collection.
@@ -633,7 +633,7 @@ export class FunctionService {
             }
         });
     }
-
+    
     /**
      * Get attached function
      * Returns an attached function by name.
@@ -650,4 +650,5 @@ export class FunctionService {
             ...options
         });
     }
-
+    
+}
