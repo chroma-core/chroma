@@ -96,4 +96,56 @@ describe("collections", () => {
     });
     expect(collection4.metadata).toEqual({ test: "test2" });
   });
+
+  test("it should fork collection", async () => {
+    const collection = await client.createCollection({
+      name: "original",
+      embeddingFunction: new DefaultEmbeddingFunction(),
+    });
+
+    // Add some data to the original collection
+    await collection.add({
+      ids: ["id1", "id2"],
+      documents: ["document 1", "document 2"],
+    });
+
+    // Fork the collection
+    const forkedCollection = await collection.fork({ name: "forked" });
+    expect(forkedCollection.name).toBe("forked");
+
+    // Verify the forked collection has the same data
+    const count = await forkedCollection.count();
+    expect(count).toBe(2);
+
+    // Verify both collections exist
+    const collections = await client.listCollections();
+    const names = collections.map((c) => c.name);
+    expect(names).toContain("original");
+    expect(names).toContain("forked");
+  });
+
+  test("it should get fork count", async () => {
+    const collection = await client.createCollection({
+      name: "original",
+      embeddingFunction: new DefaultEmbeddingFunction(),
+    });
+
+    // Initially, fork count should be 0
+    const initialForkCount = await collection.forkCount();
+    expect(initialForkCount).toBe(0);
+
+    // Fork the collection
+    await collection.fork({ name: "fork1" });
+
+    // Fork count should now be 1
+    const forkCount1 = await collection.forkCount();
+    expect(forkCount1).toBe(1);
+
+    // Fork again
+    await collection.fork({ name: "fork2" });
+
+    // Fork count should now be 2
+    const forkCount2 = await collection.forkCount();
+    expect(forkCount2).toBe(2);
+  });
 });
