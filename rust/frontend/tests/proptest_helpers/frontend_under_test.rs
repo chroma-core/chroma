@@ -143,7 +143,7 @@ impl StateMachineTest for FrontendUnderTest {
                         }
                     }
 
-                    Box::pin(state.frontend.delete(request.clone()))
+                    Box::pin(state.frontend.delete(request.clone(), String::new(), String::new()))
                         .await
                         .unwrap();
                 }

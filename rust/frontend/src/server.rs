@@ -36,9 +36,10 @@ use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use parking_lot::Mutex;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
+    Arc,
 };
 use std::{str::FromStr, time::Instant};
 #[cfg(unix)]
@@ -227,7 +228,7 @@ impl FrontendServer {
     async fn get_database_uuid(&mut self, tenant: &str, database: &str) -> String {
         // Check cache first
         {
-            let cache = self.database_uuid_cache.lock().unwrap();
+            let cache = self.database_uuid_cache.lock();
             if let Some(uuid) = cache.get(&(tenant.to_string(), database.to_string())) {
                 return uuid.clone();
             }
@@ -235,21 +236,30 @@ impl FrontendServer {
         // Cache miss — look up from sysdb
         let db_name = match DatabaseName::new(database) {
             Some(name) => name,
-            None => return String::new(),
+            None => {
+                tracing::warn!("Failed to create DatabaseName for metering: invalid database name '{}'", database);
+                return String::new();
+            }
         };
         let request = GetDatabaseRequest::try_new(tenant.to_string(), db_name);
         let request = match request {
             Ok(r) => r,
-            Err(_) => return String::new(),
+            Err(e) => {
+                tracing::warn!("Failed to create GetDatabaseRequest for metering: {:?}", e);
+                return String::new();
+            }
         };
         match self.frontend.get_database(request).await {
             Ok(db) => {
                 let uuid = db.id.to_string();
-                let mut cache = self.database_uuid_cache.lock().unwrap();
+                let mut cache = self.database_uuid_cache.lock();
                 cache.insert((tenant.to_string(), database.to_string()), uuid.clone());
                 uuid
             }
-            Err(_) => String::new(),
+            Err(e) => {
+                tracing::warn!("Failed to get database from sysdb for metering: {:?}", e);
+                String::new()
+            }
         }
     }
 
@@ -2303,14 +2313,15 @@ async fn collection_delete(
     // Create a metering context
     // NOTE(c-gamble): This is a read context because read happens first on delete, then write.
     let database_id = server.get_database_uuid(&tenant, &database).await;
+    let region = server.config.region.clone();
     let metering_context_container =
         chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
             requester_identity.tenant.clone(),
             database.clone(),
             collection_id.0.to_string(),
             ReadAction::GetForDelete,
-            server.config.region.clone(),
-            database_id,
+            region.clone(),
+            database_id.clone(),
         ));
 
     tracing::info!(name: "collection_delete", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.as_ref().map_or(0, |ids| ids.len()), has_where = r#where.is_some());
@@ -2326,7 +2337,7 @@ async fn collection_delete(
     let response = Box::pin(
         server
             .frontend
-            .delete(request)
+            .delete(request, region, database_id)
             .meter(metering_context_container),
     )
     .await?;
