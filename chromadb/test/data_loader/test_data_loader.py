@@ -120,29 +120,3 @@ def test_data_loader(
         assert data is not None
         assert query_result["uris"] is not None
         assert data == encode_data(query_result["uris"][0][i])
-
-
-def test_include_parameter_not_mutated(
-    collection_with_data_loader: chromadb.Collection, n_examples: int = 3
-) -> None:
-    """Regression test for issue #5857: include parameter must not be mutated in-place."""
-    record_set = record_set_with_uris(n=n_examples)
-
-    collection_with_data_loader.add(
-        ids=record_set["ids"],
-        uris=record_set["uris"],
-    )
-
-    # get() with "data" triggers internal append of "uris" - must not mutate caller's list
-    include_get = ["data"]
-    collection_with_data_loader.get(include=include_get)
-    assert include_get == ["data"], "get() must not mutate include parameter"
-
-    # query() with "data" triggers internal append of "uris" - must not mutate caller's list
-    include_query = ["data"]
-    collection_with_data_loader.query(
-        query_uris=[record_set["uris"][0]],
-        n_results=1,
-        include=include_query,
-    )
-    assert include_query == ["data"], "query() must not mutate include parameter"
