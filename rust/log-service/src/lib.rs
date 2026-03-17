@@ -3332,7 +3332,7 @@ impl LogServerConfig {
         10
     }
 
-    /// force compaction if a candidate comes up ten times.
+    /// The suggested number of uncompacted records to trigger compaction.
     fn default_suggested_compaction_threshold() -> u64 {
         250
     }
