@@ -910,24 +910,24 @@ impl RollupPerCollection {
         self.start_log_position >= self.limit_log_position
     }
 
+    fn uncompacted_record_count(&self) -> u64 {
+        self.limit_log_position
+            .offset()
+            .saturating_sub(self.start_log_position.offset())
+    }
+
     fn dirty_marker(&self, collection_id: CollectionUuid) -> DirtyMarker {
         DirtyMarker::MarkDirty {
             collection_id,
             log_position: self.start_log_position.offset(),
-            num_records: self
-                .limit_log_position
-                .offset()
-                .saturating_sub(self.start_log_position.offset()),
+            num_records: self.uncompacted_record_count(),
             reinsert_count: self.reinsert_count.saturating_add(1),
             initial_insertion_epoch_us: self.initial_insertion_epoch_us,
         }
     }
 
     fn requires_backpressure(&self, threshold: u64) -> bool {
-        self.limit_log_position
-            .offset()
-            .saturating_sub(self.start_log_position.offset())
-            >= threshold
+        self.uncompacted_record_count() >= threshold
     }
 
     /// Whether this rollup should be selected for compaction given the provided thresholds.
@@ -943,7 +943,7 @@ impl RollupPerCollection {
             .as_micros()
             .saturating_sub(self.initial_insertion_epoch_us as u128);
         (self.limit_log_position >= self.start_log_position
-            && self.limit_log_position - self.start_log_position >= min_compaction_size)
+            && self.uncompacted_record_count() >= min_compaction_size)
             || self.reinsert_count >= reinsert_threshold
             || time_on_log >= timeout_us as u128
     }
@@ -1389,10 +1389,14 @@ impl LogServer {
         const MAX_COLLECTION_INFO_NUMBER: usize = 10000;
         let mut selected_rollups = Vec::with_capacity(MAX_COLLECTION_INFO_NUMBER);
         let mut needs_purge_dirty = 0;
+        let mut total_uncompacted_records = 0u64;
+        let mut total_uncompacted_collections = 0u64;
         // Collect from the S3 map.
         {
             let need_to_compact_s3 = self.need_to_compact_s3.lock();
             for (collection_id, rollup) in need_to_compact_s3.iter() {
+                total_uncompacted_collections += 1;
+                total_uncompacted_records += rollup.uncompacted_record_count();
                 if rollup.should_compact(
                     request.min_compaction_size,
                     self.config.reinsert_threshold,
@@ -1412,6 +1416,8 @@ impl LogServer {
         {
             let need_to_compact_repl = self.need_to_compact_repl.lock();
             for ((topology_name, collection_id), rollup) in need_to_compact_repl.iter() {
+                total_uncompacted_collections += 1;
+                total_uncompacted_records += rollup.uncompacted_record_count();
                 if rollup.should_compact(
                     request.min_compaction_size,
                     self.config.reinsert_threshold,
@@ -1437,6 +1443,12 @@ impl LogServer {
         self.metrics
             .log_likely_needs_purge_dirty
             .record(needs_purge_dirty as f64, &[]);
+        self.metrics
+            .log_total_uncompacted_records_count
+            .record(total_uncompacted_records as f64, &[]);
+        self.metrics
+            .dirty_log_collections
+            .record(total_uncompacted_collections, &[]);
         // Then allocate the collection ID strings outside the lock.
         let mut all_collection_info = Vec::with_capacity(selected_rollups.len());
         for ((topology_name, collection_id), rollup) in selected_rollups.into_iter() {
@@ -1463,7 +1475,6 @@ impl LogServer {
                     std::mem::swap(&mut *need_to_compact_s3, &mut ru);
                 }
                 self.merge_and_set_backpressure();
-                self.record_dirty_log_metrics();
                 Ok(())
             }
             Err(err) => {
@@ -1511,7 +1522,6 @@ impl LogServer {
             std::mem::swap(&mut *need_to_compact_repl, &mut rollups);
         }
         self.merge_and_set_backpressure();
-        self.record_dirty_log_metrics();
         Ok(())
     }
 
@@ -1537,15 +1547,6 @@ impl LogServer {
             }
         }
         self.set_backpressure(&backpressure);
-    }
-
-    /// Record the total dirty log collection count metric from both maps.
-    fn record_dirty_log_metrics(&self) {
-        let s3_count = self.need_to_compact_s3.lock().len();
-        let repl_count = self.need_to_compact_repl.lock().len();
-        self.metrics
-            .dirty_log_collections
-            .record((s3_count + repl_count) as u64, &[]);
     }
 
     #[tracing::instrument(skip(self), name = "roll_dirty_log_s3")]
@@ -1645,15 +1646,10 @@ impl LogServer {
     > {
         let mut markers = vec![];
         let mut backpressure = vec![];
-        let mut total_uncompacted = 0;
         for ((_, collection_id), rollup) in rollup.rollups.iter() {
             if rollup.is_empty() {
                 continue;
             }
-            total_uncompacted += rollup
-                .limit_log_position
-                .offset()
-                .saturating_sub(rollup.start_log_position.offset());
             let marker = rollup.dirty_marker(*collection_id);
             markers.push(serde_json::to_string(&marker).map(Vec::from)?);
             if rollup.requires_backpressure(self.config.num_records_before_backpressure) {
@@ -1682,9 +1678,6 @@ impl LogServer {
         } else {
             cursors.init(&STABLE_PREFIX, new_cursor).await?;
         }
-        self.metrics
-            .log_total_uncompacted_records_count
-            .record(total_uncompacted as f64, &[]);
         let after = rollup.rollups.clone();
         // NOTE(rescrv):  This is protection against a collection hopping from one log to another
         // permanently.  Every reinsert_threshold reinserts it will remove the cached compaction
