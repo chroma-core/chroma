@@ -426,6 +426,13 @@ class System(Component):
                     "chroma_server_nofile is not supported on Windows. chroma_server_nofile will not be set."
                 )
 
+        # Log when persistence is enabled to provide transparency about the default
+        if settings["is_persistent"]:
+            logger.info(
+                "Chroma persistence is enabled. Data will be stored in: %s",
+                settings["persist_directory"],
+            )
+
         self.settings = settings
         self._instances = {}
         super().__init__(self)
