@@ -703,6 +703,15 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         pass
 
     @abstractmethod
+    def _fork_count(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> int:
+        pass
+
+    @abstractmethod
     def _get_indexing_status(
         self,
         collection_id: UUID,

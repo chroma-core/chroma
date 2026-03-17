@@ -417,6 +417,20 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         model = CollectionModel.from_json(resp_json)
         return model
 
+    @trace_method("AsyncFastAPI._fork_count", OpenTelemetryGranularity.OPERATION)
+    @override
+    async def _fork_count(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> int:
+        resp_json = await self._make_request(
+            "get",
+            f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork_count",
+        )
+        return int(resp_json["count"])
+
     @trace_method(
         "AsyncFastAPI._get_indexing_status", OpenTelemetryGranularity.OPERATION
     )
