@@ -44,18 +44,14 @@ describe("get collections", () => {
       embeddings: EMBEDDINGS,
       metadatas: METADATAS,
     });
-    try {
-      await collection.get({
+    await expect(
+      collection.get({
         where: {
           //@ts-ignore supposed to fail
           test: { $contains: "hello" },
         },
-      });
-    } catch (error: any) {
-      expect(error).toBeDefined();
-      expect(error).toBeInstanceOf(InvalidArgumentError);
-      expect(error.message).toMatchInlineSnapshot(`"Invalid where clause"`);
-    }
+      }),
+    ).rejects.toThrow(InvalidArgumentError);
   });
 
   test("it should get embedding with matching documents", async () => {
