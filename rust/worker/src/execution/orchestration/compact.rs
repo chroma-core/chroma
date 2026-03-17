@@ -1070,6 +1070,7 @@ mod tests {
             filter,
             limit,
             project,
+            None,
         );
 
         let result = get_orchestrator
@@ -1211,6 +1212,7 @@ mod tests {
             filter.clone(),
             limit.clone(),
             project.clone(),
+            None,
         );
 
         let old_vals = get_orchestrator
@@ -1285,6 +1287,7 @@ mod tests {
             filter,
             limit,
             project,
+            None,
         );
 
         let new_vals = get_orchestrator

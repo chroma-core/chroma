@@ -228,6 +228,7 @@ fn bench_regex(criterion: &mut Criterion) {
         blockfile_provider: test_segment.blockfile_provider,
         metadata_segment: test_segment.metadata_segment,
         record_segment: test_segment.record_segment,
+        bloom_filter_manager: None,
     };
 
     for pattern in REGEX_PATTERNS {

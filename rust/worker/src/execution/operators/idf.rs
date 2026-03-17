@@ -7,6 +7,7 @@ use chroma_index::sparse::{reader::SparseReaderError, types::encode_u32};
 use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentReader},
     blockfile_record::{RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError},
+    bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},
 };
 use chroma_system::Operator;
@@ -37,6 +38,7 @@ pub struct IdfInput {
     pub mask: SignedRoaringBitmap,
     pub metadata_segment: Segment,
     pub record_segment: Segment,
+    pub bloom_filter_manager: Option<BloomFilterManager>,
 }
 
 #[derive(Clone, Debug)]
@@ -86,7 +88,7 @@ impl Operator<IdfInput, IdfOutput> for Idf {
             match Box::pin(RecordSegmentReader::from_segment(
                 &input.record_segment,
                 &input.blockfile_provider,
-                None,
+                input.bloom_filter_manager.clone(),
             ))
             .await
             {
@@ -114,13 +116,14 @@ impl Operator<IdfInput, IdfOutput> for Idf {
             tokio::try_join!(record_segment_reader_fut, metadata_segment_reader_fut)?;
         n += count;
 
-        let logs = materialize_logs(
-            &record_segment_reader,
-            input.logs.clone(),
-            None,
-            &RecordSegmentPlan::default(),
-        )
-        .await?;
+        let plan = RecordSegmentPlan {
+            use_bloom_filter: input
+                .bloom_filter_manager
+                .as_ref()
+                .is_some_and(|mgr| input.logs.len() >= mgr.storage_fetch_threshold()),
+        };
+        let logs =
+            materialize_logs(&record_segment_reader, input.logs.clone(), None, &plan).await?;
 
         if let Some(sparse_index_reader) = metadata_segment_reader.sparse_index_reader.as_ref() {
             let encoded_dimensions = self
@@ -305,6 +308,7 @@ mod tests {
             mask: SignedRoaringBitmap::full(),
             metadata_segment: test_segment.metadata_segment.clone(),
             record_segment: test_segment.record_segment.clone(),
+            bloom_filter_manager: None,
         };
 
         (test_segment, input)

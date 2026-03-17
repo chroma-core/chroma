@@ -5,6 +5,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
 use chroma_segment::{
     blockfile_record::{RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError},
+    bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},
 };
 use chroma_system::Operator;
@@ -23,6 +24,7 @@ pub struct SparseLogKnnInput {
     pub logs: FetchLogOutput,
     pub mask: SignedRoaringBitmap,
     pub record_segment: Segment,
+    pub bloom_filter_manager: Option<BloomFilterManager>,
 }
 
 #[derive(Clone, Debug)]
@@ -66,7 +68,7 @@ impl Operator<SparseLogKnnInput, SparseLogKnnOutput> for SparseLogKnn {
         let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
-            None,
+            input.bloom_filter_manager.clone(),
         ))
         .await
         {
@@ -77,13 +79,14 @@ impl Operator<SparseLogKnnInput, SparseLogKnnOutput> for SparseLogKnn {
             Err(e) => Err(*e),
         }?;
 
-        let logs = materialize_logs(
-            &record_segment_reader,
-            input.logs.clone(),
-            None,
-            &RecordSegmentPlan::default(),
-        )
-        .await?;
+        let plan = RecordSegmentPlan {
+            use_bloom_filter: input
+                .bloom_filter_manager
+                .as_ref()
+                .is_some_and(|mgr| input.logs.len() >= mgr.storage_fetch_threshold()),
+        };
+        let logs =
+            materialize_logs(&record_segment_reader, input.logs.clone(), None, &plan).await?;
 
         // We need the smallest results, so we keep a max heap to track the largest of them
         // so that it can be replaced if we found a smaller one
@@ -189,6 +192,7 @@ mod tests {
             blockfile_provider: test_segment.blockfile_provider.clone(),
             record_segment: test_segment.record_segment.clone(),
             mask,
+            bloom_filter_manager: None,
         };
 
         (test_segment, input)

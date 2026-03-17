@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_segment::bloom_filter::BloomFilterManager;
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
@@ -97,6 +98,9 @@ pub struct SparseKnnOrchestrator {
     // Merge
     merge: Merge,
 
+    // Bloom filter manager
+    bloom_filter_manager: Option<BloomFilterManager>,
+
     // Result channel
     result_channel: Option<Sender<Result<Vec<RecordMeasure>, SparseKnnError>>>,
 }
@@ -112,6 +116,7 @@ impl SparseKnnOrchestrator {
         query: SparseVector,
         key: String,
         limit: u32,
+        bloom_filter_manager: Option<BloomFilterManager>,
     ) -> Self {
         let context = OrchestratorContext::new(dispatcher);
         Self {
@@ -125,6 +130,7 @@ impl SparseKnnOrchestrator {
             limit,
             batch_measures: Vec::with_capacity(2),
             merge: Merge { k: limit },
+            bloom_filter_manager,
             result_channel: None,
         }
     }
@@ -145,6 +151,7 @@ impl SparseKnnOrchestrator {
                 logs: self.knn_filter_output.logs.clone(),
                 mask: self.knn_filter_output.filter_output.log_offset_ids.clone(),
                 record_segment: self.collection_and_segments.record_segment.clone(),
+                bloom_filter_manager: self.bloom_filter_manager.clone(),
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -236,6 +243,7 @@ impl Orchestrator for SparseKnnOrchestrator {
                     mask: self.knn_filter_output.filter_output.log_offset_ids.clone(),
                     metadata_segment: self.collection_and_segments.metadata_segment.clone(),
                     record_segment: self.collection_and_segments.record_segment.clone(),
+                    bloom_filter_manager: self.bloom_filter_manager.clone(),
                 },
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),

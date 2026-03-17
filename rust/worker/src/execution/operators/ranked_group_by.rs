@@ -13,6 +13,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
     blockfile_record::{RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError},
+    bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},
 };
 use chroma_system::Operator;
@@ -36,6 +37,7 @@ pub struct RankedGroupByInput {
     pub blockfile_provider: BlockfileProvider,
     /// Record segment for metadata lookup
     pub record_segment: Segment,
+    pub bloom_filter_manager: Option<BloomFilterManager>,
 }
 
 /// Output from the RankedGroupBy operator
@@ -117,7 +119,7 @@ impl Operator<RankedGroupByInput, RankedGroupByOutput> for GroupBy {
         let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
-            None,
+            input.bloom_filter_manager.clone(),
         ))
         .await
         {
@@ -126,14 +128,16 @@ impl Operator<RankedGroupByInput, RankedGroupByOutput> for GroupBy {
             Err(e) => return Err((*e).into()),
         };
 
-        let materialized_logs = materialize_logs(
-            &record_segment_reader,
-            input.logs.clone(),
-            None,
-            &RecordSegmentPlan::default(),
-        )
-        .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
-        .await?;
+        let plan = RecordSegmentPlan {
+            use_bloom_filter: input
+                .bloom_filter_manager
+                .as_ref()
+                .is_some_and(|mgr| input.logs.len() >= mgr.storage_fetch_threshold()),
+        };
+        let materialized_logs =
+            materialize_logs(&record_segment_reader, input.logs.clone(), None, &plan)
+                .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
+                .await?;
 
         let offset_id_to_log = materialized_logs
             .iter()
@@ -347,6 +351,7 @@ mod tests {
                 logs,
                 blockfile_provider,
                 record_segment,
+                bloom_filter_manager: None,
             },
         )
     }

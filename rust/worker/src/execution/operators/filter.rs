@@ -10,6 +10,7 @@ use chroma_index::metadata::types::MetadataIndexError;
 use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentReader},
     blockfile_record::{RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError},
+    bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError, MaterializeLogsResult},
 };
 use chroma_system::Operator;
@@ -50,6 +51,7 @@ pub struct FilterInput {
     pub blockfile_provider: BlockfileProvider,
     pub metadata_segment: Segment,
     pub record_segment: Segment,
+    pub bloom_filter_manager: Option<BloomFilterManager>,
 }
 
 #[derive(Clone, Debug)]
@@ -236,6 +238,7 @@ pub(crate) enum MetadataProvider<'me> {
     CompactData(
         &'me MetadataSegmentReader<'me>,
         &'me Option<RecordSegmentReader<'me>>,
+        &'me RecordSegmentPlan,
     ),
     Log(&'me MetadataLogReader<'me>),
 }
@@ -246,7 +249,7 @@ impl MetadataProvider<'_> {
         query: &str,
     ) -> Result<RoaringBitmap, FilterError> {
         match self {
-            MetadataProvider::CompactData(metadata_segment_reader, _) => {
+            MetadataProvider::CompactData(metadata_segment_reader, _, _) => {
                 if let Some(reader) = metadata_segment_reader.full_text_index_reader.as_ref() {
                     Ok(reader
                         .search(query)
@@ -271,7 +274,7 @@ impl MetadataProvider<'_> {
     ) -> Result<SignedRoaringBitmap, FilterError> {
         let chroma_regex = ChromaRegex::try_from(query.to_string())?;
         match self {
-            MetadataProvider::CompactData(metadata_segment_reader, record_segment_reader) => {
+            MetadataProvider::CompactData(metadata_segment_reader, record_segment_reader, _) => {
                 if let (Some(fti_reader), Some(rec_reader)) = (
                     metadata_segment_reader.full_text_index_reader.as_ref(),
                     record_segment_reader,
@@ -368,7 +371,7 @@ impl MetadataProvider<'_> {
         op: &PrimitiveOperator,
     ) -> Result<RoaringBitmap, FilterError> {
         match self {
-            MetadataProvider::CompactData(metadata_segment_reader, record_segment_reader) => {
+            MetadataProvider::CompactData(metadata_segment_reader, record_segment_reader, plan) => {
                 let (metadata_index_reader, kw) = match val {
                     MetadataValue::Bool(b) => (
                         metadata_segment_reader.bool_metadata_index_reader.as_ref(),
@@ -412,7 +415,7 @@ impl MetadataProvider<'_> {
                                             Some(reader) => reader
                                                 .get_offset_id_for_user_id(
                                                     user_id,
-                                                    &RecordSegmentPlan::default(),
+                                                    plan,
                                                 )
                                                 .await?
                                                 .iter()
@@ -615,7 +618,7 @@ impl Operator<FilterInput, FilterOutput> for Filter {
             match Box::pin(RecordSegmentReader::from_segment(
                 &input.record_segment,
                 &input.blockfile_provider,
-                None,
+                input.bloom_filter_manager.clone(),
             ))
             .instrument(
                 tracing::trace_span!(parent: Span::current(), "Create record segment reader"),
@@ -645,12 +648,18 @@ impl Operator<FilterInput, FilterOutput> for Filter {
         let (record_segment_reader, metadata_segment_reader) =
             tokio::try_join!(record_segment_reader_fut, metadata_segment_reader_fut)?;
 
+        let plan = RecordSegmentPlan {
+            use_bloom_filter: input
+                .bloom_filter_manager
+                .as_ref()
+                .is_some_and(|mgr| input.logs.len() >= mgr.storage_fetch_threshold()),
+        };
         let cloned_record_segment_reader = record_segment_reader.clone();
         let materialized_logs = materialize_logs(
             &cloned_record_segment_reader,
             input.logs.clone(),
             None,
-            &RecordSegmentPlan::default(),
+            &plan,
         )
         .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
         .await?;
@@ -673,7 +682,7 @@ impl Operator<FilterInput, FilterOutput> for Filter {
 
         let log_metadata_provider = MetadataProvider::Log(&metadata_log_reader);
         let compact_metadata_provider =
-            MetadataProvider::CompactData(&metadata_segment_reader, &record_segment_reader);
+            MetadataProvider::CompactData(&metadata_segment_reader, &record_segment_reader, &plan);
 
         // Get offset ids corresponding to user ids
         let (user_allowed_log_offset_ids, user_allowed_compact_offset_ids) =
@@ -691,10 +700,7 @@ impl Operator<FilterInput, FilterOutput> for Filter {
                     let mut offset_ids = RoaringBitmap::new();
                     for user_id in user_allowed_ids {
                         match reader
-                            .get_offset_id_for_user_id(
-                                user_id.as_str(),
-                                &RecordSegmentPlan::default(),
-                            )
+                            .get_offset_id_for_user_id(user_id.as_str(), &plan)
                             .await
                         {
                             Ok(Some(offset_id)) => {
@@ -809,6 +815,7 @@ mod tests {
                 blockfile_provider,
                 metadata_segment,
                 record_segment,
+                bloom_filter_manager: None,
             },
         )
     }
@@ -1573,8 +1580,11 @@ mod tests {
         .await
         .expect("Reader should be initialized by now");
         let some_reader = Some(record_segment_reader);
-        let compact_metadata_provider =
-            MetadataProvider::CompactData(&metadata_segment_reader, &some_reader);
+        let compact_metadata_provider = MetadataProvider::CompactData(
+            &metadata_segment_reader,
+            &some_reader,
+            &RecordSegmentPlan::default(),
+        );
         let res = compact_metadata_provider
             .filter_by_document_regex("(?i)def")
             .await
@@ -1621,8 +1631,11 @@ mod tests {
         ))
         .await
         .unwrap();
-        let compact_metadata_provider =
-            MetadataProvider::CompactData(&metadata_segement_reader, &record_segment_reader);
+        let compact_metadata_provider = MetadataProvider::CompactData(
+            &metadata_segement_reader,
+            &record_segment_reader,
+            &RecordSegmentPlan::default(),
+        );
 
         let match_all = r".*";
         assert_eq!(
@@ -1783,6 +1796,7 @@ mod tests {
             blockfile_provider: test_segment.blockfile_provider.clone(),
             metadata_segment: test_segment.metadata_segment.clone(),
             record_segment: test_segment.record_segment.clone(),
+            bloom_filter_manager: None,
         };
 
         // --- $contains "a" ---

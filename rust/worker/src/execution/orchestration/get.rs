@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_segment::bloom_filter::BloomFilterManager;
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
@@ -140,6 +141,9 @@ pub struct GetOrchestrator {
     limit: Limit,
     projection: Projection,
 
+    // Bloom filter manager
+    bloom_filter_manager: Option<BloomFilterManager>,
+
     // Result channel
     result_channel: Option<Sender<Result<GetResult, GetError>>>,
 }
@@ -155,6 +159,7 @@ impl GetOrchestrator {
         filter: Filter,
         limit: Limit,
         projection: Projection,
+        bloom_filter_manager: Option<BloomFilterManager>,
     ) -> Self {
         let context = OrchestratorContext::new(dispatcher);
         Self {
@@ -167,6 +172,7 @@ impl GetOrchestrator {
             filter,
             limit,
             projection,
+            bloom_filter_manager,
             result_channel: None,
         }
     }
@@ -280,6 +286,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for GetOrchestrator {
                 blockfile_provider: self.blockfile_provider.clone(),
                 metadata_segment: self.collection_and_segments.metadata_segment.clone(),
                 record_segment: self.collection_and_segments.record_segment.clone(),
+                bloom_filter_manager: self.bloom_filter_manager.clone(),
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -313,6 +320,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for GetOrchestrator {
                 record_segment: self.collection_and_segments.record_segment.clone(),
                 log_offset_ids: output.log_offset_ids,
                 compact_offset_ids: output.compact_offset_ids,
+                bloom_filter_manager: self.bloom_filter_manager.clone(),
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -344,6 +352,7 @@ impl Handler<TaskResult<LimitOutput, LimitError>> for GetOrchestrator {
             blockfile_provider: self.blockfile_provider.clone(),
             record_segment: self.collection_and_segments.record_segment.clone(),
             offset_ids: output.offset_ids.iter().collect(),
+            bloom_filter_manager: self.bloom_filter_manager.clone(),
         };
 
         let task = wrap(

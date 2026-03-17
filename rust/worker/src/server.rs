@@ -10,6 +10,7 @@ use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_index::usearch::USearchIndexProvider;
 use chroma_jemalloc_pprof_server::spawn_pprof_server;
 use chroma_log::Log;
+use chroma_segment::bloom_filter::BloomFilterManager;
 use chroma_segment::spann_provider::SpannProvider;
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
@@ -76,6 +77,7 @@ pub struct WorkerServer {
     use_fragment_fetch: bool,
     fragment_fetcher: Option<Arc<FragmentFetcher>>,
     collections_for_fragment_fetch: HashSet<CollectionUuid>,
+    bloom_filter_manager: Option<BloomFilterManager>,
     shutdown_grace_period: Duration,
 }
 
@@ -138,6 +140,12 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
         } else {
             None
         };
+        let bloom_filter_manager = BloomFilterManager::try_from_config(
+            &(config.bloom_filter_manager.clone(), storage.clone()),
+            registry,
+        )
+        .await
+        .ok();
         Ok(WorkerServer {
             dispatcher: None,
             system: system.clone(),
@@ -153,6 +161,7 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
             use_fragment_fetch: config.use_fragment_fetch,
             fragment_fetcher,
             collections_for_fragment_fetch,
+            bloom_filter_manager,
             shutdown_grace_period: config.grpc_shutdown_grace_period,
         })
     }
@@ -302,6 +311,7 @@ impl WorkerServer {
             collection_and_segments,
             fetch_log,
             read_level,
+            self.bloom_filter_manager.clone(),
         );
 
         match count_orchestrator.run(self.system.clone()).await {
@@ -347,6 +357,7 @@ impl WorkerServer {
             filter.try_into()?,
             limit.into(),
             projection.into(),
+            self.bloom_filter_manager.clone(),
         );
 
         match get_orchestrator.run(self.system.clone()).await {
@@ -423,6 +434,7 @@ impl WorkerServer {
             fetch_log,
             filter.try_into()?,
             ReadLevel::IndexAndWal, // Full consistency for KNN queries
+            self.bloom_filter_manager.clone(),
         );
 
         let matching_records = match knn_filter_orchestrator.run(system.clone()).await {
@@ -450,6 +462,7 @@ impl WorkerServer {
                     let blockfile_provider = self.blockfile_provider.clone();
                     let knn_projection = knn_projection.clone();
                     let segment_type = vector_segment_type;
+                    let bloom_filter_manager = self.bloom_filter_manager.clone();
 
                     async move {
                         // Run KNN orchestrator — dispatch based on segment type.
@@ -461,6 +474,7 @@ impl WorkerServer {
                                 collection_and_segments.clone(),
                                 matching_records.clone(),
                                 knn,
+                                bloom_filter_manager.clone(),
                             )
                             .run(system.clone())
                             .await
@@ -473,6 +487,7 @@ impl WorkerServer {
                                 matching_records.clone(),
                                 knn.fetch as usize,
                                 knn.embedding,
+                                bloom_filter_manager.clone(),
                             )
                             .run(system.clone())
                             .await
@@ -488,6 +503,7 @@ impl WorkerServer {
                             collection_and_segments.record_segment.clone(),
                             record_distances,
                             knn_projection,
+                            bloom_filter_manager,
                         );
                         projection_orchestrator
                             .run(system)
@@ -520,6 +536,7 @@ impl WorkerServer {
                     let matching_records = matching_records.clone();
                     let system = system.clone();
                     let knn_projection = knn_projection.clone();
+                    let bloom_filter_manager = self.bloom_filter_manager.clone();
 
                     async move {
                         // Run KNN orchestrator
@@ -531,6 +548,7 @@ impl WorkerServer {
                             collection_and_segments.clone(),
                             matching_records.clone(),
                             knn,
+                            bloom_filter_manager.clone(),
                         );
                         let record_distances = knn_orchestrator
                             .run(system.clone())
@@ -546,6 +564,7 @@ impl WorkerServer {
                             collection_and_segments.record_segment.clone(),
                             record_distances,
                             knn_projection,
+                            bloom_filter_manager,
                         );
                         projection_orchestrator
                             .run(system)
@@ -596,6 +615,7 @@ impl WorkerServer {
             fetch_log,
             search_payload.filter.clone(),
             read_level, // Use the specified read level
+            self.bloom_filter_manager.clone(),
         );
 
         let knn_filter_output = match knn_filter_orchestrator.run(self.system.clone()).await {
@@ -615,6 +635,7 @@ impl WorkerServer {
             let dispatcher = self.clone_dispatcher()?;
             let blockfile_provider = self.blockfile_provider.clone();
             let spann_provider = self.spann_provider.clone();
+            let bloom_filter_manager = self.bloom_filter_manager.clone();
 
             knn_futures.push(async move {
                 let result = match knn_query.query {
@@ -634,6 +655,7 @@ impl WorkerServer {
                                     embedding: query,
                                     fetch: knn_query.limit,
                                 },
+                                bloom_filter_manager,
                             )
                             .run(system_clone)
                             .await
@@ -646,6 +668,7 @@ impl WorkerServer {
                                 knn_filter_output_clone,
                                 knn_query.limit as usize,
                                 query,
+                                bloom_filter_manager,
                             )
                             .run(system_clone)
                             .await
@@ -663,6 +686,7 @@ impl WorkerServer {
                                     collection_and_segments_clone,
                                     knn_filter_output_clone,
                                     knn,
+                                    bloom_filter_manager,
                                 )
                                 .run(system_clone)
                                 .await
@@ -681,6 +705,7 @@ impl WorkerServer {
                             query,
                             knn_query.key.to_string(),
                             knn_query.limit,
+                            bloom_filter_manager,
                         );
 
                         sparse_orchestrator
@@ -711,6 +736,7 @@ impl WorkerServer {
             search_payload.limit,
             search_payload.select,
             collection_and_segments,
+            self.bloom_filter_manager.clone(),
         );
 
         rank_orchestrator
@@ -849,6 +875,7 @@ mod tests {
             use_fragment_fetch: false,
             fragment_fetcher: None,
             collections_for_fragment_fetch: HashSet::new(),
+            bloom_filter_manager: None,
             shutdown_grace_period: Duration::from_secs(1),
         };
 

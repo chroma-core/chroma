@@ -5,6 +5,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
     blockfile_record::{RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError},
+    bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},
 };
 use chroma_system::Operator;
@@ -38,6 +39,7 @@ pub struct LimitInput {
     pub record_segment: Segment,
     pub log_offset_ids: SignedRoaringBitmap,
     pub compact_offset_ids: SignedRoaringBitmap,
+    pub bloom_filter_manager: Option<BloomFilterManager>,
 }
 
 #[derive(Debug)]
@@ -188,7 +190,7 @@ impl Operator<LimitInput, LimitOutput> for Limit {
         let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
-            None,
+            input.bloom_filter_manager.clone(),
         ))
         .instrument(tracing::trace_span!(parent: Span::current(), "Create record segment reader"))
         .await
@@ -201,17 +203,21 @@ impl Operator<LimitInput, LimitOutput> for Limit {
         }?;
 
         // Materialize the filtered offset ids from the materialized log
+        let plan = RecordSegmentPlan {
+            use_bloom_filter: input
+                .bloom_filter_manager
+                .as_ref()
+                .is_some_and(|mgr| input.logs.len() >= mgr.storage_fetch_threshold()),
+        };
         let mut materialized_log_offset_ids = match &input.log_offset_ids {
             SignedRoaringBitmap::Include(rbm) => rbm.clone(),
             SignedRoaringBitmap::Exclude(rbm) => {
-                let materialized_logs = materialize_logs(
-                    &record_segment_reader,
-                    input.logs.clone(),
-                    None,
-                    &RecordSegmentPlan::default(),
-                )
-                .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
-                .await?;
+                let materialized_logs =
+                    materialize_logs(&record_segment_reader, input.logs.clone(), None, &plan)
+                        .instrument(
+                            tracing::trace_span!(parent: Span::current(), "Materialize logs"),
+                        )
+                        .await?;
 
                 let active_domain: RoaringBitmap = materialized_logs
                     .iter()
@@ -310,6 +316,7 @@ mod tests {
                 record_segment,
                 log_offset_ids,
                 compact_offset_ids,
+                bloom_filter_manager: None,
             },
         )
     }

@@ -2,10 +2,11 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
 use chroma_log::Log;
-use chroma_segment::blockfile_record::{
-    RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError,
-};
 use chroma_segment::types::HydratedMaterializedLogRecord;
+use chroma_segment::{
+    blockfile_record::{RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError},
+    bloom_filter::BloomFilterManager,
+};
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{
     Chunk, CollectionUuid, LogRecord, MaterializedLogOperation, Operation, OperationRecord,
@@ -196,6 +197,7 @@ pub struct ExecuteAttachedFunctionInput {
 
     pub is_rebuild: bool,
     pub is_for_backfill: bool,
+    pub bloom_filter_manager: Option<BloomFilterManager>,
 }
 
 /// Output from the ExecuteAttachedFunction operator
@@ -267,7 +269,7 @@ impl Operator<ExecuteAttachedFunctionInput, ExecuteAttachedFunctionOutput>
             match Box::pin(RecordSegmentReader::from_segment(
                 &input.output_record_segment,
                 &input.blockfile_provider,
-                None,
+                input.bloom_filter_manager.clone(),
             ))
             .await
             {

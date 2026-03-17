@@ -188,6 +188,11 @@ pub struct QueryServiceConfig {
     #[serde(default)]
     pub fragment_storage: Option<chroma_storage::config::StorageConfig>,
 
+    /// The configuration for the bloom filter manager used by the record segment reader
+    /// for existence checks during queries.
+    #[serde(default)]
+    pub bloom_filter_manager: BloomFilterManagerConfig,
+
     /// The grace period for shutting down the gRPC server.
     #[serde(
         rename = "grpc_shutdown_grace_period_seconds",
