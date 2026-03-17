@@ -1812,6 +1812,8 @@ async fn fork_count(
     let database_name = DatabaseName::new(&database).ok_or_else(|| {
         ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
     })?;
+    let collection_uuid =
+        CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
     server
         .authenticate_and_authorize_collection(
             &headers,
@@ -1822,7 +1824,7 @@ async fn fork_count(
                 collection: Some(collection_id.clone()),
             },
             database_name,
-            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
+            collection_uuid,
         )
         .await?;
     let _guard = server.scorecard_request(&[
@@ -1831,10 +1833,7 @@ async fn fork_count(
         format!("collection:{}", collection_id).as_str(),
     ])?;
 
-    let collection_id =
-        CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
-
-    let count = server.frontend.fork_count(collection_id).await?;
+    let count = server.frontend.fork_count(collection_uuid).await?;
 
     Ok(Json(ForkCountResponse { count }))
 }
