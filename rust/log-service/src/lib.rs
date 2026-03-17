@@ -1474,6 +1474,7 @@ impl LogServer {
                     let mut need_to_compact_s3 = self.need_to_compact_s3.lock();
                     std::mem::swap(&mut *need_to_compact_s3, &mut ru);
                 }
+                self.record_uncompacted_rollup_metrics();
                 self.merge_and_set_backpressure();
                 Ok(())
             }
@@ -1521,8 +1522,46 @@ impl LogServer {
             let mut need_to_compact_repl = self.need_to_compact_repl.lock();
             std::mem::swap(&mut *need_to_compact_repl, &mut rollups);
         }
+        self.record_uncompacted_rollup_metrics();
         self.merge_and_set_backpressure();
         Ok(())
+    }
+
+    fn record_uncompacted_rollup_metrics(&self) {
+        let mut total_uncompacted = 0u64;
+        let mut ready_uncompacted = 0u64;
+        {
+            let need_to_compact_s3 = self.need_to_compact_s3.lock();
+            for rollup in need_to_compact_s3.values() {
+                total_uncompacted += rollup.uncompacted_record_count();
+                if rollup.should_compact(
+                    self.config.suggested_compaction_threshold,
+                    self.config.reinsert_threshold,
+                    self.config.timeout_us,
+                ) {
+                    ready_uncompacted += rollup.uncompacted_record_count();
+                }
+            }
+        }
+        {
+            let need_to_compact_repl = self.need_to_compact_repl.lock();
+            for rollup in need_to_compact_repl.values() {
+                total_uncompacted += rollup.uncompacted_record_count();
+                if rollup.should_compact(
+                    self.config.suggested_compaction_threshold,
+                    self.config.reinsert_threshold,
+                    self.config.timeout_us,
+                ) {
+                    ready_uncompacted += rollup.uncompacted_record_count();
+                }
+            }
+        }
+        self.metrics
+            .log_total_uncompacted_records_count
+            .record(total_uncompacted as f64, &[]);
+        self.metrics
+            .log_ready_uncompacted_records_count
+            .record(ready_uncompacted as f64, &[]);
     }
 
     /// Merge backpressure from both S3 and repl maps and set it atomically.
@@ -1646,25 +1685,9 @@ impl LogServer {
     > {
         let mut markers = vec![];
         let mut backpressure = vec![];
-        let mut total_uncompacted = 0;
-        let mut ready_uncompacted = 0;
         for ((_, collection_id), rollup) in rollup.rollups.iter() {
             if rollup.is_empty() {
                 continue;
-            }
-            total_uncompacted += rollup
-                .limit_log_position
-                .offset()
-                .saturating_sub(rollup.start_log_position.offset());
-            if rollup.should_compact(
-                self.config.suggested_compaction_threshold,
-                self.config.reinsert_threshold,
-                self.config.timeout_us,
-            ) {
-                ready_uncompacted += rollup
-                    .limit_log_position
-                    .offset()
-                    .saturating_sub(rollup.start_log_position.offset());
             }
             let marker = rollup.dirty_marker(*collection_id);
             markers.push(serde_json::to_string(&marker).map(Vec::from)?);
@@ -1694,12 +1717,6 @@ impl LogServer {
         } else {
             cursors.init(&STABLE_PREFIX, new_cursor).await?;
         }
-        self.metrics
-            .log_total_uncompacted_records_count
-            .record(total_uncompacted as f64, &[]);
-        self.metrics
-            .log_ready_uncompacted_records_count
-            .record(ready_uncompacted as f64, &[]);
         let after = rollup.rollups.clone();
         // NOTE(rescrv):  This is protection against a collection hopping from one log to another
         // permanently.  Every reinsert_threshold reinserts it will remove the cached compaction
