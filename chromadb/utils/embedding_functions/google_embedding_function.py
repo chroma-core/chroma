@@ -15,7 +15,7 @@ class GoogleGeminiEmbeddingFunction(EmbeddingFunction[Documents]):
         model_name: str = "gemini-embedding-001",
         task_type: Optional[str] = None,
         dimension: Optional[int] = None,
-        api_key_env_var: str = "GEMINI_API_KEY",
+        api_key_env_var: Optional[str] = "GEMINI_API_KEY",
         vertexai: Optional[bool] = None,
         project: Optional[str] = None,
         location: Optional[str] = None,
@@ -35,6 +35,7 @@ class GoogleGeminiEmbeddingFunction(EmbeddingFunction[Documents]):
             api_key_env_var (str, optional): Environment variable name that contains your API key.
                 Defaults to "GEMINI_API_KEY".
             vertexai (bool, optional): Whether to use Vertex AI.
+                If enabled, api_key_env_var must be None and environment variable GOOGLE_APPLICATION_CREDENTIALS with path to vertex JSON must be set.
             project (str, optional): The Google Cloud project ID (required for Vertex AI).
             location (str, optional): The Google Cloud location/region (required for Vertex AI).
         """
@@ -52,10 +53,10 @@ class GoogleGeminiEmbeddingFunction(EmbeddingFunction[Documents]):
         self.vertexai = vertexai
         self.project = project
         self.location = location
-        self.api_key = os.getenv(self.api_key_env_var)
-        if not self.api_key:
+        self.api_key = os.getenv(self.api_key_env_var) if self.api_key_env_var else None
+        if self.api_key and self.vertexai:
             raise ValueError(
-                f"The {self.api_key_env_var} environment variable is not set."
+                "Vertex AI and API key are mutually exclusive in the client initializer."
             )
 
         self.client = genai.Client(
