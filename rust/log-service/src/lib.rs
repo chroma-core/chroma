@@ -910,24 +910,24 @@ impl RollupPerCollection {
         self.start_log_position >= self.limit_log_position
     }
 
+    fn uncompacted_record_count(&self) -> u64 {
+        self.limit_log_position
+            .offset()
+            .saturating_sub(self.start_log_position.offset())
+    }
+
     fn dirty_marker(&self, collection_id: CollectionUuid) -> DirtyMarker {
         DirtyMarker::MarkDirty {
             collection_id,
             log_position: self.start_log_position.offset(),
-            num_records: self
-                .limit_log_position
-                .offset()
-                .saturating_sub(self.start_log_position.offset()),
+            num_records: self.uncompacted_record_count(),
             reinsert_count: self.reinsert_count.saturating_add(1),
             initial_insertion_epoch_us: self.initial_insertion_epoch_us,
         }
     }
 
     fn requires_backpressure(&self, threshold: u64) -> bool {
-        self.limit_log_position
-            .offset()
-            .saturating_sub(self.start_log_position.offset())
-            >= threshold
+        self.uncompacted_record_count() >= threshold
     }
 
     /// Whether this rollup should be selected for compaction given the provided thresholds.
@@ -943,7 +943,7 @@ impl RollupPerCollection {
             .as_micros()
             .saturating_sub(self.initial_insertion_epoch_us as u128);
         (self.limit_log_position >= self.start_log_position
-            && self.limit_log_position - self.start_log_position >= min_compaction_size)
+            && self.uncompacted_record_count() >= min_compaction_size)
             || self.reinsert_count >= reinsert_threshold
             || time_on_log >= timeout_us as u128
     }
@@ -1396,10 +1396,7 @@ impl LogServer {
             let need_to_compact_s3 = self.need_to_compact_s3.lock();
             for (collection_id, rollup) in need_to_compact_s3.iter() {
                 total_uncompacted_collections += 1;
-                total_uncompacted_records += rollup
-                    .limit_log_position
-                    .offset()
-                    .saturating_sub(rollup.start_log_position.offset());
+                total_uncompacted_records += rollup.uncompacted_record_count();
                 if rollup.should_compact(
                     request.min_compaction_size,
                     self.config.reinsert_threshold,
@@ -1420,10 +1417,7 @@ impl LogServer {
             let need_to_compact_repl = self.need_to_compact_repl.lock();
             for ((topology_name, collection_id), rollup) in need_to_compact_repl.iter() {
                 total_uncompacted_collections += 1;
-                total_uncompacted_records += rollup
-                    .limit_log_position
-                    .offset()
-                    .saturating_sub(rollup.start_log_position.offset());
+                total_uncompacted_records += rollup.uncompacted_record_count();
                 if rollup.should_compact(
                     request.min_compaction_size,
                     self.config.reinsert_threshold,
