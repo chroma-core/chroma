@@ -25,11 +25,6 @@ pub struct RebuildMessage {
 }
 
 #[derive(Debug)]
-pub struct ListDeadJobsMessage {
-    pub response_tx: oneshot::Sender<Vec<JobId>>,
-}
-
-#[derive(Debug)]
 pub struct InProgressJobEntry {
     pub job_id: JobId,
     pub database_name: String,
