@@ -299,10 +299,7 @@ mod tests {
         bytes.extend_from_slice(&1.0f32.to_le_bytes());
         bytes.extend_from_slice(&f32::NAN.to_le_bytes());
         bytes.extend_from_slice(&3.0f32.to_le_bytes());
-        let base64_str = base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            &bytes,
-        );
+        let base64_str = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
         let result = decode_base64_embedding(&base64_str);
         assert!(matches!(
             result,
@@ -317,7 +314,9 @@ mod tests {
     fn embeddings_strategy() -> impl Strategy<Value = Vec<Vec<f32>>> {
         proptest::collection::vec(
             proptest::collection::vec(
-                proptest::num::f32::NORMAL | proptest::num::f32::SUBNORMAL | proptest::num::f32::ZERO,
+                proptest::num::f32::NORMAL
+                    | proptest::num::f32::SUBNORMAL
+                    | proptest::num::f32::ZERO,
                 0..10,
             ),
             0..5,

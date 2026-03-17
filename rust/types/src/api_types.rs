@@ -1329,19 +1329,14 @@ fn validate_embeddings(embeddings: &[Vec<f32>]) -> Result<(), ValidationError> {
         return Err(ValidationError::new("embedding_minimum_dimensions")
             .with_message("Each embedding must have at least 1 dimension".into()));
     }
-    if embeddings
-        .iter()
-        .any(|e| e.iter().any(|&v| !v.is_finite()))
-    {
+    if embeddings.iter().any(|e| e.iter().any(|&v| !v.is_finite())) {
         return Err(ValidationError::new("embedding_non_finite")
             .with_message("Embeddings must not contain NaN or Infinity values".into()));
     }
     Ok(())
 }
 
-fn validate_update_embeddings(
-    embeddings: &[Option<Vec<f32>>],
-) -> Result<(), ValidationError> {
+fn validate_update_embeddings(embeddings: &[Option<Vec<f32>>]) -> Result<(), ValidationError> {
     for e in embeddings.iter().flatten() {
         if e.is_empty() {
             return Err(ValidationError::new("embedding_minimum_dimensions")
@@ -1349,9 +1344,7 @@ fn validate_update_embeddings(
         }
         if e.iter().any(|&v| !v.is_finite()) {
             return Err(ValidationError::new("embedding_non_finite")
-                .with_message(
-                    "Embeddings must not contain NaN or Infinity values".into(),
-                ));
+                .with_message("Embeddings must not contain NaN or Infinity values".into()));
         }
     }
     Ok(())
