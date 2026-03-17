@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "@jest/globals";
 import { DOCUMENTS, EMBEDDINGS, IDS, METADATAS } from "./data";
-import { ChromaNotFoundError, InvalidArgumentError } from "../src/Errors";
+import { ChromaNotFoundError } from "../src/Errors";
 import { DefaultEmbeddingFunction } from "../src/embeddings/DefaultEmbeddingFunction";
 import { ChromaClient } from "../src/ChromaClient";
 
@@ -51,7 +51,10 @@ describe("get collections", () => {
           test: { $contains: "hello" },
         },
       }),
-    ).rejects.toThrow(InvalidArgumentError);
+    ).rejects.toMatchObject({
+      name: "InvalidArgumentError",
+      message: "Invalid where clause",
+    });
   });
 
   test("it should get embedding with matching documents", async () => {
