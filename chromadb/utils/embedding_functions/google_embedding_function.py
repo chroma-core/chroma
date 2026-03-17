@@ -35,7 +35,7 @@ class GoogleGeminiEmbeddingFunction(EmbeddingFunction[Documents]):
             api_key_env_var (str, optional): Environment variable name that contains your API key.
                 Defaults to "GEMINI_API_KEY".
             vertexai (bool, optional): Whether to use Vertex AI.
-                If enabled, api_key_env_var must be None and environment variable GOOGLE_APPLICATION_CREDENTIALS with path to vertex JSON must be set.
+                If enabled, an API key must not be provided, and the environment variable `GOOGLE_APPLICATION_CREDENTIALS` must be set to the path of your service account JSON file.
             project (str, optional): The Google Cloud project ID (required for Vertex AI).
             location (str, optional): The Google Cloud location/region (required for Vertex AI).
         """
