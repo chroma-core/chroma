@@ -168,7 +168,6 @@ async fn test_delete_by_where_with_limit() {
             )
             .unwrap(),
             String::new(),
-            String::new(),
         )
         .await
         .unwrap();
@@ -210,7 +209,6 @@ async fn test_delete_by_where_with_limit_zero() {
             )
             .unwrap(),
             String::new(),
-            String::new(),
         )
         .await
         .unwrap();
@@ -248,7 +246,6 @@ async fn test_delete_by_where_with_limit_greater_than_matches() {
             )
             .unwrap(),
             String::new(),
-            String::new(),
         )
         .await
         .unwrap();
@@ -274,7 +271,6 @@ async fn test_delete_by_ids_without_limit() {
                 None,
             )
             .unwrap(),
-            String::new(),
             String::new(),
         )
         .await
@@ -327,7 +323,6 @@ async fn test_delete_by_where_with_limit_loop() {
                     Some(2),
                 )
                 .unwrap(),
-                String::new(),
                 String::new(),
             )
             .await
