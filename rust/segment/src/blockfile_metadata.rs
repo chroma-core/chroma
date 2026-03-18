@@ -2713,7 +2713,7 @@ mod test {
             "tenant/{}/database/{}/collection/{}/segment/{}",
             tenant, database_id, record_segment.collection, record_segment.id,
         );
-        assert_eq!(record_segment.file_path.len(), 4);
+        assert_eq!(record_segment.file_path.len(), 5);
         for (_, file_path) in record_segment.file_path.iter() {
             assert_eq!(file_path.len(), 1);
             assert!(file_path
