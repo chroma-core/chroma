@@ -133,6 +133,7 @@ impl TestDistributedSegment {
             &self.record_segment,
             &self.blockfile_provider,
             None,
+            None,
         ))
         .await
         .expect("Should be able to initiaize record writer.");

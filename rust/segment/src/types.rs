@@ -1240,6 +1240,7 @@ mod tests {
                 &record_segment,
                 &blockfile_provider,
                 None,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -1399,6 +1400,7 @@ mod tests {
             &record_segment,
             &blockfile_provider,
             None,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1545,6 +1547,7 @@ mod tests {
                 &database_id,
                 &record_segment,
                 &blockfile_provider,
+                None,
                 None,
             )
             .await
@@ -1696,6 +1699,7 @@ mod tests {
             &record_segment,
             &blockfile_provider,
             None,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1843,6 +1847,7 @@ mod tests {
                 &database_id,
                 &record_segment,
                 &blockfile_provider,
+                None,
                 None,
             )
             .await
@@ -2014,6 +2019,7 @@ mod tests {
             &record_segment,
             &blockfile_provider,
             None,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -2151,6 +2157,7 @@ mod tests {
                 &database_id,
                 &record_segment,
                 &blockfile_provider,
+                None,
                 None,
             )
             .await
@@ -2397,6 +2404,7 @@ mod tests {
             &database_id,
             &record_segment,
             &blockfile_provider,
+            None,
             None,
         )
         .await

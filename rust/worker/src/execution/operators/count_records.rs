@@ -240,6 +240,7 @@ mod tests {
                 &record_segment,
                 &in_memory_provider,
                 None,
+                None,
             )
             .await
             .expect("Error creating segment writer");
