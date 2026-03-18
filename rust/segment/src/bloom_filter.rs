@@ -177,7 +177,12 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
     /// `needs_rebuild` heuristic, so relaxed ordering is sufficient.
     pub fn mark_deleted(&self) {
         self.inner.stale_count.fetch_add(1, Ordering::Relaxed);
-        self.inner.live_count.fetch_sub(1, Ordering::Relaxed);
+        self.inner
+            .live_count
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
+                count.checked_sub(1)
+            })
+            .ok();
     }
 
     /// Returns true when the bloom filter has degraded enough to warrant a rebuild.
@@ -189,6 +194,7 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
         let stale = self.inner.stale_count.load(Ordering::Relaxed);
         let total = live.saturating_add(stale);
 
+        // The u64→f64 cast loses precision beyond 2^53, but that's ~9 quadrillion items.
         if total > 0 && (stale as f64 / total as f64) > REBUILD_STALE_RATIO {
             return true;
         }
@@ -231,9 +237,12 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
         storage: Arc<Storage>,
         path: String,
     ) -> Result<BloomFilterFlusher, BloomFilterError> {
+        let num_u64s = self.inner.filter.num_bits() / 64;
+        let mut bits = Vec::with_capacity(num_u64s);
+        bits.extend(self.inner.filter.iter());
         let repr = BloomFilterRepr {
             id: self.id,
-            bits: self.inner.filter.iter().collect(),
+            bits,
             num_hashes: self.inner.filter.num_hashes(),
             live_count: self.inner.live_count.load(Ordering::SeqCst),
             stale_count: self.inner.stale_count.load(Ordering::SeqCst),
@@ -253,9 +262,12 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
         let inner = Arc::try_unwrap(self.inner).map_err(|_| {
             BloomFilterError::Serialization("other references still exist".to_string())
         })?;
+        let num_u64s = inner.filter.num_bits() / 64;
+        let mut bits = Vec::with_capacity(num_u64s);
+        bits.extend(inner.filter.iter());
         let repr = BloomFilterRepr {
             id: self.id,
-            bits: inner.filter.iter().collect(),
+            bits,
             num_hashes: inner.filter.num_hashes(),
             live_count: inner.live_count.load(Ordering::SeqCst),
             stale_count: inner.stale_count.load(Ordering::SeqCst),
