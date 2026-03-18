@@ -1504,44 +1504,32 @@ impl LogServer {
         let mut ready_uncompacted = 0u64;
         let mut likely_needs_purge_dirty = 0u64;
         let mut total_uncompacted_collections = 0u64;
+        let mut record_rollup_metrics = |rollup: &RollupPerCollection| {
+            total_uncompacted_collections += 1;
+            total_uncompacted += rollup.uncompacted_record_count();
+            if rollup.should_compact(
+                self.config.suggested_compaction_threshold,
+                self.config.reinsert_threshold,
+                self.config.timeout_us,
+            ) {
+                ready_uncompacted += rollup.uncompacted_record_count();
+                if rollup
+                    .likely_needs_purge_dirty(self.config.reinsert_threshold, self.config.timeout_us)
+                {
+                    likely_needs_purge_dirty += 1;
+                }
+            }
+        };
         {
             let need_to_compact_s3 = self.need_to_compact_s3.lock();
             for rollup in need_to_compact_s3.values() {
-                total_uncompacted_collections += 1;
-                total_uncompacted += rollup.uncompacted_record_count();
-                if rollup.should_compact(
-                    self.config.suggested_compaction_threshold,
-                    self.config.reinsert_threshold,
-                    self.config.timeout_us,
-                ) {
-                    ready_uncompacted += rollup.uncompacted_record_count();
-                    if rollup.likely_needs_purge_dirty(
-                        self.config.reinsert_threshold,
-                        self.config.timeout_us,
-                    ) {
-                        likely_needs_purge_dirty += 1;
-                    }
-                }
+                record_rollup_metrics(rollup);
             }
         }
         {
             let need_to_compact_repl = self.need_to_compact_repl.lock();
             for rollup in need_to_compact_repl.values() {
-                total_uncompacted_collections += 1;
-                total_uncompacted += rollup.uncompacted_record_count();
-                if rollup.should_compact(
-                    self.config.suggested_compaction_threshold,
-                    self.config.reinsert_threshold,
-                    self.config.timeout_us,
-                ) {
-                    ready_uncompacted += rollup.uncompacted_record_count();
-                    if rollup.likely_needs_purge_dirty(
-                        self.config.reinsert_threshold,
-                        self.config.timeout_us,
-                    ) {
-                        likely_needs_purge_dirty += 1;
-                    }
-                }
+                record_rollup_metrics(rollup);
             }
         }
         self.metrics
