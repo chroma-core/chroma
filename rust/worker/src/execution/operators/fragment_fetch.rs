@@ -347,8 +347,8 @@ mod tests {
             None,
             0,
         )
-            .await
-            .expect("fragment write should succeed");
+        .await
+        .expect("fragment write should succeed");
         path
     }
 
@@ -568,7 +568,10 @@ mod tests {
             .expect("contiguous fragments should fetch successfully");
 
         assert_eq!(
-            records.iter().map(|record| record.log_offset).collect::<Vec<_>>(),
+            records
+                .iter()
+                .map(|record| record.log_offset)
+                .collect::<Vec<_>>(),
             vec![5, 6, 7, 8, 9],
             "records should be sorted and contiguous across fragment boundaries"
         );
