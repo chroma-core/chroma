@@ -626,7 +626,7 @@ mod test {
     };
 
     use crate::{
-        blockfile_record::RecordSegmentPlan,
+        blockfile_record::RecordSegmentReaderOptions,
         distributed_spann::{SpannSegmentReader, SpannSegmentWriter},
         types::materialize_logs,
     };
@@ -736,7 +736,7 @@ mod test {
         let chunked_log = Chunk::new(data.into());
         // Materialize the logs.
         let materialized_log =
-            materialize_logs(&None, chunked_log, None, &RecordSegmentPlan::default())
+            materialize_logs(&None, chunked_log, None, &RecordSegmentReaderOptions::default())
                 .await
                 .expect("Error materializing logs");
         spann_writer
@@ -976,7 +976,7 @@ mod test {
         let chunked_log = Chunk::new(data.into());
         // Materialize the logs.
         let materialized_log =
-            materialize_logs(&None, chunked_log, None, &RecordSegmentPlan::default())
+            materialize_logs(&None, chunked_log, None, &RecordSegmentReaderOptions::default())
                 .await
                 .expect("Error materializing logs");
         spann_writer
@@ -1166,7 +1166,7 @@ mod test {
         let chunked_log = Chunk::new(data.into());
         // Materialize the logs.
         let materialized_log =
-            materialize_logs(&None, chunked_log, None, &RecordSegmentPlan::default())
+            materialize_logs(&None, chunked_log, None, &RecordSegmentReaderOptions::default())
                 .await
                 .expect("Error materializing logs");
         spann_writer

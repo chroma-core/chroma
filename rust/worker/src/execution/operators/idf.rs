@@ -6,7 +6,7 @@ use chroma_error::ChromaError;
 use chroma_index::sparse::{reader::SparseReaderError, types::encode_u32};
 use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentReader},
-    blockfile_record::{RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError},
+    blockfile_record::{RecordSegmentReaderOptions, RecordSegmentReader, RecordSegmentReaderCreationError},
     bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},
 };
@@ -116,7 +116,7 @@ impl Operator<IdfInput, IdfOutput> for Idf {
             tokio::try_join!(record_segment_reader_fut, metadata_segment_reader_fut)?;
         n += count;
 
-        let plan = RecordSegmentPlan {
+        let plan = RecordSegmentReaderOptions {
             use_bloom_filter: input
                 .bloom_filter_manager
                 .as_ref()

@@ -215,7 +215,7 @@ mod tests {
     use chroma_blockstore::provider::BlockfileProvider;
     use chroma_segment::{
         blockfile_record::{
-            RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError,
+            RecordSegmentReaderOptions, RecordSegmentReader, RecordSegmentReaderCreationError,
             RecordSegmentWriter,
         },
         types::materialize_logs,
@@ -323,7 +323,7 @@ mod tests {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentPlan::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await

@@ -8,7 +8,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentWriter},
     blockfile_record::{
-        RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError,
+        RecordSegmentReaderOptions, RecordSegmentReader, RecordSegmentReaderCreationError,
         RecordSegmentWriter, RecordSegmentWriterCreationError,
     },
     distributed_hnsw::{DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentWriter},
@@ -399,7 +399,7 @@ impl AttachedFunctionOrchestrator {
         }
 
         let total_log_count: usize = partitions.iter().map(|p| p.len()).sum();
-        let plan = RecordSegmentPlan {
+        let plan = RecordSegmentReaderOptions {
             use_bloom_filter: self
                 .output_context
                 .bloom_filter_manager

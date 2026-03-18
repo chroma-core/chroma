@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_segment::blockfile_record::{
-    RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError,
+    RecordSegmentReaderOptions, RecordSegmentReader, RecordSegmentReaderCreationError,
 };
 use chroma_segment::types::{materialize_logs, LogMaterializerError, MaterializeLogsResult};
 use chroma_system::Operator;
@@ -42,7 +42,7 @@ pub struct MaterializeLogInput {
     logs: Chunk<LogRecord>,
     record_reader: Option<RecordSegmentReader<'static>>,
     offset_id: Arc<AtomicU32>,
-    plan: RecordSegmentPlan,
+    plan: RecordSegmentReaderOptions,
 }
 
 impl MaterializeLogInput {
@@ -50,7 +50,7 @@ impl MaterializeLogInput {
         logs: Chunk<LogRecord>,
         record_reader: Option<RecordSegmentReader<'static>>,
         offset_id: Arc<AtomicU32>,
-        plan: RecordSegmentPlan,
+        plan: RecordSegmentReaderOptions,
     ) -> Self {
         MaterializeLogInput {
             logs,

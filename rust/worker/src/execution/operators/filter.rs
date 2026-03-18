@@ -9,7 +9,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::metadata::types::MetadataIndexError;
 use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentReader},
-    blockfile_record::{RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError},
+    blockfile_record::{RecordSegmentReaderOptions, RecordSegmentReader, RecordSegmentReaderCreationError},
     bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError, MaterializeLogsResult},
 };
@@ -238,7 +238,7 @@ pub(crate) enum MetadataProvider<'me> {
     CompactData(
         &'me MetadataSegmentReader<'me>,
         &'me Option<RecordSegmentReader<'me>>,
-        &'me RecordSegmentPlan,
+        &'me RecordSegmentReaderOptions,
     ),
     Log(&'me MetadataLogReader<'me>),
 }
@@ -648,7 +648,7 @@ impl Operator<FilterInput, FilterOutput> for Filter {
         let (record_segment_reader, metadata_segment_reader) =
             tokio::try_join!(record_segment_reader_fut, metadata_segment_reader_fut)?;
 
-        let plan = RecordSegmentPlan {
+        let plan = RecordSegmentReaderOptions {
             use_bloom_filter: input
                 .bloom_filter_manager
                 .as_ref()
@@ -776,7 +776,7 @@ mod tests {
     use chroma_segment::{
         blockfile_metadata::{MetadataSegmentReader, MetadataSegmentWriter},
         blockfile_record::{
-            RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError,
+            RecordSegmentReaderOptions, RecordSegmentReader, RecordSegmentReaderCreationError,
             RecordSegmentWriter,
         },
         test::TestDistributedSegment,
@@ -1457,7 +1457,7 @@ mod tests {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentPlan::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -1539,7 +1539,7 @@ mod tests {
         .await
         .expect("Error creating segment writer");
         let some_reader = Some(record_segment_reader);
-        let mat_records = materialize_logs(&some_reader, data, None, &RecordSegmentPlan::default())
+        let mat_records = materialize_logs(&some_reader, data, None, &RecordSegmentReaderOptions::default())
             .await
             .expect("Log materialization failed");
         metadata_writer
@@ -1583,7 +1583,7 @@ mod tests {
         let compact_metadata_provider = MetadataProvider::CompactData(
             &metadata_segment_reader,
             &some_reader,
-            &RecordSegmentPlan::default(),
+            &RecordSegmentReaderOptions::default(),
         );
         let res = compact_metadata_provider
             .filter_by_document_regex("(?i)def")
@@ -1615,7 +1615,7 @@ mod tests {
             &cloned_record_segment_reader,
             filter_input.logs.clone(),
             None,
-            &RecordSegmentPlan::default(),
+            &RecordSegmentReaderOptions::default(),
         )
         .await
         .unwrap();
@@ -1634,7 +1634,7 @@ mod tests {
         let compact_metadata_provider = MetadataProvider::CompactData(
             &metadata_segement_reader,
             &record_segment_reader,
-            &RecordSegmentPlan::default(),
+            &RecordSegmentReaderOptions::default(),
         );
 
         let match_all = r".*";

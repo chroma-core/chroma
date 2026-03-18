@@ -43,13 +43,13 @@ struct BloomFilterRepr {
 /// Produced by `BloomFilter::into_bytes()` during commit; written
 /// to storage by calling `save()` during flush.
 /// Carries the pre-determined storage path from the `BloomFilter`.
-pub struct SerializedBloomFilter {
+pub struct BloomFilterFlusher {
     bytes: Vec<u8>,
     storage: Arc<Storage>,
     path: String,
 }
 
-impl SerializedBloomFilter {
+impl BloomFilterFlusher {
     /// Write the serialized bloom filter bytes to its pre-determined storage path.
     pub async fn save(&self) -> Result<(), BloomFilterError> {
         self.storage
@@ -187,7 +187,7 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
     pub fn needs_rebuild(&self) -> bool {
         let live = self.inner.live_count.load(Ordering::Relaxed);
         let stale = self.inner.stale_count.load(Ordering::Relaxed);
-        let total = live + stale;
+        let total = live.saturating_add(stale);
 
         if total > 0 && (stale as f64 / total as f64) > REBUILD_STALE_RATIO {
             return true;
@@ -225,12 +225,12 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
         bit_vector_bytes + live_count_bytes + stale_count_bytes + capacity_bytes
     }
 
-    /// Consume the bloom filter and return a `SerializedBloomFilter` ready for I/O.
+    /// Consume the bloom filter and return a `BloomFilterFlusher` ready for I/O.
     pub fn into_bytes(
         self,
         storage: Arc<Storage>,
         path: String,
-    ) -> Result<SerializedBloomFilter, BloomFilterError> {
+    ) -> Result<BloomFilterFlusher, BloomFilterError> {
         let repr = BloomFilterRepr {
             id: self.id,
             bits: self.inner.filter.iter().collect(),
@@ -241,7 +241,7 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
         };
         let bytes = bincode::serialize(&repr)
             .map_err(|e| BloomFilterError::Serialization(e.to_string()))?;
-        Ok(SerializedBloomFilter {
+        Ok(BloomFilterFlusher {
             bytes,
             storage,
             path,
@@ -418,7 +418,7 @@ impl BloomFilterManager {
         &self,
         bf: BloomFilter<str>,
         prefix_path: &str,
-    ) -> Result<SerializedBloomFilter, BloomFilterError> {
+    ) -> Result<BloomFilterFlusher, BloomFilterError> {
         let path = Self::format_key(prefix_path, bf.id());
         let key = bf.id().to_string();
         self.inner.cache.insert(key, bf.clone()).await;

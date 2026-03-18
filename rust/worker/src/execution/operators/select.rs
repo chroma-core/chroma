@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
-    blockfile_record::{RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError},
+    blockfile_record::{RecordSegmentReaderOptions, RecordSegmentReader, RecordSegmentReaderCreationError},
     bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},
 };
@@ -132,7 +132,7 @@ impl Operator<SelectInput, SelectOutput> for Select {
             }
         }
 
-        let plan = RecordSegmentPlan {
+        let plan = RecordSegmentReaderOptions {
             use_bloom_filter: input
                 .bloom_filter_manager
                 .as_ref()

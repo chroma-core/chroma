@@ -115,7 +115,7 @@ mod tests {
     use super::*;
     use chroma_blockstore::test_arrow_blockfile_provider;
     use chroma_segment::blockfile_record::{
-        RecordSegmentPlan, RecordSegmentReader, RecordSegmentWriter,
+        RecordSegmentReaderOptions, RecordSegmentReader, RecordSegmentWriter,
     };
     use chroma_segment::types::materialize_logs;
     use chroma_types::{
@@ -191,7 +191,7 @@ mod tests {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentPlan::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .await
             .expect("Log materialization failed");

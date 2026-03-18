@@ -1,6 +1,4 @@
-use crate::bloom_filter::{
-    BloomFilter, BloomFilterError, BloomFilterManager, SerializedBloomFilter,
-};
+use crate::bloom_filter::{BloomFilter, BloomFilterError, BloomFilterFlusher, BloomFilterManager};
 use crate::types::ChromaSegmentFlusher;
 
 use super::distributed_spann::SpannSegmentWriterError;
@@ -341,6 +339,8 @@ impl RecordSegmentWriter {
             _ => return Err(RecordSegmentWriterCreationError::IncorrectNumberOfFiles),
         };
 
+        // Having a bloom filter provider is overkill so we only have one abstraction
+        // the bloomfilter manager, which is responsible for creating, caching, and committing bloom filters.
         let prefix_path = segment.construct_prefix_path(tenant, database_id);
         let bloom_filter = if let Some(manager) = &bloom_filter_manager {
             let forked = match segment.file_path.get(USER_ID_BLOOM_FILTER) {
@@ -739,7 +739,7 @@ pub struct RecordSegmentFlusher {
     id_to_data_flusher: BlockfileFlusher,
     max_offset_id_flusher: BlockfileFlusher,
     /// Serialized bloom filter ready for I/O during flush.
-    serialized_bloom_filter: Option<SerializedBloomFilter>,
+    serialized_bloom_filter: Option<BloomFilterFlusher>,
 }
 
 impl Debug for RecordSegmentFlusher {
@@ -848,7 +848,7 @@ impl RecordSegmentFlusher {
 /// Controls how the record segment reader handles bloom-filter-based
 /// pre-filtering during lookups.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct RecordSegmentPlan {
+pub struct RecordSegmentReaderOptions {
     pub use_bloom_filter: bool,
 }
 
@@ -1035,7 +1035,7 @@ impl RecordSegmentReader<'_> {
     pub async fn get_offset_id_for_user_id(
         &self,
         user_id: &str,
-        plan: &RecordSegmentPlan,
+        plan: &RecordSegmentReaderOptions,
     ) -> Result<Option<u32>, Box<dyn ChromaError>> {
         if plan.use_bloom_filter {
             self.ensure_bloom_filter().await;
@@ -1105,7 +1105,7 @@ impl RecordSegmentReader<'_> {
 
     /// Stream all user IDs from the lightweight id_to_user_id blockfile.
     /// Used for bloom filter rebuild without loading full data records.
-    pub fn get_user_id_stream<'me>(
+    fn get_user_id_stream<'me>(
         &'me self,
     ) -> impl Stream<Item = Result<&'me str, Box<dyn ChromaError>>> + 'me {
         self.id_to_user_id
@@ -1137,7 +1137,7 @@ impl RecordSegmentReader<'_> {
     pub async fn load_user_id_to_id(
         &self,
         keys: impl Iterator<Item = &str>,
-        plan: &RecordSegmentPlan,
+        plan: &RecordSegmentReaderOptions,
     ) {
         // Lazy load the bloom filter if it is needed.
         if plan.use_bloom_filter {
@@ -1249,7 +1249,7 @@ mod tests {
                                 &None,
                                 log_chunk,
                                 Some(curr_offset_id),
-                                &super::RecordSegmentPlan::default(),
+                                &super::RecordSegmentReaderOptions::default(),
                             ))
                             .expect("Should be able to materialize log");
                             future::block_on(
@@ -1446,7 +1446,7 @@ mod tests {
             &Some(reader),
             delete_chunk.clone(),
             Some(AtomicU32::new(11).into()),
-            &super::RecordSegmentPlan::default(),
+            &super::RecordSegmentReaderOptions::default(),
         )
         .await
         .expect("Should materialize delete logs");

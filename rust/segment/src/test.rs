@@ -1,4 +1,4 @@
-use crate::{blockfile_record::RecordSegmentPlan, spann_provider::SpannProvider};
+use crate::{blockfile_record::RecordSegmentReaderOptions, spann_provider::SpannProvider};
 
 use super::{
     blockfile_metadata::MetadataSegmentWriter, blockfile_record::RecordSegmentWriter,
@@ -107,7 +107,7 @@ impl TestDistributedSegment {
             &None,
             logs,
             Some(AtomicU32::new(next_offset as u32).into()),
-            &RecordSegmentPlan::default(),
+            &RecordSegmentReaderOptions::default(),
         )
         .await
         .expect("Should be able to materialize log.");
