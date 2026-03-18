@@ -54,7 +54,6 @@ describe("collections", () => {
     expect(collection4.name).toBe(new_name);
     expect(collection4.metadata).toEqual(original_metadata);
 
-    collection3.metadata = new_metadata;
     await collection3.modify({ metadata: new_metadata });
     expect(collection3.name).toBe(new_name);
     expect(collection3.metadata).toEqual(new_metadata);

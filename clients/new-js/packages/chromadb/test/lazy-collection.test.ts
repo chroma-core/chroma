@@ -150,4 +150,45 @@ describe("thin collection via client.collection(id)", () => {
     const result = await thin.get({ ids: ["test1"], include: ["embeddings"] });
     expect(result.embeddings[0]).toEqual([10, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
   });
+
+  test("add with documents triggers hydration and makes properties accessible", async () => {
+    const created = await client.createCollection({ name: "test" });
+
+    const freshClient = new ChromaClient({
+      path: process.env.DEFAULT_CHROMA_INSTANCE_URL,
+    });
+    const thin = freshClient.collection(created.id);
+
+    // Before hydration, properties throw
+    expect(() => thin.name).toThrow("thin collection");
+
+    // add with documents triggers hydration (needs embedding function)
+    await thin.add({ ids: IDS, embeddings: EMBEDDINGS, documents: DOCUMENTS });
+
+    // After hydration, properties are accessible
+    expect(thin.name).toBe("test");
+    expect(thin.configuration).toBeDefined();
+
+    const count = await thin.count();
+    expect(count).toBe(3);
+  });
+
+  test("modify triggers hydration and makes properties accessible", async () => {
+    const created = await client.createCollection({
+      name: "test",
+      metadata: { key: "value" },
+    });
+
+    const freshClient = new ChromaClient({
+      path: process.env.DEFAULT_CHROMA_INSTANCE_URL,
+    });
+    const thin = freshClient.collection(created.id);
+
+    expect(() => thin.name).toThrow("thin collection");
+
+    await thin.modify({ metadata: { key: "updated" } });
+
+    expect(thin.name).toBe("test");
+    expect(thin.metadata).toEqual({ key: "updated" });
+  });
 });

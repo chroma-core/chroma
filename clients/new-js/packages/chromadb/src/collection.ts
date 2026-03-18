@@ -63,30 +63,30 @@ import type { SparseVectorIndexConfig } from "./schema";
  */
 export interface Collection {
   /** Tenant name */
-  tenant: string;
+  readonly tenant: string;
   /** Database name */
-  database: string;
+  readonly database: string;
   /** Unique identifier for the collection */
-  id: string;
+  readonly id: string;
   /**
    * Name of the collection.
    * @throws ChromaValueError if the collection is not yet hydrated.
    */
-  name: string;
+  readonly name: string;
   /**
-   * Collection-level metadata.
+   * Collection-level metadata. Use `modify()` to update.
    * @throws ChromaValueError if the collection is not yet hydrated.
    */
-  metadata: CollectionMetadata | undefined;
+  readonly metadata: CollectionMetadata | undefined;
   /**
-   * Collection configuration settings.
+   * Collection configuration settings. Use `modify()` to update.
    * @throws ChromaValueError if the collection is not yet hydrated.
    */
-  configuration: CollectionConfiguration;
+  readonly configuration: CollectionConfiguration;
   /** Optional embedding function. Must match the one used to create the collection. */
-  embeddingFunction?: EmbeddingFunction;
+  readonly embeddingFunction?: EmbeddingFunction;
   /** Collection schema describing index configuration */
-  schema?: Schema;
+  readonly schema?: Schema;
   /**
    * Gets the total number of records in the collection.
    * @param options - Optional settings
@@ -339,11 +339,8 @@ abstract class CollectionBase implements Collection {
   }
 
   abstract get name(): string;
-  abstract set name(name: string);
   abstract get metadata(): CollectionMetadata | undefined;
-  abstract set metadata(metadata: CollectionMetadata | undefined);
   abstract get configuration(): CollectionConfiguration;
-  abstract set configuration(configuration: CollectionConfiguration);
 
   public get embeddingFunction(): EmbeddingFunction | undefined {
     return this._embeddingFunction;
@@ -1215,24 +1212,12 @@ export class CollectionImpl extends CollectionBase {
     return this._name!;
   }
 
-  public set name(name: string) {
-    this._name = name;
-  }
-
   public get metadata(): CollectionMetadata | undefined {
     return this._metadata;
   }
 
-  public set metadata(metadata: CollectionMetadata | undefined) {
-    this._metadata = metadata;
-  }
-
   public get configuration(): CollectionConfiguration {
     return this._configuration!;
-  }
-
-  public set configuration(configuration: CollectionConfiguration) {
-    this._configuration = configuration;
   }
 }
 
@@ -1266,10 +1251,6 @@ export class ThinCollectionImpl extends CollectionBase {
     return this._name!;
   }
 
-  public set name(name: string) {
-    this._name = name;
-  }
-
   public get metadata(): CollectionMetadata | undefined {
     if (!this._hydrated) {
       throw new ChromaValueError(
@@ -1280,10 +1261,6 @@ export class ThinCollectionImpl extends CollectionBase {
     return this._metadata;
   }
 
-  public set metadata(metadata: CollectionMetadata | undefined) {
-    this._metadata = metadata;
-  }
-
   public get configuration(): CollectionConfiguration {
     if (!this._hydrated) {
       throw new ChromaValueError(
@@ -1292,10 +1269,6 @@ export class ThinCollectionImpl extends CollectionBase {
       );
     }
     return this._configuration!;
-  }
-
-  public set configuration(configuration: CollectionConfiguration) {
-    this._configuration = configuration;
   }
 
   protected override async ensureHydrated(): Promise<void> {
