@@ -1,3 +1,4 @@
+use crate::bloom_filter::BloomFilter;
 use crate::types::ChromaSegmentFlusher;
 
 use super::distributed_spann::SpannSegmentWriterError;
@@ -11,9 +12,11 @@ use chroma_blockstore::{
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::fulltext::types::FullTextIndexError;
+use chroma_storage::Storage;
 use chroma_types::{
     Cmek, DataRecord, DatabaseUuid, MaterializedLogOperation, SchemaError, Segment, SegmentType,
-    SegmentUuid, MAX_OFFSET_ID, OFFSET_ID_TO_DATA, OFFSET_ID_TO_USER_ID, USER_ID_TO_OFFSET_ID,
+    SegmentUuid, MAX_OFFSET_ID, OFFSET_ID_TO_DATA, OFFSET_ID_TO_USER_ID, USER_ID_BLOOM_FILTER,
+    USER_ID_TO_OFFSET_ID,
 };
 use futures::{Stream, StreamExt, TryStreamExt};
 use std::collections::HashMap;
@@ -23,6 +26,8 @@ use std::sync::atomic::{self, AtomicU32};
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{Instrument, Span};
+
+const DEFAULT_BLOOM_FILTER_CAPACITY: u64 = 100_000;
 
 #[derive(Clone)]
 pub struct RecordSegmentWriter {
@@ -35,6 +40,8 @@ pub struct RecordSegmentWriter {
     max_offset_id: Option<BlockfileWriter>,
     max_new_offset_id: Arc<AtomicU32>,
     pub id: SegmentUuid,
+    #[allow(dead_code)]
+    bloom_filter: Option<BloomFilter<str>>,
 }
 
 impl Debug for RecordSegmentWriter {
@@ -175,7 +182,7 @@ impl RecordSegmentWriter {
 
                 (user_id_to_id, id_to_user_id, id_to_data, max_offset_id)
             }
-            4 => {
+            4 | 5 => {
                 tracing::debug!("Found files, loading blockfiles for record segment");
                 let user_id_to_id_bf_path = match segment.file_path.get(USER_ID_TO_OFFSET_ID) {
                     Some(user_id_to_id_bf_id) => match user_id_to_id_bf_id.first() {
@@ -324,6 +331,53 @@ impl RecordSegmentWriter {
             _ => return Err(RecordSegmentWriterCreationError::IncorrectNumberOfFiles),
         };
 
+        // Handle bloom filter separately from core blockfiles so failures here
+        // degrade gracefully (fall back to blockfile lookups) rather than blocking compaction.
+        let storage = blockfile_provider.storage();
+        let bloom_filter = if segment.file_path.is_empty() {
+            Some(BloomFilter::new(
+                DEFAULT_BLOOM_FILTER_CAPACITY,
+                storage.clone(),
+            ))
+        } else {
+            // Try to load an existing bloom filter from storage.
+            let loaded = match (&storage, segment.file_path.get(USER_ID_BLOOM_FILTER)) {
+                (Some(storage), Some(paths)) if !paths.is_empty() => {
+                    match BloomFilter::<str>::load(storage.clone(), &paths[0]).await {
+                        Ok(bf) if !bf.needs_rebuild() => {
+                            tracing::info!(
+                                live_count = bf.live_count(),
+                                stale_count = bf.stale_count(),
+                                "Loaded bloom filter from storage"
+                            );
+                            Some(bf)
+                        }
+                        Ok(_) => {
+                            tracing::info!("Bloom filter needs rebuild, will rebuild from reader");
+                            None
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = ?e, "Failed to load bloom filter from storage");
+                            None
+                        }
+                    }
+                }
+                _ => None,
+            };
+
+            match loaded {
+                Some(bf) => Some(bf),
+                None => {
+                    Box::pin(Self::rebuild_bloom_filter(
+                        segment,
+                        blockfile_provider,
+                        storage.clone(),
+                    ))
+                    .await
+                }
+            }
+        };
+
         Ok(RecordSegmentWriter {
             user_id_to_id: Some(user_id_to_id),
             id_to_user_id: Some(id_to_user_id),
@@ -334,7 +388,54 @@ impl RecordSegmentWriter {
             // has been introduced in the materialized logs
             max_new_offset_id: AtomicU32::new(0).into(),
             id: segment.id,
+            bloom_filter,
         })
+    }
+
+    /// Build a bloom filter by scanning all existing user IDs from the record segment.
+    /// Returns None on any error — the caller should proceed without a bloom filter.
+    async fn rebuild_bloom_filter(
+        segment: &Segment,
+        blockfile_provider: &BlockfileProvider,
+        storage: Option<Arc<Storage>>,
+    ) -> Option<BloomFilter<str>> {
+        let reader = match Box::pin(RecordSegmentReader::from_segment(
+            segment,
+            blockfile_provider,
+        ))
+        .await
+        {
+            Ok(reader) => reader,
+            Err(e) => {
+                tracing::warn!(error = ?e, "Failed to create reader for bloom filter rebuild");
+                return None;
+            }
+        };
+        let count = match reader.count().await {
+            Ok(count) => count,
+            Err(e) => {
+                tracing::warn!(error = ?e, "Failed to count records for bloom filter rebuild");
+                return None;
+            }
+        };
+        let capacity = (count as u64).max(DEFAULT_BLOOM_FILTER_CAPACITY) * 2;
+        let bloom_filter = BloomFilter::new(capacity, storage);
+        let mut stream = std::pin::pin!(reader.get_user_id_stream());
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(user_id) => bloom_filter.insert(user_id),
+                Err(e) => {
+                    tracing::warn!(error = ?e, "Error during bloom filter rebuild, aborting");
+                    return None;
+                }
+            }
+        }
+        tracing::info!(
+            count,
+            capacity,
+            "Rebuilt bloom filter from existing records"
+        );
+        Some(bloom_filter)
     }
 
     pub async fn apply_materialized_log_chunk(
@@ -780,7 +881,7 @@ impl RecordSegmentReader<'_> {
     ) -> Result<Self, Box<RecordSegmentReaderCreationError>> {
         let (user_id_to_id, id_to_user_id, id_to_data, existing_max_offset_id) =
             match segment.file_path.len() {
-                4 => {
+                4 | 5 => {
                     let user_id_to_id_future =
                         Self::load_index_reader(segment, USER_ID_TO_OFFSET_ID, blockfile_provider)
                             .instrument(Span::current());
@@ -911,6 +1012,16 @@ impl RecordSegmentReader<'_> {
         self.id_to_user_id
             .get_range_stream(""..="", offset_range)
             .map(|res| res.map(|(_, offset_id, _)| offset_id))
+    }
+
+    /// Stream all user IDs from the lightweight id_to_user_id blockfile.
+    /// Used for bloom filter rebuild without loading full data records.
+    pub fn get_user_id_stream<'me>(
+        &'me self,
+    ) -> impl Stream<Item = Result<&'me str, Box<dyn ChromaError>>> + 'me {
+        self.id_to_user_id
+            .get_range_stream(""..="", ..)
+            .map(|res| res.map(|(_, _, user_id)| user_id))
     }
 
     /// Find the rank of the given offset id in the record segment
