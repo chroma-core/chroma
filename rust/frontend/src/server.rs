@@ -1747,6 +1747,7 @@ async fn fork_collection(
             tenant.clone(),
             database.clone(),
             collection_id.0.to_string(),
+            server.config.region.clone(),
         ));
 
     let request = chroma_types::ForkCollectionRequest::try_new(
@@ -1942,6 +1943,7 @@ async fn collection_add(
             database.clone(),
             collection_id.0.to_string(),
             WriteAction::Add,
+            server.config.region.clone(),
         ));
 
     metering_context_container.enter();
@@ -2076,6 +2078,7 @@ async fn collection_update(
             database.clone(),
             collection_id.0.to_string(),
             WriteAction::Update,
+            server.config.region.clone(),
         ));
 
     metering_context_container.enter();
@@ -2210,6 +2213,7 @@ async fn collection_upsert(
             database.clone(),
             collection_id.0.to_string(),
             WriteAction::Upsert,
+            server.config.region.clone(),
         ));
 
     metering_context_container.enter();
@@ -2350,6 +2354,7 @@ async fn collection_delete(
             database.clone(),
             collection_id.0.to_string(),
             ReadAction::GetForDelete,
+            server.config.region.clone(),
         ));
 
     tracing::info!(name: "collection_delete", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.as_ref().map_or(0, |ids| ids.len()), has_where = r#where.is_some());
@@ -2365,7 +2370,7 @@ async fn collection_delete(
     let response = Box::pin(
         server
             .frontend
-            .delete(request)
+            .delete(request, server.config.region.clone())
             .meter(metering_context_container),
     )
     .await?;
@@ -2466,6 +2471,7 @@ async fn collection_count(
             database.clone(),
             collection_id.clone(),
             ReadAction::Count,
+            server.config.region.clone(),
         ))
     } else {
         chroma_metering::create::<ExternalCollectionReadContext>(
@@ -2474,6 +2480,7 @@ async fn collection_count(
                 database.clone(),
                 collection_id.clone(),
                 ReadAction::Count,
+                server.config.region.clone(),
             ),
         )
     };
@@ -2579,6 +2586,7 @@ async fn indexing_status(
             database.clone(),
             collection_id.clone(),
             ReadAction::Query,
+            server.config.region.clone(),
         ));
 
     metering_context_container.enter();
@@ -2731,6 +2739,7 @@ async fn collection_get(
             database.clone(),
             collection_id.0.to_string(),
             ReadAction::Get,
+            server.config.region.clone(),
         ))
     } else {
         chroma_metering::create::<ExternalCollectionReadContext>(
@@ -2739,6 +2748,7 @@ async fn collection_get(
                 database.clone(),
                 collection_id.0.to_string(),
                 ReadAction::Get,
+                server.config.region.clone(),
             ),
         )
     };
@@ -2906,6 +2916,7 @@ async fn collection_query(
             database.clone(),
             collection_id.0.to_string(),
             ReadAction::Query,
+            server.config.region.clone(),
         ))
     } else {
         chroma_metering::create::<ExternalCollectionReadContext>(
@@ -2914,6 +2925,7 @@ async fn collection_query(
                 database.clone(),
                 collection_id.0.to_string(),
                 ReadAction::Query,
+                server.config.region.clone(),
             ),
         )
     };
@@ -3064,6 +3076,7 @@ async fn collection_search(
             database.clone(),
             collection_id.0.to_string(),
             ReadAction::Search,
+            server.config.region.clone(),
         ))
     } else {
         chroma_metering::create::<ExternalCollectionReadContext>(
@@ -3072,6 +3085,7 @@ async fn collection_search(
                 database.clone(),
                 collection_id.0.to_string(),
                 ReadAction::Search,
+                server.config.region.clone(),
             ),
         )
     };

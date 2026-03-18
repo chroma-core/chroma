@@ -4,6 +4,10 @@ use std::{sync::atomic::Ordering, time::Instant};
 
 use crate::types::{MeteringAtomicU64, MeteringInstant};
 
+fn default_region() -> String {
+    String::new()
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Hash, Serialize)]
 #[serde(rename_all = "snake_case", tag = "read_action")]
 pub enum ReadAction {
@@ -96,6 +100,8 @@ initialize_metering! {
         pub tenant: String,
         pub database: String,
         pub collection_id: String,
+        #[serde(default = "default_region")]
+        pub region: String,
         pub latest_collection_logical_size_bytes: MeteringAtomicU64,
     }
 
@@ -104,11 +110,13 @@ initialize_metering! {
             tenant: String,
             database: String,
             collection_id: String,
+            region: String,
         ) -> Self {
             CollectionForkContext {
                 tenant,
                 database,
                 collection_id,
+                region,
                 latest_collection_logical_size_bytes: MeteringAtomicU64::new(0),
             }
         }
@@ -153,6 +161,8 @@ initialize_metering! {
         pub tenant: String,
         pub database: String,
         pub collection_id: String,
+        #[serde(default = "default_region")]
+        pub region: String,
         #[serde(flatten)]
         pub action: ReadAction,
         #[serde(skip, default = "MeteringInstant::now")]
@@ -172,11 +182,13 @@ initialize_metering! {
             database: String,
             collection_id: String,
             action: ReadAction,
+            region: String,
         ) -> Self {
             CollectionReadContext {
                 tenant,
                 database,
                 collection_id,
+                region,
                 action,
                 request_received_at: MeteringInstant::now(),
                 fts_query_length: MeteringAtomicU64::new(0),
@@ -294,6 +306,8 @@ initialize_metering! {
         pub tenant: String,
         pub database: String,
         pub collection_id: String,
+        #[serde(default = "default_region")]
+        pub region: String,
         #[serde(flatten)]
         pub action: WriteAction,
         #[serde(skip, default = "MeteringInstant::now")]
@@ -308,11 +322,13 @@ initialize_metering! {
             database: String,
             collection_id: String,
             action: WriteAction,
+            region: String,
         ) -> Self {
             CollectionWriteContext {
                 tenant,
                 database,
                 collection_id,
+                region,
                 action,
                 request_received_at: MeteringInstant::now(),
                 log_size_bytes: MeteringAtomicU64::new(0),
@@ -387,6 +403,8 @@ initialize_metering! {
         pub tenant: String,
         pub database: String,
         pub collection_id: String,
+        #[serde(default = "default_region")]
+        pub region: String,
         #[serde(flatten)]
         pub action: ReadAction,
         #[serde(skip, default = "MeteringInstant::now")]
@@ -406,11 +424,13 @@ initialize_metering! {
             database: String,
             collection_id: String,
             action: ReadAction,
+            region: String,
         ) -> Self {
             ExternalCollectionReadContext {
                 tenant,
                 database,
                 collection_id,
+                region,
                 action,
                 request_received_at: MeteringInstant::now(),
                 fts_query_length: MeteringAtomicU64::new(0),
@@ -533,6 +553,7 @@ mod tests {
             tenant: "test_tenant".to_string(),
             database: "test_database".to_string(),
             collection_id: "test_collection".to_string(),
+            region: "aws-us-east-1".to_string(),
             action: WriteAction::Add,
             request_received_at: request_received_at.clone(),
             log_size_bytes: MeteringAtomicU64::new(1000),

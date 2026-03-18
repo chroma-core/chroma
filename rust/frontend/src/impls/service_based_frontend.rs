@@ -1198,6 +1198,7 @@ impl ServiceBasedFrontend {
             limit,
             ..
         }: DeleteCollectionRecordsRequest,
+        region: String,
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionRecordsError> {
         let database_name_typed = DatabaseName::new(database_name.clone())
             .ok_or(DeleteCollectionRecordsError::InvalidDatabaseName)?;
@@ -1305,6 +1306,7 @@ impl ServiceBasedFrontend {
                 database_name.clone(),
                 collection_id.0.to_string(),
                 WriteAction::Delete,
+                region,
             ));
 
         let deleted = records.len() as u32;
@@ -1373,17 +1375,19 @@ impl ServiceBasedFrontend {
     pub async fn delete(
         &mut self,
         request: DeleteCollectionRecordsRequest,
+        region: String,
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionRecordsError> {
         let retries = Arc::new(AtomicUsize::new(0));
         let delete_to_retry = || {
             let mut self_clone = self.clone();
             let request_clone = request.clone();
+            let region_clone = region.clone();
             let cache_clone = self
                 .collections_with_segments_provider
                 .collections_with_segments_cache
                 .clone();
             async move {
-                let res = Box::pin(self_clone.retryable_delete(request_clone)).await;
+                let res = Box::pin(self_clone.retryable_delete(request_clone, region_clone)).await;
                 match res {
                     Ok(res) => Ok(res),
                     Err(e) => {
