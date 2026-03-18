@@ -590,22 +590,21 @@ export class ChromaClient {
    * @param options.name - The name of the collection to delete
    */
   public async deleteCollection({ name }: { name: string }): Promise<void> {
-    await CollectionService.deleteCollection({
+    const path = { ...(await this._path()), collection_id: name };
+
+    // Fetch the collection ID before deleting so we can reliably
+    // invalidate the cache (which is keyed by ID, not name).
+    const { data } = await CollectionService.getCollection({
       client: this.apiClient,
-      path: { ...(await this._path()), collection_id: name },
+      path,
     });
 
-    // Remove from cache by scanning for matching name
-    for (const [id, col] of this._collectionCache) {
-      try {
-        if (col.name === name) {
-          this._collectionCache.delete(id);
-          break;
-        }
-      } catch {
-        // Unhydrated collection — can't compare by name, skip
-      }
-    }
+    await CollectionService.deleteCollection({
+      client: this.apiClient,
+      path,
+    });
+
+    this._collectionCache.delete(data.id);
   }
 
   /**
