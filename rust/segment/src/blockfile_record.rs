@@ -820,7 +820,8 @@ impl RecordSegmentFlusher {
             match serialized_bloom_filter.save(&bloom_filter_path).await {
                 Ok(()) => {
                     tracing::info!(path = %bloom_filter_path, "Persisted bloom filter to storage");
-                    flushed_files.insert(USER_ID_BLOOM_FILTER.to_string(), vec![bloom_filter_path]);
+                    // TODO(Sanket): Add bloom filter to flushed files
+                    // flushed_files.insert(USER_ID_BLOOM_FILTER.to_string(), vec![bloom_filter_path]);
                 }
                 Err(e) => {
                     tracing::warn!(error = ?e, "Failed to persist bloom filter, skipping");
@@ -1237,7 +1238,7 @@ mod tests {
         let mut test_segment = TestDistributedSegment::new().await;
         let num_records = 20;
         let logs = upsert_generator.generate_chunk(1..=num_records);
-        test_segment.compact_log(logs, 1).await;
+        Box::pin(test_segment.compact_log(logs, 1)).await;
 
         assert!(
             test_segment
@@ -1259,7 +1260,7 @@ mod tests {
         let mut test_segment = TestDistributedSegment::new().await;
         let num_records = 20;
         let logs = upsert_generator.generate_chunk(1..=num_records);
-        test_segment.compact_log(logs, 1).await;
+        Box::pin(test_segment.compact_log(logs, 1)).await;
 
         let writer = RecordSegmentWriter::from_segment(
             &test_segment.collection.tenant,
@@ -1296,7 +1297,7 @@ mod tests {
         let mut test_segment = TestDistributedSegment::new().await;
         let num_records = 20;
         let logs = upsert_generator.generate_chunk(1..=num_records);
-        test_segment.compact_log(logs, 1).await;
+        Box::pin(test_segment.compact_log(logs, 1)).await;
 
         // Simulate a legacy segment by removing the bloom filter key.
         test_segment
@@ -1343,14 +1344,14 @@ mod tests {
 
         // First compaction: add 10 records.
         let logs = upsert_generator.generate_chunk(1..=10);
-        test_segment.compact_log(logs, 1).await;
+        Box::pin(test_segment.compact_log(logs, 1)).await;
 
         // Second compaction: delete 2 records, materializing with a reader so
         // the deletes resolve to DeleteExisting.
-        let reader = super::RecordSegmentReader::from_segment(
+        let reader = Box::pin(super::RecordSegmentReader::from_segment(
             &test_segment.record_segment,
             &test_segment.blockfile_provider,
-        )
+        ))
         .await
         .expect("Should be able to create reader");
 
@@ -1379,10 +1380,10 @@ mod tests {
         .expect("Should materialize delete logs");
 
         // Need a second reader for hydration during apply.
-        let reader_for_apply = super::RecordSegmentReader::from_segment(
+        let reader_for_apply = Box::pin(super::RecordSegmentReader::from_segment(
             &test_segment.record_segment,
             &test_segment.blockfile_provider,
-        )
+        ))
         .await
         .expect("Should be able to create reader for apply");
 
