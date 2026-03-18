@@ -445,7 +445,7 @@ impl CompactionManagerContext {
         };
 
         // fetch data to compact -> execute_task/compact -> register
-        // Use the compact function to handle the entire orchestration process
+        // Use the compact function to handle the entire orchestration process.
         let is_function_disabled = self.disabled_function_collections.contains(&collection_id);
         let fragment_fetcher = self.fragment_fetcher_for_collection(collection_id);
         let bloom_filter_manager = self.bloom_filter_manager_for_collection(collection_id);
