@@ -25,6 +25,8 @@ const BLOOM_FILTER_SEED: u128 = 0xDEAD_BEEF_CAFE_BABE_0123_4567_89AB_CDEF;
 /// A fixed seed is needed so hashing stays consistent after deserialization.
 #[derive(Serialize, Deserialize)]
 struct BloomFilterRepr {
+    /// Unique identifier for this bloom filter instance.
+    id: uuid::Uuid,
     /// Raw bit vector backing the bloom filter.
     bits: Vec<u64>,
     /// Number of hash functions used per item.
@@ -73,8 +75,6 @@ struct BloomFilterInner {
     /// The number of expected items the filter was originally sized for. Used together with
     /// live_count and stale_count to decide when the filter's FPR has degraded enough to rebuild.
     capacity: u64,
-    /// Storage backend for persistence. None for in-memory-only filters (e.g. tests).
-    storage: Option<Arc<Storage>>,
 }
 
 /// A thread-safe, cloneable bloom filter for existence checks.
@@ -83,8 +83,7 @@ struct BloomFilterInner {
 /// Wraps an `Arc<Inner>` so clones share the same underlying filter.
 pub struct BloomFilter<T: Hash + ?Sized> {
     inner: Arc<BloomFilterInner>,
-    path: Option<String>,
-    manager: Option<BloomFilterManager>,
+    id: uuid::Uuid,
     _phantom: PhantomData<fn(&T)>,
 }
 
@@ -92,8 +91,7 @@ impl<T: Hash + ?Sized> Clone for BloomFilter<T> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
-            path: self.path.clone(),
-            manager: self.manager.clone(),
+            id: self.id,
             _phantom: PhantomData,
         }
     }
@@ -102,6 +100,7 @@ impl<T: Hash + ?Sized> Clone for BloomFilter<T> {
 impl<T: Hash + ?Sized> std::fmt::Debug for BloomFilter<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BloomFilter")
+            .field("id", &self.id)
             .field("live_count", &self.inner.live_count.load(Ordering::Relaxed))
             .field(
                 "stale_count",
@@ -138,14 +137,7 @@ impl ChromaError for BloomFilterError {
 
 impl<T: Hash + ?Sized> BloomFilter<T> {
     /// Create a new bloom filter sized for `expected_items` with a 0.001% false positive rate.
-    /// Generates a unique storage path under `prefix_path` automatically.
-    /// Pass `None` for `storage` / `prefix_path` for in-memory-only filters (e.g. tests).
-    pub fn new(
-        expected_items: u64,
-        storage: Option<Arc<Storage>>,
-        prefix_path: Option<&str>,
-        manager: Option<BloomFilterManager>,
-    ) -> Self {
+    pub fn new(expected_items: u64) -> Self {
         let capacity = expected_items.max(1);
         let filter = AtomicBloomFilter::with_false_pos(DEFAULT_FALSE_POSITIVE_RATE)
             .seed(&BLOOM_FILTER_SEED)
@@ -156,10 +148,8 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
                 live_count: AtomicU64::new(0),
                 stale_count: AtomicU64::new(0),
                 capacity,
-                storage,
             }),
-            path: prefix_path.map(BloomFilterManager::format_key),
-            manager,
+            id: uuid::Uuid::new_v4(),
             _phantom: PhantomData,
         }
     }
@@ -222,14 +212,8 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
         self.inner.capacity
     }
 
-    pub fn path(&self) -> Option<&str> {
-        self.path.as_deref()
-    }
-
-    /// Return a new handle with a freshly generated storage path under the given prefix.
-    fn with_fresh_path(mut self, prefix_path: &str) -> Self {
-        self.path = Some(BloomFilterManager::format_key(prefix_path));
-        self
+    pub fn id(&self) -> uuid::Uuid {
+        self.id
     }
 
     /// Approximate memory used by this bloom filter in bytes.
@@ -238,21 +222,17 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
         let live_count_bytes = std::mem::size_of::<AtomicU64>();
         let stale_count_bytes = std::mem::size_of::<AtomicU64>();
         let capacity_bytes = std::mem::size_of::<u64>();
-        let storage_bytes = std::mem::size_of::<Option<Arc<Storage>>>();
-        bit_vector_bytes + live_count_bytes + stale_count_bytes + capacity_bytes + storage_bytes
+        bit_vector_bytes + live_count_bytes + stale_count_bytes + capacity_bytes
     }
 
     /// Consume the bloom filter and return a `SerializedBloomFilter` ready for I/O.
-    /// Returns `None` if storage or path is not configured.
-    pub fn into_bytes(self) -> Result<Option<SerializedBloomFilter>, BloomFilterError> {
-        let (storage, path) = match (self.inner.storage.clone(), self.path) {
-            (Some(s), Some(p)) => (s, p),
-            _ => return Ok(None),
-        };
-        let num_u64s = self.inner.filter.num_bits() / 64;
-        let mut bits = Vec::with_capacity(num_u64s);
-        bits.extend(self.inner.filter.iter());
+    pub fn into_bytes(
+        self,
+        storage: Arc<Storage>,
+        path: String,
+    ) -> Result<SerializedBloomFilter, BloomFilterError> {
         let repr = BloomFilterRepr {
+            id: self.id,
             bits: self.inner.filter.iter().collect(),
             num_hashes: self.inner.filter.num_hashes(),
             live_count: self.inner.live_count.load(Ordering::SeqCst),
@@ -261,11 +241,11 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
         };
         let bytes = bincode::serialize(&repr)
             .map_err(|e| BloomFilterError::Serialization(e.to_string()))?;
-        Ok(Some(SerializedBloomFilter {
+        Ok(SerializedBloomFilter {
             bytes,
             storage,
             path,
-        }))
+        })
     }
 
     #[cfg(test)]
@@ -274,6 +254,7 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
             BloomFilterError::Serialization("other references still exist".to_string())
         })?;
         let repr = BloomFilterRepr {
+            id: self.id,
             bits: inner.filter.iter().collect(),
             num_hashes: inner.filter.num_hashes(),
             live_count: inner.live_count.load(Ordering::SeqCst),
@@ -283,12 +264,7 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
         bincode::serialize(&repr).map_err(|e| BloomFilterError::Serialization(e.to_string()))
     }
 
-    pub fn from_bytes(
-        bytes: &[u8],
-        storage: Option<Arc<Storage>>,
-        path: Option<String>,
-        manager: Option<BloomFilterManager>,
-    ) -> Result<Self, BloomFilterError> {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, BloomFilterError> {
         let repr: BloomFilterRepr = bincode::deserialize(bytes)
             .map_err(|e| BloomFilterError::Deserialization(e.to_string()))?;
         let filter = AtomicBloomFilter::from_vec(repr.bits)
@@ -300,10 +276,8 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
                 live_count: AtomicU64::new(repr.live_count),
                 stale_count: AtomicU64::new(repr.stale_count),
                 capacity: repr.capacity,
-                storage,
             }),
-            path,
-            manager,
+            id: repr.id,
             _phantom: PhantomData,
         })
     }
@@ -430,8 +404,7 @@ impl BloomFilterManager {
         }
     }
 
-    pub fn format_key(prefix_path: &str) -> String {
-        let id = uuid::Uuid::new_v4();
+    fn format_key(prefix_path: &str, id: uuid::Uuid) -> String {
         if prefix_path.is_empty() {
             format!("bloom_filter/{}", id)
         } else {
@@ -439,28 +412,27 @@ impl BloomFilterManager {
         }
     }
 
-    /// Cache the bloom filter under its path and return the serialized form
-    /// ready for flush. Mirrors `BlockManager::commit`.
+    /// Cache the bloom filter and return the serialized form ready for flush.
+    /// The full storage path is constructed from `prefix_path` and the filter's id.
     pub async fn commit(
         &self,
         bf: BloomFilter<str>,
-    ) -> Result<Option<SerializedBloomFilter>, BloomFilterError> {
-        if let Some(path) = bf.path() {
-            self.inner.cache.insert(path.to_string(), bf.clone()).await;
-        }
-        bf.into_bytes()
+        prefix_path: &str,
+    ) -> Result<SerializedBloomFilter, BloomFilterError> {
+        let path = Self::format_key(prefix_path, bf.id());
+        let key = bf.id().to_string();
+        self.inner.cache.insert(key, bf.clone()).await;
+        bf.into_bytes(self.inner.storage.clone(), path)
     }
 
     /// Look up a bloom filter by its storage path. Returns from cache if present,
     /// otherwise loads from storage, caches it, and returns it.
     pub async fn get(&self, path: &str) -> Result<BloomFilter<str>, BloomFilterError> {
-        let key = path.to_string();
-        if let Ok(Some(cached)) = self.inner.cache.get(&key).await {
+        // The path ends with the bloom filter's UUID; use it as cache key.
+        let cache_key = path.rsplit('/').next().unwrap_or(path).to_string();
+        if let Ok(Some(cached)) = self.inner.cache.get(&cache_key).await {
             return Ok(cached);
         }
-        let storage_for_bf = self.inner.storage.clone();
-        let key_for_bf = key.clone();
-        let manager_for_bf = self.clone();
         let (bf, _) = self
             .inner
             .storage
@@ -469,13 +441,7 @@ impl BloomFilterManager {
                 GetOptions::new(StorageRequestPriority::P0).with_parallelism(),
                 move |bytes_result| async move {
                     let bytes = bytes_result?;
-                    BloomFilter::<str>::from_bytes(
-                        &bytes,
-                        Some(storage_for_bf),
-                        Some(key_for_bf),
-                        Some(manager_for_bf),
-                    )
-                    .map_err(|e| StorageError::Message {
+                    BloomFilter::<str>::from_bytes(&bytes).map_err(|e| StorageError::Message {
                         message: e.to_string(),
                     })
                 },
@@ -483,7 +449,10 @@ impl BloomFilterManager {
             .await
             .map_err(BloomFilterError::Storage)?;
         // TODO(Sanket-temp): Should deep copy bloom filter here to avoid modifying the original one.
-        self.inner.cache.insert(key, bf.clone()).await;
+        self.inner
+            .cache
+            .insert(bf.id().to_string(), bf.clone())
+            .await;
         Ok(bf)
     }
 
@@ -497,15 +466,17 @@ impl BloomFilterManager {
         self.inner.storage_fetch_threshold
     }
 
-    /// Load an existing bloom filter and fork it for a new compaction cycle.
-    /// Generates a fresh storage path under `prefix_path` for the new copy.
-    pub async fn fork(
-        &self,
-        old_path: &str,
-        prefix_path: &str,
-    ) -> Result<BloomFilter<str>, BloomFilterError> {
-        let bf = self.get(old_path).await?;
-        Ok(bf.with_fresh_path(prefix_path))
+    /// Create a brand-new bloom filter sized for `expected_items`.
+    pub fn create(&self, expected_items: u64) -> BloomFilter<str> {
+        BloomFilter::new(expected_items)
+    }
+
+    /// Load an existing bloom filter from cache or storage with a fresh id
+    /// for the new compaction cycle.
+    pub async fn fork(&self, old_path: &str) -> Result<BloomFilter<str>, BloomFilterError> {
+        let mut bf = self.get(old_path).await?;
+        bf.id = uuid::Uuid::new_v4();
+        Ok(bf)
     }
 
     pub fn new_for_test(storage: Arc<Storage>) -> Self {
@@ -525,9 +496,126 @@ impl BloomFilterManager {
 mod tests {
     use super::*;
 
+    fn create_test_manager() -> (tempfile::TempDir, Arc<Storage>, BloomFilterManager) {
+        let (tmp, storage) = chroma_storage::test_storage();
+        let storage = Arc::new(storage);
+        let manager = BloomFilterManager::new_for_test(storage.clone());
+        (tmp, storage, manager)
+    }
+
+    #[tokio::test]
+    async fn test_manager_commit_caches_and_serializes() {
+        let (_tmp, _storage, manager) = create_test_manager();
+        let bf = manager.create(100);
+        bf.insert("alice");
+        bf.insert("bob");
+
+        let serialized = manager.commit(bf, "test_prefix").await.unwrap();
+        let path = serialized.path().to_string();
+        assert!(path.starts_with("test_prefix/bloom_filter/"));
+
+        // After commit the BF should be in the cache; get() should return it
+        // without needing to read from storage (we haven't called save() yet).
+        let cached = manager.get(&path).await.unwrap();
+        assert!(cached.contains("alice"));
+        assert!(cached.contains("bob"));
+        assert!(!cached.contains("charlie"));
+        assert_eq!(cached.live_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_manager_get_roundtrip_from_storage() {
+        let (_tmp, _storage, manager) = create_test_manager();
+        let bf = manager.create(100);
+        for i in 0..50 {
+            bf.insert(&format!("user_{i}"));
+        }
+
+        // Serialize and persist to storage.
+        let serialized = manager.commit(bf, "prefix").await.unwrap();
+        let path = serialized.path().to_string();
+        serialized.save().await.unwrap();
+
+        // Create a *fresh* manager (empty cache) backed by the same storage.
+        let manager2 = BloomFilterManager::new_for_test(manager.inner.storage.clone());
+
+        // get() should load from storage, deserialize, cache, and return.
+        let loaded = manager2.get(&path).await.unwrap();
+        for i in 0..50 {
+            assert!(
+                loaded.contains(&format!("user_{i}")),
+                "should contain user_{i}"
+            );
+        }
+        assert!(!loaded.contains("user_999"));
+        assert_eq!(loaded.live_count(), 50);
+    }
+
+    #[tokio::test]
+    async fn test_manager_get_returns_cached_after_first_load() {
+        let (_tmp, _storage, manager) = create_test_manager();
+        let bf = manager.create(100);
+        bf.insert("cached_item");
+
+        let serialized = manager.commit(bf, "prefix").await.unwrap();
+        let path = serialized.path().to_string();
+        serialized.save().await.unwrap();
+
+        // First get: loads from storage (fresh manager).
+        let manager2 = BloomFilterManager::new_for_test(manager.inner.storage.clone());
+        let first = manager2.get(&path).await.unwrap();
+        assert!(first.contains("cached_item"));
+
+        // Second get: should return from cache (same result).
+        let second = manager2.get(&path).await.unwrap();
+        assert!(second.contains("cached_item"));
+        assert_eq!(second.live_count(), first.live_count());
+    }
+
+    #[tokio::test]
+    async fn test_manager_fork_returns_same_contents() {
+        let (_tmp, _storage, manager) = create_test_manager();
+        let bf = manager.create(100);
+        let original_id = bf.id();
+        bf.insert("x");
+        bf.insert("y");
+        bf.mark_deleted();
+
+        // Commit to cache.
+        let serialized = manager.commit(bf, "original").await.unwrap();
+        let path = serialized.path().to_string();
+
+        // Fork from the committed path.
+        let forked = manager.fork(&path).await.unwrap();
+
+        // Forked filter has the same contents but a new id.
+        assert!(forked.contains("x"));
+        assert!(forked.contains("y"));
+        assert_eq!(forked.live_count(), 1);
+        assert_eq!(forked.stale_count(), 1);
+        assert_ne!(forked.id(), original_id, "fork should assign a new id");
+    }
+
+    #[test]
+    fn test_format_key() {
+        let id = uuid::Uuid::new_v4();
+        let key1 = BloomFilterManager::format_key("some/prefix", id);
+        assert_eq!(key1, format!("some/prefix/bloom_filter/{}", id));
+
+        let key2 = BloomFilterManager::format_key("", id);
+        assert_eq!(key2, format!("bloom_filter/{}", id));
+
+        // Different ids produce different keys.
+        let id2 = uuid::Uuid::new_v4();
+        assert_ne!(
+            BloomFilterManager::format_key("same", id),
+            BloomFilterManager::format_key("same", id2),
+        );
+    }
+
     #[test]
     fn test_insert_and_contains() {
-        let bf = BloomFilter::<str>::new(1000, None, None, None);
+        let bf = BloomFilter::<str>::new(1000);
         bf.insert("user_1");
         bf.insert("user_2");
 
@@ -540,7 +628,7 @@ mod tests {
 
     #[test]
     fn test_mark_deleted() {
-        let bf = BloomFilter::<str>::new(1000, None, None, None);
+        let bf = BloomFilter::<str>::new(1000);
         bf.insert("user_1");
         bf.insert("user_2");
         bf.mark_deleted();
@@ -551,7 +639,7 @@ mod tests {
 
     #[test]
     fn test_serialization_roundtrip() {
-        let bf = BloomFilter::<str>::new(1000, None, None, None);
+        let bf = BloomFilter::<str>::new(1000);
         for i in 0..100 {
             bf.insert(&format!("user_{}", i));
         }
@@ -563,7 +651,7 @@ mod tests {
         let expected_capacity = bf.capacity();
 
         let bytes = bf.into_bytes_for_test().unwrap();
-        let restored = BloomFilter::<str>::from_bytes(&bytes, None, None, None).unwrap();
+        let restored = BloomFilter::<str>::from_bytes(&bytes).unwrap();
 
         assert_eq!(restored.live_count(), expected_live);
         assert_eq!(restored.stale_count(), expected_stale);
@@ -577,7 +665,7 @@ mod tests {
 
     #[test]
     fn test_needs_rebuild_stale_ratio() {
-        let bf = BloomFilter::<str>::new(1000, None, None, None);
+        let bf = BloomFilter::<str>::new(1000);
         for i in 0..10 {
             bf.insert(&format!("user_{}", i));
         }
@@ -593,7 +681,7 @@ mod tests {
 
     #[test]
     fn test_needs_rebuild_over_capacity() {
-        let bf = BloomFilter::<str>::new(10, None, None, None);
+        let bf = BloomFilter::<str>::new(10);
         for i in 0..11 {
             bf.insert(&format!("user_{}", i));
         }

@@ -1,4 +1,6 @@
-use crate::bloom_filter::{BloomFilter, BloomFilterManager, SerializedBloomFilter};
+use crate::bloom_filter::{
+    BloomFilter, BloomFilterError, BloomFilterManager, SerializedBloomFilter,
+};
 use crate::types::ChromaSegmentFlusher;
 
 use super::distributed_spann::SpannSegmentWriterError;
@@ -12,7 +14,6 @@ use chroma_blockstore::{
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::fulltext::types::FullTextIndexError;
-use chroma_storage::Storage;
 use chroma_types::{
     Cmek, DataRecord, DatabaseUuid, MaterializedLogOperation, SchemaError, Segment, SegmentType,
     SegmentUuid, MAX_OFFSET_ID, OFFSET_ID_TO_DATA, OFFSET_ID_TO_USER_ID, USER_ID_BLOOM_FILTER,
@@ -43,6 +44,7 @@ pub struct RecordSegmentWriter {
     #[allow(dead_code)]
     bloom_filter: Option<BloomFilter<str>>,
     bloom_filter_manager: Option<BloomFilterManager>,
+    prefix_path: String,
 }
 
 impl Debug for RecordSegmentWriter {
@@ -69,6 +71,12 @@ pub enum RecordSegmentWriterCreationError {
     BlockfileOpenError(#[from] Box<OpenError>),
     #[error("S3 prefix path wrong in file paths")]
     InvalidPrefixPath,
+    #[error("Bloom filter error: {0}")]
+    BloomFilterError(#[from] BloomFilterError),
+    #[error("Record segment reader error: {0}")]
+    RecordSegmentReaderError(#[from] RecordSegmentReaderCreationError),
+    #[error("Bloom filter rebuild error: {0}")]
+    BloomFilterRebuildError(Box<dyn ChromaError>),
 }
 
 impl chroma_error::ChromaError for RecordSegmentWriterCreationError {
@@ -171,7 +179,7 @@ impl RecordSegmentWriter {
                     }
                 };
 
-                let mut options = BlockfileWriterOptions::new(prefix_path);
+                let mut options = BlockfileWriterOptions::new(prefix_path.clone());
                 if let Some(cmek) = cmek {
                     options = options.with_cmek(cmek);
                 }
@@ -333,62 +341,35 @@ impl RecordSegmentWriter {
             _ => return Err(RecordSegmentWriterCreationError::IncorrectNumberOfFiles),
         };
 
-        // Handle bloom filter separately from core blockfiles so failures here
-        // degrade gracefully (fall back to blockfile lookups) rather than blocking compaction.
-        let storage = blockfile_provider.storage();
         let prefix_path = segment.construct_prefix_path(tenant, database_id);
-        let bloom_filter = if segment.file_path.is_empty() {
-            Some(BloomFilter::new(
-                DEFAULT_BLOOM_FILTER_CAPACITY,
-                storage.clone(),
-                Some(&prefix_path),
-                bloom_filter_manager.clone(),
-            ))
-        } else {
-            // Try to load an existing bloom filter via the manager (cache-then-storage).
-            // The loaded filter gets a fresh path since this compaction will produce a new file.
-            let loaded = match (
-                &bloom_filter_manager,
-                segment.file_path.get(USER_ID_BLOOM_FILTER),
-            ) {
-                (Some(manager), Some(paths)) if !paths.is_empty() => {
-                    match manager.fork(&paths[0], &prefix_path).await {
-                        Ok(bf) if !bf.needs_rebuild() => {
-                            tracing::info!(
-                                live_count = bf.live_count(),
-                                stale_count = bf.stale_count(),
-                                "Forked bloom filter for new compaction cycle"
-                            );
-                            Some(bf)
-                        }
-                        Ok(_) => {
-                            tracing::info!("Bloom filter needs rebuild, will rebuild from reader");
-                            None
-                        }
-                        Err(e) => {
-                            tracing::warn!(error = ?e, "Failed to load bloom filter from storage");
-                            None
-                        }
+        let bloom_filter = if let Some(manager) = &bloom_filter_manager {
+            let forked = match segment.file_path.get(USER_ID_BLOOM_FILTER) {
+                Some(paths) => {
+                    // Unexpected state in the system, the key exists but the paths vector is empty.
+                    if paths.is_empty() {
+                        tracing::error!("Bloom filter key present but paths vector is empty");
+                        return Err(RecordSegmentWriterCreationError::IncorrectNumberOfFiles);
                     }
+                    Some(manager.fork(&paths[0]).await?)
                 }
-                _ => None,
+                // No bloom filter paths found, so rebuild from scratch.
+                // This handles migrations from old segments where bloom filters were not used.
+                None => None,
             };
-
-            match loaded {
-                Some(bf) => Some(bf),
-                None => {
-                    Box::pin(Self::rebuild_bloom_filter(
-                        segment,
-                        blockfile_provider,
-                        storage.clone(),
-                        Some(&prefix_path),
-                        bloom_filter_manager.clone(),
-                    ))
-                    .await
-                }
-            }
+            // Rebuild the bloom filter if it is either empty or is degraded.
+            Some(
+                Box::pin(Self::maybe_rebuild_bloom_filter(
+                    segment,
+                    blockfile_provider,
+                    manager,
+                    forked,
+                ))
+                .await?,
+            )
+        } else {
+            // No bloom filter manager provided, so no bloom filter will be used.
+            None
         };
-
         Ok(RecordSegmentWriter {
             user_id_to_id: Some(user_id_to_id),
             id_to_user_id: Some(id_to_user_id),
@@ -401,18 +382,30 @@ impl RecordSegmentWriter {
             id: segment.id,
             bloom_filter,
             bloom_filter_manager,
+            prefix_path,
         })
     }
 
-    /// Build a bloom filter by scanning all existing user IDs from the record segment.
-    /// Returns None on any error — the caller should proceed without a bloom filter.
-    async fn rebuild_bloom_filter(
+    /// Return `existing` if it does not need a rebuild, otherwise build a fresh
+    /// bloom filter by scanning all user IDs from the record segment.
+    async fn maybe_rebuild_bloom_filter(
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
-        storage: Option<Arc<Storage>>,
-        prefix_path: Option<&str>,
-        manager: Option<BloomFilterManager>,
-    ) -> Option<BloomFilter<str>> {
+        manager: &BloomFilterManager,
+        existing: Option<BloomFilter<str>>,
+    ) -> Result<BloomFilter<str>, RecordSegmentWriterCreationError> {
+        if let Some(bf) = existing {
+            if !bf.needs_rebuild() {
+                tracing::info!(
+                    live_count = bf.live_count(),
+                    stale_count = bf.stale_count(),
+                    "Reusing existing bloom filter"
+                );
+                return Ok(bf);
+            }
+        }
+        tracing::info!("Bloom filter needs rebuild, will rebuild from reader");
+
         let reader = match Box::pin(RecordSegmentReader::from_segment(
             segment,
             blockfile_provider,
@@ -421,27 +414,29 @@ impl RecordSegmentWriter {
         .await
         {
             Ok(reader) => reader,
+            // Uninitialized segment means no records in the segment, so create an empty bloom filter.
+            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+                return Ok(manager.create(DEFAULT_BLOOM_FILTER_CAPACITY));
+            }
+            // Other errors are propagated.
             Err(e) => {
-                tracing::warn!(error = ?e, "Failed to create reader for bloom filter rebuild");
-                return None;
+                return Err(RecordSegmentWriterCreationError::RecordSegmentReaderError(
+                    *e,
+                ));
             }
         };
-        let count = match reader.count().await {
-            Ok(count) => count,
-            Err(e) => {
-                tracing::warn!(error = ?e, "Failed to count records for bloom filter rebuild");
-                return None;
-            }
-        };
+        let count = reader
+            .count()
+            .await
+            .map_err(RecordSegmentWriterCreationError::BloomFilterRebuildError)?;
         let capacity = ((count * 2) as u64).max(DEFAULT_BLOOM_FILTER_CAPACITY);
-        let bloom_filter = BloomFilter::new(capacity, storage, prefix_path, manager);
+        let bloom_filter = manager.create(capacity);
         let mut stream = std::pin::pin!(reader.get_user_id_stream());
         while let Some(result) = stream.next().await {
             match result {
                 Ok(user_id) => bloom_filter.insert(user_id),
                 Err(e) => {
-                    tracing::warn!(error = ?e, "Error during bloom filter rebuild, aborting");
-                    return None;
+                    return Err(RecordSegmentWriterCreationError::BloomFilterRebuildError(e));
                 }
             }
         }
@@ -450,7 +445,7 @@ impl RecordSegmentWriter {
             capacity,
             "Rebuilt bloom filter from existing records"
         );
-        Some(bloom_filter)
+        Ok(bloom_filter)
     }
 
     pub async fn apply_materialized_log_chunk(
@@ -665,19 +660,14 @@ impl RecordSegmentWriter {
             }
         };
 
-        // Cache the bloom filter in the manager and serialize for flush.
-        let serialized_bloom_filter = match self.bloom_filter.take() {
-            Some(bf) => match &self.bloom_filter_manager {
-                Some(manager) => manager.commit(bf).await.map_err(|_| {
+        let serialized_bloom_filter = match (self.bloom_filter.take(), &self.bloom_filter_manager) {
+            (Some(bf), Some(manager)) => {
+                Some(manager.commit(bf, &self.prefix_path).await.map_err(|_| {
                     Box::new(ApplyMaterializedLogError::BloomFilterSerializationError)
                         as Box<dyn ChromaError>
-                })?,
-                None => bf.into_bytes().map_err(|_| {
-                    Box::new(ApplyMaterializedLogError::BloomFilterSerializationError)
-                        as Box<dyn ChromaError>
-                })?,
-            },
-            None => None,
+                })?)
+            }
+            _ => None,
         };
 
         // Return a flusher that can be used to flush the blockfiles
@@ -1345,7 +1335,7 @@ mod tests {
             &test_segment.record_segment,
             &test_segment.blockfile_provider,
             None,
-            None,
+            test_segment.bloom_filter_manager.clone(),
         )
         .await
         .expect("Should be able to create writer from existing segment");
@@ -1393,7 +1383,7 @@ mod tests {
             &test_segment.record_segment,
             &test_segment.blockfile_provider,
             None,
-            None,
+            test_segment.bloom_filter_manager.clone(),
         )
         .await
         .expect("Should be able to create writer from legacy segment");
@@ -1476,7 +1466,7 @@ mod tests {
             &test_segment.record_segment,
             &test_segment.blockfile_provider,
             None,
-            None,
+            test_segment.bloom_filter_manager.clone(),
         )
         .await
         .expect("Should be able to create writer");
