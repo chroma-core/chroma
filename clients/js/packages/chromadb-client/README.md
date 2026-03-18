@@ -1,6 +1,6 @@
 # ChromaDB Client
 
-Chroma is the open-source embedding database. Chroma makes it easy to build LLM apps by making knowledge, facts, and skills pluggable for LLMs.
+Chroma is the open-source data infrastructure for AI. Chroma makes it easy to build LLM apps by making knowledge, facts, and skills pluggable for LLMs.
 
 **Note:** JS client version 3._ is only compatible with chromadb v1.0.6 and newer or Chroma Cloud. For prior version compatiblity, please use JS client version 2._.
 
