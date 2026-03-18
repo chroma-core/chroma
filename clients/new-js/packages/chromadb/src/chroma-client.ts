@@ -84,6 +84,7 @@ export class ChromaClient {
   private _preflightChecks: ChecklistResponse | undefined;
   private _headers: Record<string, string> | undefined;
   private readonly apiClient: ReturnType<typeof createClient>;
+  private readonly _collectionCache: Map<string, Collection> = new Map();
 
   /**
    * Creates a new ChromaClient instance.
@@ -230,6 +231,41 @@ export class ChromaClient {
   }
 
   /**
+   * Returns a lightweight Collection object for the given collection ID.
+   *
+   * This method is synchronous and makes no network requests. The returned
+   * collection can perform operations that don't require the collection's schema
+   * (e.g. `add` with pre-computed embeddings, `get`, `delete`, `count`, `search`
+   * with vector queries) with zero overhead.
+   *
+   * Operations that require the schema or embedding function (e.g. `add` with
+   * documents, `search` with string queries) will automatically fetch the
+   * collection's data from the server on the first such call.
+   *
+   * If the collection was previously fetched via `getCollection`,
+   * `createCollection`, or similar, the cached (already hydrated) instance is
+   * returned.
+   *
+   * @param id - The collection's UUID
+   * @returns A Collection instance
+   */
+  public collection(id: string): Collection {
+    const cached = this._collectionCache.get(id);
+    if (cached) return cached;
+
+    const lazy = CollectionImpl.lazy({
+      chromaClient: this,
+      apiClient: this.apiClient,
+      id,
+      tenant: this._tenant ?? "",
+      database: this._database ?? "",
+    });
+
+    this._collectionCache.set(id, lazy);
+    return lazy;
+  }
+
+  /**
    * Lists all collections in the current database.
    * @param args - Optional pagination parameters
    * @param args.limit - Maximum number of collections to return (default: 100)
@@ -264,7 +300,7 @@ export class ChromaClient {
               collection.configuration_json.embedding_function ?? undefined,
           })) ?? schemaEmbeddingFunction;
 
-        return new CollectionImpl({
+        const col = new CollectionImpl({
           chromaClient: this,
           apiClient: this.apiClient,
           tenant: collection.tenant,
@@ -277,6 +313,8 @@ export class ChromaClient {
             deserializeMetadata(collection.metadata ?? undefined) ?? undefined,
           schema,
         });
+        this._collectionCache.set(col.id, col);
+        return col;
       }),
     );
   }
@@ -350,7 +388,7 @@ export class ChromaClient {
       })) ??
       schemaEmbeddingFunction;
 
-    return new CollectionImpl({
+    const collection = new CollectionImpl({
       chromaClient: this,
       apiClient: this.apiClient,
       name,
@@ -362,6 +400,8 @@ export class ChromaClient {
       id: data.id,
       schema: serverSchema,
     });
+    this._collectionCache.set(collection.id, collection);
+    return collection;
   }
 
   /**
@@ -394,7 +434,7 @@ export class ChromaClient {
       })) ??
       schemaEmbeddingFunction;
 
-    return new CollectionImpl({
+    const collection = new CollectionImpl({
       chromaClient: this,
       apiClient: this.apiClient,
       name,
@@ -406,6 +446,8 @@ export class ChromaClient {
       id: data.id,
       schema,
     });
+    this._collectionCache.set(collection.id, collection);
+    return collection;
   }
 
   /**
@@ -426,7 +468,7 @@ export class ChromaClient {
         efConfig: data.configuration_json.embedding_function ?? undefined,
         client: this,
       })) ?? schemaEmbeddingFunction;
-    return new CollectionImpl({
+    const collection = new CollectionImpl({
       chromaClient: this,
       apiClient: this.apiClient,
       name: data.name,
@@ -438,6 +480,8 @@ export class ChromaClient {
       id: data.id,
       schema,
     });
+    this._collectionCache.set(collection.id, collection);
+    return collection;
   }
 
   /**
@@ -524,7 +568,7 @@ export class ChromaClient {
       })) ??
       schemaEmbeddingFunction;
 
-    return new CollectionImpl({
+    const collection = new CollectionImpl({
       chromaClient: this,
       apiClient: this.apiClient,
       name,
@@ -536,6 +580,8 @@ export class ChromaClient {
       id: data.id,
       schema: serverSchema,
     });
+    this._collectionCache.set(collection.id, collection);
+    return collection;
   }
 
   /**
@@ -548,6 +594,18 @@ export class ChromaClient {
       client: this.apiClient,
       path: { ...(await this._path()), collection_id: name },
     });
+
+    // Remove from cache by scanning for matching name
+    for (const [id, col] of this._collectionCache) {
+      try {
+        if (col.name === name) {
+          this._collectionCache.delete(id);
+          break;
+        }
+      } catch {
+        // Unhydrated collection — can't compare by name, skip
+      }
+    }
   }
 
   /**
@@ -556,6 +614,7 @@ export class ChromaClient {
    * @warning This operation is irreversible and will delete all data
    */
   public async reset(): Promise<void> {
+    this._collectionCache.clear();
     await SystemService.reset({
       client: this.apiClient,
     });

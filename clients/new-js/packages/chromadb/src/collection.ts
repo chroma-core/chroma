@@ -2,6 +2,7 @@ import { ChromaClient } from "./chroma-client";
 import {
   EmbeddingFunction,
   SparseEmbeddingFunction,
+  getEmbeddingFunction,
 } from "./embedding-function";
 import {
   BaseRecordSet,
@@ -53,6 +54,11 @@ import type { SparseVectorIndexConfig } from "./schema";
 /**
  * Interface for collection operations using collection ID.
  * Provides methods for adding, querying, updating, and deleting records.
+ *
+ * Collections may be "lazy" (created via `client.collection(id)`) in which case
+ * they are not yet hydrated with server data. Accessing `name`, `metadata`, or
+ * `configuration` on a lazy collection will throw until the collection is hydrated
+ * (either explicitly or automatically by an operation that requires it).
  */
 export interface Collection {
   /** Tenant name */
@@ -61,11 +67,20 @@ export interface Collection {
   database: string;
   /** Unique identifier for the collection */
   id: string;
-  /** Name of the collection */
+  /**
+   * Name of the collection.
+   * @throws ChromaValueError if the collection is not yet hydrated.
+   */
   name: string;
-  /** Collection-level metadata */
+  /**
+   * Collection-level metadata.
+   * @throws ChromaValueError if the collection is not yet hydrated.
+   */
   metadata: CollectionMetadata | undefined;
-  /** Collection configuration settings */
+  /**
+   * Collection configuration settings.
+   * @throws ChromaValueError if the collection is not yet hydrated.
+   */
   configuration: CollectionConfiguration;
   /** Optional embedding function. Must match the one used to create the collection. */
   embeddingFunction?: EmbeddingFunction;
@@ -243,7 +258,7 @@ export interface Collection {
 }
 
 /**
- * Arguments for creating a Collection instance.
+ * Arguments for creating a fully hydrated Collection instance.
  */
 export interface CollectionArgs {
   /** ChromaDB client instance */
@@ -269,23 +284,46 @@ export interface CollectionArgs {
 }
 
 /**
+ * Arguments for creating a lazy (unhydrated) Collection instance.
+ */
+export interface LazyCollectionArgs {
+  /** ChromaDB client instance */
+  chromaClient: ChromaClient;
+  /** HTTP API client */
+  apiClient: ReturnType<typeof createClient>;
+  /** Collection ID */
+  id: string;
+  /** Tenant name */
+  tenant: string;
+  /** Database name */
+  database: string;
+}
+
+/**
  * Implementation of CollectionAPI for ID-based collection operations.
  * Provides core functionality for interacting with collections using their ID.
+ *
+ * Supports two construction modes:
+ * - **Eager** (via constructor): fully hydrated with all server data.
+ * - **Lazy** (via `CollectionImpl.lazy()`): only holds the collection ID and
+ *   client context; hydrates on demand when an operation requires it.
  */
 export class CollectionImpl implements Collection {
   protected readonly chromaClient: ChromaClient;
   protected readonly apiClient: ReturnType<typeof createClient>;
   public readonly id: string;
-  public readonly tenant: string;
-  public readonly database: string;
-  private _name: string;
+  private _tenant: string;
+  private _database: string;
+  private _name: string | undefined;
   private _metadata: CollectionMetadata | undefined;
-  private _configuration: CollectionConfiguration;
+  private _configuration: CollectionConfiguration | undefined;
   protected _embeddingFunction: EmbeddingFunction | undefined;
   protected _schema: Schema | undefined;
+  private _hydrated: boolean;
+  private _hydrationPromise: Promise<void> | null = null;
 
   /**
-   * Creates a new CollectionAPIImpl instance.
+   * Creates a new fully hydrated CollectionImpl instance.
    * @param options - Configuration for the collection API
    */
   constructor({
@@ -303,17 +341,58 @@ export class CollectionImpl implements Collection {
     this.chromaClient = chromaClient;
     this.apiClient = apiClient;
     this.id = id;
-    this.tenant = tenant;
-    this.database = database;
+    this._tenant = tenant;
+    this._database = database;
     this._name = name;
     this._metadata = metadata;
     this._configuration = configuration;
     this._embeddingFunction = embeddingFunction;
     this._schema = schema;
+    this._hydrated = true;
+  }
+
+  /**
+   * Creates a lazy (unhydrated) CollectionImpl that only holds the collection ID
+   * and client context. Server data is fetched on demand.
+   */
+  static lazy(args: LazyCollectionArgs): CollectionImpl {
+    // We bypass the constructor to avoid requiring fields that aren't yet known.
+    // Object.create + Object.assign avoids TypeScript readonly/visibility issues.
+    const instance = Object.create(
+      CollectionImpl.prototype,
+    ) as CollectionImpl;
+    return Object.assign(instance, {
+      chromaClient: args.chromaClient,
+      apiClient: args.apiClient,
+      id: args.id,
+      _tenant: args.tenant,
+      _database: args.database,
+      _name: undefined,
+      _metadata: undefined,
+      _configuration: undefined,
+      _embeddingFunction: undefined,
+      _schema: undefined,
+      _hydrated: false,
+      _hydrationPromise: null,
+    });
+  }
+
+  public get tenant(): string {
+    return this._tenant;
+  }
+
+  public get database(): string {
+    return this._database;
   }
 
   public get name(): string {
-    return this._name;
+    if (!this._hydrated) {
+      throw new ChromaValueError(
+        "Cannot access 'name' on an unhydrated collection created via client.collection(id). " +
+          "Use client.getCollection() instead, or perform an operation that triggers automatic hydration.",
+      );
+    }
+    return this._name!;
   }
 
   private set name(name: string) {
@@ -321,7 +400,13 @@ export class CollectionImpl implements Collection {
   }
 
   public get configuration(): CollectionConfiguration {
-    return this._configuration;
+    if (!this._hydrated) {
+      throw new ChromaValueError(
+        "Cannot access 'configuration' on an unhydrated collection created via client.collection(id). " +
+          "Use client.getCollection() instead, or perform an operation that triggers automatic hydration.",
+      );
+    }
+    return this._configuration!;
   }
 
   private set configuration(configuration: CollectionConfiguration) {
@@ -329,6 +414,12 @@ export class CollectionImpl implements Collection {
   }
 
   public get metadata(): CollectionMetadata | undefined {
+    if (!this._hydrated) {
+      throw new ChromaValueError(
+        "Cannot access 'metadata' on an unhydrated collection created via client.collection(id). " +
+          "Use client.getCollection() instead, or perform an operation that triggers automatic hydration.",
+      );
+    }
     return this._metadata;
   }
 
@@ -354,19 +445,83 @@ export class CollectionImpl implements Collection {
     this._schema = schema;
   }
 
+  /**
+   * Ensures this collection is hydrated with server data.
+   * No-op if already hydrated. Deduplicates concurrent calls.
+   */
+  private async ensureHydrated(): Promise<void> {
+    if (this._hydrated) return;
+
+    if (this._hydrationPromise) {
+      return this._hydrationPromise;
+    }
+
+    this._hydrationPromise = this.doHydrate();
+    try {
+      await this._hydrationPromise;
+    } finally {
+      this._hydrationPromise = null;
+    }
+  }
+
+  private async doHydrate(): Promise<void> {
+    // Resolve tenant/database from the client if not yet known (e.g. CloudClient)
+    if (!this._tenant || !this._database) {
+      const resolved = await this.chromaClient._path();
+      this._tenant = resolved.tenant;
+      this._database = resolved.database;
+    }
+
+    const { data } = await CollectionService.getCollection({
+      client: this.apiClient,
+      path: {
+        tenant: this._tenant,
+        database: this._database,
+        collection_id: this.id,
+      },
+    });
+
+    const schema = await Schema.deserializeFromJSON(
+      data.schema ?? null,
+      this.chromaClient,
+    );
+
+    this._schema = schema;
+    const schemaEmbeddingFunction = this.getSchemaEmbeddingFunction();
+    const resolvedEmbeddingFunction =
+      (await getEmbeddingFunction({
+        client: this.chromaClient,
+        efConfig: data.configuration_json.embedding_function ?? undefined,
+      })) ?? schemaEmbeddingFunction;
+
+    this._name = data.name;
+    this._metadata =
+      deserializeMetadata(data.metadata ?? undefined) ?? undefined;
+    this._configuration = data.configuration_json;
+    this._embeddingFunction = resolvedEmbeddingFunction;
+    this._hydrated = true;
+  }
+
   protected async path(): Promise<{
     tenant: string;
     database: string;
     collection_id: string;
   }> {
+    // Resolve tenant/database lazily if needed
+    if (!this._tenant || !this._database) {
+      const resolved = await this.chromaClient._path();
+      this._tenant = resolved.tenant;
+      this._database = resolved.database;
+    }
     return {
-      tenant: this.tenant,
-      database: this.database,
+      tenant: this._tenant,
+      database: this._database,
       collection_id: this.id,
     };
   }
 
   private async embed(inputs: string[], isQuery: boolean): Promise<number[][]> {
+    await this.ensureHydrated();
     const embeddingFunction =
       this._embeddingFunction ?? this.getSchemaEmbeddingFunction();
 
@@ -420,6 +575,11 @@ export class CollectionImpl implements Collection {
     metadatas?: Metadata[],
     documents?: string[],
   ): Promise<Metadata[] | undefined> {
+    // If documents are provided, we may need the schema for sparse embedding targets.
+    // Hydrate to ensure schema is available (no-op if already hydrated).
+    if (documents && !this._hydrated) {
+      await this.ensureHydrated();
+    }
     const sparseTargets = this.getSparseEmbeddingTargets();
     if (Object.keys(sparseTargets).length === 0) {
       return metadatas;
@@ -545,6 +705,9 @@ export class CollectionImpl implements Collection {
     if (typeof queryValue !== "string") {
       return { ...knn };
     }
+
+    // String query needs embedding function — ensure we're hydrated
+    await this.ensureHydrated();
 
     const keyValue = knn.key as unknown;
     const key = typeof keyValue === "string" ? keyValue : EMBEDDING_KEY;
@@ -973,6 +1136,7 @@ export class CollectionImpl implements Collection {
     metadata?: CollectionMetadata;
     configuration?: UpdateCollectionConfiguration;
   }): Promise<void> {
+    await this.ensureHydrated();
     if (name) this.name = name;
 
     if (metadata) {
@@ -1014,6 +1178,7 @@ export class CollectionImpl implements Collection {
   }
 
   public async fork({ name }: { name: string }): Promise<Collection> {
+    await this.ensureHydrated();
     const { data } = await CollectionService.forkCollection({
       client: this.apiClient,
       path: await this.path(),
