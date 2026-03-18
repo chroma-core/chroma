@@ -187,3 +187,5 @@ pub async fn compaction_client_entrypoint() {
         eprintln!("{e}");
     }
 }
+
+pub fn nop() {}
