@@ -275,6 +275,20 @@ impl WorkerServer {
         })
     }
 
+    /// Return the bloom filter manager for the given collection, or `None` if bloom filters
+    /// are disabled for this collection.
+    fn bloom_filter_manager_for_collection(
+        &self,
+        collection_id: CollectionUuid,
+    ) -> Option<BloomFilterManager> {
+        let manager = self.bloom_filter_manager.as_ref()?;
+        if manager.is_enabled_for_collection(collection_id) {
+            Some(manager.clone())
+        } else {
+            None
+        }
+    }
+
     /// Return the fragment fetcher for the given collection, or `None` if fragment fetch is
     /// disabled for this collection.  Fragment fetch is enabled when `use_fragment_fetch` is
     /// true or the collection appears in `collections_for_fragment_fetch`.
@@ -301,6 +315,7 @@ impl WorkerServer {
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
 
         let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
+        let collection_id = collection_and_segments.collection.collection_id;
         let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size)?;
 
         let count_orchestrator = CountOrchestrator::new(
@@ -311,7 +326,7 @@ impl WorkerServer {
             collection_and_segments,
             fetch_log,
             read_level,
-            self.bloom_filter_manager.clone(),
+            self.bloom_filter_manager_for_collection(collection_id),
         );
 
         match count_orchestrator.run(self.system.clone()).await {
@@ -333,6 +348,7 @@ impl WorkerServer {
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
 
         let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
+        let collection_id = collection_and_segments.collection.collection_id;
         let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size)?;
 
         let filter = get_inner
@@ -357,7 +373,7 @@ impl WorkerServer {
             filter.try_into()?,
             limit.into(),
             projection.into(),
-            self.bloom_filter_manager.clone(),
+            self.bloom_filter_manager_for_collection(collection_id),
         );
 
         match get_orchestrator.run(self.system.clone()).await {
@@ -390,6 +406,7 @@ impl WorkerServer {
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
 
         let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
+        let collection_id = collection_and_segments.collection.collection_id;
 
         let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size)?;
 
@@ -423,6 +440,7 @@ impl WorkerServer {
             ));
         }
 
+        let bloom_filter_manager = self.bloom_filter_manager_for_collection(collection_id);
         let vector_segment_type = collection_and_segments.vector_segment.r#type;
         let knn_filter_orchestrator = KnnFilterOrchestrator::new(
             self.blockfile_provider.clone(),
@@ -434,7 +452,7 @@ impl WorkerServer {
             fetch_log,
             filter.try_into()?,
             ReadLevel::IndexAndWal, // Full consistency for KNN queries
-            self.bloom_filter_manager.clone(),
+            bloom_filter_manager.clone(),
         );
 
         let matching_records = match knn_filter_orchestrator.run(system.clone()).await {
@@ -462,7 +480,7 @@ impl WorkerServer {
                     let blockfile_provider = self.blockfile_provider.clone();
                     let knn_projection = knn_projection.clone();
                     let segment_type = vector_segment_type;
-                    let bloom_filter_manager = self.bloom_filter_manager.clone();
+                    let bloom_filter_manager = bloom_filter_manager.clone();
 
                     async move {
                         // Run KNN orchestrator — dispatch based on segment type.
@@ -536,7 +554,7 @@ impl WorkerServer {
                     let matching_records = matching_records.clone();
                     let system = system.clone();
                     let knn_projection = knn_projection.clone();
-                    let bloom_filter_manager = self.bloom_filter_manager.clone();
+                    let bloom_filter_manager = bloom_filter_manager.clone();
 
                     async move {
                         // Run KNN orchestrator
@@ -597,6 +615,7 @@ impl WorkerServer {
         read_level: ReadLevel,
     ) -> Result<RankOrchestratorOutput, Status> {
         let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
+        let collection_id = collection_and_segments.collection.collection_id;
         let search_payload = SearchPayload::try_from(payload)?;
         let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size)?;
 
@@ -606,6 +625,7 @@ impl WorkerServer {
             return Ok(RankOrchestratorOutput::default());
         }
 
+        let bloom_filter_manager = self.bloom_filter_manager_for_collection(collection_id);
         let knn_filter_orchestrator = KnnFilterOrchestrator::new(
             self.blockfile_provider.clone(),
             self.clone_dispatcher()?,
@@ -615,7 +635,7 @@ impl WorkerServer {
             fetch_log,
             search_payload.filter.clone(),
             read_level, // Use the specified read level
-            self.bloom_filter_manager.clone(),
+            bloom_filter_manager.clone(),
         );
 
         let knn_filter_output = match knn_filter_orchestrator.run(self.system.clone()).await {
@@ -635,7 +655,7 @@ impl WorkerServer {
             let dispatcher = self.clone_dispatcher()?;
             let blockfile_provider = self.blockfile_provider.clone();
             let spann_provider = self.spann_provider.clone();
-            let bloom_filter_manager = self.bloom_filter_manager.clone();
+            let bloom_filter_manager = bloom_filter_manager.clone();
 
             knn_futures.push(async move {
                 let result = match knn_query.query {
@@ -736,7 +756,7 @@ impl WorkerServer {
             search_payload.limit,
             search_payload.select,
             collection_and_segments,
-            self.bloom_filter_manager.clone(),
+            bloom_filter_manager,
         );
 
         rank_orchestrator
