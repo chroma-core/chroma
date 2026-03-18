@@ -838,8 +838,7 @@ impl RecordSegmentFlusher {
             match serialized_bloom_filter.save().await {
                 Ok(()) => {
                     tracing::info!(path = %bloom_filter_path, "Persisted bloom filter to storage");
-                    // TODO(Sanket-temp): Add bloom filter to flushed files
-                    // flushed_files.insert(USER_ID_BLOOM_FILTER.to_string(), vec![bloom_filter_path]);
+                    flushed_files.insert(USER_ID_BLOOM_FILTER.to_string(), vec![bloom_filter_path]);
                 }
                 Err(e) => {
                     tracing::warn!(error = ?e, "Failed to persist bloom filter, skipping");
@@ -1253,7 +1252,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // TODO(Sanket-temp): Add bloom filter to flushed files
     async fn test_bloom_filter_persisted_after_flush() {
         let mut test_segment = TestDistributedSegment::new().await;
         let num_records = 20;

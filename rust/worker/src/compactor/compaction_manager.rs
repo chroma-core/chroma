@@ -398,6 +398,20 @@ impl Drop for CompactionManager {
 }
 
 impl CompactionManagerContext {
+    /// Return the bloom filter manager for the given collection, or `None` if bloom filters
+    /// are disabled for this collection.
+    fn bloom_filter_manager_for_collection(
+        &self,
+        collection_id: CollectionUuid,
+    ) -> Option<BloomFilterManager> {
+        let manager = self.bloom_filter_manager.as_ref()?;
+        if manager.is_enabled_for_collection(collection_id) {
+            Some(manager.clone())
+        } else {
+            None
+        }
+    }
+
     /// Return the fragment fetcher for the given collection, or `None` if fragment fetch is
     /// disabled for this collection.  Fragment fetch is enabled when `use_fragment_fetch` is
     /// true or the collection appears in `collections_for_fragment_fetch`.
@@ -434,6 +448,7 @@ impl CompactionManagerContext {
         // Use the compact function to handle the entire orchestration process
         let is_function_disabled = self.disabled_function_collections.contains(&collection_id);
         let fragment_fetcher = self.fragment_fetcher_for_collection(collection_id);
+        let bloom_filter_manager = self.bloom_filter_manager_for_collection(collection_id);
 
         let compact_result = Box::pin(compact(
             self.system.clone(),
@@ -453,7 +468,7 @@ impl CompactionManagerContext {
             dispatcher.clone(),
             is_function_disabled,
             fragment_fetcher,
-            self.bloom_filter_manager.clone(),
+            bloom_filter_manager,
             #[cfg(test)]
             None,
         ))
