@@ -1541,25 +1541,17 @@ impl LogServer {
                 }
             }
         };
-        let s3_rollups = {
-            self.need_to_compact_s3
-                .lock()
-                .values()
-                .copied()
-                .collect::<Vec<_>>()
-        };
-        for rollup in &s3_rollups {
-            record_rollup_metrics(rollup);
+        {
+            let s3_rollups = self.need_to_compact_s3.lock();
+            for rollup in s3_rollups.values() {
+                record_rollup_metrics(rollup);
+            }
         }
-        let repl_rollups = {
-            self.need_to_compact_repl
-                .lock()
-                .values()
-                .copied()
-                .collect::<Vec<_>>()
-        };
-        for rollup in &repl_rollups {
-            record_rollup_metrics(rollup);
+        {
+            let repl_rollups = self.need_to_compact_repl.lock();
+            for rollup in repl_rollups.values() {
+                record_rollup_metrics(rollup);
+            }
         }
         self.metrics
             .log_likely_needs_purge_dirty
