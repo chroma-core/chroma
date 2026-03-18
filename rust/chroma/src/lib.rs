@@ -1,7 +1,7 @@
 //! Rust client library for the Chroma AI-native database.
 //!
 //! This crate provides a comprehensive, production-ready client for interacting with [Chroma](https://www.trychroma.com),
-//! an open-source data infrastructure for AI. Chroma transforms embeddings into queryable databases,
+//! the open-source data infrastructure for AI. Chroma transforms embeddings into queryable databases,
 //! enabling similarity search, filtering, and retrieval operations over high-dimensional vector data.
 //!
 //! # Features
