@@ -40,6 +40,7 @@ pub struct RecordSegmentWriter {
     max_offset_id: Option<BlockfileWriter>,
     max_new_offset_id: Arc<AtomicU32>,
     pub id: SegmentUuid,
+    #[allow(dead_code)]
     bloom_filter: Option<BloomFilter<str>>,
 }
 
