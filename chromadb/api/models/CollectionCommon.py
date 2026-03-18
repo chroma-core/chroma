@@ -880,7 +880,7 @@ class CollectionCommon(Generic[ClientT]):
                         is_query=True,
                     )
 
-                    if not sparse_embedding or len(sparse_embedding) != 1:
+                    if sparse_embedding is None or len(sparse_embedding) != 1:
                         raise ValueError(
                             "Sparse embedding function returned unexpected number of embeddings"
                         )
