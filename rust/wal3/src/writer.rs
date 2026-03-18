@@ -875,6 +875,31 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
         options: &GarbageCollectionOptions,
         gc_state: &GarbageCollectionState,
     ) -> Result<(), Error> {
+        async fn delete_paths_in_batches<I, F, Fut>(
+            paths: I,
+            batch_size: usize,
+            exp_backoff: ExponentialBackoff,
+            delete_batch: F,
+        ) -> Result<(), Error>
+        where
+            I: IntoIterator<Item = String>,
+            F: Fn(Vec<String>, ExponentialBackoff) -> Fut,
+            Fut: Future<Output = Result<(), Error>>,
+        {
+            let mut batch = vec![];
+            for path in paths {
+                batch.push(path);
+                if batch.len() >= batch_size {
+                    let batch = std::mem::take(&mut batch);
+                    delete_batch(batch, exp_backoff.clone()).await?;
+                }
+            }
+            if !batch.is_empty() {
+                delete_batch(batch, exp_backoff).await?;
+            }
+            Ok(())
+        }
+
         let exp_backoff: ExponentialBackoff = options.throttle.into();
         let start = Instant::now();
         let (garbage, e_tag) =
@@ -890,7 +915,6 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                 "loaded garbage without e_tag".to_string(),
             ));
         };
-        let mut batch = vec![];
         let storage = self.batch_manager.preferred_storage().await;
         let delete_batch = |batch: Vec<String>, exp_backoff: ExponentialBackoff| {
             let storage = storage.clone();
@@ -929,13 +953,13 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
             }
         };
         let prefix = self.batch_manager.preferred_prefix().await;
-        for path in garbage.prefixed_paths_to_delete(&prefix) {
-            batch.push(path);
-            if batch.len() >= 100 {
-                let batch = std::mem::take(&mut batch);
-                delete_batch(batch, exp_backoff.clone()).await?;
-            }
-        }
+        delete_paths_in_batches(
+            garbage.prefixed_paths_to_delete(&prefix),
+            100,
+            exp_backoff.clone(),
+            &delete_batch,
+        )
+        .await?;
         if garbage.fragments_are_uuids {
             if let Some(limit_uuid) = garbage.fragments_to_drop_uuid_limit {
                 let collected_uuids = gc_state.collected_uuids();
@@ -950,34 +974,42 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                     .list_prefix(&fragment_root, GetOptions::default())
                     .await
                     .map_err(Arc::new)?;
-                for full_path in possible_fragments {
-                    let Some(unprefixed_path) = full_path.strip_prefix(&prefix) else {
-                        return Err(Error::GarbageCollection(format!(
-                            "got a fragment I don't trust: {full_path}"
-                        )));
+                tracing::info!(num_fragments = %possible_fragments.len(), "deleting possible paths");
+                let candidate_paths = possible_fragments.into_iter().filter_map(|full_path| {
+                    let unprefixed_path = match full_path.strip_prefix(&prefix) {
+                        Some(unprefixed_path) => unprefixed_path,
+                        None => {
+                            return Some(Err(Error::GarbageCollection(format!(
+                                "got a fragment I don't trust: {full_path}"
+                            ))));
+                        }
                     };
                     let candidate = unprefixed_path.trim_start_matches('/');
-                    let Some(fragment_id) = parse_fragment_path(candidate) else {
-                        continue;
+                    let fragment_id = match parse_fragment_path(candidate) {
+                        Some(fragment_id) => fragment_id,
+                        None => return None,
                     };
-                    let Some(uuid) = fragment_id.as_uuid() else {
-                        continue;
+                    let uuid = match fragment_id.as_uuid() {
+                        Some(uuid) => uuid,
+                        None => return None,
                     };
                     let dominated_by_limit = uuid < limit_uuid;
                     let affirmatively_collected = collected_uuids.contains(&uuid);
                     let old_orphan = !affirmatively_collected && uuid < grace_cutoff;
                     if dominated_by_limit && (affirmatively_collected || old_orphan) {
-                        batch.push(full_path);
-                        if batch.len() >= 100 {
-                            let batch = std::mem::take(&mut batch);
-                            delete_batch(batch, exp_backoff.clone()).await?;
-                        }
+                        Some(Ok(full_path))
+                    } else {
+                        None
                     }
-                }
+                });
+                delete_paths_in_batches(
+                    candidate_paths.collect::<Result<Vec<_>, _>>()?,
+                    100,
+                    exp_backoff.clone(),
+                    &delete_batch,
+                )
+                .await?;
             }
-        }
-        if !batch.is_empty() {
-            delete_batch(batch, exp_backoff.clone()).await?;
         }
         self.batch_manager
             .reset_garbage(&self.options.throttle_manifest, e_tag)

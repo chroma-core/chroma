@@ -84,6 +84,11 @@ impl ExponentialBackoff {
         // Scale the recovery window by the random number.
         Duration::from_micros((recovery_window.as_micros() as f64 * ratio) as u64)
     }
+
+    pub fn next_capped(&self, max: Duration) -> Duration {
+        let backoff = self.next();
+        if backoff > max { max } else { backoff }
+    }
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////

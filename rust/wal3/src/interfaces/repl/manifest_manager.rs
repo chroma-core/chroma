@@ -141,10 +141,7 @@ impl ManifestManager {
                 Err(google_cloud_spanner::session::SessionError::GRPC(ref status))
                     if status.code() == Code::Aborted =>
                 {
-                    let mut backoff = exp_backoff.next();
-                    if backoff > Duration::from_secs(10) {
-                        backoff = Duration::from_secs(10);
-                    }
+                    let backoff = exp_backoff.next_capped(Duration::from_secs(10));
                     tokio::time::sleep(backoff).await;
                     continue;
                 }
@@ -507,10 +504,7 @@ impl ManifestManager {
                 Err(google_cloud_spanner::session::SessionError::GRPC(ref status))
                     if status.code() == Code::Aborted =>
                 {
-                    let mut backoff = exp_backoff.next();
-                    if backoff > Duration::from_secs(10) {
-                        backoff = Duration::from_secs(10);
-                    }
+                    let backoff = exp_backoff.next_capped(Duration::from_secs(10));
                     tokio::time::sleep(backoff).await;
                     continue;
                 }
@@ -711,10 +705,7 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                 Err(err) => {
                     if let google_cloud_spanner::client::Error::GRPC(grpc) = &err {
                         if grpc.code() == Code::Aborted {
-                            let mut backoff = exp_backoff.next();
-                            if backoff > Duration::from_secs(10) {
-                                backoff = Duration::from_secs(10);
-                            }
+                            let backoff = exp_backoff.next_capped(Duration::from_secs(10));
                             tokio::time::sleep(backoff).await;
                             continue;
                         }
@@ -875,10 +866,18 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
             match res {
                 Ok(_) => return Ok(()),
                 Err(Error::TonicError(ref status)) if status.code() == Code::Aborted => {
-                    let mut backoff = exp_backoff.next();
-                    if backoff > Duration::from_secs(10) {
-                        backoff = Duration::from_secs(10);
-                    }
+                    let backoff = exp_backoff.next_capped(Duration::from_secs(10));
+                    tokio::time::sleep(backoff).await;
+                    continue;
+                }
+                Err(Error::SpannerError(err))
+                    if matches!(
+                        &*err,
+                        google_cloud_spanner::client::Error::GRPC(status)
+                            if status.code() == Code::Aborted
+                    ) =>
+                {
+                    let backoff = exp_backoff.next_capped(Duration::from_secs(10));
                     tokio::time::sleep(backoff).await;
                     continue;
                 }
@@ -1114,10 +1113,7 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                 Err(google_cloud_spanner::client::Error::GRPC(ref status))
                     if status.code() == Code::Aborted =>
                 {
-                    let mut backoff = exp_backoff.next();
-                    if backoff > Duration::from_secs(10) {
-                        backoff = Duration::from_secs(10);
-                    }
+                    let backoff = exp_backoff.next_capped(Duration::from_secs(10));
                     tokio::time::sleep(backoff).await;
                     continue;
                 }
@@ -1235,10 +1231,7 @@ impl ManifestConsumer<FragmentUuid> for ManifestManager {
                 Err(google_cloud_spanner::client::Error::GRPC(ref status))
                     if status.code() == Code::Aborted =>
                 {
-                    let mut backoff = exp_backoff.next();
-                    if backoff > Duration::from_secs(10) {
-                        backoff = Duration::from_secs(10);
-                    }
+                    let backoff = exp_backoff.next_capped(Duration::from_secs(10));
                     tokio::time::sleep(backoff).await;
                     continue;
                 }
