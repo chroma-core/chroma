@@ -820,7 +820,7 @@ impl RecordSegmentFlusher {
             match serialized_bloom_filter.save(&bloom_filter_path).await {
                 Ok(()) => {
                     tracing::info!(path = %bloom_filter_path, "Persisted bloom filter to storage");
-                    // TODO(Sanket): Add bloom filter to flushed files
+                    // TODO(Sanket-temp): Add bloom filter to flushed files
                     // flushed_files.insert(USER_ID_BLOOM_FILTER.to_string(), vec![bloom_filter_path]);
                 }
                 Err(e) => {
