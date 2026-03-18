@@ -1155,3 +1155,144 @@ export class CollectionImpl implements Collection {
     return data;
   }
 }
+
+/**
+ * Arguments for creating a CollectionHandle instance.
+ */
+export interface CollectionHandleArgs {
+  /** ChromaDB client instance */
+  chromaClient: ChromaClient;
+  /** HTTP API client */
+  apiClient: ReturnType<typeof createClient>;
+  /** Collection ID */
+  id: string;
+  /** Tenant name */
+  tenant: string;
+  /** Database name */
+  database: string;
+}
+
+const HANDLE_EMBEDDING_ERROR =
+  "This operation requires an embedding function, which is not available on " +
+  "a collection obtained via client.collection(id). Provide pre-computed " +
+  "embeddings directly, or use client.getCollection() to get a full " +
+  "collection with embedding support.";
+
+const HANDLE_NOT_SUPPORTED_ERROR =
+  "is not supported on a collection obtained via client.collection(id). " +
+  "Use client.getCollection() to get a full collection instance.";
+
+/**
+ * A lightweight collection handle that holds only the collection ID and
+ * client context. Supports operations that don't require an embedding
+ * function or schema. Obtained via {@link ChromaClient.collection}.
+ */
+export class CollectionHandle extends CollectionImpl {
+  constructor({ chromaClient, apiClient, id, tenant, database }: CollectionHandleArgs) {
+    super({
+      chromaClient,
+      apiClient,
+      id,
+      tenant,
+      database,
+      name: "",
+      configuration: {},
+    });
+  }
+
+  public override async add(args: {
+    ids: string[];
+    embeddings?: number[][];
+    metadatas?: Metadata[];
+    documents?: string[];
+    uris?: string[];
+  }): Promise<void> {
+    if (!args.embeddings) {
+      throw new ChromaValueError(HANDLE_EMBEDDING_ERROR);
+    }
+    return super.add(args);
+  }
+
+  public override async update(args: {
+    ids: string[];
+    embeddings?: number[][];
+    metadatas?: Metadata[];
+    documents?: string[];
+    uris?: string[];
+  }): Promise<void> {
+    if (!args.embeddings && args.documents) {
+      throw new ChromaValueError(HANDLE_EMBEDDING_ERROR);
+    }
+    return super.update(args);
+  }
+
+  public override async upsert(args: {
+    ids: string[];
+    embeddings?: number[][];
+    metadatas?: Metadata[];
+    documents?: string[];
+    uris?: string[];
+  }): Promise<void> {
+    if (!args.embeddings) {
+      throw new ChromaValueError(HANDLE_EMBEDDING_ERROR);
+    }
+    return super.upsert(args);
+  }
+
+  public override async query<TMeta extends Metadata = Metadata>(args: {
+    queryEmbeddings?: number[][];
+    queryTexts?: string[];
+    queryURIs?: string[];
+    ids?: string[];
+    nResults?: number;
+    where?: Where;
+    whereDocument?: WhereDocument;
+    include?: Include[];
+  }): Promise<QueryResult<TMeta>> {
+    if (!args.queryEmbeddings) {
+      throw new ChromaValueError(HANDLE_EMBEDDING_ERROR);
+    }
+    return super.query(args);
+  }
+
+  public override async search(
+    searches: SearchLike | SearchLike[],
+    options?: { readLevel?: ReadLevel },
+  ): Promise<SearchResult> {
+    const items = Array.isArray(searches) ? searches : [searches];
+    for (const search of items) {
+      const payload = toSearch(search).toPayload();
+      if (this.hasStringKnnQuery(payload.rank)) {
+        throw new ChromaValueError(HANDLE_EMBEDDING_ERROR);
+      }
+    }
+    return super.search(searches, options);
+  }
+
+  public override async modify(_args: {
+    name?: string;
+    metadata?: CollectionMetadata;
+    configuration?: UpdateCollectionConfiguration;
+  }): Promise<void> {
+    throw new ChromaValueError(`modify() ${HANDLE_NOT_SUPPORTED_ERROR}`);
+  }
+
+  public override async fork(_args: { name: string }): Promise<Collection> {
+    throw new ChromaValueError(`fork() ${HANDLE_NOT_SUPPORTED_ERROR}`);
+  }
+
+  private hasStringKnnQuery(obj: unknown): boolean {
+    if (!obj || typeof obj !== "object") return false;
+    if (Array.isArray(obj)) {
+      return obj.some((item) => this.hasStringKnnQuery(item));
+    }
+    const record = obj as Record<string, unknown>;
+    if ("$knn" in record && isPlainObject(record.$knn)) {
+      const knn = record.$knn as Record<string, unknown>;
+      if (typeof knn.query === "string") return true;
+    }
+    return Object.values(record).some((value) =>
+      this.hasStringKnnQuery(value),
+    );
+  }
+}
