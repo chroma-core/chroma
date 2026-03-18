@@ -71,9 +71,7 @@ impl<'a, T> ReadValue<'a> for T where T: Value + Readable<'a> + ArrowReadableVal
 impl BlockfileProvider {
     pub fn storage(&self) -> Option<Arc<Storage>> {
         match self {
-            BlockfileProvider::ArrowBlockfileProvider(provider) => {
-                Some(provider.storage().clone())
-            }
+            BlockfileProvider::ArrowBlockfileProvider(provider) => Some(provider.storage().clone()),
             BlockfileProvider::HashMapBlockfileProvider(_) => None,
         }
     }
