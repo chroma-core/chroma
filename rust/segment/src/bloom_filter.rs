@@ -617,6 +617,8 @@ mod tests {
                 cache: chroma_cache::new_non_persistent_cache_for_test(),
                 storage: storage.clone(),
                 scope: BloomFilterScope::None,
+                storage_fetch_threshold: BloomFilterManagerConfig::default_storage_fetch_threshold(
+                ),
             }),
         };
         assert!(!mgr.is_enabled_for_collection(c1));
@@ -628,6 +630,8 @@ mod tests {
                 cache: chroma_cache::new_non_persistent_cache_for_test(),
                 storage: storage.clone(),
                 scope: BloomFilterScope::All,
+                storage_fetch_threshold: BloomFilterManagerConfig::default_storage_fetch_threshold(
+                ),
             }),
         };
         assert!(mgr.is_enabled_for_collection(c1));
@@ -639,6 +643,8 @@ mod tests {
                 cache: chroma_cache::new_non_persistent_cache_for_test(),
                 storage: storage.clone(),
                 scope: BloomFilterScope::Some(HashSet::from([c1])),
+                storage_fetch_threshold: BloomFilterManagerConfig::default_storage_fetch_threshold(
+                ),
             }),
         };
         assert!(mgr.is_enabled_for_collection(c1));
