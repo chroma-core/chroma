@@ -1,6 +1,6 @@
 ## chromadb
 
-Chroma is the open-source embedding database. Chroma makes it easy to build LLM apps by making knowledge, facts, and skills pluggable for LLMs.
+Chroma is the open-source data infrastructure for AI. Chroma makes it easy to build LLM apps by making knowledge, facts, and skills pluggable for LLMs.
 
 This package gives you a JS/TS interface to talk to a backend Chroma DB over REST.
 

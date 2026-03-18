@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-    <b>Chroma - the open-source embedding database</b>. <br />
+    <b>Chroma - the open-source data infrastructure for AI</b>. <br />
     This package is for the Python HTTP client-only library for Chroma. This client connects to the Chroma Server. If that it not what you are looking for, you might want to check out the <a href="https://github.com/chroma-core/chroma ">full library</a>.
 </p>
 
