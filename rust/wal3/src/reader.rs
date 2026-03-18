@@ -75,7 +75,7 @@ pub fn scan_from_manifest(
     if !manifest
         .fragments
         .iter()
-        .any(|f| f.limit > log_position_range.1)
+        .any(|f| f.limit >= log_position_range.1)
     {
         return None;
     }
@@ -98,7 +98,7 @@ pub fn scan_from_manifest(
             break;
         }
     }
-    if covered_until <= log_position_range.1 {
+    if covered_until < log_position_range.1 {
         return None;
     }
     let mut short_read = false;
@@ -1045,7 +1045,11 @@ mod tests {
         )
         .expect("overlapping fragments that cover the full range should be accepted");
 
-        assert_eq!(result.len(), 3, "all covering fragments should be preserved");
+        assert_eq!(
+            result.len(),
+            3,
+            "all covering fragments should be preserved"
+        );
     }
 
     #[test]

@@ -87,7 +87,11 @@ impl ExponentialBackoff {
 
     pub fn next_capped(&self, max: Duration) -> Duration {
         let backoff = self.next();
-        if backoff > max { max } else { backoff }
+        if backoff > max {
+            max
+        } else {
+            backoff
+        }
     }
 }
 
