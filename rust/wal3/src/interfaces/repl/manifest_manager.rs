@@ -366,8 +366,10 @@ impl ManifestManager {
             ",
         );
         stmt.add_param("region", &region);
-        stmt.add_param("record_count_threshold", &(record_count_threshold as i64));
-        stmt.add_param("timeout_us", &(timeout_us as i64));
+        let record_count_threshold = record_count_threshold.min(i64::MAX as u64) as i64;
+        let timeout_us = timeout_us.min(i64::MAX as u64) as i64;
+        stmt.add_param("record_count_threshold", &record_count_threshold);
+        stmt.add_param("timeout_us", &timeout_us);
         let mut tx = spanner.read_only_transaction().await?;
         let mut reader = tx.query(stmt).await?;
         let mut results = vec![];
