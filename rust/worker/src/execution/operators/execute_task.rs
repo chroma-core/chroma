@@ -4,7 +4,9 @@ use chroma_error::ChromaError;
 use chroma_log::Log;
 use chroma_segment::types::HydratedMaterializedLogRecord;
 use chroma_segment::{
-    blockfile_record::{RecordSegmentReaderOptions, RecordSegmentReader, RecordSegmentReaderCreationError},
+    blockfile_record::{
+        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
+    },
     bloom_filter::BloomFilterManager,
 };
 use chroma_system::{Operator, OperatorType};
@@ -57,7 +59,10 @@ impl CountAttachedFunction {
 
         // Try to get the existing record with the function output ID
         let offset_id = match reader
-            .get_offset_id_for_user_id(COUNT_FUNCTION_OUTPUT_ID, &RecordSegmentReaderOptions::default())
+            .get_offset_id_for_user_id(
+                COUNT_FUNCTION_OUTPUT_ID,
+                &RecordSegmentReaderOptions::default(),
+            )
             .await
         {
             Ok(Some(offset_id)) => offset_id,

@@ -5,7 +5,9 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::ChromaError;
 use chroma_segment::{
-    blockfile_record::{RecordSegmentReaderOptions, RecordSegmentReader, RecordSegmentReaderCreationError},
+    blockfile_record::{
+        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
+    },
     bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},
 };

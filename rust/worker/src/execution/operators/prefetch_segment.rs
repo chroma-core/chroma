@@ -115,7 +115,7 @@ mod tests {
     use super::*;
     use chroma_blockstore::test_arrow_blockfile_provider;
     use chroma_segment::blockfile_record::{
-        RecordSegmentReaderOptions, RecordSegmentReader, RecordSegmentWriter,
+        RecordSegmentReader, RecordSegmentReaderOptions, RecordSegmentWriter,
     };
     use chroma_segment::types::materialize_logs;
     use chroma_types::{

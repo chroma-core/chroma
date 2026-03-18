@@ -6,7 +6,9 @@ use chroma_error::ChromaError;
 use chroma_index::sparse::{reader::SparseReaderError, types::encode_u32};
 use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentReader},
-    blockfile_record::{RecordSegmentReaderOptions, RecordSegmentReader, RecordSegmentReaderCreationError},
+    blockfile_record::{
+        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
+    },
     bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},
 };

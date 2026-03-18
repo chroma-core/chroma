@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_segment::blockfile_record::{
-    RecordSegmentReaderOptions, RecordSegmentReader, RecordSegmentReaderCreationError,
+    RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
 };
 use chroma_segment::types::{materialize_logs, LogMaterializerError, MaterializeLogsResult};
 use chroma_system::Operator;

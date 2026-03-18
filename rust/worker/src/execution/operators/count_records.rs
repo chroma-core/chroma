@@ -215,7 +215,7 @@ mod tests {
     use chroma_blockstore::provider::BlockfileProvider;
     use chroma_segment::{
         blockfile_record::{
-            RecordSegmentReaderOptions, RecordSegmentReader, RecordSegmentReaderCreationError,
+            RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
             RecordSegmentWriter,
         },
         types::materialize_logs,

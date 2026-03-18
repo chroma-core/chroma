@@ -9,7 +9,9 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::metadata::types::MetadataIndexError;
 use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentReader},
-    blockfile_record::{RecordSegmentReaderOptions, RecordSegmentReader, RecordSegmentReaderCreationError},
+    blockfile_record::{
+        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
+    },
     bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError, MaterializeLogsResult},
 };
@@ -776,7 +778,7 @@ mod tests {
     use chroma_segment::{
         blockfile_metadata::{MetadataSegmentReader, MetadataSegmentWriter},
         blockfile_record::{
-            RecordSegmentReaderOptions, RecordSegmentReader, RecordSegmentReaderCreationError,
+            RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
             RecordSegmentWriter,
         },
         test::TestDistributedSegment,
@@ -1539,9 +1541,14 @@ mod tests {
         .await
         .expect("Error creating segment writer");
         let some_reader = Some(record_segment_reader);
-        let mat_records = materialize_logs(&some_reader, data, None, &RecordSegmentReaderOptions::default())
-            .await
-            .expect("Log materialization failed");
+        let mat_records = materialize_logs(
+            &some_reader,
+            data,
+            None,
+            &RecordSegmentReaderOptions::default(),
+        )
+        .await
+        .expect("Log materialization failed");
         metadata_writer
             .apply_materialized_log_chunk(&some_reader, &mat_records, None)
             .await
