@@ -1,12 +1,14 @@
 use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use google_cloud_spanner::client::Client;
 use google_cloud_spanner::key::Key;
 use google_cloud_spanner::mutation::{delete, insert, update};
 use google_cloud_spanner::statement::Statement;
+use google_cloud_spanner::value::CommitTimestamp;
+use prost_types::Timestamp;
 use setsum::Setsum;
 use tonic::Code;
 use uuid::Uuid;
@@ -39,6 +41,7 @@ impl ManifestManager {
         log_id: Uuid,
         manifest: &Manifest,
     ) -> Result<(), Error> {
+        let commit_ts = CommitTimestamp::new();
         let enum_offset = manifest.fragments.iter().map(|f| f.limit).max().unwrap_or(
             manifest
                 .initial_offset
@@ -53,6 +56,7 @@ impl ManifestManager {
                 "writer",
                 "enumeration_offset",
                 "ignore_dirty",
+                "updated_at",
             ],
             &[
                 &log_id.to_string(),
@@ -61,6 +65,7 @@ impl ManifestManager {
                 &"spanner init",
                 &(enum_offset.offset() as i64),
                 &false,
+                &commit_ts,
             ],
         )];
         let initial_offset = manifest
@@ -339,45 +344,70 @@ impl ManifestManager {
     pub async fn get_dirty_logs(
         spanner: &Client,
         region: &str,
-    ) -> Result<Vec<(Uuid, LogPosition, LogPosition)>, Error> {
+        record_count_threshold: u64,
+        timeout_us: u64,
+    ) -> Result<Vec<(Uuid, LogPosition, LogPosition, SystemTime)>, Error> {
         let mut stmt = Statement::new(
             "
-            SELECT DISTINCT manifests.log_id, manifest_regions.intrinsic_cursor, manifests.enumeration_offset
+            SELECT DISTINCT manifests.log_id, manifest_regions.intrinsic_cursor, manifest_regions.initial_offset, manifests.enumeration_offset,
+                COALESCE(manifests.updated_at, TIMESTAMP_SECONDS(0)) AS updated_at
             FROM manifests
                 INNER JOIN manifest_regions
                 ON manifests.log_id = manifest_regions.log_id
             WHERE manifest_regions.region = @region
-                AND (manifest_regions.intrinsic_cursor IS NULL
-                    OR manifest_regions.intrinsic_cursor < manifests.enumeration_offset)
+                AND (
+                    manifests.enumeration_offset - COALESCE(manifest_regions.intrinsic_cursor, manifest_regions.initial_offset) > @record_count_threshold
+                    OR (
+                        manifests.enumeration_offset > COALESCE(manifest_regions.intrinsic_cursor, manifest_regions.initial_offset)
+                        AND UNIX_MICROS(CURRENT_TIMESTAMP()) - UNIX_MICROS(COALESCE(manifests.updated_at, TIMESTAMP_SECONDS(0))) >= @timeout_us
+                    )
+                )
                 AND manifests.ignore_dirty = false
             ",
         );
         stmt.add_param("region", &region);
+        stmt.add_param("record_count_threshold", &(record_count_threshold as i64));
+        stmt.add_param("timeout_us", &(timeout_us as i64));
         let mut tx = spanner.read_only_transaction().await?;
         let mut reader = tx.query(stmt).await?;
         let mut results = vec![];
         while let Some(row) = reader.next().await? {
             let log_id_str = row.column_by_name::<String>("log_id")?;
-            let intrinsic_cursor = row.column_by_name::<i64>("intrinsic_cursor")?;
+            let intrinsic_cursor = row.column_by_name::<Option<i64>>("intrinsic_cursor")?;
+            let initial_offset = row.column_by_name::<i64>("initial_offset")?;
             let enumeration_offset = row.column_by_name::<i64>("enumeration_offset")?;
+            let updated_at = row.column_by_name::<Timestamp>("updated_at")?;
             let Ok(log_id) = Uuid::parse_str(&log_id_str) else {
                 tracing::warn!("invalid log_id in manifests table: {log_id_str}");
                 continue;
             };
-            if intrinsic_cursor < 0 {
-                tracing::warn!("negative intrinsic_cursor {intrinsic_cursor} for log_id {log_id}");
-                continue;
-            }
             if enumeration_offset < 0 {
                 tracing::warn!(
                     "negative enumeration_offset {enumeration_offset} for log_id {log_id}"
                 );
                 continue;
             }
+            if initial_offset < 0 {
+                tracing::warn!("negative initial_offset {initial_offset} for log_id {log_id}");
+                continue;
+            }
+            let compaction_offset = intrinsic_cursor.unwrap_or(initial_offset);
+            if compaction_offset < 0 {
+                tracing::warn!(
+                    "negative compaction_offset {compaction_offset} for log_id {log_id}"
+                );
+                continue;
+            }
+            let updated_at = SystemTime::try_from(updated_at).map_err(|err| {
+                Error::CorruptManifest(format!(
+                    "invalid updated_at timestamp for manifest {log_id}: {err}"
+                ))
+            })?;
             results.push((
                 log_id,
-                LogPosition::from_offset(intrinsic_cursor as u64),
+                LogPosition::from_offset(compaction_offset as u64),
                 LogPosition::from_offset(enumeration_offset as u64),
+                updated_at,
             ));
         }
         Ok(results)
@@ -434,10 +464,11 @@ impl ManifestManager {
             .iter()
             .map(|id| {
                 let log_id_str = id.to_string();
+                let commit_ts = CommitTimestamp::new();
                 update(
                     "manifests",
-                    &["log_id", "ignore_dirty"],
-                    &[&log_id_str, &ignore_dirty],
+                    &["log_id", "ignore_dirty", "updated_at"],
+                    &[&log_id_str, &ignore_dirty, &commit_ts],
                 )
             })
             .collect();
@@ -509,6 +540,7 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
         let pointer = pointer.to_string();
         let path = path.to_string();
         let regions: Vec<String> = successful_regions.to_vec();
+        let commit_ts = CommitTimestamp::new();
         // The SDK's read_write_transaction has internal retries for Aborted errors, so this outer
         // loop handles cases where those are exhausted.
         let exp_backoff = ExponentialBackoff::new(2_000.0, 1_500.0);
@@ -608,13 +640,20 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                             ),
                             update(
                                 "manifests",
-                                &["log_id", "setsum", "enumeration_offset", "acc_bytes"],
+                                &[
+                                    "log_id",
+                                    "setsum",
+                                    "enumeration_offset",
+                                    "acc_bytes",
+                                    "updated_at",
+                                ],
                                 // NOTE(rescrv):  Pass in enumeration_limit so that we advance the enumeration offset.
                                 &[
                                     &log_id,
                                     &updated_setsum,
                                     &enumeration_limit,
                                     &updated_acc_bytes,
+                                    &commit_ts,
                                 ],
                             ),
                         ];
@@ -2201,11 +2240,11 @@ mod tests {
             .await
             .expect("publish failed");
 
-        let dirty_logs = ManifestManager::get_dirty_logs(&client, "dummy")
+        let dirty_logs = ManifestManager::get_dirty_logs(&client, "dummy", 0, u64::MAX)
             .await
             .expect("get_dirty_logs failed");
 
-        let found = dirty_logs.iter().any(|(id, _, _)| *id == log_id);
+        let found = dirty_logs.iter().any(|(id, _, _, _)| *id == log_id);
         assert!(
             found,
             "get_dirty_logs should return the log with uncompacted data, log_id={}, dirty_logs={:?}",
@@ -2249,10 +2288,10 @@ mod tests {
             .expect("publish failed");
 
         // Verify the log appears in dirty logs before setting ignore.
-        let dirty_before = ManifestManager::get_dirty_logs(&client, "dummy")
+        let dirty_before = ManifestManager::get_dirty_logs(&client, "dummy", 0, u64::MAX)
             .await
             .expect("get_dirty_logs failed");
-        let found_before = dirty_before.iter().any(|(id, _, _)| *id == log_id);
+        let found_before = dirty_before.iter().any(|(id, _, _, _)| *id == log_id);
         assert!(
             found_before,
             "log should appear in dirty logs before ignore is set"
@@ -2275,10 +2314,10 @@ mod tests {
             .expect("failed to set ignore=true");
 
         // Verify the log no longer appears in dirty logs.
-        let dirty_after = ManifestManager::get_dirty_logs(&client, "dummy")
+        let dirty_after = ManifestManager::get_dirty_logs(&client, "dummy", 0, u64::MAX)
             .await
             .expect("get_dirty_logs failed");
-        let found_after = dirty_after.iter().any(|(id, _, _)| *id == log_id);
+        let found_after = dirty_after.iter().any(|(id, _, _, _)| *id == log_id);
         assert!(
             !found_after,
             "get_dirty_logs should exclude log with ignore=true, log_id={}, dirty_logs={:?}",
@@ -2321,11 +2360,11 @@ mod tests {
             .expect("publish failed");
 
         // Verify the collection appears in dirty logs before purging.
-        let dirty_before = ManifestManager::get_dirty_logs(&client, "dummy")
+        let dirty_before = ManifestManager::get_dirty_logs(&client, "dummy", 0, u64::MAX)
             .await
             .expect("get_dirty_logs failed");
         assert!(
-            dirty_before.iter().any(|(id, _, _)| *id == log_id),
+            dirty_before.iter().any(|(id, _, _, _)| *id == log_id),
             "log should appear in dirty logs before purge, log_id={}, dirty_logs={:?}",
             log_id,
             dirty_before
@@ -2337,11 +2376,11 @@ mod tests {
             .expect("purge_dirty_for_collections failed");
 
         // Verify the collection no longer appears in dirty logs.
-        let dirty_after = ManifestManager::get_dirty_logs(&client, "dummy")
+        let dirty_after = ManifestManager::get_dirty_logs(&client, "dummy", 0, u64::MAX)
             .await
             .expect("get_dirty_logs failed");
         assert!(
-            !dirty_after.iter().any(|(id, _, _)| *id == log_id),
+            !dirty_after.iter().any(|(id, _, _, _)| *id == log_id),
             "log should not appear in dirty logs after purge, log_id={}, dirty_logs={:?}",
             log_id,
             dirty_after
@@ -2388,11 +2427,11 @@ mod tests {
             .expect("purge_dirty_for_collections failed");
 
         // Verify it is excluded from dirty logs.
-        let dirty_purged = ManifestManager::get_dirty_logs(&client, "dummy")
+        let dirty_purged = ManifestManager::get_dirty_logs(&client, "dummy", 0, u64::MAX)
             .await
             .expect("get_dirty_logs failed");
         assert!(
-            !dirty_purged.iter().any(|(id, _, _)| *id == log_id),
+            !dirty_purged.iter().any(|(id, _, _, _)| *id == log_id),
             "log should not appear in dirty logs after purge, log_id={}, dirty_logs={:?}",
             log_id,
             dirty_purged
@@ -2404,11 +2443,11 @@ mod tests {
             .expect("unpurge_dirty_for_collections failed");
 
         // Verify it reappears in dirty logs.
-        let dirty_unpurged = ManifestManager::get_dirty_logs(&client, "dummy")
+        let dirty_unpurged = ManifestManager::get_dirty_logs(&client, "dummy", 0, u64::MAX)
             .await
             .expect("get_dirty_logs failed");
         assert!(
-            dirty_unpurged.iter().any(|(id, _, _)| *id == log_id),
+            dirty_unpurged.iter().any(|(id, _, _, _)| *id == log_id),
             "log should reappear in dirty logs after unpurge, log_id={}, dirty_logs={:?}",
             log_id,
             dirty_unpurged
@@ -2458,11 +2497,11 @@ mod tests {
             .expect("second purge_dirty_for_collections failed");
 
         // Verify the collection is excluded after double purge.
-        let dirty_after = ManifestManager::get_dirty_logs(&client, "dummy")
+        let dirty_after = ManifestManager::get_dirty_logs(&client, "dummy", 0, u64::MAX)
             .await
             .expect("get_dirty_logs failed");
         assert!(
-            !dirty_after.iter().any(|(id, _, _)| *id == log_id),
+            !dirty_after.iter().any(|(id, _, _, _)| *id == log_id),
             "log should not appear in dirty logs after double purge, log_id={}, dirty_logs={:?}",
             log_id,
             dirty_after

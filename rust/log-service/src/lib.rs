@@ -1603,6 +1603,8 @@ impl LogServer {
         let dirty_logs = ReplManifestManager::get_dirty_logs(
             &topology.config.spanner,
             self.storages.preferred.as_str(),
+            self.config.record_count_threshold,
+            self.config.timeout_us,
         )
         .instrument(get_dirty_logs_span.clone())
         .await?;
@@ -1613,18 +1615,17 @@ impl LogServer {
                 Default::default(),
             ));
         }
-        let now_us = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_micros() as u64)
-            .unwrap_or(0);
         let mut rollups = HashMap::new();
-        for (log_id, compaction_offset, enumeration_offset) in dirty_logs {
+        for (log_id, compaction_offset, enumeration_offset, updated_at) in dirty_logs {
             let collection_id = CollectionUuid(log_id);
             let rollup = RollupPerCollection {
                 start_log_position: compaction_offset,
                 limit_log_position: enumeration_offset,
                 reinsert_count: 0,
-                initial_insertion_epoch_us: now_us,
+                initial_insertion_epoch_us: updated_at
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map(|d| d.as_micros() as u64)
+                    .unwrap_or(0),
             };
             rollups.insert((Some(topology.name.clone()), collection_id), rollup);
         }
