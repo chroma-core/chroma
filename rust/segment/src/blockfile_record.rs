@@ -432,7 +432,7 @@ impl RecordSegmentWriter {
                 return None;
             }
         };
-        let capacity = (count as u64).max(DEFAULT_BLOOM_FILTER_CAPACITY) * 2;
+        let capacity = ((count * 2) as u64).max(DEFAULT_BLOOM_FILTER_CAPACITY);
         let bloom_filter = BloomFilter::new(capacity, storage, prefix_path, manager);
         let mut stream = std::pin::pin!(reader.get_user_id_stream());
         while let Some(result) = stream.next().await {
