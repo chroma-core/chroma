@@ -11,6 +11,7 @@
 #[allow(dead_code)]
 mod datasets;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
@@ -61,10 +62,6 @@ struct Args {
     #[arg(long, default_value = "1000000")]
     data_vectors: usize,
 
-    /// Number of threads for the SPANN simulation
-    #[arg(long, default_value = "32")]
-    threads: usize,
-
     /// HNSW ef_search (expansion_search) parameter
     #[arg(long, default_value = "128")]
     ef_search: usize,
@@ -73,13 +70,28 @@ struct Args {
     #[arg(long, default_value = "200")]
     num_queries: usize,
 
+    /// Comma-separated nprobe values to sweep in Phase 2 (Phase 3 uses the first value)
+    #[arg(long, value_delimiter = ',', default_values_t = vec![32, 64, 128, 256])]
+    nprobe: Vec<usize>,
+
+    /// Comma-separated rerank factors to sweep in both phases
+    #[arg(long, value_delimiter = ',', default_values_t = vec![1, 4, 8, 16])]
+    rerank: Vec<usize>,
+
+    /// Enable Phase 2 (synthetic SPANN workload with nprobe x rerank sweep)
+    #[arg(long)]
+    phase_2: bool,
+
+    /// Enable Phase 3 (search-only recall with rerank sweep)
+    #[arg(long)]
+    phase_3: bool,
+
     /// Extra arguments (ignored, for compatibility with cargo bench)
     #[arg(hide = true, allow_hyphen_values = true)]
     _extra: Vec<String>,
 }
 // example:
-// cargo bench -p chroma-index --bench usearch_spann_profile -- --dataset wikipedia-en --centroid-bits 4 --initial-centroids 5700 --threads 32 --data-vectors 10000
-
+// cargo bench -p chroma-index --features usearch --bench usearch_spann_profile -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 1000000 --phase-2 --phase-3
 
 // =============================================================================
 // Load profile ratios (from SPANN CP1 @ 1M data vectors)
@@ -88,7 +100,6 @@ struct Args {
 const NAVIGATES_PER_ADD: f64 = 3.05;
 const SPAWN_RATE: f64 = 0.0114;
 const DROP_RATE: f64 = 0.0057;
-const NPROBE: usize = 64;
 
 // =============================================================================
 // Stats tracking
@@ -123,6 +134,13 @@ impl MethodStats {
 #[derive(Default, Clone)]
 struct PhaseStats {
     navigate: MethodStats,
+    nav_search: MethodStats,
+    nav_rerank: MethodStats,
+    nav_rr_dist: MethodStats,
+    nav_rr_sort: MethodStats,
+    rr_scored_total: u64,
+    rr_scored_calls: u64,
+    rr_bytes_total: u64,
     spawn: MethodStats,
     drop_op: MethodStats,
     wall: Duration,
@@ -131,8 +149,31 @@ struct PhaseStats {
 impl PhaseStats {
     fn merge(&mut self, other: &PhaseStats) {
         self.navigate.merge(&other.navigate);
+        self.nav_search.merge(&other.nav_search);
+        self.nav_rerank.merge(&other.nav_rerank);
+        self.nav_rr_dist.merge(&other.nav_rr_dist);
+        self.nav_rr_sort.merge(&other.nav_rr_sort);
+        self.rr_scored_total += other.rr_scored_total;
+        self.rr_scored_calls += other.rr_scored_calls;
+        self.rr_bytes_total += other.rr_bytes_total;
         self.spawn.merge(&other.spawn);
         self.drop_op.merge(&other.drop_op);
+    }
+
+    fn avg_rr_scored(&self) -> f64 {
+        if self.rr_scored_calls == 0 {
+            0.0
+        } else {
+            self.rr_scored_total as f64 / self.rr_scored_calls as f64
+        }
+    }
+
+    fn avg_rr_bytes(&self) -> f64 {
+        if self.rr_scored_calls == 0 {
+            0.0
+        } else {
+            self.rr_bytes_total as f64 / self.rr_scored_calls as f64
+        }
     }
 }
 
@@ -157,6 +198,16 @@ fn format_duration(d: Duration) -> String {
 
 fn format_nanos(nanos: u64) -> String {
     format_duration(Duration::from_nanos(nanos))
+}
+
+fn format_bytes(bytes: f64) -> String {
+    if bytes < 1024.0 {
+        format!("{:.0}B", bytes)
+    } else if bytes < 1024.0 * 1024.0 {
+        format!("{:.1}KB", bytes / 1024.0)
+    } else {
+        format!("{:.1}MB", bytes / (1024.0 * 1024.0))
+    }
 }
 
 // =============================================================================
@@ -220,19 +271,45 @@ fn load_vectors(args: &Args) -> (Vec<Vec<f32>>, usize, DistanceFunction) {
 }
 
 // =============================================================================
-// Brute-force ground truth
+// Recall evaluation helpers
 // =============================================================================
 
-fn brute_force_knn(
+struct CorpusView<'a> {
+    corpus_refs: Vec<&'a [f32]>,
+    corpus_keys: Vec<u32>,
+    key_to_vec_idx: HashMap<u32, usize>,
+}
+
+impl<'a> CorpusView<'a> {
+    fn from_live_entries(live_entries: &[(u32, usize)], all_vectors: &'a [Vec<f32>]) -> Self {
+        let mut corpus_refs = Vec::with_capacity(live_entries.len());
+        let mut corpus_keys = Vec::with_capacity(live_entries.len());
+        let mut key_to_vec_idx = HashMap::with_capacity(live_entries.len());
+        for &(key, vec_idx) in live_entries {
+            if vec_idx < all_vectors.len() {
+                corpus_refs.push(all_vectors[vec_idx].as_slice());
+                corpus_keys.push(key);
+                key_to_vec_idx.insert(key, vec_idx);
+            }
+        }
+        Self {
+            corpus_refs,
+            corpus_keys,
+            key_to_vec_idx,
+        }
+    }
+}
+
+fn brute_force_knn_refs(
     query: &[f32],
-    corpus: &[Vec<f32>],
+    corpus_refs: &[&[f32]],
     corpus_keys: &[u32],
     k: usize,
     distance_fn: &DistanceFunction,
 ) -> Vec<u32> {
     let mut dists: Vec<(u32, f32)> = corpus_keys
         .iter()
-        .zip(corpus.iter())
+        .zip(corpus_refs.iter())
         .map(|(&key, vec)| {
             let d = match distance_fn {
                 DistanceFunction::Euclidean => {
@@ -242,9 +319,7 @@ fn brute_force_knn(
                     let ip = f32::inner(query, vec).unwrap_or(0.0) as f32;
                     1.0 - ip
                 }
-                DistanceFunction::Cosine => {
-                    f32::cosine(query, vec).unwrap_or(f64::MAX) as f32
-                }
+                DistanceFunction::Cosine => f32::cosine(query, vec).unwrap_or(f64::MAX) as f32,
             };
             (key, d)
         })
@@ -253,141 +328,166 @@ fn brute_force_knn(
     dists.into_iter().take(k).map(|(k, _)| k).collect()
 }
 
+fn compute_ground_truths(
+    query_vecs: &[&[f32]],
+    corpus: &CorpusView,
+    k: usize,
+    distance_fn: &DistanceFunction,
+    num_threads: usize,
+) -> Vec<Vec<u32>> {
+    std::thread::scope(|s| {
+        let chunk_size = (query_vecs.len() + num_threads - 1).max(1) / num_threads.max(1);
+        let handles: Vec<_> = query_vecs
+            .chunks(chunk_size)
+            .map(|chunk| {
+                let corpus_refs = &corpus.corpus_refs;
+                let corpus_keys = &corpus.corpus_keys;
+                s.spawn(move || {
+                    chunk
+                        .iter()
+                        .map(|q| brute_force_knn_refs(q, corpus_refs, corpus_keys, k, distance_fn))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().unwrap())
+            .collect()
+    })
+}
+
+fn evaluate_recall(
+    index: &USearchIndex,
+    query_vecs: &[&[f32]],
+    ground_truths: &[Vec<u32>],
+    corpus: &CorpusView,
+    all_vectors: &[Vec<f32>],
+    rerank_factor: usize,
+    nprobe: usize,
+    distance_fn: &DistanceFunction,
+) -> (f64, f64) {
+    let mut r10_sum = 0.0f64;
+    let mut r100_sum = 0.0f64;
+
+    for (qi, query) in query_vecs.iter().enumerate() {
+        let gt = &ground_truths[qi];
+        let gt_10: std::collections::HashSet<u32> = gt.iter().take(10).copied().collect();
+        let gt_100: std::collections::HashSet<u32> = gt.iter().take(nprobe).copied().collect();
+
+        let fetch_k = rerank_factor * nprobe;
+        let result = index.search(query, fetch_k).unwrap();
+
+        let predicted: std::collections::HashSet<u32> = if rerank_factor > 1 {
+            let mut scored: Vec<(u32, f32)> = result
+                .keys
+                .iter()
+                .filter_map(|&key| {
+                    corpus
+                        .key_to_vec_idx
+                        .get(&key)
+                        .map(|&vi| (key, distance_fn.distance(query, &all_vectors[vi])))
+                })
+                .collect();
+            scored.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            scored.iter().take(nprobe).map(|(key, _)| *key).collect()
+        } else {
+            result.keys.iter().copied().collect()
+        };
+
+        r10_sum += predicted.intersection(&gt_10).count() as f64 / gt_10.len().max(1) as f64;
+        r100_sum += predicted.intersection(&gt_100).count() as f64 / gt_100.len().max(1) as f64;
+    }
+
+    let n_q = query_vecs.len() as f64;
+    (r10_sum / n_q * 100.0, r100_sum / n_q * 100.0)
+}
+
 // =============================================================================
-// Main benchmark
+// Search + rerank helper
 // =============================================================================
 
-fn main() {
-    let args = Args::parse();
-    let centroid_bits = args.centroid_bits;
-    let initial_centroids = args.initial_centroids;
-    let data_vectors = args.data_vectors;
-    let num_threads = args.threads;
-    let ef_search = args.ef_search;
-    let num_queries = args.num_queries;
+struct NavTiming {
+    navigate: Duration,
+    search: Duration,
+    rerank: Duration,
+    rr_dist: Duration,
+    rr_sort: Duration,
+    rr_scored: usize,
+    rr_bytes: usize,
+}
 
-    let (all_vectors, dim, distance_fn) = load_vectors(&args);
+fn search_and_rerank(
+    index: &USearchIndex,
+    query: &[f32],
+    nprobe: usize,
+    rerank_factor: usize,
+    corpus: &CorpusView,
+    all_vectors: &[Vec<f32>],
+    distance_fn: &DistanceFunction,
+) -> NavTiming {
+    let t_nav = Instant::now();
+    let fetch_k = rerank_factor * nprobe;
 
-    let quantization_center: Option<Arc<[f32]>> = centroid_bits.map(|_| {
-        let n = all_vectors.len().min(initial_centroids);
-        let mut avg = vec![0.0f32; dim];
-        for v in &all_vectors[..n] {
-            for (a, b) in avg.iter_mut().zip(v.iter()) {
-                *a += b;
-            }
-        }
-        let scale = 1.0 / n as f32;
-        for a in avg.iter_mut() {
-            *a *= scale;
-        }
-        Arc::from(avg)
-    });
+    let t_search = Instant::now();
+    let result = index.search(query, fetch_k).unwrap();
+    let search_dur = t_search.elapsed();
 
-    let bits_label = match centroid_bits {
-        Some(b) => format!("{}", b),
-        None => "f32".to_string(),
-    };
+    let (rerank_dur, rr_dist, rr_sort, rr_scored, rr_bytes) = if rerank_factor > 1 {
+        let t_rr = Instant::now();
 
-    println!("\n=== USearch SPANN Profile Benchmark ===");
-    println!(
-        "Dim: {} | Metric: {:?} | Centroid bits: {} | ef_search: {} | Threads: {}",
-        dim, args.metric, bits_label, ef_search, num_threads
-    );
-    println!(
-        "Initial centroids: {} | Data vectors: {} | Queries: {}",
-        format_count(initial_centroids),
-        format_count(data_vectors),
-        num_queries
-    );
-    println!(
-        "Load profile per data vector: {:.2} navigates, {:.4} spawns, {:.4} drops",
-        NAVIGATES_PER_ADD, SPAWN_RATE, DROP_RATE
-    );
+        let t_dist = Instant::now();
+        let mut scored: Vec<(u32, f32)> = result
+            .keys
+            .iter()
+            .filter_map(|&key| {
+                corpus
+                    .key_to_vec_idx
+                    .get(&key)
+                    .map(|&vi| (key, distance_fn.distance(query, &all_vectors[vi])))
+            })
+            .collect();
+        let dist_dur = t_dist.elapsed();
 
-    // Create USearch index
-    let config = USearchIndexConfig {
-        collection_id: CollectionUuid(Uuid::new_v4()),
-        cmek: None,
-        prefix_path: String::new(),
-        dimensions: dim,
-        distance_function: distance_fn.clone(),
-        connectivity: 16,
-        expansion_add: 128,
-        expansion_search: ef_search,
-        quantization_center: quantization_center,
-        centroid_quantization_bits: centroid_bits.unwrap_or(4),
-    };
+        let t_sort = Instant::now();
+        scored.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        let sort_dur = t_sort.elapsed();
 
-    let index = USearchIndex::new_for_benchmark(config.clone())
-        .expect("Failed to create index");
-
-    // =========================================================================
-    // Phase 1: Bootstrap – add initial centroids (with disk cache)
-    // =========================================================================
-    let cache_dir = PathBuf::from("target/usearch_cache");
-    let cache_file = cache_dir.join(format!(
-        "bootstrap_{:?}_{}_{:?}_{}.bin",
-        args.dataset,
-        initial_centroids,
-        args.metric,
-        bits_label,
-    ));
-
-    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
-    let loaded_from_cache = if cache_file.exists() {
-        println!("\n--- Phase 1: Loading cached bootstrap from {} ---", cache_file.display());
-        let data = std::fs::read(&cache_file).expect("Failed to read cache file");
-        rt.block_on(index.load_for_benchmark(Arc::new(data))).expect("Failed to load cached index");
-        println!("Loaded {} centroids from cache", index.len().unwrap());
-        true
+        let n = scored.len();
+        (t_rr.elapsed(), dist_dur, sort_dur, n, n * query.len() * std::mem::size_of::<f32>())
     } else {
-        println!("\n--- Phase 1: Bootstrap ({} centroids) ---", format_count(initial_centroids));
-
-        let progress = ProgressBar::new(initial_centroids as u64);
-        progress.set_style(
-            ProgressStyle::default_bar()
-                .template("[Bootstrap] {wide_bar} {pos}/{len} [{elapsed_precise}<{eta_precise}]")
-                .unwrap(),
-        );
-
-        let bootstrap_start = Instant::now();
-        for i in 0..initial_centroids.min(all_vectors.len()) {
-            index.add(i as u32, &all_vectors[i]).unwrap();
-            progress.inc(1);
-        }
-        progress.finish_and_clear();
-        let bootstrap_time = bootstrap_start.elapsed();
-
-        println!(
-            "Added {} centroids in {} ({:.0} vec/s)",
-            format_count(initial_centroids),
-            format_duration(bootstrap_time),
-            initial_centroids as f64 / bootstrap_time.as_secs_f64()
-        );
-        println!("Index size: {}", index.len().unwrap());
-
-        std::fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
-        let buf = rt.block_on(index.save_for_benchmark()).expect("Failed to serialize index");
-        std::fs::write(&cache_file, &buf).expect("Failed to write cache file");
-        println!("Cached bootstrap to {}", cache_file.display());
-        false
+        (Duration::ZERO, Duration::ZERO, Duration::ZERO, 0, 0)
     };
-    let _ = loaded_from_cache;
 
-    // =========================================================================
-    // Phase 2: Simulated SPANN workload (multi-threaded)
-    // =========================================================================
-    println!(
-        "\n--- Phase 2: SPANN workload ({} data vectors, {} threads) ---",
-        format_count(data_vectors),
-        num_threads
-    );
+    NavTiming {
+        navigate: t_nav.elapsed(),
+        search: search_dur,
+        rerank: rerank_dur,
+        rr_dist,
+        rr_sort,
+        rr_scored,
+        rr_bytes,
+    }
+}
 
+// =============================================================================
+// Phase 2 workload runner
+// =============================================================================
+
+fn run_phase2_workload(
+    index: &USearchIndex,
+    all_vectors: &[Vec<f32>],
+    corpus: &CorpusView,
+    initial_centroids: usize,
+    data_vectors: usize,
+    num_threads: usize,
+    rerank_factor: usize,
+    nprobe: usize,
+    distance_fn: &DistanceFunction,
+) -> (PhaseStats, Vec<(u32, usize)>) {
     let next_key = AtomicU32::new(initial_centroids as u32);
-    // Track (usearch_key, index_into_all_vectors) so we can reconstruct the corpus for recall.
-    let live_entries: Mutex<Vec<(u32, usize)>> = Mutex::new(
-        (0..initial_centroids).map(|i| (i as u32, i)).collect(),
-    );
+    let live_entries: Mutex<Vec<(u32, usize)>> =
+        Mutex::new((0..initial_centroids).map(|i| (i as u32, i)).collect());
 
     let total_navigates = (data_vectors as f64 * NAVIGATES_PER_ADD) as u64;
     let total_spawns = (data_vectors as f64 * SPAWN_RATE) as u64;
@@ -397,7 +497,10 @@ fn main() {
     let progress = ProgressBar::new(total_ops);
     progress.set_style(
         ProgressStyle::default_bar()
-            .template("[SPANN sim] {wide_bar} {pos}/{len} [{elapsed_precise}<{eta_precise}]")
+            .template(&format!(
+                "[{}T/{}x] {{wide_bar}} {{pos}}/{{len}} [{{elapsed_precise}}<{{eta_precise}}]",
+                num_threads, rerank_factor
+            ))
             .unwrap(),
     );
 
@@ -406,14 +509,13 @@ fn main() {
     let vec_pool_start = initial_centroids;
     let vec_pool_size = all_vectors.len() - vec_pool_start;
 
-    let phase2_start = Instant::now();
+    let phase_start = Instant::now();
 
     let chunk_size = (data_vectors + num_threads - 1) / num_threads;
     let thread_stats: Vec<PhaseStats> = std::thread::scope(|s| {
         let handles: Vec<_> = (0..num_threads)
             .map(|thread_id| {
-                let index = &index;
-                let all_vectors = &all_vectors;
+                let index = index;
                 let next_key = &next_key;
                 let live_entries = &live_entries;
                 let progress = &progress;
@@ -427,15 +529,24 @@ fn main() {
                         let pool_idx = i % vec_pool_size;
                         let query_vec = &all_vectors[vec_pool_start + pool_idx];
 
-                        // Navigate (search)
+                        // Navigate (search + optional rerank)
                         let mut n_nav = nav_per_add;
                         if rng.gen::<f64>() < nav_frac {
                             n_nav += 1;
                         }
                         for _ in 0..n_nav {
-                            let t = Instant::now();
-                            let _ = index.search(query_vec, NPROBE);
-                            local_stats.navigate.record(t.elapsed());
+                            let timing = search_and_rerank(
+                                index, query_vec, nprobe, rerank_factor,
+                                corpus, all_vectors, distance_fn,
+                            );
+                            local_stats.navigate.record(timing.navigate);
+                            local_stats.nav_search.record(timing.search);
+                            local_stats.nav_rerank.record(timing.rerank);
+                            local_stats.nav_rr_dist.record(timing.rr_dist);
+                            local_stats.nav_rr_sort.record(timing.rr_sort);
+                            local_stats.rr_scored_total += timing.rr_scored as u64;
+                            local_stats.rr_bytes_total += timing.rr_bytes as u64;
+                            local_stats.rr_scored_calls += 1;
                             progress.inc(1);
                         }
 
@@ -487,210 +598,324 @@ fn main() {
     for ts in &thread_stats {
         stats.merge(ts);
     }
-    stats.wall = phase2_start.elapsed();
+    stats.wall = phase_start.elapsed();
 
-    let final_live_entries = live_entries.into_inner();
+    (stats, live_entries.into_inner())
+}
 
-    println!(
-        "Completed in {} | Index size: {}",
-        format_duration(stats.wall),
-        index.len().unwrap()
-    );
+// =============================================================================
+// Main benchmark
+// =============================================================================
 
-    println!("\n=== Phase 2: Task Counts ===");
-    println!(
-        "| {:>10} | {:>10} | {:>10} |",
-        "navigate", "spawn", "drop"
-    );
-    println!("|------------|------------|------------|");
-    println!(
-        "| {:>10} | {:>10} | {:>10} |",
-        format_count(stats.navigate.calls as usize),
-        format_count(stats.spawn.calls as usize),
-        format_count(stats.drop_op.calls as usize),
-    );
+fn main() {
+    let args = Args::parse();
+    let centroid_bits = args.centroid_bits;
+    let initial_centroids = args.initial_centroids;
+    let data_vectors = args.data_vectors;
+    let ef_search = args.ef_search;
+    let num_queries = args.num_queries;
+    let nprobe_values = &args.nprobe;
+    let rerank_factors = &args.rerank;
+    let num_threads = 32;
 
-    println!("\n=== Phase 2: Task Total Time ===");
-    println!(
-        "| {:>10} | {:>10} | {:>10} | {:>10} |",
-        "navigate", "spawn", "drop", "wall"
-    );
-    println!("|------------|------------|------------|------------|");
-    println!(
-        "| {:>10} | {:>10} | {:>10} | {:>10} |",
-        format_duration(stats.navigate.total),
-        format_duration(stats.spawn.total),
-        format_duration(stats.drop_op.total),
-        format_duration(stats.wall),
-    );
+    let (all_vectors, dim, distance_fn) = load_vectors(&args);
 
-    println!("\n=== Phase 2: Task Avg Time ===");
-    println!(
-        "| {:>10} | {:>10} | {:>10} |",
-        "navigate", "spawn", "drop"
-    );
-    println!("|------------|------------|------------|");
-    println!(
-        "| {:>10} | {:>10} | {:>10} |",
-        format_nanos(stats.navigate.avg_nanos()),
-        format_nanos(stats.spawn.avg_nanos()),
-        format_nanos(stats.drop_op.avg_nanos()),
-    );
-
-    // =========================================================================
-    // Phase 3: Recall evaluation
-    // =========================================================================
-    println!("\n--- Phase 3: Recall ({} queries, k=100) ---", num_queries);
-
-    // Collect current corpus for brute-force using the tracked (key, vec_index) mapping
-    let corpus_vecs: Vec<Vec<f32>> = final_live_entries
-        .iter()
-        .filter_map(|&(_, vec_idx)| {
-            if vec_idx < all_vectors.len() {
-                Some(all_vectors[vec_idx].clone())
-            } else {
-                None
+    let quantization_center: Option<Arc<[f32]>> = centroid_bits.map(|_| {
+        let n = all_vectors.len().min(initial_centroids);
+        let mut avg = vec![0.0f32; dim];
+        for v in &all_vectors[..n] {
+            for (a, b) in avg.iter_mut().zip(v.iter()) {
+                *a += b;
             }
-        })
-        .collect();
-    let corpus_keys: Vec<u32> = final_live_entries
-        .iter()
-        .filter(|&&(_, vec_idx)| vec_idx < all_vectors.len())
-        .map(|&(key, _)| key)
-        .collect();
+        }
+        let scale = 1.0 / n as f32;
+        for a in avg.iter_mut() {
+            *a *= scale;
+        }
+        Arc::from(avg)
+    });
 
-    let query_start = vec_pool_start;
-    let query_vecs: Vec<&Vec<f32>> = all_vectors[query_start..]
+    let bits_label = match centroid_bits {
+        Some(b) => format!("{}", b),
+        None => "f32".to_string(),
+    };
+
+    println!("\n=== USearch SPANN Profile Benchmark ===");
+    println!(
+        "Dim: {} | Metric: {:?} | Centroid bits: {} | ef_search: {} | Threads: {}",
+        dim, args.metric, bits_label, ef_search, num_threads
+    );
+    println!(
+        "Initial centroids: {} | Data vectors: {} | Queries: {}",
+        format_count(initial_centroids),
+        format_count(data_vectors),
+        num_queries
+    );
+    println!(
+        "Load profile per data vector: {:.2} navigates, {:.4} spawns, {:.4} drops",
+        NAVIGATES_PER_ADD, SPAWN_RATE, DROP_RATE
+    );
+
+    let config = USearchIndexConfig {
+        collection_id: CollectionUuid(Uuid::new_v4()),
+        cmek: None,
+        prefix_path: String::new(),
+        dimensions: dim,
+        distance_function: distance_fn.clone(),
+        connectivity: 16,
+        expansion_add: 128,
+        expansion_search: ef_search,
+        quantization_center,
+        centroid_quantization_bits: centroid_bits.unwrap_or(4),
+    };
+
+    // =========================================================================
+    // Phase 1: Bootstrap -- ensure cached index exists
+    // =========================================================================
+    let cache_dir = PathBuf::from("target/usearch_cache");
+    let cache_file = cache_dir.join(format!(
+        "bootstrap_{:?}_{}_{:?}_{}.bin",
+        args.dataset, initial_centroids, args.metric, bits_label,
+    ));
+
+    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+
+    if !cache_file.exists() {
+        println!(
+            "\n--- Phase 1: Bootstrap ({} centroids) ---",
+            format_count(initial_centroids)
+        );
+        let boot_index =
+            USearchIndex::new_for_benchmark(config.clone()).expect("Failed to create index");
+
+        let progress = ProgressBar::new(initial_centroids as u64);
+        progress.set_style(
+            ProgressStyle::default_bar()
+                .template("[Bootstrap] {wide_bar} {pos}/{len} [{elapsed_precise}<{eta_precise}]")
+                .unwrap(),
+        );
+
+        let bootstrap_start = Instant::now();
+        for i in 0..initial_centroids.min(all_vectors.len()) {
+            boot_index.add(i as u32, &all_vectors[i]).unwrap();
+            progress.inc(1);
+        }
+        progress.finish_and_clear();
+        let bootstrap_time = bootstrap_start.elapsed();
+
+        println!(
+            "Added {} centroids in {} ({:.0} vec/s)",
+            format_count(initial_centroids),
+            format_duration(bootstrap_time),
+            initial_centroids as f64 / bootstrap_time.as_secs_f64()
+        );
+
+        std::fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
+        let buf = rt
+            .block_on(boot_index.save_for_benchmark())
+            .expect("Failed to serialize index");
+        std::fs::write(&cache_file, &buf).expect("Failed to write cache file");
+        println!("Cached bootstrap to {}", cache_file.display());
+    } else {
+        println!(
+            "\n--- Phase 1: Using cached bootstrap from {} ---",
+            cache_file.display()
+        );
+    }
+
+    let cached_data = Arc::new(std::fs::read(&cache_file).expect("Failed to read cache file"));
+
+    // Shared setup for recall evaluation
+    let vec_pool_start = initial_centroids;
+    let query_vecs: Vec<&[f32]> = all_vectors[vec_pool_start..]
         .iter()
         .take(num_queries)
+        .map(|v| v.as_slice())
         .collect();
 
-    let k = 100;
-    let mut recall_10_sum = 0.0f64;
-    let mut recall_100_sum = 0.0f64;
-    let mut total_latency = Duration::ZERO;
+    let bootstrap_entries: Vec<(u32, usize)> =
+        (0..initial_centroids).map(|i| (i as u32, i)).collect();
+    let corpus = CorpusView::from_live_entries(&bootstrap_entries, &all_vectors);
 
-    let progress = ProgressBar::new(query_vecs.len() as u64);
-    progress.set_style(
-        ProgressStyle::default_bar()
-            .template("[Recall] {wide_bar} {pos}/{len} [{elapsed_precise}]")
-            .unwrap(),
+    // Precompute ground truth once (use largest nprobe for gt_k so it covers all nprobe values)
+    let max_nprobe = *nprobe_values.iter().max().unwrap_or(&100);
+    eprintln!(
+        "  Computing ground truth ({} corpus, {} queries, k={}, {} threads)...",
+        corpus.corpus_keys.len(),
+        query_vecs.len(),
+        max_nprobe,
+        num_threads
     );
+    let ground_truths =
+        compute_ground_truths(&query_vecs, &corpus, max_nprobe, &distance_fn, num_threads);
 
-    for query in &query_vecs {
-        let gt = brute_force_knn(query, &corpus_vecs, &corpus_keys, k, &distance_fn);
-
-        let t = Instant::now();
-        let result = index.search(query, k).unwrap();
-        total_latency += t.elapsed();
-
-        let predicted: std::collections::HashSet<u32> = result.keys.iter().copied().collect();
-        let gt_10: std::collections::HashSet<u32> = gt.iter().take(10).copied().collect();
-        let gt_100: std::collections::HashSet<u32> = gt.iter().take(k).copied().collect();
-        recall_10_sum += predicted.intersection(&gt_10).count() as f64 / gt_10.len().max(1) as f64;
-        recall_100_sum += predicted.intersection(&gt_100).count() as f64 / gt_100.len().max(1) as f64;
-
-        progress.inc(1);
-    }
-    progress.finish_and_clear();
-
-    let n_q = query_vecs.len() as f64;
-    let avg_recall_10 = recall_10_sum / n_q * 100.0;
-    let avg_recall_100 = recall_100_sum / n_q * 100.0;
-    let avg_latency = total_latency / query_vecs.len() as u32;
-
-    println!("\n=== Recall Summary (no rerank) ===");
-    println!("Corpus size: {} | Queries: {} | k: {}", format_count(corpus_keys.len()), query_vecs.len(), k);
-    println!(
-        "Recall@10: {:.2}% | Recall@100: {:.2}% | Avg latency: {}",
-        avg_recall_10, avg_recall_100, format_duration(avg_latency)
-    );
-
-    // =========================================================================
-    // Phase 3b: Rerank evaluation
-    // =========================================================================
-    if centroid_bits.is_some() {
-        println!("\n--- Phase 3b: Rerank sweep ({} queries) ---", num_queries);
-
-        let corpus_map: std::collections::HashMap<u32, &[f32]> = final_live_entries
-            .iter()
-            .filter(|&&(_, vi)| vi < all_vectors.len())
-            .map(|&(key, vi)| (key, all_vectors[vi].as_slice()))
-            .collect();
-
-        let rerank_factors: &[usize] = &[2, 4, 8, 16];
-
-        println!(
-            "| {:>7} | {:>10} | {:>11} | {:>11} | {:>10} |",
-            "Rerank", "Fetch", "Recall@10", "Recall@100", "Avg lat"
-        );
-        println!("|---------|------------|-------------|-------------|------------|");
-
-        // Baseline row (1x, no rerank -- already computed)
-        println!(
-            "| {:>5}x | {:>10} | {:>10.2}% | {:>10.2}% | {:>10} |",
-            1, k, avg_recall_10, avg_recall_100, format_duration(avg_latency)
-        );
-
-        // Pre-compute ground truths once
-        let ground_truths: Vec<Vec<u32>> = query_vecs
-            .iter()
-            .map(|q| brute_force_knn(q, &corpus_vecs, &corpus_keys, k, &distance_fn))
-            .collect();
-
-        for &factor in rerank_factors {
-            let fetch_k = factor * k;
-            let mut r10_sum = 0.0f64;
-            let mut r100_sum = 0.0f64;
-            let mut lat_total = Duration::ZERO;
-
-            for (qi, query) in query_vecs.iter().enumerate() {
-                let t = Instant::now();
-
-                let result = index.search(query, fetch_k).unwrap();
-
-                let mut scored: Vec<(u32, f32)> = result
-                    .keys
-                    .iter()
-                    .filter_map(|&key| {
-                        corpus_map.get(&key).map(|vec| {
-                            let d = distance_fn.distance(query, vec);
-                            (key, d)
-                        })
-                    })
-                    .collect();
-                scored.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-
-                lat_total += t.elapsed();
-
-                let reranked: std::collections::HashSet<u32> =
-                    scored.iter().take(k).map(|(key, _)| *key).collect();
-
-                let gt = &ground_truths[qi];
-                let gt_10: std::collections::HashSet<u32> = gt.iter().take(10).copied().collect();
-                let gt_100: std::collections::HashSet<u32> = gt.iter().take(k).copied().collect();
-
-                r10_sum +=
-                    reranked.intersection(&gt_10).count() as f64 / gt_10.len().max(1) as f64;
-                r100_sum +=
-                    reranked.intersection(&gt_100).count() as f64 / gt_100.len().max(1) as f64;
-            }
-
-            let n_q = query_vecs.len() as f64;
+    // Table header/row helpers
+    let print_header = |phase: &str, has_spawn_drop: bool| {
+        if has_spawn_drop {
             println!(
-                "| {:>5}x | {:>10} | {:>10.2}% | {:>10.2}% | {:>10} |",
-                factor,
-                fetch_k,
-                r10_sum / n_q * 100.0,
-                r100_sum / n_q * 100.0,
-                format_duration(lat_total / query_vecs.len() as u32),
+                "\n=== {} ===\n| {:>6} | {:>6} | {:>10} | {:>10} | {:>12} | {:>12} | {:>12} | {:>12} | {:>12} | {:>10} | {:>10} | {:>12} | {:>12} | {:>12} |",
+                phase, "nprobe", "Rerank", "R@10", "R@100",
+                "navigate", "search", "rerank", "rr_dist", "rr_sort", "rr_scored", "rr_bytes",
+                "spawn", "drop", "wall"
             );
+            println!(
+                "|--------|--------|------------|------------|--------------|--------------|--------------|--------------|--------------|------------|------------|--------------|--------------|--------------|"
+            );
+        } else {
+            println!(
+                "\n=== {} ===\n| {:>6} | {:>6} | {:>10} | {:>10} | {:>12} | {:>12} | {:>12} | {:>12} | {:>12} | {:>10} | {:>10} |",
+                phase, "nprobe", "Rerank", "R@10", "R@100",
+                "navigate", "search", "rerank", "rr_dist", "rr_sort", "rr_scored", "rr_bytes"
+            );
+            println!(
+                "|--------|--------|------------|------------|--------------|--------------|--------------|--------------|--------------|------------|------------|"
+            );
+        }
+    };
+
+    // =========================================================================
+    // Phase 2: nprobe x rerank sweep with synthetic workload (optional, --phase-2)
+    // =========================================================================
+    if args.phase_2 {
+        print_header(
+            &format!(
+                "Phase 2: SPANN Workload ({} data vectors, {} threads)",
+                format_count(data_vectors),
+                num_threads
+            ),
+            true,
+        );
+
+        for &nprobe in nprobe_values {
+            for &rerank in rerank_factors {
+                let run_index = USearchIndex::new_for_benchmark(config.clone())
+                    .expect("Failed to create index");
+                rt.block_on(run_index.load_for_benchmark(cached_data.clone()))
+                    .expect("Failed to load cached index");
+
+                let (stats, _live_entries) = run_phase2_workload(
+                    &run_index,
+                    &all_vectors,
+                    &corpus,
+                    initial_centroids,
+                    data_vectors,
+                    num_threads,
+                    rerank,
+                    nprobe,
+                    &distance_fn,
+                );
+
+                let (r10, r100) = evaluate_recall(
+                    &run_index,
+                    &query_vecs,
+                    &ground_truths,
+                    &corpus,
+                    &all_vectors,
+                    rerank,
+                    nprobe,
+                    &distance_fn,
+                );
+
+                println!(
+                    "| {:>6} | {:>4}x | {:>9.2}% | {:>9.2}% | {:>12} | {:>12} | {:>12} | {:>12} | {:>12} | {:>10.1} | {:>10} | {:>12} | {:>12} | {:>12} |",
+                    nprobe,
+                    rerank,
+                    r10,
+                    r100,
+                    format_nanos(stats.navigate.avg_nanos()),
+                    format_nanos(stats.nav_search.avg_nanos()),
+                    format_nanos(stats.nav_rerank.avg_nanos()),
+                    format_nanos(stats.nav_rr_dist.avg_nanos()),
+                    format_nanos(stats.nav_rr_sort.avg_nanos()),
+                    stats.avg_rr_scored(),
+                    format_bytes(stats.avg_rr_bytes()),
+                    format_nanos(stats.spawn.avg_nanos()),
+                    format_nanos(stats.drop_op.avg_nanos()),
+                    format_duration(stats.wall),
+                );
+            }
+        }
+    }
+
+    // =========================================================================
+    // Phase 3: Search-only rerank sweep (optional, --phase-3)
+    // =========================================================================
+    if args.phase_3 {
+        let index =
+            USearchIndex::new_for_benchmark(config.clone()).expect("Failed to create index");
+        rt.block_on(index.load_for_benchmark(cached_data.clone()))
+            .expect("Failed to load cached index");
+
+        print_header(
+            &format!(
+                "Phase 3: Search-Only Recall ({} queries, {} threads)",
+                num_queries, num_threads
+            ),
+            false,
+        );
+
+        for &nprobe in nprobe_values {
+            for &rerank in rerank_factors {
+                let (r10, r100) = evaluate_recall(
+                    &index,
+                    &query_vecs,
+                    &ground_truths,
+                    &corpus,
+                    &all_vectors,
+                    rerank,
+                    nprobe,
+                    &distance_fn,
+                );
+
+                let mut nav_total = Duration::ZERO;
+                let mut search_total = Duration::ZERO;
+                let mut rerank_total = Duration::ZERO;
+                let mut rr_dist_total = Duration::ZERO;
+                let mut rr_sort_total = Duration::ZERO;
+                let mut rr_scored_total: u64 = 0;
+                let mut rr_bytes_total: u64 = 0;
+
+                for query in &query_vecs {
+                    let timing = search_and_rerank(
+                        &index, query, nprobe, rerank,
+                        &corpus, &all_vectors, &distance_fn,
+                    );
+                    nav_total += timing.navigate;
+                    search_total += timing.search;
+                    rerank_total += timing.rerank;
+                    rr_dist_total += timing.rr_dist;
+                    rr_sort_total += timing.rr_sort;
+                    rr_scored_total += timing.rr_scored as u64;
+                    rr_bytes_total += timing.rr_bytes as u64;
+                }
+
+                let n_q = query_vecs.len() as u64;
+                let avg_scored = if n_q > 0 { rr_scored_total as f64 / n_q as f64 } else { 0.0 };
+                let avg_bytes = if n_q > 0 { rr_bytes_total as f64 / n_q as f64 } else { 0.0 };
+                println!(
+                    "| {:>6} | {:>4}x | {:>9.2}% | {:>9.2}% | {:>12} | {:>12} | {:>12} | {:>12} | {:>12} | {:>10.1} | {:>10} |",
+                    nprobe,
+                    rerank,
+                    r10,
+                    r100,
+                    format_nanos(nav_total.as_nanos() as u64 / n_q),
+                    format_nanos(search_total.as_nanos() as u64 / n_q),
+                    format_nanos(rerank_total.as_nanos() as u64 / n_q),
+                    format_nanos(rr_dist_total.as_nanos() as u64 / n_q),
+                    format_nanos(rr_sort_total.as_nanos() as u64 / n_q),
+                    avg_scored,
+                    format_bytes(avg_bytes),
+                );
+            }
         }
     }
 
     println!("\n=== Legend ===");
-    println!("navigate - search() the centroid HNSW index (nprobe={})", NPROBE);
-    println!("spawn    - add() a new centroid to the HNSW index (from cluster split)");
-    println!("drop     - remove() a centroid from the HNSW index (from cluster split/merge)");
+    println!("nprobe   - number of nearest neighbors to retrieve per search");
+    println!("navigate - total navigate latency: search + rerank");
+    println!("search   - index.search() across the HNSW graph");
+    println!("rerank   - re-score candidates with exact f32 distance and sort");
+    println!("spawn    - add() a new centroid (from cluster split)");
+    println!("drop     - remove() a centroid (from cluster split/merge)");
     println!("wall     - wall-clock time for the full SPANN simulation phase");
 }

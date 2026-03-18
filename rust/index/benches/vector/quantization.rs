@@ -31,7 +31,7 @@
 //!   quant-1bit     Code::<1>::quantize                       q-
 //!   quant-4bit     Code::<4>::quantize                       q-
 //!   quant-query    QuantizedQuery::new                      q-
-//!   dq-exact       DistanceFunction::distance (f32×f32)      dq-
+//!   dq-fp       DistanceFunction::distance (f32×f32)      dq-
 //!   dq-bw          Code::<1>::distance_quantized_query       dq-
 //!   dq-4f          Code::<4>::distance_query                 dq-
 //!   dc-1bit        Code::<1>::distance_code                  dc-
@@ -48,7 +48,7 @@
 use std::hint::black_box;
 
 use chroma_distance::DistanceFunction;
-use chroma_index::quantization::{Code, QuantizedQuery};
+use chroma_index::quantization::{Code, QuantizedQuery, rabitq_distance_code_public};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use itertools::izip;
 use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -151,8 +151,52 @@ fn q_norm(centroid: &[f32], r_q: &[f32]) -> f32 {
 
 fn bench_quantize(c: &mut Criterion) {
     let mut group = c.benchmark_group("quantize");
-    // Throughput = f32 input bytes read per iteration (same for both BITS).
-    // This makes GiB/s comparable across bit widths at the same dim.
+
+    for &dim in DIMS {
+        let mut rng = make_rng();
+        let centroid = random_vec(&mut rng, dim);
+        let embedding = random_vec(&mut rng, dim);
+        let padded_bytes = Code::<1>::packed_len(dim);
+        let cn = c_norm(&centroid);
+
+        group.throughput(Throughput::Bytes((2 * dim * 4) as u64));
+        desc!(
+            format!("quant-4bit/{dim}"),
+            "per-call; 4-bit ray-walk codes"
+        );
+        group.bench_with_input(BenchmarkId::new("quant-4bit", dim), &dim, |b, _| {
+            b.iter(|| black_box(Code::<4>::quantize(&embedding, &centroid)));
+        });
+
+        group.throughput(Throughput::Bytes((2 * dim * 4) as u64));
+        desc!(
+            format!("quant-1bit/{dim}"),
+            "per-call; sign-bit codes"
+        );
+        group.bench_with_input(BenchmarkId::new("quant-1bit", dim), &dim, |b, _| {
+            b.iter(|| black_box(Code::<1>::quantize(&embedding, &centroid)));
+        });
+
+        group.throughput(Throughput::Bytes((dim * 4) as u64));
+        desc!(
+            format!("quant-query/{dim}"),
+            "per-call; residual alloc + c_dot_q + q_norm + QuantizedQuery::new"
+        );
+        group.bench_with_input(BenchmarkId::new("quant-query", dim), &dim, |b, _| {
+            b.iter(|| {
+                let r_q: Vec<f32> = embedding.iter().zip(&centroid).map(|(q, c)| q - c).collect();
+                let cdq = c_dot_q(&centroid, &r_q);
+                let qn = q_norm(&centroid, &r_q);
+                black_box(QuantizedQuery::new(&r_q, padded_bytes, cn, cdq, qn));
+            });
+        });
+    }
+
+    group.finish();
+}
+
+fn bench_quantize_scan(c: &mut Criterion) {
+    let mut group = c.benchmark_group("quantize_scan");
 
     for &dim in DIMS {
         let mut rng = make_rng();
@@ -161,9 +205,7 @@ fn bench_quantize(c: &mut Criterion) {
         let padded_bytes = Code::<1>::packed_len(dim);
         let cn = c_norm(&centroid);
 
-        // Code::quantize reads both embedding and centroid: 2 * dim * 4 bytes per call.
         group.throughput(Throughput::Bytes((BATCH * 2 * dim * 4) as u64));
-
         desc!(
             format!("quant-4bit/{dim}"),
             format!("{BATCH} embeddings → 4-bit ray-walk codes")
@@ -176,6 +218,7 @@ fn bench_quantize(c: &mut Criterion) {
             });
         });
 
+        group.throughput(Throughput::Bytes((BATCH * 2 * dim * 4) as u64));
         desc!(
             format!("quant-1bit/{dim}"),
             format!("{BATCH} embeddings → sign-bit codes")
@@ -188,15 +231,11 @@ fn bench_quantize(c: &mut Criterion) {
             });
         });
 
-        // QuantizedQuery::new reads only the pre-computed residual: dim * 4 bytes.
         group.throughput(Throughput::Bytes((BATCH * dim * 4) as u64));
         desc!(
             format!("quant-query/{dim}"),
             format!(
-                "{BATCH} queries: residual alloc + c_dot_q + q_norm + QuantizedQuery::new. \
-                     Higher per-query latency than primitives/quant-query/full (which calls \
-                     QuantizedQuery::new alone with hot caches) due to the extra work and \
-                     cache pressure from cycling {BATCH} distinct queries."
+                "{BATCH} queries: residual alloc + c_dot_q + q_norm + QuantizedQuery::new"
             )
         );
         group.bench_with_input(BenchmarkId::new("quant-query", dim), &dim, |b, _| {
@@ -209,7 +248,6 @@ fn bench_quantize(c: &mut Criterion) {
                 }
             });
         });
-
     }
 
     group.finish();
@@ -217,241 +255,293 @@ fn bench_quantize(c: &mut Criterion) {
 
 // ── 2. distance_code throughput (code vs code) ────────────────────────────────
 
-fn bench_distance_code(c: &mut Criterion) {
-    let mut group = c.benchmark_group("distance_code");
+fn bench_distance(c: &mut Criterion) {
+    // Compare the same two codes over and over again. Measure the latency of each distance_code call
+    let mut group = c.benchmark_group("distance");
     let df = DistanceFunction::Euclidean;
-    let pairs = (BATCH / 2) as u64;
 
     for &dim in DIMS {
-        let (centroid, codes_1, _) = make_codes_1bit(dim, BATCH);
-        let (_, codes_4, _) = make_codes_4bit(dim, BATCH);
+        let (centroid, codes_1, queries_1) = make_codes_1bit(dim, 2);
+        let (_, codes_4, queries_4) = make_codes_4bit(dim, 2);
         let cn = c_norm(&centroid);
         let code_bytes_1 = Code::<1>::size(dim);
         let code_bytes_4 = Code::<4>::size(dim);
 
-        group.throughput(Throughput::Bytes(pairs * 2 * code_bytes_1 as u64));
+        group.throughput(Throughput::Bytes(2 * code_bytes_1 as u64));
         desc!(
             format!("dc-1bit/{dim}"),
-            format!("{pairs} pairs; simsimd hamming (NEON CNT / AVX-512 VPOPCNTDQ)")
+            "per-call; simsimd hamming (NEON CNT / AVX-512 VPOPCNTDQ)"
         );
         group.bench_with_input(BenchmarkId::new("dc-1bit", dim), &dim, |b, _| {
-            b.iter(|| {
-                for i in (0..BATCH).step_by(2) {
-                    let a = Code::<1, _>::new(codes_1[i].as_slice());
-                    let bb = Code::<1, _>::new(codes_1[i + 1].as_slice());
-                    black_box(a.distance_code(&bb, &df, cn, dim));
-                }
-            });
+            let a = Code::<1, _>::new(codes_1[0].as_slice());
+            let bb = Code::<1, _>::new(codes_1[1].as_slice());
+            b.iter(|| black_box(a.distance_code(&bb, &df, cn, dim)));
         });
 
-        group.throughput(Throughput::Bytes(pairs * 2 * code_bytes_4 as u64));
+        group.throughput(Throughput::Bytes(2 * code_bytes_1 as u64));
+        desc!(
+            format!("dc-1bit/simsimd_hamming/{dim}"),
+            "per-call; <u8 as BinarySimilarity>::hamming (SIMD popcount)"
+        );
+        group.bench_with_input(BenchmarkId::new("dc-1bit/simsimd_hamming", dim), &dim, |b, _| {
+            let a = codes_1[0].as_slice();
+            let bb = codes_1[1].as_slice();
+            b.iter(|| black_box(<u8 as BinarySimilarity>::hamming(a, bb).unwrap_or(0.0)));
+        });
+
+        group.throughput(Throughput::Bytes(2 * code_bytes_1 as u64));
+        desc!(
+            format!("dc-1bit/rabitq_distance_code/{dim}"),
+            "per-call; rabitq_distance_code"
+        );
+        group.bench_with_input(BenchmarkId::new("dc-1bit/rabitq_distance_code", dim), &dim, |b, _| {
+            let a = Code::<1, _>::new(codes_1[0].as_slice());
+            let bb = Code::<1, _>::new(codes_1[1].as_slice());
+            b.iter(|| black_box(rabitq_distance_code_public(0.0, a.correction(), a.norm(), a.radial(), bb.correction(), bb.norm(), bb.radial(), cn, &df)));
+        });
+
+        group.throughput(Throughput::Bytes(2 * code_bytes_4 as u64));
         desc!(
             format!("dc-4bit/{dim}"),
-            format!("{pairs} pairs; nibble unpack + dot")
+            "per-call; nibble unpack + dot"
         );
         group.bench_with_input(BenchmarkId::new("dc-4bit", dim), &dim, |b, _| {
-            b.iter(|| {
-                for i in (0..BATCH).step_by(2) {
-                    let a = Code::<4, _>::new(codes_4[i].as_slice());
-                    let bb = Code::<4, _>::new(codes_4[i + 1].as_slice());
-                    black_box(a.distance_code(&bb, &df, cn, dim));
-                }
-            });
+            let a = Code::<4, _>::new(codes_4[0].as_slice());
+            let bb = Code::<4, _>::new(codes_4[1].as_slice());
+            b.iter(|| black_box(a.distance_code(&bb, &df, cn, dim)));
         });
-    }
 
-    group.finish();
-}
-
-// ── 3. distance_query: all implementations in one group ──────────────────────
-//
-// Implementations:
-//   1bit_bitwise — paper §3.3.1: quantize query to B_q bits, AND + popcount
-//   4bit_float   — grid unpack + f32 dot product (reference quality ceiling)
-//
-// Access patterns:
-//   cold (BATCH=512 distinct queries) — each iteration touches a fresh query
-//     vector; models worst-case where every lookup has a cache-cold query.
-//     Query quantization cost is paid for every call.
-//   hot / cluster-scan (N=2048 codes, 1 fixed query, dim=1024) — the query
-//     stays in L1 while codes stream through cache.  Query setup is paid
-//     once before the iter loop, so only the inner scoring loop is timed.
-//     This is the realistic hot path: one query probing one cluster.
-
-fn bench_distance_query(c: &mut Criterion) {
-    let mut group = c.benchmark_group("distance_query");
-    let df = DistanceFunction::Euclidean;
-
-    // ── Cold-query variant ────────────────────────────────────────────────────
-    for &dim in DIMS {
-        let (centroid, codes_1, queries_1) = make_codes_1bit(dim, BATCH);
-        let (_, codes_4, queries_4) = make_codes_4bit(dim, BATCH);
-        let cn = c_norm(&centroid);
-        let code_bytes_1 = Code::<1>::size(dim);
-        let code_bytes_4 = Code::<4>::size(dim);
         let query_bytes = dim * 4;
         let padded_bytes = Code::<1>::packed_len(dim);
 
-        // Ground truth: exact f32 distance (no quantization at all)
         let mut rng_exact = StdRng::seed_from_u64(0xcafe);
-        let raw_vecs: Vec<Vec<f32>> = (0..BATCH)
-            .map(|_| random_vec(&mut rng_exact, dim))
-            .collect();
-        let raw_queries: Vec<Vec<f32>> = (0..BATCH)
-            .map(|_| random_vec(&mut rng_exact, dim))
-            .collect();
+        let raw_vec = random_vec(&mut rng_exact, dim);
+        let raw_query = random_vec(&mut rng_exact, dim);
 
-        group.throughput(Throughput::Bytes((BATCH * 2 * dim * 4) as u64));
+        group.throughput(Throughput::Bytes((2 * dim * 4) as u64));
         desc!(
-            format!("dq-exact/{dim}"),
-            format!("cold {BATCH} queries; DistanceFunction::distance f32*f32 (ground truth)")
+            format!("dq-fp/{dim}"),
+            "per-call; DistanceFunction::distance f32*f32 (ground truth)"
         );
-        group.bench_with_input(BenchmarkId::new("dq-exact", dim), &dim, |b, _| {
-            b.iter(|| {
-                for i in 0..BATCH {
-                    black_box(df.distance(&raw_vecs[i], &raw_queries[i]));
-                }
-            });
+        group.bench_with_input(BenchmarkId::new("dq-fp", dim), &dim, |b, _| {
+            b.iter(|| black_box(df.distance(&raw_vec, &raw_query)));
         });
 
-        // All 1-bit variants use the same throughput so GiB/s is comparable.
-        let throughput_1bit = BATCH as u64 * (code_bytes_1 + query_bytes) as u64;
-        let throughput_4bit = BATCH as u64 * (code_bytes_4 + query_bytes) as u64;
-
-        group.throughput(Throughput::Bytes(throughput_4bit));
+        group.throughput(Throughput::Bytes((code_bytes_4 + query_bytes) as u64));
         desc!(
             format!("dq-4f/{dim}"),
-            format!("cold {BATCH} queries; grid unpack + f32 dot (reference quality ceiling)")
+            "per-call; grid unpack + f32 dot (reference quality ceiling)"
         );
         group.bench_with_input(BenchmarkId::new("dq-4f", dim), &dim, |b, _| {
-            b.iter(|| {
-                for i in 0..BATCH {
-                    let code = Code::<4, _>::new(codes_4[i].as_slice());
-                    let r_q = &queries_4[i];
-                    let cdq = c_dot_q(&centroid, r_q);
-                    let qn = q_norm(&centroid, r_q);
-                    black_box(code.distance_query(&df, r_q, cn, cdq, qn));
-                }
-            });
+            let code = Code::<4, _>::new(codes_4[0].as_slice());
+            let r_q = &queries_4[0];
+            let cdq = c_dot_q(&centroid, r_q);
+            let qn = q_norm(&centroid, r_q);
+            b.iter(|| black_box(code.distance_query(&df, r_q, cn, cdq, qn)));
         });
-        group.throughput(Throughput::Bytes(throughput_1bit));
+
+        group.throughput(Throughput::Bytes((code_bytes_1 + query_bytes) as u64));
         desc!(
             format!("dq-bw/{dim}"),
-            format!("cold {BATCH} queries; QuantizedQuery build + AND+popcount (§3.3.1)")
+            "per-call; QuantizedQuery built once, AND+popcount (§3.3.1)"
         );
         group.bench_with_input(BenchmarkId::new("dq-bw", dim), &dim, |b, _| {
+            let code = Code::<1, _>::new(codes_1[0].as_slice());
+            let r_q = &queries_1[0];
+            let cdq = c_dot_q(&centroid, r_q);
+            let qn = q_norm(&centroid, r_q);
+            let qq = QuantizedQuery::new(r_q, padded_bytes, cn, cdq, qn);
+            b.iter(|| black_box(code.distance_quantized_query(&df, &qq)));
+        });
+    }
+    group.finish();
+}
+
+// ── Hot-query / cluster-scan variant ─────────────────────────────────────
+// 1M codes, (1 query for distance_query functions).
+// loop over all codes and compute the distance to the query/code.
+// Do this as many times as Criterion chooses to. I've seen 1,065,641,261 function calls.
+//
+// Query setup (QuantizedQuery build) is done once outside the iter loop,
+// so only the inner per-code scoring loop is timed.
+// -------------------------------------------------------------------------
+fn bench_distance_scan(c: &mut Criterion) {
+    let mut group = c.benchmark_group("distance_scan");
+    const SCAN_DIM: usize = 1024;
+    const SCAN_N: usize = 100000;
+
+    let mut rng = make_rng();
+    let centroid = random_vec(&mut rng, SCAN_DIM);
+    let r_q: Vec<f32> = {
+        let query = random_vec(&mut rng, SCAN_DIM);
+        query.iter().zip(&centroid).map(|(q, c)| q - c).collect()
+    };
+    let cdq = c_dot_q(&centroid, &r_q);
+    let qn = q_norm(&centroid, &r_q);
+    let cn = c_norm(&centroid);
+    let df = DistanceFunction::Euclidean;
+
+    let (_, codes_1, _) = make_codes_1bit(SCAN_DIM, SCAN_N);
+    let (_, codes_4, _) = make_codes_4bit(SCAN_DIM, SCAN_N);
+    let padded_bytes = Code::<1>::packed_len(SCAN_DIM);
+
+    let mut rng_exact = StdRng::seed_from_u64(0xcafe);
+    let scan_raw_vecs: Vec<Vec<f32>> = (0..SCAN_N)
+        .map(|_| random_vec(&mut rng_exact, SCAN_DIM))
+        .collect();
+    let scan_raw_query = random_vec(&mut rng_exact, SCAN_DIM);
+
+    group.throughput(Throughput::Bytes((SCAN_DIM * 4) as u64));
+    desc!(
+        "dq-fp/scan",
+        format!("per-call avg over {SCAN_N} vectors @ dim={SCAN_DIM}; DistanceFunction::distance f32*f32 (ground truth)")
+    );
+    {
+        let mut idx = 0usize;
+        let mut count = 0u64;
+        group.bench_function("dq-fp/scan", |b| {
             b.iter(|| {
-                for i in 0..BATCH {
-                    let code = Code::<1, _>::new(codes_1[i].as_slice());
-                    let r_q = &queries_1[i];
-                    let cdq = c_dot_q(&centroid, r_q);
-                    let qn = q_norm(&centroid, r_q);
-                    let qq = QuantizedQuery::new(r_q, padded_bytes, cn, cdq, qn);
-                    black_box(code.distance_quantized_query(&df, &qq));
-                }
+                count += 1;
+                let d = black_box(df.distance(&scan_raw_vecs[idx], &scan_raw_query));
+                idx = (idx + 1) % SCAN_N;
+                d
             });
         });
-
+        eprintln!("  dq-fp/scan iterations: {count}");
     }
 
-    // ── Hot-query / cluster-scan variant ─────────────────────────────────────
-    // Query setup (QuantizedQuery build) is done once outside the iter loop,
-    // so only the inner per-code scoring loop is timed.
+    group.throughput(Throughput::Bytes(Code::<4>::size(SCAN_DIM) as u64));
+    desc!(
+        "dq-4f/scan",
+        format!("per-call avg over {SCAN_N} codes @ dim={SCAN_DIM}; grid unpack + f32 dot (quality ceiling)")
+    );
     {
-        const SCAN_DIM: usize = 1024;
-        const SCAN_N: usize = 2048;
-
-        let mut rng = make_rng();
-        let centroid = random_vec(&mut rng, SCAN_DIM);
-        let r_q: Vec<f32> = {
-            let query = random_vec(&mut rng, SCAN_DIM);
-            query.iter().zip(&centroid).map(|(q, c)| q - c).collect()
-        };
-        let cdq = c_dot_q(&centroid, &r_q);
-        let qn = q_norm(&centroid, &r_q);
-        let cn = c_norm(&centroid);
-
-        let (_, codes_1, _) = make_codes_1bit(SCAN_DIM, SCAN_N);
-        let (_, codes_4, _) = make_codes_4bit(SCAN_DIM, SCAN_N);
-        let padded_bytes = Code::<1>::packed_len(SCAN_DIM);
-
-        // Ground truth: exact f32 distance scan (no quantization)
-        let mut rng_exact = StdRng::seed_from_u64(0xcafe);
-        let scan_raw_vecs: Vec<Vec<f32>> = (0..SCAN_N)
-            .map(|_| random_vec(&mut rng_exact, SCAN_DIM))
-            .collect();
-        let scan_raw_query = random_vec(&mut rng_exact, SCAN_DIM);
-
-        // Throughput counts code bytes only; the query is amortized and stays in L1.
-        let tput_1bit = SCAN_N as u64 * Code::<1>::size(SCAN_DIM) as u64;
-        let tput_4bit = SCAN_N as u64 * Code::<4>::size(SCAN_DIM) as u64;
-
-        group.throughput(Throughput::Bytes((SCAN_N * SCAN_DIM * 4) as u64));
-        desc!(
-            "dq-exact/scan",
-            format!("hot {SCAN_N} vectors @ dim={SCAN_DIM}; DistanceFunction::distance f32*f32 (ground truth)")
-        );
-        group.bench_function("dq-exact/scan", |b| {
-            b.iter(|| {
-                let _: f32 = scan_raw_vecs
-                    .iter()
-                    .map(|v| black_box(df.distance(v, &scan_raw_query)))
-                    .sum();
-            });
-        });
-
-        group.throughput(Throughput::Bytes(tput_4bit));
-        desc!(
-            "dq-4f/scan",
-            format!("hot {SCAN_N} codes @ dim={SCAN_DIM}; grid unpack + f32 dot (quality ceiling)")
-        );
+        let mut idx = 0usize;
+        let mut count = 0u64;
         group.bench_function("dq-4f/scan", |b| {
             b.iter(|| {
-                let _: f32 = codes_4
-                    .iter()
-                    .map(|cb| {
-                        let code = Code::<4, _>::new(cb.as_slice());
-                        black_box(code.distance_query(&df, &r_q, cn, cdq, qn))
-                    })
-                    .sum();
+                count += 1;
+                let code = Code::<4, _>::new(codes_4[idx].as_slice());
+                let d = black_box(code.distance_query(&df, &r_q, cn, cdq, qn));
+                idx = (idx + 1) % SCAN_N;
+                d
             });
         });
+        eprintln!("  dq-4f/scan iterations: {count}");
+    }
 
-        group.throughput(Throughput::Bytes(
-            (SCAN_N / 2) as u64 * 2 * Code::<1>::size(SCAN_DIM) as u64,
-        ));
-        desc!(
-            "dc-1bit/scan",
-            format!("hot {} pairs @ dim={SCAN_DIM}; simsimd hamming code-vs-code", SCAN_N / 2)
-        );
+    group.throughput(Throughput::Bytes(Code::<1>::size(SCAN_DIM) as u64));
+    desc!(
+        "dq-bw/scan",
+        format!("per-call avg over {SCAN_N} codes @ dim={SCAN_DIM}; QuantizedQuery built once, AND+popcount (§3.3.1)")
+    );
+    {
+        let qq = QuantizedQuery::new(&r_q, padded_bytes, cn, cdq, qn);
+        let mut idx = 0usize;
+        let mut count = 0u64;
+        group.bench_function("dq-bw/scan", |b| {
+            b.iter(|| {
+                count += 1;
+                let code = Code::<1, _>::new(codes_1[idx].as_slice());
+                let d = black_box(code.distance_quantized_query(&df, &qq));
+                idx = (idx + 1) % SCAN_N;
+                d
+            });
+        });
+        eprintln!("  dq-bw/scan iterations: {count}");
+    }
+
+    group.throughput(Throughput::Bytes(2 * Code::<1>::size(SCAN_DIM) as u64));
+    desc!(
+        "dc-1bit/scan",
+        format!(
+            "per-pair avg over {} pairs @ dim={SCAN_DIM}; simsimd hamming code-vs-code",
+            SCAN_N / 2
+        )
+    );
+    {
+        let mut idx = 0usize;
+        let mut count = 0u64;
         group.bench_function("dc-1bit/scan", |b| {
             b.iter(|| {
-                for pair in codes_1.chunks_exact(2) {
-                    let a = Code::<1, _>::new(pair[0].as_slice());
-                    let bb = Code::<1, _>::new(pair[1].as_slice());
-                    black_box(a.distance_code(&bb, &df, cn, SCAN_DIM));
-                }
+                count += 1;
+                let a = Code::<1, _>::new(codes_1[idx].as_slice());
+                let bb = Code::<1, _>::new(codes_1[idx + 1].as_slice());
+                let d = black_box(a.distance_code(&bb, &df, cn, SCAN_DIM));
+                idx = (idx + 2) % SCAN_N;
+                d
             });
         });
+        eprintln!("  dc-1bit/scan iterations: {count}");
+    }
 
-        group.throughput(Throughput::Bytes(tput_1bit));
-        desc!(
-            "dq-bw/scan",
-            format!("hot {SCAN_N} codes @ dim={SCAN_DIM}; QuantizedQuery built once, AND+popcount (§3.3.1)")
-        );
-        group.bench_function("dq-bw/scan", |b| {
-            let qq = QuantizedQuery::new(&r_q, padded_bytes, cn, cdq, qn);
+    group.throughput(Throughput::Bytes(2 * Code::<1>::size(SCAN_DIM) as u64));
+    desc!(
+        "dc-1bit/scan/simsimd_hamming",
+        format!(
+            "per-pair avg over {} pairs @ dim={SCAN_DIM}; <u8 as BinarySimilarity>::hamming",
+            SCAN_N / 2
+        )
+    );
+    {
+        let mut idx = 0usize;
+        let mut count = 0u64;
+        group.bench_function("dc-1bit/scan/simsimd_hamming", |b| {
             b.iter(|| {
-                let _: f32 = codes_1
-                    .iter()
-                    .map(|cb| {
-                        let code = Code::<1, _>::new(cb.as_slice());
-                        black_box(code.distance_quantized_query(&df, &qq))
-                    })
-                    .sum();
+                count += 1;
+                let a = codes_1[idx].as_slice();
+                let bb = codes_1[idx + 1].as_slice();
+                let d = black_box(<u8 as BinarySimilarity>::hamming(a, bb).unwrap_or(0.0));
+                idx = (idx + 2) % SCAN_N;
+                d
             });
         });
+        eprintln!("  dc-1bit/scan/simsimd_hamming iterations: {count}");
+    }
 
+    group.throughput(Throughput::Bytes(2 * Code::<1>::size(SCAN_DIM) as u64));
+    desc!(
+        "dc-1bit/scan/rabitq_distance_code",
+        format!("per-pair avg over {} pairs @ dim={SCAN_DIM}; rabitq_distance_code", SCAN_N / 2)
+    );
+    {
+        let mut idx = 0usize;
+        let mut count = 0u64;
+        group.bench_function("dc-1bit/scan/rabitq_distance_code", |b| {
+            b.iter(|| {
+                count += 1;
+                let a = Code::<1, _>::new(codes_1[idx].as_slice());
+                let bb = Code::<1, _>::new(codes_1[idx + 1].as_slice());
+                let d = black_box(rabitq_distance_code_public(0.0, a.correction(), a.norm(), a.radial(), bb.correction(), bb.norm(), bb.radial(), cn, &df));
+                idx = (idx + 2) % SCAN_N;
+                black_box(d);
+            });
+        });
+        eprintln!("  dc-1bit/scan/rabitq_distance_code iterations: {count}");
+    }
+
+    group.throughput(Throughput::Bytes(2 * Code::<4>::size(SCAN_DIM) as u64));
+    desc!(
+        "dc-4bit/scan",
+        format!(
+            "per-pair avg over {} pairs @ dim={SCAN_DIM}; nibble unpack + dot code-vs-code",
+            SCAN_N / 2
+        )
+    );
+    {
+        let mut idx = 0usize;
+        let mut count = 0u64;
+        group.bench_function("dc-4bit/scan", |b| {
+            b.iter(|| {
+                count += 1;
+                let a = Code::<4, _>::new(codes_4[idx].as_slice());
+                let bb = Code::<4, _>::new(codes_4[idx + 1].as_slice());
+                let d = black_box(a.distance_code(&bb, &df, cn, SCAN_DIM));
+                idx = (idx + 2) % SCAN_N;
+                d
+            });
+        });
+        eprintln!("  dc-4bit/scan iterations: {count}");
     }
 
     group.finish();
@@ -556,7 +646,6 @@ fn bench_thread_scaling(c: &mut Criterion) {
                 });
             });
         });
-
     }
     group.finish();
 }
@@ -1149,8 +1238,9 @@ fn bench_primitives(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_quantize,
-    bench_distance_code,
-    bench_distance_query,
+    bench_quantize_scan,
+    bench_distance,
+    bench_distance_scan,
     bench_thread_scaling,
     bench_primitives,
 );

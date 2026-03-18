@@ -1,10 +1,10 @@
 - [Intro to Large Index Benchmarking](#intro-to-large-index-benchmarking)
-- [TODO](#todo)
 - [Key Results](#key-results)
-- [RaBitQ Implementation (Core Functions)](#rabitq-implementation-core-functions)
-  - [1-Bit (vs 4-Bit) Performance Comparison](#1-bit-vs-4-bit-performance-comparison)
+- [RaBitQ Implementation](#rabitq-implementation)
+  - [Primitives](#primitives)
+  - [Core Functions](#core-functions)
     - [r6i.8xlarge](#r6i8xlarge)
-    - [vs Exact f32 Distance Query](#vs-exact-f32-distance-query)
+    - [vs Baseline: Exact f32 Distance Query](#vs-baseline-exact-f32-distance-query)
     - [Thread Scaling](#thread-scaling)
   - [Error Bound](#error-bound)
 - [Comparing Different Central Indices](#comparing-different-central-indices)
@@ -25,14 +25,16 @@
   - [USearch - Reranked, Improved Concurrency, Improved Concurrency](#usearch---reranked-improved-concurrency-improved-concurrency)
     - [1 Bit build + search](#1-bit-build--search)
     - [4 Bit build + search](#4-bit-build--search)
-    - [FP build + 1 Bit search](#fp-build--1-bit-search)
   - [Flat / Brute Force](#flat--brute-force)
+    - [Architecture](#architecture)
+      - [Thread Safety](#thread-safety)
+    - [FP vs 1 Bit vs 4 Bit (Navigate only)](#fp-vs-1-bit-vs-4-bit-navigate-only)
+    - [Flat vs USearch HNSW (forked) -- 1-bit code-to-code, wikipedia-en dim=1024 (Navigate only)](#flat-vs-usearch-hnsw-forked----1-bit-code-to-code-wikipedia-en-dim1024-navigate-only)
+    - [Sythetic Workload (Thread Scaling + Performance + Recall)](#sythetic-workload-thread-scaling--performance--recall)
   - [Hierarchical SPANN](#hierarchical-spann)
     - [Design](#design)
     - [Hierarchical Tree Config vs SPANN Config](#hierarchical-tree-config-vs-spann-config)
-    - [10K Centroid Experiments (wikipedia-en, f32, 1K data vectors)](#10k-centroid-experiments-wikipedia-en-f32-1k-data-vectors)
     - [Balanced k-means (100K centroids, wikipedia-en, f32, eps=1.0, r=4)](#balanced-k-means-100k-centroids-wikipedia-en-f32-eps10-r4)
-    - [Dynamic beam / tau sweep (100K centroids, wikipedia-en, no replication, bf=100)](#dynamic-beam--tau-sweep-100k-centroids-wikipedia-en-no-replication-bf100)
 - [Recall](#recall)
   - [USearch Recall](#usearch-recall)
     - [1-bit centroids](#1-bit-centroids)
@@ -71,13 +73,6 @@ To do this we need to address these core components/bottle necks:
 
 This document contains benchmarks for most of the above components.
 
-# TODO
-
-- [X] 1 Bit RaBitQ Performance
-- [ ] USearch
-- [ ] Data vector rerank performance
-- [ ] E2E Quantized SPANN
-
 
 # Key Results
 
@@ -85,21 +80,29 @@ This document contains benchmarks for most of the above components.
 - USearch 1 Bit (add 1M data vectors): 96.07% Recall, 4.74ms latency (vs 4 bit: WIP)
 - E2E Quantized SPANN 1M data vectors: X% Recall, Y latency
 
-# RaBitQ Implementation (Core Functions)
+# RaBitQ Implementation
 
-## 1-Bit (vs 4-Bit) Performance Comparison
+## Primitives
+
+| Function      | Primitive | Benchmark Name                          | Latency   | Throughput   |
+| ------------- | --------- | --------------------------------------- | --------- | ------------ |
+| distance_code | simsimd   | primitives/dc-1bit/hamming/simsimd/1024 | 4.7657 ns | 50.025 GiB/s |
+
+
+## Core Functions
 
 [../../../benches/vector/quantization.rs](../../../benches/vector/quantization.rs)
 
 ### r6i.8xlarge
 
 
-| Function       | Benchmark                                                | 4-bit               | 1-bit               | Speedup |
-| -------------- | -------------------------------------------------------- | ------------------- | ------------------- | ------- |
-| quantize data  | quantize/quant-4bit/1024 vs quantize/quant-1bit/1024     | 43.2 ms, 92.5 MiB/s | 576 µs, 6.78 GiB/s  | ~75x    |
-| quantize query | primitives/quant-query/full/1024                         | N/A                 | 2.21 µs, 1.73 GiB/s | --      |
-| distance_code  | distance_code/dc-4bit/1024 vs distance_code/dc-1bit/1024 | 166 µs, 1.50 GiB/s  | 3.99 µs, 17.2 GiB/s | ~42x    |
-| distance_query | distance_query/dq-4f/scan vs distance_query/dq-bw/scan   | 762 µs, 1.31 GiB/s  | 40 µs, 6.86 GiB/s   | ~19x    |
+| Function       | Benchmark                                                  | 4-bit               | 1-bit               | Speedup |
+| -------------- | ---------------------------------------------------------- | ------------------- | ------------------- | ------- |
+| quantize data  | quantize/quant-4bit/1024 vs quantize/quant-1bit/1024       | 43.2 ms, 92.5 MiB/s | 576 µs, 6.78 GiB/s  | ~75x    |
+| quantize query | primitives/quant-query/full/1024                           | N/A                 | 2.21 µs, 1.73 GiB/s | --      |
+| distance_code  | distance_query/dc-4bit/scan vs distance_query/dc-1bit/scan | 549ns, 1.77 GiB/s   | 34 ns, 8 GiB/s      | 16x     |
+| distance_query | distance_query/dq-4f/scan vs distance_query/dq-bw/scan     | 381 ns, 1.28 GiB/s  | 29 ns, 4.6 GiB/s    | 13x     |
+
 
 
 [performance_r6i.8xlarge.txt](performance_r6i.8xlarge.txt)
@@ -115,7 +118,7 @@ effects from cycling 512 distinct queries (~2.55 us/query). `quant-query/full` i
 is the cost of the preparation pipeline and cache pressure, not the quantization itself.
 
 
-### vs Exact f32 Distance Query
+### vs Baseline: Exact f32 Distance Query
 
 [../../../benches/vector/quantization.rs](../../../benches/vector/quantization.rs)
 
@@ -199,7 +202,6 @@ RSME: "Root Mean Square Error".
 - The fully quantized 1-bit-vs-1-bit path is the noisiest (RMSE 0.036) but 90% of samples still fall within +/-6% relative error.
 
 
-
 # Comparing Different Central Indices
 
 What central index will give us the fastest index build times?
@@ -208,34 +210,31 @@ What central index will give us the fastest index build times?
 
 **Benchmarks**
 
-
-| Index                                 | Standalone Query @1M                                                                    | Synthetic Nav @1M                                                             | SPANN Nav @27k                                                  |
-| ------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| USearch - 4 bit (baseline)            | [2.75ms (R=86.07%)](saved_benchmarks/usearch_4bit.txt)                                  | [3.28ms](saved_benchmarks/usearch_4bit.txt)                                   | [444.7µs](saved_benchmarks/quant_spann_4bit.txt)                |
-| USearch - 1 bit                       | [3.16ms (R=94.49%)](saved_benchmarks/usearch_1bit.txt)                                  | [568.0µs](saved_benchmarks/usearch_1bit.txt)                                  | [122.1µs](saved_benchmarks/quant_spann_1bit.txt)                |
-| USearch - 1 bit, Threadsafe           | [2.58ms (R=94.95%)](saved_benchmarks/usearch_forked_1bit.txt)                           | [210.5µs](saved_benchmarks/usearch_forked_1bit.txt)                           | [90.7µs](quant_spann_1bit_forked_usearch.txt)                   |
-| USearch - 1 bit, Threadsafe, Reranked | [2.39ms (R=91.25%)](saved_benchmarks/usearch_rerank_1bit.txt)                           | ?                                                                             | [100.9µs](saved_benchmarks/quant_spann_1bit_forked_usearch.txt) |
-| Flat - Full Precision (5k Centroids)  | [11.05ms (R=100%)](saved_benchmarks/flat_full_precision.txt)                            | [6.13ms](saved_benchmarks/flat_full_precision.txt)                            | -                                                               |
-| Flat - 1 bit + rerank (10k Centroids) | [4.77ms (R=96.41%)](saved_benchmarks/flat_1bit_rerank.txt)                              | [5.89ms](saved_benchmarks/flat_1bit_rerank.txt)                               | -                                                               |
-| Hierarchical SPANN - Full Precision   | [58.98ms (R=98.47%)](saved_benchmarks/hierarchical_centroid_profile_full_precision.txt) | [102.45ms](saved_benchmarks/hierarchical_centroid_profile_full_precision.txt) | -                                                               |
-| Hierarchical SPANN - 1 bit, Reranked  | [5.32ms (R=93.37%)](saved_benchmarks/hierarchical_centroid_profile_1bit.txt)            | [9.39ms](saved_benchmarks/hierarchical_centroid_profile_1bit.txt)             | -                                                               |
-|                                       |                                                                                         |                                                                               |                                                                 |
-| USearch - 1 bit, Reranked             | [2.39ms (R=91.25%)](saved_benchmarks/usearch_rerank_1bit.txt)                           | ?                                                                             | ?                                                               |
+| Index                                 | Navigate @1M Centroids                                                                  | Navigate During Build @1M Centroids                                           | SPANN Navigate @27k Centroids                                   | Thread Scaling |
+| ------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------- |---|
+| Flat - 1 bit, global lock             | [131.77ms (R=95.56%, RR=16x)](saved_benchmarks/flat_1bit_rerank.txt)                    | [164.45ms (R=95.56%, RR=16x)](saved_benchmarks/flat_1bit_rerank.txt)          | ?                                                               | Linear |
+| USearch - 1 bit                       | [6.09ms (R=96.24%, RR=16x)](saved_benchmarks/usearch_1bit.txt)                          | [3.72ms (R=96.25%, RR=16x)](saved_benchmarks/usearch_1bit.txt)                | [?](saved_benchmarks/quant_spann_1bit.txt)                | O(linear) |
+| Hierarchical SPANN - 1 bit, global lock| [?](saved_benchmarks/hierarchical_centroid_profile_1bit.txt)                           | [8.27ms (R=61.5%, RR=2x)](saved_benchmarks/hierarchical_centroid_profile_1bit.txt) | ?                                                          | Linear |
+|                                       |                                                                                         |                                                                               |                                                                 | ? |
+| USearch - 4 bit (baseline)            | [2.75ms (R=86.07%, RR=1x)](saved_benchmarks/usearch_4bit.txt)                                  | [3.28ms](saved_benchmarks/usearch_4bit.txt)                                   | [444.7µs](saved_benchmarks/quant_spann_4bit.txt)                | ? |
+| Flat - Full Precision                 | [529.73ms (R=100%, RR=1x)](saved_benchmarks/flat_full_precision.txt)                           | ?                                                                             | -                                                               | ? |
+| Hierarchical SPANN - FullP (100k)     | [58.98ms (R=98.47%)](saved_benchmarks/hierarchical_centroid_profile_full_precision.txt) | [?](saved_benchmarks/hierarchical_centroid_profile_full_precision.txt)        | -                                                               | ? |
+| USearch - 1 bit, Threadsafe           | [2.58ms (R=94.95%)](saved_benchmarks/usearch_forked_1bit.txt)                           | ?                                                                             | [90.7µs](quant_spann_1bit_forked_usearch.txt)                   | ? |
+| USearch - 1 bit, Threadsafe, Reranked | [2.39ms (R=91.25%)](saved_benchmarks/usearch_rerank_1bit.txt)                           | ?                                                                             | [100.9µs](saved_benchmarks/quant_spann_1bit_forked_usearch.txt) | ? |
+| USearch - 1 bit, Reranked             | [2.39ms (R=91.25%)](saved_benchmarks/usearch_rerank_1bit.txt)                           | ?                                                                             | ?                                                               | ? |
 
 
 Legend:
 
 - Standalone Query:
   - Query latency over the index alone
-  - k=100, 32 threads, >90% Recall@100, which might include implicit reranking or high nprobe counts
+  - k=100, 32 threads, >90% Recall@100, 10k data vectors/samples
   - 1M centroids
 - Synthetic: Navigate latency when synthetically inserting 1M data vectors
-  - Uses synthetic SPANN workload on the index alone, so intentionally produces *a tiny bit* of thread contention
-  - Doesn't care about recall
+  - Uses synthetic SPANN workload on the index alone, so intentionally produces contention between threads
   - 1M centroids
 - SPANN: Navigate latency when inserting 1M data vectors
   - Uses full SPANN index.
-  - Doesn't care about recall
   - ~27k centroids, 4M existing data vectors, 1M new data vectors
   - Uses the [quantized_spann.rs](../../../benches/quantized_spann.rs) benchmark.
 
@@ -473,21 +472,29 @@ Dim: 1024 | Metric: L2 | Centroid bits: 4 | ef_search: 128 | Centroids: 1.00M | 
 | 8x     | 800   | 99.65%    | 97.80%     | 13.00ms | 12.49ms | 77.6µs  | 427.0µs |
 | 16x    | 1600  | 99.85%    | 99.17%     | 24.50ms | 23.45ms | 153.4µs | 899.7µs |
 
-### FP build + 1 Bit search
-
-TODO
-
-Will require major modifications to USearch fork.
-
 ## Flat / Brute Force
 
+### Architecture
+
 benchmark code: [../../../benches/flat_centroid_profile.rs](../../../benches/flat_centroid_profile.rs)
-results: [flat_1bit.txt](saved_benchmarks/flat_1bit.txt)
 
-**tl;dr:** Not competitve with USearch navigate latency, even at 10k centroid scale. The advantage of flat scan is zero graph maintenance, lock-free reads, and simpler code.
+#### Thread Safety
 
-**Flat vs USearch HNSW (forked) -- 1-bit code-to-code, wikipedia-en dim=1024:**
+The flat index uses two mechanisms:
+- parking_lot::RwLock on the mutable collections -- keys, vectors, codes, and tombstones are each wrapped in an RwLock. Search methods (search_f32, search_quantized, search_code_to_code) acquire read locks, so many searches can run concurrently without blocking each other. Write methods (add, remove) acquire write locks, which block readers and other writers.
+- Tombstone-based soft deletes -- remove() doesn't actually modify the keys/vectors/codes arrays. It just inserts the key into the tombstones: RwLock<HashSet<u32>> set. Searches skip tombstoned keys during the scan. This avoids the need to compact or shift array elements under a write lock, keeping the write critical section very short.
 
+### FP vs 1 Bit vs 4 Bit (Navigate only)
+k=100, vectors=1000000, single thread, 1000 queries/samples
+
+| Metric             | [FP](saved_benchmarks/flat_full_precision.txt) | [4 Bit](saved_benchmarks/flat_4bit.txt) | [1 Bit](saved_benchmarks/flat_1bit.txt) |
+| ------------------ | ---------------------------------------------- | --------------------------------------- | --------------------------------------- |
+| Navigate latency   | 236ms                                          | 822ms                                   | 298ms                                   |
+| Latency per vector | 236ns                                          | 822ns                                   | 298ns                                   |
+| Recall@100         | 100%                                           | 90%                                     | 89% (Rerank=8x)                         |
+
+
+### Flat vs USearch HNSW (forked) -- 1-bit code-to-code, wikipedia-en dim=1024 (Navigate only)
 
 | Metric          | Flat (1M, 32t) | HNSW (1M, 32t) | Flat (10K, 32t) | HNSW (5.7K, 8t) |
 | --------------- | -------------- | -------------- | --------------- | --------------- |
@@ -497,6 +504,32 @@ results: [flat_1bit.txt](saved_benchmarks/flat_1bit.txt)
 | Recall@10 (4x)  | 97.50%         | 99.10%         | 99.20%          | 100.00%         |
 | Recall@100 (4x) | 80.01%         | 89.25%         | 88.44%          | 99.60%          |
 | Total lat (4x)  | 236.3ms        | 1.23ms         | 3.88ms          | 496.0us         |
+
+### Sythetic Workload (Thread Scaling + Performance + Recall)
+
+Index uses global lock
+
+[source](saved_benchmarks/flat_1bit.txt)
+
+=== Phase 2: Task Total Time ===
+| threads | navigate | spawn    | drop     | wall   |
+| ------- | -------- | -------- | -------- | ------ |
+| 1       | 1.6m     | 12.18ms  | 3.8µs    | 1.6m   |
+| 2       | 1.6m     | 111.41ms | 2.2µs    | 46.89s |
+| 4       | 1.4m     | 100.41ms | 22.91ms  | 21.66s |
+| 8       | 1.6m     | 294.70ms | 91.08ms  | 11.98s |
+| 16      | 1.7m     | 223.42ms | 90.71ms  | 6.68s  |
+| 32      | 1.8m     | 386.31ms | 212.38ms | 3.98s  |
+
+=== Phase 2: Task Avg Time ===
+| threads | navigate | spawn   | drop    |
+| ------- | -------- | ------- | ------- |
+| 1       | 30.86ms  | 1.52ms  | 549ns   |
+| 2       | 30.62ms  | 12.38ms | 743ns   |
+| 4       | 28.06ms  | 12.55ms | 7.64ms  |
+| 8       | 30.72ms  | 32.74ms | 30.36ms |
+| 16      | 32.91ms  | 31.92ms | 30.24ms |
+| 32      | 35.64ms  | 35.12ms | 30.34ms |
 
 
 ## Hierarchical SPANN
@@ -532,17 +565,6 @@ Querying
 | N/A                     |         | `write_rng_factor`         | **4.0** | RNG rule factor for selecting replica clusters. No tree analog.                                                                                                    |
 
 
-### 10K Centroid Experiments (wikipedia-en, f32, 1K data vectors)
-
-
-| Test     | Config                       | R@10      | R@100     | Nav Latency | Tree Entries | Depth |
-| -------- | ---------------------------- | --------- | --------- | ----------- | ------------ | ----- |
-| Baseline | bf=100, beam=10              | 80.0%     | 34.7%     | 672us       | 10K          | 3     |
-| Test 1   | bf=1000, beam=20             | 86.2%     | 63.0%     | 608us       | 10K          | 2     |
-| Test 2   | bf=100, beam=10, eps=1, r=4  | **97.1%** | **98.4%** | 10.6ms      | 40K (4x)     | 2     |
-| Test 3   | bf=1000, beam=20, eps=1, r=4 | 94.4%     | 85.6%     | 1.9ms       | 39.3K (3.9x) | 2     |
-
-
 ### Balanced k-means (100K centroids, wikipedia-en, f32, eps=1.0, r=4)
 
 See `--balanced` flag in [hierarchical_centroid_profile.rs](../../../benches/hierarchical_centroid_profile.rs)
@@ -563,23 +585,6 @@ Balanced clustering produces more uniform leaf sizes (max 520 vs 851) and ~2x fa
 navigate, but loses ~12% recall at beam=10. The gap narrows at high beam widths
 (beam=1000: both ~98% R@10). At iso-recall, balanced does not win on latency because
 the wider beam needed to recover recall cancels out the per-step savings.
-
-### Dynamic beam / tau sweep (100K centroids, wikipedia-en, no replication, bf=100)
-
-Best configurations from tau sweep (tau=1.0, min=10, max=5000). No replication (eps=0, r=1).
-**f32 (full precision):**
-
-
-| Precision | Config   | R@10      | R@100     | Avg Latency | Leaves | Vecs scanned |
-| --------- | -------- | --------- | --------- | ----------- | ------ | ------------ |
-| f32       | tau=1.00 | **97.9%** | **98.5%** | 59.0ms      | 4098   | 53.9K        |
-| 1-bit     | tau=1.00 | **97.6%** | **70.7%** | 17.9ms      | 4153   | 54.5K        |
-
-
-1-bit quantization gives ~3-4x latency reduction but R@100 degrades significantly
-(98.5% -> 70.7% at tau=1.0) because quantization error compounds over thousands of
-leaf vectors. R@10 is preserved (97.9% -> 97.6%) since top-10 neighbors tend to be
-well-separated.
 
 
 # Recall

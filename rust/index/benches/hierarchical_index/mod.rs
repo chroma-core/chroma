@@ -5,6 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use chroma_distance::DistanceFunction;
 use chroma_index::quantization::{Code, QuantizedQuery};
@@ -734,9 +735,26 @@ impl HierarchicalCentroidIndex {
         beam: usize,
         tau_override: Option<f64>,
     ) -> Vec<(u32, f32)> {
+        self.search_with_rerank_timed(query, k, fetch, beam, tau_override).0
+    }
+
+    /// Like `search_with_rerank` but returns (results, search_duration, rerank_duration).
+    pub fn search_with_rerank_timed(
+        &self,
+        query: &[f32],
+        k: usize,
+        fetch: usize,
+        beam: usize,
+        tau_override: Option<f64>,
+    ) -> (Vec<(u32, f32)>, Duration, Duration) {
         if self.quantization_center.is_none() {
-            return self.search_f32(query, k, beam, tau_override);
+            let t = Instant::now();
+            let r = self.search_f32(query, k, beam, tau_override);
+            let d = t.elapsed();
+            return (r, d, Duration::ZERO);
         }
+
+        let search_start = Instant::now();
 
         let dim = self.dim;
         let df = &self.distance_fn;
@@ -750,17 +768,41 @@ impl HierarchicalCentroidIndex {
         let padded_bytes = Code::<1>::packed_len(dim);
         let qq = QuantizedQuery::new(&r_q, padded_bytes, c_norm, c_dot_q, q_norm);
 
-        // Phase 1: traverse tree with 1-bit, collecting (key, quantized_dist, leaf_ref_index)
-        // We need the leaf centroids for reranking, so collect leaf references.
-        let mut leaf_refs: Vec<(&[f32], u32)> = Vec::new(); // (centroid_slice, key)
-        let mut quant_scores: Vec<(usize, f32)> = Vec::new(); // (index into leaf_refs, dist)
+        let mut leaf_refs: Vec<(&[f32], u32)> = Vec::new();
+        let mut quant_scores: Vec<(usize, f32)> = Vec::new();
 
         let mut current: Vec<&CentroidTreeNode> = vec![&self.root];
 
         loop {
-            let mut child_scores: Vec<(&CentroidTreeNode, f32)> = Vec::new();
-
+            // Collect results from any leaf nodes in `current` (handles root-is-leaf)
+            let mut internals_in_current: Vec<&CentroidTreeNode> = Vec::new();
             for node in &current {
+                match node {
+                    CentroidTreeNode::Leaf {
+                        keys, centroids, codes, ..
+                    } => {
+                        let codes_buf = codes.as_ref().unwrap();
+                        let base = leaf_refs.len();
+                        for (i, &key) in keys.iter().enumerate() {
+                            leaf_refs.push((&centroids[i * dim..(i + 1) * dim], key));
+                            let code_slice = &codes_buf[i * cs..(i + 1) * cs];
+                            let code = Code::<1, &[u8]>::new(code_slice);
+                            let dist = code.distance_quantized_query(df, &qq);
+                            quant_scores.push((base + i, dist));
+                        }
+                    }
+                    CentroidTreeNode::Internal { .. } => {
+                        internals_in_current.push(node);
+                    }
+                }
+            }
+
+            if internals_in_current.is_empty() {
+                break;
+            }
+
+            let mut child_scores: Vec<(&CentroidTreeNode, f32)> = Vec::new();
+            for node in &internals_in_current {
                 if let CentroidTreeNode::Internal {
                     codes,
                     children,
@@ -777,15 +819,11 @@ impl HierarchicalCentroidIndex {
                 }
             }
 
-            if child_scores.is_empty() {
-                break;
-            }
-
             child_scores.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
             let effective = self.effective_beam(&child_scores, beam, tau_override);
             child_scores.truncate(effective);
 
-            let mut next_internals: Vec<&CentroidTreeNode> = Vec::new();
+            let mut next: Vec<&CentroidTreeNode> = Vec::new();
             for (node, _) in &child_scores {
                 match node {
                     CentroidTreeNode::Leaf {
@@ -805,21 +843,23 @@ impl HierarchicalCentroidIndex {
                         }
                     }
                     CentroidTreeNode::Internal { .. } => {
-                        next_internals.push(node);
+                        next.push(node);
                     }
                 }
             }
 
-            if next_internals.is_empty() {
+            if next.is_empty() {
                 break;
             }
-            current = next_internals;
+            current = next;
         }
 
-        // Phase 2: pick top `fetch` by quantized distance, then rerank with f32
         quant_scores.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
         quant_scores.truncate(fetch);
 
+        let search_duration = search_start.elapsed();
+
+        let rerank_start = Instant::now();
         let mut results: Vec<(u32, f32)> = quant_scores
             .iter()
             .map(|&(idx, _)| {
@@ -828,8 +868,10 @@ impl HierarchicalCentroidIndex {
                 (key, dist)
             })
             .collect();
+        let reranked = dedup_and_topk(&mut results, k);
+        let rerank_duration = rerank_start.elapsed();
 
-        dedup_and_topk(&mut results, k)
+        (reranked, search_duration, rerank_duration)
     }
 
     /// Compute effective beam from sorted (node, dist) pairs.
@@ -873,9 +915,31 @@ impl HierarchicalCentroidIndex {
         let mut current: Vec<&CentroidTreeNode> = vec![&self.root];
 
         loop {
-            let mut child_scores: Vec<(&CentroidTreeNode, f32)> = Vec::new();
-
+            // Collect results from any leaf nodes in `current` (handles root-is-leaf)
+            let mut internals_in_current: Vec<&CentroidTreeNode> = Vec::new();
             for node in &current {
+                match node {
+                    CentroidTreeNode::Leaf {
+                        keys, centroids, ..
+                    } => {
+                        for (i, &key) in keys.iter().enumerate() {
+                            let c = &centroids[i * dim..(i + 1) * dim];
+                            let dist = compute_distance(query, c, df);
+                            all_results.push((key, dist));
+                        }
+                    }
+                    CentroidTreeNode::Internal { .. } => {
+                        internals_in_current.push(node);
+                    }
+                }
+            }
+
+            if internals_in_current.is_empty() {
+                break;
+            }
+
+            let mut child_scores: Vec<(&CentroidTreeNode, f32)> = Vec::new();
+            for node in &internals_in_current {
                 if let CentroidTreeNode::Internal {
                     centers, children, ..
                 } = node
@@ -888,15 +952,11 @@ impl HierarchicalCentroidIndex {
                 }
             }
 
-            if child_scores.is_empty() {
-                break;
-            }
-
             child_scores.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
             let effective = self.effective_beam(&child_scores, beam, tau_override);
             child_scores.truncate(effective);
 
-            let mut next_internals: Vec<&CentroidTreeNode> = Vec::new();
+            let mut next: Vec<&CentroidTreeNode> = Vec::new();
             for (node, _) in &child_scores {
                 match node {
                     CentroidTreeNode::Leaf {
@@ -909,15 +969,15 @@ impl HierarchicalCentroidIndex {
                         }
                     }
                     CentroidTreeNode::Internal { .. } => {
-                        next_internals.push(node);
+                        next.push(node);
                     }
                 }
             }
 
-            if next_internals.is_empty() {
+            if next.is_empty() {
                 break;
             }
-            current = next_internals;
+            current = next;
         }
 
         dedup_and_topk(&mut all_results, k)
@@ -946,9 +1006,33 @@ impl HierarchicalCentroidIndex {
         let mut current: Vec<&CentroidTreeNode> = vec![&self.root];
 
         loop {
-            let mut child_scores: Vec<(&CentroidTreeNode, f32)> = Vec::new();
-
+            // Collect results from any leaf nodes in `current` (handles root-is-leaf)
+            let mut internals_in_current: Vec<&CentroidTreeNode> = Vec::new();
             for node in &current {
+                match node {
+                    CentroidTreeNode::Leaf {
+                        keys, codes, ..
+                    } => {
+                        let codes_buf = codes.as_ref().unwrap();
+                        for (i, &key) in keys.iter().enumerate() {
+                            let code_slice = &codes_buf[i * cs..(i + 1) * cs];
+                            let code = Code::<1, &[u8]>::new(code_slice);
+                            let dist = code.distance_quantized_query(df, &qq);
+                            all_results.push((key, dist));
+                        }
+                    }
+                    CentroidTreeNode::Internal { .. } => {
+                        internals_in_current.push(node);
+                    }
+                }
+            }
+
+            if internals_in_current.is_empty() {
+                break;
+            }
+
+            let mut child_scores: Vec<(&CentroidTreeNode, f32)> = Vec::new();
+            for node in &internals_in_current {
                 if let CentroidTreeNode::Internal {
                     codes,
                     children,
@@ -965,15 +1049,11 @@ impl HierarchicalCentroidIndex {
                 }
             }
 
-            if child_scores.is_empty() {
-                break;
-            }
-
             child_scores.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
             let effective = self.effective_beam(&child_scores, beam, tau_override);
             child_scores.truncate(effective);
 
-            let mut next_internals: Vec<&CentroidTreeNode> = Vec::new();
+            let mut next: Vec<&CentroidTreeNode> = Vec::new();
             for (node, _) in &child_scores {
                 match node {
                     CentroidTreeNode::Leaf {
@@ -990,15 +1070,15 @@ impl HierarchicalCentroidIndex {
                         }
                     }
                     CentroidTreeNode::Internal { .. } => {
-                        next_internals.push(node);
+                        next.push(node);
                     }
                 }
             }
 
-            if next_internals.is_empty() {
+            if next.is_empty() {
                 break;
             }
-            current = next_internals;
+            current = next;
         }
 
         dedup_and_topk(&mut all_results, k)

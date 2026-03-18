@@ -1,3 +1,71 @@
+1M centroids, 10k data vectors - rerank debugging: looks good
+cargo bench -p chroma-index --bench usearch_spann_profile --features chroma-index/usearch -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 1000000 --data-vectors 10000 --phase-2 --phase-3
+   Compiling chroma-index v0.1.0 (/home/ubuntu/chroma/rust/index)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 20.46s
+     Running benches/usearch_spann_profile.rs (target/release/deps/usearch_spann_profile-b580f88df037e4ac)
+Loading Wikipedia EN from HuggingFace Hub...
+Loading 1.00M vectors from wikipedia-en (dim=1024)...
+
+=== USearch SPANN Profile Benchmark ===
+Dim: 1024 | Metric: L2 | Centroid bits: 1 | ef_search: 128 | Threads: 32
+Initial centroids: 1.00M | Data vectors: 10.0K | Queries: 200
+Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
+
+--- Phase 1: Using cached bootstrap from target/usearch_cache/bootstrap_WikipediaEn_1000000_L2_1.bin ---
+  Computing ground truth (1000000 corpus, 200 queries, k=256, 32 threads)...
+
+=== Phase 2: SPANN Workload (10.0K data vectors, 32 threads) ===
+| nprobe | Rerank |       R@10 |      R@100 |     navigate |       search |       rerank |      rr_dist |      rr_sort |  rr_scored |   rr_bytes |        spawn |         drop |         wall |
+|--------|--------|------------|------------|--------------|--------------|--------------|--------------|--------------|------------|------------|--------------|--------------|--------------|
+|     32 |    1x |     71.15% |     49.22% |      265.2µs |      265.2µs |          0ns |          0ns |          0ns |        0.0 |         0B |       8.10ms |       9.84ms |     335.21ms |
+|     32 |    4x |     86.25% |     78.12% |      417.6µs |      335.8µs |       81.6µs |       79.8µs |        1.7µs |      127.4 |    509.5KB |       5.34ms |      10.33ms |     482.85ms |
+|     32 |    8x |     93.70% |     88.28% |      956.5µs |      711.0µs |      245.3µs |      241.4µs |        3.8µs |      255.3 |   1021.2KB |       2.06ms |       6.34ms |     983.25ms |
+|     32 |   16x |     97.05% |     94.34% |       1.99ms |       1.39ms |      597.7µs |      588.0µs |        9.6µs |      511.2 |      2.0MB |       1.58ms |       5.43ms |        2.01s |
+|     64 |    1x |     81.15% |     50.23% |      271.8µs |      271.8µs |          0ns |          0ns |          0ns |        0.0 |         0B |       7.08ms |       9.82ms |     358.40ms |
+|     64 |    4x |     93.70% |     81.02% |      956.8µs |      710.8µs |      245.8µs |      241.9µs |        3.8µs |      255.3 |   1021.2KB |       1.99ms |       5.77ms |     992.57ms |
+|     64 |    8x |     97.05% |     90.50% |       1.99ms |       1.39ms |      598.2µs |      588.4µs |        9.7µs |      511.2 |      2.0MB |       1.41ms |       5.29ms |        2.01s |
+|     64 |   16x |     98.65% |     95.55% |       4.07ms |       2.77ms |       1.30ms |       1.26ms |       36.1µs |     1023.1 |      4.0MB |       1.41ms |       5.25ms |        4.10s |
+|    128 |    1x |     86.30% |     51.21% |      271.3µs |      271.3µs |          0ns |          0ns |          0ns |        0.0 |         0B |       5.74ms |       7.72ms |     333.35ms |
+|    128 |    4x |     97.05% |     83.04% |       2.00ms |       1.40ms |      599.1µs |      589.3µs |        9.7µs |      511.2 |      2.0MB |       1.18ms |       5.54ms |        2.05s |
+|    128 |    8x |     98.65% |     91.83% |       4.08ms |       2.78ms |       1.30ms |       1.27ms |       36.1µs |     1023.1 |      4.0MB |       1.29ms |       5.06ms |        4.10s |
+|    128 |   16x |     99.45% |     96.56% |       8.03ms |       5.37ms |       2.65ms |       2.58ms |       78.6µs |     2047.0 |      8.0MB |       1.17ms |       5.14ms |        8.08s |
+|    256 |    1x |     93.70% |     53.10% |      504.0µs |      504.0µs |          0ns |          0ns |          0ns |        0.0 |         0B |       3.36ms |       6.76ms |     540.10ms |
+|    256 |    4x |     98.65% |     84.64% |       4.08ms |       2.78ms |       1.30ms |       1.26ms |       35.8µs |     1023.1 |      4.0MB |       1.26ms |       5.10ms |        4.09s |
+|    256 |    8x |     99.45% |     92.95% |       8.03ms |       5.38ms |       2.65ms |       2.58ms |       78.7µs |     2047.0 |      8.0MB |       1.25ms |       5.03ms |        8.08s |
+|    256 |   16x |     99.85% |     97.33% |      16.50ms |      11.12ms |       5.39ms |       5.24ms |      151.4µs |     4094.8 |     16.0MB |       1.19ms |       5.06ms |       16.67s |
+
+=== Phase 3: Search-Only Recall (200 queries, 32 threads) ===
+| nprobe | Rerank |       R@10 |      R@100 |     navigate |       search |       rerank |      rr_dist |      rr_sort |  rr_scored |   rr_bytes |
+|--------|--------|------------|------------|--------------|--------------|--------------|--------------|--------------|------------|------------|
+|     32 |    1x |     71.95% |     50.12% |      277.1µs |      277.1µs |          0ns |          0ns |          0ns |        0.0 |         0B |
+|     32 |    4x |     86.00% |     77.95% |      463.7µs |      347.8µs |      115.8µs |      113.7µs |        2.0µs |      128.0 |    512.0KB |
+|     32 |    8x |     93.20% |     87.98% |      887.9µs |      655.7µs |      232.1µs |      228.2µs |        3.9µs |      256.0 |      1.0MB |
+|     32 |   16x |     96.75% |     94.09% |       1.68ms |       1.22ms |      462.8µs |      454.4µs |        8.3µs |      512.0 |      2.0MB |
+|     64 |    1x |     81.40% |     50.70% |      287.6µs |      287.6µs |          0ns |          0ns |          0ns |        0.0 |         0B |
+|     64 |    4x |     93.20% |     80.84% |      887.8µs |      654.9µs |      232.7µs |      228.8µs |        3.8µs |      256.0 |      1.0MB |
+|     64 |    8x |     96.75% |     90.30% |       1.67ms |       1.21ms |      464.3µs |      455.9µs |        8.2µs |      512.0 |      2.0MB |
+|     64 |   16x |     98.50% |     95.48% |       3.31ms |       2.37ms |      940.5µs |      908.7µs |       31.7µs |     1024.0 |      4.0MB |
+|    128 |    1x |     86.00% |     51.29% |      299.7µs |      299.6µs |          0ns |          0ns |          0ns |        0.0 |         0B |
+|    128 |    4x |     96.75% |     82.95% |       1.67ms |       1.20ms |      464.8µs |      456.5µs |        8.2µs |      512.0 |      2.0MB |
+|    128 |    8x |     98.50% |     91.79% |       3.30ms |       2.36ms |      940.6µs |      908.9µs |       31.5µs |     1024.0 |      4.0MB |
+|    128 |   16x |     99.40% |     96.52% |       6.63ms |       4.72ms |       1.91ms |       1.85ms |       56.9µs |     2048.0 |      8.0MB |
+|    256 |    1x |     93.20% |     53.18% |      593.2µs |      593.2µs |          0ns |          0ns |          0ns |        0.0 |         0B |
+|    256 |    4x |     98.50% |     84.62% |       3.29ms |       2.34ms |      945.2µs |      913.7µs |       31.4µs |     1024.0 |      4.0MB |
+|    256 |    8x |     99.40% |     92.93% |       6.64ms |       4.72ms |       1.91ms |       1.85ms |       57.9µs |     2048.0 |      8.0MB |
+|    256 |   16x |     99.85% |     97.33% |      13.98ms |      10.03ms |       3.95ms |       3.85ms |       94.9µs |     4096.0 |     16.0MB |
+
+=== Legend ===
+nprobe   - number of nearest neighbors to retrieve per search
+navigate - total navigate latency: search + rerank
+search   - index.search() across the HNSW graph
+rerank   - re-score candidates with exact f32 distance and sort
+spawn    - add() a new centroid (from cluster split)
+drop     - remove() a centroid (from cluster split/merge)
+wall     - wall-clock time for the full SPANN simulation phase
+
+
+
+
 cargo bench -p chroma-index --bench usearch_spann_profile -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 1000000 --threads 32 --data-vectors 1000000 usearch_spann_profile_1bit.txt  2>&1 &
     Finished `bench` profile [optimized + debuginfo] target(s) in 0.34s
      Running benches/usearch_spann_profile.rs (target/release/deps/usearch_spann_profile-2f17528a797d0cb1)

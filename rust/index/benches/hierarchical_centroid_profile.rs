@@ -22,7 +22,6 @@ use std::time::{Duration, Instant};
 use chroma_distance::DistanceFunction;
 use chroma_index::quantization::Code;
 use clap::Parser;
-use indicatif::{ProgressBar, ProgressStyle};
 use parking_lot::Mutex;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -32,7 +31,7 @@ use hierarchical_index::{
     compute_distance, print_tree_diagram, tree_depth, tree_node_size, CentroidTreeNode,
     HierarchicalCentroidIndex, TreeBuildConfig,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 // =============================================================================
 // CLI Arguments
@@ -59,11 +58,11 @@ struct Args {
     #[arg(long, default_value = "5700")]
     initial_centroids: usize,
 
-    /// Number of simulated data vector adds (drives navigate/spawn/drop)
+    /// Number of simulated data vector adds (Phase 2) and recall queries (Phase 3)
     #[arg(long, default_value = "1000000")]
     data_vectors: usize,
 
-    /// Number of threads for the SPANN simulation
+    /// Number of threads for workload and search phases
     #[arg(long, default_value = "32")]
     threads: usize,
 
@@ -110,9 +109,17 @@ struct Args {
     #[arg(long, default_value = "5000")]
     beam_max: usize,
 
-    /// Number of queries for recall evaluation
-    #[arg(long, default_value = "200")]
-    num_queries: usize,
+    /// Rerank factors to sweep (comma-separated). Only applied when --centroid-bits is set.
+    #[arg(long, value_delimiter = ',', default_values_t = vec![1, 4, 16])]
+    rerank_factors: Vec<usize>,
+
+    /// Skip Phase 2 (SPANN synthetic workload)
+    #[arg(long)]
+    skip_phase_2: bool,
+
+    /// Skip Phase 3 (pure search recall sweep)
+    #[arg(long)]
+    skip_phase_3: bool,
 
     /// Extra arguments (ignored, for compatibility with cargo bench)
     #[arg(hide = true, allow_hyphen_values = true)]
@@ -161,6 +168,8 @@ impl MethodStats {
 #[derive(Default, Clone)]
 struct PhaseStats {
     navigate: MethodStats,
+    nav_search: MethodStats,
+    nav_rerank: MethodStats,
     spawn: MethodStats,
     drop_op: MethodStats,
     wall: Duration,
@@ -169,6 +178,8 @@ struct PhaseStats {
 impl PhaseStats {
     fn merge(&mut self, other: &PhaseStats) {
         self.navigate.merge(&other.navigate);
+        self.nav_search.merge(&other.nav_search);
+        self.nav_rerank.merge(&other.nav_rerank);
         self.spawn.merge(&other.spawn);
         self.drop_op.merge(&other.drop_op);
     }
@@ -206,7 +217,7 @@ fn load_vectors(args: &Args) -> (Vec<Vec<f32>>, usize, DistanceFunction) {
 
     let total_needed = args.initial_centroids
         + (args.data_vectors as f64 * SPAWN_RATE) as usize
-        + args.num_queries
+        + args.data_vectors
         + 1024;
 
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
@@ -289,8 +300,7 @@ fn main() {
     let centroid_bits = args.centroid_bits;
     let initial_centroids = args.initial_centroids;
     let data_vectors = args.data_vectors;
-    let num_threads = args.threads;
-    let num_queries = args.num_queries;
+    let num_queries = data_vectors;
 
     let cfg = TreeBuildConfig {
         branching_factor: args.branching_factor,
@@ -321,14 +331,15 @@ fn main() {
 
     println!("\n=== Hierarchical Centroid Tree Profile ===");
     println!(
-        "Dim: {} | Metric: {:?} | Centroid bits: {} | Threads: {}",
-        dim, args.metric, bits_label, num_threads
+        "Dim: {} | Metric: {:?} | Centroid bits: {}",
+        dim, args.metric, bits_label
     );
     println!(
-        "Initial centroids: {} | Data vectors: {} | Queries: {}",
+        "Initial centroids: {} | Data vectors / queries: {} | Threads: {} | Rerank: {:?}",
         format_count(initial_centroids),
         format_count(data_vectors),
-        num_queries
+        args.threads,
+        args.rerank_factors,
     );
     let beam_sched = match args.beam_tau {
         Some(tau) => format!(
@@ -465,437 +476,290 @@ fn main() {
     println!("Phase 1 wall clock: {}", format_duration(phase1_start.elapsed()));
 
     // =========================================================================
-    // Phase 2: Simulated SPANN workload (multi-threaded)
+    // Precompute ground truths for Phase 2 recall (with disk cache)
     // =========================================================================
-    println!(
-        "\n--- Phase 2: SPANN workload ({} data vectors, {} threads) ---",
-        format_count(data_vectors),
-        num_threads
-    );
-
-    let next_key = AtomicU32::new(initial_centroids as u32);
-    let live_entries: Mutex<Vec<(u32, usize)>> = Mutex::new(
-        (0..initial_centroids).map(|i| (i as u32, i)).collect(),
-    );
-
-    let total_navigates = (data_vectors as f64 * NAVIGATES_PER_ADD) as u64;
-    let total_spawns = (data_vectors as f64 * SPAWN_RATE) as u64;
-    let total_drops = (data_vectors as f64 * DROP_RATE) as u64;
-    let total_ops = total_navigates + total_spawns + total_drops;
-
-    let progress = ProgressBar::new(total_ops);
-    progress.set_style(
-        ProgressStyle::default_bar()
-            .template("[SPANN sim] {wide_bar} {pos}/{len} [{elapsed_precise}<{eta_precise}]")
-            .unwrap(),
-    );
-
-    let nav_per_add = NAVIGATES_PER_ADD.floor() as usize;
-    let nav_frac = NAVIGATES_PER_ADD - nav_per_add as f64;
     let vec_pool_start = initial_centroids;
-    let vec_pool_size = all_vectors.len() - vec_pool_start;
+    let vec_pool_size = all_vectors.len().saturating_sub(vec_pool_start);
+    let num_recall_queries = num_queries.min(vec_pool_size).max(1);
 
-    let phase2_start = Instant::now();
-
-    let chunk_size = (data_vectors + num_threads - 1) / num_threads;
-    let thread_stats: Vec<PhaseStats> = std::thread::scope(|s| {
-        let handles: Vec<_> = (0..num_threads)
-            .map(|thread_id| {
-                let index = &index;
-                let all_vectors = &all_vectors;
-                let next_key = &next_key;
-                let live_entries = &live_entries;
-                let progress = &progress;
-                s.spawn(move || {
-                    let mut local_stats = PhaseStats::default();
-                    let mut rng = StdRng::seed_from_u64(123 + thread_id as u64);
-                    let start = thread_id * chunk_size;
-                    let end = (start + chunk_size).min(data_vectors);
-
-                    for i in start..end {
-                        let pool_idx = i % vec_pool_size;
-                        let query_vec = &all_vectors[vec_pool_start + pool_idx];
-
-                        let mut n_nav = nav_per_add;
-                        if rng.gen::<f64>() < nav_frac {
-                            n_nav += 1;
-                        }
-                        for _ in 0..n_nav {
-                            let t = Instant::now();
-                            let _ = index.search(query_vec, NPROBE);
-                            local_stats.navigate.record(t.elapsed());
-                            progress.inc(1);
-                        }
-
-                        if rng.gen::<f64>() < SPAWN_RATE {
-                            let spawn_idx = (i + 1) % vec_pool_size;
-                            let vec_index = vec_pool_start + spawn_idx;
-                            let spawn_vec = &all_vectors[vec_index];
-                            let key = next_key.fetch_add(1, Ordering::Relaxed);
-
-                            let t = Instant::now();
-                            index.add(key, spawn_vec.clone());
-                            local_stats.spawn.record(t.elapsed());
-                            live_entries.lock().push((key, vec_index));
-                            progress.inc(1);
-                        }
-
-                        if rng.gen::<f64>() < DROP_RATE {
-                            let entry = {
-                                let mut entries = live_entries.lock();
-                                if entries.len() > 100 {
-                                    let idx = rng.gen_range(0..entries.len());
-                                    Some(entries.swap_remove(idx))
-                                } else {
-                                    None
-                                }
-                            };
-                            if let Some((key, _)) = entry {
-                                let t = Instant::now();
-                                index.remove(key);
-                                local_stats.drop_op.record(t.elapsed());
-                                progress.inc(1);
-                            }
-                        }
-                    }
-
-                    local_stats
-                })
-            })
-            .collect();
-
-        handles.into_iter().map(|h| h.join().unwrap()).collect()
-    });
-
-    progress.finish_and_clear();
-
-    let mut stats = PhaseStats::default();
-    for ts in &thread_stats {
-        stats.merge(ts);
-    }
-    stats.wall = phase2_start.elapsed();
-
-    let final_live_entries = live_entries.into_inner();
-
-    println!(
-        "Completed in {} | Index size: {}",
-        format_duration(stats.wall),
-        index.len()
-    );
-
-    println!("\n=== Phase 2: Task Counts ===");
-    println!(
-        "| {:>10} | {:>10} | {:>10} |",
-        "navigate", "spawn", "drop"
-    );
-    println!("|------------|------------|------------|");
-    println!(
-        "| {:>10} | {:>10} | {:>10} |",
-        format_count(stats.navigate.calls as usize),
-        format_count(stats.spawn.calls as usize),
-        format_count(stats.drop_op.calls as usize),
-    );
-
-    println!("\n=== Phase 2: Task Total Time ===");
-    println!(
-        "| {:>10} | {:>10} | {:>10} | {:>10} |",
-        "navigate", "spawn", "drop", "wall"
-    );
-    println!("|------------|------------|------------|------------|");
-    println!(
-        "| {:>10} | {:>10} | {:>10} | {:>10} |",
-        format_duration(stats.navigate.total),
-        format_duration(stats.spawn.total),
-        format_duration(stats.drop_op.total),
-        format_duration(stats.wall),
-    );
-
-    println!("\n=== Phase 2: Task Avg Time ===");
-    println!(
-        "| {:>10} | {:>10} | {:>10} |",
-        "navigate", "spawn", "drop"
-    );
-    println!("|------------|------------|------------|");
-    println!(
-        "| {:>10} | {:>10} | {:>10} |",
-        format_nanos(stats.navigate.avg_nanos()),
-        format_nanos(stats.spawn.avg_nanos()),
-        format_nanos(stats.drop_op.avg_nanos()),
-    );
-
-    // =========================================================================
-    // Phase 3: Recall evaluation
-    // =========================================================================
-    let phase3_start = Instant::now();
-
-    let corpus_vecs: Vec<Vec<f32>> = final_live_entries
+    let recall_query_vecs: Vec<&Vec<f32>> = all_vectors[vec_pool_start..]
         .iter()
-        .filter_map(|&(_, vec_idx)| {
-            if vec_idx < all_vectors.len() {
-                Some(all_vectors[vec_idx].clone())
-            } else {
-                None
-            }
-        })
-        .collect();
-    let corpus_keys: Vec<u32> = final_live_entries
-        .iter()
-        .filter(|&&(_, vec_idx)| vec_idx < all_vectors.len())
-        .map(|&(key, _)| key)
+        .take(num_recall_queries)
         .collect();
 
-    let query_start = vec_pool_start;
-    let query_vecs: Vec<&Vec<f32>> = all_vectors[query_start..]
-        .iter()
-        .take(num_queries)
-        .collect();
+    let gt_cache_file = cache_dir.join(format!(
+        "gt_{:?}_{}_{:?}_{}.bin",
+        args.dataset, initial_centroids, args.metric, num_recall_queries,
+    ));
 
-    let k = 100;
-    let mut recall_10_sum = 0.0f64;
-    let mut recall_100_sum = 0.0f64;
-    let mut total_latency = Duration::ZERO;
-
-    let progress = ProgressBar::new(query_vecs.len() as u64);
-    progress.set_style(
-        ProgressStyle::default_bar()
-            .template("[Recall] {wide_bar} {pos}/{len} [{elapsed_precise}]")
-            .unwrap(),
-    );
-
-    for query in &query_vecs {
-        let gt = brute_force_knn(query, &corpus_vecs, &corpus_keys, k, &distance_fn);
-
-        let t = Instant::now();
-        let result = index.search(query, k);
-        total_latency += t.elapsed();
-
-        let predicted: std::collections::HashSet<u32> =
-            result.iter().map(|&(key, _)| key).collect();
-        let gt_10: std::collections::HashSet<u32> = gt.iter().take(10).copied().collect();
-        let gt_100: std::collections::HashSet<u32> = gt.iter().take(k).copied().collect();
-        recall_10_sum +=
-            predicted.intersection(&gt_10).count() as f64 / gt_10.len().max(1) as f64;
-        recall_100_sum +=
-            predicted.intersection(&gt_100).count() as f64 / gt_100.len().max(1) as f64;
-
-        progress.inc(1);
-    }
-    progress.finish_and_clear();
-
-    let n_q = query_vecs.len() as f64;
-    let avg_recall_10 = recall_10_sum / n_q * 100.0;
-    let avg_recall_100 = recall_100_sum / n_q * 100.0;
-    let avg_latency = total_latency / query_vecs.len() as u32;
-
-    println!("\n=== Recall Summary ===");
-    println!(
-        "Corpus size: {} | Queries: {} | k: {}",
-        format_count(corpus_keys.len()),
-        query_vecs.len(),
-        k
-    );
-    println!(
-        "Recall@10: {:.2}% | Recall@100: {:.2}% | Avg latency: {}",
-        avg_recall_10, avg_recall_100, format_duration(avg_latency)
-    );
-
-    // =========================================================================
-    // Phase 3b: Sweep (beam widths in fixed mode, tau values in dynamic mode)
-    // =========================================================================
-
-    let ground_truths: Vec<Vec<u32>> = query_vecs
-        .iter()
-        .map(|q| brute_force_knn(q, &corpus_vecs, &corpus_keys, k, &distance_fn))
-        .collect();
-
-    if args.beam_tau.is_some() {
-        let num_levels = tree_depth(&index.root) - 1; // internal levels only
-
-        println!(
-            "\n=== Phase 3: Tau sweep ({} queries, min={}, max={}) ===",
-            num_queries, args.beam_min, args.beam_max
-        );
-
-        let sweep_taus: &[f64] = &[0.1, 0.5, 0.75, 1.0];
-        let rerank_factors: &[usize] = if centroid_bits.is_some() {
-            &[1, 2, 4, 8]
-        } else {
-            &[1]
-        };
-
-        // Build header dynamically based on tree depth
-        let mut header = format!(
-            "| {:>6} | {:>6} | {:>11} | {:>11} | {:>10}",
-            "Tau", "Rerank", "Recall@10", "Recall@100", "Avg lat"
-        );
-        for l in 1..=num_levels {
-            header.push_str(&format!(" | L{} beam | L{} R@100", l, l));
-        }
-        header.push_str(" | Leaves |   Vecs |");
-        println!("{}", header);
-
-        let mut sep = String::from("|--------|--------|-------------|-------------|------------|");
-        for _ in 1..=num_levels {
-            sep.push_str("---------|---------|");
-        }
-        sep.push_str("--------|--------|");
-        println!("{}", sep);
-
-        for &tau in sweep_taus {
-            // Collect per-level stats once per tau (same tree traversal regardless of rerank)
-            let mut level_accum: Vec<(usize, f64, usize)> = vec![(0, 0.0, 0); num_levels];
-            let mut leaves_sum = 0usize;
-            let mut vectors_sum = 0usize;
-            let mut stats_collected = false;
-
-            for &rf in rerank_factors {
-                let mut r10_sum = 0.0f64;
-                let mut r100_sum = 0.0f64;
-                let mut lat_total = Duration::ZERO;
-
-                for (qi, query) in query_vecs.iter().enumerate() {
-                    let gt = &ground_truths[qi];
-                    let gt_10: HashSet<u32> = gt.iter().take(10).copied().collect();
-                    let gt_100: HashSet<u32> = gt.iter().take(k).copied().collect();
-
-                    let t = Instant::now();
-                    let result = if rf == 1 {
-                        index.search_with_beam(query, k, cfg.beam_width, Some(tau))
-                    } else {
-                        index.search_with_rerank(
-                            query,
-                            k,
-                            k * rf,
-                            cfg.beam_width,
-                            Some(tau),
-                        )
-                    };
-                    lat_total += t.elapsed();
-
-                    let predicted: HashSet<u32> =
-                        result.iter().map(|&(key, _)| key).collect();
-
-                    r10_sum += predicted.intersection(&gt_10).count() as f64
-                        / gt_10.len().max(1) as f64;
-                    r100_sum += predicted.intersection(&gt_100).count() as f64
-                        / gt_100.len().max(1) as f64;
-
-                    if !stats_collected {
-                        let lr = index.diagnose_level_recall(
-                            query,
-                            cfg.beam_width,
-                            &gt_10,
-                            &gt_100,
-                            Some(tau),
-                        );
-                        for entry in &lr {
-                            let idx = entry.level - 1;
-                            if idx < num_levels {
-                                level_accum[idx].0 += entry.beam_size;
-                                level_accum[idx].1 += entry.reachable_100;
-                                level_accum[idx].2 += 1;
-                            }
-                            leaves_sum += entry.leaves_scanned;
-                            vectors_sum += entry.vectors_scanned;
-                        }
-                    }
-                }
-                stats_collected = true;
-
-                let n_q = query_vecs.len() as f64;
-                let avg_leaves = leaves_sum / query_vecs.len();
-                let avg_vectors = vectors_sum / query_vecs.len();
-                let rerank_label = if rf == 1 {
-                    "1x".to_string()
-                } else {
-                    format!("{}x", rf)
-                };
-                let mut row = format!(
-                    "| {:>6.2} | {:>6} | {:>10.2}% | {:>10.2}% | {:>10}",
-                    tau,
-                    rerank_label,
-                    r10_sum / n_q * 100.0,
-                    r100_sum / n_q * 100.0,
-                    format_duration(lat_total / query_vecs.len() as u32),
-                );
-                for l in 0..num_levels {
-                    let (beam_sum, reach_sum, count) = level_accum[l];
-                    if count > 0 {
-                        let avg_beam = beam_sum / count;
-                        let avg_reach = reach_sum / count as f64 * 100.0;
-                        row.push_str(&format!(" | {:>7} | {:>6.1}%", avg_beam, avg_reach));
-                    } else {
-                        row.push_str(" |       - |      -");
-                    }
-                }
-                row.push_str(&format!(
-                    " | {:>6} | {:>6} |",
-                    avg_leaves,
-                    format_count(avg_vectors)
-                ));
-                println!("{}", row);
-            }
-        }
+    let ground_truths: Vec<Vec<u32>> = if gt_cache_file.exists() {
+        let data = std::fs::read(&gt_cache_file).expect("Failed to read ground truth cache");
+        bincode::deserialize(&data).expect("Failed to deserialize ground truths")
     } else {
+        let centroid_vecs: Vec<Vec<f32>> = all_vectors[0..n].to_vec();
+        let centroid_keys: Vec<u32> = (0..n as u32).collect();
         println!(
-            "\n--- Phase 3b: Beam width sweep ({} queries) ---",
-            num_queries
+            "\n--- Precomputing ground truths ({} queries, k=100) ---",
+            num_recall_queries
         );
-
-        let sweep_widths: &[usize] = &[5, 10, 20, 50, 100, 200, 500, 1000];
-
+        let gt_start = Instant::now();
+        let gts: Vec<Vec<u32>> = recall_query_vecs
+            .iter()
+            .map(|q| brute_force_knn(q, &centroid_vecs, &centroid_keys, 100, &distance_fn))
+            .collect();
+        std::fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
+        let encoded = bincode::serialize(&gts).expect("Failed to serialize ground truths");
+        std::fs::write(&gt_cache_file, &encoded).expect("Failed to write ground truth cache");
         println!(
-            "| {:>5} | {:>11} | {:>11} | {:>10} |",
-            "Beam", "Recall@10", "Recall@100", "Avg lat"
+            "Cached ground truths to {} ({:.1}ms)",
+            gt_cache_file.display(),
+            gt_start.elapsed().as_secs_f64() * 1000.0,
         );
-        println!("|-------|-------------|-------------|------------|");
+        gts
+    };
 
-        for &bw in sweep_widths {
+    // =========================================================================
+    // Shared config for Phases 2 and 3
+    // =========================================================================
+    let num_threads = args.threads;
+    let tau_sweep: &[f64] = &[0.1, 0.5, 1.0];
+    let rerank_sweep: Vec<usize> = if centroid_bits.is_some() {
+        args.rerank_factors.clone()
+    } else {
+        vec![1]
+    };
+    let k = 100;
+
+    // Precompute recall for each (tau, rerank) pair once.
+    println!(
+        "\n--- Precomputing recall ({} queries per config) ---",
+        num_recall_queries
+    );
+    let mut recall_cache: HashMap<(u64, usize), (f64, f64)> = HashMap::new();
+    for &tau in tau_sweep {
+        for &rf in &rerank_sweep {
             let mut r10_sum = 0.0f64;
             let mut r100_sum = 0.0f64;
-            let mut lat_total = Duration::ZERO;
-
-            for (qi, query) in query_vecs.iter().enumerate() {
-                let t = Instant::now();
-                let result = index.search_with_beam(query, k, bw, None);
-                lat_total += t.elapsed();
-
-                let predicted: std::collections::HashSet<u32> =
-                    result.iter().map(|&(key, _)| key).collect();
+            for (qi, query) in recall_query_vecs.iter().enumerate() {
                 let gt = &ground_truths[qi];
-                let gt_10: std::collections::HashSet<u32> =
-                    gt.iter().take(10).copied().collect();
-                let gt_100: std::collections::HashSet<u32> =
-                    gt.iter().take(k).copied().collect();
+                let gt_10: HashSet<u32> = gt.iter().take(10).copied().collect();
+                let gt_100: HashSet<u32> = gt.iter().take(k).copied().collect();
 
+                let result = if rf <= 1 || centroid_bits.is_none() {
+                    index.search_with_beam(query, NPROBE, index.beam_width, Some(tau))
+                } else {
+                    index.search_with_rerank(
+                        query, NPROBE, NPROBE * rf, index.beam_width, Some(tau),
+                    )
+                };
+
+                let predicted: HashSet<u32> = result.iter().map(|&(key, _)| key).collect();
                 r10_sum += predicted.intersection(&gt_10).count() as f64
                     / gt_10.len().max(1) as f64;
                 r100_sum += predicted.intersection(&gt_100).count() as f64
                     / gt_100.len().max(1) as f64;
             }
-
-            let n_q = query_vecs.len() as f64;
+            let n_q = recall_query_vecs.len() as f64;
+            let recall_10 = r10_sum / n_q * 100.0;
+            let recall_100 = r100_sum / n_q * 100.0;
             println!(
-                "| {:>5} | {:>10.2}% | {:>10.2}% | {:>10} |",
-                bw,
-                r10_sum / n_q * 100.0,
-                r100_sum / n_q * 100.0,
-                format_duration(lat_total / query_vecs.len() as u32),
+                "  tau={:.2} rerank={:>2}x => R@10: {:>5.1}%  R@100: {:>5.1}%",
+                tau, rf, recall_10, recall_100
             );
+            recall_cache.insert((tau.to_bits(), rf), (recall_10, recall_100));
         }
     }
 
-    println!(
-        "Phase 3 wall clock: {}",
-        format_duration(phase3_start.elapsed())
-    );
+    // =========================================================================
+    // Phases 2 & 3: unified tau x rerank sweep
+    //   Phase 2 = synthetic SPANN workload (navigate + spawn + drop)
+    //   Phase 3 = pure search (navigate only)
+    // =========================================================================
+    let nav_per_add = NAVIGATES_PER_ADD.floor() as usize;
+    let nav_frac = NAVIGATES_PER_ADD - nav_per_add as f64;
+
+    let phases: &[(usize, &str, bool)] = &[
+        (2, "SPANN Workload", true),
+        (3, "Pure Search", false),
+    ];
+
+    for &(phase_num, phase_label, with_writes) in phases {
+        let skip = match phase_num {
+            2 => args.skip_phase_2,
+            3 => args.skip_phase_3,
+            _ => false,
+        };
+        if skip {
+            println!("\nPhase {} skipped (--skip-phase-{})", phase_num, phase_num);
+            continue;
+        }
+
+        let work_items = if with_writes { data_vectors } else { num_queries };
+
+        print!(
+            "\n=== Phase {}: {} ({}", phase_num, phase_label, format_count(work_items),
+        );
+        if with_writes {
+            print!(" data vectors, {} threads) ===", num_threads);
+        } else {
+            print!(" queries, {} threads) ===", num_threads);
+        }
+        println!();
+
+        print!(
+            "| {:>5} | {:>6} | {:>9} | {:>9} | {:>10} | {:>10} | {:>10} | {:>10}",
+            "Tau", "Rerank", "R@10", "R@100", "Wall", "Nav avg", "Srch avg", "Rank avg"
+        );
+        if with_writes {
+            print!(" | {:>10} | {:>10}", "Spn avg", "Drop avg");
+        }
+        println!(" |");
+
+        print!("|-------|--------|----------|----------|------------|------------|------------|------------");
+        if with_writes {
+            print!("|------------|------------");
+        }
+        println!("|");
+
+        for &tau in tau_sweep {
+            for &rf in &rerank_sweep {
+                index.overflow.lock().clear();
+                index.tombstones.lock().clear();
+
+                let next_key = AtomicU32::new(initial_centroids as u32);
+                let live_entries: Mutex<Vec<(u32, usize)>> = Mutex::new(
+                    (0..initial_centroids).map(|i| (i as u32, i)).collect(),
+                );
+
+                let phase_start = Instant::now();
+                let chunk_size = (work_items + num_threads - 1) / num_threads;
+                let tau_override = Some(tau);
+
+                let thread_stats: Vec<PhaseStats> = std::thread::scope(|s| {
+                    let handles: Vec<_> = (0..num_threads)
+                        .map(|thread_id| {
+                            let index = &index;
+                            let all_vectors = &all_vectors;
+                            let next_key = &next_key;
+                            let live_entries = &live_entries;
+                            s.spawn(move || {
+                                let mut local_stats = PhaseStats::default();
+                                let mut rng = StdRng::seed_from_u64(123 + thread_id as u64);
+                                let start = thread_id * chunk_size;
+                                let end = (start + chunk_size).min(work_items);
+
+                                for i in start..end {
+                                    let pool_idx = i % vec_pool_size;
+                                    let query_vec = &all_vectors[vec_pool_start + pool_idx];
+
+                                    let n_nav = if with_writes {
+                                        let extra = if rng.gen::<f64>() < nav_frac { 1 } else { 0 };
+                                        nav_per_add + extra
+                                    } else {
+                                        1
+                                    };
+
+                                    for _ in 0..n_nav {
+                                        if rf <= 1 || centroid_bits.is_none() {
+                                            let t = Instant::now();
+                                            let _ = index.search_with_beam(
+                                                query_vec, NPROBE, index.beam_width, tau_override,
+                                            );
+                                            let elapsed = t.elapsed();
+                                            local_stats.navigate.record(elapsed);
+                                            local_stats.nav_search.record(elapsed);
+                                        } else {
+                                            let (_, search_dur, rerank_dur) =
+                                                index.search_with_rerank_timed(
+                                                    query_vec, NPROBE, NPROBE * rf,
+                                                    index.beam_width, tau_override,
+                                                );
+                                            let total = search_dur + rerank_dur;
+                                            local_stats.navigate.record(total);
+                                            local_stats.nav_search.record(search_dur);
+                                            local_stats.nav_rerank.record(rerank_dur);
+                                        }
+                                    }
+
+                                    if with_writes {
+                                        if rng.gen::<f64>() < SPAWN_RATE {
+                                            let spawn_idx = (i + 1) % vec_pool_size;
+                                            let vec_index = vec_pool_start + spawn_idx;
+                                            let spawn_vec = &all_vectors[vec_index];
+                                            let key = next_key.fetch_add(1, Ordering::Relaxed);
+                                            let t = Instant::now();
+                                            index.add(key, spawn_vec.clone());
+                                            local_stats.spawn.record(t.elapsed());
+                                            live_entries.lock().push((key, vec_index));
+                                        }
+
+                                        if rng.gen::<f64>() < DROP_RATE {
+                                            let entry = {
+                                                let mut entries = live_entries.lock();
+                                                if entries.len() > 100 {
+                                                    let idx = rng.gen_range(0..entries.len());
+                                                    Some(entries.swap_remove(idx))
+                                                } else {
+                                                    None
+                                                }
+                                            };
+                                            if let Some((key, _)) = entry {
+                                                let t = Instant::now();
+                                                index.remove(key);
+                                                local_stats.drop_op.record(t.elapsed());
+                                            }
+                                        }
+                                    }
+                                }
+
+                                local_stats
+                            })
+                        })
+                        .collect();
+
+                    handles.into_iter().map(|h| h.join().unwrap()).collect()
+                });
+
+                let mut stats = PhaseStats::default();
+                for ts in &thread_stats {
+                    stats.merge(ts);
+                }
+                stats.wall = phase_start.elapsed();
+
+                let &(recall_10, recall_100) = recall_cache
+                    .get(&(tau.to_bits(), rf))
+                    .unwrap_or(&(0.0, 0.0));
+
+                print!(
+                    "| {:>5.2} | {:>5}x | {:>8.1}% | {:>8.1}% | {:>10} | {:>10} | {:>10} | {:>10}",
+                    tau, rf,
+                    recall_10, recall_100,
+                    format_duration(stats.wall),
+                    format_nanos(stats.navigate.avg_nanos()),
+                    format_nanos(stats.nav_search.avg_nanos()),
+                    format_nanos(stats.nav_rerank.avg_nanos()),
+                );
+                if with_writes {
+                    print!(
+                        " | {:>10} | {:>10}",
+                        format_nanos(stats.spawn.avg_nanos()),
+                        format_nanos(stats.drop_op.avg_nanos()),
+                    );
+                }
+                println!(" |");
+            }
+        }
+    }
 
     println!("\n=== Legend ===");
+    println!("R@10/R@100 - recall vs precomputed ground truth (cached)");
     println!(
-        "navigate - beam search the centroid tree (nprobe={})",
+        "navigate   - search + rerank total (nprobe={})",
         NPROBE
     );
-    println!("spawn    - append to overflow buffer (from cluster split)");
-    println!("drop     - add to tombstone set (from cluster split/merge)");
-    println!("wall     - wall-clock time for the full SPANN simulation phase");
+    println!("search     - tree traversal (1-bit or f32)");
+    println!("rerank     - f32 rescoring of top candidates");
+    println!("spawn      - append to overflow buffer (from cluster split)");
+    println!("drop       - add to tombstone set (from cluster split/merge)");
+    println!("wall       - wall-clock time for the full phase");
 }

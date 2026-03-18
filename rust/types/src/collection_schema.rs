@@ -19,7 +19,7 @@ use crate::{
     default_construction_ef_spann, default_initial_lambda, default_m, default_m_spann,
     default_merge_threshold, default_nreplica_count, default_num_centers_to_merge_to,
     default_num_samples_kmeans, default_num_threads, default_reassign_neighbor_count,
-    default_centroid_rerank_factor, default_resize_factor, default_search_ef,
+    default_centroid_rerank_factor, default_data_rerank_factor, default_resize_factor, default_search_ef,
     default_search_ef_spann, default_search_nprobe,
     default_search_rng_epsilon, default_search_rng_factor, default_space, default_split_threshold,
     default_sync_threshold, default_write_nprobe, default_write_rng_epsilon,
@@ -819,6 +819,7 @@ impl Schema {
                         quantize: Quantization::None,
                         centroid_bits: None,
                         centroid_rerank_factor: None,
+                        data_rerank_factor: None,
                     }),
                 },
             },
@@ -916,6 +917,7 @@ impl Schema {
                                 quantize: Quantization::None,
                                 centroid_bits: None,
                                 centroid_rerank_factor: None,
+                                data_rerank_factor: None,
                             }),
                         },
                     },
@@ -1741,6 +1743,9 @@ impl Schema {
                     centroid_rerank_factor: user
                         .centroid_rerank_factor
                         .or(default.centroid_rerank_factor),
+                    data_rerank_factor: user
+                        .data_rerank_factor
+                        .or(default.data_rerank_factor),
                 }))
             }
             (Some(default), None) => {
@@ -2924,6 +2929,12 @@ pub struct SpannIndexConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[validate(range(min = 1, max = 20))]
     pub centroid_rerank_factor: Option<u32>,
+    /// Rerank factor for data vectors. When > 1, search keeps
+    /// `k * factor` candidates from the quantized cluster scan and
+    /// reranks them using full-precision embeddings.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 1, max = 100))]
+    pub data_rerank_factor: Option<u32>,
 }
 
 impl SpannIndexConfig {
@@ -2935,6 +2946,11 @@ impl SpannIndexConfig {
     pub fn centroid_rerank_factor(&self) -> u32 {
         self.centroid_rerank_factor
             .unwrap_or(default_centroid_rerank_factor())
+    }
+
+    pub fn data_rerank_factor(&self) -> u32 {
+        self.data_rerank_factor
+            .unwrap_or(default_data_rerank_factor())
     }
 
     /// Check if this config has default values
@@ -3027,6 +3043,11 @@ impl SpannIndexConfig {
         }
         if let Some(centroid_rerank_factor) = self.centroid_rerank_factor {
             if centroid_rerank_factor != default_centroid_rerank_factor() {
+                return false;
+            }
+        }
+        if let Some(data_rerank_factor) = self.data_rerank_factor {
+            if data_rerank_factor != default_data_rerank_factor() {
                 return false;
             }
         }
@@ -3199,6 +3220,7 @@ impl TryFrom<&InternalCollectionConfiguration> for Schema {
                     quantize: Quantization::None,
                     centroid_bits: None,
                     centroid_rerank_factor: None,
+                    data_rerank_factor: None,
                 }),
             },
         };
@@ -6553,6 +6575,7 @@ mod tests {
                         quantize: Quantization::None,
                         centroid_bits: None,
                         centroid_rerank_factor: None,
+                        data_rerank_factor: None,
                     },
                 )
         }
@@ -6908,6 +6931,7 @@ mod tests {
                 quantize: Quantization::None,
                 centroid_bits: None,
                 centroid_rerank_factor: None,
+                data_rerank_factor: None,
             })
         }
 

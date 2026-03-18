@@ -1,3 +1,95 @@
+cargo bench -p chroma-index --bench hierarchical_centroid_profile --  --dataset wikipedia-en --initial-centroids 100 --threads 32  --data-vectors 10 --num-queries 10 --branching-factor 100 --beam-width 10  --expansion-factor 0 --max-replicas 1 --beam-tau 1.0 --centroid-bits 1 --beam-max 50000
+   Compiling chroma-index v0.1.0 (/home/ubuntu/chroma/rust/index)
+warning: field `tree_size` is never read
+   --> rust/index/benches/hierarchical_index/mod.rs:281:9
+    |
+267 | pub struct HierarchicalCentroidIndex {
+    |            ------------------------- field in this struct
+...
+281 |     pub tree_size: usize,
+    |         ^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `len` is never used
+    --> rust/index/benches/hierarchical_index/mod.rs:1035:12
+     |
+ 673 | impl HierarchicalCentroidIndex {
+     | ------------------------------ method in this implementation
+...
+1035 |     pub fn len(&self) -> usize {
+     |            ^^^
+
+warning: `chroma-index` (bench "hierarchical_centroid_profile") generated 2 warnings
+    Finished `bench` profile [optimized + debuginfo] target(s) in 22.98s
+     Running benches/hierarchical_centroid_profile.rs (target/release/deps/hierarchical_centroid_profile-2d0bb9373c1dad52)
+Loading Wikipedia EN from HuggingFace Hub...
+Loading 1.1K vectors from wikipedia-en (dim=1024)...
+
+=== Hierarchical Centroid Tree Profile ===
+Dim: 1024 | Metric: L2 | Centroid bits: 1
+Initial centroids: 100 | Data vectors: 10 | Queries: 10
+Branching factor: 100 | Beam: dynamic (tau=1.00, min=10, max=50000) | K-means: 10 iters
+Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
+
+--- Phase 1: Build tree (100 centroids) ---
+Built tree with 100 centroids in 275.2µs (depth=1, 363435 vec/s)
+Cached tree to target/hierarchical_cache/tree_WikipediaEn_100_bf100_ki10_L2_1.bin (0 MB)
+
+--- Tree Structure ---
+  *  Level 0 : 1 leaf, 100 total vectors (size: min=100, p25=100, p50=100, p75=100, max=100)
+
+Total entries: 100 | Unique centroids: 100 | Avg replication: 1.00x
+Phase 1 wall clock: 816.9µs
+
+=== Phase 2: SPANN Workload Scaling (10 data vectors) ===
+| Threads |   Tau | Rerank |       Wall |    Nav avg |   Srch avg |   Rank avg |    Spn avg |   Drop avg |
+|---------|-------|--------|------------|------------|------------|------------|------------|------------|
+|       1 |  0.10 |     1x |    408.7µs |     10.9µs |     10.9µs |        0ns |        0ns |        0ns |
+|       1 |  0.10 |     2x |    597.9µs |     17.7µs |     17.6µs |      101ns |        0ns |        0ns |
+|       1 |  0.10 |     4x |    420.0µs |     12.0µs |     11.9µs |       95ns |        0ns |        0ns |
+|       1 |  0.10 |     8x |    361.7µs |     10.1µs |     10.0µs |       86ns |        0ns |        0ns |
+|       1 |  0.10 |    16x |    454.2µs |      9.8µs |      9.8µs |       93ns |        0ns |        0ns |
+|       1 |  0.50 |     1x |    483.4µs |      9.2µs |      9.2µs |        0ns |        0ns |        0ns |
+|       1 |  0.50 |     2x |    541.3µs |      9.9µs |      9.8µs |       98ns |        0ns |        0ns |
+|       1 |  0.50 |     4x |    468.2µs |      9.4µs |      9.3µs |       88ns |        0ns |        0ns |
+|       1 |  0.50 |     8x |    362.7µs |     10.1µs |     10.0µs |       97ns |        0ns |        0ns |
+|       1 |  0.50 |    16x |    349.4µs |      9.6µs |      9.5µs |       87ns |        0ns |        0ns |
+|       1 |  1.00 |     1x |    475.4µs |      9.5µs |      9.5µs |        0ns |        0ns |        0ns |
+|       1 |  1.00 |     2x |    488.3µs |      9.0µs |      8.9µs |       85ns |        0ns |        0ns |
+|       1 |  1.00 |     4x |    434.0µs |      9.1µs |      9.0µs |       84ns |        0ns |        0ns |
+|       1 |  1.00 |     8x |    527.7µs |     10.7µs |     10.6µs |       85ns |        0ns |        0ns |
+|       1 |  1.00 |    16x |    329.4µs |      9.2µs |      9.1µs |       85ns |        0ns |        0ns |
+|      16 |  0.10 |     1x |     1.17ms |     13.3µs |     13.3µs |        0ns |        0ns |        0ns |
+|      16 |  0.10 |     2x |    828.2µs |     11.2µs |     10.8µs |      465ns |        0ns |        0ns |
+|      16 |  0.10 |     4x |    701.4µs |     13.5µs |     13.1µs |      363ns |        0ns |        0ns |
+|      16 |  0.10 |     8x |    530.4µs |     12.9µs |     12.4µs |      455ns |        0ns |        0ns |
+|      16 |  0.10 |    16x |    437.1µs |     11.2µs |     10.9µs |      293ns |        0ns |        0ns |
+|      16 |  0.50 |     1x |    526.4µs |      9.8µs |      9.8µs |        0ns |        0ns |        0ns |
+|      16 |  0.50 |     2x |    445.7µs |     11.3µs |     11.0µs |      282ns |        0ns |        0ns |
+|      16 |  0.50 |     4x |    339.2µs |      9.5µs |      9.2µs |      244ns |        0ns |        0ns |
+|      16 |  0.50 |     8x |    373.6µs |     10.7µs |     10.4µs |      256ns |        0ns |        0ns |
+|      16 |  0.50 |    16x |    306.6µs |     11.7µs |     11.4µs |      302ns |        0ns |        0ns |
+|      16 |  1.00 |     1x |    226.0µs |      9.1µs |      9.1µs |        0ns |        0ns |        0ns |
+|      16 |  1.00 |     2x |    699.7µs |      9.0µs |      8.8µs |      252ns |        0ns |        0ns |
+|      16 |  1.00 |     4x |    561.3µs |     12.8µs |     12.4µs |      397ns |        0ns |        0ns |
+|      16 |  1.00 |     8x |    507.2µs |     12.3µs |     11.9µs |      397ns |        0ns |        0ns |
+|      16 |  1.00 |    16x |    897.4µs |     11.3µs |     11.0µs |      300ns |        0ns |        0ns |
+|      32 |  0.10 |     1x |    978.6µs |     14.3µs |     14.3µs |        0ns |        0ns |        0ns |
+|      32 |  0.10 |     2x |     1.11ms |     10.8µs |     10.4µs |      357ns |        0ns |        0ns |
+|      32 |  0.10 |     4x |    972.8µs |     11.7µs |     11.4µs |      254ns |        0ns |        0ns |
+|      32 |  0.10 |     8x |    961.6µs |     10.6µs |     10.3µs |      257ns |        0ns |        0ns |
+|      32 |  0.10 |    16x |    956.0µs |     11.4µs |     11.0µs |      332ns |        0ns |        0ns |
+|      32 |  0.50 |     1x |     1.07ms |     10.1µs |     10.1µs |        0ns |        0ns |        0ns |
+|      32 |  0.50 |     2x |    994.3µs |     11.3µs |     10.9µs |      369ns |        0ns |        0ns |
+|      32 |  0.50 |     4x |    865.0µs |      9.8µs |      9.5µs |      275ns |        0ns |        0ns |
+|      32 |  0.50 |     8x |    925.9µs |     10.2µs |      9.9µs |      242ns |        0ns |        0ns |
+|      32 |  0.50 |    16x |     1.32ms |      9.8µs |      9.5µs |      278ns |        0ns |        0ns |
+|      32 |  1.00 |     1x |     1.01ms |     11.5µs |     11.5µs |        0ns |        0ns |        0ns |
+|      32 |  1.00 |     2x |    977.4µs |     10.6µs |     10.4µs |      263ns |        0ns |        0ns |
+|      32 |  1.00 |     4x |    746.9µs |      9.7µs |      9.5µs |      237ns |        0ns |        0ns |
+|      32 |  1.00 |     8x |     1.11ms |     12.4µs |     12.1µs |      283ns |        0ns |        0ns |
+|      32 |  1.00 |    16x |     1.13ms |     11.3µs |     11.0µs |      332ns |        0ns |        0ns |
 
 
 

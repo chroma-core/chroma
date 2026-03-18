@@ -157,6 +157,8 @@ pub mod stats {
         pub q_add: MethodSnapshot,
         pub q_rm: MethodSnapshot,
         pub load_raw_points: u64,
+        pub data_rerank_vectors: u64,
+        pub dimension: usize,
         pub cluster_stats: ClusterSizeStats,
         /// Wall-clock time for this checkpoint (set by the caller, not by snapshot()).
         pub wall_nanos: u64,
@@ -208,10 +210,11 @@ pub mod stats {
         pub q_add: MethodStats,
         pub q_rm: MethodStats,
         pub load_raw_points: AtomicU64,
+        pub data_rerank_vectors: AtomicU64,
     }
 
     impl QuantizedSpannStats {
-        pub fn snapshot(&self, cluster_sizes: &[usize]) -> StatsSnapshot {
+        pub fn snapshot(&self, cluster_sizes: &[usize], dimension: usize) -> StatsSnapshot {
             let snap = |m: &MethodStats| {
                 let (calls, total_nanos) = m.get();
                 MethodSnapshot { calls, total_nanos }
@@ -235,6 +238,8 @@ pub mod stats {
                 q_add: snap(&self.q_add),
                 q_rm: snap(&self.q_rm),
                 load_raw_points: self.load_raw_points.load(Ordering::Relaxed),
+                data_rerank_vectors: self.data_rerank_vectors.load(Ordering::Relaxed),
+                dimension,
                 cluster_stats: ClusterSizeStats::from_sizes(cluster_sizes),
                 wall_nanos: 0,
             }
@@ -385,6 +390,18 @@ pub mod stats {
         out
     }
 
+    fn format_bytes(bytes: u64) -> String {
+        if bytes < 1024 {
+            format!("{}B", bytes)
+        } else if bytes < 1024 * 1024 {
+            format!("{:.1}KB", bytes as f64 / 1024.0)
+        } else if bytes < 1024 * 1024 * 1024 {
+            format!("{:.1}MB", bytes as f64 / (1024.0 * 1024.0))
+        } else {
+            format!("{:.2}GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+        }
+    }
+
     fn format_task_avg_time_table(snapshots: &[StatsSnapshot]) -> String {
         use std::fmt::Write;
         let mut out = String::new();
@@ -394,12 +411,14 @@ pub mod stats {
         for method in ALL_METHODS {
             write!(out, " {:>8} |", method).unwrap();
         }
+        write!(out, " rr_vecs | rr_data |").unwrap();
         writeln!(out).unwrap();
         // Separator
         write!(out, "|----|").unwrap();
         for _ in ALL_METHODS {
             write!(out, "----------|").unwrap();
         }
+        write!(out, "---------|---------|").unwrap();
         writeln!(out).unwrap();
         // Data rows
         for (i, snap) in snapshots.iter().enumerate() {
@@ -413,6 +432,18 @@ pub mod stats {
                 };
                 write!(out, " {:>8} |", avg).unwrap();
             }
+            let search_calls = snap.search.calls;
+            let avg_rerank_vecs = if search_calls > 0 {
+                format_count(snap.data_rerank_vectors / search_calls)
+            } else {
+                "-".to_string()
+            };
+            let avg_rerank_bytes = if search_calls > 0 {
+                format_bytes(snap.data_rerank_vectors / search_calls * snap.dimension as u64 * 4)
+            } else {
+                "-".to_string()
+            };
+            write!(out, " {:>7} | {:>7} |", avg_rerank_vecs, avg_rerank_bytes).unwrap();
             writeln!(out).unwrap();
         }
         out
@@ -448,7 +479,9 @@ pub mod stats {
              Derived:\n\
              \x20 raw_pts   - number of raw embedding points loaded during load_raw\n\
              \x20 raw/pt    - average time per raw embedding point (load_raw total / raw_pts)\n\
-             \x20 total     - wall-clock time for the checkpoint (load + raw_write + index + commit)\n",
+             \x20 total     - wall-clock time for the checkpoint (load + raw_write + index + commit)\n\
+             \x20 rr_vecs   - avg number of full-precision vectors loaded per search (data rerank)\n\
+             \x20 rr_data   - avg data volume of full-precision vectors per search (vecs x dims x 4B)\n",
         );
         out
     }
@@ -680,13 +713,43 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             }
         }
 
-        // Sort by distance ascending and truncate to k
+        // Sort by approximate distance ascending
         results.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-        results.truncate(k);
 
-        // Convert to SearchResult
-        let (keys, distances): (Vec<u32>, Vec<f32>) = results.into_iter().unzip();
-        Ok(SearchResult { keys, distances })
+        let data_rerank_factor = self.config.data_rerank_factor() as usize;
+        if data_rerank_factor > 1 {
+            let rerank_count = (k * data_rerank_factor).min(results.len());
+            results.truncate(rerank_count);
+
+            self.stats
+                .data_rerank_vectors
+                .fetch_add(rerank_count as u64, Ordering::Relaxed);
+
+            let rerank_ids: Vec<u32> = results.iter().map(|(id, _)| *id).collect();
+            self.load_raw(&rerank_ids).await?;
+
+            let mut reranked: Vec<(u32, f32)> = results
+                .into_iter()
+                .filter_map(|(id, approx_dist)| {
+                    if let Some(emb) = self.embeddings.get(&id) {
+                        let dist = self.distance_function.distance(&rotated, emb.value());
+                        Some((id, dist))
+                    } else {
+                        Some((id, approx_dist))
+                    }
+                })
+                .collect();
+
+            reranked.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+            reranked.truncate(k);
+
+            let (keys, distances): (Vec<u32>, Vec<f32>) = reranked.into_iter().unzip();
+            Ok(SearchResult { keys, distances })
+        } else {
+            results.truncate(k);
+            let (keys, distances): (Vec<u32>, Vec<f32>) = results.into_iter().unzip();
+            Ok(SearchResult { keys, distances })
+        }
     }
 }
 
@@ -2147,6 +2210,7 @@ mod tests {
             quantize: Quantization::FourBitRabitQWithUSearch,
             centroid_bits: None,
             centroid_rerank_factor: None,
+            data_rerank_factor: None,
         }
     }
 

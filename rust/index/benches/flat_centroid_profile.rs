@@ -49,7 +49,7 @@ struct Args {
     #[arg(long, default_value = "l2")]
     metric: MetricType,
 
-    /// Quantization bit-width for centroid codes (1 only). Omit for full precision f32.
+    /// Quantization bit-width for centroid codes (1 or 4). Omit for full precision f32.
     #[arg(long)]
     centroid_bits: Option<u8>,
 
@@ -69,16 +69,24 @@ struct Args {
     #[arg(long, default_value = "100")]
     num_queries: usize,
 
-    /// Rerank factor for quantized mode: fetch rerank_factor*k candidates,
-    /// rerank with full precision, return top k. Ignored for full precision.
-    #[arg(long, default_value = "1")]
-    rerank_factor: usize,
+    /// Rerank factors to sweep (comma-separated). Each factor fetches
+    /// factor*k candidates via quantized scan, then reranks with full precision.
+    #[arg(long, value_delimiter = ',', default_values_t = vec![1, 4, 16])]
+    rerank_factors: Vec<usize>,
 
     /// Use code-to-code distance (quantize the query to 1-bit, then hamming)
     /// instead of the default quantized-query path (4-bit query quantization
     /// with AND+popcount). Only applies when --centroid-bits is set.
     #[arg(long, default_value = "true")]
     code_to_code: bool,
+
+    /// Enable Phase 2 (SPANN workload with thread/rerank scaling). Disabled by default.
+    #[arg(long)]
+    phase_2: bool,
+
+    /// Enable Phase 3 (scale sweep with recall evaluation). Disabled by default.
+    #[arg(long)]
+    phase_3: bool,
 
     /// Extra arguments (ignored, for compatibility with cargo bench)
     #[arg(hide = true, allow_hyphen_values = true)]
@@ -94,7 +102,7 @@ struct Args {
 const NAVIGATES_PER_ADD: f64 = 3.05;
 const SPAWN_RATE: f64 = 0.0114;
 const DROP_RATE: f64 = 0.0057;
-const NPROBE: usize = 64;
+const NPROBE: usize = 100;
 
 // =============================================================================
 // Stats tracking
@@ -129,6 +137,8 @@ impl MethodStats {
 #[derive(Default, Clone)]
 struct PhaseStats {
     navigate: MethodStats,
+    navigate_scan: MethodStats,
+    navigate_rerank: MethodStats,
     spawn: MethodStats,
     drop_op: MethodStats,
     wall: Duration,
@@ -137,6 +147,8 @@ struct PhaseStats {
 impl PhaseStats {
     fn merge(&mut self, other: &PhaseStats) {
         self.navigate.merge(&other.navigate);
+        self.navigate_scan.merge(&other.navigate_scan);
+        self.navigate_rerank.merge(&other.navigate_rerank);
         self.spawn.merge(&other.spawn);
         self.drop_op.merge(&other.drop_op);
     }
@@ -184,7 +196,7 @@ fn compute_distance(a: &[f32], b: &[f32], df: &DistanceFunction) -> f32 {
 // Flat centroid index
 // =============================================================================
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct FlatIndexData {
     keys: Vec<u32>,
     vectors: Vec<f32>,
@@ -211,12 +223,15 @@ impl Ord for OrdF32 {
 struct FlatCentroidIndex {
     dim: usize,
     distance_fn: DistanceFunction,
+    centroid_bits: Option<u8>,
     code_size: usize,
 
     keys: RwLock<Vec<u32>>,
-    /// Contiguous f32 storage: vectors[i*dim..(i+1)*dim] is vector i.
+    /// Contiguous f32 storage: [v0_d0, v0_d1, ..., v0_d1023, v1_d0, v1_d1, ..., v1_d1023, ...].
+    /// vectors[i*dim..(i+1)*dim] is vector i.
+    /// At 1M centroids x 1024 dims x 4 bytes, this is ~3.9 GB of f32 data
     vectors: RwLock<Vec<f32>>,
-    /// 1-bit RaBitQ codes (contiguous, code_size bytes per entry). None for full precision.
+    /// RaBitQ codes (contiguous, code_size bytes per entry). None for full precision.
     codes: RwLock<Option<Vec<u8>>>,
     quantization_center: Option<Vec<f32>>,
     /// Tombstone set for soft deletes.
@@ -247,26 +262,28 @@ impl FlatCentroidIndex {
             mean
         });
 
-        let codes = quantization_center.as_ref().map(|center| {
-            let cs = Code::<1>::size(dim);
-            let mut all_codes = Vec::with_capacity(n * cs);
-            for i in 0..n {
-                let v = &flat_vectors[i * dim..(i + 1) * dim];
-                let code = Code::<1>::quantize(v, center);
-                all_codes.extend_from_slice(code.as_ref());
-            }
-            all_codes
-        });
-
-        let code_size = if centroid_bits.is_some() {
-            Code::<1>::size(dim)
-        } else {
-            0
+        let code_size = match centroid_bits {
+            Some(1) => Code::<1>::size(dim),
+            Some(4) => Code::<4>::size(dim),
+            _ => 0,
         };
+
+        let codes = quantization_center.as_ref().map(|center| {
+            use rayon::prelude::*;
+            flat_vectors
+                .par_chunks(dim)
+                .flat_map_iter(|v| match centroid_bits {
+                    Some(1) => Code::<1>::quantize(v, center).as_ref().to_vec(),
+                    Some(4) => Code::<4>::quantize(v, center).as_ref().to_vec(),
+                    _ => unreachable!(),
+                })
+                .collect()
+        });
 
         Self {
             dim,
             distance_fn,
+            centroid_bits,
             code_size,
             keys: RwLock::new(keys.to_vec()),
             vectors: RwLock::new(flat_vectors.to_vec()),
@@ -276,15 +293,21 @@ impl FlatCentroidIndex {
         }
     }
 
-    fn from_data(data: FlatIndexData, dim: usize, distance_fn: DistanceFunction) -> Self {
-        let code_size = if data.codes.is_some() {
-            Code::<1>::size(dim)
-        } else {
-            0
+    fn from_data(
+        data: FlatIndexData,
+        dim: usize,
+        distance_fn: DistanceFunction,
+        centroid_bits: Option<u8>,
+    ) -> Self {
+        let code_size = match centroid_bits {
+            Some(1) => Code::<1>::size(dim),
+            Some(4) => Code::<4>::size(dim),
+            _ => 0,
         };
         Self {
             dim,
             distance_fn,
+            centroid_bits,
             code_size,
             keys: RwLock::new(data.keys),
             vectors: RwLock::new(data.vectors),
@@ -336,7 +359,8 @@ impl FlatCentroidIndex {
         result
     }
 
-    /// 1-bit quantized scan with 4 bit query: approximate distance via RaBitQ, return top-k.
+    /// Quantized scan: approximate distance via RaBitQ, return top-k.
+    /// 1-bit uses QuantizedQuery + AND+popcount; 4-bit uses distance_query with f32 dot.
     fn search_quantized(&self, query: &[f32], k: usize) -> Vec<(u32, f32)> {
         let dim = self.dim;
         let df = &self.distance_fn;
@@ -352,8 +376,13 @@ impl FlatCentroidIndex {
         let c_norm = center.iter().map(|c| c * c).sum::<f32>().sqrt();
         let c_dot_q: f32 = center.iter().zip(query.iter()).map(|(c, q)| c * q).sum();
         let q_norm = query.iter().map(|q| q * q).sum::<f32>().sqrt();
-        let padded_bytes = Code::<1>::packed_len(dim);
-        let qq = QuantizedQuery::new(&r_q, padded_bytes, c_norm, c_dot_q, q_norm);
+
+        let qq_1bit = if self.centroid_bits == Some(1) {
+            let padded_bytes = Code::<1>::packed_len(dim);
+            Some(QuantizedQuery::new(&r_q, padded_bytes, c_norm, c_dot_q, q_norm))
+        } else {
+            None
+        };
 
         let mut heap: BinaryHeap<(OrdF32, u32)> = BinaryHeap::with_capacity(k + 1);
         for i in 0..n {
@@ -362,8 +391,17 @@ impl FlatCentroidIndex {
                 continue;
             }
             let code_slice = &codes_buf[i * cs..(i + 1) * cs];
-            let code = Code::<1, &[u8]>::new(code_slice);
-            let dist = code.distance_quantized_query(df, &qq);
+            let dist = match self.centroid_bits {
+                Some(1) => {
+                    let code = Code::<1, &[u8]>::new(code_slice);
+                    code.distance_quantized_query(df, qq_1bit.as_ref().unwrap())
+                }
+                Some(4) => {
+                    let code = Code::<4, &[u8]>::new(code_slice);
+                    code.distance_query(df, &r_q, c_norm, c_dot_q, q_norm)
+                }
+                _ => unreachable!(),
+            };
             if heap.len() < k {
                 heap.push((OrdF32(dist), key));
             } else if dist < heap.peek().unwrap().0 .0 {
@@ -378,6 +416,7 @@ impl FlatCentroidIndex {
 
     /// Quantized scan with full-precision reranking.
     /// Fetches `fetch_k` candidates via quantized scan, then reranks with exact distances.
+    #[allow(dead_code)]
     fn search_quantized_rerank(&self, query: &[f32], k: usize, fetch_k: usize) -> Vec<(u32, f32)> {
         let candidates = self.search_quantized(query, fetch_k);
         let dim = self.dim;
@@ -406,8 +445,8 @@ impl FlatCentroidIndex {
         scored
     }
 
-    /// 1-bit code-to-code scan: quantize the query to a 1-bit code, then
-    /// compute distance via hamming (Code::distance_code).
+    /// Code-to-code scan: quantize the query, then compute distance via
+    /// Code::distance_code (hamming for 1-bit, nibble dot for 4-bit).
     fn search_code_to_code(&self, query: &[f32], k: usize) -> Vec<(u32, f32)> {
         let dim = self.dim;
         let df = &self.distance_fn;
@@ -420,7 +459,16 @@ impl FlatCentroidIndex {
         let n = keys.len();
 
         let c_norm = center.iter().map(|c| c * c).sum::<f32>().sqrt();
-        let query_code = Code::<1>::quantize(query, center);
+        let qc_1 = if self.centroid_bits == Some(1) {
+            Some(Code::<1>::quantize(query, center))
+        } else {
+            None
+        };
+        let qc_4 = if self.centroid_bits == Some(4) {
+            Some(Code::<4>::quantize(query, center))
+        } else {
+            None
+        };
 
         let mut heap: BinaryHeap<(OrdF32, u32)> = BinaryHeap::with_capacity(k + 1);
         for i in 0..n {
@@ -429,8 +477,17 @@ impl FlatCentroidIndex {
                 continue;
             }
             let code_slice = &codes_buf[i * cs..(i + 1) * cs];
-            let code = Code::<1, &[u8]>::new(code_slice);
-            let dist = query_code.distance_code(&code, df, c_norm, dim);
+            let dist = match self.centroid_bits {
+                Some(1) => {
+                    let code = Code::<1, &[u8]>::new(code_slice);
+                    qc_1.as_ref().unwrap().distance_code(&code, df, c_norm, dim)
+                }
+                Some(4) => {
+                    let code = Code::<4, &[u8]>::new(code_slice);
+                    qc_4.as_ref().unwrap().distance_code(&code, df, c_norm, dim)
+                }
+                _ => unreachable!(),
+            };
             if heap.len() < k {
                 heap.push((OrdF32(dist), key));
             } else if dist < heap.peek().unwrap().0 .0 {
@@ -443,6 +500,7 @@ impl FlatCentroidIndex {
         result
     }
 
+    #[allow(dead_code)]
     fn search_code_to_code_rerank(&self, query: &[f32], k: usize, fetch_k: usize) -> Vec<(u32, f32)> {
         let candidates = self.search_code_to_code(query, fetch_k);
         let dim = self.dim;
@@ -471,28 +529,52 @@ impl FlatCentroidIndex {
         scored
     }
 
-    fn search(&self, query: &[f32], k: usize, code_to_code: bool) -> Vec<(u32, f32)> {
-        if self.quantization_center.is_some() {
-            if code_to_code {
-                self.search_code_to_code(query, k)
-            } else {
-                self.search_quantized(query, k)
-            }
-        } else {
-            self.search_f32(query, k)
-        }
-    }
+    /// Like search_with_rerank, but returns (results, scan_duration, rerank_duration).
+    fn search_with_rerank_timed(
+        &self,
+        query: &[f32],
+        k: usize,
+        rerank_factor: usize,
+        code_to_code: bool,
+    ) -> (Vec<(u32, f32)>, Duration, Duration) {
+        let fetch_k = k * rerank_factor.max(1);
 
-    fn search_with_rerank(&self, query: &[f32], k: usize, rerank_factor: usize, code_to_code: bool) -> Vec<(u32, f32)> {
-        if self.quantization_center.is_some() && rerank_factor > 1 {
+        let t_scan = Instant::now();
+        let candidates = if self.quantization_center.is_some() {
             if code_to_code {
-                self.search_code_to_code_rerank(query, k, k * rerank_factor)
+                self.search_code_to_code(query, fetch_k)
             } else {
-                self.search_quantized_rerank(query, k, k * rerank_factor)
+                self.search_quantized(query, fetch_k)
             }
         } else {
-            self.search(query, k, code_to_code)
+            self.search_f32(query, fetch_k)
+        };
+        let scan_dur = t_scan.elapsed();
+
+        if rerank_factor <= 1 || self.quantization_center.is_none() {
+            return (candidates, scan_dur, Duration::ZERO);
         }
+
+        let t_rerank = Instant::now();
+        let dim = self.dim;
+        let df = &self.distance_fn;
+        let vectors = self.vectors.read();
+
+        // Keys are positional (key == index into vectors), so we index directly.
+        let mut scored: Vec<(u32, f32)> = candidates
+            .iter()
+            .map(|&(key, _)| {
+                let idx = key as usize;
+                let v = &vectors[idx * dim..(idx + 1) * dim];
+                let d = compute_distance(query, v, df);
+                (key, d)
+            })
+            .collect();
+        scored.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        scored.truncate(k);
+        let rerank_dur = t_rerank.elapsed();
+
+        (scored, scan_dur, rerank_dur)
     }
 
     fn add(&self, key: u32, vector: &[f32]) {
@@ -502,9 +584,13 @@ impl FlatCentroidIndex {
         vectors.extend_from_slice(vector);
 
         if let Some(center) = &self.quantization_center {
-            let code = Code::<1>::quantize(vector, center);
             let mut codes_guard = self.codes.write();
-            codes_guard.as_mut().unwrap().extend_from_slice(code.as_ref());
+            let buf = codes_guard.as_mut().unwrap();
+            match self.centroid_bits {
+                Some(1) => buf.extend_from_slice(Code::<1>::quantize(vector, center).as_ref()),
+                Some(4) => buf.extend_from_slice(Code::<4>::quantize(vector, center).as_ref()),
+                _ => unreachable!(),
+            }
         }
 
         // Un-tombstone if re-added
@@ -625,13 +711,18 @@ fn main() {
     let data_vectors = args.data_vectors;
     let num_threads = args.threads;
     let num_queries = args.num_queries;
-    let rerank_factor = args.rerank_factor;
     let code_to_code = args.code_to_code;
 
+    let rerank_factors: Vec<usize> = if centroid_bits.is_some() {
+        args.rerank_factors.clone()
+    } else {
+        vec![1]
+    };
+
     if let Some(bits) = centroid_bits {
-        assert_eq!(
-            bits, 1,
-            "Only 1-bit quantization is supported for flat index"
+        assert!(
+            bits == 1 || bits == 4,
+            "Only 1-bit or 4-bit quantization is supported (got {bits})"
         );
     }
 
@@ -642,11 +733,10 @@ fn main() {
         None => "f32".to_string(),
     };
 
-    let quantized_index_bytes = if centroid_bits.is_some() {
-        let code_size = Code::<1>::size(dim);
-        initial_centroids * code_size
-    } else {
-        initial_centroids * dim * std::mem::size_of::<f32>()
+    let quantized_index_bytes = match centroid_bits {
+        Some(1) => initial_centroids * Code::<1>::size(dim),
+        Some(4) => initial_centroids * Code::<4>::size(dim),
+        _ => initial_centroids * dim * std::mem::size_of::<f32>(),
     };
 
     println!("\n=== Flat Centroid Index Profile ===");
@@ -662,8 +752,8 @@ fn main() {
     );
     if centroid_bits.is_some() {
         println!(
-            "Rerank factor: {}x | Distance: {}",
-            rerank_factor,
+            "Rerank factors: {} | Distance: {}",
+            rerank_factors.iter().map(|r| format!("{r}x")).collect::<Vec<_>>().join(", "),
             if code_to_code { "code-to-code (hamming)" } else { "quantized-query (AND+popcount)" }
         );
     }
@@ -701,7 +791,7 @@ fn main() {
         let data = std::fs::read(&cache_file).expect("Failed to read cache file");
         let index_data: FlatIndexData =
             bincode::deserialize(&data).expect("Failed to deserialize flat index");
-        let idx = FlatCentroidIndex::from_data(index_data, dim, distance_fn.clone());
+        let idx = FlatCentroidIndex::from_data(index_data, dim, distance_fn.clone(), centroid_bits);
         println!(
             "Loaded {} centroids in {}",
             format_count(idx.len()),
@@ -758,28 +848,65 @@ fn main() {
     println!("Index size: {}", index.len());
 
     // =========================================================================
-    // Phase 2: Simulated SPANN workload (multi-threaded)
+    // Shared: recall ground truth (used by both Phase 2 and Phase 3)
     // =========================================================================
+    let initial_data = index.to_data();
+    let recall_k: usize = 100;
+    let recall_queries: Vec<&Vec<f32>> = all_vectors[initial_centroids..]
+        .iter()
+        .take(num_queries)
+        .collect();
+    let corpus_vecs: Vec<Vec<f32>> = all_vectors[..initial_centroids].to_vec();
+    let corpus_keys: Vec<u32> = (0..initial_centroids as u32).collect();
+    let gt: Vec<Vec<u32>> = recall_queries
+        .iter()
+        .map(|q| brute_force_knn(q, &corpus_vecs, &corpus_keys, recall_k, &distance_fn))
+        .collect();
+
+    let recall_index = FlatCentroidIndex::from_data(
+        initial_data.clone(),
+        dim,
+        distance_fn.clone(),
+        centroid_bits,
+    );
+    let mut recall_per_rf: HashMap<usize, (f64, f64)> = HashMap::new();
+    for &rf in &rerank_factors {
+        let mut r10_sum = 0.0f64;
+        let mut r100_sum = 0.0f64;
+        for (qi, q) in recall_queries.iter().enumerate() {
+            let (results, ..) =
+                recall_index.search_with_rerank_timed(q, recall_k, rf, code_to_code);
+            let predicted: HashSet<u32> = results.iter().map(|&(key, _)| key).collect();
+            let gt_10: HashSet<u32> = gt[qi].iter().take(10).copied().collect();
+            let gt_k: HashSet<u32> = gt[qi].iter().take(recall_k).copied().collect();
+            r10_sum +=
+                predicted.intersection(&gt_10).count() as f64 / gt_10.len().max(1) as f64;
+            r100_sum +=
+                predicted.intersection(&gt_k).count() as f64 / gt_k.len().max(1) as f64;
+        }
+        let nq = recall_queries.len().max(1) as f64;
+        recall_per_rf.insert(rf, (r10_sum / nq * 100.0, r100_sum / nq * 100.0));
+    }
     println!(
-        "\n--- Phase 2: SPANN workload ({} data vectors, {} threads) ---",
-        format_count(data_vectors),
-        num_threads
+        "Recall evaluated ({} queries, k={})",
+        recall_queries.len(),
+        recall_k
     );
 
-    let next_key = AtomicU32::new(initial_centroids as u32);
-    let live_entries: Mutex<Vec<(u32, usize)>> =
-        Mutex::new((0..initial_centroids).map(|i| (i as u32, i)).collect());
+    // =========================================================================
+    // Phase 2: Simulated SPANN workload (with mutations), sweep rerank
+    // =========================================================================
+    if !args.phase_2 {
+        println!("\n--- Phase 2 skipped (pass --phase-2 to enable) ---");
+    }
 
-    let total_navigates = (data_vectors as f64 * NAVIGATES_PER_ADD) as u64;
-    let total_spawns = (data_vectors as f64 * SPAWN_RATE) as u64;
-    let total_drops = (data_vectors as f64 * DROP_RATE) as u64;
-    let total_ops = total_navigates + total_spawns + total_drops;
+    if args.phase_2 {
 
-    let progress = ProgressBar::new(total_ops);
-    progress.set_style(
-        ProgressStyle::default_bar()
-            .template("[SPANN sim] {wide_bar} {pos}/{len} [{elapsed_precise}<{eta_precise}]")
-            .unwrap(),
+    println!(
+        "\n--- Phase 2: SPANN workload ({} data vectors, {} threads, rerank: {}) ---",
+        format_count(data_vectors),
+        num_threads,
+        rerank_factors.iter().map(|r| format!("{r}x")).collect::<Vec<_>>().join(", "),
     );
 
     let nav_per_add = NAVIGATES_PER_ADD.floor() as usize;
@@ -787,533 +914,263 @@ fn main() {
     let vec_pool_start = initial_centroids;
     let vec_pool_size = all_vectors.len() - vec_pool_start;
 
-    let phase2_start = Instant::now();
+    let mut all_phase2_stats: Vec<(usize, PhaseStats)> = Vec::new();
 
-    let chunk_size = (data_vectors + num_threads - 1) / num_threads;
-    let thread_stats: Vec<PhaseStats> = std::thread::scope(|s| {
-        let handles: Vec<_> = (0..num_threads)
-            .map(|thread_id| {
-                let index = &index;
-                let all_vectors = &all_vectors;
-                let next_key = &next_key;
-                let live_entries = &live_entries;
-                let progress = &progress;
-                s.spawn(move || {
-                    let mut local_stats = PhaseStats::default();
-                    let mut rng = StdRng::seed_from_u64(123 + thread_id as u64);
-                    let start = thread_id * chunk_size;
-                    let end = (start + chunk_size).min(data_vectors);
+    let total_navigates = (data_vectors as f64 * NAVIGATES_PER_ADD) as u64;
+    let total_spawns = (data_vectors as f64 * SPAWN_RATE) as u64;
+    let total_drops = (data_vectors as f64 * DROP_RATE) as u64;
+    let total_ops_per_iter = total_navigates + total_spawns + total_drops;
 
-                    for i in start..end {
-                        let pool_idx = i % vec_pool_size;
-                        let query_vec = &all_vectors[vec_pool_start + pool_idx];
+    for &rf in &rerank_factors {
+        let index = FlatCentroidIndex::from_data(
+            initial_data.clone(),
+            dim,
+            distance_fn.clone(),
+            centroid_bits,
+        );
+        let next_key = AtomicU32::new(initial_centroids as u32);
+        let live_entries: Mutex<Vec<(u32, usize)>> =
+            Mutex::new((0..initial_centroids).map(|i| (i as u32, i)).collect());
 
-                        let mut n_nav = nav_per_add;
-                        if rng.gen::<f64>() < nav_frac {
-                            n_nav += 1;
-                        }
-                        for _ in 0..n_nav {
-                            let t = Instant::now();
-                            let _ = index.search_with_rerank(query_vec, NPROBE, rerank_factor, code_to_code);
-                            local_stats.navigate.record(t.elapsed());
-                            progress.inc(1);
-                        }
+        let progress = ProgressBar::new(total_ops_per_iter);
+        progress.set_style(
+            ProgressStyle::default_bar()
+                .template(&format!(
+                    "[{rf:>2}x] {{wide_bar}} {{pos}}/{{len}} [{{elapsed_precise}}<{{eta_precise}}]"
+                ))
+                .unwrap(),
+        );
 
-                        if rng.gen::<f64>() < SPAWN_RATE {
-                            let spawn_idx = (i + 1) % vec_pool_size;
-                            let vec_index = vec_pool_start + spawn_idx;
-                            let spawn_vec = &all_vectors[vec_index];
-                            let key = next_key.fetch_add(1, Ordering::Relaxed);
+        let phase2_start = Instant::now();
+        let chunk_size = (data_vectors + num_threads - 1) / num_threads;
+        let thread_stats: Vec<PhaseStats> = std::thread::scope(|s| {
+            let handles: Vec<_> = (0..num_threads)
+                .map(|thread_id| {
+                    let index = &index;
+                    let all_vectors = &all_vectors;
+                    let next_key = &next_key;
+                    let live_entries = &live_entries;
+                    let progress = &progress;
+                    s.spawn(move || {
+                        let mut local_stats = PhaseStats::default();
+                        let mut rng = StdRng::seed_from_u64(123 + thread_id as u64);
+                        let start = thread_id * chunk_size;
+                        let end = (start + chunk_size).min(data_vectors);
 
-                            let t = Instant::now();
-                            index.add(key, spawn_vec);
-                            local_stats.spawn.record(t.elapsed());
-                            live_entries.lock().push((key, vec_index));
-                            progress.inc(1);
-                        }
+                        for i in start..end {
+                            let pool_idx = i % vec_pool_size;
+                            let query_vec = &all_vectors[vec_pool_start + pool_idx];
 
-                        if rng.gen::<f64>() < DROP_RATE {
-                            let entry = {
-                                let mut entries = live_entries.lock();
-                                if entries.len() > 100 {
-                                    let idx = rng.gen_range(0..entries.len());
-                                    Some(entries.swap_remove(idx))
-                                } else {
-                                    None
-                                }
-                            };
-                            if let Some((key, _)) = entry {
+                            let mut n_nav = nav_per_add;
+                            if rng.gen::<f64>() < nav_frac {
+                                n_nav += 1;
+                            }
+                            for _ in 0..n_nav {
                                 let t = Instant::now();
-                                index.remove(key);
-                                local_stats.drop_op.record(t.elapsed());
+                                let (_, scan_dur, rerank_dur) =
+                                    index.search_with_rerank_timed(
+                                        query_vec, NPROBE, rf, code_to_code,
+                                    );
+                                local_stats.navigate.record(t.elapsed());
+                                local_stats.navigate_scan.record(scan_dur);
+                                local_stats.navigate_rerank.record(rerank_dur);
                                 progress.inc(1);
                             }
-                        }
-                    }
 
-                    local_stats
-                })
-            })
-            .collect();
+                            if rng.gen::<f64>() < SPAWN_RATE {
+                                let spawn_idx = (i + 1) % vec_pool_size;
+                                let vec_index = vec_pool_start + spawn_idx;
+                                let spawn_vec = &all_vectors[vec_index];
+                                let key = next_key.fetch_add(1, Ordering::Relaxed);
 
-        handles.into_iter().map(|h| h.join().unwrap()).collect()
-    });
+                                let t = Instant::now();
+                                index.add(key, spawn_vec);
+                                local_stats.spawn.record(t.elapsed());
+                                live_entries.lock().push((key, vec_index));
+                                progress.inc(1);
+                            }
 
-    progress.finish_and_clear();
-
-    let mut stats = PhaseStats::default();
-    for ts in &thread_stats {
-        stats.merge(ts);
-    }
-    stats.wall = phase2_start.elapsed();
-
-    let _final_live_entries = live_entries.into_inner();
-
-    println!(
-        "Completed in {} | Index size: {}",
-        format_duration(stats.wall),
-        index.len()
-    );
-
-    println!("\n=== Phase 2: Task Counts ===");
-    println!(
-        "| {:>10} | {:>10} | {:>10} |",
-        "navigate", "spawn", "drop"
-    );
-    println!("|------------|------------|------------|");
-    println!(
-        "| {:>10} | {:>10} | {:>10} |",
-        format_count(stats.navigate.calls as usize),
-        format_count(stats.spawn.calls as usize),
-        format_count(stats.drop_op.calls as usize),
-    );
-
-    println!("\n=== Phase 2: Task Total Time ===");
-    println!(
-        "| {:>10} | {:>10} | {:>10} | {:>10} |",
-        "navigate", "spawn", "drop", "wall"
-    );
-    println!("|------------|------------|------------|------------|");
-    println!(
-        "| {:>10} | {:>10} | {:>10} | {:>10} |",
-        format_duration(stats.navigate.total),
-        format_duration(stats.spawn.total),
-        format_duration(stats.drop_op.total),
-        format_duration(stats.wall),
-    );
-
-    println!("\n=== Phase 2: Task Avg Time ===");
-    println!(
-        "| {:>10} | {:>10} | {:>10} |",
-        "navigate", "spawn", "drop"
-    );
-    println!("|------------|------------|------------|");
-    println!(
-        "| {:>10} | {:>10} | {:>10} |",
-        format_nanos(stats.navigate.avg_nanos()),
-        format_nanos(stats.spawn.avg_nanos()),
-        format_nanos(stats.drop_op.avg_nanos()),
-    );
-
-    // =========================================================================
-    // Phase 3: Scale sweep — latency & recall across index sizes
-    // =========================================================================
-    let scale_steps: Vec<usize> = {
-        let mut steps = Vec::new();
-        let mut s = 1_000usize;
-        while s <= initial_centroids {
-            steps.push(s);
-            s *= 10;
-        }
-        if steps.last() != Some(&initial_centroids) && initial_centroids > 0 {
-            steps.push(initial_centroids);
-        }
-        steps.retain(|&s| s <= all_vectors.len());
-        steps
-    };
-
-    let scale_k: usize = 100;
-
-    if scale_steps.len() > 1 {
-        println!(
-            "\n--- Phase 3: Scale sweep ({} sizes, {} queries, k={}) ---",
-            scale_steps.len(),
-            num_queries,
-            scale_k
-        );
-        println!(
-            "Scales: {}",
-            scale_steps
-                .iter()
-                .map(|s| format_count(*s))
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-
-        // Query vectors come from beyond the largest corpus.
-        let scale_query_start = *scale_steps.last().unwrap();
-        let scale_query_vecs: Vec<&Vec<f32>> = all_vectors[scale_query_start..]
-            .iter()
-            .take(num_queries)
-            .collect();
-
-        if scale_query_vecs.len() < num_queries {
-            println!(
-                "Warning: only {} query vectors available (requested {})",
-                scale_query_vecs.len(),
-                num_queries
-            );
-        }
-
-        if centroid_bits.is_some() {
-            // Quantized mode: table with rerank factors per scale
-            let rerank_factors: &[usize] = &[1, 2, 4, 8, 16];
-
-            println!(
-                "\n| {:>10} | {:>8} | {:>7} | {:>11} | {:>12} | {:>10} | {:>10} | {:>10} | {:>10} |",
-                "Centroids", "Scan MB", "Rerank", "Recall@10", "Recall@100", "Scan", "Rerank", "Total", "Wall"
-            );
-            println!(
-                "|------------|----------|---------|-------------|--------------|------------|------------|------------|------------|"
-            );
-
-            for &scale in &scale_steps {
-                let mut flat_vecs = Vec::with_capacity(scale * dim);
-                for v in &all_vectors[..scale] {
-                    flat_vecs.extend_from_slice(v);
-                }
-                let keys: Vec<u32> = (0..scale as u32).collect();
-                let idx = FlatCentroidIndex::build(
-                    &flat_vecs,
-                    &keys,
-                    scale,
-                    dim,
-                    distance_fn.clone(),
-                    centroid_bits,
-                );
-
-                let corpus_vecs_scale: Vec<Vec<f32>> =
-                    all_vectors[..scale].iter().cloned().collect();
-                let corpus_keys_scale: Vec<u32> = (0..scale as u32).collect();
-
-                let gt_scale: Vec<Vec<u32>> = scale_query_vecs
-                    .iter()
-                    .map(|q| {
-                        brute_force_knn(q, &corpus_vecs_scale, &corpus_keys_scale, scale_k, &distance_fn)
-                    })
-                    .collect();
-
-                let scan_mb = (scale * Code::<1>::size(dim)) as f64 / (1024.0 * 1024.0);
-
-                for &factor in rerank_factors {
-                    let fetch_k = factor * scale_k;
-                    let nq = scale_query_vecs.len();
-                    let chunk = (nq + num_threads - 1) / num_threads;
-
-                    let wall_start = Instant::now();
-                    let per_thread: Vec<(f64, f64, Duration, Duration)> = std::thread::scope(|s| {
-                        let handles: Vec<_> = (0..num_threads)
-                            .map(|tid| {
-                                let idx = &idx;
-                                let scale_query_vecs = &scale_query_vecs;
-                                let gt_scale = &gt_scale;
-                                let distance_fn = &distance_fn;
-                                s.spawn(move || {
-                                    let start = tid * chunk;
-                                    let end = (start + chunk).min(nq);
-                                    let mut r10 = 0.0f64;
-                                    let mut rk_acc = 0.0f64;
-                                    let mut s_lat = Duration::ZERO;
-                                    let mut rr_lat = Duration::ZERO;
-
-                                    for qi in start..end {
-                                        let q = scale_query_vecs[qi];
-                                        let t_scan = Instant::now();
-                                        let candidates = if code_to_code {
-                                            idx.search_code_to_code(q, fetch_k)
-                                        } else {
-                                            idx.search_quantized(q, fetch_k)
-                                        };
-                                        s_lat += t_scan.elapsed();
-
-                                        let result = if factor == 1 {
-                                            candidates
-                                        } else {
-                                            let t_rr = Instant::now();
-                                            let keys_guard = idx.keys.read();
-                                            let vectors = idx.vectors.read();
-                                            let key_to_idx: HashMap<u32, usize> = keys_guard
-                                                .iter()
-                                                .enumerate()
-                                                .map(|(i, &k)| (k, i))
-                                                .collect();
-                                            let mut scored: Vec<(u32, f32)> = candidates
-                                                .iter()
-                                                .filter_map(|&(key, _)| {
-                                                    key_to_idx.get(&key).map(|&vi| {
-                                                        let v = &vectors[vi * dim..(vi + 1) * dim];
-                                                        let d = compute_distance(q, v, distance_fn);
-                                                        (key, d)
-                                                    })
-                                                })
-                                                .collect();
-                                            scored.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-                                            scored.truncate(scale_k);
-                                            rr_lat += t_rr.elapsed();
-                                            scored
-                                        };
-
-                                        let predicted: HashSet<u32> =
-                                            result.iter().map(|&(key, _)| key).collect();
-                                        let gt = &gt_scale[qi];
-                                        let gt_10: HashSet<u32> = gt.iter().take(10).copied().collect();
-                                        let gt_k: HashSet<u32> = gt.iter().take(scale_k).copied().collect();
-                                        r10 += predicted.intersection(&gt_10).count() as f64
-                                            / gt_10.len().max(1) as f64;
-                                        rk_acc += predicted.intersection(&gt_k).count() as f64
-                                            / gt_k.len().max(1) as f64;
+                            if rng.gen::<f64>() < DROP_RATE {
+                                let entry = {
+                                    let mut entries = live_entries.lock();
+                                    if entries.len() > 100 {
+                                        let idx = rng.gen_range(0..entries.len());
+                                        Some(entries.swap_remove(idx))
+                                    } else {
+                                        None
                                     }
-                                    (r10, rk_acc, s_lat, rr_lat)
-                                })
-                            })
-                            .collect();
-                        handles.into_iter().map(|h| h.join().unwrap()).collect()
-                    });
-
-                    let wall = wall_start.elapsed();
-
-                    let (r10, rk, scan_lat, rerank_lat) = per_thread.iter().fold(
-                        (0.0f64, 0.0f64, Duration::ZERO, Duration::ZERO),
-                        |(r10, rk, sl, rl), &(r, k, s, re)| (r10 + r, rk + k, sl + s, rl + re),
-                    );
-
-                    let nq = nq as u32;
-                    println!(
-                        "| {:>10} | {:>7.1} | {:>5}x | {:>10.2}% | {:>11.2}% | {:>10} | {:>10} | {:>10} | {:>10} |",
-                        format_count(scale),
-                        scan_mb,
-                        factor,
-                        r10 / nq as f64 * 100.0,
-                        rk / nq as f64 * 100.0,
-                        format_duration(scan_lat / nq),
-                        format_duration(rerank_lat / nq),
-                        format_duration((scan_lat + rerank_lat) / nq),
-                        format_duration(wall),
-                    );
-                }
-            }
-
-            // Full-precision scan baseline at each scale
-            println!(
-                "\n| {:>10} | {:>8} | {:>11} | {:>12} | {:>10} | {:>10} |",
-                "Centroids", "FP MB", "Recall@10", "Recall@100", "FP Avg lat", "Wall"
-            );
-            println!(
-                "|------------|----------|-------------|--------------|------------|------------|"
-            );
-
-            for &scale in &scale_steps {
-                let mut flat_vecs = Vec::with_capacity(scale * dim);
-                for v in &all_vectors[..scale] {
-                    flat_vecs.extend_from_slice(v);
-                }
-                let keys: Vec<u32> = (0..scale as u32).collect();
-                let idx = FlatCentroidIndex::build(
-                    &flat_vecs,
-                    &keys,
-                    scale,
-                    dim,
-                    distance_fn.clone(),
-                    centroid_bits,
-                );
-
-                let corpus_vecs_scale: Vec<Vec<f32>> =
-                    all_vectors[..scale].iter().cloned().collect();
-                let corpus_keys_scale: Vec<u32> = (0..scale as u32).collect();
-
-                let gt_scale: Vec<Vec<u32>> = scale_query_vecs
-                    .iter()
-                    .map(|q| {
-                        brute_force_knn(q, &corpus_vecs_scale, &corpus_keys_scale, scale_k, &distance_fn)
-                    })
-                    .collect();
-
-                let fp_mb = (scale * dim * 4) as f64 / (1024.0 * 1024.0);
-                let nq = scale_query_vecs.len();
-                let chunk = (nq + num_threads - 1) / num_threads;
-
-                let wall_start = Instant::now();
-                let per_thread: Vec<(f64, f64, Duration)> = std::thread::scope(|s| {
-                    let handles: Vec<_> = (0..num_threads)
-                        .map(|tid| {
-                            let idx = &idx;
-                            let scale_query_vecs = &scale_query_vecs;
-                            let gt_scale = &gt_scale;
-                            s.spawn(move || {
-                                let start = tid * chunk;
-                                let end = (start + chunk).min(nq);
-                                let mut r10 = 0.0f64;
-                                let mut rk_acc = 0.0f64;
-                                let mut lat = Duration::ZERO;
-
-                                for qi in start..end {
-                                    let q = scale_query_vecs[qi];
+                                };
+                                if let Some((key, _)) = entry {
                                     let t = Instant::now();
-                                    let result = idx.search_f32(q, scale_k);
-                                    lat += t.elapsed();
-
-                                    let predicted: HashSet<u32> = result.iter().map(|&(key, _)| key).collect();
-                                    let gt = &gt_scale[qi];
-                                    let gt_10: HashSet<u32> = gt.iter().take(10).copied().collect();
-                                    let gt_k: HashSet<u32> = gt.iter().take(scale_k).copied().collect();
-                                    r10 += predicted.intersection(&gt_10).count() as f64
-                                        / gt_10.len().max(1) as f64;
-                                    rk_acc += predicted.intersection(&gt_k).count() as f64
-                                        / gt_k.len().max(1) as f64;
+                                    index.remove(key);
+                                    local_stats.drop_op.record(t.elapsed());
+                                    progress.inc(1);
                                 }
-                                (r10, rk_acc, lat)
-                            })
-                        })
-                        .collect();
-                    handles.into_iter().map(|h| h.join().unwrap()).collect()
-                });
-                let wall = wall_start.elapsed();
+                            }
+                        }
 
-                let (r10, rk, lat) = per_thread.iter().fold(
-                    (0.0f64, 0.0f64, Duration::ZERO),
-                    |(r10, rk, l), &(r, k, la)| (r10 + r, rk + k, l + la),
-                );
-
-                println!(
-                    "| {:>10} | {:>7.1} | {:>10.2}% | {:>11.2}% | {:>10} | {:>10} |",
-                    format_count(scale),
-                    fp_mb,
-                    r10 / nq as f64 * 100.0,
-                    rk / nq as f64 * 100.0,
-                    format_duration(lat / nq as u32),
-                    format_duration(wall),
-                );
-            }
-        } else {
-            // Full precision mode: simple latency table
-            println!(
-                "\n| {:>10} | {:>8} | {:>11} | {:>12} | {:>10} | {:>10} |",
-                "Centroids", "FP MB", "Recall@10", "Recall@100", "Avg lat", "Wall"
-            );
-            println!(
-                "|------------|----------|-------------|--------------|------------|------------|"
-            );
-
-            for &scale in &scale_steps {
-                let mut flat_vecs = Vec::with_capacity(scale * dim);
-                for v in &all_vectors[..scale] {
-                    flat_vecs.extend_from_slice(v);
-                }
-                let keys: Vec<u32> = (0..scale as u32).collect();
-                let idx = FlatCentroidIndex::build(
-                    &flat_vecs,
-                    &keys,
-                    scale,
-                    dim,
-                    distance_fn.clone(),
-                    None,
-                );
-
-                let corpus_vecs_scale: Vec<Vec<f32>> =
-                    all_vectors[..scale].iter().cloned().collect();
-                let corpus_keys_scale: Vec<u32> = (0..scale as u32).collect();
-
-                let gt_scale: Vec<Vec<u32>> = scale_query_vecs
-                    .iter()
-                    .map(|q| {
-                        brute_force_knn(q, &corpus_vecs_scale, &corpus_keys_scale, scale_k, &distance_fn)
+                        local_stats
                     })
-                    .collect();
+                })
+                .collect();
 
-                let fp_mb = (scale * dim * 4) as f64 / (1024.0 * 1024.0);
-                let nq = scale_query_vecs.len();
-                let chunk = (nq + num_threads - 1) / num_threads;
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
 
-                let wall_start = Instant::now();
-                let per_thread: Vec<(f64, f64, Duration)> = std::thread::scope(|s| {
-                    let handles: Vec<_> = (0..num_threads)
-                        .map(|tid| {
-                            let idx = &idx;
-                            let scale_query_vecs = &scale_query_vecs;
-                            let gt_scale = &gt_scale;
-                            s.spawn(move || {
-                                let start = tid * chunk;
-                                let end = (start + chunk).min(nq);
-                                let mut r10 = 0.0f64;
-                                let mut rk_acc = 0.0f64;
-                                let mut lat = Duration::ZERO;
+        progress.finish_and_clear();
 
-                                for qi in start..end {
-                                    let q = scale_query_vecs[qi];
-                                    let t = Instant::now();
-                                    let result = idx.search(q, scale_k, false);
-                                    lat += t.elapsed();
-
-                                    let predicted: HashSet<u32> = result.iter().map(|&(key, _)| key).collect();
-                                    let gt = &gt_scale[qi];
-                                    let gt_10: HashSet<u32> = gt.iter().take(10).copied().collect();
-                                    let gt_k: HashSet<u32> = gt.iter().take(scale_k).copied().collect();
-                                    r10 += predicted.intersection(&gt_10).count() as f64
-                                        / gt_10.len().max(1) as f64;
-                                    rk_acc += predicted.intersection(&gt_k).count() as f64
-                                        / gt_k.len().max(1) as f64;
-                                }
-                                (r10, rk_acc, lat)
-                            })
-                        })
-                        .collect();
-                    handles.into_iter().map(|h| h.join().unwrap()).collect()
-                });
-                let wall = wall_start.elapsed();
-
-                let (r10, rk, lat) = per_thread.iter().fold(
-                    (0.0f64, 0.0f64, Duration::ZERO),
-                    |(r10, rk, l), &(r, k, la)| (r10 + r, rk + k, l + la),
-                );
-
-                println!(
-                    "| {:>10} | {:>7.1} | {:>10.2}% | {:>11.2}% | {:>10} | {:>10} |",
-                    format_count(scale),
-                    fp_mb,
-                    r10 / nq as f64 * 100.0,
-                    rk / nq as f64 * 100.0,
-                    format_duration(lat / nq as u32),
-                    format_duration(wall),
-                );
-            }
+        let mut stats = PhaseStats::default();
+        for ts in &thread_stats {
+            stats.merge(ts);
         }
+        stats.wall = phase2_start.elapsed();
+
+        println!(
+            "  {:>2}x  completed in {} | Index size: {}",
+            rf,
+            format_duration(stats.wall),
+            index.len()
+        );
+
+        all_phase2_stats.push((rf, stats));
     }
+
+    println!("\n=== Phase 2: Task Counts (same across all runs) ===");
+    {
+        let s = &all_phase2_stats[0].1;
+        println!(
+            "| {:>10} | {:>10} | {:>10} |",
+            "navigate", "spawn", "drop"
+        );
+        println!("|------------|------------|------------|");
+        println!(
+            "| {:>10} | {:>10} | {:>10} |",
+            format_count(s.navigate.calls as usize),
+            format_count(s.spawn.calls as usize),
+            format_count(s.drop_op.calls as usize),
+        );
+    }
+
+    println!("\n=== Phase 2: SPANN Workload ({} threads) ===", num_threads);
+    println!(
+        "| {:>6} | {:>11} | {:>12} | {:>10} | {:>10} | {:>10} | {:>10} | {:>10} | {:>10} |",
+        "rerank", "Recall@10", "Recall@100", "scan_avg", "rerank_avg", "total_avg", "spawn_avg", "drop_avg", "wall"
+    );
+    println!(
+        "|--------|-------------|--------------|------------|------------|------------|------------|------------|------------|"
+    );
+    for &(rf, ref s) in &all_phase2_stats {
+        let (r10, r100) = recall_per_rf[&rf];
+        println!(
+            "| {:>5}x | {:>10.2}% | {:>11.2}% | {:>10} | {:>10} | {:>10} | {:>10} | {:>10} | {:>10} |",
+            rf,
+            r10,
+            r100,
+            format_nanos(s.navigate_scan.avg_nanos()),
+            format_nanos(s.navigate_rerank.avg_nanos()),
+            format_nanos(s.navigate.avg_nanos()),
+            format_nanos(s.spawn.avg_nanos()),
+            format_nanos(s.drop_op.avg_nanos()),
+            format_duration(s.wall),
+        );
+    }
+
+    } // end Phase 2
+
+    // =========================================================================
+    // Phase 3: Search only — latency & recall, sweep rerank factors
+    // =========================================================================
+    if !args.phase_3 {
+        println!("\n--- Phase 3 skipped (pass --phase-3 to enable) ---");
+    }
+
+    if args.phase_3 {
+
+    println!(
+        "\n--- Phase 3: Search only ({} queries, {} threads, k={}, rerank: {}) ---",
+        num_queries,
+        num_threads,
+        recall_k,
+        rerank_factors.iter().map(|r| format!("{r}x")).collect::<Vec<_>>().join(", "),
+    );
+
+    println!(
+        "| {:>6} | {:>11} | {:>12} | {:>10} | {:>10} | {:>10} | {:>10} |",
+        "rerank", "Recall@10", "Recall@100", "scan_avg", "rerank_avg", "total_avg", "wall"
+    );
+    println!(
+        "|--------|-------------|--------------|------------|------------|------------|------------|"
+    );
+
+    for &rf in &rerank_factors {
+        let idx = FlatCentroidIndex::from_data(
+            initial_data.clone(),
+            dim,
+            distance_fn.clone(),
+            centroid_bits,
+        );
+
+        let nq = recall_queries.len();
+        let chunk = (nq + num_threads - 1) / num_threads;
+
+        let wall_start = Instant::now();
+        let per_thread: Vec<(Duration, Duration)> = std::thread::scope(|s| {
+            let handles: Vec<_> = (0..num_threads)
+                .map(|tid| {
+                    let idx = &idx;
+                    let recall_queries = &recall_queries;
+                    s.spawn(move || {
+                        let start = tid * chunk;
+                        let end = (start + chunk).min(nq);
+                        let mut scan = Duration::ZERO;
+                        let mut rerank = Duration::ZERO;
+
+                        for qi in start..end {
+                            let q = recall_queries[qi];
+                            let (_, scan_dur, rerank_dur) =
+                                idx.search_with_rerank_timed(q, recall_k, rf, code_to_code);
+                            scan += scan_dur;
+                            rerank += rerank_dur;
+                        }
+                        (scan, rerank)
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        let wall = wall_start.elapsed();
+
+        let (scan_total, rerank_total) = per_thread.iter().fold(
+            (Duration::ZERO, Duration::ZERO),
+            |(s, r), &(a, b)| (s + a, r + b),
+        );
+
+        let nq = nq as u32;
+        let (r10, r100) = recall_per_rf[&rf];
+        println!(
+            "| {:>5}x | {:>10.2}% | {:>11.2}% | {:>10} | {:>10} | {:>10} | {:>10} |",
+            rf,
+            r10,
+            r100,
+            format_duration(scan_total / nq),
+            format_duration(rerank_total / nq),
+            format_duration((scan_total + rerank_total) / nq),
+            format_duration(wall),
+        );
+    }
+
+    } // end Phase 3
 
     println!("\n=== Legend ===");
-    println!("Phase 2 columns:");
-    println!(
-        "  navigate  - flat scan the centroid index (nprobe={}, rerank={}x)",
-        NPROBE,
-        if centroid_bits.is_some() { rerank_factor } else { 1 }
-    );
-    println!("  spawn     - append a new centroid to the flat index (from cluster split)");
-    println!("  drop      - tombstone a centroid in the flat index (from cluster split/merge)");
-    println!("  wall      - wall-clock time for the full SPANN simulation phase");
-    println!("Phase 3 columns:");
-    println!("  Centroids - number of centroid vectors in the flat index");
-    if centroid_bits.is_some() {
-        println!("  Scan MB   - memory footprint of the quantized code array");
-        println!("  Rerank    - rerank multiplier (fetch Rerank*k candidates, rerank with f32)");
-    }
-    println!("  FP MB     - memory footprint of the full-precision f32 vector array");
-    println!("  Recall@10 - fraction of true top-10 neighbors found");
-    println!("  Recall@100- fraction of true top-100 neighbors found");
-    if centroid_bits.is_some() {
-        println!("  Scan      - average quantized scan time per query");
-        println!("  Rerank    - average full-precision rerank time per query (0 at 1x)");
-        println!("  Total     - Scan + Rerank (= end-to-end query latency)");
-    } else {
-        println!("  Avg lat   - average single-query search latency");
-    }
-    println!("  Wall      - wall-clock time for all queries at this scale/rerank combo");
+    println!("Shared columns:");
+    println!("  rerank     - rerank multiplier");
+    println!("  Recall@10  - fraction of true top-10 neighbors found");
+    println!("  Recall@100 - fraction of true top-100 neighbors found");
+    println!("  scan_avg   - average quantized/f32 scan time per query");
+    println!("  rerank_avg - average rerank time per query");
+    println!("  total_avg  - scan + rerank_avg (= end-to-end query latency)");
+    println!("  wall       - wall-clock time for the full phase");
+    println!("Phase 2 extra columns:");
+    println!("  spawn_avg  - avg time to append a new centroid (from cluster split)");
+    println!("  drop_avg   - avg time to tombstone a centroid (from cluster split/merge)");
 }

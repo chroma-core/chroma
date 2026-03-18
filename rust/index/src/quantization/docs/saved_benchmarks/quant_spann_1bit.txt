@@ -1,3 +1,13 @@
+cargo bench -p chroma-index --bench quantized_spann -- --dataset wikipedia-en --checkpoint 1 --threads 32 --data-bits 1 --centroid-bits 1
+
+
+
+
+
+
+
+
+
 1 Bit Centroids
 
  nohup cargo bench -p chroma-index --bench quantized_spann -- --dataset wikipedia-en --checkpoint 5 --threads 16 --data-bits 1 --centroid-bits 1 > quantized_spann_1bit_wikipedia.txt 2>&1 &

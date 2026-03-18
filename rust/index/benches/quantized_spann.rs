@@ -74,9 +74,13 @@ struct Args {
     #[arg(long, default_value = "1000000")]
     synthetic_size: usize,
 
-    /// Centroid rerank factors to sweep, comma-separated (e.g. "1,2,4,8")
-    #[arg(long, default_value = "1,2,4,8")]
-    rerank_factors: String,
+    /// Centroid rerank factor for navigate (single value)
+    #[arg(long, default_value = "1")]
+    centroid_rerank: u32,
+
+    /// Data vector rerank factors to sweep, comma-separated (e.g. "4,8,16")
+    #[arg(long, default_value = "4,8,16")]
+    data_rerank_factors: String,
 
     /// Extra arguments (ignored, for compatibility with cargo bench)
     #[arg(hide = true, allow_hyphen_values = true)]
@@ -101,6 +105,8 @@ struct CheckpointResult {
     commit_time: Duration,
     num_queries: usize,
     rerank_factor: u32,
+    avg_rerank_vecs: u64,
+    rerank_data_bytes: u64,
     recall_10_np16: f64,
     recall_100_np16: f64,
     latency_np16: Duration,
@@ -126,6 +132,7 @@ fn spann_config(
     data_bits: u8,
     centroid_bits: Option<u8>,
     centroid_rerank_factor: Option<u32>,
+    data_rerank_factor: Option<u32>,
 ) -> SpannIndexConfig {
     let quantize = match data_bits {
         4 => Quantization::FourBitRabitQWithUSearch,
@@ -155,6 +162,7 @@ fn spann_config(
         quantize,
         centroid_bits,
         centroid_rerank_factor,
+        data_rerank_factor,
 
         // Other
         ..Default::default()
@@ -292,6 +300,18 @@ async fn evaluate_recall(
     (avg_recall_10, avg_recall_100, avg_latency)
 }
 
+fn format_bytes(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{}B", bytes)
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1}KB", bytes as f64 / 1024.0)
+    } else if bytes < 1024 * 1024 * 1024 {
+        format!("{:.1}MB", bytes as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{:.2}GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+    }
+}
+
 fn format_latency(d: Duration) -> String {
     let ms = d.as_secs_f64() * 1000.0;
     if ms < 10.0 {
@@ -305,15 +325,17 @@ fn format_latency(d: Duration) -> String {
 
 /// Print the recall summary table.
 fn print_recall_summary(results: &[CheckpointResult]) {
-    println!("\n=== Recall Summary (Rerank Sweep) ===");
+    println!("\n=== Recall Summary (Data Rerank Sweep) ===");
     println!(
-        "| {:>3} | {:>6} | {:>8} | {:>8} | {:>8} | {:>7} | {:^19} | {:^19} | {:^19} | {:^19} | {:^19} |",
+        "| {:>3} | {:>6} | {:>8} | {:>8} | {:>8} | {:>7} | {:>7} | {:>7} | {:^19} | {:^19} | {:^19} | {:^19} | {:^19} |",
         "CP",
-        "Rerank",
+        "DRR",
         "Vectors",
         "Index",
         "Commit",
         "Queries",
+        "RR Vecs",
+        "RR Data",
         "nprobe=16",
         "nprobe=32",
         "nprobe=64",
@@ -321,23 +343,25 @@ fn print_recall_summary(results: &[CheckpointResult]) {
         "nprobe=256"
     );
     println!(
-        "| {:>3} | {:>6} | {:>8} | {:>8} | {:>8} | {:>7} | {:>5} {:>5} {:>6} | {:>5} {:>5} {:>6} | {:>5} {:>5} {:>6} | {:>5} {:>5} {:>6} | {:>5} {:>5} {:>6} |",
-        "", "", "", "", "", "", "R@10", "R@100", "Lat", "R@10", "R@100", "Lat", "R@10", "R@100", "Lat", "R@10", "R@100", "Lat", "R@10", "R@100", "Lat"
+        "| {:>3} | {:>6} | {:>8} | {:>8} | {:>8} | {:>7} | {:>7} | {:>7} | {:>5} {:>5} {:>6} | {:>5} {:>5} {:>6} | {:>5} {:>5} {:>6} | {:>5} {:>5} {:>6} | {:>5} {:>5} {:>6} |",
+        "", "", "", "", "", "", "", "", "R@10", "R@100", "Lat", "R@10", "R@100", "Lat", "R@10", "R@100", "Lat", "R@10", "R@100", "Lat", "R@10", "R@100", "Lat"
     );
     println!(
-        "|{:-^5}|{:-^8}|{:-^10}|{:-^10}|{:-^10}|{:-^9}|{:-^21}|{:-^21}|{:-^21}|{:-^21}|{:-^21}|",
-        "", "", "", "", "", "", "", "", "", "", ""
+        "|{:-^5}|{:-^8}|{:-^10}|{:-^10}|{:-^10}|{:-^9}|{:-^9}|{:-^9}|{:-^21}|{:-^21}|{:-^21}|{:-^21}|{:-^21}|",
+        "", "", "", "", "", "", "", "", "", "", "", "", ""
     );
 
     for r in results {
         println!(
-            "| {:>3} | {:>4}x | {:>8} | {:>8} | {:>8} | {:>7} | {:>5.2} {:>5.2} {:>6} | {:>5.2} {:>5.2} {:>6} | {:>5.2} {:>5.2} {:>6} | {:>5.2} {:>5.2} {:>6} | {:>5.2} {:>5.2} {:>6} |",
+            "| {:>3} | {:>4}x | {:>8} | {:>8} | {:>8} | {:>7} | {:>7} | {:>7} | {:>5.2} {:>5.2} {:>6} | {:>5.2} {:>5.2} {:>6} | {:>5.2} {:>5.2} {:>6} | {:>5.2} {:>5.2} {:>6} | {:>5.2} {:>5.2} {:>6} |",
             r.checkpoint,
             r.rerank_factor,
             format_count(r.vectors),
             format_duration(r.index_time),
             format_duration(r.commit_time),
             r.num_queries,
+            r.avg_rerank_vecs,
+            format_bytes(r.rerank_data_bytes),
             r.recall_10_np16, r.recall_100_np16, format_latency(r.latency_np16),
             r.recall_10_np32, r.recall_100_np32, format_latency(r.latency_np32),
             r.recall_10_np64, r.recall_100_np64, format_latency(r.latency_np64),
@@ -386,13 +410,15 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .unwrap_or(max_checkpoints)
         .min(max_checkpoints);
 
-    let rerank_factors: Vec<u32> = args
-        .rerank_factors
+    let data_rerank_factors: Vec<u32> = args
+        .data_rerank_factors
         .split(',')
-        .map(|s| s.trim().parse().expect("invalid rerank factor"))
+        .map(|s| s.trim().parse().expect("invalid data rerank factor"))
         .collect();
 
-    let config = spann_config(args.data_bits, args.centroid_bits, None);
+    let centroid_rerank = args.centroid_rerank;
+
+    let config = spann_config(args.data_bits, args.centroid_bits, Some(centroid_rerank), None);
 
     println!("=== QuantizedSpannIndexWriter Benchmark ===");
     println!(
@@ -410,8 +436,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         config.centroid_bits()
     );
     println!(
-        "Rerank factors: {:?}",
-        rerank_factors
+        "Centroid rerank: {}x | Data rerank factors: {:?}",
+        centroid_rerank, data_rerank_factors
     );
     println!(
         "Total vectors to index: {}",
@@ -631,7 +657,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         // Capture stats snapshot before commit consumes the index
         let cluster_sizes = index.cluster_sizes();
-        let mut snap = index.stats().snapshot(&cluster_sizes);
+        let mut snap = index.stats().snapshot(&cluster_sizes, dimension);
 
         let flusher = index
             .commit(&blockfile_provider, &usearch_provider)
@@ -642,6 +668,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         let checkpoint_wall = load_time + raw_write_time + index_time + commit_time;
         snap.wall_nanos = checkpoint_wall.as_nanos() as u64;
+        let snap_idx = batch_snapshots.len();
         batch_snapshots.push(snap);
 
         total_vectors += actual_count;
@@ -665,18 +692,24 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             throughput,
         );
 
-        for &rerank_factor in &rerank_factors {
+        let mut total_search_calls: u64 = 0;
+        let mut total_search_nanos: u64 = 0;
+        let mut total_data_rerank_vectors: u64 = 0;
+
+        for &data_rerank_factor in &data_rerank_factors {
             let (
                 recall_10_np16, recall_100_np16, latency_np16,
                 recall_10_np32, recall_100_np32, latency_np32,
                 recall_10_np64, recall_100_np64, latency_np64,
                 recall_10_np128, recall_100_np128, latency_np128,
                 recall_10_np256, recall_100_np256, latency_np256,
+                avg_rerank_vecs, rerank_data_bytes,
             ) = if !checkpoint_queries.is_empty() {
                 let search_config = spann_config(
                     args.data_bits,
                     args.centroid_bits,
-                    Some(rerank_factor),
+                    Some(centroid_rerank),
+                    Some(data_rerank_factor),
                 );
 
                 let block_cache = new_cache_for_test();
@@ -766,7 +799,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .await;
 
                 let (r10_256, r100_256, lat_256) = evaluate_recall(
-                    search_index,
+                    Arc::clone(&search_index),
                     checkpoint_queries,
                     k,
                     256,
@@ -776,10 +809,24 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 )
                 .await;
 
+                let search_stats_ref = search_index.stats();
+                let search_snap = search_stats_ref.snapshot(&[], dimension);
+                total_search_calls += search_snap.search.calls;
+                total_search_nanos += search_snap.search.total_nanos;
+                total_data_rerank_vectors += search_snap.data_rerank_vectors;
+
+                let per_search_vecs = if search_snap.search.calls > 0 {
+                    search_snap.data_rerank_vectors / search_snap.search.calls
+                } else {
+                    0
+                };
+                let per_search_bytes = per_search_vecs * dimension as u64 * 4;
+
                 (
                     r10_16, r100_16, lat_16, r10_32, r100_32, lat_32,
                     r10_64, r100_64, lat_64, r10_128, r100_128, lat_128,
                     r10_256, r100_256, lat_256,
+                    per_search_vecs, per_search_bytes,
                 )
             } else {
                 (
@@ -788,17 +835,20 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     0.0, 0.0, Duration::ZERO,
                     0.0, 0.0, Duration::ZERO,
                     0.0, 0.0, Duration::ZERO,
+                    0, 0,
                 )
             };
 
             println!(
-                "  Rerank {}x: np16={:.2}/{:.2} np32={:.2}/{:.2} np64={:.2}/{:.2} np128={:.2}/{:.2} np256={:.2}/{:.2}",
-                rerank_factor,
+                "  DataRerank {}x: np16={:.2}/{:.2} np32={:.2}/{:.2} np64={:.2}/{:.2} np128={:.2}/{:.2} np256={:.2}/{:.2} | rr_vecs={} rr_data={}",
+                data_rerank_factor,
                 recall_10_np16, recall_100_np16,
                 recall_10_np32, recall_100_np32,
                 recall_10_np64, recall_100_np64,
                 recall_10_np128, recall_100_np128,
                 recall_10_np256, recall_100_np256,
+                avg_rerank_vecs,
+                format_bytes(rerank_data_bytes),
             );
 
             checkpoint_results.push(CheckpointResult {
@@ -807,7 +857,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 index_time,
                 commit_time,
                 num_queries: checkpoint_queries.len(),
-                rerank_factor,
+                rerank_factor: data_rerank_factor,
+                avg_rerank_vecs,
+                rerank_data_bytes,
                 recall_10_np16,
                 recall_100_np16,
                 latency_np16,
@@ -824,6 +876,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 recall_100_np256,
                 latency_np256,
             });
+        }
+
+        if total_search_calls > 0 {
+            let snap = &mut batch_snapshots[snap_idx];
+            snap.search.calls = total_search_calls;
+            snap.search.total_nanos = total_search_nanos;
+            snap.data_rerank_vectors = total_data_rerank_vectors;
         }
     }
 

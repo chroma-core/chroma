@@ -222,6 +222,31 @@ pub(crate) fn rabitq_distance_code(
     }
 }
 
+/// Public version of `rabitq_distance_code`.
+pub fn rabitq_distance_code_public(
+    g_a_dot_g_b: f32,
+    correction_a: f32,
+    norm_a: f32,
+    radial_a: f32,
+    correction_b: f32,
+    norm_b: f32,
+    radial_b: f32,
+    c_norm: f32,
+    distance_fn: &DistanceFunction,
+) -> f32 {
+    rabitq_distance_code(
+        g_a_dot_g_b,
+        correction_a,
+        norm_a,
+        radial_a,
+        correction_b,
+        norm_b,
+        radial_b,
+        c_norm,
+        distance_fn,
+    )
+}
+
 
 impl<const BITS: u8, T: AsRef<[u8]>> Code<BITS, T> {
     /// Correction factor `⟨g, n⟩`.
