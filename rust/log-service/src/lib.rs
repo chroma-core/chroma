@@ -1198,12 +1198,19 @@ impl LogServer {
     }
 
     #[allow(clippy::result_large_err)]
-    fn check_for_backpressure(&self, collection_id: CollectionUuid) -> Result<(), Status> {
+    async fn check_for_backpressure(&self, collection_id: CollectionUuid) -> Result<(), Status> {
         let backpressure = {
             let backpressure = self.backpressure.lock();
             Arc::clone(&backpressure)
         };
         if backpressure.contains(&collection_id) {
+            if let Some(cache) = self.cache.as_ref() {
+                // When backpressure is detected, the cached intrinsic cursor may be stale.
+                // Evict it to force a read from storage on the next operation, ensuring
+                // the system can recover from the backpressure state.
+                let cache_key = cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR);
+                cache.remove(&cache_key).await;
+            }
             return Err(status_with_backoff_reason(
                 tonic::Code::ResourceExhausted,
                 "log needs compaction; too full",
@@ -1983,7 +1990,7 @@ impl LogServer {
         if push_logs.records.is_empty() {
             return Err(Status::invalid_argument("Too few records"));
         }
-        self.check_for_backpressure(collection_id)?;
+        self.check_for_backpressure(collection_id).await?;
 
         // Extract CMEK from request
         let cmek = push_logs
@@ -2401,7 +2408,7 @@ impl LogServer {
         let source_collection_id = Uuid::parse_str(&request.source_collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-        self.check_for_backpressure(source_collection_id)?;
+        self.check_for_backpressure(source_collection_id).await?;
         let target_collection_id = Uuid::parse_str(&request.target_collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
