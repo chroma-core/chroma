@@ -127,13 +127,13 @@ impl TestDistributedSegment {
         .await
         .expect("Should be able to flush metadata.");
 
-        let record_writer = RecordSegmentWriter::from_segment(
+        let record_writer = Box::pin(RecordSegmentWriter::from_segment(
             &self.collection.tenant,
             &self.collection.database_id,
             &self.record_segment,
             &self.blockfile_provider,
             None,
-        )
+        ))
         .await
         .expect("Should be able to initiaize record writer.");
         record_writer

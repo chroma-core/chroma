@@ -368,7 +368,12 @@ impl RecordSegmentWriter {
             match loaded {
                 Some(bf) => Some(bf),
                 None => {
-                    Self::rebuild_bloom_filter(segment, blockfile_provider, storage.clone()).await
+                    Box::pin(Self::rebuild_bloom_filter(
+                        segment,
+                        blockfile_provider,
+                        storage.clone(),
+                    ))
+                    .await
                 }
             }
         };
@@ -394,7 +399,12 @@ impl RecordSegmentWriter {
         blockfile_provider: &BlockfileProvider,
         storage: Option<Arc<Storage>>,
     ) -> Option<BloomFilter<str>> {
-        let reader = match RecordSegmentReader::from_segment(segment, blockfile_provider).await {
+        let reader = match Box::pin(RecordSegmentReader::from_segment(
+            segment,
+            blockfile_provider,
+        ))
+        .await
+        {
             Ok(reader) => reader,
             Err(e) => {
                 tracing::warn!(error = ?e, "Failed to create reader for bloom filter rebuild");
