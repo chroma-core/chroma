@@ -376,7 +376,7 @@ impl ManifestManager {
         while let Some(row) = reader.next().await? {
             let log_id_str = row.column_by_name::<String>("log_id")?;
             let intrinsic_cursor = row.column_by_name::<Option<i64>>("intrinsic_cursor")?;
-            let initial_offset = row.column_by_name::<i64>("initial_offset")?;
+            let initial_offset = row.column_by_name::<Option<i64>>("initial_offset")?;
             let enumeration_offset = row.column_by_name::<i64>("enumeration_offset")?;
             let updated_at = row.column_by_name::<Timestamp>("updated_at")?;
             let Ok(log_id) = Uuid::parse_str(&log_id_str) else {
@@ -389,11 +389,13 @@ impl ManifestManager {
                 );
                 continue;
             }
-            if initial_offset < 0 {
+            if let Some(initial_offset) = initial_offset
+                && initial_offset < 0
+            {
                 tracing::warn!("negative initial_offset {initial_offset} for log_id {log_id}");
                 continue;
             }
-            let compaction_offset = intrinsic_cursor.unwrap_or(initial_offset);
+            let compaction_offset = intrinsic_cursor.unwrap_or(initial_offset.unwrap_or(0));
             if compaction_offset < 0 {
                 tracing::warn!(
                     "negative compaction_offset {compaction_offset} for log_id {log_id}"
