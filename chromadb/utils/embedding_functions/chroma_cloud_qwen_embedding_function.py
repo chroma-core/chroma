@@ -98,7 +98,7 @@ class ChromaCloudQwenEmbeddingFunction(EmbeddingFunction[Documents]):
 
         embeddings: List[List[float]] = response["embeddings"]
 
-        return np.array(embeddings, dtype=np.float32)
+        return [np.array(embedding, dtype=np.float32) for embedding in embeddings]
 
     def __call__(self, input: Documents) -> Embeddings:
         """
