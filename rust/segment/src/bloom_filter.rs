@@ -405,6 +405,7 @@ impl BloomFilterManager {
             )
             .await
             .map_err(BloomFilterError::Storage)?;
+        // TODO(Sanket-temp): Should deep copy bloom filter here to avoid modifying the original one.
         self.inner.cache.insert(key, bf.clone()).await;
         Ok(bf)
     }
