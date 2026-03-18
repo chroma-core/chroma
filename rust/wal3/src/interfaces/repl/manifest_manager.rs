@@ -356,9 +356,9 @@ impl ManifestManager {
                 ON manifests.log_id = manifest_regions.log_id
             WHERE manifest_regions.region = @region
                 AND (
-                    manifests.enumeration_offset - COALESCE(manifest_regions.intrinsic_cursor, manifest_regions.initial_offset) > @record_count_threshold
+                    manifests.enumeration_offset - COALESCE(manifest_regions.intrinsic_cursor, manifest_regions.initial_offset, 0) > @record_count_threshold
                     OR (
-                        manifests.enumeration_offset > COALESCE(manifest_regions.intrinsic_cursor, manifest_regions.initial_offset)
+                        manifests.enumeration_offset > COALESCE(manifest_regions.intrinsic_cursor, manifest_regions.initial_offset, 0)
                         AND UNIX_MICROS(CURRENT_TIMESTAMP()) - UNIX_MICROS(COALESCE(manifests.updated_at, TIMESTAMP_SECONDS(0))) >= @timeout_us
                     )
                 )
@@ -389,11 +389,11 @@ impl ManifestManager {
                 );
                 continue;
             }
-            if let Some(initial_offset) = initial_offset
-                && initial_offset < 0
-            {
-                tracing::warn!("negative initial_offset {initial_offset} for log_id {log_id}");
-                continue;
+            if let Some(initial_offset) = initial_offset {
+                if initial_offset < 0 {
+                    tracing::warn!("negative initial_offset {initial_offset} for log_id {log_id}");
+                    continue;
+                }
             }
             let compaction_offset = intrinsic_cursor.unwrap_or(initial_offset.unwrap_or(0));
             if compaction_offset < 0 {
