@@ -24,6 +24,7 @@ import {
   ChromaValueError,
 } from "./errors";
 import {
+  CollectionConfiguration,
   CreateCollectionConfiguration,
   processCreateCollectionConfig,
 } from "./collection-configuration";
@@ -231,6 +232,43 @@ export class ChromaClient {
   }
 
   /**
+   * Caches a fully-resolved collection. If a thin (unhydrated) instance for
+   * this ID already exists in the cache, it is hydrated in place so that
+   * holders of the thin reference see the updated data. Otherwise a new
+   * `CollectionImpl` is created and cached.
+   */
+  private cacheCollection(args: {
+    id: string;
+    name: string;
+    tenant: string;
+    database: string;
+    configuration: CollectionConfiguration;
+    metadata?: CollectionMetadata;
+    embeddingFunction?: EmbeddingFunction;
+    schema?: Schema;
+  }): Collection {
+    const existing = this._collectionCache.get(args.id);
+    if (existing instanceof ThinCollectionImpl) {
+      existing.hydrateWith({
+        name: args.name,
+        metadata: args.metadata,
+        configuration: args.configuration,
+        embeddingFunction: args.embeddingFunction,
+        schema: args.schema,
+      });
+      return existing;
+    }
+
+    const collection = new CollectionImpl({
+      chromaClient: this,
+      apiClient: this.apiClient,
+      ...args,
+    });
+    this._collectionCache.set(collection.id, collection);
+    return collection;
+  }
+
+  /**
    * Returns a lightweight Collection object for the given collection ID.
    *
    * This method is synchronous and makes no network requests. The returned
@@ -300,7 +338,7 @@ export class ChromaClient {
               collection.configuration_json.embedding_function ?? undefined,
           })) ?? schemaEmbeddingFunction;
 
-        const col = new CollectionImpl({
+        return new CollectionImpl({
           chromaClient: this,
           apiClient: this.apiClient,
           tenant: collection.tenant,
@@ -313,8 +351,6 @@ export class ChromaClient {
             deserializeMetadata(collection.metadata ?? undefined) ?? undefined,
           schema,
         });
-        this._collectionCache.set(col.id, col);
-        return col;
       }),
     );
   }
@@ -388,9 +424,7 @@ export class ChromaClient {
       })) ??
       schemaEmbeddingFunction;
 
-    const collection = new CollectionImpl({
-      chromaClient: this,
-      apiClient: this.apiClient,
+    return this.cacheCollection({
       name,
       tenant: data.tenant,
       database: data.database,
@@ -400,8 +434,6 @@ export class ChromaClient {
       id: data.id,
       schema: serverSchema,
     });
-    this._collectionCache.set(collection.id, collection);
-    return collection;
   }
 
   /**
@@ -434,9 +466,7 @@ export class ChromaClient {
       })) ??
       schemaEmbeddingFunction;
 
-    const collection = new CollectionImpl({
-      chromaClient: this,
-      apiClient: this.apiClient,
+    return this.cacheCollection({
       name,
       tenant: data.tenant,
       database: data.database,
@@ -446,8 +476,6 @@ export class ChromaClient {
       id: data.id,
       schema,
     });
-    this._collectionCache.set(collection.id, collection);
-    return collection;
   }
 
   /**
@@ -468,9 +496,7 @@ export class ChromaClient {
         efConfig: data.configuration_json.embedding_function ?? undefined,
         client: this,
       })) ?? schemaEmbeddingFunction;
-    const collection = new CollectionImpl({
-      chromaClient: this,
-      apiClient: this.apiClient,
+    return this.cacheCollection({
       name: data.name,
       tenant: data.tenant,
       database: data.database,
@@ -480,8 +506,6 @@ export class ChromaClient {
       id: data.id,
       schema,
     });
-    this._collectionCache.set(collection.id, collection);
-    return collection;
   }
 
   /**
@@ -568,9 +592,7 @@ export class ChromaClient {
       })) ??
       schemaEmbeddingFunction;
 
-    const collection = new CollectionImpl({
-      chromaClient: this,
-      apiClient: this.apiClient,
+    return this.cacheCollection({
       name,
       tenant: data.tenant,
       database: data.database,
@@ -580,8 +602,6 @@ export class ChromaClient {
       id: data.id,
       schema: serverSchema,
     });
-    this._collectionCache.set(collection.id, collection);
-    return collection;
   }
 
   /**

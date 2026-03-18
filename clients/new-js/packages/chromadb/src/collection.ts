@@ -1298,6 +1298,26 @@ export class ThinCollectionImpl extends CollectionBase {
     this._configuration = configuration;
   }
 
+  /**
+   * Populates this thin collection with server data, marking it as hydrated.
+   * Used by ChromaClient to hydrate an existing thin instance when the same
+   * collection is fetched via getCollection/createCollection/etc.
+   */
+  public hydrateWith(args: {
+    name: string;
+    metadata?: CollectionMetadata;
+    configuration: CollectionConfiguration;
+    embeddingFunction?: EmbeddingFunction;
+    schema?: Schema;
+  }): void {
+    this._name = args.name;
+    this._metadata = args.metadata;
+    this._configuration = args.configuration;
+    this._embeddingFunction = args.embeddingFunction;
+    this._schema = args.schema;
+    this._hydrated = true;
+  }
+
   protected override async ensureHydrated(): Promise<void> {
     if (this._hydrated) return;
 

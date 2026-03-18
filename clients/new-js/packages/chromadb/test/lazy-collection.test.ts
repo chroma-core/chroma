@@ -180,4 +180,58 @@ describe("thin collection via client.collection(id)", () => {
     expect(fromCache).toBe(created);
     expect(fromCache.name).toBe("test");
   });
+
+  test("getCollection hydrates existing thin instance in place", async () => {
+    const created = await client.createCollection({ name: "test" });
+    const freshClient = new ChromaClient({
+      path: process.env.DEFAULT_CHROMA_INSTANCE_URL,
+    });
+
+    // Create a thin collection first
+    const thin = freshClient.collection(created.id);
+    expect(() => thin.name).toThrow("thin collection");
+
+    // Now fetch the same collection by name — should hydrate the thin instance
+    const fetched = await freshClient.getCollection({ name: "test" });
+
+    // The fetched reference should be the same object as the thin reference
+    expect(fetched).toBe(thin);
+    // And properties should now be accessible
+    expect(thin.name).toBe("test");
+  });
+
+  test("deleteCollection removes thin collection from cache", async () => {
+    const created = await client.createCollection({ name: "test" });
+    const freshClient = new ChromaClient({
+      path: process.env.DEFAULT_CHROMA_INSTANCE_URL,
+    });
+
+    // Create a thin collection in cache
+    const thin = freshClient.collection(created.id);
+    expect(thin.id).toBe(created.id);
+
+    // Delete the collection
+    await freshClient.deleteCollection({ name: "test" });
+
+    // Subsequent collection(id) call should return a new instance, not the stale one
+    const afterDelete = freshClient.collection(created.id);
+    expect(afterDelete).not.toBe(thin);
+  });
+
+  test("listCollections does not populate cache", async () => {
+    const created = await client.createCollection({ name: "test" });
+    const freshClient = new ChromaClient({
+      path: process.env.DEFAULT_CHROMA_INSTANCE_URL,
+    });
+
+    // List collections
+    const listed = await freshClient.listCollections();
+    expect(listed).toHaveLength(1);
+
+    // collection(id) should return a new thin instance, not the listed one
+    const fromCollection = freshClient.collection(created.id);
+    expect(fromCollection).not.toBe(listed[0]);
+    // It should be thin (unhydrated)
+    expect(() => fromCollection.name).toThrow("thin collection");
+  });
 });
