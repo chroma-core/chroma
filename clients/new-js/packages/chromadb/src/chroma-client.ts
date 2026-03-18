@@ -24,7 +24,6 @@ import {
   ChromaValueError,
 } from "./errors";
 import {
-  CollectionConfiguration,
   CreateCollectionConfiguration,
   processCreateCollectionConfig,
 } from "./collection-configuration";
@@ -85,7 +84,6 @@ export class ChromaClient {
   private _preflightChecks: ChecklistResponse | undefined;
   private _headers: Record<string, string> | undefined;
   private readonly apiClient: ReturnType<typeof createClient>;
-  private readonly _collectionCache: Map<string, Collection> = new Map();
 
   /**
    * Creates a new ChromaClient instance.
@@ -232,43 +230,6 @@ export class ChromaClient {
   }
 
   /**
-   * Caches a fully-resolved collection. If a thin (unhydrated) instance for
-   * this ID already exists in the cache, it is hydrated in place so that
-   * holders of the thin reference see the updated data. Otherwise a new
-   * `CollectionImpl` is created and cached.
-   */
-  private cacheCollection(args: {
-    id: string;
-    name: string;
-    tenant: string;
-    database: string;
-    configuration: CollectionConfiguration;
-    metadata?: CollectionMetadata;
-    embeddingFunction?: EmbeddingFunction;
-    schema?: Schema;
-  }): Collection {
-    const existing = this._collectionCache.get(args.id);
-    if (existing instanceof ThinCollectionImpl) {
-      existing.hydrateWith({
-        name: args.name,
-        metadata: args.metadata,
-        configuration: args.configuration,
-        embeddingFunction: args.embeddingFunction,
-        schema: args.schema,
-      });
-      return existing;
-    }
-
-    const collection = new CollectionImpl({
-      chromaClient: this,
-      apiClient: this.apiClient,
-      ...args,
-    });
-    this._collectionCache.set(collection.id, collection);
-    return collection;
-  }
-
-  /**
    * Returns a lightweight Collection object for the given collection ID.
    *
    * This method is synchronous and makes no network requests. The returned
@@ -280,27 +241,17 @@ export class ChromaClient {
    * documents, `search` with string queries) will automatically fetch the
    * collection's data from the server on the first such call.
    *
-   * If the collection was previously fetched via `getCollection`,
-   * `createCollection`, or similar, the cached (already hydrated) instance is
-   * returned.
-   *
    * @param id - The collection's UUID
    * @returns A Collection instance
    */
   public collection(id: string): Collection {
-    const cached = this._collectionCache.get(id);
-    if (cached) return cached;
-
-    const thin = new ThinCollectionImpl({
+    return new ThinCollectionImpl({
       chromaClient: this,
       apiClient: this.apiClient,
       id,
       tenant: this._tenant ?? "",
       database: this._database ?? "",
     });
-
-    this._collectionCache.set(id, thin);
-    return thin;
   }
 
   /**
@@ -424,7 +375,9 @@ export class ChromaClient {
       })) ??
       schemaEmbeddingFunction;
 
-    return this.cacheCollection({
+    return new CollectionImpl({
+      chromaClient: this,
+      apiClient: this.apiClient,
       name,
       tenant: data.tenant,
       database: data.database,
@@ -466,7 +419,9 @@ export class ChromaClient {
       })) ??
       schemaEmbeddingFunction;
 
-    return this.cacheCollection({
+    return new CollectionImpl({
+      chromaClient: this,
+      apiClient: this.apiClient,
       name,
       tenant: data.tenant,
       database: data.database,
@@ -496,7 +451,9 @@ export class ChromaClient {
         efConfig: data.configuration_json.embedding_function ?? undefined,
         client: this,
       })) ?? schemaEmbeddingFunction;
-    return this.cacheCollection({
+    return new CollectionImpl({
+      chromaClient: this,
+      apiClient: this.apiClient,
       name: data.name,
       tenant: data.tenant,
       database: data.database,
@@ -592,7 +549,9 @@ export class ChromaClient {
       })) ??
       schemaEmbeddingFunction;
 
-    return this.cacheCollection({
+    return new CollectionImpl({
+      chromaClient: this,
+      apiClient: this.apiClient,
       name,
       tenant: data.tenant,
       database: data.database,
@@ -610,21 +569,10 @@ export class ChromaClient {
    * @param options.name - The name of the collection to delete
    */
   public async deleteCollection({ name }: { name: string }): Promise<void> {
-    const path = { ...(await this._path()), collection_id: name };
-
-    // Fetch the collection ID before deleting so we can reliably
-    // invalidate the cache (which is keyed by ID, not name).
-    const { data } = await CollectionService.getCollection({
-      client: this.apiClient,
-      path,
-    });
-
     await CollectionService.deleteCollection({
       client: this.apiClient,
-      path,
+      path: { ...(await this._path()), collection_id: name },
     });
-
-    this._collectionCache.delete(data.id);
   }
 
   /**
@@ -633,7 +581,6 @@ export class ChromaClient {
    * @warning This operation is irreversible and will delete all data
    */
   public async reset(): Promise<void> {
-    this._collectionCache.clear();
     await SystemService.reset({
       client: this.apiClient,
     });
