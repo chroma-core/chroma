@@ -1314,20 +1314,11 @@ export class ThinCollectionImpl extends CollectionBase {
   }
 
   private async doHydrate(): Promise<void> {
-    // Resolve tenant/database from the client if not yet known (e.g. CloudClient)
-    if (!this._tenant || !this._database) {
-      const resolved = await this.chromaClient._path();
-      this._tenant = resolved.tenant;
-      this._database = resolved.database;
-    }
+    const path = await this.path();
 
     const { data } = await CollectionService.getCollection({
       client: this.apiClient,
-      path: {
-        tenant: this._tenant,
-        database: this._database,
-        collection_id: this.id,
-      },
+      path,
     });
 
     const schema = await Schema.deserializeFromJSON(
