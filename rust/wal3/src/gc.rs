@@ -300,16 +300,19 @@ impl Garbage {
                         )))
                     })?;
                 } else {
-                    self.fragments_to_drop_start =
-                        std::cmp::min(self.fragments_to_drop_start, seq_no);
-                    self.fragments_to_drop_limit = std::cmp::max(
-                        self.fragments_to_drop_limit,
-                        seq_no.successor().ok_or_else(|| {
-                            Error::ScrubError(Box::new(ScrubError::Internal(
-                                "fragment sequence number has no successor".to_string(),
-                            )))
-                        })?,
-                    );
+                    if seq_no != self.fragments_to_drop_limit {
+                        return Err(Error::ScrubError(Box::new(
+                            ScrubError::NonContiguousFragments {
+                                expected: self.fragments_to_drop_limit,
+                                got: seq_no,
+                            },
+                        )));
+                    }
+                    self.fragments_to_drop_limit = seq_no.successor().ok_or_else(|| {
+                        Error::ScrubError(Box::new(ScrubError::Internal(
+                            "fragment sequence number has no successor".to_string(),
+                        )))
+                    })?;
                 }
             }
             FragmentIdentifier::Uuid(uuid) => {
@@ -882,6 +885,124 @@ mod tests {
         println!(
             "all_uuid_fragments_dropped_yields_successor_limit: limit={:?}",
             garbage.fragments_to_drop_uuid_limit
+        );
+    }
+
+    #[test]
+    fn drop_fragment_rejects_gap_in_seq_no() {
+        let mut garbage = Garbage::empty();
+        let mut first = true;
+        let mut first_to_keep = LogPosition::from_offset(1);
+        let fragment1 = Fragment {
+            path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000001.parquet".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(2),
+            num_bytes: 1,
+            setsum: Setsum::default(),
+        };
+        let fragment3 = Fragment {
+            path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000003.parquet".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3)),
+            start: LogPosition::from_offset(3),
+            limit: LogPosition::from_offset(4),
+            num_bytes: 1,
+            setsum: Setsum::default(),
+        };
+        garbage
+            .drop_fragment(&fragment1, &mut first, &mut first_to_keep)
+            .unwrap();
+        let err = garbage
+            .drop_fragment(&fragment3, &mut first, &mut first_to_keep)
+            .unwrap_err();
+        let msg = format!("{}", err);
+        println!("drop_fragment_rejects_gap_in_seq_no: err={}", msg);
+        assert!(
+            msg.contains("NonContiguousFragments"),
+            "expected NonContiguousFragments error, got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn drop_fragment_rejects_out_of_order_seq_no() {
+        let mut garbage = Garbage::empty();
+        let mut first = true;
+        let mut first_to_keep = LogPosition::from_offset(1);
+        let fragment2 = Fragment {
+            path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000002.parquet".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(2),
+            num_bytes: 1,
+            setsum: Setsum::default(),
+        };
+        let fragment1 = Fragment {
+            path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000001.parquet".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+            start: LogPosition::from_offset(2),
+            limit: LogPosition::from_offset(3),
+            num_bytes: 1,
+            setsum: Setsum::default(),
+        };
+        garbage
+            .drop_fragment(&fragment2, &mut first, &mut first_to_keep)
+            .unwrap();
+        let err = garbage
+            .drop_fragment(&fragment1, &mut first, &mut first_to_keep)
+            .unwrap_err();
+        let msg = format!("{}", err);
+        println!("drop_fragment_rejects_out_of_order_seq_no: err={}", msg);
+        assert!(
+            msg.contains("NonContiguousFragments"),
+            "expected NonContiguousFragments error, got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn drop_fragment_accepts_contiguous_seq_no() {
+        let mut garbage = Garbage::empty();
+        let mut first = true;
+        let mut first_to_keep = LogPosition::from_offset(1);
+        let fragment1 = Fragment {
+            path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000001.parquet".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(2),
+            num_bytes: 1,
+            setsum: Setsum::default(),
+        };
+        let fragment2 = Fragment {
+            path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000002.parquet".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
+            start: LogPosition::from_offset(2),
+            limit: LogPosition::from_offset(3),
+            num_bytes: 1,
+            setsum: Setsum::default(),
+        };
+        let fragment3 = Fragment {
+            path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000003.parquet".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3)),
+            start: LogPosition::from_offset(3),
+            limit: LogPosition::from_offset(4),
+            num_bytes: 1,
+            setsum: Setsum::default(),
+        };
+        garbage
+            .drop_fragment(&fragment1, &mut first, &mut first_to_keep)
+            .unwrap();
+        garbage
+            .drop_fragment(&fragment2, &mut first, &mut first_to_keep)
+            .unwrap();
+        garbage
+            .drop_fragment(&fragment3, &mut first, &mut first_to_keep)
+            .unwrap();
+        assert_eq!(garbage.fragments_to_drop_start, FragmentSeqNo::from_u64(1));
+        assert_eq!(garbage.fragments_to_drop_limit, FragmentSeqNo::from_u64(4));
+        println!(
+            "drop_fragment_accepts_contiguous_seq_no: start={}, limit={}",
+            garbage.fragments_to_drop_start, garbage.fragments_to_drop_limit
         );
     }
 }

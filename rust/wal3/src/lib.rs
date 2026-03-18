@@ -322,6 +322,11 @@ pub enum ScrubError {
     },
     #[error("The given snapshot rolls up to nothing with garbage")]
     ReplaceDroppedEverything { snapshot: SnapshotPointer },
+    #[error("NonContiguousFragments: expected {expected} got {got}")]
+    NonContiguousFragments {
+        expected: FragmentSeqNo,
+        got: FragmentSeqNo,
+    },
 }
 
 //////////////////////////////////////////// LogPosition ///////////////////////////////////////////
