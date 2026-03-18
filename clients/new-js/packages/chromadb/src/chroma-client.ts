@@ -14,7 +14,7 @@ import {
   ChecklistResponse,
 } from "./api";
 import { CollectionMetadata, UserIdentity } from "./types";
-import { Collection, CollectionImpl } from "./collection";
+import { Collection, CollectionImpl, ThinCollectionImpl } from "./collection";
 import { EmbeddingFunction, getEmbeddingFunction } from "./embedding-function";
 import { chromaFetch } from "./chroma-fetch";
 import * as process from "node:process";
@@ -253,7 +253,7 @@ export class ChromaClient {
     const cached = this._collectionCache.get(id);
     if (cached) return cached;
 
-    const lazy = CollectionImpl.lazy({
+    const thin = new ThinCollectionImpl({
       chromaClient: this,
       apiClient: this.apiClient,
       id,
@@ -261,8 +261,8 @@ export class ChromaClient {
       database: this._database ?? "",
     });
 
-    this._collectionCache.set(id, lazy);
-    return lazy;
+    this._collectionCache.set(id, thin);
+    return thin;
   }
 
   /**
