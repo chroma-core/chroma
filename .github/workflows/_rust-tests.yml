@@ -53,8 +53,10 @@ jobs:
         uses: actions/checkout@v4
       - name: Check GCS credentials availability
         id: check-creds
+        env:
+          TEST_CRED_GCS: ${{ secrets.TEST_CRED_GCS }}
         run: |
-          if [ -z '${{ secrets.TEST_CRED_GCS }}' ]; then
+          if [ -z "$TEST_CRED_GCS" ]; then
             echo "available=false" >> $GITHUB_OUTPUT
             echo "GCS credentials not available, skipping tests"
           else
@@ -67,8 +69,10 @@ jobs:
           github-token: ${{ github.token }}
       - name: Extract credentials
         if: steps.check-creds.outputs.available == 'true'
+        env:
+          TEST_CRED_GCS: ${{ secrets.TEST_CRED_GCS }}
         run: |
-          echo '${{ secrets.TEST_CRED_GCS }}' > ${{ github.workspace }}/cred_gcs.json
+          echo "$TEST_CRED_GCS" > ${{ github.workspace }}/cred_gcs.json
       - name: Test
         if: steps.check-creds.outputs.available == 'true'
         run: cargo nextest run --profile storage_gcs
