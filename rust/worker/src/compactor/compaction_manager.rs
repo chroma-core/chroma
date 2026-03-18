@@ -880,6 +880,8 @@ impl Handler<ListInProgressJobsMessage> for CompactionManager {
         message: ListInProgressJobsMessage,
         _ctx: &ComponentContext<CompactionManager>,
     ) {
+        tracing::info!("Received ListInProgressJobs request");
+
         let entries = self
             .scheduler
             .get_in_progress_jobs()
