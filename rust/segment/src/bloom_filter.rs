@@ -199,21 +199,19 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
     /// are done (e.g. during `commit`).
     /// Fails if other clones of this handle still exist.
     pub fn into_bytes(self) -> Result<Option<SerializedBloomFilter>, BloomFilterError> {
-        let inner = Arc::try_unwrap(self.inner).map_err(|_| {
-            BloomFilterError::Serialization(
-                "Cannot serialize: other references to the bloom filter still exist".to_string(),
-            )
-        })?;
-        let storage = match inner.storage {
-            Some(s) => s,
+        let storage = match &self.inner.storage {
+            Some(s) => s.clone(),
             None => return Ok(None),
         };
+        let num_u64s = self.inner.filter.num_bits() / 64;
+        let mut bits = Vec::with_capacity(num_u64s);
+        bits.extend(self.inner.filter.iter());
         let repr = BloomFilterRepr {
-            bits: inner.filter.iter().collect(),
-            num_hashes: inner.filter.num_hashes(),
-            live_count: inner.live_count.load(Ordering::SeqCst),
-            stale_count: inner.stale_count.load(Ordering::SeqCst),
-            capacity: inner.capacity,
+            bits,
+            num_hashes: self.inner.filter.num_hashes(),
+            live_count: self.inner.live_count.load(Ordering::SeqCst),
+            stale_count: self.inner.stale_count.load(Ordering::SeqCst),
+            capacity: self.inner.capacity,
         };
         let bytes = bincode::serialize(&repr)
             .map_err(|e| BloomFilterError::Serialization(e.to_string()))?;

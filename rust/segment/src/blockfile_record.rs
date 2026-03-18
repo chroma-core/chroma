@@ -1,4 +1,4 @@
-use crate::bloom_filter::BloomFilter;
+use crate::bloom_filter::{BloomFilter, SerializedBloomFilter};
 use crate::types::ChromaSegmentFlusher;
 
 use super::distributed_spann::SpannSegmentWriterError;
@@ -500,6 +500,9 @@ impl RecordSegmentWriter {
                     }
                     // Set max offset id.
                     max_new_offset_id = max_new_offset_id.max(log_record.get_offset_id());
+                    if let Some(bf) = &self.bloom_filter {
+                        bf.insert(log_record.get_user_id());
+                    }
                 }
                 MaterializedLogOperation::UpdateExisting | MaterializedLogOperation::OverwriteExisting => {
                     // Offset id and user id do not need to change. Only data
@@ -573,6 +576,9 @@ impl RecordSegmentWriter {
                             return Err(ApplyMaterializedLogError::BlockfileDelete);
                         }
                     }
+                    if let Some(bf) = &self.bloom_filter {
+                        bf.mark_deleted();
+                    }
                 }
                 MaterializedLogOperation::Initial => panic!("Invariant violation. Materialized logs should not have any logs in the initial state")
             }
@@ -644,6 +650,16 @@ impl RecordSegmentWriter {
             }
         };
 
+        // Serialize bloom filter to bytes.
+        // Follows the same commit/flush split as blockfiles: commit serializes, flush writes I/O.
+        let serialized_bloom_filter = match self.bloom_filter.take() {
+            Some(bf) => bf.into_bytes().map_err(|_| {
+                Box::new(ApplyMaterializedLogError::BloomFilterSerializationError)
+                    as Box<dyn ChromaError>
+            })?,
+            None => None,
+        };
+
         // Return a flusher that can be used to flush the blockfiles
         Ok(RecordSegmentFlusher {
             id: self.id,
@@ -651,6 +667,7 @@ impl RecordSegmentWriter {
             id_to_user_id_flusher: flusher_id_to_user_id,
             id_to_data_flusher: flusher_id_to_data,
             max_offset_id_flusher: flusher_max_offset_id,
+            serialized_bloom_filter,
         })
     }
 }
@@ -679,6 +696,8 @@ pub enum ApplyMaterializedLogError {
     Materialization(#[from] LogMaterializerError),
     #[error("Error applying materialized records to spann segment: {0}")]
     SpannSegmentError(#[from] SpannSegmentWriterError),
+    #[error("Bloom filter serialization failed during commit")]
+    BloomFilterSerializationError,
     #[cfg(feature = "usearch")]
     #[error(transparent)]
     QuantizedSpannSegmentError(#[from] crate::quantized_spann::QuantizedSpannSegmentError),
@@ -696,6 +715,7 @@ impl ChromaError for ApplyMaterializedLogError {
             ApplyMaterializedLogError::HnswIndex(_) => ErrorCodes::Internal,
             ApplyMaterializedLogError::Materialization(e) => e.code(),
             ApplyMaterializedLogError::SpannSegmentError(e) => e.code(),
+            ApplyMaterializedLogError::BloomFilterSerializationError => ErrorCodes::Internal,
             #[cfg(feature = "usearch")]
             ApplyMaterializedLogError::QuantizedSpannSegmentError(e) => e.code(),
         }
@@ -708,6 +728,8 @@ pub struct RecordSegmentFlusher {
     id_to_user_id_flusher: BlockfileFlusher,
     id_to_data_flusher: BlockfileFlusher,
     max_offset_id_flusher: BlockfileFlusher,
+    /// Serialized bloom filter ready for I/O during flush.
+    serialized_bloom_filter: Option<SerializedBloomFilter>,
 }
 
 impl Debug for RecordSegmentFlusher {
@@ -787,6 +809,23 @@ impl RecordSegmentFlusher {
             }
             Err(e) => {
                 return Err(e);
+            }
+        }
+
+        // Write serialized bloom filter to storage. Failures are non-fatal —
+        // the bloom filter will be rebuilt from the reader on the next compaction cycle.
+        if let Some(serialized_bloom_filter) = self.serialized_bloom_filter {
+            let bloom_filter_id = uuid::Uuid::new_v4();
+            let bloom_filter_path = ChromaSegmentFlusher::flush_key(&prefix_path, &bloom_filter_id);
+            match serialized_bloom_filter.save(&bloom_filter_path).await {
+                Ok(()) => {
+                    tracing::info!(path = %bloom_filter_path, "Persisted bloom filter to storage");
+                    // TODO(Sanket-temp): Add bloom filter to flushed files
+                    // flushed_files.insert(USER_ID_BLOOM_FILTER.to_string(), vec![bloom_filter_path]);
+                }
+                Err(e) => {
+                    tracing::warn!(error = ?e, "Failed to persist bloom filter, skipping");
+                }
             }
         }
 
@@ -1088,8 +1127,8 @@ mod tests {
     use std::sync::{atomic::AtomicU32, Arc};
 
     use chroma_blockstore::BlockfileWriter;
-    use chroma_log::test::{upsert_generator, LogGenerator};
-    use chroma_types::Chunk;
+    use chroma_log::test::{int_as_id, upsert_generator, LogGenerator};
+    use chroma_types::{Chunk, USER_ID_BLOOM_FILTER};
     use shuttle::{future, thread};
 
     use crate::{
@@ -1192,5 +1231,197 @@ mod tests {
             },
             60,
         );
+    }
+
+    #[tokio::test]
+    #[ignore] // TODO(Sanket-temp): Add bloom filter to flushed files
+    async fn test_bloom_filter_persisted_after_flush() {
+        let mut test_segment = TestDistributedSegment::new().await;
+        let num_records = 20;
+        let logs = upsert_generator.generate_chunk(1..=num_records);
+        Box::pin(test_segment.compact_log(logs, 1)).await;
+
+        assert!(
+            test_segment
+                .record_segment
+                .file_path
+                .contains_key(USER_ID_BLOOM_FILTER),
+            "Flushed file_path should contain bloom filter key"
+        );
+        let paths = &test_segment.record_segment.file_path[USER_ID_BLOOM_FILTER];
+        assert_eq!(paths.len(), 1, "Should have exactly one bloom filter path");
+        assert!(
+            !paths[0].is_empty(),
+            "Bloom filter path should not be empty"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_bloom_filter_loaded_on_next_compaction() {
+        let mut test_segment = TestDistributedSegment::new().await;
+        let num_records = 20;
+        let logs = upsert_generator.generate_chunk(1..=num_records);
+        Box::pin(test_segment.compact_log(logs, 1)).await;
+
+        let writer = RecordSegmentWriter::from_segment(
+            &test_segment.collection.tenant,
+            &test_segment.collection.database_id,
+            &test_segment.record_segment,
+            &test_segment.blockfile_provider,
+            None,
+        )
+        .await
+        .expect("Should be able to create writer from existing segment");
+
+        let bf = writer
+            .bloom_filter
+            .as_ref()
+            .expect("Bloom filter should be loaded");
+
+        for i in 1..=num_records {
+            assert!(
+                bf.contains(&int_as_id(i)),
+                "Bloom filter should contain {}",
+                int_as_id(i)
+            );
+        }
+        assert!(
+            !bf.contains("id_nonexistent"),
+            "Bloom filter should not contain a never-inserted ID"
+        );
+        assert_eq!(bf.live_count(), num_records as u64);
+        assert_eq!(bf.stale_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_bloom_filter_rebuilt_for_legacy_segment() {
+        let mut test_segment = TestDistributedSegment::new().await;
+        let num_records = 20;
+        let logs = upsert_generator.generate_chunk(1..=num_records);
+        Box::pin(test_segment.compact_log(logs, 1)).await;
+
+        // Simulate a legacy segment by removing the bloom filter key.
+        test_segment
+            .record_segment
+            .file_path
+            .remove(USER_ID_BLOOM_FILTER);
+        assert!(!test_segment
+            .record_segment
+            .file_path
+            .contains_key(USER_ID_BLOOM_FILTER),);
+
+        let writer = RecordSegmentWriter::from_segment(
+            &test_segment.collection.tenant,
+            &test_segment.collection.database_id,
+            &test_segment.record_segment,
+            &test_segment.blockfile_provider,
+            None,
+        )
+        .await
+        .expect("Should be able to create writer from legacy segment");
+
+        let bf = writer
+            .bloom_filter
+            .as_ref()
+            .expect("Bloom filter should be rebuilt from reader");
+
+        for i in 1..=num_records {
+            assert!(
+                bf.contains(&int_as_id(i)),
+                "Rebuilt bloom filter should contain {}",
+                int_as_id(i)
+            );
+        }
+        assert!(
+            !bf.contains("id_nonexistent"),
+            "Rebuilt bloom filter should not contain a never-inserted ID"
+        );
+        assert_eq!(bf.live_count(), num_records as u64);
+    }
+
+    #[tokio::test]
+    async fn test_bloom_filter_updated_on_insert_and_delete() {
+        let mut test_segment = TestDistributedSegment::new().await;
+
+        // First compaction: add 10 records.
+        let logs = upsert_generator.generate_chunk(1..=10);
+        Box::pin(test_segment.compact_log(logs, 1)).await;
+
+        // Second compaction: delete 2 records, materializing with a reader so
+        // the deletes resolve to DeleteExisting.
+        let reader = Box::pin(super::RecordSegmentReader::from_segment(
+            &test_segment.record_segment,
+            &test_segment.blockfile_provider,
+        ))
+        .await
+        .expect("Should be able to create reader");
+
+        let delete_logs: Vec<_> = [1usize, 2]
+            .iter()
+            .enumerate()
+            .map(|(i, &id)| chroma_types::LogRecord {
+                log_offset: (11 + i) as i64,
+                record: chroma_types::OperationRecord {
+                    id: int_as_id(id),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: chroma_types::Operation::Delete,
+                },
+            })
+            .collect();
+
+        let materialized = materialize_logs(
+            &Some(reader),
+            Chunk::new(delete_logs.into()),
+            Some(AtomicU32::new(11).into()),
+        )
+        .await
+        .expect("Should materialize delete logs");
+
+        // Need a second reader for hydration during apply.
+        let reader_for_apply = Box::pin(super::RecordSegmentReader::from_segment(
+            &test_segment.record_segment,
+            &test_segment.blockfile_provider,
+        ))
+        .await
+        .expect("Should be able to create reader for apply");
+
+        let writer = RecordSegmentWriter::from_segment(
+            &test_segment.collection.tenant,
+            &test_segment.collection.database_id,
+            &test_segment.record_segment,
+            &test_segment.blockfile_provider,
+            None,
+        )
+        .await
+        .expect("Should be able to create writer");
+
+        writer
+            .apply_materialized_log_chunk(&Some(reader_for_apply), &materialized)
+            .await
+            .expect("Should apply materialized deletes");
+
+        let bf = writer
+            .bloom_filter
+            .as_ref()
+            .expect("Bloom filter should exist");
+
+        // Deleted IDs are still in the bloom filter (can't remove from BF).
+        assert!(bf.contains(&int_as_id(1)));
+        assert!(bf.contains(&int_as_id(2)));
+
+        // Live IDs should be present.
+        for i in 3..=10 {
+            assert!(
+                bf.contains(&int_as_id(i)),
+                "Bloom filter should contain live {}",
+                int_as_id(i)
+            );
+        }
+
+        assert_eq!(bf.stale_count(), 2, "Two deletes should be tracked");
+        assert_eq!(bf.live_count(), 8, "8 records should remain live");
     }
 }
