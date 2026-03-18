@@ -205,47 +205,53 @@ fn bench_quantize_scan(c: &mut Criterion) {
         let padded_bytes = Code::<1>::packed_len(dim);
         let cn = c_norm(&centroid);
 
-        group.throughput(Throughput::Bytes((BATCH * 2 * dim * 4) as u64));
+        group.throughput(Throughput::Bytes((2 * dim * 4) as u64));
         desc!(
             format!("quant-4bit/{dim}"),
-            format!("{BATCH} embeddings → 4-bit ray-walk codes")
+            format!("per-call avg over {BATCH} embeddings; 4-bit ray-walk codes")
         );
         group.bench_with_input(BenchmarkId::new("quant-4bit", dim), &dim, |b, _| {
+            let mut idx = 0usize;
             b.iter(|| {
-                for emb in &embeddings {
-                    black_box(Code::<4>::quantize(emb, &centroid));
-                }
+                let emb = &embeddings[idx];
+                let d = black_box(Code::<4>::quantize(emb, &centroid));
+                idx = (idx + 1) % BATCH;
+                d
             });
         });
 
-        group.throughput(Throughput::Bytes((BATCH * 2 * dim * 4) as u64));
+        group.throughput(Throughput::Bytes((2 * dim * 4) as u64));
         desc!(
             format!("quant-1bit/{dim}"),
-            format!("{BATCH} embeddings → sign-bit codes")
+            format!("per-call avg over {BATCH} embeddings; sign-bit codes")
         );
         group.bench_with_input(BenchmarkId::new("quant-1bit", dim), &dim, |b, _| {
+            let mut idx = 0usize;
             b.iter(|| {
-                for emb in &embeddings {
-                    black_box(Code::<1>::quantize(emb, &centroid));
-                }
+                let emb = &embeddings[idx];
+                let d = black_box(Code::<1>::quantize(emb, &centroid));
+                idx = (idx + 1) % BATCH;
+                d
             });
         });
 
-        group.throughput(Throughput::Bytes((BATCH * dim * 4) as u64));
+        group.throughput(Throughput::Bytes((dim * 4) as u64));
         desc!(
             format!("quant-query/{dim}"),
             format!(
-                "{BATCH} queries: residual alloc + c_dot_q + q_norm + QuantizedQuery::new"
+                "per-call avg over {BATCH} queries; residual alloc + c_dot_q + q_norm + QuantizedQuery::new"
             )
         );
         group.bench_with_input(BenchmarkId::new("quant-query", dim), &dim, |b, _| {
+            let mut idx = 0usize;
             b.iter(|| {
-                for query in &embeddings {
-                    let r_q: Vec<f32> = query.iter().zip(&centroid).map(|(q, c)| q - c).collect();
-                    let cdq = c_dot_q(&centroid, &r_q);
-                    let qn = q_norm(&centroid, &r_q);
-                    black_box(QuantizedQuery::new(&r_q, padded_bytes, cn, cdq, qn));
-                }
+                let query = &embeddings[idx];
+                let r_q: Vec<f32> = query.iter().zip(&centroid).map(|(q, c)| q - c).collect();
+                let cdq = c_dot_q(&centroid, &r_q);
+                let qn = q_norm(&centroid, &r_q);
+                let d = black_box(QuantizedQuery::new(&r_q, padded_bytes, cn, cdq, qn));
+                idx = (idx + 1) % BATCH;
+                d
             });
         });
     }
@@ -398,16 +404,13 @@ fn bench_distance_scan(c: &mut Criterion) {
     );
     {
         let mut idx = 0usize;
-        let mut count = 0u64;
         group.bench_function("dq-fp/scan", |b| {
             b.iter(|| {
-                count += 1;
                 let d = black_box(df.distance(&scan_raw_vecs[idx], &scan_raw_query));
                 idx = (idx + 1) % SCAN_N;
                 d
             });
         });
-        eprintln!("  dq-fp/scan iterations: {count}");
     }
 
     group.throughput(Throughput::Bytes(Code::<4>::size(SCAN_DIM) as u64));
@@ -417,17 +420,14 @@ fn bench_distance_scan(c: &mut Criterion) {
     );
     {
         let mut idx = 0usize;
-        let mut count = 0u64;
         group.bench_function("dq-4f/scan", |b| {
             b.iter(|| {
-                count += 1;
                 let code = Code::<4, _>::new(codes_4[idx].as_slice());
                 let d = black_box(code.distance_query(&df, &r_q, cn, cdq, qn));
                 idx = (idx + 1) % SCAN_N;
                 d
             });
         });
-        eprintln!("  dq-4f/scan iterations: {count}");
     }
 
     group.throughput(Throughput::Bytes(Code::<1>::size(SCAN_DIM) as u64));
@@ -438,17 +438,14 @@ fn bench_distance_scan(c: &mut Criterion) {
     {
         let qq = QuantizedQuery::new(&r_q, padded_bytes, cn, cdq, qn);
         let mut idx = 0usize;
-        let mut count = 0u64;
         group.bench_function("dq-bw/scan", |b| {
             b.iter(|| {
-                count += 1;
                 let code = Code::<1, _>::new(codes_1[idx].as_slice());
                 let d = black_box(code.distance_quantized_query(&df, &qq));
                 idx = (idx + 1) % SCAN_N;
                 d
             });
         });
-        eprintln!("  dq-bw/scan iterations: {count}");
     }
 
     group.throughput(Throughput::Bytes(2 * Code::<1>::size(SCAN_DIM) as u64));
@@ -461,10 +458,8 @@ fn bench_distance_scan(c: &mut Criterion) {
     );
     {
         let mut idx = 0usize;
-        let mut count = 0u64;
         group.bench_function("dc-1bit/scan", |b| {
             b.iter(|| {
-                count += 1;
                 let a = Code::<1, _>::new(codes_1[idx].as_slice());
                 let bb = Code::<1, _>::new(codes_1[idx + 1].as_slice());
                 let d = black_box(a.distance_code(&bb, &df, cn, SCAN_DIM));
@@ -472,7 +467,6 @@ fn bench_distance_scan(c: &mut Criterion) {
                 d
             });
         });
-        eprintln!("  dc-1bit/scan iterations: {count}");
     }
 
     group.throughput(Throughput::Bytes(2 * Code::<1>::size(SCAN_DIM) as u64));
@@ -485,10 +479,8 @@ fn bench_distance_scan(c: &mut Criterion) {
     );
     {
         let mut idx = 0usize;
-        let mut count = 0u64;
         group.bench_function("dc-1bit/scan/simsimd_hamming", |b| {
             b.iter(|| {
-                count += 1;
                 let a = codes_1[idx].as_slice();
                 let bb = codes_1[idx + 1].as_slice();
                 let d = black_box(<u8 as BinarySimilarity>::hamming(a, bb).unwrap_or(0.0));
@@ -496,7 +488,6 @@ fn bench_distance_scan(c: &mut Criterion) {
                 d
             });
         });
-        eprintln!("  dc-1bit/scan/simsimd_hamming iterations: {count}");
     }
 
     group.throughput(Throughput::Bytes(2 * Code::<1>::size(SCAN_DIM) as u64));
@@ -506,10 +497,8 @@ fn bench_distance_scan(c: &mut Criterion) {
     );
     {
         let mut idx = 0usize;
-        let mut count = 0u64;
         group.bench_function("dc-1bit/scan/rabitq_distance_code", |b| {
             b.iter(|| {
-                count += 1;
                 let a = Code::<1, _>::new(codes_1[idx].as_slice());
                 let bb = Code::<1, _>::new(codes_1[idx + 1].as_slice());
                 let d = black_box(rabitq_distance_code_public(0.0, a.correction(), a.norm(), a.radial(), bb.correction(), bb.norm(), bb.radial(), cn, &df));
@@ -517,7 +506,6 @@ fn bench_distance_scan(c: &mut Criterion) {
                 black_box(d);
             });
         });
-        eprintln!("  dc-1bit/scan/rabitq_distance_code iterations: {count}");
     }
 
     group.throughput(Throughput::Bytes(2 * Code::<4>::size(SCAN_DIM) as u64));
@@ -530,10 +518,8 @@ fn bench_distance_scan(c: &mut Criterion) {
     );
     {
         let mut idx = 0usize;
-        let mut count = 0u64;
         group.bench_function("dc-4bit/scan", |b| {
             b.iter(|| {
-                count += 1;
                 let a = Code::<4, _>::new(codes_4[idx].as_slice());
                 let bb = Code::<4, _>::new(codes_4[idx + 1].as_slice());
                 let d = black_box(a.distance_code(&bb, &df, cn, SCAN_DIM));
@@ -541,7 +527,6 @@ fn bench_distance_scan(c: &mut Criterion) {
                 d
             });
         });
-        eprintln!("  dc-4bit/scan iterations: {count}");
     }
 
     group.finish();

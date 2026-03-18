@@ -1,9 +1,83 @@
-tmp
 cargo bench -p chroma-index --bench hierarchical_centroid_profile -- \
-  --dataset wikipedia-en --initial-centroids 10000 --threads 32 \
-  --data-vectors 1000 --branching-factor 100 --beam-width 10 \
+  --dataset wikipedia-en --initial-centroids 1000000 --threads 32 \
+  --data-vectors 1000 --branching-factor 100 --beam-width 100 \
   --expansion-factor 0 --max-replicas 1 --beam-tau 1.0 \
   --centroid-bits 1 --beam-max 50000
+
+warning: `chroma-index` (bench "hierarchical_centroid_profile") generated 3 warnings
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.34s
+     Running benches/hierarchical_centroid_profile.rs (target/release/deps/hierarchical_centroid_profile-2d0bb9373c1dad52)
+Loading Wikipedia EN from HuggingFace Hub...
+Loading 1.00M vectors from wikipedia-en (dim=1024)...
+
+=== Hierarchical Centroid Tree Profile ===
+Dim: 1024 | Metric: L2 | Centroid bits: 1
+Initial centroids: 1.00M | Data vectors / queries: 1.0K | Threads: 32 | Rerank: [1, 4, 16]
+Branching factor: 100 | Beam: dynamic (tau=1.00, min=10, max=50000) | K-means: 10 iters
+Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
+
+--- Phase 1: Loading cached tree from target/hierarchical_cache/tree_WikipediaEn_1000000_bf100_ki10_L2_1.bin ---
+Loaded 1.00M centroids in 6.30s (depth=4)
+
+--- Tree Structure ---
+  *  Level 0 : 1 internal node, 100 total children (fan-out: min=100, avg=100, max=100)
+  |
+  |  Level 1 : 100 internal nodes, 10.0K total children (fan-out: min=100, avg=100, max=100)
+  |
+  |  Level 2 : 4.2K internal nodes, 419.5K total children (fan-out: min=74, avg=100, max=100)
+  |  Level 2 : 5.8K leaves, 335.7K total vectors (size: min=1, p25=38, p50=59, p75=79, max=100)
+  |
+  |  Level 3 : 419.5K leaves, 664.3K total vectors (size: min=1, p25=1, p50=1, p75=2, max=41)
+
+Total entries: 1.00M | Unique centroids: 1.00M | Avg replication: 1.00x
+Phase 1 wall clock: 6.57s
+
+--- Precomputing recall (1000 queries per config) ---
+  tau=0.10 rerank= 1x => R@10:  46.0%  R@100:  24.7%
+  tau=0.10 rerank= 4x => R@10:  46.0%  R@100:  25.9%
+  tau=0.10 rerank=16x => R@10:  46.0%  R@100:  25.9%
+  tau=0.50 rerank= 1x => R@10:  92.8%  R@100:  48.7%
+  tau=0.50 rerank= 4x => R@10:  94.9%  R@100:  61.6%
+  tau=0.50 rerank=16x => R@10:  95.0%  R@100:  61.7%
+  tau=1.00 rerank= 1x => R@10:  96.9%  R@100:  51.1%
+  tau=1.00 rerank= 4x => R@10:  99.7%  R@100:  63.5%
+  tau=1.00 rerank=16x => R@10:  99.8%  R@100:  63.5%
+
+=== Phase 2: SPANN Workload (1.0K data vectors, 32 threads) ===
+|   Tau | Rerank |      R@10 |     R@100 |       Wall |    Nav avg |   Srch avg |   Rank avg |    Spn avg |   Drop avg |
+|-------|--------|----------|----------|------------|------------|------------|------------|------------|------------|
+|  0.10 |     1x |     46.0% |     24.7% |    24.48ms |    215.6µs |    215.6µs |        0ns |      766ns |      400ns |
+|  0.10 |     4x |     46.0% |     25.9% |    36.45ms |    322.0µs |    262.1µs |     59.9µs |      1.1µs |      484ns |
+|  0.10 |    16x |     46.0% |     25.9% |    43.00ms |    363.6µs |    261.4µs |    102.2µs |      1.2µs |      555ns |
+|  0.50 |     1x |     92.8% |     48.7% |      3.60s |     8.59ms |     8.59ms |        0ns |      1.6µs |      420ns |
+|  0.50 |     4x |     94.9% |     61.6% |      3.51s |     8.50ms |     8.37ms |    131.0µs |      1.3µs |      387ns |
+|  0.50 |    16x |     95.0% |     61.7% |      3.58s |     9.05ms |     8.52ms |    530.9µs |      1.4µs |      480ns |
+|  1.00 |     1x |     96.9% |     51.1% |     13.58s |    85.10ms |    85.10ms |        0ns |      1.9µs |      487ns |
+|  1.00 |     4x |     99.7% |     63.5% |     12.25s |    77.62ms |    77.45ms |    170.5µs |      1.8µs |      446ns |
+|  1.00 |    16x |     99.8% |     63.5% |     12.28s |    78.15ms |    77.49ms |    668.1µs |      1.8µs |      404ns |
+
+=== Phase 3: Pure Search (1.0K queries, 32 threads) ===
+|   Tau | Rerank |      R@10 |     R@100 |       Wall |    Nav avg |   Srch avg |   Rank avg |
+|-------|--------|----------|----------|------------|------------|------------|------------|
+|  0.10 |     1x |     46.0% |     24.7% |    10.49ms |    240.1µs |    240.1µs |        0ns |
+|  0.10 |     4x |     46.0% |     25.9% |    12.96ms |    360.2µs |    270.2µs |     90.0µs |
+|  0.10 |    16x |     46.0% |     25.9% |    15.98ms |    419.2µs |    277.2µs |    141.9µs |
+|  0.50 |     1x |     92.8% |     48.7% |      1.16s |     8.52ms |     8.52ms |        0ns |
+|  0.50 |     4x |     94.9% |     61.6% |      1.13s |     8.48ms |     8.34ms |    138.6µs |
+|  0.50 |    16x |     95.0% |     61.7% |      1.15s |     9.11ms |     8.56ms |    550.4µs |
+|  1.00 |     1x |     96.9% |     51.1% |      4.48s |    86.70ms |    86.70ms |        0ns |
+|  1.00 |     4x |     99.7% |     63.5% |      3.98s |    77.63ms |    77.46ms |    170.2µs |
+|  1.00 |    16x |     99.8% |     63.5% |      4.01s |    78.28ms |    77.61ms |    668.9µs |
+
+=== Legend ===
+R@10/R@100 - recall vs precomputed ground truth (cached)
+navigate   - search + rerank total (nprobe=64)
+search     - tree traversal (1-bit or f32)
+rerank     - f32 rescoring of top candidates
+spawn      - append to overflow buffer (from cluster split)
+drop       - add to tombstone set (from cluster split/merge)
+wall       - wall-clock time for the full phase
+
 
 1M Centroids (reranking, thread scaling)
 cargo bench -p chroma-index --bench hierarchical_centroid_profile --  --dataset wikipedia-en --initial-centroids 1000000 --threads 32 --data-vectors 1000 --num-queries 1000 --branching-factor 100 --beam-width 10  --expansion-factor 0 --max-replicas 1 --beam-tau 1.0 --centroid-bits 1 --beam-max 50000 --phase-2 --phase-3

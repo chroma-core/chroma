@@ -1,4 +1,46 @@
-1M centroids (insert 10k data vectors) distance_query
+1M centroids (insert 1k data vectors)
+cargo bench -p chroma-index --bench flat_centroid_profile -- --dataset wikipedia-en --initial-centroids 1000000 --data-vectors 1000 --threads 1 --phase-3
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.35s
+     Running benches/flat_centroid_profile.rs (target/release/deps/flat_centroid_profile-38cd2afab553f60e)
+Loading Wikipedia EN from HuggingFace Hub...
+Loading 1.00M vectors from wikipedia-en (dim=1024)...
+
+=== Flat Centroid Index Profile ===
+Dim: 1024 | Metric: L2 | Centroid bits: f32 | Threads: 1
+Initial centroids: 1.00M | Data vectors: 1.0K | Queries: 100
+Scan footprint: 3906.2 MB (full precision)
+Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
+
+--- Phase 1: Loading cached flat index from target/flat_cache/flat_WikipediaEn_1000000_f32_L2.bin ---
+Loaded 1.00M centroids in 4.10s
+Index size: 1000000
+Recall evaluated (100 queries, k=100)
+
+--- Phase 2 skipped (pass --phase-2 to enable) ---
+
+--- Phase 3: Search only (100 queries, 1 threads, k=100, rerank: 1x) ---
+| rerank |   Recall@10 |   Recall@100 |   scan_avg | rerank_avg |  total_avg |       wall |
+|--------|-------------|--------------|------------|------------|------------|------------|
+|     1x |     100.00% |      100.00% |   300.34ms |        0ns |   300.34ms |     30.03s |
+
+=== Legend ===
+Shared columns:
+  rerank     - rerank multiplier
+  Recall@10  - fraction of true top-10 neighbors found
+  Recall@100 - fraction of true top-100 neighbors found
+  scan_avg   - average quantized/f32 scan time per query
+  rerank_avg - average rerank time per query
+  total_avg  - scan + rerank_avg (= end-to-end query latency)
+  wall       - wall-clock time for the full phase
+Phase 2 extra columns:
+  spawn_avg  - avg time to append a new centroid (from cluster split)
+  drop_avg   - avg time to tombstone a centroid (from cluster split/merge)
+
+
+
+
+
+1M centroids (insert 10k data vectors)
 cargo bench -p chroma-index --bench flat_centroid_profile -- --dataset wikipedia-en --initial-centroids 1000000 --data-vectors 10000 --threads 32
    Compiling chroma-index v0.1.0 (/home/ubuntu/chroma/rust/index)
     Finished `bench` profile [optimized + debuginfo] target(s) in 20.55s
@@ -59,6 +101,16 @@ Phase 3 columns:
   Recall@100- fraction of true top-100 neighbors found
   Avg lat   - average single-query search latency
   Wall      - wall-clock time for all queries at this scale/rerank combo
+
+
+
+
+
+1M centroids, 1 thread
+cargo bench -p chroma-index --bench flat_centroid_profile -- --dataset wikipedia-en --initial-centroids 1000000 --data-vectors 1000 --threads 1 --phase-3
+
+
+
 
 
 

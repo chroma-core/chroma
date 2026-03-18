@@ -1,9 +1,10 @@
 - [RaBitQ Implementation](#rabitq-implementation)
   - [Primitives](#primitives)
   - [Core Functions](#core-functions)
-    - [r6i.8xlarge](#r6i8xlarge)
-    - [1 Bit vs 4 Bit vs FP (distance query)](#1-bit-vs-4-bit-vs-fp-distance-query)
+    - [Hot cache](#hot-cache)
+    - [Cold Cache](#cold-cache)
     - [Thread Scaling](#thread-scaling)
+    - [Rerank / Error (+ latency)](#rerank--error--latency)
 - [Comparing Different Central Indices](#comparing-different-central-indices)
   - [Summary](#summary)
   - [Legend:](#legend)
@@ -12,59 +13,76 @@
 
 # RaBitQ Implementation
 
+- **distance_code** -- estimate distance between two stored codes (code vs code). Uses Hamming distance on packed sign bits.
+- **distance_query** -- estimate distance from a stored code to a query vector. 4-bit (`dq-4f`) uses an f32 query vector; 1-bit (`dq-bw`) uses a 4-bit `QuantizedQuery`
+- **quantize** -- encode a data vector into a quantized code (4-bit ray-walk or 1-bit sign extraction).
+- **quantize_query** -- build a `QuantizedQuery` from a query residual (min/max, quantize elements, decompose into bit planes).
+
 ## Primitives
 
 | Function                 | Primitive                    | Benchmark Name                                         | What is tested | Latency    | Throughput   |
 | ------------------------ | ---------------------------- | ------------------------------------------------------ | -------------- | ---------- | ------------ |
 | distance_code            | simsimd hamming              | distance_code/dc-1bit/simsimd_hamming/1024            | Each call. Scan 1M codes | 11.984  | 22.382 GiB/s |
-| *distance_quantized_query | AND+popcount [B1+B2]         | primitives/dq-bw/and_popcount/interleaved_chunks/1024  |                | 13.310 ns  | 44.777 GiB/s |
-| *quantize                 | fused reductions             | primitives/quant-1bit/fused_reductions/1024            |                | 669.43 ns  | 11.396 GiB/s |
-| *quantize_query           | bit_plane_decompose [P4+]    | primitives/quant-query/bit_plane_decompose/byte_chunks/1024 |           | 1.2742 us  | 2.9934 GiB/s |
+| distance_quantized_query | AND+popcount [B1+B2]         | primitives/dq-bw/and_popcount/interleaved_chunks/1024  |                | 13.418 ns  | 44.422 GiB/s |
+| quantize                 | fused reductions             | primitives/quant-1bit/fused_reductions/1024            |                | 675.80 ns  | 11.289 GiB/s |
+| quantize_query           | bit_plane_decompose [P4+]    | primitives/quant-query/bit_plane_decompose/byte_chunks/1024 |           | 1.2790 µs  | 2.9827 GiB/s |
 
-* OUTDATED: Need to inspect the test setup. Ensure it is measuring the function and not the whole scan.
 
 ## Core Functions
 
 [../../../benches/vector/quantization.rs](../../../benches/vector/quantization.rs)
 
-### r6i.8xlarge
+Tested on r6i.8xlarge
 
-Scan of 1M codes (and 1 query for distance_query functions). Take the average latency of each call.
+### Hot cache
+Same pair/vector every call. Function latency should be comparable to the total latency of its constituent primitives (above).
 
-| Function       | Benchmark                                                  | 4-bit               | 1-bit               | Speedup |
-| -------------- | ---------------------------------------------------------- | ------------------- | ------------------- | ------- |
-| distance_code  | distance_query/dc-4bit/scan vs distance_query/dc-1bit/scan | 549ns, 1.77 GiB/s   | 20.059 ns, 13.371 GiB/s | 27x     |
-| distance_query | distance_query/dq-4f/scan vs distance_query/dq-bw/scan     | 381 ns, 1.28 GiB/s  | 29 ns, 4.6 GiB/s    | 13x     |
-| quantize data  | quantize/quant-4bit/1024 vs quantize/quant-1bit/1024       | 43.2 ms, 92.5 MiB/s | 576 µs, 6.78 GiB/s  | ~75x    |
-| quantize query | primitives/quant-query/full/1024                           | N/A                 | 2.21 µs, 1.73 GiB/s | --      |
+| Function       | Full Precision                              | 4-bit                                        | 1-bit                                       | Speedup (4b vs 1b) |
+| -------------- | ------------------------------------------- | -------------------------------------------- | ------------------------------------------- | ------------------- |
+| distance_code  | --                                          | 575 ns, 1.70 GiB/s (distance/dc-4bit/1024)   | 38.4 ns, 6.98 GiB/s (distance/dc-1bit/1024) | 15x                 |
+| distance_query | 73.67 ns, 103.56 GiB/s (distance/dq-fp/1024) | 330 ns, 13.0 GiB/s (distance/dq-4f/1024)     | 18.1 ns, 218 GiB/s (distance/dq-bw/1024)   | 18x                 |
+| quantize data  | --                                          | 51.8 µs, 151 MiB/s (quantize/quant-4bit/1024) | 1.07 µs, 7.15 GiB/s (quantize/quant-1bit/1024) | ~49x             |
+| quantize query | --                                          | N/A                                          | 4.77 µs, 819 MiB/s (quantize/quant-query/1024) | --               |
 
+### Cold Cache
+Scan of 100k codes/queries to simulate a cluster scan workload. Per-call average.
+Because this is a scan, codes are not cached and we expect the latency to be higher than the hot cache variant.
+
+| Function       | Full Precision                                    | 4-bit                                                  | 1-bit                                                 | Speedup (4b vs 1b) |
+| -------------- | ------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------- | ------------------- |
+| distance_code  | --                                                | 620 ns, 1.57 GiB/s (distance_scan/dc-4bit/scan)        | 20.1 ns, 13.3 GiB/s (distance_scan/dc-1bit/scan)      | 31x                 |
+| distance_query | 319.29 ns, 11.947 GiB/s (distance_scan/dq-fp/scan) | 365 ns, 1.33 GiB/s (distance_scan/dq-4f/scan)          | 25.5 ns, 5.26 GiB/s (distance_scan/dq-bw/scan)        | 14x                 |
+| quantize data  | --                                                | 82.6 µs, 94.6 MiB/s (quantize_scan/quant-4bit/1024)    | 1.04 µs, 7.33 GiB/s (quantize_scan/quant-1bit/1024)   | ~79x                |
+| quantize query | --                                                | N/A                                                    | 4.80 µs, 815 MiB/s (quantize_scan/quant-query/1024)   | --                  |
+
+Note. 4-bit is similar to FP because the 4-bit distance query function compares to a full precision query vector.
 
 [performance_r6i.8xlarge.txt](performance_r6i.8xlarge.txt)
-
-### 1 Bit vs 4 Bit vs FP (distance query)
-
-k=100, vectors=1000000, single thread, 1000 queries/samples
-
-| Metric             | [FP](saved_benchmarks/flat_full_precision.txt) | [4 Bit](saved_benchmarks/flat_4bit.txt) | [1 Bit](saved_benchmarks/flat_1bit.txt) |
-| ------------------ | ---------------------------------------------- | --------------------------------------- | --------------------------------------- |
-| Navigate latency   | 236ms                                          | 822ms                                   | 298ms                                   |
-| Recall@100         | 100%                                           | 90%                                     | 89% (Rerank=8x)                         |
-
 
 ### Thread Scaling
 
 [thread_scaling_r6i.8xlarge.txt](thread_scaling_r6i.8xlarge.txt)
 
 
-| Operation  | What it does                   | 1 thread            | 16 threads         | 32 threads         | 1->16 | 16->32 (HT) |
-| ---------- | ------------------------------ | ------------------- | ------------------ | ------------------ | ----- | ----------- |
-| quant-4bit | 4-bit data encode (ray-walk)   | 86.9 ms, 46 MiB/s   | 6.09 ms, 656 MiB/s | 4.54 ms, 880 MiB/s | 14.3x | 1.34x       |
-| quant-1bit | 1-bit data encode (dual accum) | 1.17 ms, 3.35 GiB/s | 108 us, 36.1 GiB/s | 114 us, 34.2 GiB/s | 10.8x | **0.95x**   |
-| dq-4f      | 4-bit code vs f32 query        | 3.48 ms, 1.27 GiB/s | 261 us, 16.9 GiB/s | 168 us, 26.2 GiB/s | 13.3x | 1.55x       |
-| dq-float   | 1-bit code vs f32 query        | 2.94 ms, 1.38 GiB/s | 224 us, 18.1 GiB/s | 143 us, 28.3 GiB/s | 13.1x | 1.57x       |
-| dq-bw      | 1-bit code vs QuantizedQuery   | 4.84 ms, 855 MiB/s  | 345 us, 11.7 GiB/s | 250 us, 16.1 GiB/s | 14.0x | 1.38x       |
-| d-lut      | 1-bit code vs BatchQueryLuts   | 7.02 ms, 589 MiB/s  | 490 us, 8.24 GiB/s | 401 us, 10.1 GiB/s | 14.3x | 1.22x       |
+| Function       | Benchmark                   | 1 thread              | 16 threads            | 32 threads            | 1->16 | 16->32 (HT) |
+| -------------- | --------------------------- | --------------------- | --------------------- | --------------------- | ----- | ------------ |
+| quantize 4-bit | thread_scaling/quant-4bit   | 84.1 ms, 47.6 MiB/s  | 6.94 ms, 576 MiB/s   | 5.06 ms, 790 MiB/s   | 12.1x | 1.37x        |
+| quantize 1-bit | thread_scaling/quant-1bit   | 1.19 ms, 3.28 GiB/s  | 342 µs, 11.4 GiB/s   | 84.6 µs, 46.2 GiB/s  | 3.5x  | 4.04x        |
+| distance_query 4-bit | thread_scaling/dq-4f  | 2.93 ms, 1.50 GiB/s  | 232 µs, 19.0 GiB/s   | 157 µs, 28.0 GiB/s   | 12.6x | 1.48x        |
+| distance_query 1-bit | thread_scaling/dq-bw  | 4.83 ms, 934 MiB/s   | 719 µs, 6.13 GiB/s   | 194 µs, 22.7 GiB/s   | 6.7x  | 3.70x        |
 
+### Rerank / Error (+ latency)
+
+1 Bit vs 4 Bit vs FP (distance query)
+
+k=100, vectors=1M, 1 thread, 1k queries/samples
+
+| Metric           | [FP](saved_benchmarks/flat_full_precision.txt) | [4 Bit](saved_benchmarks/flat_4bit.txt) | [1 Bit](saved_benchmarks/flat_1bit.txt) |
+| ---------------- | ---------------------------------------------- | --------------------------------------- | --------------------------------------- |
+| Navigate latency | 300.34ms                                       | 775.79ms                                | 23.38ms                                 |
+| Recall@100       | 100%                                           | 89.94%                                  | 95.56% (Rerank=16x)                     |
+
+4 bit is slower than FP because 4bit distance query is slower than fp distance query (see above), which is because 4bit distance query uses a full precision query vector and it's probably not as optimized as the library dot product for full precision vectors.
 
 # Comparing Different Central Indices
 
@@ -79,8 +97,8 @@ What central index will give us the fastest index build times?
 | ---------------------------------------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | -------------- | --------------------------------------------------------------- |
 | Flat - 1 bit, global lock                | [26.49ms (R=95.56%, RR=16x)](saved_benchmarks/flat_1bit.txt)                           | [43.12ms (R=95.56%, RR=16x)](saved_benchmarks/flat_1bit.txt)                      | Linear         | ?                                                               |
 | USearch - 1 bit                          | [1.68ms (R=94.09%, RR=16x)](saved_benchmarks/usearch_1bit.txt)                          | [1.99ms (R=94.34%, RR=16x)](saved_benchmarks/usearch_1bit.txt)                     | O(linear)      | [?](saved_benchmarks/quant_spann_1bit.txt)                      |
-| Hierarchical SPANN - 1 bit, global lock  | [?](saved_benchmarks/hierarchical_centroid_profile_1bit.txt)                            | [8.27ms (R=61.5%, RR=2x)](saved_benchmarks/hierarchical_centroid_profile_1bit.txt) | Linear         | ?                                                               |
 | Usearch - 4 bit|[5.08ms (R=95.30% RR=8x)](saved_benchmarks/usearch_4bit.txt)|[4.98ms (R=95.44%, RR=8x)](saved_benchmarks/usearch_4bit.txt)|?|-|
+| Hierarchical SPANN - 1 bit, global lock  | [?](saved_benchmarks/hierarchical_centroid_profile_1bit.txt)                            | [8.27ms (R=61.5%, RR=2x)](saved_benchmarks/hierarchical_centroid_profile_1bit.txt) | Linear         | ?                                                               |
 
 
 ## Legend:

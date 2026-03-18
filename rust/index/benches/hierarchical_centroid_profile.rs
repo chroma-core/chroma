@@ -549,7 +549,7 @@ fn main() {
                     index.search_with_beam(query, NPROBE, index.beam_width, Some(tau))
                 } else {
                     index.search_with_rerank(
-                        query, NPROBE, NPROBE * rf, index.beam_width, Some(tau),
+                        query, NPROBE, rf, index.beam_width, Some(tau),
                     )
                 };
 
@@ -583,6 +583,9 @@ fn main() {
         (3, "Pure Search", false),
     ];
 
+    let num_levels = tree_depth(&index.root).saturating_sub(1).max(1);
+    let max_diag_levels = num_levels.min(4);
+
     for &(phase_num, phase_label, with_writes) in phases {
         let skip = match phase_num {
             2 => args.skip_phase_2,
@@ -606,6 +609,7 @@ fn main() {
         }
         println!();
 
+        // Table header
         print!(
             "| {:>5} | {:>6} | {:>9} | {:>9} | {:>10} | {:>10} | {:>10} | {:>10}",
             "Tau", "Rerank", "R@10", "R@100", "Wall", "Nav avg", "Srch avg", "Rank avg"
@@ -613,11 +617,22 @@ fn main() {
         if with_writes {
             print!(" | {:>10} | {:>10}", "Spn avg", "Drop avg");
         }
+        if !with_writes {
+            for l in 1..=max_diag_levels {
+                print!(" | L{} beam | L{} R@10", l, l);
+            }
+        }
         println!(" |");
 
+        // Separator
         print!("|-------|--------|----------|----------|------------|------------|------------|------------");
         if with_writes {
             print!("|------------|------------");
+        }
+        if !with_writes {
+            for _ in 1..=max_diag_levels {
+                print!("|---------|--------");
+            }
         }
         println!("|");
 
@@ -671,7 +686,7 @@ fn main() {
                                         } else {
                                             let (_, search_dur, rerank_dur) =
                                                 index.search_with_rerank_timed(
-                                                    query_vec, NPROBE, NPROBE * rf,
+                                                    query_vec, NPROBE, rf,
                                                     index.beam_width, tau_override,
                                                 );
                                             let total = search_dur + rerank_dur;
@@ -745,6 +760,39 @@ fn main() {
                         format_nanos(stats.spawn.avg_nanos()),
                         format_nanos(stats.drop_op.avg_nanos()),
                     );
+                }
+                if !with_writes {
+                    // Per-level diagnostics: average beam size and R@10 at each level
+                    let mut level_beam_sum = vec![0usize; max_diag_levels];
+                    let mut level_r10_sum = vec![0.0f64; max_diag_levels];
+                    let mut level_count = vec![0usize; max_diag_levels];
+
+                    for (qi, query) in recall_query_vecs.iter().enumerate() {
+                        let gt = &ground_truths[qi];
+                        let gt_10: HashSet<u32> = gt.iter().take(10).copied().collect();
+                        let gt_100: HashSet<u32> = gt.iter().take(k).copied().collect();
+                        let lr = index.diagnose_level_recall(
+                            query, cfg.beam_width, &gt_10, &gt_100, Some(tau),
+                        );
+                        for entry in &lr {
+                            let idx = entry.level - 1;
+                            if idx < max_diag_levels {
+                                level_beam_sum[idx] += entry.beam_size;
+                                level_r10_sum[idx] += entry.reachable_10;
+                                level_count[idx] += 1;
+                            }
+                        }
+                    }
+
+                    for l in 0..max_diag_levels {
+                        if level_count[l] > 0 {
+                            let avg_beam = level_beam_sum[l] / level_count[l];
+                            let avg_r10 = level_r10_sum[l] / level_count[l] as f64 * 100.0;
+                            print!(" | {:>7} | {:>5.1}%", avg_beam, avg_r10);
+                        } else {
+                            print!(" |       - |     -");
+                        }
+                    }
                 }
                 println!(" |");
             }

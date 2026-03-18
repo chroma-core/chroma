@@ -34,6 +34,10 @@ Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
 |    256 |    8x |     99.45% |     92.95% |       8.03ms |       5.38ms |       2.65ms |       2.58ms |       78.7µs |     2047.0 |      8.0MB |       1.25ms |       5.03ms |        8.08s |
 |    256 |   16x |     99.85% |     97.33% |      16.50ms |      11.12ms |       5.39ms |       5.24ms |      151.4µs |     4094.8 |     16.0MB |       1.19ms |       5.06ms |       16.67s |
 
+Note: rr_scored is fractional sometimes because the index is being mutated concurrently.
+vectors are spawned and dropped during the workload. So occasionally a search returns a key that has already been dropped from the corpus map (or was never in it).
+That means scored.len() can be slightly less than fetch_k for some queries.
+
 === Phase 3: Search-Only Recall (200 queries, 32 threads) ===
 | nprobe | Rerank |       R@10 |      R@100 |     navigate |       search |       rerank |      rr_dist |      rr_sort |  rr_scored |   rr_bytes |
 |--------|--------|------------|------------|--------------|--------------|--------------|--------------|--------------|------------|------------|

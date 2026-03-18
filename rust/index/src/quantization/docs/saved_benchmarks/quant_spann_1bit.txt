@@ -1,5 +1,79 @@
-cargo bench -p chroma-index --bench quantized_spann -- --dataset wikipedia-en --checkpoint 1 --threads 32 --data-bits 1 --centroid-bits 1
+cargo bench -p chroma-index --bench quantized_spann  --features chroma-index/usearch -- --dataset wikipedia-en --checkpoint 1 --threads 32 --data-bits 1 --centroid-bits 1
+cargo bench -p chroma-index --bench quantized_spann  --features chroma-index/usearch -- --dataset wikipedia-en --checkpoint 1 --threads 32 --data-bits 1 --centroid-bits 1
+   Compiling chroma-index v0.1.0 (/home/ubuntu/chroma/rust/index)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 34.58s
+     Running benches/quantized_spann.rs (target/release/deps/quantized_spann-f5b26d0d1576127a)
+Loading Wikipedia EN from HuggingFace Hub...
+=== QuantizedSpannIndexWriter Benchmark ===
+Dataset: wikipedia-en (41.49M vectors, 1024 dims)
+Metric: Euclidean | Checkpoints: 1 | Threads: 32 | Data bits: 1 | Centroid bits: 1
+Centroid rerank: 1x | Data rerank factors: [4, 8, 16]
+Total vectors to index: 1.00M
 
+Checkpoint 1: 1.00M vec | load 11.61s | raw 11.50s | index 44.89s | commit 1.78s | 22279 vec/s
+  DataRerank 4x: np16=0.82/0.76 np32=0.87/0.83 np64=0.91/0.89 np128=0.94/0.93 np256=0.97/0.96 | rr_vecs=400 rr_data=1.6MB
+  DataRerank 8x: np16=0.82/0.76 np32=0.87/0.83 np64=0.91/0.89 np128=0.94/0.93 np256=0.97/0.96 | rr_vecs=800 rr_data=3.1MB
+  DataRerank 16x: np16=0.82/0.76 np32=0.87/0.83 np64=0.91/0.89 np128=0.94/0.93 np256=0.97/0.96 | rr_vecs=1600 rr_data=6.2MB
+
+=== Cluster Statistics ===
+| CP | Centroids |   Min |   Max | Median |   P90 |   P99 |    Avg |    Std |
+|----|-----------|-------|-------|--------|-------|-------|--------|--------|
+|  1 |      5.6K |    11 |   512 |    385 |   490 |   510 |  368.3 |  102.8 |
+
+=== Task Counts ===
+| CP |      add | navigate | register |    spawn |    scrub |    split |    merge | reassign |     drop |     load | load_raw | quantize |   search |  raw_add |   raw_rm |    q_add |     q_rm |
+|----|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|
+|  1 |    1.00M |    3.98M |        0 |    11.3K |   198.6K |     5.7K |        0 |    3.08M |     5.7K |   198.6K |    11.3K |    7.57M |     1.5K |    11.3K |     5.7K |    11.3K |     5.7K |
+
+=== Task Total Time ===
+| CP |      add | navigate | register |    spawn |    scrub |    split |    merge | reassign |     drop |     load | load_raw | quantize |   search |  raw_add |   raw_rm |    q_add |     q_rm | raw_pts |  raw/pt |    total |
+|----|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|---------|---------|----------|
+|  1 | 1269.80s |  256.50s |      0ns |    7.10s |    8.82s | 1433.00s |      0ns |  612.09s | 220.63ms |   5.56ms |   1.44ms |   12.83s |  338.40s |    5.26s |  47.92ms |    1.83s |  40.31ms |       0 |       - |   69.78s |
+
+=== Task Avg Time ===
+| CP |      add | navigate | register |    spawn |    scrub |    split |    merge | reassign |     drop |     load | load_raw | quantize |   search |  raw_add |   raw_rm |    q_add |     q_rm | rr_vecs | rr_data |
+|----|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|---------|---------|
+|  1 |   1.27ms |   64.4µs |        - |  626.0µs |   44.4µs | 251.45ms |        - |  198.4µs |   38.7µs |     27ns |    126ns |    1.7µs | 225.60ms |  463.8µs |    8.4µs |  161.2µs |    7.1µs |     933 |   3.6MB |
+
+=== Legend ===
+Write path:
+  add       - top-level add(id, embedding): navigate + register + balance
+  navigate  - query centroid HNSW index for nearest clusters
+  register  - quantize vector and append to target cluster(s)
+  spawn     - create a new cluster and insert centroid into HNSW indexes
+Balance path:
+  scrub     - load cluster from reader, remove tombstoned entries
+  split     - split an oversized cluster via 2-means into two new clusters
+  merge     - merge an undersized cluster into its nearest neighbor
+  reassign  - re-add a displaced vector after split/merge
+  drop      - remove a cluster from centroid indexes and load its raw embeddings
+I/O:
+  load      - load quantized cluster data from blockfile reader into memory
+  load_raw  - load raw f32 embeddings from blockfile reader into cache
+Quantization:
+  quantize  - encode a vector into a RaBitQ code relative to its centroid
+Search:
+  search    - full query: centroid navigate + cluster scan + rerank
+Derived:
+  raw_pts   - number of raw embedding points loaded during load_raw
+  raw/pt    - average time per raw embedding point (load_raw total / raw_pts)
+  total     - wall-clock time for the checkpoint (load + raw_write + index + commit)
+  rr_vecs   - avg number of full-precision vectors loaded per search (data rerank)
+  rr_data   - avg data volume of full-precision vectors per search (vecs x dims x 4B)
+
+
+=== Indexing Summary ===
+Total vectors: 1.00M
+Total time: 1.4m
+Overall throughput: 11655 vec/s
+
+=== Recall Summary (Data Rerank Sweep) ===
+|  CP |    DRR |  Vectors |    Index |   Commit | Queries | RR Vecs | RR Data |      nprobe=16      |      nprobe=32      |      nprobe=64      |     nprobe=128      |     nprobe=256      |
+|     |        |          |          |          |         |         |         |  R@10 R@100    Lat |  R@10 R@100    Lat |  R@10 R@100    Lat |  R@10 R@100    Lat |  R@10 R@100    Lat |
+|-----|--------|----------|----------|----------|---------|---------|---------|---------------------|---------------------|---------------------|---------------------|---------------------|
+|   1 |    4x |    1.00M |   44.89s |    1.78s |     100 |     400 |   1.6MB |  0.82  0.76  233ms |  0.87  0.83   67ms |  0.91  0.89  116ms |  0.94  0.93  205ms |  0.97  0.96  379ms |
+|   1 |    8x |    1.00M |   44.89s |    1.78s |     100 |     800 |   3.1MB |  0.82  0.76  286ms |  0.87  0.83   80ms |  0.91  0.89  126ms |  0.94  0.93  210ms |  0.97  0.96  383ms |
+|   1 |   16x |    1.00M |   44.89s |    1.78s |     100 |    1600 |   6.2MB |  0.82  0.76  425ms |  0.87  0.83  109ms |  0.91  0.89
 
 
 
@@ -163,7 +237,7 @@ Below is unclear if 1 bit centroids were used, or only 1 bit data vectors:
 
 
 # 16 threads
- nohup cargo bench -p chroma-index --bench quantized_spann -- --dataset wikipedia-en --checkpoint 10 --threads 16 --data-bits 1 --centroid-bits 1 > quantized_spann_1bit_wikipedia.txt 2>&1 &
+nohup cargo bench -p chroma-index --bench quantized_spann -- --dataset wikipedia-en --checkpoint 10 --threads 16 --data-bits 1 --centroid-bits 1 > quantized_spann_1bit_wikipedia.txt 2>&1 &
 [1] 181688
 ubuntu@ip-172-31-75-166:~/chroma$ tail -f quantized_spann_1bit_wikipedia.txt
 nohup: ignoring input

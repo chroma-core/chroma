@@ -71,7 +71,7 @@ struct Args {
 
     /// Rerank factors to sweep (comma-separated). Each factor fetches
     /// factor*k candidates via quantized scan, then reranks with full precision.
-    #[arg(long, value_delimiter = ',', default_values_t = vec![1, 4, 16])]
+    #[arg(long, value_delimiter = ',', default_values_t = vec![1, 4, 8, 16])]
     rerank_factors: Vec<usize>,
 
     /// Use code-to-code distance (quantize the query to 1-bit, then hamming)

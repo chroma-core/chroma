@@ -725,17 +725,19 @@ impl HierarchicalCentroidIndex {
         }
     }
 
-    /// 1-bit quantized tree traversal followed by f32 reranking of the top candidates.
-    /// `fetch` is the number of candidates to collect via 1-bit scoring before reranking.
+    /// 1-bit quantized tree traversal with per-level f32 reranking below L1.
+    /// `rerank_factor` controls overselection: at each level >= 2, keep
+    /// `effective_beam * rerank_factor` via 1-bit, then re-score with f32 and
+    /// keep `effective_beam`. Leaf-level results are also f32-scored.
     pub fn search_with_rerank(
         &self,
         query: &[f32],
         k: usize,
-        fetch: usize,
+        rerank_factor: usize,
         beam: usize,
         tau_override: Option<f64>,
     ) -> Vec<(u32, f32)> {
-        self.search_with_rerank_timed(query, k, fetch, beam, tau_override).0
+        self.search_with_rerank_timed(query, k, rerank_factor, beam, tau_override).0
     }
 
     /// Like `search_with_rerank` but returns (results, search_duration, rerank_duration).
@@ -743,7 +745,7 @@ impl HierarchicalCentroidIndex {
         &self,
         query: &[f32],
         k: usize,
-        fetch: usize,
+        rerank_factor: usize,
         beam: usize,
         tau_override: Option<f64>,
     ) -> (Vec<(u32, f32)>, Duration, Duration) {
@@ -755,6 +757,7 @@ impl HierarchicalCentroidIndex {
         }
 
         let search_start = Instant::now();
+        let mut rerank_total = Duration::ZERO;
 
         let dim = self.dim;
         let df = &self.distance_fn;
@@ -768,27 +771,26 @@ impl HierarchicalCentroidIndex {
         let padded_bytes = Code::<1>::packed_len(dim);
         let qq = QuantizedQuery::new(&r_q, padded_bytes, c_norm, c_dot_q, q_norm);
 
-        let mut leaf_refs: Vec<(&[f32], u32)> = Vec::new();
-        let mut quant_scores: Vec<(usize, f32)> = Vec::new();
-
+        let mut all_results: Vec<(u32, f32)> = Vec::new();
+        // Each entry: (child node ref, 1-bit distance, parent's f32 center for this child)
         let mut current: Vec<&CentroidTreeNode> = vec![&self.root];
+        let mut level = 0usize;
 
         loop {
+            level += 1;
+            let do_rerank = rerank_factor > 1 && level > 1;
+
             // Collect results from any leaf nodes in `current` (handles root-is-leaf)
             let mut internals_in_current: Vec<&CentroidTreeNode> = Vec::new();
             for node in &current {
                 match node {
                     CentroidTreeNode::Leaf {
-                        keys, centroids, codes, ..
+                        keys, centroids, ..
                     } => {
-                        let codes_buf = codes.as_ref().unwrap();
-                        let base = leaf_refs.len();
                         for (i, &key) in keys.iter().enumerate() {
-                            leaf_refs.push((&centroids[i * dim..(i + 1) * dim], key));
-                            let code_slice = &codes_buf[i * cs..(i + 1) * cs];
-                            let code = Code::<1, &[u8]>::new(code_slice);
-                            let dist = code.distance_quantized_query(df, &qq);
-                            quant_scores.push((base + i, dist));
+                            let c = &centroids[i * dim..(i + 1) * dim];
+                            let dist = compute_distance(query, c, df);
+                            all_results.push((key, dist));
                         }
                     }
                     CentroidTreeNode::Internal { .. } => {
@@ -801,12 +803,13 @@ impl HierarchicalCentroidIndex {
                 break;
             }
 
-            let mut child_scores: Vec<(&CentroidTreeNode, f32)> = Vec::new();
+            // Score all children with 1-bit codes, carrying each child's f32 center slice
+            let mut child_scores: Vec<(&CentroidTreeNode, f32, &[f32])> = Vec::new();
             for node in &internals_in_current {
                 if let CentroidTreeNode::Internal {
+                    centers,
                     codes,
                     children,
-                    ..
                 } = node
                 {
                     let codes_buf = codes.as_ref().unwrap();
@@ -814,32 +817,44 @@ impl HierarchicalCentroidIndex {
                         let code_slice = &codes_buf[i * cs..(i + 1) * cs];
                         let code = Code::<1, &[u8]>::new(code_slice);
                         let dist = code.distance_quantized_query(df, &qq);
-                        child_scores.push((child, dist));
+                        let child_center = &centers[i * dim..(i + 1) * dim];
+                        child_scores.push((child, dist, child_center));
                     }
                 }
             }
 
             child_scores.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            let effective = self.effective_beam(&child_scores, beam, tau_override);
-            child_scores.truncate(effective);
+            let effective = {
+                let pairs: Vec<(&CentroidTreeNode, f32)> =
+                    child_scores.iter().map(|(n, d, _)| (*n, *d)).collect();
+                self.effective_beam(&pairs, beam, tau_override)
+            };
+
+            if do_rerank {
+                let fetch = (effective * rerank_factor).min(child_scores.len());
+                child_scores.truncate(fetch);
+
+                let rerank_start = Instant::now();
+                for item in child_scores.iter_mut() {
+                    item.1 = compute_distance(query, item.2, df);
+                }
+                child_scores.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+                child_scores.truncate(effective);
+                rerank_total += rerank_start.elapsed();
+            } else {
+                child_scores.truncate(effective);
+            }
 
             let mut next: Vec<&CentroidTreeNode> = Vec::new();
-            for (node, _) in &child_scores {
+            for (node, _, _) in &child_scores {
                 match node {
                     CentroidTreeNode::Leaf {
-                        keys,
-                        centroids,
-                        codes,
-                        ..
+                        keys, centroids, ..
                     } => {
-                        let codes_buf = codes.as_ref().unwrap();
-                        let base = leaf_refs.len();
                         for (i, &key) in keys.iter().enumerate() {
-                            leaf_refs.push((&centroids[i * dim..(i + 1) * dim], key));
-                            let code_slice = &codes_buf[i * cs..(i + 1) * cs];
-                            let code = Code::<1, &[u8]>::new(code_slice);
-                            let dist = code.distance_quantized_query(df, &qq);
-                            quant_scores.push((base + i, dist));
+                            let c = &centroids[i * dim..(i + 1) * dim];
+                            let dist = compute_distance(query, c, df);
+                            all_results.push((key, dist));
                         }
                     }
                     CentroidTreeNode::Internal { .. } => {
@@ -854,24 +869,9 @@ impl HierarchicalCentroidIndex {
             current = next;
         }
 
-        quant_scores.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-        quant_scores.truncate(fetch);
-
-        let search_duration = search_start.elapsed();
-
-        let rerank_start = Instant::now();
-        let mut results: Vec<(u32, f32)> = quant_scores
-            .iter()
-            .map(|&(idx, _)| {
-                let (centroid, key) = leaf_refs[idx];
-                let dist = compute_distance(query, centroid, df);
-                (key, dist)
-            })
-            .collect();
-        let reranked = dedup_and_topk(&mut results, k);
-        let rerank_duration = rerank_start.elapsed();
-
-        (reranked, search_duration, rerank_duration)
+        let search_duration = search_start.elapsed() - rerank_total;
+        let reranked = dedup_and_topk(&mut all_results, k);
+        (reranked, search_duration, rerank_total)
     }
 
     /// Compute effective beam from sorted (node, dist) pairs.

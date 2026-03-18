@@ -1,3 +1,6 @@
+cargo bench -p chroma-index --bench flat_centroid_profile -- --dataset wikipedia-en --centroid-bits 4 --initial-centroids 1000000 --data-vectors 1000 --threads 1 --phase-2 --phase-3
+
+
 cargo bench -p chroma-index --bench flat_centroid_profile -- --dataset wikipedia-en --centroid-bits 4 --initial-centroids 1000000 --threads 32 --data-vectors 1000
     Finished `bench` profile [optimized + debuginfo] target(s) in 0.33s
      Running benches/flat_centroid_profile.rs (target/release/deps/flat_centroid_profile-38cd2afab553f60e)
@@ -83,3 +86,7 @@ Phase 3 columns:
   Rerank    - average full-precision rerank time per query (0 at 1x)
   Total     - Scan + Rerank (= end-to-end query latency)
   Wall      - wall-clock time for all queries at this scale/rerank combo
+
+
+
+1M centroids, 1 thread
