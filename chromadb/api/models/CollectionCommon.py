@@ -836,7 +836,7 @@ class CollectionCommon(Generic[ClientT]):
         if key == EMBEDDING_KEY:
             # Use the collection's main embedding function
             embedding = self._embed(input=[query_text], is_query=True)
-            if not embedding or len(embedding) != 1:
+            if embedding is None or len(embedding) != 1:
                 raise ValueError(
                     "Embedding function returned unexpected number of embeddings"
                 )
@@ -910,7 +910,7 @@ class CollectionCommon(Generic[ClientT]):
                         # Fallback if embed_query doesn't exist
                         embeddings = embedding_func([query_text])
 
-                    if not embeddings or len(embeddings) != 1:
+                    if embeddings is None or len(embeddings) != 1:
                         raise ValueError(
                             "Embedding function returned unexpected number of embeddings"
                         )
