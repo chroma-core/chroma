@@ -1,13 +1,8 @@
 from concurrent.futures import ThreadPoolExecutor
 import uuid
-import chromadb
 from chromadb.api import ClientAPI
 from chromadb.errors import ChromaError, UniqueConstraintError
 from chromadb.test.conftest import multi_region_test
-from chromadb.test.data_loader.test_data_loader import (
-    collection_with_data_loader,
-    record_set_with_uris,
-)
 
 
 @multi_region_test
@@ -79,28 +74,32 @@ def test_multithreaded_get_or_create(client: ClientAPI) -> None:
                 future.result()
             except Exception as e:
                 assert False, f"Thread raised an exception: {e}"
-def test_include_parameter_not_mutated(
-    collection_with_data_loader: chromadb.Collection, n_examples: int = 3
-) -> None:
-    """Regression test for issue #5857: include parameter must not be mutated in-place."""
-    record_set = record_set_with_uris(n=n_examples)
 
-    collection_with_data_loader.add(
-        ids=record_set["ids"],
-        uris=record_set["uris"],
+
+def test_include_parameter_not_mutated(client: ClientAPI) -> None:
+    """Regression test for issue #5857: include parameter must not be mutated in-place."""
+    collection = client.get_or_create_collection(
+        name="test_include_mutation",
+    )
+    collection.add(
+        ids=["id1", "id2"],
+        documents=["doc one", "doc two"],
     )
 
-    # get() with "data" triggers internal append of "uris" - must not mutate caller's list
-    include_get = ["data"]
-    collection_with_data_loader.get(include=include_get)
-    assert include_get == ["data"], "get() must not mutate include parameter"
+    include_get: list[str] = ["documents", "metadatas"]
+    collection.get(include=include_get)
+    assert include_get == [
+        "documents",
+        "metadatas",
+    ], "get() must not mutate include parameter"
 
-    # query() with "data" triggers internal append of "uris" - must not mutate caller's list
-    include_query = ["data"]
-    collection_with_data_loader.query(
-        query_uris=[record_set["uris"][0]],
+    include_query: list[str] = ["documents", "metadatas"]
+    collection.query(
+        query_texts=["doc"],
         n_results=1,
         include=include_query,
     )
-    assert include_query == ["data"], "query() must not mutate include parameter"
-
+    assert include_query == [
+        "documents",
+        "metadatas",
+    ], "query() must not mutate include parameter"
