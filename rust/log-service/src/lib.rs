@@ -930,6 +930,10 @@ impl RollupPerCollection {
         self.uncompacted_record_count() >= threshold
     }
 
+    fn time_on_log_us(&self, now_us: u128) -> u128 {
+        now_us.saturating_sub(self.initial_insertion_epoch_us as u128)
+    }
+
     /// Whether this rollup should be selected for compaction given the provided thresholds.
     fn should_compact(
         &self,
@@ -937,24 +941,34 @@ impl RollupPerCollection {
         reinsert_threshold: u64,
         timeout_us: u64,
     ) -> bool {
-        let time_on_log = SystemTime::now()
+        let now_us = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("time never moves to before epoch")
-            .as_micros()
-            .saturating_sub(self.initial_insertion_epoch_us as u128);
+            .as_micros();
+        self.should_compact_at(now_us, min_compaction_size, reinsert_threshold, timeout_us)
+    }
+
+    fn should_compact_at(
+        &self,
+        now_us: u128,
+        min_compaction_size: u64,
+        reinsert_threshold: u64,
+        timeout_us: u64,
+    ) -> bool {
+        let time_on_log = self.time_on_log_us(now_us);
         (self.limit_log_position >= self.start_log_position
             && self.uncompacted_record_count() >= min_compaction_size)
             || self.reinsert_count >= reinsert_threshold
             || time_on_log >= timeout_us as u128
     }
 
-    /// Whether this rollup likely needs a dirty log purge.
-    fn likely_needs_purge_dirty(&self, reinsert_threshold: u64, timeout_us: u64) -> bool {
-        let time_on_log = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("time never moves to before epoch")
-            .as_micros()
-            .saturating_sub(self.initial_insertion_epoch_us as u128);
+    fn likely_needs_purge_dirty_at(
+        &self,
+        now_us: u128,
+        reinsert_threshold: u64,
+        timeout_us: u64,
+    ) -> bool {
+        let time_on_log = self.time_on_log_us(now_us);
         self.reinsert_count >= reinsert_threshold * 2 || time_on_log >= timeout_us as u128 * 2
     }
 }
@@ -1504,33 +1518,48 @@ impl LogServer {
         let mut ready_uncompacted = 0u64;
         let mut likely_needs_purge_dirty = 0u64;
         let mut total_uncompacted_collections = 0u64;
+        let now_us = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("time never moves to before epoch")
+            .as_micros();
         let mut record_rollup_metrics = |rollup: &RollupPerCollection| {
             total_uncompacted_collections += 1;
             total_uncompacted += rollup.uncompacted_record_count();
-            if rollup.should_compact(
+            if rollup.should_compact_at(
+                now_us,
                 self.config.suggested_compaction_threshold,
                 self.config.reinsert_threshold,
                 self.config.timeout_us,
             ) {
                 ready_uncompacted += rollup.uncompacted_record_count();
-                if rollup
-                    .likely_needs_purge_dirty(self.config.reinsert_threshold, self.config.timeout_us)
-                {
+                if rollup.likely_needs_purge_dirty_at(
+                    now_us,
+                    self.config.reinsert_threshold,
+                    self.config.timeout_us,
+                ) {
                     likely_needs_purge_dirty += 1;
                 }
             }
         };
-        {
-            let need_to_compact_s3 = self.need_to_compact_s3.lock();
-            for rollup in need_to_compact_s3.values() {
-                record_rollup_metrics(rollup);
-            }
+        let s3_rollups = {
+            self.need_to_compact_s3
+                .lock()
+                .values()
+                .copied()
+                .collect::<Vec<_>>()
+        };
+        for rollup in &s3_rollups {
+            record_rollup_metrics(rollup);
         }
-        {
-            let need_to_compact_repl = self.need_to_compact_repl.lock();
-            for rollup in need_to_compact_repl.values() {
-                record_rollup_metrics(rollup);
-            }
+        let repl_rollups = {
+            self.need_to_compact_repl
+                .lock()
+                .values()
+                .copied()
+                .collect::<Vec<_>>()
+        };
+        for rollup in &repl_rollups {
+            record_rollup_metrics(rollup);
         }
         self.metrics
             .log_likely_needs_purge_dirty
