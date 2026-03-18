@@ -1231,6 +1231,7 @@ mod tests {
             false,          // use_fragment_fetch
             None,           // fragment_fetcher
             HashSet::new(), // collections_for_fragment_fetch
+            None,           // bloom_filter_manager
         )
         .expect("Failed to create compaction manager in test");
 
