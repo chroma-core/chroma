@@ -1395,26 +1395,15 @@ impl LogServer {
         // TODO(rescrv):  Realistically we could make this configurable.
         const MAX_COLLECTION_INFO_NUMBER: usize = 10000;
         let mut selected_rollups = Vec::with_capacity(MAX_COLLECTION_INFO_NUMBER);
-        let mut needs_purge_dirty = 0;
-        let mut total_uncompacted_records = 0u64;
-        let mut total_uncompacted_collections = 0u64;
         // Collect from the S3 map.
         {
             let need_to_compact_s3 = self.need_to_compact_s3.lock();
             for (collection_id, rollup) in need_to_compact_s3.iter() {
-                total_uncompacted_collections += 1;
-                total_uncompacted_records += rollup.uncompacted_record_count();
                 if rollup.should_compact(
                     request.min_compaction_size,
                     self.config.reinsert_threshold,
                     self.config.timeout_us,
                 ) {
-                    if rollup.likely_needs_purge_dirty(
-                        self.config.reinsert_threshold,
-                        self.config.timeout_us,
-                    ) {
-                        needs_purge_dirty += 1;
-                    }
                     selected_rollups.push(((None, *collection_id), *rollup));
                 }
             }
@@ -1423,32 +1412,15 @@ impl LogServer {
         {
             let need_to_compact_repl = self.need_to_compact_repl.lock();
             for ((topology_name, collection_id), rollup) in need_to_compact_repl.iter() {
-                total_uncompacted_collections += 1;
-                total_uncompacted_records += rollup.uncompacted_record_count();
                 if rollup.should_compact(
                     request.min_compaction_size,
                     self.config.reinsert_threshold,
                     self.config.timeout_us,
                 ) {
-                    if rollup.likely_needs_purge_dirty(
-                        self.config.reinsert_threshold,
-                        self.config.timeout_us,
-                    ) {
-                        needs_purge_dirty += 1;
-                    }
                     selected_rollups.push(((Some(topology_name.clone()), *collection_id), *rollup));
                 }
             }
         }
-        self.metrics
-            .log_likely_needs_purge_dirty
-            .record(needs_purge_dirty as f64, &[]);
-        self.metrics
-            .log_total_uncompacted_records_count
-            .record(total_uncompacted_records as f64, &[]);
-        self.metrics
-            .dirty_log_collections
-            .record(total_uncompacted_collections, &[]);
         // Then allocate the collection ID strings outside the lock.
         let mut all_collection_info = Vec::with_capacity(selected_rollups.len());
         for ((topology_name, collection_id), rollup) in selected_rollups.into_iter() {
@@ -1530,9 +1502,12 @@ impl LogServer {
     fn record_uncompacted_rollup_metrics(&self) {
         let mut total_uncompacted = 0u64;
         let mut ready_uncompacted = 0u64;
+        let mut likely_needs_purge_dirty = 0u64;
+        let mut total_uncompacted_collections = 0u64;
         {
             let need_to_compact_s3 = self.need_to_compact_s3.lock();
             for rollup in need_to_compact_s3.values() {
+                total_uncompacted_collections += 1;
                 total_uncompacted += rollup.uncompacted_record_count();
                 if rollup.should_compact(
                     self.config.suggested_compaction_threshold,
@@ -1540,12 +1515,19 @@ impl LogServer {
                     self.config.timeout_us,
                 ) {
                     ready_uncompacted += rollup.uncompacted_record_count();
+                    if rollup.likely_needs_purge_dirty(
+                        self.config.reinsert_threshold,
+                        self.config.timeout_us,
+                    ) {
+                        likely_needs_purge_dirty += 1;
+                    }
                 }
             }
         }
         {
             let need_to_compact_repl = self.need_to_compact_repl.lock();
             for rollup in need_to_compact_repl.values() {
+                total_uncompacted_collections += 1;
                 total_uncompacted += rollup.uncompacted_record_count();
                 if rollup.should_compact(
                     self.config.suggested_compaction_threshold,
@@ -1553,15 +1535,27 @@ impl LogServer {
                     self.config.timeout_us,
                 ) {
                     ready_uncompacted += rollup.uncompacted_record_count();
+                    if rollup.likely_needs_purge_dirty(
+                        self.config.reinsert_threshold,
+                        self.config.timeout_us,
+                    ) {
+                        likely_needs_purge_dirty += 1;
+                    }
                 }
             }
         }
+        self.metrics
+            .log_likely_needs_purge_dirty
+            .record(likely_needs_purge_dirty as f64, &[]);
         self.metrics
             .log_total_uncompacted_records_count
             .record(total_uncompacted as f64, &[]);
         self.metrics
             .log_ready_uncompacted_records_count
             .record(ready_uncompacted as f64, &[]);
+        self.metrics
+            .dirty_log_collections
+            .record(total_uncompacted_collections, &[]);
     }
 
     /// Merge backpressure from both S3 and repl maps and set it atomically.
