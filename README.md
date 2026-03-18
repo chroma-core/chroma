@@ -2,7 +2,7 @@
 ![Chroma](./docs/assets/chroma-wordmark-white.png#gh-dark-mode-only)
 
 <p align="center">
-    <b>Chroma - open-source data infrastructure for AI</b>. <br />
+    <b>Chroma - the open-source data infrastructure for AI</b>. <br />
 </p>
 
 <p align="center">
