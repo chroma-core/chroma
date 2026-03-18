@@ -4,9 +4,7 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
 use chroma_segment::{
-    blockfile_record::{
-        RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError,
-    },
+    blockfile_record::{RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError},
     types::{materialize_logs, LogMaterializerError},
 };
 use chroma_system::Operator;
@@ -79,7 +77,13 @@ impl Operator<SparseLogKnnInput, SparseLogKnnOutput> for SparseLogKnn {
             Err(e) => Err(*e),
         }?;
 
-        let logs = materialize_logs(&record_segment_reader, input.logs.clone(), None, &RecordSegmentPlan::default()).await?;
+        let logs = materialize_logs(
+            &record_segment_reader,
+            input.logs.clone(),
+            None,
+            &RecordSegmentPlan::default(),
+        )
+        .await?;
 
         // We need the smallest results, so we keep a max heap to track the largest of them
         // so that it can be replaced if we found a smaller one
