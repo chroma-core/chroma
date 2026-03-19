@@ -59,7 +59,6 @@ pub fn scan_from_manifest(
     } else {
         (from, LogPosition::MAX)
     };
-    println!("log_position_range = {log_position_range:?}");
     // If no there is no fragment with a start earlier than the from LogPosition, that means
     // we'd need to load snapshots.  Since this is an in-memory only function, we return "None"
     // to indicate that it's not satisfiable and do no I/O.
