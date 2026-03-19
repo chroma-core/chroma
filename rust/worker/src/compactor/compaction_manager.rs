@@ -28,6 +28,7 @@ use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_index::usearch::USearchIndexProvider;
 use chroma_log::Log;
 use chroma_memberlist::memberlist_provider::Memberlist;
+use chroma_segment::bloom_filter::BloomFilterManager;
 use chroma_segment::spann_provider::SpannProvider;
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
@@ -104,6 +105,7 @@ pub(crate) struct CompactionManagerContext {
     use_fragment_fetch: bool,
     fragment_fetcher: Option<Arc<FragmentFetcher>>,
     collections_for_fragment_fetch: HashSet<CollectionUuid>,
+    bloom_filter_manager: Option<BloomFilterManager>,
 }
 
 pub(crate) struct CompactionManager {
@@ -157,6 +159,7 @@ impl CompactionManager {
         use_fragment_fetch: bool,
         fragment_fetcher: Option<Arc<FragmentFetcher>>,
         collections_for_fragment_fetch: HashSet<CollectionUuid>,
+        bloom_filter_manager: Option<BloomFilterManager>,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (compact_awaiter_tx, compact_awaiter_rx) =
             mpsc::channel::<CompactionTask>(compaction_manager_queue_size);
@@ -194,6 +197,7 @@ impl CompactionManager {
                 use_fragment_fetch,
                 fragment_fetcher,
                 collections_for_fragment_fetch,
+                bloom_filter_manager,
             },
             on_next_memberlist_signal: None,
             compact_awaiter_channel: compact_awaiter_tx,
@@ -394,6 +398,20 @@ impl Drop for CompactionManager {
 }
 
 impl CompactionManagerContext {
+    /// Return the bloom filter manager for the given collection, or `None` if bloom filters
+    /// are disabled for this collection.
+    fn bloom_filter_manager_for_collection(
+        &self,
+        collection_id: CollectionUuid,
+    ) -> Option<BloomFilterManager> {
+        let manager = self.bloom_filter_manager.as_ref()?;
+        if manager.is_enabled_for_collection(collection_id) {
+            Some(manager.clone())
+        } else {
+            None
+        }
+    }
+
     /// Return the fragment fetcher for the given collection, or `None` if fragment fetch is
     /// disabled for this collection.  Fragment fetch is enabled when `use_fragment_fetch` is
     /// true or the collection appears in `collections_for_fragment_fetch`.
@@ -427,9 +445,10 @@ impl CompactionManagerContext {
         };
 
         // fetch data to compact -> execute_task/compact -> register
-        // Use the compact function to handle the entire orchestration process
+        // Use the compact function to handle the entire orchestration process.
         let is_function_disabled = self.disabled_function_collections.contains(&collection_id);
         let fragment_fetcher = self.fragment_fetcher_for_collection(collection_id);
+        let bloom_filter_manager = self.bloom_filter_manager_for_collection(collection_id);
 
         let compact_result = Box::pin(compact(
             self.system.clone(),
@@ -449,6 +468,7 @@ impl CompactionManagerContext {
             dispatcher.clone(),
             is_function_disabled,
             fragment_fetcher,
+            bloom_filter_manager,
             #[cfg(test)]
             None,
         ))
@@ -631,6 +651,12 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             None
         };
 
+        let bloom_filter_manager = BloomFilterManager::try_from_config(
+            &(config.bloom_filter_manager.clone(), storage.clone()),
+            registry,
+        )
+        .await?;
+
         CompactionManager::new(
             system.clone(),
             scheduler,
@@ -654,6 +680,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             config.compactor.use_fragment_fetch,
             fragment_fetcher,
             collections_for_fragment_fetch,
+            Some(bloom_filter_manager),
         )
     }
 }
@@ -1219,6 +1246,7 @@ mod tests {
             false,          // use_fragment_fetch
             None,           // fragment_fetcher
             HashSet::new(), // collections_for_fragment_fetch
+            None,           // bloom_filter_manager
         )
         .expect("Failed to create compaction manager in test");
 

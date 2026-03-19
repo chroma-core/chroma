@@ -2,8 +2,10 @@ use async_trait::async_trait;
 use chroma_cache::{Cache, CacheConfig, Weighted};
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
+use chroma_types::CollectionUuid;
 use fastbloom::AtomicBloomFilter;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::PhantomData;
@@ -119,6 +121,19 @@ pub enum BloomFilterError {
     Serialization(String),
     #[error("Deserialization error: {0}")]
     Deserialization(String),
+    #[error("Invalid config: {0}")]
+    InvalidConfig(String),
+}
+
+impl ChromaError for BloomFilterError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        match self {
+            BloomFilterError::Storage(_) => chroma_error::ErrorCodes::Internal,
+            BloomFilterError::Serialization(_) => chroma_error::ErrorCodes::Internal,
+            BloomFilterError::Deserialization(_) => chroma_error::ErrorCodes::Internal,
+            BloomFilterError::InvalidConfig(_) => chroma_error::ErrorCodes::InvalidArgument,
+        }
+    }
 }
 
 impl<T: Hash + ?Sized> BloomFilter<T> {
@@ -306,19 +321,39 @@ impl<T: Hash + ?Sized> Weighted for BloomFilter<T> {
 pub struct BloomFilterManagerConfig {
     #[serde(default)]
     pub cache_config: CacheConfig,
+
+    /// Controls which collections use bloom filters.
+    ///   - `[]` (default) — disabled for all collections.
+    ///   - `["all"]` — enabled for every collection.
+    ///   - `["<uuid>", ...]` — enabled only for the listed collections.
+    #[serde(default)]
+    pub enabled_collection_ids: Vec<String>,
 }
 
 impl Default for BloomFilterManagerConfig {
     fn default() -> Self {
         Self {
             cache_config: CacheConfig::Nop,
+            enabled_collection_ids: Vec::new(),
         }
     }
+}
+
+/// Parsed representation of `enabled_collection_ids`.
+#[derive(Debug, Clone)]
+enum BloomFilterScope {
+    /// Disabled for all collections (empty list).
+    None,
+    /// Enabled for every collection (`["all"]`).
+    All,
+    /// Enabled for a specific set of collections.
+    Some(HashSet<CollectionUuid>),
 }
 
 struct BloomFilterManagerInner {
     cache: Box<dyn Cache<String, BloomFilter<str>>>,
     storage: Arc<Storage>,
+    scope: BloomFilterScope,
 }
 
 /// Manages a shared cache of bloom filter instances across queries.
@@ -343,16 +378,44 @@ impl Configurable<(BloomFilterManagerConfig, Storage)> for BloomFilterManager {
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (manager_config, storage) = config;
         let cache = chroma_cache::from_config(&manager_config.cache_config).await?;
+        let scope = if manager_config.enabled_collection_ids.is_empty() {
+            BloomFilterScope::None
+        } else if manager_config.enabled_collection_ids.len() == 1
+            && manager_config.enabled_collection_ids[0].eq_ignore_ascii_case("all")
+        {
+            BloomFilterScope::All
+        } else {
+            let mut ids = HashSet::new();
+            for id_str in &manager_config.enabled_collection_ids {
+                let uuid = uuid::Uuid::parse_str(id_str).map_err(|_| {
+                    Box::new(BloomFilterError::InvalidConfig(format!(
+                        "invalid collection UUID: {}",
+                        id_str
+                    ))) as Box<dyn ChromaError>
+                })?;
+                ids.insert(CollectionUuid(uuid));
+            }
+            BloomFilterScope::Some(ids)
+        };
         Ok(Self {
             inner: Arc::new(BloomFilterManagerInner {
                 cache,
                 storage: Arc::new(storage.clone()),
+                scope,
             }),
         })
     }
 }
 
 impl BloomFilterManager {
+    pub fn is_enabled_for_collection(&self, collection_id: CollectionUuid) -> bool {
+        match &self.inner.scope {
+            BloomFilterScope::None => false,
+            BloomFilterScope::All => true,
+            BloomFilterScope::Some(ids) => ids.contains(&collection_id),
+        }
+    }
+
     pub fn format_key(prefix_path: &str) -> String {
         let id = uuid::Uuid::new_v4();
         if prefix_path.is_empty() {
@@ -426,6 +489,7 @@ impl BloomFilterManager {
             inner: Arc::new(BloomFilterManagerInner {
                 cache: chroma_cache::new_non_persistent_cache_for_test(),
                 storage,
+                scope: BloomFilterScope::All,
             }),
         }
     }
@@ -509,5 +573,50 @@ mod tests {
         }
         // live=11, stale=0, total=11 > capacity=10
         assert!(bf.needs_rebuild());
+    }
+
+    #[test]
+    fn test_is_enabled_for_collection() {
+        let storage = Arc::new(Storage::Local(chroma_storage::local::LocalStorage::new(
+            "/tmp/bf_test",
+        )));
+
+        let c1 = CollectionUuid(uuid::Uuid::new_v4());
+        let c2 = CollectionUuid(uuid::Uuid::new_v4());
+        let c3 = CollectionUuid(uuid::Uuid::new_v4());
+
+        // Scope::None -> all disabled
+        let mgr = BloomFilterManager {
+            inner: Arc::new(BloomFilterManagerInner {
+                cache: chroma_cache::new_non_persistent_cache_for_test(),
+                storage: storage.clone(),
+                scope: BloomFilterScope::None,
+            }),
+        };
+        assert!(!mgr.is_enabled_for_collection(c1));
+        assert!(!mgr.is_enabled_for_collection(c2));
+
+        // Scope::All -> all enabled
+        let mgr = BloomFilterManager {
+            inner: Arc::new(BloomFilterManagerInner {
+                cache: chroma_cache::new_non_persistent_cache_for_test(),
+                storage: storage.clone(),
+                scope: BloomFilterScope::All,
+            }),
+        };
+        assert!(mgr.is_enabled_for_collection(c1));
+        assert!(mgr.is_enabled_for_collection(c2));
+
+        // Scope::Some -> only listed collections
+        let mgr = BloomFilterManager {
+            inner: Arc::new(BloomFilterManagerInner {
+                cache: chroma_cache::new_non_persistent_cache_for_test(),
+                storage: storage.clone(),
+                scope: BloomFilterScope::Some(HashSet::from([c1])),
+            }),
+        };
+        assert!(mgr.is_enabled_for_collection(c1));
+        assert!(!mgr.is_enabled_for_collection(c2));
+        assert!(!mgr.is_enabled_for_collection(c3));
     }
 }

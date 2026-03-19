@@ -154,7 +154,10 @@ impl Segment {
                 }
             }
             SegmentType::BlockfileMetadata | SegmentType::BlockfileRecord => {
-                for paths in self.file_path.values() {
+                for (key, paths) in &self.file_path {
+                    if key == USER_ID_BLOOM_FILTER {
+                        continue;
+                    }
                     res.extend(paths.iter().cloned());
                 }
             }

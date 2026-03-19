@@ -11,6 +11,7 @@ use chroma_segment::{
         RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
         RecordSegmentWriterCreationError,
     },
+    bloom_filter::BloomFilterManager,
     distributed_hnsw::{DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentWriter},
     distributed_spann::SpannSegmentWriterError,
     spann_provider::SpannProvider,
@@ -308,6 +309,7 @@ impl LogFetchOrchestrator {
         spann_provider: SpannProvider,
         dispatcher: ComponentHandle<Dispatcher>,
         fragment_fetcher: Option<Arc<crate::execution::operators::fragment_fetch::FragmentFetcher>>,
+        bloom_filter_manager: Option<BloomFilterManager>,
     ) -> Self {
         let context = CompactionContext::new(
             is_rebuild,
@@ -324,6 +326,7 @@ impl LogFetchOrchestrator {
             dispatcher.clone(),
             false, // LogFetchOrchestrator doesn't need is_function_disabled
             fragment_fetcher,
+            bloom_filter_manager,
         );
         LogFetchOrchestrator {
             collection_id,
@@ -580,7 +583,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                     &record_segment,
                     &self.context.blockfile_provider,
                     cmek.clone(),
-                    None,
+                    self.context.bloom_filter_manager.clone(),
                 )
                 .await,
                 ctx,

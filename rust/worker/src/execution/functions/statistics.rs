@@ -1373,6 +1373,7 @@ mod tests {
             false,
             None,
             None,
+            None,
         ))
         .await
         .expect("Compaction should succeed");
