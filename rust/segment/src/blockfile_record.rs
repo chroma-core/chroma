@@ -1020,7 +1020,9 @@ impl RecordSegmentReader<'_> {
 
     /// Lazily loads the bloom filter using the two-tier heuristic.
     /// Called internally when a plan requests bloom filter usage.
-    async fn ensure_bloom_filter(&self) {
+    /// Fetch the bloom filter from storage (via the manager cache) and populate
+    /// the local `OnceCell`. Only call when a storage fetch is acceptable.
+    async fn fetch_bloom_filter(&self) {
         self.bloom_filter
             .get_or_init(|| async {
                 let (manager, path) = match (&self.bloom_filter_manager, &self.bloom_filter_path) {
@@ -1032,17 +1034,35 @@ impl RecordSegmentReader<'_> {
             .await;
     }
 
+    /// Try to populate the local `OnceCell` from the manager's in-memory cache
+    /// without triggering a storage fetch. Returns quickly if already loaded or
+    /// if the bloom filter isn't cached.
+    async fn try_load_bloom_filter_from_cache(&self) {
+        if self.bloom_filter.get().is_some() {
+            return;
+        }
+        let (manager, path) = match (&self.bloom_filter_manager, &self.bloom_filter_path) {
+            (Some(mgr), Some(p)) => (mgr, p.as_str()),
+            _ => return,
+        };
+        if let Some(bf) = manager.get_if_cached(path).await {
+            let _ = self.bloom_filter.set(Some(bf));
+        }
+    }
+
     pub async fn get_offset_id_for_user_id(
         &self,
         user_id: &str,
         plan: &RecordSegmentReaderOptions,
     ) -> Result<Option<u32>, Box<dyn ChromaError>> {
         if plan.use_bloom_filter {
-            self.ensure_bloom_filter().await;
-            if let Some(Some(bf)) = self.bloom_filter.get() {
-                if !bf.contains(user_id) {
-                    return Ok(None);
-                }
+            self.fetch_bloom_filter().await;
+        } else {
+            self.try_load_bloom_filter_from_cache().await;
+        }
+        if let Some(Some(bf)) = self.bloom_filter.get() {
+            if !bf.contains(user_id) {
+                return Ok(None);
             }
         }
         self.user_id_to_id.get("", user_id).await
@@ -1141,7 +1161,9 @@ impl RecordSegmentReader<'_> {
     ) {
         // Lazy load the bloom filter if it is needed.
         if plan.use_bloom_filter {
-            self.ensure_bloom_filter().await;
+            self.fetch_bloom_filter().await;
+        } else {
+            self.try_load_bloom_filter_from_cache().await;
         }
 
         let filtered: Vec<&str> = if let Some(Some(bf)) = self.bloom_filter.get() {
