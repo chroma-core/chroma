@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import re
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Union
 
 import numpy as np
 import pytest
@@ -423,7 +423,7 @@ VALIDATORS = {
 }
 
 
-def _case_id(case: AcceptedInput | RejectableInput) -> str:
+def _case_id(case: Union[AcceptedInput, RejectableInput]) -> str:
     return case.description or repr(case.value)
 
 
