@@ -2774,8 +2774,7 @@ mod test {
             "tenant/{}/database/{}/collection/{}/segment/{}",
             tenant, database_id, record_segment.collection, record_segment.id,
         );
-        // 4 blockfiles and 1 bloom filter.
-        assert_eq!(record_segment.file_path.len(), 5);
+        assert_eq!(record_segment.file_path.len(), 4);
         for (_, file_path) in record_segment.file_path.iter() {
             assert_eq!(file_path.len(), 1);
             assert!(file_path
