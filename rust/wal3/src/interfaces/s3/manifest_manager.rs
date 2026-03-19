@@ -482,7 +482,10 @@ impl ManifestManager {
                     // without an e_tag we cannot do anything.  The log contention backoff protocol
                     // cares for this case, rather than having to error-handle it separately
                     // because it "crashes" the log and reinitializes.
-                    return Err(Error::LogContentionFailure);
+                    //
+                    // Was: LogContentionFailure.  Changed to LogContentionDurable because the
+                    // manifest post-fragment is durable.
+                    return Err(Error::LogContentionDurable);
                 }
                 Err(StorageError::AlreadyExists { path: _, source: _ })
                 | Err(StorageError::Precondition { path: _, source: _ }) => {
