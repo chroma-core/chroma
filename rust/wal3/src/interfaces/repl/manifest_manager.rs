@@ -941,14 +941,19 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
             let position_limit = row.column_by_name::<i64>("position_limit")?;
             max_log_position = std::cmp::max(max_log_position, position_limit);
             let ident = row.column_by_name::<String>("ident")?;
-            if let Ok(uuid) = ident.parse::<Uuid>() {
-                let fragment_uuid = FragmentUuid::from_uuid(uuid);
-                max_dropped_uuid = Some(
-                    max_dropped_uuid
-                        .map(|existing| std::cmp::max(existing, fragment_uuid))
-                        .unwrap_or(fragment_uuid),
-                );
-            }
+            let fragment_uuid = ident
+                .parse::<Uuid>()
+                .map(FragmentUuid::from_uuid)
+                .map_err(|e| {
+                    Error::CorruptGarbage(format!(
+                        "invalid UUID fragment identifier in fragments.ident: {ident}: {e}"
+                    ))
+                })?;
+            max_dropped_uuid = Some(
+                max_dropped_uuid
+                    .map(|existing| std::cmp::max(existing, fragment_uuid))
+                    .unwrap_or(fragment_uuid),
+            );
         }
         if max_log_position as u64 > first_to_keep.offset() {
             return Err(Error::GarbageCollection(format!(
@@ -1256,7 +1261,7 @@ mod tests {
     };
     use google_cloud_gax::conn::Environment;
     use google_cloud_spanner::client::{ChannelConfig, Client, ClientConfig};
-    use google_cloud_spanner::mutation::update;
+    use google_cloud_spanner::mutation::{insert, update};
     use google_cloud_spanner::session::SessionConfig;
     use setsum::Setsum;
     use uuid::Uuid;
@@ -2334,6 +2339,78 @@ mod tests {
         );
 
         println!("test_k8s_mcmr_integration_compute_garbage: passed");
+    }
+
+    // Test compute_garbage returns CorruptGarbage for invalid fragment identifiers.
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_compute_garbage_rejects_invalid_fragment_ident() {
+        let Some(client) = setup_spanner_client().await else {
+            panic!("Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let log_id = Uuid::new_v4();
+        let manifest = make_empty_manifest();
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
+            .await
+            .expect("init failed");
+
+        let manager = ManifestManager::new(Arc::new(client.clone()), "dummy".to_string(), log_id);
+        let log_id_str = log_id.to_string();
+        let invalid_ident = "invalid-uuid";
+        client
+            .read_write_transaction(|tx| {
+                let log_id_str = log_id_str.clone();
+                let invalid_ident = invalid_ident.to_string();
+                let setsum = make_setsum(1).hexdigest();
+                Box::pin(async move {
+                    tx.buffer_write(vec![
+                        insert(
+                            "fragments",
+                            &[
+                                "log_id",
+                                "ident",
+                                "path",
+                                "position_start",
+                                "position_limit",
+                                "num_bytes",
+                                "setsum",
+                            ],
+                            &[
+                                &log_id_str,
+                                &invalid_ident,
+                                &"corrupt/path.parquet",
+                                &0i64,
+                                &100i64,
+                                &1234i64,
+                                &setsum,
+                            ],
+                        ),
+                        insert(
+                            "fragment_regions",
+                            &["log_id", "ident", "region"],
+                            &[&log_id_str, &invalid_ident, &"dummy"],
+                        ),
+                    ]);
+                    Ok::<_, google_cloud_spanner::session::SessionError>(())
+                })
+            })
+            .await
+            .expect("failed to insert invalid fragment");
+
+        let options = crate::GarbageCollectionOptions::default();
+        let first_to_keep = LogPosition::from_offset(100);
+        let result = manager.compute_garbage(&options, first_to_keep).await;
+        match result {
+            Err(Error::CorruptGarbage(msg)) => assert!(
+                msg.contains("invalid UUID fragment identifier in fragments.ident"),
+                "unexpected corrupt message: {msg}"
+            ),
+            other => panic!("expected CorruptGarbage, got {:?}", other),
+        }
+
+        println!(
+            "test_k8s_mcmr_integration_compute_garbage_rejects_invalid_fragment_ident: passed"
+        );
     }
 
     // ==================== get_dirty_logs tests ====================

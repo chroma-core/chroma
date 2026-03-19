@@ -715,8 +715,19 @@ impl FragmentUuid {
             .duration_since(std::time::UNIX_EPOCH)
             .expect("system clock before UNIX epoch")
             .saturating_sub(grace_period);
-        let ts = uuid::Timestamp::from_unix_time(cutoff.as_secs(), cutoff.subsec_nanos(), 0, 0);
-        FragmentUuid(Uuid::new_v7(ts))
+        let cutoff_millis = cutoff.as_millis().min(u64::MAX as u128) as u64;
+        Self::minimum_for_millis_since_unix_epoch(cutoff_millis)
+    }
+
+    /// Returns the minimum possible UUIDv7 value for a millisecond Unix timestamp.
+    ///
+    /// This is the earliest UUID for the given timestamp, with zeroed random bits.
+    fn minimum_for_millis_since_unix_epoch(timestamp_millis: u64) -> Self {
+        let mut bytes = [0u8; 16];
+        bytes[0..6].copy_from_slice(&timestamp_millis.to_be_bytes()[2..]);
+        bytes[6] = 0x70;
+        bytes[8] = 0x80;
+        FragmentUuid(Uuid::from_u128(u128::from_be_bytes(bytes)))
     }
 }
 
@@ -1469,5 +1480,36 @@ mod tests {
             recent >= cutoff,
             "a fragment generated now must survive a 1-hour grace period cutoff"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn minimum_for_millis_since_unix_epoch_is_deterministic_and_minimal() {
+        let timestamp_millis = 1_700_000_000_123u64;
+
+        let first = FragmentUuid::minimum_for_millis_since_unix_epoch(timestamp_millis);
+        let second = FragmentUuid::minimum_for_millis_since_unix_epoch(timestamp_millis);
+        assert_eq!(first, second);
+
+        let expected_timestamp_bytes = timestamp_millis.to_be_bytes();
+        let mut expected_uuid_bytes = [0u8; 16];
+        expected_uuid_bytes[0..6].copy_from_slice(&expected_timestamp_bytes[2..]);
+        expected_uuid_bytes[6] = 0x70;
+        expected_uuid_bytes[8] = 0x80;
+
+        assert_eq!(first.0.as_bytes(), &expected_uuid_bytes);
+
+        let mut greater_bytes = [0u8; 16];
+        greater_bytes.copy_from_slice(first.0.as_bytes());
+        greater_bytes[7] = 1;
+        let greater = FragmentUuid(Uuid::from_u128(u128::from_be_bytes(greater_bytes)));
+        assert!(first < greater);
+
+        let next_millis = FragmentUuid::minimum_for_millis_since_unix_epoch(timestamp_millis + 1);
+        assert!(greater < next_millis);
     }
 }
