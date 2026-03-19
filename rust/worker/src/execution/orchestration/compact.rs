@@ -183,6 +183,10 @@ impl CompactionContext {
         self.apply_segment_scopes.is_empty() || self.apply_segment_scopes.contains(scope)
     }
 
+    pub fn is_full_rebuild(&self) -> bool {
+        self.is_rebuild && self.scope_is_active(&chroma_types::SegmentScope::RECORD)
+    }
+
     /// Create an empty output context for attached function orchestrator
     /// This creates a new context with an empty collection_info OnceCell
     fn clone_for_new_collection(&self) -> Self {
@@ -405,6 +409,7 @@ impl CompactionContext {
             collection_id,
             database_name,
             self.is_rebuild || is_getting_compacted_logs,
+            self.apply_segment_scopes.clone(),
             self.fetch_log_batch_size,
             self.fetch_log_concurrency,
             self.max_compaction_size,
@@ -1006,7 +1011,10 @@ mod tests {
         test::{add_delete_generator, LogGenerator},
         Log,
     };
-    use chroma_segment::{spann_provider::SpannProvider, test::TestDistributedSegment};
+    use chroma_segment::{
+        blockfile_record::RecordSegmentReader, distributed_hnsw::DistributedHNSWSegmentReader,
+        spann_provider::SpannProvider, test::TestDistributedSegment,
+    };
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_sysdb::{SysDb, TestSysDb};
     use chroma_system::{ComponentHandle, Dispatcher, DispatcherConfig, Orchestrator, System};
@@ -1015,6 +1023,7 @@ mod tests {
         Collection, DocumentExpression, DocumentOperator, MetadataExpression, PrimitiveOperator,
         Segment, SegmentUuid, Where,
     };
+    use futures::TryStreamExt;
     use regex::Regex;
     use tempfile;
 
@@ -1025,6 +1034,59 @@ mod tests {
 
     use super::{compact, CompactionContext, CompactionResponse, LogFetchOrchestratorResponse};
     use crate::execution::orchestration::register_orchestrator::CollectionRegisterInfo;
+
+    #[cfg(test)]
+    async fn check_offset_ids_match(
+        collection: &Collection,
+        vector_segment: &Segment,
+        record_segment: &Segment,
+        hnsw_provider: HnswIndexProvider,
+        blockfile_provider: &BlockfileProvider,
+    ) {
+        // Get offset IDs from vector segment
+        let vector_reader = DistributedHNSWSegmentReader::from_segment(
+            collection,
+            vector_segment,
+            collection.dimension.unwrap() as usize,
+            hnsw_provider,
+        )
+        .await
+        .expect("Should create vector reader");
+
+        let mut vector_offset_ids = vector_reader
+            .get_all_offset_ids()
+            .expect("Should get all IDs from HNSW index");
+        vector_offset_ids.sort();
+
+        // Get offset IDs from record segment
+        let record_reader = Box::pin(RecordSegmentReader::from_segment(
+            record_segment,
+            blockfile_provider,
+            None,
+        ))
+        .await
+        .expect("Should create record reader");
+
+        let record_data: Vec<_> = record_reader
+            .get_data_stream(..)
+            .await
+            .try_collect()
+            .await
+            .expect("Should read all records");
+
+        let mut record_offset_ids: Vec<usize> = record_data
+            .into_iter()
+            .map(|(offset_id, _data)| offset_id as usize)
+            .collect();
+        record_offset_ids.sort();
+
+        // Assert they match
+        assert_eq!(vector_offset_ids.len(), record_offset_ids.len());
+        assert_eq!(
+            vector_offset_ids, record_offset_ids,
+            "Vector and record segment offset IDs should match after vector-only rebuild"
+        );
+    }
 
     async fn get_all_records(
         system: &System,
@@ -1310,6 +1372,7 @@ mod tests {
         let mut sysdb = SysDb::Test(TestSysDb::new());
         let test_segments = TestDistributedSegment::new().await;
         let collection_id = test_segments.collection.collection_id;
+        let collection_for_reader = test_segments.collection.clone();
         let database_name =
             chroma_types::DatabaseName::new(test_segments.collection.database.clone())
                 .expect("database name should be valid");
@@ -1347,7 +1410,7 @@ mod tests {
                     },
                 )
             });
-        let log = Log::InMemory(in_memory_log);
+        let log = Log::InMemory(in_memory_log.clone());
 
         // Initial compaction to create segments
         let compact_result = Box::pin(compact(
@@ -1357,6 +1420,57 @@ mod tests {
             false,
             HashSet::new(),
             50,
+            10,
+            1000,
+            50,
+            log.clone(),
+            sysdb.clone(),
+            test_segments.blockfile_provider.clone(),
+            test_segments.hnsw_provider.clone(),
+            test_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            false,
+            None,
+            None,
+            None,
+        ))
+        .await;
+        assert!(compact_result.is_ok());
+
+        let delete_ids = [75, 77, 79, 83];
+        for (idx, rec_id) in delete_ids.iter().enumerate() {
+            let del_record = chroma_types::LogRecord {
+                log_offset: 120 + idx as i64,
+                record: chroma_types::OperationRecord {
+                    id: chroma_log::test::int_as_id(*rec_id),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: chroma_types::Operation::Delete,
+                },
+            };
+
+            in_memory_log.add_log(
+                collection_id,
+                InternalLogRecord {
+                    collection_id,
+                    log_offset: del_record.log_offset,
+                    log_ts: del_record.log_offset,
+                    record: del_record,
+                },
+            );
+        }
+
+        let log = Log::InMemory(in_memory_log.clone());
+
+        let compact_result = Box::pin(compact(
+            system.clone(),
+            collection_id,
+            database_name.clone(),
+            false,
+            HashSet::new(),
+            1,
             10,
             1000,
             50,
@@ -1389,6 +1503,15 @@ mod tests {
         )
         .await;
         assert!(!old_records.is_empty());
+
+        Box::pin(check_offset_ids_match(
+            &collection_for_reader,
+            &old_cas.vector_segment,
+            &old_cas.record_segment,
+            test_segments.hnsw_provider.clone(),
+            &test_segments.blockfile_provider,
+        ))
+        .await;
 
         // Rebuild ONLY the vector segment
         let vector_only_scopes = HashSet::from([chroma_types::SegmentScope::VECTOR]);
@@ -1427,12 +1550,31 @@ mod tests {
         // Version file path should be updated
         let version_suffix_re = Regex::new(r"/\d+$").unwrap();
         let expected_version_file = version_suffix_re
-            .replace(&old_cas.collection.version_file_path.clone().unwrap(), "/2")
+            .replace(&old_cas.collection.version_file_path.clone().unwrap(), "/3")
             .to_string();
         assert_eq!(
             new_cas.collection.version_file_path,
             Some(expected_version_file)
         );
+
+        // Verify offset IDs match after vector-only rebuild
+        Box::pin(check_offset_ids_match(
+            &collection_for_reader,
+            &new_cas.vector_segment,
+            &new_cas.record_segment,
+            test_segments.hnsw_provider.clone(),
+            &test_segments.blockfile_provider,
+        ))
+        .await;
+
+        let mut expected_new_collection = old_cas.collection.clone();
+        expected_new_collection.version += 1;
+        expected_new_collection.version_file_path = Some(
+            version_suffix_re
+                .replace(&old_cas.collection.version_file_path.clone().unwrap(), "/3")
+                .to_string(),
+        );
+        assert_eq!(new_cas.collection, expected_new_collection);
 
         // Record count and size should be preserved
         assert_eq!(
