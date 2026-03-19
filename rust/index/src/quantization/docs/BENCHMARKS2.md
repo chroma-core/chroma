@@ -23,7 +23,7 @@
 
 [../../../benches/vector/quantization.rs](../../../benches/vector/quantization.rs)
 
-Tested on r6i.8xlarge
+Tested on r6id.8xlarge
 
 ### Hot cache
 Same pair/vector every call. Function latency should be comparable to the total latency of its constituent primitives (below).

@@ -1,4 +1,4 @@
-1M centroids, 10k data vectors - rerank debugging: looks good
+Usearch - 1M centroids, 10k data vectors
  cargo bench -p chroma-index --bench usearch_spann_profile --features chroma-index/usearch -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 1000000 --data-vectors 10000 --phase-2 --phase-3
    Compiling chroma-index v0.1.0 (/home/ubuntu/chroma/rust/index)
     Finished `bench` profile [optimized + debuginfo] target(s) in 20.55s

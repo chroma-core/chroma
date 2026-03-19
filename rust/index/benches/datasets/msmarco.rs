@@ -1,4 +1,8 @@
 //! MS MARCO v2 with Cohere embed-multilingual-v3 embeddings: ~138M vectors, 1024 dimensions.
+//!
+//! Shards are downloaded lazily: only the parquet files actually needed by
+//! `load_range()` are fetched from HuggingFace, keeping disk usage proportional
+//! to the number of vectors requested rather than the full 138M-vector dataset.
 
 use std::fs::File;
 use std::io;
@@ -10,7 +14,7 @@ use arrow::datatypes::ArrowNativeType;
 use chroma_distance::DistanceFunction;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
-use super::{ground_truth, Dataset, Query};
+use super::{ground_truth, Dataset, LazyShardLoader, Query};
 
 const REPO_ID: &str = "Cohere/msmarco-v2-embed-multilingual-v3";
 const NUM_SHARDS: usize = 139;
@@ -34,41 +38,29 @@ fn gt_path() -> PathBuf {
     cache_dir().join("ground_truth.parquet")
 }
 
-/// MS MARCO v2 dataset handle.
+/// MS MARCO v2 dataset handle. Shards are downloaded on demand.
 pub struct MsMarco {
-    shard_paths: Vec<PathBuf>,
+    loader: LazyShardLoader,
 }
 
 impl MsMarco {
-    /// Load MS MARCO v2 dataset from HuggingFace Hub.
-    /// Requires ground truth to be precomputed at ~/.cache/msmarco_v2/ground_truth.parquet
+    /// Prepare MS MARCO v2 dataset handle (no shard downloads happen here).
+    /// Ground truth is optional; if missing, recall evaluation is skipped.
     pub async fn load() -> io::Result<Self> {
-        // Check ground truth exists before downloading shards
         if !ground_truth::exists(&gt_path()) {
-            return Err(io::Error::other(format!(
-                "Ground truth not found at {}.\n  \
-                 Run: python sphroma/scripts/compute_ground_truth.py --dataset msmarco",
+            println!(
+                "Note: ground truth not found at {}. Recall evaluation will be skipped.",
                 gt_path().display()
-            )));
+            );
         }
 
         println!("Loading MS MARCO v2 from HuggingFace Hub...");
-
-        let api = hf_hub::api::tokio::Api::new().map_err(io::Error::other)?;
-        let repo = api.dataset(REPO_ID.to_string());
-
-        let shard_files = shard_files();
-        let mut shard_paths = Vec::with_capacity(NUM_SHARDS);
-        for filename in shard_files.iter() {
-            let path = repo.get(filename).await.map_err(io::Error::other)?;
-            shard_paths.push(path);
-        }
-
-        Ok(Self { shard_paths })
+        let loader = LazyShardLoader::new(REPO_ID, shard_files())?;
+        Ok(Self { loader })
     }
 
     /// Load vectors in range [offset, offset+limit).
-    /// Returns (global_id, embedding) pairs.
+    /// Only the shards overlapping the requested range are downloaded.
     pub fn load_range(&self, offset: usize, limit: usize) -> io::Result<Vec<(u32, Arc<[f32]>)>> {
         let end = (offset + limit).min(DATA_LEN);
         if offset >= end {
@@ -79,17 +71,17 @@ impl MsMarco {
         let mut global_idx = 0usize;
         let mut collected = 0usize;
 
-        for shard_path in &self.shard_paths {
+        for shard_idx in 0..self.loader.num_shards() {
             if collected >= limit || global_idx >= end {
                 break;
             }
 
-            let file = File::open(shard_path)?;
+            let shard_path = self.loader.get(shard_idx)?;
+            let file = File::open(&shard_path)?;
             let builder = ParquetRecordBatchReaderBuilder::try_new(file)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
             let num_rows = builder.metadata().file_metadata().num_rows() as usize;
 
-            // Skip shards entirely before our range
             if global_idx + num_rows <= offset {
                 global_idx += num_rows;
                 continue;
@@ -129,13 +121,11 @@ impl MsMarco {
                         continue;
                     }
 
-                    // Skip if before offset
                     if global_idx < offset {
                         global_idx += 1;
                         continue;
                     }
 
-                    // Stop if we've collected enough
                     if collected >= limit {
                         break;
                     }
@@ -193,6 +183,10 @@ impl Dataset for MsMarco {
     }
 
     fn queries(&self, distance_function: DistanceFunction) -> io::Result<Vec<Query>> {
-        ground_truth::load(&gt_path(), distance_function)
+        if ground_truth::exists(&gt_path()) {
+            ground_truth::load(&gt_path(), distance_function)
+        } else {
+            Ok(Vec::new())
+        }
     }
 }

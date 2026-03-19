@@ -95,6 +95,14 @@ struct Args {
     #[arg(long)]
     legend: bool,
 
+    /// Compute brute-force ground truth when precomputed GT is missing (slow at scale)
+    #[arg(long)]
+    brute_force_gt: bool,
+
+    /// Directory for temporary storage (blockfiles, indexes). Defaults to system temp.
+    #[arg(long)]
+    tmp_dir: Option<String>,
+
     /// Extra arguments (ignored, for compatibility with cargo bench)
     #[arg(hide = true, allow_hyphen_values = true)]
     _extra: Vec<String>,
@@ -476,7 +484,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let queries_by_checkpoint = group_queries_by_checkpoint(all_queries);
 
     // Setup temp directory and storage
-    let tmp_dir = tempfile::tempdir()?;
+    let tmp_dir = if let Some(ref base) = args.tmp_dir {
+        tempfile::tempdir_in(base)?
+    } else {
+        tempfile::tempdir()?
+    };
     let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
 
     let collection_id = CollectionUuid::new();
@@ -702,9 +714,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         all_indexed_vectors.extend(batch_vectors.iter().cloned());
 
         // === Step 7: Evaluate recall for this checkpoint ===
-        // Try pre-computed ground truth first (exact match on total_vectors).
-        // If none exists (checkpoint size doesn't align with GT boundaries),
-        // compute brute-force kNN ground truth on the fly.
+        // Use pre-computed ground truth if available for this boundary.
+        // Skip recall evaluation if no precomputed GT exists (brute-force is too
+        // slow at scale). Use --brute-force-gt to force on-the-fly computation.
         let precomputed: Vec<&Query> = queries_by_checkpoint
             .get(&(total_vectors as u64))
             .map(|qs| qs.iter().collect())
@@ -713,7 +725,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let computed_gt;
         let checkpoint_queries: Vec<&Query> = if !precomputed.is_empty() {
             precomputed
-        } else {
+        } else if args.brute_force_gt {
             println!("  Computing brute-force ground truth ({} queries x {} vectors)...",
                 query_vectors.len(), all_indexed_vectors.len());
             let gt_start = Instant::now();
@@ -725,6 +737,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             );
             println!("  Ground truth computed in {}", format_duration(gt_start.elapsed()));
             computed_gt.iter().collect()
+        } else {
+            Vec::new()
         };
         let checkpoint_queries: &[&Query] = &checkpoint_queries;
 
@@ -740,6 +754,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             format_duration(commit_time),
             throughput,
         );
+
+        if checkpoint_queries.is_empty() {
+            println!("  (no precomputed ground truth for {}M boundary, skipping recall)", total_vectors / 1_000_000);
+        }
 
         let mut total_search_calls: u64 = 0;
         let mut total_search_nanos: u64 = 0;
