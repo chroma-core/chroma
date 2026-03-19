@@ -489,10 +489,9 @@ impl ManifestManager {
             .collect();
         let exp_backoff = ExponentialBackoff::new(2_000.0, 1_500.0);
         for _ in 0..3 {
-            let mutations_clone = mutations.clone();
             let res = spanner
-                .read_write_transaction(move |tx| {
-                    let mutations = mutations_clone.clone();
+                .read_write_transaction(|tx| {
+                    let mutations = mutations.clone();
                     Box::pin(async move {
                         tx.buffer_write(mutations);
                         Ok::<_, google_cloud_spanner::session::SessionError>(())
