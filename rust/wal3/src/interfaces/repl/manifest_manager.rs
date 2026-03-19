@@ -121,6 +121,7 @@ impl ManifestManager {
             }
         }
         let exp_backoff = ExponentialBackoff::new(2_000.0, 1_500.0);
+        let mut last_err: Option<String> = None;
         for _ in 0..3 {
             let res = spanner
                 .read_write_transaction(|tx| {
@@ -141,12 +142,19 @@ impl ManifestManager {
                 Err(google_cloud_spanner::session::SessionError::GRPC(ref status))
                     if status.code() == Code::Aborted =>
                 {
+                    last_err = Some(format!("{status:?}"));
                     let backoff = exp_backoff.next_capped(Duration::from_secs(10));
                     tokio::time::sleep(backoff).await;
                     continue;
                 }
                 Err(err) => return Err(err.into()),
             }
+        }
+        if let Some(last_err) = last_err {
+            tracing::warn!(
+                error = last_err,
+                "set_ignore_dirty transaction exhausted retries",
+            );
         }
         Err(Error::Backoff)
     }
@@ -940,14 +948,15 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
             let position_limit = row.column_by_name::<i64>("position_limit")?;
             max_log_position = std::cmp::max(max_log_position, position_limit);
             let ident = row.column_by_name::<String>("ident")?;
-            let fragment_uuid = ident
-                .parse::<Uuid>()
-                .map(FragmentUuid::from_uuid)
-                .map_err(|e| {
-                    Error::CorruptGarbage(format!(
-                        "invalid UUID fragment identifier in fragments.ident: {ident}: {e}"
-                    ))
-                })?;
+            let fragment_uuid =
+                ident
+                    .parse::<Uuid>()
+                    .map(FragmentUuid::from_uuid)
+                    .map_err(|e| {
+                        Error::CorruptGarbage(format!(
+                            "invalid UUID fragment identifier in fragments.ident: {ident}: {e}"
+                        ))
+                    })?;
             max_dropped_uuid = Some(
                 max_dropped_uuid
                     .map(|existing| std::cmp::max(existing, fragment_uuid))

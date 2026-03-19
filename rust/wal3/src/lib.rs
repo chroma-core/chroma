@@ -1481,11 +1481,6 @@ mod tests {
             "a fragment generated now must survive a 1-hour grace period cutoff"
         );
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     #[test]
     fn minimum_for_millis_since_unix_epoch_is_deterministic_and_minimal() {
