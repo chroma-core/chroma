@@ -105,26 +105,76 @@ Measured per-navigate-call with 5000 centroids, dim=1024, fetching 128 vectors:
 USearch `get()` dominates rerank cost (~97% is fetch, not distance computation).
 All in-memory alternatives reduce fetch to negligible.
 
-## Decision: use `cluster_deltas` (Option 0)
+## Future: Option D not worth pursuing
 
-`navigate()` now calls `self.centroid(key)` which reads from
-`cluster_deltas: DashMap<u32, QuantizedDelta>` -- every centroid's f32 vector
-is already stored as `Arc<[f32]>` in the delta's `center` field. This is the
-DashMap<Arc> row above (~46ns/vec, ~100x faster than USearch get).
+Option D (USearch `get_into` with reusable buffer) only eliminates the
+per-call allocation, not the lock + hash + FFI overhead that dominates.
 
-`raw_centroid` (USearch index) is kept for persistence (save/load across
-generations) and the write path (add/remove), but the hot read path in
-`navigate()` no longer touches it.
+## Implementation History
 
-## Future: further options if DashMap becomes a bottleneck
+### Iteration 1: DashMap via `cluster_deltas` (Option 0)
 
-If `nav_fetch` still shows up in profiles, upgrade to Option B:
+Changed `navigate()` to call `self.centroid(key)` which reads from
+`cluster_deltas: DashMap<u32, QuantizedDelta>`. The centroid f32 vector is
+already stored as `Arc<[f32]>` in the delta's `center` field -- no new data
+structure needed.
 
-- Add `centroid_vecs: Vec<Option<Arc<[f32]>>>` indexed by cluster ID.
-- Populate in `init()`/`resume()`, update in `spawn()`/`drop_cluster()`.
-- Fetch becomes a single array index (~3ns/vec vs DashMap's ~46ns/vec).
-- Trade-off: ~30-50 lines of sync code, but 15x faster than DashMap.
+Result: `nav_fetch` dropped from ~4.6us/vec (USearch) to ~46ns/vec (DashMap).
+But at scale (128 vectors fetched per navigate), DashMap's per-shard locking
+still showed `nav_fetch` taking as long as `nav_search` and `nav_rerank`
+(~36-53us total per navigate call).
 
-Option D (USearch `get_into` with reusable buffer) is not worth pursuing --
-it only eliminates the allocation, not the lock/hash/FFI overhead that
-dominates.
+### Iteration 2: flat `Vec<Option<Arc<[f32]>>>` (Option B)
+
+Added `centroid_vectors: Arc<RwLock<Vec<Option<Arc<[f32]>>>>>` to the writer,
+indexed by cluster ID. One `parking_lot::RwLock::read()` per navigate call
+(~20ns), then N array lookups at ~3ns each.
+
+Sync points:
+- `spawn()`: write-lock, grow vec if needed, insert `Some(center.clone())`
+- `drop()`: write-lock, set slot to `None`
+- `resume()`: pre-populate from `cluster_deltas` after init
+- `rebuild_on_drift()`: no change needed (centroids unchanged)
+- `commit()`: not carried to flusher (read-only cache)
+
+### Iteration 3: removed `raw_centroid` from writer
+
+Removed the `raw_centroid: I` field entirely from `QuantizedSpannIndexWriter`.
+The field was only used for:
+1. Per-operation sync writes in `spawn()`/`drop()` (redundant with
+   `centroid_vectors`)
+2. Persistence (flushed to storage, loaded on resume)
+3. Rebuild in `rebuild_on_drift()` (redundant -- quantized_centroid suffices)
+
+After removal:
+- `commit()` builds a fresh `raw_centroid` USearch index on demand from
+  `centroid_vectors` and passes it to the flusher. This is still needed
+  because the segment reader (`rust/segment/src/quantized_spann.rs`) opens
+  `raw_centroid` on its read path.
+- `resume()` reads centroid vectors from the `QuantizedCluster` blockfile
+  (the `center` field) instead of from `raw_centroid`.
+
+## Known issue: persistence of centroid vectors
+
+**`resume()` reads centroids from `QuantizedCluster.center` in the cluster
+blockfile.** The `QuantizedCluster` struct stores `center: &[f32]` which is
+written as `center: &delta.center` (full-precision `Arc<[f32]>`) and stored
+via `Float32Builder` in Arrow. So the data IS full-precision f32 -- the
+"Quantized" in the struct name refers to the member codes, not the center.
+
+**However, this has not been verified end-to-end.** If the cluster blockfile
+center turns out NOT to be the raw full-precision centroid (e.g. if it's
+transformed or truncated somewhere in the blockfile serialization path), then
+`resume()` would be loading wrong data into `centroid_vectors`.
+
+**If that's the case, the fix is:** persist `centroid_vectors` directly as a
+dedicated blockfile (or as a separate prefix in the existing scalar/embedding
+metadata blockfile) during `commit()`, and load from it in `resume()`. This
+would replace the on-demand `raw_centroid` USearch build in `commit()` too --
+we'd write a simple flat array of f32 vectors keyed by cluster ID instead of
+building an entire HNSW graph just to use it as a key-value store.
+
+**The on-demand `raw_centroid` build in `commit()` should also be removed**
+once the segment reader is updated to source centroid vectors from the cluster
+blockfile (or a dedicated centroid blockfile) instead of from a USearch index.
+That's a cross-crate change (touches `rust/segment/src/quantized_spann.rs`).

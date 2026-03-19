@@ -3,6 +3,8 @@ use std::sync::{
     Arc,
 };
 
+use parking_lot::RwLock;
+
 use chroma_blockstore::{
     arrow::provider::BlockfileReaderOptions, provider::BlockfileProvider, BlockfileFlusher,
     BlockfileReader, BlockfileWriterOptions,
@@ -158,8 +160,6 @@ pub mod stats {
         pub nav_search: MethodSnapshot,
         pub nav_fetch: MethodSnapshot,
         pub nav_rerank: MethodSnapshot,
-        pub raw_add: MethodSnapshot,
-        pub raw_rm: MethodSnapshot,
         pub q_add: MethodSnapshot,
         pub q_rm: MethodSnapshot,
         pub load_raw_points: u64,
@@ -192,8 +192,6 @@ pub mod stats {
                 "nav_search" => self.nav_search,
                 "nav_fetch" => self.nav_fetch,
                 "nav_rerank" => self.nav_rerank,
-                "raw_add" => self.raw_add,
-                "raw_rm" => self.raw_rm,
                 "q_add" => self.q_add,
                 "q_rm" => self.q_rm,
                 _ => MethodSnapshot::default(),
@@ -223,8 +221,6 @@ pub mod stats {
         pub nav_search: MethodStats,
         pub nav_fetch: MethodStats,
         pub nav_rerank: MethodStats,
-        pub raw_add: MethodStats,
-        pub raw_rm: MethodStats,
         pub q_add: MethodStats,
         pub q_rm: MethodStats,
         pub load_raw_points: AtomicU64,
@@ -257,8 +253,6 @@ pub mod stats {
                 nav_search: snap(&self.nav_search),
                 nav_fetch: snap(&self.nav_fetch),
                 nav_rerank: snap(&self.nav_rerank),
-                raw_add: snap(&self.raw_add),
-                raw_rm: snap(&self.raw_rm),
                 q_add: snap(&self.q_add),
                 q_rm: snap(&self.q_rm),
                 load_raw_points: self.load_raw_points.load(Ordering::Relaxed),
@@ -278,7 +272,7 @@ pub mod stats {
         "load", "load_raw", // I/O
         "quantize", // Quantization (encoding vectors to codes)
         "search", "search_scan", "search_load_raw", "search_rerank", // Search (total, cluster scan, load raw, fp rerank)
-        "raw_add", "raw_rm", "q_add", "q_rm", // HNSW centroid index ops
+        "q_add", "q_rm", // HNSW centroid index ops
     ];
 
     fn format_duration(nanos: u64) -> String {
@@ -611,7 +605,7 @@ pub struct QuantizedSpannIndexWriter<I: VectorIndex> {
     // === Centroid Index ===
     next_cluster_id: Arc<AtomicU32>,
     quantized_centroid: I,
-    raw_centroid: I,
+    centroid_vectors: Arc<RwLock<Vec<Option<Arc<[f32]>>>>>,
 
     // === Quantization ===
     center: Arc<[f32]>,
@@ -837,9 +831,8 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
 
     /// Get the centroid for a cluster, cloning to release the lock.
     fn centroid(&self, cluster_id: u32) -> Option<Arc<[f32]>> {
-        self.cluster_deltas
-            .get(&cluster_id)
-            .map(|delta| delta.center.clone())
+        let vecs = self.centroid_vectors.read();
+        vecs.get(cluster_id as usize).and_then(|opt| opt.clone())
     }
 
     /// Compute distance between two vectors using the configured distance function.
@@ -858,18 +851,18 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
     async fn drop(&self, cluster_id: u32) -> Result<Option<QuantizedDelta>, QuantizedSpannError> {
         let _guard = stats::TimedGuard::new(&self.stats.drop);
         {
-            let _g = stats::TimedGuard::new(&self.stats.raw_rm);
-            self.raw_centroid
-                .remove(cluster_id)
-                .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
-        }
-        {
             let _g = stats::TimedGuard::new(&self.stats.q_rm);
             self.quantized_centroid
                 .remove(cluster_id)
                 .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
         }
         self.tombstones.insert(cluster_id);
+        {
+            let mut vecs = self.centroid_vectors.write();
+            if let Some(slot) = vecs.get_mut(cluster_id as usize) {
+                *slot = None;
+            }
+        }
 
         let Some((_, delta)) = self.cluster_deltas.remove(&cluster_id) else {
             return Ok(None);
@@ -1264,10 +1257,12 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
         let center = delta.center.clone();
         self.cluster_deltas.insert(cluster_id, delta);
         {
-            let _g = stats::TimedGuard::new(&self.stats.raw_add);
-            self.raw_centroid
-                .add(cluster_id, &center)
-                .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
+            let mut vecs = self.centroid_vectors.write();
+            let id = cluster_id as usize;
+            if id >= vecs.len() {
+                vecs.resize(id + 1, None);
+            }
+            vecs[id] = Some(center.clone());
         }
         {
             let _g = stats::TimedGuard::new(&self.stats.q_add);
@@ -1691,12 +1686,45 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
         .instrument(tracing::trace_span!("Commit embedding metadata blockfile"))
         .await?;
 
+        // Build raw_centroid on demand for persistence
+        let max_neighbors = self.config.max_neighbors.unwrap_or(default_m_spann());
+        let ef_construction = self
+            .config
+            .ef_construction
+            .unwrap_or(default_construction_ef_spann());
+        let ef_search = self.config.ef_search.unwrap_or(default_search_ef_spann());
+        let raw_usearch_config = USearchIndexConfig {
+            collection_id: self.collection_id,
+            cmek: self.cmek.clone(),
+            prefix_path: self.prefix_path.clone(),
+            dimensions: self.dimension,
+            distance_function: self.distance_function.clone(),
+            connectivity: max_neighbors,
+            expansion_add: ef_construction,
+            expansion_search: ef_search,
+            quantization_center: None,
+            centroid_quantization_bits: self.config.centroid_bits(),
+        };
+        let raw_centroid = usearch_provider
+            .open(&raw_usearch_config, OpenMode::Create)
+            .await
+            .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
+        let vecs = self.centroid_vectors.read();
+        for (id, slot) in vecs.iter().enumerate() {
+            if let Some(v) = slot {
+                raw_centroid
+                    .add(id as u32, v)
+                    .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
+            }
+        }
+        drop(vecs);
+
         Ok(QuantizedSpannFlusher {
             embedding_metadata_flusher,
             prefix_path: self.prefix_path.clone(),
             quantized_centroid: self.quantized_centroid,
             quantized_cluster_flusher,
-            raw_centroid: self.raw_centroid,
+            raw_centroid,
             scalar_metadata_flusher,
             usearch_provider: usearch_provider.clone(),
         })
@@ -1739,23 +1767,11 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             connectivity: max_neighbors,
             expansion_add: ef_construction,
             expansion_search: ef_search,
-            quantization_center: None,
+            quantization_center: Some(center.clone()),
             centroid_quantization_bits: config.centroid_bits(),
         };
-
-        // Create centroid indexes
-        let raw_centroid = usearch_provider
-            .open(&usearch_config, OpenMode::Create)
-            .instrument(tracing::trace_span!("Create raw centroid index"))
-            .await
-            .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
-
-        let quantized_usearch_config = USearchIndexConfig {
-            quantization_center: Some(center.clone()),
-            ..usearch_config
-        };
         let quantized_centroid = usearch_provider
-            .open(&quantized_usearch_config, OpenMode::Create)
+            .open(&usearch_config, OpenMode::Create)
             .instrument(tracing::trace_span!("Create quantized centroid index"))
             .await
             .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
@@ -1773,7 +1789,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             // === Centroid Index ===
             next_cluster_id: Arc::new(AtomicU32::new(0)),
             quantized_centroid,
-            raw_centroid,
+            centroid_vectors: Arc::new(RwLock::new(Vec::new())),
             // === Quantization ===
             center,
             rotation,
@@ -1905,8 +1921,8 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             .unwrap_or(default_construction_ef_spann());
         let ef_search = config.ef_search.unwrap_or(default_search_ef_spann());
 
-        // Build USearch config from params
-        let usearch_config = USearchIndexConfig {
+        // Step 1: Open quantized centroid index
+        let quantized_usearch_config = USearchIndexConfig {
             collection_id,
             cmek: cmek.clone(),
             prefix_path: prefix_path.clone(),
@@ -1915,23 +1931,8 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             connectivity: max_neighbors,
             expansion_add: ef_construction,
             expansion_search: ef_search,
-            quantization_center: None,
-            centroid_quantization_bits: config.centroid_bits(),
-        };
-
-        // Step 1: Open centroid indexes
-        let raw_centroid = usearch_provider
-            .open(&usearch_config, OpenMode::Fork(file_ids.raw_centroid_id))
-            .instrument(tracing::trace_span!(
-                "Fork raw centroid index",
-                index_id = %file_ids.raw_centroid_id.0
-            ))
-            .await
-            .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
-
-        let quantized_usearch_config = USearchIndexConfig {
             quantization_center: Some(center.clone()),
-            ..usearch_config
+            centroid_quantization_bits: config.centroid_bits(),
         };
         let quantized_centroid = usearch_provider
             .open(
@@ -1987,37 +1988,39 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
         .await?;
 
         // Step 3: Open cluster reader + initialize deltas from cluster_lengths
-        let (quantized_cluster_reader, deltas) = async {
+        let (quantized_cluster_reader, deltas): (_, DashMap<u32, QuantizedDelta>) = async {
             let options =
                 BlockfileReaderOptions::new(file_ids.quantized_cluster_id, prefix_path.clone());
             let reader = Some(
                 blockfile_provider
-                    .read(options)
+                    .read::<u32, QuantizedCluster<'static>>(options)
                     .await
                     .map_err(|err| QuantizedSpannError::Blockfile(err.boxed()))?,
             );
 
-            // Initialize deltas from cluster_lengths by getting centers from raw_centroid
-            let deltas = DashMap::new();
-            for entry in cluster_lengths.iter() {
-                let cluster_id = *entry.key();
-                let length = *entry.value();
+            // Initialize deltas from cluster_lengths by getting centers from cluster blockfile
+            let deltas: DashMap<u32, QuantizedDelta> = DashMap::new();
+            if let Some(ref cluster_reader) = reader {
+                for entry in cluster_lengths.iter() {
+                    let cluster_id = *entry.key();
+                    let length = *entry.value();
 
-                // Get center embedding from raw_centroid index
-                if let Some(center_embedding) = raw_centroid
-                    .get(cluster_id)
-                    .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?
-                {
-                    deltas.insert(
-                        cluster_id,
-                        QuantizedDelta {
-                            center: center_embedding.into(),
-                            codes: Vec::new(),
-                            ids: Vec::new(),
-                            length,
-                            versions: Vec::new(),
-                        },
-                    );
+                    if let Some(cluster) = cluster_reader
+                        .get("", cluster_id)
+                        .await
+                        .map_err(QuantizedSpannError::Blockfile)?
+                    {
+                        deltas.insert(
+                            cluster_id,
+                            QuantizedDelta {
+                                center: cluster.center.into(),
+                                codes: Vec::new(),
+                                ids: Vec::new(),
+                                length,
+                                versions: Vec::new(),
+                            },
+                        );
+                    }
                 }
             }
 
@@ -2028,6 +2031,15 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             num_clusters = cluster_lengths.len()
         ))
         .await?;
+
+        let mut centroid_vecs: Vec<Option<Arc<[f32]>>> =
+            vec![None; next_cluster_id as usize];
+        for entry in deltas.iter() {
+            let id = *entry.key() as usize;
+            if id < centroid_vecs.len() {
+                centroid_vecs[id] = Some(entry.value().center.clone());
+            }
+        }
 
         Ok(Self {
             // === Config ===
@@ -2042,7 +2054,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             // === Centroid Index ===
             next_cluster_id: Arc::new(AtomicU32::new(next_cluster_id)),
             quantized_centroid,
-            raw_centroid,
+            centroid_vectors: Arc::new(RwLock::new(centroid_vecs)),
             // === Quantization ===
             center,
             rotation,
@@ -2111,8 +2123,8 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
                 .unwrap_or(default_construction_ef_spann());
             let ef_search = self.config.ef_search.unwrap_or(default_search_ef_spann());
 
-            // Build USearch config from stored fields
-            let usearch_config = USearchIndexConfig {
+            // Rebuild quantized centroid index with new center
+            let quantized_config = USearchIndexConfig {
                 collection_id: self.collection_id,
                 cmek: self.cmek.clone(),
                 prefix_path: self.prefix_path.clone(),
@@ -2121,35 +2133,16 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
                 connectivity: max_neighbors,
                 expansion_add: ef_construction,
                 expansion_search: ef_search,
-                quantization_center: None,
-                centroid_quantization_bits: self.config.centroid_bits(),
-            };
-
-            // Rebuild raw centroid index
-            self.raw_centroid = usearch_provider
-                .open(&usearch_config, OpenMode::Create)
-                .await
-                .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
-
-            // Rebuild quantized centroid index with new center
-            let quantized_config = USearchIndexConfig {
                 quantization_center: Some(new_center.clone().into()),
-                ..usearch_config
+                centroid_quantization_bits: self.config.centroid_bits(),
             };
             self.quantized_centroid = usearch_provider
                 .open(&quantized_config, OpenMode::Create)
                 .await
                 .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
 
-            // Re-add all cluster centers to both indexes
             for entry in self.cluster_deltas.iter() {
                 let cluster_id = *entry.key();
-                {
-                    let _g = stats::TimedGuard::new(&self.stats.raw_add);
-                    self.raw_centroid
-                        .add(cluster_id, &entry.center)
-                        .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
-                }
                 {
                     let _g = stats::TimedGuard::new(&self.stats.q_add);
                     self.quantized_centroid
@@ -2249,7 +2242,6 @@ mod tests {
     use crate::{
         quantization::Code,
         usearch::{USearchIndex, USearchIndexProvider},
-        VectorIndex,
     };
 
     use super::{QuantizedDelta, QuantizedSpannIndexWriter};
@@ -3637,12 +3629,11 @@ mod tests {
             );
         }
 
-        // --- Verify raw centroid index contains all cluster IDs ---
+        // --- Verify centroid_vectors contains all cluster IDs ---
         for cluster_id in &cluster_ids {
-            let result = writer.raw_centroid.get(*cluster_id);
             assert!(
-                result.is_ok() && result.unwrap().is_some(),
-                "Cluster {} not found in raw_centroid index",
+                writer.centroid(*cluster_id).is_some(),
+                "Cluster {} not found in centroid_vectors",
                 cluster_id
             );
         }
