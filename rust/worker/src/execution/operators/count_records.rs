@@ -1,7 +1,10 @@
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_segment::blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError};
+use chroma_segment::{
+    blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    bloom_filter::BloomFilterManager,
+};
 use chroma_system::Operator;
 use chroma_types::{Chunk, LogRecord, Operation, Segment};
 use std::collections::HashSet;
@@ -21,6 +24,7 @@ pub(crate) struct CountRecordsInput {
     record_segment_definition: Segment,
     blockfile_provider: BlockfileProvider,
     log_records: Chunk<LogRecord>,
+    bloom_filter_manager: Option<BloomFilterManager>,
 }
 
 impl CountRecordsInput {
@@ -28,11 +32,13 @@ impl CountRecordsInput {
         record_segment_definition: Segment,
         blockfile_provider: BlockfileProvider,
         log_records: Chunk<LogRecord>,
+        bloom_filter_manager: Option<BloomFilterManager>,
     ) -> Self {
         Self {
             record_segment_definition,
             blockfile_provider,
             log_records,
+            bloom_filter_manager,
         }
     }
 }
@@ -74,7 +80,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
         let segment_reader = Box::pin(RecordSegmentReader::from_segment(
             &input.record_segment_definition,
             &input.blockfile_provider,
-            None,
+            input.bloom_filter_manager.clone(),
         ))
         .await;
         let reader = match segment_reader {
@@ -209,7 +215,7 @@ mod tests {
     use chroma_blockstore::provider::BlockfileProvider;
     use chroma_segment::{
         blockfile_record::{
-            RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError,
+            RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
             RecordSegmentWriter,
         },
         types::materialize_logs,
@@ -317,7 +323,7 @@ mod tests {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentPlan::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await
@@ -373,6 +379,7 @@ mod tests {
             record_segment_definition: record_segment,
             blockfile_provider: in_memory_provider,
             log_records: data,
+            bloom_filter_manager: None,
         };
         let operator = CountRecordsOperator {};
         let count = operator
@@ -459,6 +466,7 @@ mod tests {
             record_segment_definition: record_segment,
             blockfile_provider: in_memory_provider,
             log_records: data,
+            bloom_filter_manager: None,
         };
         let operator = CountRecordsOperator {};
         let count = operator

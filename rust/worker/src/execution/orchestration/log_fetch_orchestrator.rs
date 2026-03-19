@@ -8,7 +8,7 @@ use chroma_log::Log;
 use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentWriter},
     blockfile_record::{
-        RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError,
+        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
         RecordSegmentWriter, RecordSegmentWriterCreationError,
     },
     bloom_filter::BloomFilterManager,
@@ -399,7 +399,7 @@ impl LogFetchOrchestrator {
         }
 
         let total_log_count: usize = partitions.iter().map(|p| p.len()).sum();
-        let plan = RecordSegmentPlan {
+        let option = RecordSegmentReaderOptions {
             use_bloom_filter: self
                 .context
                 .bloom_filter_manager
@@ -413,7 +413,7 @@ impl LogFetchOrchestrator {
                 partition.clone(),
                 record_reader.clone(),
                 next_max_offset_id.clone(),
-                plan,
+                option,
             );
             let task = wrap(
                 operator,

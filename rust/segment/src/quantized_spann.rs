@@ -659,7 +659,7 @@ mod test {
     use rand::{Rng, SeedableRng};
 
     use super::{QuantizedSpannSegmentReader, QuantizedSpannSegmentWriter};
-    use crate::blockfile_record::RecordSegmentPlan;
+    use crate::blockfile_record::RecordSegmentReaderOptions;
     use crate::types::materialize_logs;
 
     const CLUSTER_BLOCK_SIZE: usize = 2 * 1024 * 1024;
@@ -857,7 +857,7 @@ mod test {
                 &None,
                 chunked,
                 Some(next_offset_id.clone()),
-                &RecordSegmentPlan::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .await
             .unwrap_or_else(|e| panic!("cycle {cycle}: materialize failed: {e}"));

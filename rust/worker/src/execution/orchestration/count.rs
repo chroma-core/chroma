@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_segment::bloom_filter::BloomFilterManager;
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
@@ -77,6 +78,9 @@ pub struct CountOrchestrator {
     // Read level
     read_level: ReadLevel,
 
+    // Bloom filter manager
+    bloom_filter_manager: Option<BloomFilterManager>,
+
     // Fetched log size
     fetch_log_bytes: Option<u64>,
 
@@ -92,6 +96,7 @@ impl CountOrchestrator {
         collection_and_segments: CollectionAndSegments,
         fetch_log: FetchLogOperator,
         read_level: ReadLevel,
+        bloom_filter_manager: Option<BloomFilterManager>,
     ) -> Self {
         let context = OrchestratorContext::new(dispatcher);
         Self {
@@ -101,6 +106,7 @@ impl CountOrchestrator {
             queue,
             fetch_log,
             read_level,
+            bloom_filter_manager,
             fetch_log_bytes: None,
             result_channel: None,
         }
@@ -136,6 +142,7 @@ impl Orchestrator for CountOrchestrator {
                         self.collection_and_segments.record_segment.clone(),
                         self.blockfile_provider.clone(),
                         empty_logs,
+                        self.bloom_filter_manager.clone(),
                     ),
                     ctx.receiver(),
                     self.context.task_cancellation_token.clone(),
@@ -189,6 +196,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CountOrchestrator {
                 self.collection_and_segments.record_segment.clone(),
                 self.blockfile_provider.clone(),
                 output,
+                self.bloom_filter_manager.clone(),
             ),
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),

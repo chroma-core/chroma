@@ -40,6 +40,7 @@ fn trivial_knn_filter(
         empty_fetch_log(collection_uuid),
         trivial_filter(),
         ReadLevel::IndexAndWal,
+        None,
     )
 }
 
@@ -59,6 +60,7 @@ fn always_true_knn_filter(
         empty_fetch_log(collection_uuid),
         always_true_filter_for_modulo_metadata(),
         ReadLevel::IndexAndWal,
+        None,
     )
 }
 
@@ -78,6 +80,7 @@ fn always_false_knn_filter(
         empty_fetch_log(collection_uuid),
         always_false_filter_for_modulo_metadata(),
         ReadLevel::IndexAndWal,
+        None,
     )
 }
 
@@ -97,6 +100,7 @@ fn knn(
             embedding: query,
             fetch: Sift1MData::k() as u32,
         },
+        None,
     )
 }
 

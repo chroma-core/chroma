@@ -1,9 +1,8 @@
-use crate::spann_provider::SpannProvider;
+use crate::{blockfile_record::RecordSegmentReaderOptions, spann_provider::SpannProvider};
 
 use super::{
-    blockfile_metadata::MetadataSegmentWriter,
-    blockfile_record::{RecordSegmentPlan, RecordSegmentWriter},
-    distributed_hnsw::DistributedHNSWSegmentWriter,
+    blockfile_metadata::MetadataSegmentWriter, blockfile_record::RecordSegmentWriter,
+    bloom_filter::BloomFilterManager, distributed_hnsw::DistributedHNSWSegmentWriter,
     types::materialize_logs,
 };
 use chroma_blockstore::{provider::BlockfileProvider, test_arrow_blockfile_provider};
@@ -42,6 +41,7 @@ pub struct TestDistributedSegment {
     pub blockfile_provider: BlockfileProvider,
     pub hnsw_provider: HnswIndexProvider,
     pub spann_provider: SpannProvider,
+    pub bloom_filter_manager: Option<BloomFilterManager>,
     pub collection: Collection,
     pub metadata_segment: Segment,
     pub record_segment: Segment,
@@ -75,10 +75,15 @@ impl TestDistributedSegment {
         #[cfg(feature = "usearch")]
         temp_dirs.push(usearch_dir);
 
+        let bloom_filter_manager = blockfile_provider
+            .storage()
+            .map(BloomFilterManager::new_for_test);
+
         Self {
             temp_dirs,
             blockfile_provider: blockfile_provider.clone(),
             hnsw_provider: hnsw_provider.clone(),
+            bloom_filter_manager,
             spann_provider: SpannProvider {
                 adaptive_search_nprobe: true,
                 blockfile_provider,
@@ -102,7 +107,7 @@ impl TestDistributedSegment {
             &None,
             logs,
             Some(AtomicU32::new(next_offset as u32).into()),
-            &RecordSegmentPlan::default(),
+            &RecordSegmentReaderOptions::default(),
         )
         .await
         .expect("Should be able to materialize log.");
@@ -139,7 +144,7 @@ impl TestDistributedSegment {
             &self.record_segment,
             &self.blockfile_provider,
             None,
-            None,
+            self.bloom_filter_manager.clone(),
         ))
         .await
         .expect("Should be able to initiaize record writer.");

@@ -1434,7 +1434,7 @@ mod test {
     use crate::{
         blockfile_metadata::{MetadataSegmentReader, MetadataSegmentWriter},
         blockfile_record::{
-            RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError,
+            RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
             RecordSegmentWriter,
         },
         test::TestDistributedSegment,
@@ -1600,7 +1600,7 @@ mod test {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentPlan::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -1682,9 +1682,14 @@ mod test {
         .await
         .expect("Error creating segment writer");
         let some_reader = Some(record_segment_reader);
-        let mat_records = materialize_logs(&some_reader, data, None, &RecordSegmentPlan::default())
-            .await
-            .expect("Log materialization failed");
+        let mat_records = materialize_logs(
+            &some_reader,
+            data,
+            None,
+            &RecordSegmentReaderOptions::default(),
+        )
+        .await
+        .expect("Log materialization failed");
         metadata_writer
             .apply_materialized_log_chunk(&some_reader, &mat_records, None)
             .await
@@ -1777,9 +1782,14 @@ mod test {
         .await
         .expect("Error creating segment writer");
         let some_reader = Some(record_segment_reader);
-        let mat_records = materialize_logs(&some_reader, data, None, &RecordSegmentPlan::default())
-            .await
-            .expect("Log materialization failed");
+        let mat_records = materialize_logs(
+            &some_reader,
+            data,
+            None,
+            &RecordSegmentReaderOptions::default(),
+        )
+        .await
+        .expect("Log materialization failed");
         metadata_writer
             .apply_materialized_log_chunk(&some_reader, &mat_records, None)
             .await
@@ -1940,7 +1950,7 @@ mod test {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentPlan::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -2029,9 +2039,14 @@ mod test {
         .await
         .expect("Error creating segment writer");
         let some_reader = Some(record_segment_reader);
-        let mat_records = materialize_logs(&some_reader, data, None, &RecordSegmentPlan::default())
-            .await
-            .expect("Log materialization failed");
+        let mat_records = materialize_logs(
+            &some_reader,
+            data,
+            None,
+            &RecordSegmentReaderOptions::default(),
+        )
+        .await
+        .expect("Log materialization failed");
         metadata_writer
             .apply_materialized_log_chunk(&some_reader, &mat_records, None)
             .await
@@ -2216,7 +2231,7 @@ mod test {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentPlan::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -2287,9 +2302,14 @@ mod test {
         .await
         .expect("Error creating segment writer");
         let some_reader = Some(record_segment_reader);
-        let mat_records = materialize_logs(&some_reader, data, None, &RecordSegmentPlan::default())
-            .await
-            .expect("Log materialization failed");
+        let mat_records = materialize_logs(
+            &some_reader,
+            data,
+            None,
+            &RecordSegmentReaderOptions::default(),
+        )
+        .await
+        .expect("Log materialization failed");
         metadata_writer
             .apply_materialized_log_chunk(&some_reader, &mat_records, None)
             .await
@@ -2461,7 +2481,7 @@ mod test {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentPlan::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -2530,9 +2550,14 @@ mod test {
         .await
         .expect("Error creating segment writer");
         let some_reader = Some(record_segment_reader);
-        let mat_records = materialize_logs(&some_reader, data, None, &RecordSegmentPlan::default())
-            .await
-            .expect("Log materialization failed");
+        let mat_records = materialize_logs(
+            &some_reader,
+            data,
+            None,
+            &RecordSegmentReaderOptions::default(),
+        )
+        .await
+        .expect("Log materialization failed");
         metadata_writer
             .apply_materialized_log_chunk(&some_reader, &mat_records, None)
             .await
@@ -2716,7 +2741,7 @@ mod test {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentPlan::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -2749,8 +2774,7 @@ mod test {
             "tenant/{}/database/{}/collection/{}/segment/{}",
             tenant, database_id, record_segment.collection, record_segment.id,
         );
-        // 4 blockfiles and 1 bloom filter.
-        assert_eq!(record_segment.file_path.len(), 5);
+        assert_eq!(record_segment.file_path.len(), 4);
         for (_, file_path) in record_segment.file_path.iter() {
             assert_eq!(file_path.len(), 1);
             assert!(file_path
@@ -3006,7 +3030,7 @@ mod test {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentPlan::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .await
             .expect("Error materializing logs");
@@ -3399,7 +3423,7 @@ mod test {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentPlan::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -3597,7 +3621,7 @@ mod test {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentPlan::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .await
             .expect("Log materialization failed");

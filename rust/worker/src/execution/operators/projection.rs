@@ -4,7 +4,10 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
-    blockfile_record::{RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError},
+    blockfile_record::{
+        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
+    },
+    bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},
 };
 use chroma_system::Operator;
@@ -36,6 +39,7 @@ pub struct ProjectionInput {
     pub blockfile_provider: BlockfileProvider,
     pub record_segment: Segment,
     pub offset_ids: Vec<u32>,
+    pub bloom_filter_manager: Option<BloomFilterManager>,
 }
 
 #[derive(Error, Debug)]
@@ -83,7 +87,7 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
         let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
-            None,
+            input.bloom_filter_manager.clone(),
         ))
         .await
         {
@@ -112,14 +116,16 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
             }
         }
 
-        let materialized_logs = materialize_logs(
-            &record_segment_reader,
-            input.logs.clone(),
-            None,
-            &RecordSegmentPlan::default(),
-        )
-        .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
-        .await?;
+        let plan = RecordSegmentReaderOptions {
+            use_bloom_filter: input
+                .bloom_filter_manager
+                .as_ref()
+                .is_some_and(|mgr| input.logs.len() >= mgr.storage_fetch_threshold()),
+        };
+        let materialized_logs =
+            materialize_logs(&record_segment_reader, input.logs.clone(), None, &plan)
+                .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
+                .await?;
 
         // Create a hash map that maps an offset id to the corresponding log
         // It contains all records from the logs that should be present in the final result
@@ -256,6 +262,7 @@ mod tests {
                 blockfile_provider,
                 record_segment,
                 offset_ids,
+                bloom_filter_manager: None,
             },
         )
     }

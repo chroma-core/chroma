@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_segment::{
+    bloom_filter::BloomFilterManager,
     distributed_spann::{SpannSegmentReader, SpannSegmentReaderError},
     spann_provider::SpannProvider,
 };
@@ -65,12 +66,16 @@ pub struct SpannKnnOrchestrator {
     // Merge
     merge: Merge,
 
+    // Bloom filter manager
+    bloom_filter_manager: Option<BloomFilterManager>,
+
     // Result channel
     result_channel: Option<Sender<Result<Vec<RecordMeasure>, KnnError>>>,
     spann_reader: Option<SpannSegmentReader<'static>>,
 }
 
 impl SpannKnnOrchestrator {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         spann_provider: SpannProvider,
         dispatcher: ComponentHandle<Dispatcher>,
@@ -79,6 +84,7 @@ impl SpannKnnOrchestrator {
         knn_filter_output: KnnFilterOutput,
         k: usize,
         query: Vec<f32>,
+        bloom_filter_manager: Option<BloomFilterManager>,
     ) -> Self {
         let normalized_query_emb =
             if knn_filter_output.distance_function == DistanceFunction::Cosine {
@@ -109,6 +115,7 @@ impl SpannKnnOrchestrator {
             bruteforce_log_done: false,
             records: Vec::new(),
             merge: Merge { k: k as u32 },
+            bloom_filter_manager,
             result_channel: None,
             spann_reader: None,
         }
@@ -159,6 +166,7 @@ impl Orchestrator for SpannKnnOrchestrator {
                 record_segment: self.collection_and_segments.record_segment.clone(),
                 log_offset_ids: self.knn_filter_output.filter_output.log_offset_ids.clone(),
                 distance_function: self.knn_filter_output.distance_function.clone(),
+                bloom_filter_manager: self.bloom_filter_manager.clone(),
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
