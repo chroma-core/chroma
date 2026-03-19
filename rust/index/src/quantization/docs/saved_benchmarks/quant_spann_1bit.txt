@@ -218,6 +218,35 @@ Overall throughput: 4219 vec/s
 
 
 
+test faster raw fetch primitves for FP centroids
+cargo bench -p chroma-index --bench centroid_fetch --features chroma-index/usearch -- --num-centroids 5000 --fetch-k 128 --num-queries 2000 --dim 1024 2>&1
+=== Centroid Fetch Benchmark ===
+Centroids: 5000 | Fetch K: 128 | Queries: 2000 | Dim: 1024 | Warmup: 100
+
+Storage sizes:
+  Vectors: 5000 x 1024 = 19.5MB raw
+
+=== Results (per navigate call, fetching 128 vectors of dim 1024) ===
+|         Strategy |      Total |      Fetch |   Distance |  Speedup |
+|------------------|------------|------------|------------|----------|
+|    USearch get() |    601.3us |    585.0us |     14.4us |    1.0x |
+|    Vec<Vec<f32>> |     25.4us |      496ns |     24.9us |   23.7x |
+|          HashMap |     27.7us |      2.7us |     25.0us |   21.7x |
+|     DashMap<Arc> |     34.0us |      6.0us |     28.0us |   17.7x |
+|  Vec<Arc<[f32]>> |     28.1us |      406ns |     27.7us |   21.4x |
+
+Per-vector fetch cost (fetch time / 128 vectors):
+|         Strategy |    Per-vec |
+|------------------|------------|
+|    USearch get() |      4.6us |
+|    Vec<Vec<f32>> |        3ns |
+|          HashMap |       21ns |
+|     DashMap<Arc> |       46ns |
+|  Vec<Arc<[f32]>> |        3ns |
+
+
+
+
 
 
 

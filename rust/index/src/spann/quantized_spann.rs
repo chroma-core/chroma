@@ -274,15 +274,14 @@ pub mod stats {
         }
     }
 
-    // All methods ordered by path: Write Path, Balance Path, I/O, Quantization
-    const ALL_METHODS: &[&str] = &[
-        "add", "navigate", "nav_search", "nav_fetch", "nav_rerank", // Write Path + navigate breakdown
-        "register", "spawn", // Write Path (continued)
-        "scrub", "split", "merge", "reassign", "drop", // Balance Path
-        "load", "load_raw", // I/O
-        "quantize", // Quantization (encoding vectors to codes)
-        "search", "search_scan", "search_load_cluster", "search_load_raw", "search_rerank", // Search
-        "raw_add", "raw_rm", "q_add", "q_rm", // HNSW centroid index ops
+    /// Methods shown in `quantized_spann` benchmark batch tables (indexing only; no query `search*`).
+    const INDEXING_TASK_METHODS: &[&str] = &[
+        "add", "navigate", "nav_search", "nav_fetch", "nav_rerank",
+        "register", "spawn",
+        "scrub", "split", "merge", "reassign", "drop",
+        "load", "load_raw",
+        "quantize",
+        "raw_add", "raw_rm", "q_add", "q_rm",
     ];
 
     fn format_duration(nanos: u64) -> String {
@@ -341,17 +340,20 @@ pub mod stats {
         out
     }
 
-    fn col_widths() -> Vec<usize> {
-        ALL_METHODS.iter().map(|m| m.len().max(8)).collect()
+    fn col_widths_indexing() -> Vec<usize> {
+        INDEXING_TASK_METHODS
+            .iter()
+            .map(|m| m.len().max(8))
+            .collect()
     }
 
     fn format_task_counts_table(snapshots: &[StatsSnapshot]) -> String {
         use std::fmt::Write;
-        let widths = col_widths();
+        let widths = col_widths_indexing();
         let mut out = String::new();
         writeln!(out, "\n=== Task Counts ===").unwrap();
         write!(out, "| CP |").unwrap();
-        for (method, w) in ALL_METHODS.iter().zip(&widths) {
+        for (method, w) in INDEXING_TASK_METHODS.iter().zip(&widths) {
             write!(out, " {:>w$} |", method, w = *w).unwrap();
         }
         writeln!(out).unwrap();
@@ -362,7 +364,7 @@ pub mod stats {
         writeln!(out).unwrap();
         for (i, snap) in snapshots.iter().enumerate() {
             write!(out, "| {:>2} |", i + 1).unwrap();
-            for (method, w) in ALL_METHODS.iter().zip(&widths) {
+            for (method, w) in INDEXING_TASK_METHODS.iter().zip(&widths) {
                 let m = snap.get(method);
                 write!(out, " {:>w$} |", format_count(m.calls), w = *w).unwrap();
             }
@@ -373,11 +375,11 @@ pub mod stats {
 
     fn format_task_timing_table(snapshots: &[StatsSnapshot]) -> String {
         use std::fmt::Write;
-        let widths = col_widths();
+        let widths = col_widths_indexing();
         let mut out = String::new();
         writeln!(out, "\n=== Task Total Time ===").unwrap();
         write!(out, "| CP |").unwrap();
-        for (method, w) in ALL_METHODS.iter().zip(&widths) {
+        for (method, w) in INDEXING_TASK_METHODS.iter().zip(&widths) {
             write!(out, " {:>w$} |", method, w = *w).unwrap();
         }
         write!(out, " raw_pts |  raw/pt |    total |").unwrap();
@@ -390,7 +392,7 @@ pub mod stats {
         writeln!(out).unwrap();
         for (i, snap) in snapshots.iter().enumerate() {
             write!(out, "| {:>2} |", i + 1).unwrap();
-            for (method, w) in ALL_METHODS.iter().zip(&widths) {
+            for (method, w) in INDEXING_TASK_METHODS.iter().zip(&widths) {
                 let m = snap.get(method);
                 write!(out, " {:>w$} |", format_duration(m.total_nanos), w = *w).unwrap();
             }
@@ -418,38 +420,24 @@ pub mod stats {
         out
     }
 
-    fn format_bytes(bytes: u64) -> String {
-        if bytes < 1024 {
-            format!("{}B", bytes)
-        } else if bytes < 1024 * 1024 {
-            format!("{:.1}KB", bytes as f64 / 1024.0)
-        } else if bytes < 1024 * 1024 * 1024 {
-            format!("{:.1}MB", bytes as f64 / (1024.0 * 1024.0))
-        } else {
-            format!("{:.2}GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
-        }
-    }
-
     fn format_task_avg_time_table(snapshots: &[StatsSnapshot]) -> String {
         use std::fmt::Write;
-        let widths = col_widths();
+        let widths = col_widths_indexing();
         let mut out = String::new();
         writeln!(out, "\n=== Task Avg Time ===").unwrap();
         write!(out, "| CP |").unwrap();
-        for (method, w) in ALL_METHODS.iter().zip(&widths) {
+        for (method, w) in INDEXING_TASK_METHODS.iter().zip(&widths) {
             write!(out, " {:>w$} |", method, w = *w).unwrap();
         }
-        write!(out, " rr_vecs | rr_data |").unwrap();
         writeln!(out).unwrap();
         write!(out, "|----|").unwrap();
         for w in &widths {
             write!(out, "-{:-<w$}-|", "", w = *w).unwrap();
         }
-        write!(out, "---------|---------|").unwrap();
         writeln!(out).unwrap();
         for (i, snap) in snapshots.iter().enumerate() {
             write!(out, "| {:>2} |", i + 1).unwrap();
-            for (method, w) in ALL_METHODS.iter().zip(&widths) {
+            for (method, w) in INDEXING_TASK_METHODS.iter().zip(&widths) {
                 let m = snap.get(method);
                 let avg = if m.calls > 0 {
                     format_duration(m.total_nanos / m.calls)
@@ -458,18 +446,6 @@ pub mod stats {
                 };
                 write!(out, " {:>w$} |", avg, w = *w).unwrap();
             }
-            let search_calls = snap.search.calls;
-            let avg_rerank_vecs = if search_calls > 0 {
-                format_count(snap.data_rerank_vectors / search_calls)
-            } else {
-                "-".to_string()
-            };
-            let avg_rerank_bytes = if search_calls > 0 {
-                format_bytes(snap.data_rerank_vectors / search_calls * snap.dimension as u64 * 4)
-            } else {
-                "-".to_string()
-            };
-            write!(out, " {:>7} | {:>7} |", avg_rerank_vecs, avg_rerank_bytes).unwrap();
             writeln!(out).unwrap();
         }
         out
@@ -503,13 +479,7 @@ pub mod stats {
              \x20 load_raw  - load raw f32 embeddings from blockfile reader into cache\n\
              Quantization:\n\
              \x20 quantize  - encode a vector into a RaBitQ code relative to its centroid\n\
-             Search:\n\
-             \x20 search    - full query: centroid navigate + cluster scan + rerank\n\
-             \x20 search_scan      - time in cluster scan (setup + quantized distance)\n\
-             \x20 search_load_cluster - time loading cluster deltas from blockfile\n\
-             \x20 search_load_raw  - time loading raw f32 embeddings for data rerank\n\
-             \x20 search_rerank    - time in data rerank (full-precision distance computation)\n\
-             Navigate breakdown (centroid rerank):\n\
+             Navigate breakdown (write path centroid routing):\n\
              \x20 nav_search  - quantized centroid HNSW search\n\
              \x20 nav_fetch   - fetching raw centroid vectors for rerank\n\
              \x20 nav_rerank  - full-precision distance computation for centroid rerank\n\
@@ -517,8 +487,7 @@ pub mod stats {
              \x20 raw_pts   - number of raw embedding points loaded during load_raw\n\
              \x20 raw/pt    - average time per raw embedding point (load_raw total / raw_pts)\n\
              \x20 total     - wall-clock time for the checkpoint (load + raw_write + index + commit)\n\
-             \x20 rr_vecs   - avg number of full-precision vectors loaded per search (data rerank)\n\
-             \x20 rr_data   - avg data volume of full-precision vectors per search (vecs x dims x 4B)\n",
+             Query search timings (search, search_scan, etc.) are reported in the benchmark Recall Summary table, not here.\n",
         );
         out
     }
@@ -547,7 +516,9 @@ pub mod stats {
     }
 }
 
-pub use stats::{format_batch_tables, ClusterSizeStats, QuantizedSpannStats, StatsSnapshot};
+pub use stats::{
+    format_batch_tables, ClusterSizeStats, MethodSnapshot, QuantizedSpannStats, StatsSnapshot,
+};
 
 // Blockfile prefixes
 pub const PREFIX_CENTER: &str = "center";

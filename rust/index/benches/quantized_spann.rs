@@ -16,7 +16,7 @@ use chroma_blockstore::{
 };
 use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
 use chroma_index::{
-    spann::quantized_spann::{QuantizedSpannIds, QuantizedSpannIndexWriter},
+    spann::quantized_spann::{MethodSnapshot, QuantizedSpannIds, QuantizedSpannIndexWriter},
     usearch::{USearchIndex, USearchIndexProvider},
 };
 use chroma_distance::DistanceFunction;
@@ -122,7 +122,12 @@ struct RerankRecall {
     rerank_factor: u32,
     recall_10: f64,
     recall_100: f64,
-    latency: Duration,
+    /// Per-query avg wall time for full `search()` (same role as former `latency`).
+    search: MethodSnapshot,
+    search_scan: MethodSnapshot,
+    search_load_cluster: MethodSnapshot,
+    search_load_raw: MethodSnapshot,
+    search_rerank: MethodSnapshot,
     avg_rerank_vecs: u64,
     rerank_data_bytes: u64,
 }
@@ -362,22 +367,43 @@ fn format_latency(d: Duration) -> String {
     }
 }
 
+fn format_avg_method(m: MethodSnapshot) -> String {
+    if let Some(avg) = m.avg_nanos() {
+        format_latency(Duration::from_nanos(avg))
+    } else {
+        "-".to_string()
+    }
+}
+
 /// Print the recall summary table (one row per nprobe / DRR combination).
 fn print_recall_summary(results: &[CheckpointResult]) {
     println!("\n=== Recall Summary ===");
     println!(
-        "| {:>3} | {:>6} | {:>6} | {:>8} | {:>7} | {:>7} | {:>7} | {:>6} | {:>6} | {:>8} |",
-        "CP", "nprobe", "DRR", "Vectors", "Queries", "RR Vecs", "RR Data", "R@10", "R@100", "Lat"
+        "| {:>3} | {:>6} | {:>6} | {:>8} | {:>7} | {:>7} | {:>7} | {:>6} | {:>6} | {:>7} | {:>7} | {:>7} | {:>7} | {:>7} |",
+        "CP",
+        "nprobe",
+        "DRR",
+        "Vectors",
+        "Queries",
+        "RR Vecs",
+        "RR Data",
+        "R@10",
+        "R@100",
+        "search",
+        "scan",
+        "ld_cl",
+        "ld_raw",
+        "rerank"
     );
     println!(
-        "|{:-^5}|{:-^8}|{:-^8}|{:-^10}|{:-^9}|{:-^9}|{:-^9}|{:-^8}|{:-^8}|{:-^10}|",
-        "", "", "", "", "", "", "", "", "", ""
+        "|{:-^5}|{:-^8}|{:-^8}|{:-^10}|{:-^9}|{:-^9}|{:-^9}|{:-^8}|{:-^8}|{:-^9}|{:-^9}|{:-^9}|{:-^9}|{:-^9}|",
+        "", "", "", "", "", "", "", "", "", "", "", "", "", ""
     );
 
     for r in results {
         for rr in &r.rerank_results {
             println!(
-                "| {:>3} | {:>6} | {:>4}x | {:>8} | {:>7} | {:>7} | {:>7} | {:>6.2} | {:>6.2} | {:>8} |",
+                "| {:>3} | {:>6} | {:>4}x | {:>8} | {:>7} | {:>7} | {:>7} | {:>6.2} | {:>6.2} | {:>7} | {:>7} | {:>7} | {:>7} | {:>7} |",
                 r.checkpoint,
                 r.nprobe,
                 rr.rerank_factor,
@@ -385,7 +411,13 @@ fn print_recall_summary(results: &[CheckpointResult]) {
                 r.num_queries,
                 rr.avg_rerank_vecs,
                 format_bytes(rr.rerank_data_bytes),
-                rr.recall_10, rr.recall_100, format_latency(rr.latency),
+                rr.recall_10,
+                rr.recall_100,
+                format_avg_method(rr.search),
+                format_avg_method(rr.search_scan),
+                format_avg_method(rr.search_load_cluster),
+                format_avg_method(rr.search_load_raw),
+                format_avg_method(rr.search_rerank),
             );
         }
     }
@@ -707,7 +739,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         let checkpoint_wall = load_time + raw_write_time + index_time + commit_time;
         snap.wall_nanos = checkpoint_wall.as_nanos() as u64;
-        let snap_idx = batch_snapshots.len();
         batch_snapshots.push(snap);
 
         total_vectors += actual_count;
@@ -759,23 +790,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             println!("  (no precomputed ground truth for {}M boundary, skipping recall)", total_vectors / 1_000_000);
         }
 
-        let mut total_search_calls: u64 = 0;
-        let mut total_search_nanos: u64 = 0;
-        let mut total_search_scan_nanos: u64 = 0;
-        let mut total_search_load_cluster_nanos: u64 = 0;
-        let mut total_search_load_raw_nanos: u64 = 0;
-        let mut total_search_rerank_nanos: u64 = 0;
-        let mut total_navigate_nanos: u64 = 0;
-        let mut total_nav_search_nanos: u64 = 0;
-        let mut total_nav_fetch_nanos: u64 = 0;
-        let mut total_nav_rerank_nanos: u64 = 0;
-        let mut total_data_rerank_vectors: u64 = 0;
-
         for &nprobe in &nprobes {
             let mut rerank_results = Vec::with_capacity(data_rerank_factors.len());
 
             for &data_rerank_factor in &data_rerank_factors {
-                let (r10, r100, lat, avg_rerank_vecs, rerank_data_bytes) =
+                let (r10, r100, avg_rerank_vecs, rerank_data_bytes, sm) =
                     if !checkpoint_queries.is_empty() {
                         let search_config = spann_config(
                             args.data_bits,
@@ -826,7 +845,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
                         let search_index = Arc::new(search_index);
 
-                        let (r10, r100, lat) = evaluate_recall(
+                        let (r10, r100, _lat) = evaluate_recall(
                             Arc::clone(&search_index),
                             checkpoint_queries,
                             k,
@@ -839,17 +858,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
                         let search_stats_ref = search_index.stats();
                         let search_snap = search_stats_ref.snapshot(&[], dimension);
-                        total_search_calls += search_snap.search.calls;
-                        total_search_nanos += search_snap.search.total_nanos;
-                        total_search_scan_nanos += search_snap.search_scan.total_nanos;
-                        total_search_load_cluster_nanos += search_snap.search_load_cluster.total_nanos;
-                        total_search_load_raw_nanos += search_snap.search_load_raw.total_nanos;
-                        total_search_rerank_nanos += search_snap.search_rerank.total_nanos;
-                        total_navigate_nanos += search_snap.navigate.total_nanos;
-                        total_nav_search_nanos += search_snap.nav_search.total_nanos;
-                        total_nav_fetch_nanos += search_snap.nav_fetch.total_nanos;
-                        total_nav_rerank_nanos += search_snap.nav_rerank.total_nanos;
-                        total_data_rerank_vectors += search_snap.data_rerank_vectors;
 
                         let per_search_vecs = if search_snap.search.calls > 0 {
                             search_snap.data_rerank_vectors / search_snap.search.calls
@@ -858,16 +866,44 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         };
                         let per_search_bytes = per_search_vecs * dimension as u64 * 4;
 
-                        (r10, r100, lat, per_search_vecs, per_search_bytes)
+                        (
+                            r10,
+                            r100,
+                            per_search_vecs,
+                            per_search_bytes,
+                            (
+                                search_snap.search,
+                                search_snap.search_scan,
+                                search_snap.search_load_cluster,
+                                search_snap.search_load_raw,
+                                search_snap.search_rerank,
+                            ),
+                        )
                     } else {
-                        (0.0, 0.0, Duration::ZERO, 0, 0)
+                        (
+                            0.0,
+                            0.0,
+                            0,
+                            0,
+                            (
+                                MethodSnapshot::default(),
+                                MethodSnapshot::default(),
+                                MethodSnapshot::default(),
+                                MethodSnapshot::default(),
+                                MethodSnapshot::default(),
+                            ),
+                        )
                     };
 
                 rerank_results.push(RerankRecall {
                     rerank_factor: data_rerank_factor,
                     recall_10: r10,
                     recall_100: r100,
-                    latency: lat,
+                    search: sm.0,
+                    search_scan: sm.1,
+                    search_load_cluster: sm.2,
+                    search_load_raw: sm.3,
+                    search_rerank: sm.4,
                     avg_rerank_vecs,
                     rerank_data_bytes,
                 });
@@ -883,17 +919,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 })
                 .collect::<Vec<_>>()
                 .join(" ");
-            println!(
-                "  nprobe {}: {} | lat={}",
-                nprobe,
-                drr_str,
-                format_latency(
-                    rerank_results
-                        .last()
-                        .map(|r| r.latency)
-                        .unwrap_or(Duration::ZERO)
-                ),
-            );
+            let search_avgs: String = rerank_results
+                .iter()
+                .map(|r| format_avg_method(r.search))
+                .collect::<Vec<_>>()
+                .join(", ");
+            println!("  nprobe {}: {} | search_avg={}", nprobe, drr_str, search_avgs);
 
             checkpoint_results.push(CheckpointResult {
                 checkpoint: checkpoint_idx + 1,
@@ -902,29 +933,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 nprobe,
                 rerank_results,
             });
-        }
-
-        if total_search_calls > 0 {
-            let snap = &mut batch_snapshots[snap_idx];
-            snap.search.calls = total_search_calls;
-            snap.search.total_nanos = total_search_nanos;
-            snap.search_scan.calls = total_search_calls;
-            snap.search_scan.total_nanos = total_search_scan_nanos;
-            snap.search_load_cluster.calls = total_search_calls;
-            snap.search_load_cluster.total_nanos = total_search_load_cluster_nanos;
-            snap.search_load_raw.calls = total_search_calls;
-            snap.search_load_raw.total_nanos = total_search_load_raw_nanos;
-            snap.search_rerank.calls = total_search_calls;
-            snap.search_rerank.total_nanos = total_search_rerank_nanos;
-            snap.navigate.calls += total_search_calls;
-            snap.navigate.total_nanos += total_navigate_nanos;
-            snap.nav_search.calls += total_search_calls;
-            snap.nav_search.total_nanos += total_nav_search_nanos;
-            snap.nav_fetch.calls += total_search_calls;
-            snap.nav_fetch.total_nanos += total_nav_fetch_nanos;
-            snap.nav_rerank.calls += total_search_calls;
-            snap.nav_rerank.total_nanos += total_nav_rerank_nanos;
-            snap.data_rerank_vectors = total_data_rerank_vectors;
         }
     }
 
