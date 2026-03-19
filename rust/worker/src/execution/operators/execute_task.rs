@@ -2,7 +2,9 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
 use chroma_log::Log;
-use chroma_segment::blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError};
+use chroma_segment::blockfile_record::{
+    RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError,
+};
 use chroma_segment::types::HydratedMaterializedLogRecord;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{
@@ -54,7 +56,7 @@ impl CountAttachedFunction {
 
         // Try to get the existing record with the function output ID
         let offset_id = match reader
-            .get_offset_id_for_user_id(COUNT_FUNCTION_OUTPUT_ID)
+            .get_offset_id_for_user_id(COUNT_FUNCTION_OUTPUT_ID, &RecordSegmentPlan::default())
             .await
         {
             Ok(Some(offset_id)) => offset_id,
@@ -265,6 +267,7 @@ impl Operator<ExecuteAttachedFunctionInput, ExecuteAttachedFunctionOutput>
             match Box::pin(RecordSegmentReader::from_segment(
                 &input.output_record_segment,
                 &input.blockfile_provider,
+                None,
             ))
             .await
             {

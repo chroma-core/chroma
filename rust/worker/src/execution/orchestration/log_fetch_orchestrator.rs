@@ -8,8 +8,8 @@ use chroma_log::Log;
 use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentWriter},
     blockfile_record::{
-        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
-        RecordSegmentWriterCreationError,
+        RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError,
+        RecordSegmentWriter, RecordSegmentWriterCreationError,
     },
     bloom_filter::BloomFilterManager,
     distributed_hnsw::{DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentWriter},
@@ -398,6 +398,14 @@ impl LogFetchOrchestrator {
             collection_info.collection.total_records_post_compaction = count;
         }
 
+        let total_log_count: usize = partitions.iter().map(|p| p.len()).sum();
+        let plan = RecordSegmentPlan {
+            use_bloom_filter: self
+                .context
+                .bloom_filter_manager
+                .as_ref()
+                .is_some_and(|mgr| total_log_count >= mgr.storage_fetch_threshold()),
+        };
         self.num_uncompleted_materialization_tasks = partitions.len();
         for partition in partitions.iter() {
             let operator = MaterializeLogOperator::new();
@@ -405,6 +413,7 @@ impl LogFetchOrchestrator {
                 partition.clone(),
                 record_reader.clone(),
                 next_max_offset_id.clone(),
+                plan,
             );
             let task = wrap(
                 operator,
@@ -443,6 +452,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                 match Box::pin(RecordSegmentReader::from_segment(
                     &output.record_segment,
                     &self.context.blockfile_provider,
+                    self.context.bloom_filter_manager.clone(),
                 ))
                 .await
                 {

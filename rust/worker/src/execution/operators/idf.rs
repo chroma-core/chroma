@@ -6,7 +6,7 @@ use chroma_error::ChromaError;
 use chroma_index::sparse::{reader::SparseReaderError, types::encode_u32};
 use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentReader},
-    blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    blockfile_record::{RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError},
     types::{materialize_logs, LogMaterializerError},
 };
 use chroma_system::Operator;
@@ -86,6 +86,7 @@ impl Operator<IdfInput, IdfOutput> for Idf {
             match Box::pin(RecordSegmentReader::from_segment(
                 &input.record_segment,
                 &input.blockfile_provider,
+                None,
             ))
             .await
             {
@@ -113,7 +114,13 @@ impl Operator<IdfInput, IdfOutput> for Idf {
             tokio::try_join!(record_segment_reader_fut, metadata_segment_reader_fut)?;
         n += count;
 
-        let logs = materialize_logs(&record_segment_reader, input.logs.clone(), None).await?;
+        let logs = materialize_logs(
+            &record_segment_reader,
+            input.logs.clone(),
+            None,
+            &RecordSegmentPlan::default(),
+        )
+        .await?;
 
         if let Some(sparse_index_reader) = metadata_segment_reader.sparse_index_reader.as_ref() {
             let encoded_dimensions = self

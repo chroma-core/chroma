@@ -416,6 +416,7 @@ impl RecordSegmentWriter {
         let reader = match Box::pin(RecordSegmentReader::from_segment(
             segment,
             blockfile_provider,
+            None,
         ))
         .await
         {
@@ -854,12 +855,22 @@ impl RecordSegmentFlusher {
     }
 }
 
+/// Controls how the record segment reader handles bloom-filter-based
+/// pre-filtering during lookups.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RecordSegmentPlan {
+    pub use_bloom_filter: bool,
+}
+
 #[derive(Clone)]
 pub struct RecordSegmentReader<'me> {
     user_id_to_id: BlockfileReader<'me, &'me str, u32>,
     id_to_user_id: BlockfileReader<'me, u32, &'me str>,
     id_to_data: BlockfileReader<'me, u32, DataRecord<'me>>,
     max_offset_id: u32,
+    bloom_filter_manager: Option<BloomFilterManager>,
+    bloom_filter_path: Option<String>,
+    bloom_filter: Arc<tokio::sync::OnceCell<Option<BloomFilter<str>>>>,
 }
 
 impl Debug for RecordSegmentReader<'_> {
@@ -934,6 +945,7 @@ impl RecordSegmentReader<'_> {
     pub async fn from_segment(
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
+        bloom_filter_manager: Option<BloomFilterManager>,
     ) -> Result<Self, Box<RecordSegmentReaderCreationError>> {
         let (user_id_to_id, id_to_user_id, id_to_data, existing_max_offset_id) =
             match segment.file_path.len() {
@@ -996,11 +1008,19 @@ impl RecordSegmentReader<'_> {
                 }
             };
 
+        let bloom_filter_path = segment
+            .file_path
+            .get(USER_ID_BLOOM_FILTER)
+            .and_then(|paths| paths.first().cloned());
+
         Ok(RecordSegmentReader {
             user_id_to_id,
             id_to_user_id,
             id_to_data,
             max_offset_id: existing_max_offset_id,
+            bloom_filter_manager,
+            bloom_filter_path,
+            bloom_filter: Arc::new(tokio::sync::OnceCell::new()),
         })
     }
 
@@ -1008,10 +1028,33 @@ impl RecordSegmentReader<'_> {
         self.max_offset_id
     }
 
+    /// Lazily loads the bloom filter using the two-tier heuristic.
+    /// Called internally when a plan requests bloom filter usage.
+    async fn ensure_bloom_filter(&self) {
+        self.bloom_filter
+            .get_or_init(|| async {
+                let (manager, path) = match (&self.bloom_filter_manager, &self.bloom_filter_path) {
+                    (Some(mgr), Some(p)) => (mgr, p.as_str()),
+                    _ => return None,
+                };
+                manager.get(path).await.ok()
+            })
+            .await;
+    }
+
     pub async fn get_offset_id_for_user_id(
         &self,
         user_id: &str,
+        plan: &RecordSegmentPlan,
     ) -> Result<Option<u32>, Box<dyn ChromaError>> {
+        if plan.use_bloom_filter {
+            self.ensure_bloom_filter().await;
+            if let Some(Some(bf)) = self.bloom_filter.get() {
+                if !bf.contains(user_id) {
+                    return Ok(None);
+                }
+            }
+        }
         self.user_id_to_id.get("", user_id).await
     }
 
@@ -1101,9 +1144,24 @@ impl RecordSegmentReader<'_> {
             .await
     }
 
-    pub async fn load_user_id_to_id(&self, keys: impl Iterator<Item = &str>) {
+    pub async fn load_user_id_to_id(
+        &self,
+        keys: impl Iterator<Item = &str>,
+        plan: &RecordSegmentPlan,
+    ) {
+        // Lazy load the bloom filter if it is needed.
+        if plan.use_bloom_filter {
+            self.ensure_bloom_filter().await;
+        }
+
+        let filtered: Vec<&str> = if let Some(Some(bf)) = self.bloom_filter.get() {
+            keys.filter(|k| bf.contains(k)).collect()
+        } else {
+            keys.collect()
+        };
+
         self.user_id_to_id
-            .load_data_for_keys(keys.map(|k| ("".to_string(), k)))
+            .load_data_for_keys(filtered.into_iter().map(|k| ("".to_string(), k)))
             .await
     }
 
@@ -1201,6 +1259,7 @@ mod tests {
                                 &None,
                                 log_chunk,
                                 Some(curr_offset_id),
+                                &super::RecordSegmentPlan::default(),
                             ))
                             .expect("Should be able to materialize log");
                             future::block_on(
@@ -1371,6 +1430,7 @@ mod tests {
         let reader = Box::pin(super::RecordSegmentReader::from_segment(
             &test_segment.record_segment,
             &test_segment.blockfile_provider,
+            None,
         ))
         .await
         .expect("Should be able to create reader");
@@ -1391,10 +1451,12 @@ mod tests {
             })
             .collect();
 
+        let delete_chunk = Chunk::new(delete_logs.into());
         let materialized = materialize_logs(
             &Some(reader),
-            Chunk::new(delete_logs.into()),
+            delete_chunk.clone(),
             Some(AtomicU32::new(11).into()),
+            &super::RecordSegmentPlan::default(),
         )
         .await
         .expect("Should materialize delete logs");
@@ -1403,6 +1465,7 @@ mod tests {
         let reader_for_apply = Box::pin(super::RecordSegmentReader::from_segment(
             &test_segment.record_segment,
             &test_segment.blockfile_provider,
+            None,
         ))
         .await
         .expect("Should be able to create reader for apply");

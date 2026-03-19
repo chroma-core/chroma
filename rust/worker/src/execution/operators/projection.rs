@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
-    blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    blockfile_record::{RecordSegmentPlan, RecordSegmentReader, RecordSegmentReaderCreationError},
     types::{materialize_logs, LogMaterializerError},
 };
 use chroma_system::Operator;
@@ -83,6 +83,7 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
         let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
+            None,
         ))
         .await
         {
@@ -111,9 +112,14 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
             }
         }
 
-        let materialized_logs = materialize_logs(&record_segment_reader, input.logs.clone(), None)
-            .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
-            .await?;
+        let materialized_logs = materialize_logs(
+            &record_segment_reader,
+            input.logs.clone(),
+            None,
+            &RecordSegmentPlan::default(),
+        )
+        .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
+        .await?;
 
         // Create a hash map that maps an offset id to the corresponding log
         // It contains all records from the logs that should be present in the final result

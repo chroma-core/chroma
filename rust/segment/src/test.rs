@@ -1,8 +1,10 @@
 use crate::spann_provider::SpannProvider;
 
 use super::{
-    blockfile_metadata::MetadataSegmentWriter, blockfile_record::RecordSegmentWriter,
-    distributed_hnsw::DistributedHNSWSegmentWriter, types::materialize_logs,
+    blockfile_metadata::MetadataSegmentWriter,
+    blockfile_record::{RecordSegmentPlan, RecordSegmentWriter},
+    distributed_hnsw::DistributedHNSWSegmentWriter,
+    types::materialize_logs,
 };
 use chroma_blockstore::{provider::BlockfileProvider, test_arrow_blockfile_provider};
 use chroma_config::registry::Registry;
@@ -96,10 +98,14 @@ impl TestDistributedSegment {
 
     // WARN: The size of the log chunk should not be too large
     pub async fn compact_log(&mut self, logs: Chunk<LogRecord>, next_offset: usize) {
-        let materialized_logs =
-            materialize_logs(&None, logs, Some(AtomicU32::new(next_offset as u32).into()))
-                .await
-                .expect("Should be able to materialize log.");
+        let materialized_logs = materialize_logs(
+            &None,
+            logs,
+            Some(AtomicU32::new(next_offset as u32).into()),
+            &RecordSegmentPlan::default(),
+        )
+        .await
+        .expect("Should be able to materialize log.");
 
         let mut metadata_writer = MetadataSegmentWriter::from_segment(
             &self.collection.tenant,
