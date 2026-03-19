@@ -153,6 +153,7 @@ pub mod stats {
         pub quantize: MethodSnapshot,
         pub search: MethodSnapshot,
         pub search_scan: MethodSnapshot,
+        pub search_load_cluster: MethodSnapshot,
         pub search_load_raw: MethodSnapshot,
         pub search_rerank: MethodSnapshot,
         pub nav_search: MethodSnapshot,
@@ -187,6 +188,7 @@ pub mod stats {
                 "quantize" => self.quantize,
                 "search" => self.search,
                 "search_scan" => self.search_scan,
+                "search_load_cluster" => self.search_load_cluster,
                 "search_load_raw" => self.search_load_raw,
                 "search_rerank" => self.search_rerank,
                 "nav_search" => self.nav_search,
@@ -218,6 +220,7 @@ pub mod stats {
         pub quantize: MethodStats,
         pub search: MethodStats,
         pub search_scan: MethodStats,
+        pub search_load_cluster: MethodStats,
         pub search_load_raw: MethodStats,
         pub search_rerank: MethodStats,
         pub nav_search: MethodStats,
@@ -252,6 +255,7 @@ pub mod stats {
                 quantize: snap(&self.quantize),
                 search: snap(&self.search),
                 search_scan: snap(&self.search_scan),
+                search_load_cluster: snap(&self.search_load_cluster),
                 search_load_raw: snap(&self.search_load_raw),
                 search_rerank: snap(&self.search_rerank),
                 nav_search: snap(&self.nav_search),
@@ -277,7 +281,7 @@ pub mod stats {
         "scrub", "split", "merge", "reassign", "drop", // Balance Path
         "load", "load_raw", // I/O
         "quantize", // Quantization (encoding vectors to codes)
-        "search", "search_scan", "search_load_raw", "search_rerank", // Search (total, cluster scan, load raw, fp rerank)
+        "search", "search_scan", "search_load_cluster", "search_load_raw", "search_rerank", // Search
         "raw_add", "raw_rm", "q_add", "q_rm", // HNSW centroid index ops
     ];
 
@@ -472,12 +476,15 @@ pub mod stats {
     }
 
     /// Format all batch stats as summary tables.
-    pub fn format_batch_tables(snapshots: &[StatsSnapshot]) -> String {
+    pub fn format_batch_tables(snapshots: &[StatsSnapshot], legend: bool) -> String {
         let mut out = String::new();
         out.push_str(&format_cluster_stats_table(snapshots));
         out.push_str(&format_task_counts_table(snapshots));
         out.push_str(&format_task_timing_table(snapshots));
         out.push_str(&format_task_avg_time_table(snapshots));
+        if !legend {
+            return out;
+        }
         out.push_str(
             "\n=== Legend ===\n\
              Write path:\n\
@@ -498,7 +505,8 @@ pub mod stats {
              \x20 quantize  - encode a vector into a RaBitQ code relative to its centroid\n\
              Search:\n\
              \x20 search    - full query: centroid navigate + cluster scan + rerank\n\
-             \x20 search_scan      - time in cluster scan (load + setup + quantized distance)\n\
+             \x20 search_scan      - time in cluster scan (setup + quantized distance)\n\
+             \x20 search_load_cluster - time loading cluster deltas from blockfile\n\
              \x20 search_load_raw  - time loading raw f32 embeddings for data rerank\n\
              \x20 search_rerank    - time in data rerank (full-precision distance computation)\n\
              Navigate breakdown (centroid rerank):\n\
@@ -708,10 +716,13 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
         let q_norm = (f32::dot(&rotated, &rotated).unwrap_or(0.0) as f32).sqrt();
 
         {
-            let _guard_scan = stats::TimedGuard::new(&self.stats.search_scan);
             for cluster_id in cluster_ids {
-                self.load(cluster_id).await?;
+                {
+                    let _guard_load = stats::TimedGuard::new(&self.stats.search_load_cluster);
+                    self.load(cluster_id).await?;
+                }
 
+                let _guard_scan = stats::TimedGuard::new(&self.stats.search_scan);
                 let Some(delta) = self.cluster_deltas.get(&cluster_id) else {
                     continue;
                 };

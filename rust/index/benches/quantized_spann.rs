@@ -91,6 +91,10 @@ struct Args {
     #[arg(long, default_value = "16")]
     data_rerank_factors: String,
 
+    /// Print the method legend after the stats tables
+    #[arg(long)]
+    legend: bool,
+
     /// Extra arguments (ignored, for compatibility with cargo bench)
     #[arg(hide = true, allow_hyphen_values = true)]
     _extra: Vec<String>,
@@ -740,6 +744,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut total_search_calls: u64 = 0;
         let mut total_search_nanos: u64 = 0;
         let mut total_search_scan_nanos: u64 = 0;
+        let mut total_search_load_cluster_nanos: u64 = 0;
         let mut total_search_load_raw_nanos: u64 = 0;
         let mut total_search_rerank_nanos: u64 = 0;
         let mut total_navigate_nanos: u64 = 0;
@@ -819,6 +824,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         total_search_calls += search_snap.search.calls;
                         total_search_nanos += search_snap.search.total_nanos;
                         total_search_scan_nanos += search_snap.search_scan.total_nanos;
+                        total_search_load_cluster_nanos += search_snap.search_load_cluster.total_nanos;
                         total_search_load_raw_nanos += search_snap.search_load_raw.total_nanos;
                         total_search_rerank_nanos += search_snap.search_rerank.total_nanos;
                         total_navigate_nanos += search_snap.navigate.total_nanos;
@@ -886,6 +892,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             snap.search.total_nanos = total_search_nanos;
             snap.search_scan.calls = total_search_calls;
             snap.search_scan.total_nanos = total_search_scan_nanos;
+            snap.search_load_cluster.calls = total_search_calls;
+            snap.search_load_cluster.total_nanos = total_search_load_cluster_nanos;
             snap.search_load_raw.calls = total_search_calls;
             snap.search_load_raw.total_nanos = total_search_load_raw_nanos;
             snap.search_rerank.calls = total_search_calls;
@@ -908,7 +916,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Print method statistics tables
     println!(
         "{}",
-        chroma_index::spann::quantized_spann::format_batch_tables(&batch_snapshots)
+        chroma_index::spann::quantized_spann::format_batch_tables(&batch_snapshots, args.legend)
     );
 
     println!("\n=== Indexing Summary ===");

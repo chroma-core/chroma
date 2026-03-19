@@ -10,7 +10,7 @@
     - [Usearch Thread Scaling](#usearch-thread-scaling)
   - [Legend:](#legend)
   - [Notes](#notes)
-- [E2E](#e2e)
+- [SPANN Benchmarks 10, 50, 100M](#spann-benchmarks-10-50-100m)
 
 # RaBitQ Implementation
 
@@ -142,4 +142,6 @@ Navigate latency is flat across threads (~374µs) -- no contention since there a
 
 - Flat 1M, rerank 16x, rerank_avg is 1.25ms, which seems close enough to full precision distance latency (1600 comparisons * 300ns (fp dist) ~= 500us)
 
-# E2E
+# SPANN Benchmarks 10, 50, 100M
+
+WIP...
