@@ -1149,6 +1149,7 @@ impl RecordSegmentReader<'_> {
         keys: impl Iterator<Item = &str>,
         plan: &RecordSegmentPlan,
     ) {
+        // Lazy load the bloom filter if it is needed.
         if plan.use_bloom_filter {
             self.ensure_bloom_filter().await;
         }
