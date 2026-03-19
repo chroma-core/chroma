@@ -310,11 +310,13 @@ garbage_collector:
     request_timeout_ms: 60000
   dispatcher_config:
     num_worker_threads: 4
-    dispatcher_queue_size: 100
-    worker_queue_size: 100
+    dispatcher_queue_size: 1000
+    worker_queue_size: 1000
   storage_config:
     s3:
       bucket: "chroma-storage"
+      connect_timeout_ms: 60000
+      request_timeout_ms: 60000 # 1 minute
   assignment_policy:
     rendezvous_hashing:
       hasher: Murmur3
