@@ -122,19 +122,9 @@ pub fn quantize(bits: u8, embedding: &[f32], centroid: &[f32]) -> Arc<[u8]> {
     }
 }
 
-pub fn distance_query(
-    bits: u8,
-    code: &[u8],
-    distance_fn: &DistanceFunction,
-    r_q: &[f32],
-    c_norm: f32,
-    c_dot_q: f32,
-    q_norm: f32,
-) -> f32 {
-    match bits {
-        1 => Code::<1, _>::new(code).distance_query(distance_fn, r_q, c_norm, c_dot_q, q_norm),
-        _ => Code::<4, _>::new(code).distance_query(distance_fn, r_q, c_norm, c_dot_q, q_norm),
-    }
+/// Padded byte length of 1-bit codes for a given dimension (for building [`QuantizedQuery`]).
+pub fn packed_len_1bit(dim: usize) -> usize {
+    Code::<1>::packed_len(dim)
 }
 
 // ── Shared math helpers ───────────────────────────────────────────────────────

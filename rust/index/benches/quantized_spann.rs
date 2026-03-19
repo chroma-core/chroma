@@ -19,6 +19,7 @@ use chroma_index::{
     spann::quantized_spann::{QuantizedSpannIds, QuantizedSpannIndexWriter},
     usearch::{USearchIndex, USearchIndexProvider},
 };
+use chroma_distance::DistanceFunction;
 use chroma_storage::{local::LocalStorage, Storage};
 use chroma_types::{CollectionUuid, DataRecord, Quantization, SpannIndexConfig};
 use clap::Parser;
@@ -43,16 +44,24 @@ use datasets::{format_count, recall_at_k, Dataset, DatasetType, MetricType, Quer
 #[command(trailing_var_arg = true)]
 struct Args {
     /// Dataset to use
-    #[arg(long, default_value = "db-pedia")]
+    #[arg(long, default_value = "wikipedia-en")]
     dataset: DatasetType,
 
     /// Distance metric
     #[arg(long, default_value = "l2")]
     metric: MetricType,
 
-    /// Number of checkpoints to run (each checkpoint = 1M vectors)
+    /// Number of checkpoints to run
     #[arg(long)]
     checkpoint: Option<usize>,
+
+    /// Vectors per checkpoint (default 1M)
+    #[arg(long, default_value = "1000000")]
+    checkpoint_size: usize,
+
+    /// nprobe values for recall evaluation, comma-separated (e.g. "32,64,128,256")
+    #[arg(long, default_value = "32,64,128,256")]
+    nprobes: String,
 
     /// Number of threads for parallel indexing
     #[arg(long, default_value = "32")]
@@ -79,7 +88,7 @@ struct Args {
     centroid_rerank: u32,
 
     /// Data vector rerank factors to sweep, comma-separated (e.g. "4,8,16")
-    #[arg(long, default_value = "4,8,16")]
+    #[arg(long, default_value = "16")]
     data_rerank_factors: String,
 
     /// Extra arguments (ignored, for compatibility with cargo bench)
@@ -92,36 +101,26 @@ struct Args {
 // =============================================================================
 
 const BLOCK_SIZE_BYTES: usize = 3 * 1024 * 1024; // 3MB
-const BATCH_SIZE: usize = 1_000_000; // 1M vectors per checkpoint (matches ground truth)
 
 // =============================================================================
 // Checkpoint Result
 // =============================================================================
 
+struct RerankRecall {
+    rerank_factor: u32,
+    recall_10: f64,
+    recall_100: f64,
+    latency: Duration,
+    avg_rerank_vecs: u64,
+    rerank_data_bytes: u64,
+}
+
 struct CheckpointResult {
     checkpoint: usize,
     vectors: usize,
-    index_time: Duration,
-    commit_time: Duration,
     num_queries: usize,
-    rerank_factor: u32,
-    avg_rerank_vecs: u64,
-    rerank_data_bytes: u64,
-    recall_10_np16: f64,
-    recall_100_np16: f64,
-    latency_np16: Duration,
-    recall_10_np32: f64,
-    recall_100_np32: f64,
-    latency_np32: Duration,
-    recall_10_np64: f64,
-    recall_100_np64: f64,
-    latency_np64: Duration,
-    recall_10_np128: f64,
-    recall_100_np128: f64,
-    latency_np128: Duration,
-    recall_10_np256: f64,
-    recall_100_np256: f64,
-    latency_np256: Duration,
+    nprobe: u32,
+    rerank_results: Vec<RerankRecall>,
 }
 
 // =============================================================================
@@ -147,8 +146,8 @@ fn spann_config(
         write_rng_factor: Some(4.0),
 
         // Cluster maintenance
-        split_threshold: Some(512),
-        merge_threshold: Some(128),
+        split_threshold: Some(2048),
+        merge_threshold: Some(512),
         reassign_neighbor_count: Some(32),
 
         // Commit-time parameters
@@ -184,6 +183,31 @@ fn format_duration(d: Duration) -> String {
     }
 }
 
+/// Compute brute-force kNN ground truth for query vectors against a set of data vectors.
+fn compute_ground_truth(
+    query_vectors: &[Vec<f32>],
+    data_vectors: &[(u32, Arc<[f32]>)],
+    distance_fn: &DistanceFunction,
+    k: usize,
+) -> Vec<Query> {
+    query_vectors
+        .iter()
+        .map(|qv| {
+            let mut dists: Vec<(u32, f32)> = data_vectors
+                .iter()
+                .map(|(id, emb)| (*id, distance_fn.distance(qv, emb)))
+                .collect();
+            dists.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+            let neighbors: Vec<u32> = dists.iter().take(k).map(|(id, _)| *id).collect();
+            Query {
+                vector: qv.clone(),
+                neighbors,
+                max_vector_id: data_vectors.len() as u64,
+            }
+        })
+        .collect()
+}
+
 /// Group queries by their max_vector_id (checkpoint boundary).
 fn group_queries_by_checkpoint(queries: Vec<Query>) -> BTreeMap<u64, Vec<Query>> {
     let mut map: BTreeMap<u64, Vec<Query>> = BTreeMap::new();
@@ -197,7 +221,7 @@ fn group_queries_by_checkpoint(queries: Vec<Query>) -> BTreeMap<u64, Vec<Query>>
 /// Returns (avg_recall@10, avg_recall@100, avg_search_latency).
 async fn evaluate_recall(
     index: Arc<QuantizedSpannIndexWriter<USearchIndex>>,
-    queries: &[Query],
+    queries: &[&Query],
     k: usize,
     nprobe: usize,
     num_threads: usize,
@@ -214,7 +238,10 @@ async fn evaluate_recall(
     let num_evaluated = Arc::new(AtomicUsize::new(0));
 
     let chunk_size = (queries.len() + num_threads - 1) / num_threads;
-    let query_chunks: Vec<Vec<Query>> = queries.chunks(chunk_size).map(|c| c.to_vec()).collect();
+    let query_chunks: Vec<Vec<Query>> = queries
+        .chunks(chunk_size)
+        .map(|c| c.iter().map(|q| (*q).clone()).collect())
+        .collect();
 
     let progress = ProgressBar::new(queries.len() as u64);
     progress.set_style(
@@ -323,51 +350,32 @@ fn format_latency(d: Duration) -> String {
     }
 }
 
-/// Print the recall summary table.
+/// Print the recall summary table (one row per nprobe / DRR combination).
 fn print_recall_summary(results: &[CheckpointResult]) {
-    println!("\n=== Recall Summary (Data Rerank Sweep) ===");
+    println!("\n=== Recall Summary ===");
     println!(
-        "| {:>3} | {:>6} | {:>8} | {:>8} | {:>8} | {:>7} | {:>7} | {:>7} | {:^19} | {:^19} | {:^19} | {:^19} | {:^19} |",
-        "CP",
-        "DRR",
-        "Vectors",
-        "Index",
-        "Commit",
-        "Queries",
-        "RR Vecs",
-        "RR Data",
-        "nprobe=16",
-        "nprobe=32",
-        "nprobe=64",
-        "nprobe=128",
-        "nprobe=256"
+        "| {:>3} | {:>6} | {:>6} | {:>8} | {:>7} | {:>7} | {:>7} | {:>6} | {:>6} | {:>8} |",
+        "CP", "nprobe", "DRR", "Vectors", "Queries", "RR Vecs", "RR Data", "R@10", "R@100", "Lat"
     );
     println!(
-        "| {:>3} | {:>6} | {:>8} | {:>8} | {:>8} | {:>7} | {:>7} | {:>7} | {:>5} {:>5} {:>6} | {:>5} {:>5} {:>6} | {:>5} {:>5} {:>6} | {:>5} {:>5} {:>6} | {:>5} {:>5} {:>6} |",
-        "", "", "", "", "", "", "", "", "R@10", "R@100", "Lat", "R@10", "R@100", "Lat", "R@10", "R@100", "Lat", "R@10", "R@100", "Lat", "R@10", "R@100", "Lat"
-    );
-    println!(
-        "|{:-^5}|{:-^8}|{:-^10}|{:-^10}|{:-^10}|{:-^9}|{:-^9}|{:-^9}|{:-^21}|{:-^21}|{:-^21}|{:-^21}|{:-^21}|",
-        "", "", "", "", "", "", "", "", "", "", "", "", ""
+        "|{:-^5}|{:-^8}|{:-^8}|{:-^10}|{:-^9}|{:-^9}|{:-^9}|{:-^8}|{:-^8}|{:-^10}|",
+        "", "", "", "", "", "", "", "", "", ""
     );
 
     for r in results {
-        println!(
-            "| {:>3} | {:>4}x | {:>8} | {:>8} | {:>8} | {:>7} | {:>7} | {:>7} | {:>5.2} {:>5.2} {:>6} | {:>5.2} {:>5.2} {:>6} | {:>5.2} {:>5.2} {:>6} | {:>5.2} {:>5.2} {:>6} | {:>5.2} {:>5.2} {:>6} |",
-            r.checkpoint,
-            r.rerank_factor,
-            format_count(r.vectors),
-            format_duration(r.index_time),
-            format_duration(r.commit_time),
-            r.num_queries,
-            r.avg_rerank_vecs,
-            format_bytes(r.rerank_data_bytes),
-            r.recall_10_np16, r.recall_100_np16, format_latency(r.latency_np16),
-            r.recall_10_np32, r.recall_100_np32, format_latency(r.latency_np32),
-            r.recall_10_np64, r.recall_100_np64, format_latency(r.latency_np64),
-            r.recall_10_np128, r.recall_100_np128, format_latency(r.latency_np128),
-            r.recall_10_np256, r.recall_100_np256, format_latency(r.latency_np256),
-        );
+        for rr in &r.rerank_results {
+            println!(
+                "| {:>3} | {:>6} | {:>4}x | {:>8} | {:>7} | {:>7} | {:>7} | {:>6.2} | {:>6.2} | {:>8} |",
+                r.checkpoint,
+                r.nprobe,
+                rr.rerank_factor,
+                format_count(r.vectors),
+                r.num_queries,
+                rr.avg_rerank_vecs,
+                format_bytes(rr.rerank_data_bytes),
+                rr.recall_10, rr.recall_100, format_latency(rr.latency),
+            );
+        }
     }
 }
 
@@ -402,9 +410,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let data_len = dataset.data_len();
     let dimension = dataset.dimension();
     let k = dataset.k();
+    let batch_size = args.checkpoint_size;
 
-    // Calculate number of checkpoints (each checkpoint = 1M vectors)
-    let max_checkpoints = (data_len + BATCH_SIZE - 1) / BATCH_SIZE;
+    // Calculate number of checkpoints
+    let max_checkpoints = (data_len + batch_size - 1) / batch_size;
     let num_checkpoints = args
         .checkpoint
         .unwrap_or(max_checkpoints)
@@ -416,9 +425,20 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .map(|s| s.trim().parse().expect("invalid data rerank factor"))
         .collect();
 
+    let nprobes: Vec<u32> = args
+        .nprobes
+        .split(',')
+        .map(|s| s.trim().parse().expect("invalid nprobe value"))
+        .collect();
+
     let centroid_rerank = args.centroid_rerank;
 
-    let config = spann_config(args.data_bits, args.centroid_bits, Some(centroid_rerank), None);
+    let config = spann_config(
+        args.data_bits,
+        args.centroid_bits,
+        Some(centroid_rerank),
+        None,
+    );
 
     println!("=== QuantizedSpannIndexWriter Benchmark ===");
     println!(
@@ -428,25 +448,27 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         dimension
     );
     println!(
-        "Metric: {:?} | Checkpoints: {} | Threads: {} | Data bits: {} | Centroid bits: {}",
+        "Metric: {:?} | Checkpoints: {} ({} vec/CP) | Threads: {} | Data bits: {} | Centroid bits: {}",
         distance_function,
         num_checkpoints,
+        format_count(batch_size),
         num_threads,
         args.data_bits,
         config.centroid_bits()
     );
     println!(
-        "Centroid rerank: {}x | Data rerank factors: {:?}",
-        centroid_rerank, data_rerank_factors
+        "Centroid rerank: {}x | Data rerank factors: {:?} | nprobes: {:?}",
+        centroid_rerank, data_rerank_factors, nprobes
     );
     println!(
         "Total vectors to index: {}",
-        format_count((BATCH_SIZE * num_checkpoints).min(data_len))
+        format_count((batch_size * num_checkpoints).min(data_len))
     );
     println!();
 
     // Load and group queries by checkpoint
     let all_queries = dataset.queries(distance_function.clone())?;
+    let query_vectors: Vec<Vec<f32>> = all_queries.iter().take(100).map(|q| q.vector.clone()).collect();
     let queries_by_checkpoint = group_queries_by_checkpoint(all_queries);
 
     // Setup temp directory and storage
@@ -457,6 +479,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Run checkpoints with incremental raw embedding building
     let mut total_vectors = 0usize;
+    let mut all_indexed_vectors: Vec<(u32, Arc<[f32]>)> = Vec::new();
     let mut file_ids: Option<QuantizedSpannIds> = None;
     let mut raw_embedding_id: Option<Uuid> = None;
     let total_start = Instant::now();
@@ -465,8 +488,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut checkpoint_results: Vec<CheckpointResult> = Vec::new();
 
     for checkpoint_idx in 0..num_checkpoints {
-        let offset = checkpoint_idx * BATCH_SIZE;
-        let limit = BATCH_SIZE.min(data_len.saturating_sub(offset));
+        let offset = checkpoint_idx * batch_size;
+        let limit = batch_size.min(data_len.saturating_sub(offset));
 
         if limit == 0 {
             println!("Checkpoint {}: No more data available", checkpoint_idx);
@@ -672,12 +695,34 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         batch_snapshots.push(snap);
 
         total_vectors += actual_count;
+        all_indexed_vectors.extend(batch_vectors.iter().cloned());
 
         // === Step 7: Evaluate recall for this checkpoint ===
-        let checkpoint_queries = queries_by_checkpoint
+        // Try pre-computed ground truth first (exact match on total_vectors).
+        // If none exists (checkpoint size doesn't align with GT boundaries),
+        // compute brute-force kNN ground truth on the fly.
+        let precomputed: Vec<&Query> = queries_by_checkpoint
             .get(&(total_vectors as u64))
-            .map(|v| v.as_slice())
-            .unwrap_or(&[]);
+            .map(|qs| qs.iter().collect())
+            .unwrap_or_default();
+
+        let computed_gt;
+        let checkpoint_queries: Vec<&Query> = if !precomputed.is_empty() {
+            precomputed
+        } else {
+            println!("  Computing brute-force ground truth ({} queries x {} vectors)...",
+                query_vectors.len(), all_indexed_vectors.len());
+            let gt_start = Instant::now();
+            computed_gt = compute_ground_truth(
+                &query_vectors,
+                &all_indexed_vectors,
+                &distance_function,
+                k,
+            );
+            println!("  Ground truth computed in {}", format_duration(gt_start.elapsed()));
+            computed_gt.iter().collect()
+        };
+        let checkpoint_queries: &[&Query] = &checkpoint_queries;
 
         let throughput = actual_count as f64 / index_time.as_secs_f64();
 
@@ -694,187 +739,144 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         let mut total_search_calls: u64 = 0;
         let mut total_search_nanos: u64 = 0;
+        let mut total_search_scan_nanos: u64 = 0;
+        let mut total_search_load_raw_nanos: u64 = 0;
+        let mut total_search_rerank_nanos: u64 = 0;
+        let mut total_navigate_nanos: u64 = 0;
+        let mut total_nav_search_nanos: u64 = 0;
+        let mut total_nav_fetch_nanos: u64 = 0;
+        let mut total_nav_rerank_nanos: u64 = 0;
         let mut total_data_rerank_vectors: u64 = 0;
 
-        for &data_rerank_factor in &data_rerank_factors {
-            let (
-                recall_10_np16, recall_100_np16, latency_np16,
-                recall_10_np32, recall_100_np32, latency_np32,
-                recall_10_np64, recall_100_np64, latency_np64,
-                recall_10_np128, recall_100_np128, latency_np128,
-                recall_10_np256, recall_100_np256, latency_np256,
-                avg_rerank_vecs, rerank_data_bytes,
-            ) = if !checkpoint_queries.is_empty() {
-                let search_config = spann_config(
-                    args.data_bits,
-                    args.centroid_bits,
-                    Some(centroid_rerank),
-                    Some(data_rerank_factor),
-                );
+        for &nprobe in &nprobes {
+            let mut rerank_results = Vec::with_capacity(data_rerank_factors.len());
 
-                let block_cache = new_cache_for_test();
-                let sparse_index_cache = new_cache_for_test();
-                let arrow_blockfile_provider = ArrowBlockfileProvider::new(
-                    storage.clone(),
-                    BLOCK_SIZE_BYTES,
-                    block_cache,
-                    sparse_index_cache,
-                    16,
-                );
-                let blockfile_provider =
-                    BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+            for &data_rerank_factor in &data_rerank_factors {
+                let (r10, r100, lat, avg_rerank_vecs, rerank_data_bytes) =
+                    if !checkpoint_queries.is_empty() {
+                        let search_config = spann_config(
+                            args.data_bits,
+                            args.centroid_bits,
+                            Some(centroid_rerank),
+                            Some(data_rerank_factor),
+                        );
 
-                let usearch_cache = new_non_persistent_cache_for_test();
-                let usearch_provider =
-                    USearchIndexProvider::new(storage.clone(), usearch_cache);
+                        let block_cache = new_cache_for_test();
+                        let sparse_index_cache = new_cache_for_test();
+                        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+                            storage.clone(),
+                            BLOCK_SIZE_BYTES,
+                            block_cache,
+                            sparse_index_cache,
+                            16,
+                        );
+                        let blockfile_provider =
+                            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
 
-                let raw_reader = blockfile_provider
-                    .read::<u32, DataRecord<'static>>(BlockfileReaderOptions::new(
-                        raw_embedding_id.unwrap(),
-                        "".to_string(),
-                    ))
-                    .await
-                    .expect("Failed to open raw embedding reader");
+                        let usearch_cache = new_non_persistent_cache_for_test();
+                        let usearch_provider =
+                            USearchIndexProvider::new(storage.clone(), usearch_cache);
 
-                let search_index = QuantizedSpannIndexWriter::<USearchIndex>::open(
-                    BLOCK_SIZE_BYTES,
-                    collection_id,
-                    search_config,
-                    dimension,
-                    distance_function.clone(),
-                    file_ids.clone().unwrap(),
-                    None,
-                    "".to_string(),
-                    Some(raw_reader),
-                    &blockfile_provider,
-                    &usearch_provider,
-                )
-                .await
-                .expect("Failed to open index for search");
+                        let raw_reader = blockfile_provider
+                            .read::<u32, DataRecord<'static>>(BlockfileReaderOptions::new(
+                                raw_embedding_id.unwrap(),
+                                "".to_string(),
+                            ))
+                            .await
+                            .expect("Failed to open raw embedding reader");
 
-                let search_index = Arc::new(search_index);
+                        let search_index = QuantizedSpannIndexWriter::<USearchIndex>::open(
+                            BLOCK_SIZE_BYTES,
+                            collection_id,
+                            search_config,
+                            dimension,
+                            distance_function.clone(),
+                            file_ids.clone().unwrap(),
+                            None,
+                            "".to_string(),
+                            Some(raw_reader),
+                            &blockfile_provider,
+                            &usearch_provider,
+                        )
+                        .await
+                        .expect("Failed to open index for search");
 
-                let (r10_16, r100_16, lat_16) = evaluate_recall(
-                    Arc::clone(&search_index),
-                    checkpoint_queries,
-                    k,
-                    16,
-                    num_threads,
-                    checkpoint_idx,
-                    num_checkpoints,
-                )
-                .await;
+                        let search_index = Arc::new(search_index);
 
-                let (r10_32, r100_32, lat_32) = evaluate_recall(
-                    Arc::clone(&search_index),
-                    checkpoint_queries,
-                    k,
-                    32,
-                    num_threads,
-                    checkpoint_idx,
-                    num_checkpoints,
-                )
-                .await;
+                        let (r10, r100, lat) = evaluate_recall(
+                            Arc::clone(&search_index),
+                            checkpoint_queries,
+                            k,
+                            nprobe as usize,
+                            num_threads,
+                            checkpoint_idx,
+                            num_checkpoints,
+                        )
+                        .await;
 
-                let (r10_64, r100_64, lat_64) = evaluate_recall(
-                    Arc::clone(&search_index),
-                    checkpoint_queries,
-                    k,
-                    64,
-                    num_threads,
-                    checkpoint_idx,
-                    num_checkpoints,
-                )
-                .await;
+                        let search_stats_ref = search_index.stats();
+                        let search_snap = search_stats_ref.snapshot(&[], dimension);
+                        total_search_calls += search_snap.search.calls;
+                        total_search_nanos += search_snap.search.total_nanos;
+                        total_search_scan_nanos += search_snap.search_scan.total_nanos;
+                        total_search_load_raw_nanos += search_snap.search_load_raw.total_nanos;
+                        total_search_rerank_nanos += search_snap.search_rerank.total_nanos;
+                        total_navigate_nanos += search_snap.navigate.total_nanos;
+                        total_nav_search_nanos += search_snap.nav_search.total_nanos;
+                        total_nav_fetch_nanos += search_snap.nav_fetch.total_nanos;
+                        total_nav_rerank_nanos += search_snap.nav_rerank.total_nanos;
+                        total_data_rerank_vectors += search_snap.data_rerank_vectors;
 
-                let (r10_128, r100_128, lat_128) = evaluate_recall(
-                    Arc::clone(&search_index),
-                    checkpoint_queries,
-                    k,
-                    128,
-                    num_threads,
-                    checkpoint_idx,
-                    num_checkpoints,
-                )
-                .await;
+                        let per_search_vecs = if search_snap.search.calls > 0 {
+                            search_snap.data_rerank_vectors / search_snap.search.calls
+                        } else {
+                            0
+                        };
+                        let per_search_bytes = per_search_vecs * dimension as u64 * 4;
 
-                let (r10_256, r100_256, lat_256) = evaluate_recall(
-                    Arc::clone(&search_index),
-                    checkpoint_queries,
-                    k,
-                    256,
-                    num_threads,
-                    checkpoint_idx,
-                    num_checkpoints,
-                )
-                .await;
+                        (r10, r100, lat, per_search_vecs, per_search_bytes)
+                    } else {
+                        (0.0, 0.0, Duration::ZERO, 0, 0)
+                    };
 
-                let search_stats_ref = search_index.stats();
-                let search_snap = search_stats_ref.snapshot(&[], dimension);
-                total_search_calls += search_snap.search.calls;
-                total_search_nanos += search_snap.search.total_nanos;
-                total_data_rerank_vectors += search_snap.data_rerank_vectors;
+                rerank_results.push(RerankRecall {
+                    rerank_factor: data_rerank_factor,
+                    recall_10: r10,
+                    recall_100: r100,
+                    latency: lat,
+                    avg_rerank_vecs,
+                    rerank_data_bytes,
+                });
+            }
 
-                let per_search_vecs = if search_snap.search.calls > 0 {
-                    search_snap.data_rerank_vectors / search_snap.search.calls
-                } else {
-                    0
-                };
-                let per_search_bytes = per_search_vecs * dimension as u64 * 4;
-
-                (
-                    r10_16, r100_16, lat_16, r10_32, r100_32, lat_32,
-                    r10_64, r100_64, lat_64, r10_128, r100_128, lat_128,
-                    r10_256, r100_256, lat_256,
-                    per_search_vecs, per_search_bytes,
-                )
-            } else {
-                (
-                    0.0, 0.0, Duration::ZERO,
-                    0.0, 0.0, Duration::ZERO,
-                    0.0, 0.0, Duration::ZERO,
-                    0.0, 0.0, Duration::ZERO,
-                    0.0, 0.0, Duration::ZERO,
-                    0, 0,
-                )
-            };
-
+            let drr_str: String = rerank_results
+                .iter()
+                .map(|r| {
+                    format!(
+                        "drr{}x={:.2}/{:.2}",
+                        r.rerank_factor, r.recall_10, r.recall_100
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
             println!(
-                "  DataRerank {}x: np16={:.2}/{:.2} np32={:.2}/{:.2} np64={:.2}/{:.2} np128={:.2}/{:.2} np256={:.2}/{:.2} | rr_vecs={} rr_data={}",
-                data_rerank_factor,
-                recall_10_np16, recall_100_np16,
-                recall_10_np32, recall_100_np32,
-                recall_10_np64, recall_100_np64,
-                recall_10_np128, recall_100_np128,
-                recall_10_np256, recall_100_np256,
-                avg_rerank_vecs,
-                format_bytes(rerank_data_bytes),
+                "  nprobe {}: {} | lat={}",
+                nprobe,
+                drr_str,
+                format_latency(
+                    rerank_results
+                        .last()
+                        .map(|r| r.latency)
+                        .unwrap_or(Duration::ZERO)
+                ),
             );
 
             checkpoint_results.push(CheckpointResult {
                 checkpoint: checkpoint_idx + 1,
                 vectors: total_vectors,
-                index_time,
-                commit_time,
                 num_queries: checkpoint_queries.len(),
-                rerank_factor: data_rerank_factor,
-                avg_rerank_vecs,
-                rerank_data_bytes,
-                recall_10_np16,
-                recall_100_np16,
-                latency_np16,
-                recall_10_np32,
-                recall_100_np32,
-                latency_np32,
-                recall_10_np64,
-                recall_100_np64,
-                latency_np64,
-                recall_10_np128,
-                recall_100_np128,
-                latency_np128,
-                recall_10_np256,
-                recall_100_np256,
-                latency_np256,
+                nprobe,
+                rerank_results,
             });
         }
 
@@ -882,6 +884,20 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let snap = &mut batch_snapshots[snap_idx];
             snap.search.calls = total_search_calls;
             snap.search.total_nanos = total_search_nanos;
+            snap.search_scan.calls = total_search_calls;
+            snap.search_scan.total_nanos = total_search_scan_nanos;
+            snap.search_load_raw.calls = total_search_calls;
+            snap.search_load_raw.total_nanos = total_search_load_raw_nanos;
+            snap.search_rerank.calls = total_search_calls;
+            snap.search_rerank.total_nanos = total_search_rerank_nanos;
+            snap.navigate.calls += total_search_calls;
+            snap.navigate.total_nanos += total_navigate_nanos;
+            snap.nav_search.calls += total_search_calls;
+            snap.nav_search.total_nanos += total_nav_search_nanos;
+            snap.nav_fetch.calls += total_search_calls;
+            snap.nav_fetch.total_nanos += total_nav_fetch_nanos;
+            snap.nav_rerank.calls += total_search_calls;
+            snap.nav_rerank.total_nanos += total_nav_rerank_nanos;
             snap.data_rerank_vectors = total_data_rerank_vectors;
         }
     }

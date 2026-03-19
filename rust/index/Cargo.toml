@@ -111,10 +111,12 @@ required-features = ["usearch"]
 [[bench]]
 name = "usearch_spann_profile"
 harness = false
+required-features = ["usearch"] # Use --features chroma-index/usearch
 
 [[bench]]
 name = "usearch_rerank"
 harness = false
+required-features = ["usearch"] # Use --features chroma-index/usearch
 
 [[bench]]
 name = "hierarchical_centroid_profile"
@@ -123,3 +125,8 @@ harness = false
 [[bench]]
 name = "flat_centroid_profile"
 harness = false
+
+[[bench]]
+name = "centroid_fetch"
+harness = false
+required-features = ["usearch"]

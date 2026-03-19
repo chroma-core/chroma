@@ -152,6 +152,12 @@ pub mod stats {
         pub load_raw: MethodSnapshot,
         pub quantize: MethodSnapshot,
         pub search: MethodSnapshot,
+        pub search_scan: MethodSnapshot,
+        pub search_load_raw: MethodSnapshot,
+        pub search_rerank: MethodSnapshot,
+        pub nav_search: MethodSnapshot,
+        pub nav_fetch: MethodSnapshot,
+        pub nav_rerank: MethodSnapshot,
         pub raw_add: MethodSnapshot,
         pub raw_rm: MethodSnapshot,
         pub q_add: MethodSnapshot,
@@ -180,6 +186,12 @@ pub mod stats {
                 "load_raw" => self.load_raw,
                 "quantize" => self.quantize,
                 "search" => self.search,
+                "search_scan" => self.search_scan,
+                "search_load_raw" => self.search_load_raw,
+                "search_rerank" => self.search_rerank,
+                "nav_search" => self.nav_search,
+                "nav_fetch" => self.nav_fetch,
+                "nav_rerank" => self.nav_rerank,
                 "raw_add" => self.raw_add,
                 "raw_rm" => self.raw_rm,
                 "q_add" => self.q_add,
@@ -205,6 +217,12 @@ pub mod stats {
         pub load_raw: MethodStats,
         pub quantize: MethodStats,
         pub search: MethodStats,
+        pub search_scan: MethodStats,
+        pub search_load_raw: MethodStats,
+        pub search_rerank: MethodStats,
+        pub nav_search: MethodStats,
+        pub nav_fetch: MethodStats,
+        pub nav_rerank: MethodStats,
         pub raw_add: MethodStats,
         pub raw_rm: MethodStats,
         pub q_add: MethodStats,
@@ -233,6 +251,12 @@ pub mod stats {
                 load_raw: snap(&self.load_raw),
                 quantize: snap(&self.quantize),
                 search: snap(&self.search),
+                search_scan: snap(&self.search_scan),
+                search_load_raw: snap(&self.search_load_raw),
+                search_rerank: snap(&self.search_rerank),
+                nav_search: snap(&self.nav_search),
+                nav_fetch: snap(&self.nav_fetch),
+                nav_rerank: snap(&self.nav_rerank),
                 raw_add: snap(&self.raw_add),
                 raw_rm: snap(&self.raw_rm),
                 q_add: snap(&self.q_add),
@@ -248,11 +272,12 @@ pub mod stats {
 
     // All methods ordered by path: Write Path, Balance Path, I/O, Quantization
     const ALL_METHODS: &[&str] = &[
-        "add", "navigate", "register", "spawn", // Write Path
+        "add", "navigate", "nav_search", "nav_fetch", "nav_rerank", // Write Path + navigate breakdown
+        "register", "spawn", // Write Path (continued)
         "scrub", "split", "merge", "reassign", "drop", // Balance Path
         "load", "load_raw", // I/O
         "quantize", // Quantization (encoding vectors to codes)
-        "search",   // Search (centroid navigate + cluster scan)
+        "search", "search_scan", "search_load_raw", "search_rerank", // Search (total, cluster scan, load raw, fp rerank)
         "raw_add", "raw_rm", "q_add", "q_rm", // HNSW centroid index ops
     ];
 
@@ -312,28 +337,30 @@ pub mod stats {
         out
     }
 
+    fn col_widths() -> Vec<usize> {
+        ALL_METHODS.iter().map(|m| m.len().max(8)).collect()
+    }
+
     fn format_task_counts_table(snapshots: &[StatsSnapshot]) -> String {
         use std::fmt::Write;
+        let widths = col_widths();
         let mut out = String::new();
         writeln!(out, "\n=== Task Counts ===").unwrap();
-        // Header
         write!(out, "| CP |").unwrap();
-        for method in ALL_METHODS {
-            write!(out, " {:>8} |", method).unwrap();
+        for (method, w) in ALL_METHODS.iter().zip(&widths) {
+            write!(out, " {:>w$} |", method, w = *w).unwrap();
         }
         writeln!(out).unwrap();
-        // Separator
         write!(out, "|----|").unwrap();
-        for _ in ALL_METHODS {
-            write!(out, "----------|").unwrap();
+        for w in &widths {
+            write!(out, "-{:-<w$}-|", "", w = *w).unwrap();
         }
         writeln!(out).unwrap();
-        // Data rows
         for (i, snap) in snapshots.iter().enumerate() {
             write!(out, "| {:>2} |", i + 1).unwrap();
-            for method in ALL_METHODS {
+            for (method, w) in ALL_METHODS.iter().zip(&widths) {
                 let m = snap.get(method);
-                write!(out, " {:>8} |", format_count(m.calls)).unwrap();
+                write!(out, " {:>w$} |", format_count(m.calls), w = *w).unwrap();
             }
             writeln!(out).unwrap();
         }
@@ -342,30 +369,27 @@ pub mod stats {
 
     fn format_task_timing_table(snapshots: &[StatsSnapshot]) -> String {
         use std::fmt::Write;
+        let widths = col_widths();
         let mut out = String::new();
         writeln!(out, "\n=== Task Total Time ===").unwrap();
-        // Header
         write!(out, "| CP |").unwrap();
-        for method in ALL_METHODS {
-            write!(out, " {:>8} |", method).unwrap();
+        for (method, w) in ALL_METHODS.iter().zip(&widths) {
+            write!(out, " {:>w$} |", method, w = *w).unwrap();
         }
         write!(out, " raw_pts |  raw/pt |    total |").unwrap();
         writeln!(out).unwrap();
-        // Separator
         write!(out, "|----|").unwrap();
-        for _ in ALL_METHODS {
-            write!(out, "----------|").unwrap();
+        for w in &widths {
+            write!(out, "-{:-<w$}-|", "", w = *w).unwrap();
         }
         write!(out, "---------|---------|----------|").unwrap();
         writeln!(out).unwrap();
-        // Data rows
         for (i, snap) in snapshots.iter().enumerate() {
             write!(out, "| {:>2} |", i + 1).unwrap();
-            for method in ALL_METHODS {
+            for (method, w) in ALL_METHODS.iter().zip(&widths) {
                 let m = snap.get(method);
-                write!(out, " {:>8} |", format_duration(m.total_nanos)).unwrap();
+                write!(out, " {:>w$} |", format_duration(m.total_nanos), w = *w).unwrap();
             }
-            // load_raw points and avg per point
             let points = snap.load_raw_points;
             let avg_per_point = if points > 0 {
                 format_duration(snap.load_raw.total_nanos / points)
@@ -404,33 +428,31 @@ pub mod stats {
 
     fn format_task_avg_time_table(snapshots: &[StatsSnapshot]) -> String {
         use std::fmt::Write;
+        let widths = col_widths();
         let mut out = String::new();
         writeln!(out, "\n=== Task Avg Time ===").unwrap();
-        // Header
         write!(out, "| CP |").unwrap();
-        for method in ALL_METHODS {
-            write!(out, " {:>8} |", method).unwrap();
+        for (method, w) in ALL_METHODS.iter().zip(&widths) {
+            write!(out, " {:>w$} |", method, w = *w).unwrap();
         }
         write!(out, " rr_vecs | rr_data |").unwrap();
         writeln!(out).unwrap();
-        // Separator
         write!(out, "|----|").unwrap();
-        for _ in ALL_METHODS {
-            write!(out, "----------|").unwrap();
+        for w in &widths {
+            write!(out, "-{:-<w$}-|", "", w = *w).unwrap();
         }
         write!(out, "---------|---------|").unwrap();
         writeln!(out).unwrap();
-        // Data rows
         for (i, snap) in snapshots.iter().enumerate() {
             write!(out, "| {:>2} |", i + 1).unwrap();
-            for method in ALL_METHODS {
+            for (method, w) in ALL_METHODS.iter().zip(&widths) {
                 let m = snap.get(method);
                 let avg = if m.calls > 0 {
                     format_duration(m.total_nanos / m.calls)
                 } else {
                     "-".to_string()
                 };
-                write!(out, " {:>8} |", avg).unwrap();
+                write!(out, " {:>w$} |", avg, w = *w).unwrap();
             }
             let search_calls = snap.search.calls;
             let avg_rerank_vecs = if search_calls > 0 {
@@ -476,6 +498,13 @@ pub mod stats {
              \x20 quantize  - encode a vector into a RaBitQ code relative to its centroid\n\
              Search:\n\
              \x20 search    - full query: centroid navigate + cluster scan + rerank\n\
+             \x20 search_scan      - time in cluster scan (load + setup + quantized distance)\n\
+             \x20 search_load_raw  - time loading raw f32 embeddings for data rerank\n\
+             \x20 search_rerank    - time in data rerank (full-precision distance computation)\n\
+             Navigate breakdown (centroid rerank):\n\
+             \x20 nav_search  - quantized centroid HNSW search\n\
+             \x20 nav_fetch   - fetching raw centroid vectors for rerank\n\
+             \x20 nav_rerank  - full-precision distance computation for centroid rerank\n\
              Derived:\n\
              \x20 raw_pts   - number of raw embedding points loaded during load_raw\n\
              \x20 raw/pt    - average time per raw embedding point (load_raw total / raw_pts)\n\
@@ -678,38 +707,45 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
 
         let q_norm = (f32::dot(&rotated, &rotated).unwrap_or(0.0) as f32).sqrt();
 
-        for cluster_id in cluster_ids {
-            self.load(cluster_id).await?;
+        {
+            let _guard_scan = stats::TimedGuard::new(&self.stats.search_scan);
+            for cluster_id in cluster_ids {
+                self.load(cluster_id).await?;
 
-            let Some(delta) = self.cluster_deltas.get(&cluster_id) else {
-                continue;
-            };
-
-            let center = &delta.center;
-            let c_norm = (f32::dot(center, center).unwrap_or(0.0) as f32).sqrt();
-            let c_dot_q = f32::dot(center, &rotated).unwrap_or(0.0) as f32;
-            let r_q: Vec<f32> = rotated
-                .iter()
-                .zip(center.iter())
-                .map(|(q, c)| q - c)
-                .collect();
-
-            for (i, (id, version)) in delta.ids.iter().zip(delta.versions.iter()).enumerate() {
-                if !self.is_valid(*id, *version) || !measured.insert(*id) {
+                let Some(delta) = self.cluster_deltas.get(&cluster_id) else {
                     continue;
-                }
+                };
+
+                let center = &delta.center;
+                let c_norm = (f32::dot(center, center).unwrap_or(0.0) as f32).sqrt();
+                let c_dot_q = f32::dot(center, &rotated).unwrap_or(0.0) as f32;
+                let r_q: Vec<f32> = rotated
+                    .iter()
+                    .zip(center.iter())
+                    .map(|(q, c)| q - c)
+                    .collect();
 
                 let code_bits = self.config.quantize.data_bits().unwrap_or(4);
-                let distance = quantization::distance_query(
-                    code_bits,
-                    delta.codes[i].as_ref(),
-                    &self.distance_function,
-                    &r_q,
-                    c_norm,
-                    c_dot_q,
-                    q_norm,
-                );
-                results.push((*id, distance));
+                let qq_1bit = (code_bits == 1).then(|| {
+                    let padded_bytes = quantization::packed_len_1bit(self.dimension);
+                    quantization::QuantizedQuery::new(&r_q, padded_bytes, c_norm, c_dot_q, q_norm)
+                });
+
+                for (i, (id, version)) in delta.ids.iter().zip(delta.versions.iter()).enumerate() {
+                    if !self.is_valid(*id, *version) || !measured.insert(*id) {
+                        continue;
+                    }
+
+                    let code: &[u8] = delta.codes[i].as_ref();
+                    let distance = if let Some(ref qq) = qq_1bit {
+                        quantization::Code::<1, _>::new(code)
+                            .distance_quantized_query(&self.distance_function, qq)
+                    } else {
+                        quantization::Code::<4, _>::new(code)
+                            .distance_query(&self.distance_function, &r_q, c_norm, c_dot_q, q_norm)
+                    };
+                    results.push((*id, distance));
+                }
             }
         }
 
@@ -726,8 +762,12 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
                 .fetch_add(rerank_count as u64, Ordering::Relaxed);
 
             let rerank_ids: Vec<u32> = results.iter().map(|(id, _)| *id).collect();
-            self.load_raw(&rerank_ids).await?;
+            {
+                let _guard_load_raw = stats::TimedGuard::new(&self.stats.search_load_raw);
+                self.load_raw(&rerank_ids).await?;
+            }
 
+            let _guard_rerank = stats::TimedGuard::new(&self.stats.search_rerank);
             let mut reranked: Vec<(u32, f32)> = results
                 .into_iter()
                 .filter_map(|(id, approx_dist)| {
@@ -990,26 +1030,41 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
         let rerank_factor = self.config.centroid_rerank_factor() as usize;
 
         if rerank_factor <= 1 {
+            let _g = stats::TimedGuard::new(&self.stats.nav_search);
             return self
                 .quantized_centroid
                 .search(query, count)
                 .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()));
         }
 
-        let candidates = self
-            .quantized_centroid
-            .search(query, count * rerank_factor)
-            .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
+        let candidates = {
+            let _g = stats::TimedGuard::new(&self.stats.nav_search);
+            self.quantized_centroid
+                .search(query, count * rerank_factor)
+                .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?
+        };
 
-        let mut reranked: Vec<(u32, f32)> = candidates
-            .keys
-            .iter()
-            .filter_map(|&key| {
-                let raw_vec = self.raw_centroid.get(key).ok()??;
-                let dist = self.distance_function.distance(query, &raw_vec);
-                Some((key, dist))
-            })
-            .collect();
+        let raw_vecs: Vec<(u32, Arc<[f32]>)> = {
+            let _g = stats::TimedGuard::new(&self.stats.nav_fetch);
+            candidates
+                .keys
+                .iter()
+                .filter_map(|&key| {
+                    self.centroid(key).map(|v| (key, v))
+                })
+                .collect()
+        };
+
+        let mut reranked: Vec<(u32, f32)> = {
+            let _g = stats::TimedGuard::new(&self.stats.nav_rerank);
+            raw_vecs
+                .iter()
+                .map(|(key, raw_vec)| {
+                    let dist = self.distance_function.distance(query, raw_vec);
+                    (*key, dist)
+                })
+                .collect()
+        };
 
         reranked.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
         reranked.truncate(count);
@@ -1388,6 +1443,16 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             let neighbor_c_dot_q = c_norm * c_norm;
             let neighbor_q_norm = c_norm;
 
+            let code_bits = self.data_bits();
+            let qq_1bit = (code_bits == 1).then(|| {
+                let pb = quantization::packed_len_1bit(self.dimension);
+                let left = quantization::QuantizedQuery::new(&left_r_q, pb, c_norm, left_c_dot_q, left_q_norm);
+                let right = quantization::QuantizedQuery::new(&right_r_q, pb, c_norm, right_c_dot_q, right_q_norm);
+                let neighbor = quantization::QuantizedQuery::new(&neighbor_r_q, pb, c_norm, neighbor_c_dot_q, neighbor_q_norm);
+                let old = quantization::QuantizedQuery::new(&old_r_q, pb, c_norm, old_c_dot_q, old_q_norm);
+                (left, right, neighbor, old)
+            });
+
             for (i, code) in neighbor_delta.codes.iter().enumerate() {
                 let id = neighbor_delta.ids[i];
                 let version = neighbor_delta.versions[i];
@@ -1399,30 +1464,35 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
                     continue;
                 }
 
-                let code_bytes = code.as_ref();
-                let bits = self.data_bits();
+                let code_bytes: &[u8] = code.as_ref();
 
-                let left_dist = quantization::distance_query(
-                    bits, code_bytes, &self.distance_function,
-                    &left_r_q, c_norm, left_c_dot_q, left_q_norm,
-                );
-                let right_dist = quantization::distance_query(
-                    bits, code_bytes, &self.distance_function,
-                    &right_r_q, c_norm, right_c_dot_q, right_q_norm,
-                );
-                let neighbor_dist = quantization::distance_query(
-                    bits, code_bytes, &self.distance_function,
-                    &neighbor_r_q, c_norm, neighbor_c_dot_q, neighbor_q_norm,
-                );
+                let (left_dist, right_dist, neighbor_dist) = if let Some((ref lq, ref rq, ref nq, _)) = qq_1bit {
+                    let c = quantization::Code::<1, _>::new(code_bytes);
+                    (
+                        c.distance_quantized_query(&self.distance_function, lq),
+                        c.distance_quantized_query(&self.distance_function, rq),
+                        c.distance_quantized_query(&self.distance_function, nq),
+                    )
+                } else {
+                    let c = quantization::Code::<4, _>::new(code_bytes);
+                    (
+                        c.distance_query(&self.distance_function, &left_r_q, c_norm, left_c_dot_q, left_q_norm),
+                        c.distance_query(&self.distance_function, &right_r_q, c_norm, right_c_dot_q, right_q_norm),
+                        c.distance_query(&self.distance_function, &neighbor_r_q, c_norm, neighbor_c_dot_q, neighbor_q_norm),
+                    )
+                };
 
                 if neighbor_dist <= left_dist && neighbor_dist <= right_dist {
                     continue;
                 }
 
-                let old_dist = quantization::distance_query(
-                    bits, code_bytes, &self.distance_function,
-                    &old_r_q, c_norm, old_c_dot_q, old_q_norm,
-                );
+                let old_dist = if let Some((_, _, _, ref oq)) = qq_1bit {
+                    quantization::Code::<1, _>::new(code_bytes)
+                        .distance_quantized_query(&self.distance_function, oq)
+                } else {
+                    quantization::Code::<4, _>::new(code_bytes)
+                        .distance_query(&self.distance_function, &old_r_q, c_norm, old_c_dot_q, old_q_norm)
+                };
 
                 if old_dist <= left_dist && old_dist <= right_dist {
                     continue;

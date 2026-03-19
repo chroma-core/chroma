@@ -1,4 +1,89 @@
-cargo bench -p chroma-index --bench quantized_spann  --features chroma-index/usearch -- --dataset wikipedia-en --checkpoint 1 --threads 32 --data-bits 1 --centroid-bits 1
+
+baseline
+cargo bench -p chroma-index --bench quantized_spann  --features chroma-index/usearch -- --checkpoint 1 --data-bits 1 --centroid-bits 1 --centroid-rerank 1 --data-rerank-factors 1 --nprobes 32,64,128,256
+
+rerank
+cargo bench -p chroma-index --bench quantized_spann  --features chroma-index/usearch -- --checkpoint 1 --data-bits 1 --centroid-bits 1 --centroid-rerank 16 --data-rerank-factors 1,4,16 --nprobes 32,64,128,256
+
+srs - when ready
+nohup cargo bench -p chroma-index --bench quantized_spann  --features chroma-index/usearch -- --checkpoint 10 --data-bits 1 --centroid-bits 1 --centroid-rerank 16 --data-rerank-factors 1,4,16 --nprobes 32,64,128,256 > quantized_spann_1bit_wikipedia.txt 2>&1 &
+
+cargo bench -p chroma-index --bench quantized_spann  --features chroma-index/usearch -- --checkpoint 1 --data-bits 1 --centroid-bits 1 --centroid-rerank 16 --data-rerank-factors 4,8,16 --nprobes 32
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.34s
+     Running benches/quantized_spann.rs (target/release/deps/quantized_spann-f5b26d0d1576127a)
+Loading Wikipedia EN from HuggingFace Hub...
+=== QuantizedSpannIndexWriter Benchmark ===
+Dataset: wikipedia-en (41.49M vectors, 1024 dims)
+Metric: Euclidean | Checkpoints: 1 (1.00M vec/CP) | Threads: 32 | Data bits: 1 | Centroid bits: 1
+Centroid rerank: 16x | Data rerank factors: [4, 8, 16] | nprobes: [32]
+Total vectors to index: 1.00M
+
+Checkpoint 1: 1.00M vec | load 11.84s | raw 11.59s | index 10.3m | commit 1.47s | 1615 vec/s
+  nprobe 32: drr4x=0.94/0.94 drr8x=0.94/0.94 drr16x=0.94/0.94 | lat=531ms
+
+=== Cluster Statistics ===
+| CP | Centroids |   Min |   Max | Median |   P90 |   P99 |    Avg |    Std |
+|----|-----------|-------|-------|--------|-------|-------|--------|--------|
+|  1 |      1.4K |     2 |  2048 |   1551 |  1965 |  2045 | 1442.5 |  481.4 |
+
+=== Task Counts ===
+| CP |      add | navigate | register |    spawn |    scrub |    split |    merge | reassign |     drop |     load | load_raw | quantize |   search | search_scan | search_rerank |  raw_add |   raw_rm |    q_add |     q_rm |
+|----|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|
+|  1 |    1.00M |    3.08M |        0 |     2.8K |    50.5K |     1.4K |        0 |    2.25M |     1.4K |    50.5K |     2.8K |    6.92M |      300 |      300 |      300 |     2.8K |     1.4K |     2.8K |     1.4K |
+
+=== Task Total Time ===
+| CP |      add | navigate | register |    spawn |    scrub |    split |    merge | reassign |     drop |     load | load_raw | quantize |   search | search_scan | search_rerank |  raw_add |   raw_rm |    q_add |     q_rm | raw_pts |  raw/pt |    total |
+|----|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|---------|---------|----------|
+|  1 | 17063.14s | 16167.33s |      0ns |  116.74s |    5.47s | 16864.16s |      0ns | 16140.12s |   61.39s |   1.61ms |  332.8µs |   12.13s |  106.71s |    3.95s | 188.30ms |  116.40s |   61.21s | 334.42ms |   4.13ms |       0 |       - |  643.93s |
+
+=== Task Avg Time ===
+| CP |      add | navigate | register |    spawn |    scrub |    split |    merge | reassign |     drop |     load | load_raw | quantize |   search | search_scan | search_rerank |  raw_add |   raw_rm |    q_add |     q_rm | rr_vecs | rr_data |
+|----|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|---------|---------|
+|  1 |  17.06ms |   5.25ms |        - |  41.13ms |  108.4µs |   11.77s |        - |   7.18ms |  42.84ms |     31ns |    117ns |    1.8µs | 355.71ms |  13.16ms |  627.7µs |  41.01ms |  42.71ms |  117.8µs |    2.9µs |     933 |   3.6MB |
+
+=== Legend ===
+Write path:
+  add       - top-level add(id, embedding): navigate + register + balance
+  navigate  - query centroid HNSW index for nearest clusters
+  register  - quantize vector and append to target cluster(s)
+  spawn     - create a new cluster and insert centroid into HNSW indexes
+Balance path:
+  scrub     - load cluster from reader, remove tombstoned entries
+  split     - split an oversized cluster via 2-means into two new clusters
+  merge     - merge an undersized cluster into its nearest neighbor
+  reassign  - re-add a displaced vector after split/merge
+  drop      - remove a cluster from centroid indexes and load its raw embeddings
+I/O:
+  load      - load quantized cluster data from blockfile reader into memory
+  load_raw  - load raw f32 embeddings from blockfile reader into cache
+Quantization:
+  quantize  - encode a vector into a RaBitQ code relative to its centroid
+Search:
+  search    - full query: centroid navigate + cluster scan + rerank
+  search_scan   - time in cluster scan (quantized distance over codes)
+  search_rerank - time in data rerank (full-precision distance after load_raw)
+Derived:
+  raw_pts   - number of raw embedding points loaded during load_raw
+  raw/pt    - average time per raw embedding point (load_raw total / raw_pts)
+  total     - wall-clock time for the checkpoint (load + raw_write + index + commit)
+  rr_vecs   - avg number of full-precision vectors loaded per search (data rerank)
+  rr_data   - avg data volume of full-precision vectors per search (vecs x dims x 4B)
+
+
+=== Indexing Summary ===
+Total vectors: 1.00M
+Total time: 10.8m
+Overall throughput: 1539 vec/s
+
+=== Recall Summary ===
+|  CP | nprobe |    DRR |  Vectors | Queries | RR Vecs | RR Data |   R@10 |  R@100 |      Lat |
+|-----|--------|--------|----------|---------|---------|---------|--------|--------|----------|
+|   1 |     32 |    4x |    1.00M |     100 |     400 |   1.6MB |   0.94 |   0.94 |    212ms |
+|   1 |     32 |    8x |    1.00M |     100 |     800 |   3.1MB |   0.94 |   0.94 |    325ms |
+|   1 |     32 |   16x |    1.00M |     100 |    1600 |   6.2MB |   0.94 |   0.94 |    531ms |
+
+
+
 cargo bench -p chroma-index --bench quantized_spann  --features chroma-index/usearch -- --dataset wikipedia-en --checkpoint 1 --threads 32 --data-bits 1 --centroid-bits 1
    Compiling chroma-index v0.1.0 (/home/ubuntu/chroma/rust/index)
     Finished `bench` profile [optimized + debuginfo] target(s) in 34.58s

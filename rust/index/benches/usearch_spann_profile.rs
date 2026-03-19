@@ -43,7 +43,7 @@ use datasets::{format_count, Dataset, DatasetType, MetricType};
 #[command(trailing_var_arg = true)]
 struct Args {
     /// Dataset to use (or 'random' for synthetic data)
-    #[arg(long, default_value = "db-pedia")]
+    #[arg(long, default_value = "wikipedia-en")]
     dataset: DatasetType,
 
     /// Distance metric
@@ -77,6 +77,10 @@ struct Args {
     /// Comma-separated rerank factors to sweep in both phases
     #[arg(long, value_delimiter = ',', default_values_t = vec![1, 4, 8, 16])]
     rerank: Vec<usize>,
+
+    /// Comma-separated thread counts to sweep in both phases
+    #[arg(long, value_delimiter = ',', default_values_t = vec![32])]
+    threads: Vec<usize>,
 
     /// Enable Phase 2 (synthetic SPANN workload with nprobe x rerank sweep)
     #[arg(long)]
@@ -616,7 +620,7 @@ fn main() {
     let num_queries = args.num_queries;
     let nprobe_values = &args.nprobe;
     let rerank_factors = &args.rerank;
-    let num_threads = 32;
+    let thread_counts = &args.threads;
 
     let (all_vectors, dim, distance_fn) = load_vectors(&args);
 
@@ -642,8 +646,8 @@ fn main() {
 
     println!("\n=== USearch SPANN Profile Benchmark ===");
     println!(
-        "Dim: {} | Metric: {:?} | Centroid bits: {} | ef_search: {} | Threads: {}",
-        dim, args.metric, bits_label, ef_search, num_threads
+        "Dim: {} | Metric: {:?} | Centroid bits: {} | ef_search: {} | Threads: {:?}",
+        dim, args.metric, bits_label, ef_search, thread_counts
     );
     println!(
         "Initial centroids: {} | Data vectors: {} | Queries: {}",
@@ -739,36 +743,37 @@ fn main() {
 
     // Precompute ground truth once (use largest nprobe for gt_k so it covers all nprobe values)
     let max_nprobe = *nprobe_values.iter().max().unwrap_or(&100);
+    let gt_threads = *thread_counts.iter().max().unwrap_or(&32);
     eprintln!(
         "  Computing ground truth ({} corpus, {} queries, k={}, {} threads)...",
         corpus.corpus_keys.len(),
         query_vecs.len(),
         max_nprobe,
-        num_threads
+        gt_threads
     );
     let ground_truths =
-        compute_ground_truths(&query_vecs, &corpus, max_nprobe, &distance_fn, num_threads);
+        compute_ground_truths(&query_vecs, &corpus, max_nprobe, &distance_fn, gt_threads);
 
     // Table header/row helpers
     let print_header = |phase: &str, has_spawn_drop: bool| {
         if has_spawn_drop {
             println!(
-                "\n=== {} ===\n| {:>6} | {:>6} | {:>10} | {:>10} | {:>12} | {:>12} | {:>12} | {:>12} | {:>12} | {:>10} | {:>10} | {:>12} | {:>12} | {:>12} |",
-                phase, "nprobe", "Rerank", "R@10", "R@100",
+                "\n=== {} ===\n| {:>7} | {:>6} | {:>6} | {:>10} | {:>10} | {:>12} | {:>12} | {:>12} | {:>12} | {:>12} | {:>10} | {:>10} | {:>12} | {:>12} | {:>12} |",
+                phase, "Threads", "nprobe", "Rerank", "R@10", "R@100",
                 "navigate", "search", "rerank", "rr_dist", "rr_sort", "rr_scored", "rr_bytes",
                 "spawn", "drop", "wall"
             );
             println!(
-                "|--------|--------|------------|------------|--------------|--------------|--------------|--------------|--------------|------------|------------|--------------|--------------|--------------|"
+                "|---------|--------|--------|------------|------------|--------------|--------------|--------------|--------------|--------------|------------|------------|--------------|--------------|--------------|"
             );
         } else {
             println!(
-                "\n=== {} ===\n| {:>6} | {:>6} | {:>10} | {:>10} | {:>12} | {:>12} | {:>12} | {:>12} | {:>12} | {:>10} | {:>10} |",
-                phase, "nprobe", "Rerank", "R@10", "R@100",
+                "\n=== {} ===\n| {:>7} | {:>6} | {:>6} | {:>10} | {:>10} | {:>12} | {:>12} | {:>12} | {:>12} | {:>12} | {:>10} | {:>10} |",
+                phase, "Threads", "nprobe", "Rerank", "R@10", "R@100",
                 "navigate", "search", "rerank", "rr_dist", "rr_sort", "rr_scored", "rr_bytes"
             );
             println!(
-                "|--------|--------|------------|------------|--------------|--------------|--------------|--------------|--------------|------------|------------|"
+                "|---------|--------|--------|------------|------------|--------------|--------------|--------------|--------------|--------------|------------|------------|"
             );
         }
     };
@@ -779,60 +784,62 @@ fn main() {
     if args.phase_2 {
         print_header(
             &format!(
-                "Phase 2: SPANN Workload ({} data vectors, {} threads)",
+                "Phase 2: SPANN Workload ({} data vectors)",
                 format_count(data_vectors),
-                num_threads
             ),
             true,
         );
 
-        for &nprobe in nprobe_values {
-            for &rerank in rerank_factors {
-                let run_index = USearchIndex::new_for_benchmark(config.clone())
-                    .expect("Failed to create index");
-                rt.block_on(run_index.load_for_benchmark(cached_data.clone()))
-                    .expect("Failed to load cached index");
+        for &num_threads in thread_counts {
+            for &nprobe in nprobe_values {
+                for &rerank in rerank_factors {
+                    let run_index = USearchIndex::new_for_benchmark(config.clone())
+                        .expect("Failed to create index");
+                    rt.block_on(run_index.load_for_benchmark(cached_data.clone()))
+                        .expect("Failed to load cached index");
 
-                let (stats, _live_entries) = run_phase2_workload(
-                    &run_index,
-                    &all_vectors,
-                    &corpus,
-                    initial_centroids,
-                    data_vectors,
-                    num_threads,
-                    rerank,
-                    nprobe,
-                    &distance_fn,
-                );
+                    let (stats, _live_entries) = run_phase2_workload(
+                        &run_index,
+                        &all_vectors,
+                        &corpus,
+                        initial_centroids,
+                        data_vectors,
+                        num_threads,
+                        rerank,
+                        nprobe,
+                        &distance_fn,
+                    );
 
-                let (r10, r100) = evaluate_recall(
-                    &run_index,
-                    &query_vecs,
-                    &ground_truths,
-                    &corpus,
-                    &all_vectors,
-                    rerank,
-                    nprobe,
-                    &distance_fn,
-                );
+                    let (r10, r100) = evaluate_recall(
+                        &run_index,
+                        &query_vecs,
+                        &ground_truths,
+                        &corpus,
+                        &all_vectors,
+                        rerank,
+                        nprobe,
+                        &distance_fn,
+                    );
 
-                println!(
-                    "| {:>6} | {:>4}x | {:>9.2}% | {:>9.2}% | {:>12} | {:>12} | {:>12} | {:>12} | {:>12} | {:>10.1} | {:>10} | {:>12} | {:>12} | {:>12} |",
-                    nprobe,
-                    rerank,
-                    r10,
-                    r100,
-                    format_nanos(stats.navigate.avg_nanos()),
-                    format_nanos(stats.nav_search.avg_nanos()),
-                    format_nanos(stats.nav_rerank.avg_nanos()),
-                    format_nanos(stats.nav_rr_dist.avg_nanos()),
-                    format_nanos(stats.nav_rr_sort.avg_nanos()),
-                    stats.avg_rr_scored(),
-                    format_bytes(stats.avg_rr_bytes()),
-                    format_nanos(stats.spawn.avg_nanos()),
-                    format_nanos(stats.drop_op.avg_nanos()),
-                    format_duration(stats.wall),
-                );
+                    println!(
+                        "| {:>7} | {:>6} | {:>4}x | {:>9.2}% | {:>9.2}% | {:>12} | {:>12} | {:>12} | {:>12} | {:>12} | {:>10.1} | {:>10} | {:>12} | {:>12} | {:>12} |",
+                        num_threads,
+                        nprobe,
+                        rerank,
+                        r10,
+                        r100,
+                        format_nanos(stats.navigate.avg_nanos()),
+                        format_nanos(stats.nav_search.avg_nanos()),
+                        format_nanos(stats.nav_rerank.avg_nanos()),
+                        format_nanos(stats.nav_rr_dist.avg_nanos()),
+                        format_nanos(stats.nav_rr_sort.avg_nanos()),
+                        stats.avg_rr_scored(),
+                        format_bytes(stats.avg_rr_bytes()),
+                        format_nanos(stats.spawn.avg_nanos()),
+                        format_nanos(stats.drop_op.avg_nanos()),
+                        format_duration(stats.wall),
+                    );
+                }
             }
         }
     }
@@ -841,71 +848,74 @@ fn main() {
     // Phase 3: Search-only rerank sweep (optional, --phase-3)
     // =========================================================================
     if args.phase_3 {
-        let index =
-            USearchIndex::new_for_benchmark(config.clone()).expect("Failed to create index");
-        rt.block_on(index.load_for_benchmark(cached_data.clone()))
-            .expect("Failed to load cached index");
-
         print_header(
             &format!(
-                "Phase 3: Search-Only Recall ({} queries, {} threads)",
-                num_queries, num_threads
+                "Phase 3: Search-Only Recall ({} queries)",
+                num_queries
             ),
             false,
         );
 
-        for &nprobe in nprobe_values {
-            for &rerank in rerank_factors {
-                let (r10, r100) = evaluate_recall(
-                    &index,
-                    &query_vecs,
-                    &ground_truths,
-                    &corpus,
-                    &all_vectors,
-                    rerank,
-                    nprobe,
-                    &distance_fn,
-                );
+        for &num_threads in thread_counts {
+            let index =
+                USearchIndex::new_for_benchmark(config.clone()).expect("Failed to create index");
+            rt.block_on(index.load_for_benchmark(cached_data.clone()))
+                .expect("Failed to load cached index");
 
-                let mut nav_total = Duration::ZERO;
-                let mut search_total = Duration::ZERO;
-                let mut rerank_total = Duration::ZERO;
-                let mut rr_dist_total = Duration::ZERO;
-                let mut rr_sort_total = Duration::ZERO;
-                let mut rr_scored_total: u64 = 0;
-                let mut rr_bytes_total: u64 = 0;
-
-                for query in &query_vecs {
-                    let timing = search_and_rerank(
-                        &index, query, nprobe, rerank,
-                        &corpus, &all_vectors, &distance_fn,
+            for &nprobe in nprobe_values {
+                for &rerank in rerank_factors {
+                    let (r10, r100) = evaluate_recall(
+                        &index,
+                        &query_vecs,
+                        &ground_truths,
+                        &corpus,
+                        &all_vectors,
+                        rerank,
+                        nprobe,
+                        &distance_fn,
                     );
-                    nav_total += timing.navigate;
-                    search_total += timing.search;
-                    rerank_total += timing.rerank;
-                    rr_dist_total += timing.rr_dist;
-                    rr_sort_total += timing.rr_sort;
-                    rr_scored_total += timing.rr_scored as u64;
-                    rr_bytes_total += timing.rr_bytes as u64;
-                }
 
-                let n_q = query_vecs.len() as u64;
-                let avg_scored = if n_q > 0 { rr_scored_total as f64 / n_q as f64 } else { 0.0 };
-                let avg_bytes = if n_q > 0 { rr_bytes_total as f64 / n_q as f64 } else { 0.0 };
-                println!(
-                    "| {:>6} | {:>4}x | {:>9.2}% | {:>9.2}% | {:>12} | {:>12} | {:>12} | {:>12} | {:>12} | {:>10.1} | {:>10} |",
-                    nprobe,
-                    rerank,
-                    r10,
-                    r100,
-                    format_nanos(nav_total.as_nanos() as u64 / n_q),
-                    format_nanos(search_total.as_nanos() as u64 / n_q),
-                    format_nanos(rerank_total.as_nanos() as u64 / n_q),
-                    format_nanos(rr_dist_total.as_nanos() as u64 / n_q),
-                    format_nanos(rr_sort_total.as_nanos() as u64 / n_q),
-                    avg_scored,
-                    format_bytes(avg_bytes),
-                );
+                    let mut nav_total = Duration::ZERO;
+                    let mut search_total = Duration::ZERO;
+                    let mut rerank_total = Duration::ZERO;
+                    let mut rr_dist_total = Duration::ZERO;
+                    let mut rr_sort_total = Duration::ZERO;
+                    let mut rr_scored_total: u64 = 0;
+                    let mut rr_bytes_total: u64 = 0;
+
+                    for query in &query_vecs {
+                        let timing = search_and_rerank(
+                            &index, query, nprobe, rerank,
+                            &corpus, &all_vectors, &distance_fn,
+                        );
+                        nav_total += timing.navigate;
+                        search_total += timing.search;
+                        rerank_total += timing.rerank;
+                        rr_dist_total += timing.rr_dist;
+                        rr_sort_total += timing.rr_sort;
+                        rr_scored_total += timing.rr_scored as u64;
+                        rr_bytes_total += timing.rr_bytes as u64;
+                    }
+
+                    let n_q = query_vecs.len() as u64;
+                    let avg_scored = if n_q > 0 { rr_scored_total as f64 / n_q as f64 } else { 0.0 };
+                    let avg_bytes = if n_q > 0 { rr_bytes_total as f64 / n_q as f64 } else { 0.0 };
+                    println!(
+                        "| {:>7} | {:>6} | {:>4}x | {:>9.2}% | {:>9.2}% | {:>12} | {:>12} | {:>12} | {:>12} | {:>12} | {:>10.1} | {:>10} |",
+                        num_threads,
+                        nprobe,
+                        rerank,
+                        r10,
+                        r100,
+                        format_nanos(nav_total.as_nanos() as u64 / n_q),
+                        format_nanos(search_total.as_nanos() as u64 / n_q),
+                        format_nanos(rerank_total.as_nanos() as u64 / n_q),
+                        format_nanos(rr_dist_total.as_nanos() as u64 / n_q),
+                        format_nanos(rr_sort_total.as_nanos() as u64 / n_q),
+                        avg_scored,
+                        format_bytes(avg_bytes),
+                    );
+                }
             }
         }
     }

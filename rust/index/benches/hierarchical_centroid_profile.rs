@@ -43,7 +43,7 @@ use std::collections::{HashMap, HashSet};
 #[command(trailing_var_arg = true)]
 struct Args {
     /// Dataset to use
-    #[arg(long, default_value = "db-pedia")]
+    #[arg(long, default_value = "wikipedia-en")]
     dataset: DatasetType,
 
     /// Distance metric
