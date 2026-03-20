@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use crate::client::ChromaHttpClientError;
@@ -15,7 +15,6 @@ use biometrics::Sensor;
 use futures_util::future::join_all;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, Mutex, Semaphore};
 use tokio::task::JoinHandle;
@@ -32,6 +31,14 @@ const WARMUP_PROGRESS_INTERVAL: usize = 10;
 const US_ENDPOINT: &str = "https://api.devchroma.com:443";
 const EU_ENDPOINT: &str = "https://europe-west1.gcp.devchroma.com:443";
 const MAX_COLLECTION_RETRIES: u32 = 3;
+type CollectionCache = HashMap<String, HashMap<String, serde_json::Value>>;
+static COLLECTION_CACHE_LOCKS: LazyLock<StdMutex<HashMap<PathBuf, Arc<Mutex<()>>>>> =
+    LazyLock::new(|| StdMutex::new(HashMap::new()));
+static COLLECTION_CACHE_STATES: LazyLock<StdMutex<HashMap<PathBuf, Arc<Mutex<CollectionCache>>>>> =
+    LazyLock::new(|| StdMutex::new(HashMap::new()));
+static COLLECTION_ENTRY_LOCKS: LazyLock<
+    StdMutex<HashMap<(PathBuf, String, String), Arc<Mutex<()>>>>,
+> = LazyLock::new(|| StdMutex::new(HashMap::new()));
 
 /// Shared CLI-style configuration used by example load generators.
 pub struct CommonLoadArgs {
@@ -84,8 +91,7 @@ pub async fn prepare_dual_collections(
         |_collection_name, elapsed| {
             ddl_latency.observe(elapsed.as_secs_f64() * 1000.);
         },
-    )
-    .await?;
+    );
     let collections_eu = get_or_create_collections_with_cache(
         &client_eu,
         "eu",
@@ -97,8 +103,8 @@ pub async fn prepare_dual_collections(
         |_collection_name, elapsed| {
             ddl_latency.observe(elapsed.as_secs_f64() * 1000.);
         },
-    )
-    .await?;
+    );
+    let (collections_us, collections_eu) = tokio::try_join!(collections_us, collections_eu)?;
 
     Ok((collections_us, collections_eu))
 }
@@ -117,8 +123,8 @@ pub fn collection_cache_file_path(prefix: &str, num_collections: usize) -> Strin
 
 fn read_collection_cache_records(
     cache_path: &Path,
-) -> HashMap<String, HashMap<String, serde_json::Value>> {
-    let mut cache = HashMap::<String, HashMap<String, serde_json::Value>>::new();
+) -> CollectionCache {
+    let mut cache = CollectionCache::new();
     let file = match File::open(cache_path) {
         Ok(file) => file,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return cache,
@@ -174,7 +180,7 @@ fn read_collection_cache_records(
 
 fn write_collection_cache_records(
     cache_path: &Path,
-    cache: &HashMap<String, HashMap<String, serde_json::Value>>,
+    cache: &CollectionCache,
 ) -> io::Result<()> {
     let tmp_path = cache_path.with_extension("tmp");
     let mut file = BufWriter::new(File::create(&tmp_path)?);
@@ -233,6 +239,44 @@ fn append_collection_cache_record(
     Ok(())
 }
 
+fn collection_cache_lock(cache_path: &Path) -> Arc<Mutex<()>> {
+    let mut locks = COLLECTION_CACHE_LOCKS
+        .lock()
+        .expect("collection cache lock table poisoned");
+    locks
+        .entry(cache_path.to_path_buf())
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
+}
+
+fn collection_cache_state(cache_path: &Path) -> Arc<Mutex<CollectionCache>> {
+    let mut states = COLLECTION_CACHE_STATES
+        .lock()
+        .expect("collection cache state table poisoned");
+    states
+        .entry(cache_path.to_path_buf())
+        .or_insert_with(|| Arc::new(Mutex::new(read_collection_cache_records(cache_path))))
+        .clone()
+}
+
+fn collection_entry_lock(
+    cache_path: &Path,
+    endpoint_label: &str,
+    collection_name: &str,
+) -> Arc<Mutex<()>> {
+    let mut locks = COLLECTION_ENTRY_LOCKS
+        .lock()
+        .expect("collection entry lock table poisoned");
+    locks
+        .entry((
+            cache_path.to_path_buf(),
+            endpoint_label.to_string(),
+            collection_name.to_string(),
+        ))
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
+}
+
 /// Loads cached collections for the endpoint, rehydrating when possible and creating the rest.
 ///
 /// Any collection found in the cache is rehydrated. Collections that are missing from the cache
@@ -244,101 +288,120 @@ pub async fn get_or_create_collections_with_cache(
     cache_path: impl AsRef<Path>,
     collection_names: &[String],
     max_retries: u32,
-    max_outstanding_ops: usize,
+    _max_outstanding_ops: usize,
     progress_label: &'static str,
     mut on_ddl_latency: impl FnMut(&str, Duration) + Send,
 ) -> Result<Vec<ChromaCollection>, ChromaHttpClientError> {
     let cache_path = cache_path.as_ref();
-    let mut cache = read_collection_cache_records(cache_path);
-    let mut endpoint_cache = cache.remove(endpoint_label).unwrap_or_default();
+    let cache_lock = collection_cache_lock(cache_path);
+    let shared_cache = {
+        let _cache_guard = cache_lock.lock().await;
+        collection_cache_state(cache_path)
+    };
+    let mut collections = Vec::with_capacity(collection_names.len());
+    let mut created = 0usize;
 
-    let mut pending: Vec<(usize, String)> = Vec::new();
-    let mut collections: Vec<Option<ChromaCollection>> = vec![None; collection_names.len()];
+    for name in collection_names {
+        let entry_lock = collection_entry_lock(cache_path, endpoint_label, name);
+        let _entry_guard = entry_lock.lock().await;
+        let cached = {
+            let cache = shared_cache.lock().await;
+            cache.get(endpoint_label).and_then(|records| records.get(name)).cloned()
+        };
 
-    for (idx, name) in collection_names.iter().enumerate() {
-        match endpoint_cache.get(name) {
-            Some(dehydrated) => match client.rehydrate_collection(dehydrated.clone()).await {
-                Ok(collection) => collections[idx] = Some(collection),
+        let collection = if let Some(dehydrated) = cached {
+            match client.rehydrate_collection(dehydrated).await {
+                Ok(collection) => collection,
                 Err(err) => {
                     eprintln!(
                         "Failed to rehydrate collection '{}' for '{}': {}",
                         name, endpoint_label, err
                     );
-                    pending.push((idx, name.clone()));
+                    let (collection, elapsed) =
+                        get_or_create_collection_with_retry(client, name, max_retries).await?;
+                    on_ddl_latency(name, elapsed);
+                    created += 1;
+                    if created % WARMUP_PROGRESS_INTERVAL == 0 || created == collection_names.len() {
+                        println!(
+                            "  [{}] Prepared {} / {} collections",
+                            progress_label,
+                            created,
+                            collection_names.len()
+                        );
+                    }
+                    match collection.dehydrate().await {
+                        Ok(dehydrated) => {
+                            let _cache_guard = cache_lock.lock().await;
+                            if let Err(err) = append_collection_cache_record(
+                                cache_path,
+                                endpoint_label,
+                                name,
+                                &dehydrated,
+                            ) {
+                                eprintln!(
+                                    "Warning: Failed to append collection cache {}: {}",
+                                    cache_path.display(),
+                                    err
+                                );
+                            } else {
+                                let mut cache = shared_cache.lock().await;
+                                cache.entry(endpoint_label.to_string())
+                                    .or_default()
+                                    .insert(name.clone(), dehydrated);
+                            }
+                        }
+                        Err(err) => {
+                            eprintln!(
+                                "Failed to dehydrate collection '{}' for cache '{}': {}",
+                                name, endpoint_label, err
+                            );
+                        }
+                    }
+                    collection
                 }
-            },
-            None => pending.push((idx, name.clone())),
-        }
-    }
-
-    if !pending.is_empty() {
-        let pending_names: Vec<String> = pending.iter().map(|(_, name)| name.clone()).collect();
-        let created = create_collections_with_progress(
-            client,
-            &pending_names,
-            max_outstanding_ops,
-            max_retries,
-            progress_label,
-            &mut on_ddl_latency,
-        )
-        .await?;
-        for ((idx, _), collection) in pending.into_iter().zip(created.into_iter()) {
-            collections[idx] = Some(collection);
-        }
-    }
-
-    let collections = collections
-        .into_iter()
-        .collect::<Option<Vec<_>>>()
-        .ok_or_else(|| {
-            ChromaHttpClientError::ApiError(
-                "Failed to prepare collections from cache or creation path".to_string(),
-                StatusCode::INTERNAL_SERVER_ERROR,
-            )
-        })?;
-
-    for collection in &collections {
-        match collection.dehydrate().await {
-            Ok(dehydrated) => {
-                let collection_name = collection.name().to_string();
-                let needs_append = endpoint_cache
-                    .get(&collection_name)
-                    .is_none_or(|cached| cached != &dehydrated);
-                endpoint_cache.insert(collection_name.clone(), dehydrated.clone());
-
-                if needs_append {
-                    if let Err(err) = append_collection_cache_record(
-                        cache_path,
-                        endpoint_label,
-                        &collection_name,
-                        &dehydrated,
-                    ) {
+            }
+        } else {
+            let (collection, elapsed) =
+                get_or_create_collection_with_retry(client, name, max_retries).await?;
+            on_ddl_latency(name, elapsed);
+            created += 1;
+            if created % WARMUP_PROGRESS_INTERVAL == 0 || created == collection_names.len() {
+                println!(
+                    "  [{}] Prepared {} / {} collections",
+                    progress_label,
+                    created,
+                    collection_names.len()
+                );
+            }
+            match collection.dehydrate().await {
+                Ok(dehydrated) => {
+                    let _cache_guard = cache_lock.lock().await;
+                    if let Err(err) =
+                        append_collection_cache_record(cache_path, endpoint_label, name, &dehydrated)
+                    {
                         eprintln!(
                             "Warning: Failed to append collection cache {}: {}",
                             cache_path.display(),
                             err
                         );
+                    } else {
+                        let mut cache = shared_cache.lock().await;
+                        cache.entry(endpoint_label.to_string())
+                            .or_default()
+                            .insert(name.clone(), dehydrated);
                     }
                 }
+                Err(err) => {
+                    eprintln!(
+                        "Failed to dehydrate collection '{}' for cache '{}': {}",
+                        name, endpoint_label, err
+                    );
+                }
             }
-            Err(err) => {
-                eprintln!(
-                    "Failed to dehydrate collection '{}' for cache '{}': {}",
-                    collection.name(),
-                    endpoint_label,
-                    err
-                );
-            }
-        }
-    }
+            collection
+        };
 
-    cache.insert(endpoint_label.to_string(), endpoint_cache);
-    if let Err(err) = write_collection_cache_records(cache_path, &cache) {
-        eprintln!(
-            "Warning: Failed to save collection cache {}: {}",
-            cache_path.display(),
-            err
-        );
+        collections.push(collection);
     }
 
     Ok(collections)
