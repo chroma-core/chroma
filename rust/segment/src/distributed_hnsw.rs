@@ -322,6 +322,12 @@ impl DistributedHNSWSegmentReader {
         DistributedHNSWSegmentReader { index, id }
     }
 
+    pub fn get_all_offset_ids(&self) -> Result<Vec<usize>, Box<dyn ChromaError>> {
+        let hnsw_index = &self.index.inner.read().hnsw_index;
+        let (offset_ids, _sizes) = hnsw_index.get_all_ids()?;
+        Ok(offset_ids)
+    }
+
     pub async fn from_segment(
         collection: &Collection,
         segment: &Segment,

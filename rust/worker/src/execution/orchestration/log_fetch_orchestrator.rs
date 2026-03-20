@@ -297,6 +297,7 @@ impl LogFetchOrchestrator {
         collection_id: CollectionUuid,
         database_name: chroma_types::DatabaseName,
         is_rebuild: bool,
+        apply_segment_scopes: std::collections::HashSet<chroma_types::SegmentScope>,
         fetch_log_batch_size: u32,
         fetch_log_concurrency: usize,
         max_compaction_size: usize,
@@ -311,7 +312,7 @@ impl LogFetchOrchestrator {
     ) -> Self {
         let context = CompactionContext::new(
             is_rebuild,
-            std::collections::HashSet::new(),
+            apply_segment_scopes,
             fetch_log_batch_size,
             fetch_log_concurrency,
             max_compaction_size,
@@ -663,7 +664,11 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         };
 
         let writers = CompactWriters {
-            record_reader: record_reader.clone().filter(|_| !self.context.is_rebuild),
+            // If we are rebuilding but not applying to the record segment,
+            // we should still read the record segment to get its offset ids.
+            record_reader: record_reader
+                .clone()
+                .filter(|_| !self.context.is_full_rebuild()),
             metadata_writer,
             record_writer,
             vector_writer,
