@@ -16,6 +16,7 @@ reqwest = { version = ">=0.13.0,<0.14.0", features = ["json", "charset", "system
 rust-stemmers = "1.2"
 serde.workspace = true
 serde_json.workspace = true
+rand.workspace = true
 tokio = { version = ">=1,<2", features = ["sync"] }
 thiserror.workspace = true
 tracing.workspace = true

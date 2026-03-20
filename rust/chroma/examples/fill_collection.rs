@@ -2,69 +2,17 @@ use std::io::Error;
 use std::sync::Arc;
 use std::time::Instant;
 
-use chroma::client::ChromaHttpClientOptions;
+use chroma::bench::{create_client, GaussianMixtureModel};
 use chroma::types::{Key, QueryVector, RankExpr, SearchPayload};
-use chroma::ChromaHttpClient;
 use clap::Parser;
 use futures_util::stream::FuturesUnordered;
 use futures_util::StreamExt;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
-const EMBEDDING_DIM: usize = 1536;
-const NUM_CLUSTERS: usize = 1000;
-
 const DEFAULT_TOTAL_OPS: usize = 1_000_000;
 const DEFAULT_BATCH_SIZE: usize = 300;
 const DEFAULT_MAX_OUTSTANDING_OPS: usize = 10;
-
-struct GaussianMixtureModel {
-    centroids: Vec<Vec<f32>>,
-    std_devs: Vec<f32>,
-}
-
-impl GaussianMixtureModel {
-    fn new(seed: u64) -> Self {
-        let mut rng = StdRng::seed_from_u64(seed);
-
-        let centroids: Vec<Vec<f32>> = (0..NUM_CLUSTERS)
-            .map(|_| {
-                (0..EMBEDDING_DIM)
-                    .map(|_| rng.gen_range(-1.0..1.0))
-                    .collect()
-            })
-            .collect();
-
-        let std_devs: Vec<f32> = (0..NUM_CLUSTERS)
-            .map(|_| rng.gen_range(0.01..0.1))
-            .collect();
-
-        Self {
-            centroids,
-            std_devs,
-        }
-    }
-
-    fn generate_batch(&self, rng: &mut StdRng, batch_size: usize) -> Vec<Vec<f32>> {
-        (0..batch_size)
-            .map(|_| {
-                let cluster_idx = rng.gen_range(0..NUM_CLUSTERS);
-                let centroid = &self.centroids[cluster_idx];
-                let std_dev = self.std_devs[cluster_idx];
-
-                centroid
-                    .iter()
-                    .map(|&c| {
-                        let u1: f32 = rng.gen_range(0.0001..1.0);
-                        let u2: f32 = rng.gen_range(0.0..1.0);
-                        let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos();
-                        c + z * std_dev
-                    })
-                    .collect()
-            })
-            .collect()
-    }
-}
 
 #[derive(Parser, Debug)]
 #[command(name = "fill_collection_to_1e6")]
@@ -85,16 +33,8 @@ struct Args {
     max_outstanding_ops: usize,
 }
 
-fn create_client(
-    endpoint: &str,
-) -> Result<ChromaHttpClient, Box<dyn std::error::Error + Send + Sync>> {
-    let mut options = ChromaHttpClientOptions::from_cloud_env()?;
-    options.endpoint = endpoint.parse()?;
-    Ok(ChromaHttpClient::new(options))
-}
-
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     if args.batch_size == 0 {
         return Err(Error::other("--batch-size must be greater than 0").into());

@@ -100,6 +100,7 @@
 
 #![deny(missing_docs)]
 
+pub mod bench;
 pub mod client;
 mod collection;
 pub mod embed;
