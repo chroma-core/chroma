@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use biometrics::Sensor;
 use crate::client::ChromaHttpClientError;
 use crate::{ChromaCollection, ChromaHttpClient, ChromaHttpClientOptions};
 use futures_util::future::join_all;
@@ -276,7 +277,8 @@ async fn create_collections_with_progress(
     max_outstanding_ops: usize,
     max_retries: u32,
     label: &'static str,
-    on_ddl_latency: &mut impl FnMut(&str, Duration) + Send,
+    #[allow(unused_parens)]
+    on_ddl_latency: &mut impl (FnMut(&str, Duration)) + Send,
 ) -> Result<Vec<ChromaCollection>, ChromaHttpClientError> {
     let total_collections = collection_names.len();
     let limiter = Arc::new(tokio::sync::Semaphore::new(max_outstanding_ops));
@@ -458,6 +460,368 @@ pub struct LoadWorkerSummary {
     pub failures: u64,
     /// Total records inserted successfully by the worker.
     pub records: u64,
+}
+
+/// Selects which collection each worker should write to for a given operation.
+pub type CollectionSelector = Box<dyn FnMut(usize, &mut StdRng) -> usize + Send>;
+
+/// A collection of shared load-generator metrics for a specific example.
+pub struct LoadMetricRefs {
+    /// Total upsert attempts.
+    pub upsert_attempts: &'static biometrics::Counter,
+    /// Successful upserts.
+    pub upsert_success: &'static biometrics::Counter,
+    /// Failed upserts.
+    pub upsert_failures: &'static biometrics::Counter,
+    /// DDL latency histogram.
+    pub ddl_latency: &'static biometrics::Histogram,
+    /// Upsert latency histogram.
+    pub upsert_latency: &'static biometrics::Histogram,
+    /// Success-path latency histogram.
+    pub success_latency: &'static biometrics::Histogram,
+}
+
+/// Spawns the shared metrics emitter loop used by load generators.
+pub fn spawn_load_metrics_emitter(
+    options: biometrics_prometheus::Options,
+    upsert_attempts: &'static biometrics::Counter,
+    upsert_success: &'static biometrics::Counter,
+    upsert_failures: &'static biometrics::Counter,
+    ddl_latency: &'static biometrics::Histogram,
+    upsert_latency: &'static biometrics::Histogram,
+    success_latency: &'static biometrics::Histogram,
+) -> (tokio::task::JoinHandle<()>, tokio::sync::oneshot::Sender<()>) {
+    let collector = biometrics::Collector::new();
+    collector.register_counter(upsert_attempts);
+    collector.register_counter(upsert_success);
+    collector.register_counter(upsert_failures);
+    collector.register_histogram(ddl_latency);
+    collector.register_histogram(upsert_latency);
+    collector.register_histogram(success_latency);
+    let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
+
+    let handle = tokio::spawn(async move {
+        let mut emitter = biometrics_prometheus::Emitter::new(options);
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        interval.tick().await;
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .expect("system clock moved backward")
+                        .as_millis()
+                        .try_into()
+                        .expect("timestamp exceeds supported range");
+                    let _ = collector.emit(&mut emitter, now);
+                }
+                _ = &mut stop_rx => {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .expect("system clock moved backward")
+                        .as_millis()
+                        .try_into()
+                        .expect("timestamp exceeds supported range");
+                    let _ = collector.emit(&mut emitter, now);
+                    break;
+                }
+            }
+        }
+    });
+
+    (handle, stop_tx)
+}
+
+fn spawn_backend_workers<SelFactory>(
+    handles: &mut Vec<tokio::task::JoinHandle<LoadWorkerSummary>>,
+    endpoint_label: &str,
+    collections: Vec<ChromaCollection>,
+    collection_semaphores: Vec<Arc<Semaphore>>,
+    task_count: usize,
+    seed_base: u64,
+    batch_size: usize,
+    start_time: Instant,
+    duration: Duration,
+    pacing_rx: Arc<Mutex<mpsc::Receiver<()>>>,
+    gmm: Arc<GaussianMixtureModel>,
+    stats: Arc<BackendStats>,
+    metrics: &LoadMetricRefs,
+    selector_factory: &mut SelFactory,
+) where
+    SelFactory: FnMut(usize, usize) -> CollectionSelector,
+{
+    if collections.is_empty() {
+        return;
+    }
+
+    for task_id in 0..task_count {
+        let collection_count = collections.len();
+        let mut collection_selector = selector_factory(task_id, collection_count);
+        let ctx = WorkerContext {
+            gmm: Arc::clone(&gmm),
+            stats: Arc::clone(&stats),
+            batch_size,
+            start_time,
+            duration,
+            pacing_rx: Arc::clone(&pacing_rx),
+        };
+        let task_label = format!("{}_task{}", endpoint_label, task_id);
+        let upsert_attempts = metrics.upsert_attempts;
+        let upsert_success = metrics.upsert_success;
+        let upsert_failures = metrics.upsert_failures;
+        let upsert_latency = metrics.upsert_latency;
+        let success_latency = metrics.success_latency;
+
+        let handle = tokio::spawn(run_load_worker(
+            collections.clone(),
+            collection_semaphores.clone(),
+            ctx,
+            task_id as u64 * 1000 + seed_base,
+            task_label.clone(),
+            move |num_collections, rng| collection_selector(num_collections, rng),
+            move |sample: LoadOpSample| {
+                upsert_attempts.click();
+                upsert_success.click();
+                upsert_latency.observe(sample.latency_ms);
+                success_latency.observe(sample.latency_ms);
+            },
+            move |_attempt, err| {
+                upsert_attempts.click();
+                upsert_failures.click();
+                eprintln!("[{}] Upsert error: {}", task_label, err);
+            },
+        ));
+        handles.push(handle);
+    }
+}
+
+/// Spawns load-reporting progress task for dual-backend load generators.
+pub fn spawn_load_progress_reporter(
+    start_time: Instant,
+    duration: Duration,
+    stats_us: std::sync::Arc<BackendStats>,
+    stats_eu: std::sync::Arc<BackendStats>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut last_us_upserts = 0u64;
+        let mut last_us_records = 0u64;
+        let mut last_eu_upserts = 0u64;
+        let mut last_eu_records = 0u64;
+        let report_interval = Duration::from_secs(10);
+
+        while start_time.elapsed() < duration {
+            tokio::time::sleep(report_interval).await;
+
+            let us_upserts = stats_us.upserts();
+            let us_records = stats_us.records();
+            let eu_upserts = stats_eu.upserts();
+            let eu_records = stats_eu.records();
+            let elapsed = start_time.elapsed().as_secs_f64();
+
+            let us_upserts_delta = us_upserts - last_us_upserts;
+            let us_records_delta = us_records - last_us_records;
+            let eu_upserts_delta = eu_upserts - last_eu_upserts;
+            let eu_records_delta = eu_records - last_eu_records;
+
+            let interval_secs = report_interval.as_secs_f64();
+
+            println!(
+                "[{:.0}s] US: {} upserts, {} records | Rate: {:.1} upserts/s, {:.1} records/s",
+                elapsed,
+                us_upserts,
+                us_records,
+                us_upserts_delta as f64 / interval_secs,
+                us_records_delta as f64 / interval_secs
+            );
+            println!(
+                "[{:.0}s] EU: {} upserts, {} records | Rate: {:.1} upserts/s, {:.1} records/s",
+                elapsed,
+                eu_upserts,
+                eu_records,
+                eu_upserts_delta as f64 / interval_secs,
+                eu_records_delta as f64 / interval_secs
+            );
+            println!(
+                "[{:.0}s] Total: {} upserts, {} records | Rate: {:.1} upserts/s, {:.1} records/s",
+                elapsed,
+                us_upserts + eu_upserts,
+                us_records + eu_records,
+                (us_upserts_delta + eu_upserts_delta) as f64 / interval_secs,
+                (us_records_delta + eu_records_delta) as f64 / interval_secs
+            );
+            println!();
+
+            last_us_upserts = us_upserts;
+            last_us_records = us_records;
+            last_eu_upserts = eu_upserts;
+            last_eu_records = eu_records;
+        }
+    })
+}
+
+/// Prints the final combined load generation summary for dual-backend runs.
+pub fn print_dual_backend_load_summary(
+    elapsed: Duration,
+    stats_us: &BackendStats,
+    stats_eu: &BackendStats,
+    upsert_attempts: &biometrics::Counter,
+    upsert_success: &biometrics::Counter,
+    upsert_failures: &biometrics::Counter,
+) {
+    let elapsed_secs = elapsed.as_secs_f64();
+    let us_upserts = stats_us.upserts();
+    let us_records = stats_us.records();
+    let eu_upserts = stats_eu.upserts();
+    let eu_records = stats_eu.records();
+    println!("\n=== Load Generation Complete ===");
+    println!("Duration: {:.1} seconds", elapsed_secs);
+    println!();
+    println!("US Backend:");
+    println!("  Total upserts: {}", us_upserts);
+    println!("  Total records: {}", us_records);
+    println!(
+        "  Average rate: {:.1} upserts/s, {:.1} records/s",
+        us_upserts as f64 / elapsed_secs,
+        us_records as f64 / elapsed_secs
+    );
+    println!();
+    println!("EU Backend:");
+    println!("  Total upserts: {}", eu_upserts);
+    println!("  Total records: {}", eu_records);
+    println!(
+        "  Average rate: {:.1} upserts/s, {:.1} records/s",
+        eu_upserts as f64 / elapsed_secs,
+        eu_records as f64 / elapsed_secs
+    );
+    println!();
+    println!("Combined:");
+    println!("  Total upserts: {}", us_upserts + eu_upserts);
+    println!("  Total records: {}", us_records + eu_records);
+    println!(
+        "  Average rate: {:.1} upserts/s, {:.1} records/s",
+        (us_upserts + eu_upserts) as f64 / elapsed_secs,
+        (us_records + eu_records) as f64 / elapsed_secs
+    );
+    println!(
+        "  Upsert attempts/success/failures: {}/{}/{}",
+        upsert_attempts.read(),
+        upsert_success.read(),
+        upsert_failures.read(),
+    );
+}
+
+/// Runs the dual-backend load generation workload shared by load generator examples.
+pub async fn run_dual_load_generator<UsSelectorFactory, EuSelectorFactory>(
+    duration: Duration,
+    pace_qps: u64,
+    task_count: usize,
+    batch_size: usize,
+    max_outstanding_ops: usize,
+    metrics_prefix: &str,
+    metrics: LoadMetricRefs,
+    collections_us: Vec<ChromaCollection>,
+    collections_eu: Vec<ChromaCollection>,
+    gmm: Arc<GaussianMixtureModel>,
+    stats_us: Arc<BackendStats>,
+    stats_eu: Arc<BackendStats>,
+    mut us_selector_factory: UsSelectorFactory,
+    mut eu_selector_factory: EuSelectorFactory,
+) -> Result<(), Box<dyn Error>>
+where
+    UsSelectorFactory: FnMut(usize, usize) -> CollectionSelector + Send,
+    EuSelectorFactory: FnMut(usize, usize) -> CollectionSelector + Send,
+{
+    let start_time = Instant::now();
+
+    let semaphores_us: Vec<Arc<Semaphore>> = (0..collections_us.len())
+        .map(|_| Arc::new(Semaphore::new(max_outstanding_ops)))
+        .collect();
+    let semaphores_eu: Vec<Arc<Semaphore>> = (0..collections_eu.len())
+        .map(|_| Arc::new(Semaphore::new(max_outstanding_ops)))
+        .collect();
+
+    let (ticket_tx, ticket_rx) = mpsc::channel::<()>(1024);
+    let pacing_rx = Arc::new(Mutex::new(ticket_rx));
+
+    let (metrics_handle, stop_metrics) = spawn_load_metrics_emitter(
+        biometrics_prometheus::Options {
+            segment_size: 64 * 1024 * 1024 * 1024,
+            flush_interval: Duration::from_secs(3600),
+            prefix: utf8path::Path::new(metrics_prefix),
+        },
+        metrics.upsert_attempts,
+        metrics.upsert_success,
+        metrics.upsert_failures,
+        metrics.ddl_latency,
+        metrics.upsert_latency,
+        metrics.success_latency,
+    );
+
+    let pacing_handle = spawn_pacing_task(start_time, duration, pace_qps.max(1), ticket_tx);
+    let mut handles = Vec::with_capacity(task_count.saturating_mul(2));
+
+    spawn_backend_workers(
+        &mut handles,
+        "us",
+        collections_us,
+        semaphores_us,
+        task_count,
+        0,
+        batch_size,
+        start_time,
+        duration,
+        Arc::clone(&pacing_rx),
+        Arc::clone(&gmm),
+        Arc::clone(&stats_us),
+        &metrics,
+        &mut us_selector_factory,
+    );
+
+    spawn_backend_workers(
+        &mut handles,
+        "eu",
+        collections_eu,
+        semaphores_eu,
+        task_count,
+        500 * 1000,
+        batch_size,
+        start_time,
+        duration,
+        Arc::clone(&pacing_rx),
+        Arc::clone(&gmm),
+        Arc::clone(&stats_eu),
+        &metrics,
+        &mut eu_selector_factory,
+    );
+
+    let report_handle = spawn_load_progress_reporter(
+        start_time,
+        duration,
+        Arc::clone(&stats_us),
+        Arc::clone(&stats_eu),
+    );
+
+    for handle in handles {
+        if let Err(err) = handle.await {
+            eprintln!("load worker panicked: {err}");
+        }
+    }
+
+    let _ = stop_metrics.send(());
+    let _ = metrics_handle.await;
+    report_handle.abort();
+    pacing_handle.abort();
+
+    print_dual_backend_load_summary(
+        start_time.elapsed(),
+        &stats_us,
+        &stats_eu,
+        metrics.upsert_attempts,
+        metrics.upsert_success,
+        metrics.upsert_failures,
+    );
+
+    Ok(())
 }
 
 /// Spawn a pacing task that emits one token per target QPS until run duration elapses.

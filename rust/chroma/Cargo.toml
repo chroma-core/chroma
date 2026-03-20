@@ -21,6 +21,9 @@ tokio = { version = ">=1,<2", features = ["sync"] }
 thiserror.workspace = true
 tracing.workspace = true
 
+biometrics = { path = "../../../blue/biometrics" }
+biometrics_prometheus = { path = "../../../blue/biometrics_prometheus" }
+
 chroma-api-types.workspace = true
 chroma-error.workspace = true
 chroma-types.workspace = true
@@ -36,8 +39,6 @@ ollama = []
 clap.workspace = true
 dotenvy = "0.15.7"
 futures-util = "0.3.31"
-biometrics = { path = "../../../blue/biometrics" }
-biometrics_prometheus = { path = "../../../blue/biometrics_prometheus" }
 sig_fig_histogram = { path = "../../../blue/sig_fig_histogram" }
 guacamole = { version = "0.13", default-features = false }
 utf8path = { path = "../../../blue/utf8path" }
