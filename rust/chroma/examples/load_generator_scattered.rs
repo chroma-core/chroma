@@ -29,10 +29,12 @@ use std::time::{Duration, Instant, SystemTime};
 use biometrics::Sensor;
 
 use biometrics::{Collector, Counter};
-use chroma::{ChromaCollection, ChromaHttpClient};
+use chroma::ChromaCollection;
 use clap::Parser;
+use guacamole::combinators::*;
+use guacamole::{Guacamole, Zipf};
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::SeedableRng;
 use tokio::sync::{mpsc, oneshot, Mutex, Semaphore};
 use utf8path::Path as Utf8Path;
 
@@ -158,8 +160,13 @@ async fn run_worker(
     id_prefix: String,
 ) {
     let mut rng = StdRng::seed_from_u64(seed);
+    let mut collection_rng = Guacamole::new(seed);
     let mut record_counter: u64 = 0;
-    let num_collections = collections.len();
+    let zipf = Zipf::from_param(collections.len() as u64, 0.8);
+    let mut collection_idx = map(
+        move |guac| zipf.next(guac),
+        |value| (value as usize).saturating_sub(1),
+    );
 
     while ctx.start_time.elapsed() < ctx.duration {
         let remaining = ctx.duration.saturating_sub(ctx.start_time.elapsed());
@@ -179,9 +186,9 @@ async fn run_worker(
         }
 
         // Random collection selection to avoid concurrency hotspots
-        let collection_idx = rng.gen_range(0..num_collections);
-        let collection = &collections[collection_idx];
-        let semaphore = &collection_semaphores[collection_idx];
+        let idx = collection_idx(&mut collection_rng) % collections.len();
+        let collection = &collections[idx];
+        let semaphore = &collection_semaphores[idx];
 
         // Acquire permit to limit outstanding ops per collection
         let permit = match semaphore.clone().acquire_owned().await {

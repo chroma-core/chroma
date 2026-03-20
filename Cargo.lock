@@ -1573,6 +1573,7 @@ dependencies = [
  "clap",
  "dotenvy",
  "futures-util",
+ "guacamole 0.13.0",
  "httpmock",
  "murmur3",
  "opentelemetry 0.31.0",
@@ -4265,6 +4266,12 @@ name = "guacamole"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9565cdbd784632899effe78bbe5d95f4bfafac752b701df4b52a764ea71d3063"
+
+[[package]]
+name = "guacamole"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bddcc40ab792a84ff9b8caba00013bf2fe9030fbe0202b68fd5d771dacc129ee"
 
 [[package]]
 name = "h2"
@@ -8129,7 +8136,7 @@ dependencies = [
  "chroma-storage",
  "chrono",
  "futures",
- "guacamole",
+ "guacamole 0.11.0",
  "parking_lot",
  "parquet",
  "serde",

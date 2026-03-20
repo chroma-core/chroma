@@ -24,6 +24,7 @@ tracing.workspace = true
 chroma-api-types.workspace = true
 chroma-error.workspace = true
 chroma-types.workspace = true
+futures-util = "0.3.31"
 
 [features]
 default = ["rustls", "ollama"]
@@ -38,6 +39,7 @@ futures-util = "0.3.31"
 biometrics = { path = "../../../blue/biometrics" }
 biometrics_prometheus = { path = "../../../blue/biometrics_prometheus" }
 sig_fig_histogram = { path = "../../../blue/sig_fig_histogram" }
+guacamole = { version = "0.13", default-features = false }
 utf8path = { path = "../../../blue/utf8path" }
 rand.workspace = true
 test-log = { version = "0.2.18", features = ["trace"] }

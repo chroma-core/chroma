@@ -1,7 +1,7 @@
 //! Shared helpers for example load generators.
 
-use std::error::Error;
 use std::collections::HashMap;
+use std::error::Error;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
@@ -47,7 +47,11 @@ fn read_collection_cache_records(
         Ok(file) => file,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return cache,
         Err(err) => {
-            eprintln!("Failed to read collection cache {}: {}", cache_path.display(), err);
+            eprintln!(
+                "Failed to read collection cache {}: {}",
+                cache_path.display(),
+                err
+            );
             return cache;
         }
     };
@@ -179,7 +183,7 @@ pub async fn get_or_create_collections_with_cache(
         )
         .await?;
         for ((idx, _), collection) in pending.into_iter().zip(created.into_iter()) {
-            collections[*idx] = Some(collection);
+            collections[idx] = Some(collection);
         }
     }
 
