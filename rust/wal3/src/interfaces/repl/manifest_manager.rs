@@ -887,9 +887,16 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                     tokio::time::sleep(backoff).await;
                     continue;
                 }
-                Err(Error::SpannerError(google_cloud_spanner::client::Error::GRPC(ref status)))
-                    if status.code() == Code::Aborted =>
+                Err(Error::SpannerError(err))
+                    if matches!(
+                        &**err,
+                        google_cloud_spanner::client::Error::GRPC(status)
+                            if status.code() == Code::Aborted
+                    ) =>
                 {
+                    let google_cloud_spanner::client::Error::GRPC(ref status) = &**err else {
+                        unreachable!("because the match arm above");
+                    };
                     last_err = Some(format!("{status:?}"));
                     let backoff = exp_backoff.next_capped(Duration::from_secs(10));
                     tokio::time::sleep(backoff).await;
@@ -1149,10 +1156,7 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
             }
         }
         if let Some(last_err) = last_err {
-            tracing::warn!(
-                error = last_err,
-                "destroy transaction exhausted retries",
-            );
+            tracing::warn!(error = last_err, "destroy transaction exhausted retries",);
         }
         Err(Error::Backoff)
     }
