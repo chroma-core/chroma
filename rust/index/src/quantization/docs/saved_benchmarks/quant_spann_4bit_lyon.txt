@@ -1,4 +1,4 @@
-4bit 5M
+4bit 5M - 412 cluster size (probably)
 nohup cargo bench -p chroma-index --bench quantized_spann -- --dataset wikipedia-en --checkpoint 5 --threads 16 --data-bits 4 --centroid-bits 4 > quantized_spann_4bit_wikipedia.txt 2>&1 &
 [1] 179212
 ubuntu@ip-172-31-75-166:~/chroma$ tail -f quantized_spann_4bit_wikipedia.txt

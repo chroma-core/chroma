@@ -30,8 +30,8 @@
 //!   ─────────  ────────────────────────────────────     ──────
 //!   quant-1bit     Code::<1>::quantize                       q-
 //!   quant-4bit     Code::<4>::quantize                       q-
-//!   quant-query    QuantizedQuery::new                      q-
-//!   dq-fp       DistanceFunction::distance (f32×f32)      dq-
+//!   quant-query    QuantizedQuery::new                       q-
+//!   dq-fp          DistanceFunction::distance (f32×f32)      dq-
 //!   dq-bw          Code::<1>::distance_quantized_query       dq-
 //!   dq-4f          Code::<4>::distance_query                 dq-
 //!   dc-1bit        Code::<1>::distance_code                  dc-
@@ -78,7 +78,7 @@ const DIMS: &[usize] = &[1024];
 // const DIMS: &[usize] = &[128, 1024, 4096];
 const BATCH: usize = 512;
 // const THREAD_COUNTS: &[usize] = &[1, 8];
-const THREAD_COUNTS: &[usize] = &[1, 2, 4, 8, 16, 32];
+const THREAD_COUNTS: &[usize] = &[1, 16, 32];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -278,9 +278,9 @@ fn bench_distance(c: &mut Criterion) {
             format!("dc-1bit/{dim}"),
             "per-call; simsimd hamming (NEON CNT / AVX-512 VPOPCNTDQ)"
         );
+        let a = Code::<1, _>::new(codes_1[0].as_slice());
+        let bb = Code::<1, _>::new(codes_1[1].as_slice());
         group.bench_with_input(BenchmarkId::new("dc-1bit", dim), &dim, |b, _| {
-            let a = Code::<1, _>::new(codes_1[0].as_slice());
-            let bb = Code::<1, _>::new(codes_1[1].as_slice());
             b.iter(|| black_box(a.distance_code(&bb, &df, cn, dim)));
         });
 
@@ -318,7 +318,6 @@ fn bench_distance(c: &mut Criterion) {
         });
 
         let query_bytes = dim * 4;
-        let padded_bytes = Code::<1>::packed_len(dim);
 
         let mut rng_exact = StdRng::seed_from_u64(0xcafe);
         let raw_vec = random_vec(&mut rng_exact, dim);
@@ -346,6 +345,8 @@ fn bench_distance(c: &mut Criterion) {
             b.iter(|| black_box(code.distance_query(&df, r_q, cn, cdq, qn)));
         });
 
+        let query_bytes = dim * 4 / 8;
+        let padded_bytes = Code::<1>::packed_len(dim);
         group.throughput(Throughput::Bytes((code_bytes_1 + query_bytes) as u64));
         desc!(
             format!("dq-bw/{dim}"),
@@ -628,6 +629,43 @@ fn bench_thread_scaling(c: &mut Criterion) {
                             let qq = QuantizedQuery::new(r_q, padded_bytes, cn, cdq, qn);
                             black_box(code.distance_quantized_query(&df, &qq));
                         });
+                });
+            });
+        });
+        group.throughput(Throughput::Bytes(
+            (N * 2 * Code::<1>::size(DIM)) as u64,
+        ));
+        desc!(
+            format!("dc-1bit/{threads}t"),
+            format!("{} pairs, 1-bit distance_code, {threads} thread(s)", N / 2)
+        );
+        group.bench_with_input(BenchmarkId::new("dc-1bit", threads), &threads, |b, _| {
+            b.iter(|| {
+                pool.install(|| {
+                    codes_1.par_chunks(2).for_each(|pair| {
+                        let a = Code::<1, _>::new(pair[0].as_slice());
+                        let bb = Code::<1, _>::new(pair[1].as_slice());
+                        black_box(a.distance_code(&bb, &df, cn, DIM));
+                    });
+                });
+            });
+        });
+
+        group.throughput(Throughput::Bytes(
+            (N * 2 * Code::<4>::size(DIM)) as u64,
+        ));
+        desc!(
+            format!("dc-4bit/{threads}t"),
+            format!("{} pairs, 4-bit distance_code, {threads} thread(s)", N / 2)
+        );
+        group.bench_with_input(BenchmarkId::new("dc-4bit", threads), &threads, |b, _| {
+            b.iter(|| {
+                pool.install(|| {
+                    codes_4.par_chunks(2).for_each(|pair| {
+                        let a = Code::<4, _>::new(pair[0].as_slice());
+                        let bb = Code::<4, _>::new(pair[1].as_slice());
+                        black_box(a.distance_code(&bb, &df, cn, DIM));
+                    });
                 });
             });
         });

@@ -185,6 +185,45 @@ fn spann_config(
     }
 }
 
+/// Print fixed benchmark SPANN parameters (see [`spann_config`]) for log reproducibility.
+fn print_spann_bench_static_config(cfg: &SpannIndexConfig) {
+    let o_u32 = |v: Option<u32>| v.map(|x| x.to_string()).unwrap_or_else(|| "-".into());
+    let o_usize = |v: Option<usize>| v.map(|x| x.to_string()).unwrap_or_else(|| "-".into());
+    let o_f32 = |v: Option<f32>| v.map(|x| format!("{x}")).unwrap_or_else(|| "-".into());
+
+    println!("Static SPANN index config (benchmark):");
+    println!(
+        "  write path: write_nprobe={} nreplica_count={} write_rng_epsilon={} write_rng_factor={}",
+        o_u32(cfg.write_nprobe),
+        o_u32(cfg.nreplica_count),
+        o_f32(cfg.write_rng_epsilon),
+        o_f32(cfg.write_rng_factor),
+    );
+    println!(
+        "  cluster maintenance: split_threshold={} merge_threshold={} reassign_neighbor_count={}",
+        o_u32(cfg.split_threshold),
+        o_u32(cfg.merge_threshold),
+        o_u32(cfg.reassign_neighbor_count),
+    );
+    println!(
+        "  commit: center_drift_threshold={}",
+        o_f32(cfg.center_drift_threshold),
+    );
+    println!(
+        "  HNSW: ef_construction={} ef_search={} max_neighbors={}",
+        o_usize(cfg.ef_construction),
+        o_usize(cfg.ef_search),
+        o_usize(cfg.max_neighbors),
+    );
+    println!(
+        "  quantization: {:?} centroid_bits={:?} centroid_rerank_factor={:?} data_rerank_factor={:?}",
+        cfg.quantize,
+        cfg.centroid_bits,
+        cfg.centroid_rerank_factor,
+        cfg.data_rerank_factor,
+    );
+}
+
 // =============================================================================
 // Helpers
 // =============================================================================
@@ -508,6 +547,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "Total vectors to index: {}",
         format_count((batch_size * num_checkpoints).min(data_len))
     );
+    print_spann_bench_static_config(&config);
     println!();
 
     // Load and group queries by checkpoint

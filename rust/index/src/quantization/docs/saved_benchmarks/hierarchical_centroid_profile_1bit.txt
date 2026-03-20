@@ -33,18 +33,18 @@ Total entries: 1.00M | Unique centroids: 1.00M | Avg replication: 1.00x
 Phase 1 wall clock: 6.57s
 
 --- Precomputing recall (1000 queries per config) ---
-  tau=0.10 rerank= 1x => R@10:  46.0%  R@100:  24.7%
-  tau=0.10 rerank= 4x => R@10:  46.0%  R@100:  25.9%
-  tau=0.10 rerank=16x => R@10:  46.0%  R@100:  25.9%
-  tau=0.50 rerank= 1x => R@10:  92.8%  R@100:  48.7%
-  tau=0.50 rerank= 4x => R@10:  94.9%  R@100:  61.6%
-  tau=0.50 rerank=16x => R@10:  95.0%  R@100:  61.7%
-  tau=1.00 rerank= 1x => R@10:  96.9%  R@100:  51.1%
-  tau=1.00 rerank= 4x => R@10:  99.7%  R@100:  63.5%
-  tau=1.00 rerank=16x => R@10:  99.8%  R@100:  63.5%
+  tau=0.10 rerank= 1x => R@10:  46.0%  R@nprobe:  24.7%
+  tau=0.10 rerank= 4x => R@10:  46.0%  R@nprobe:  25.9%
+  tau=0.10 rerank=16x => R@10:  46.0%  R@nprobe:  25.9%
+  tau=0.50 rerank= 1x => R@10:  92.8%  R@nprobe:  48.7%
+  tau=0.50 rerank= 4x => R@10:  94.9%  R@nprobe:  61.6%
+  tau=0.50 rerank=16x => R@10:  95.0%  R@nprobe:  61.7%
+  tau=1.00 rerank= 1x => R@10:  96.9%  R@nprobe:  51.1%
+  tau=1.00 rerank= 4x => R@10:  99.7%  R@nprobe:  63.5%
+  tau=1.00 rerank=16x => R@10:  99.8%  R@nprobe:  63.5%
 
 === Phase 2: SPANN Workload (1.0K data vectors, 32 threads) ===
-|   Tau | Rerank |      R@10 |     R@100 |       Wall |    Nav avg |   Srch avg |   Rank avg |    Spn avg |   Drop avg |
+|   Tau | Rerank |      R@10 |     R@nprobe |       Wall |    Nav avg |   Srch avg |   Rank avg |    Spn avg |   Drop avg |
 |-------|--------|----------|----------|------------|------------|------------|------------|------------|------------|
 |  0.10 |     1x |     46.0% |     24.7% |    24.48ms |    215.6µs |    215.6µs |        0ns |      766ns |      400ns |
 |  0.10 |     4x |     46.0% |     25.9% |    36.45ms |    322.0µs |    262.1µs |     59.9µs |      1.1µs |      484ns |
@@ -57,7 +57,7 @@ Phase 1 wall clock: 6.57s
 |  1.00 |    16x |     99.8% |     63.5% |     12.28s |    78.15ms |    77.49ms |    668.1µs |      1.8µs |      404ns |
 
 === Phase 3: Pure Search (1.0K queries, 32 threads) ===
-|   Tau | Rerank |      R@10 |     R@100 |       Wall |    Nav avg |   Srch avg |   Rank avg |
+|   Tau | Rerank |      R@10 |     R@nprobe |       Wall |    Nav avg |   Srch avg |   Rank avg |
 |-------|--------|----------|----------|------------|------------|------------|------------|
 |  0.10 |     1x |     46.0% |     24.7% |    10.49ms |    240.1µs |    240.1µs |        0ns |
 |  0.10 |     4x |     46.0% |     25.9% |    12.96ms |    360.2µs |    270.2µs |     90.0µs |
@@ -70,7 +70,7 @@ Phase 1 wall clock: 6.57s
 |  1.00 |    16x |     99.8% |     63.5% |      4.01s |    78.28ms |    77.61ms |    668.9µs |
 
 === Legend ===
-R@10/R@100 - recall vs precomputed ground truth (cached)
+R@10/R@nprobe - recall vs precomputed ground truth (cached)
 navigate   - search + rerank total (nprobe=64)
 search     - tree traversal (1-bit or f32)
 rerank     - f32 rescoring of top candidates
@@ -113,7 +113,7 @@ Phase 1 wall clock: 1.2m
 Cached ground truths to target/hierarchical_cache/gt_WikipediaEn_1000000_L2_100.bin (35986.5ms)
 
 === Phase 2: SPANN Workload Scaling (1.0K data vectors, 100 recall queries) ===
-| Threads |   Tau | Rerank |      R@10 |     R@100 |       Wall |    Nav avg |   Srch avg |   Rank avg |    Spn avg |   Drop avg |
+| Threads |   Tau | Rerank |      R@10 |     R@nprobe |       Wall |    Nav avg |   Srch avg |   Rank avg |    Spn avg |   Drop avg |
 |---------|-------|--------|-----------|-----------|------------|------------|------------|------------|------------|------------|
 |       1 |  0.10 |     1x |     42.1% |     23.8% |   623.47ms |    203.6µs |    203.6µs |        0ns |      586ns |      193ns |
 |       1 |  0.10 |     2x |     42.1% |     24.9% |   741.65ms |    242.1µs |    214.6µs |     27.5µs |      614ns |      166ns |
@@ -162,7 +162,7 @@ Cached ground truths to target/hierarchical_cache/gt_WikipediaEn_1000000_L2_100.
 |      32 |  1.00 |    16x |     99.3% |     63.6% |     12.17s |    77.68ms |    77.01ms |    667.7µs |      1.6µs |      703ns |
 
 === Phase 3: Tau sweep (100 queries, min=10, max=50000) ===
-|    Tau | Rerank |   Recall@10 |  Recall@100 |    Avg lat | L1 beam | L1 R@100| L2 beam | L2 R@100| L3 beam | L3 R@100| Leaves |   Vecs |
+|    Tau | Rerank |   Recall@10 |  Recall@100 |    Avg lat | L1 beam | L1 R@nprobe| L2 beam | L2 R@nprobe| L3 beam | L3 R@nprobe| Leaves |   Vecs |
 |--------|--------|-------------|-------------|------------|---------|---------|---------|---------|---------|---------|--------|--------|
 |   0.10 |     1x |      42.10% |      24.98% |    224.5µs |      11 |   80.7% |      10 |   39.6% |      10 |    6.3% |     16 |    458 |
 |   0.10 |     2x |      42.10% |      25.25% |    290.9µs |      11 |   80.7% |      10 |   39.6% |      10 |    6.3% |     16 |    458 |
@@ -183,7 +183,7 @@ Cached ground truths to target/hierarchical_cache/gt_WikipediaEn_1000000_L2_100.
 Phase 3 wall clock: 3.5m
 
 === Legend ===
-R@10/R@100 - recall vs precomputed ground truth (cached)
+R@10/R@nprobe - recall vs precomputed ground truth (cached)
 navigate   - beam search the centroid tree (nprobe=64)
 search     - tree traversal (1-bit or f32)
 rerank     - f32 rescoring of top candidates
@@ -245,7 +245,7 @@ Corpus size: 1.00M | Queries: 1000 | k: 100
 Recall@10: 98.48% | Recall@100: 66.68% | Avg latency: 84.20ms
 
 === Phase 3: Tau sweep (1000 queries, min=10, max=50000) ===
-|    Tau | Rerank |   Recall@10 |  Recall@100 |    Avg lat | L1 beam | L1 R@100 | L2 beam | L2 R@100 | L3 beam | L3 R@100 | Leaves |   Vecs |
+|    Tau | Rerank |   Recall@10 |  Recall@100 |    Avg lat | L1 beam | L1 R@nprobe | L2 beam | L2 R@nprobe | L3 beam | L3 R@nprobe | Leaves |   Vecs |
 |--------|--------|-------------|-------------|------------|---------|---------|---------|---------|---------|---------|--------|--------|
 |   0.50 |     1x |      94.17% |      61.40% |     8.21ms |      63 |  100.0% |     644 |   95.7% |    1951 |   51.8% |   2235 |  26.7K |
 |   0.50 |     2x |      94.88% |      74.34% |     7.98ms |      63 |  100.0% |     644 |   95.7% |    1951 |   51.8% |   2235 |  26.7K |
@@ -326,7 +326,7 @@ Phase 1 wall clock: 6.45s
 Cached ground truths to target/hierarchical_cache/gt_WikipediaEn_1000000_L2_1000.bin (342629.7ms)
 
 === Phase 2: SPANN Workload Scaling (1.0K data vectors, 1000 recall queries) ===
-| Threads |   Tau | Rerank |      R@10 |     R@100 |       Wall |    Nav avg |   Srch avg |   Rank avg |    Spn avg |   Drop avg |
+| Threads |   Tau | Rerank |      R@10 |     R@nprobe |       Wall |    Nav avg |   Srch avg |   Rank avg |    Spn avg |   Drop avg |
 |---------|-------|--------|----------|----------|------------|------------|------------|------------|------------|------------|
 |       1 |  0.10 |     1x |     46.0% |     24.7% |   622.51ms |    203.3µs |    203.3µs |        0ns |      557ns |      270ns |
 |       1 |  0.10 |     2x |     46.0% |     25.9% |   742.90ms |    242.5µs |    215.1µs |     27.4µs |      615ns |       82ns |
@@ -415,7 +415,7 @@ Corpus size: 100.0K | Queries: 100 | k: 100
 Recall@10: 97.50% | Recall@100: 70.68% | Avg latency: 11.12ms
 
 === Phase 3: Tau sweep (100 queries, min=10, max=50000) ===
-|    Tau | Rerank |   Recall@10 |  Recall@100 |    Avg lat | L1 beam | L1 R@100 | L2 beam | L2 R@100 | Leaves |   Vecs |
+|    Tau | Rerank |   Recall@10 |  Recall@100 |    Avg lat | L1 beam | L1 R@nprobe | L2 beam | L2 R@nprobe | Leaves |   Vecs |
 |--------|--------|-------------|-------------|------------|---------|---------|---------|---------|--------|--------|
 |   0.02 |     1x |      56.90% |      32.29% |    130.2µs |      10 |   89.1% |      10 |   32.3% |     10 |    175 |
 |   0.02 |     2x |      56.90% |      32.30% |    176.2µs |      10 |   89.1% |      10 |   32.3% |     10 |    175 |
@@ -496,7 +496,7 @@ Corpus size: 100.0K | Queries: 100 | k: 100
 Recall@10: 97.50% | Recall@100: 70.68% | Avg latency: 11.08ms
 
 === Phase 3: Tau sweep (100 queries, min=10, max=50000) ===
-|    Tau |   Recall@10 |  Recall@100 |    Avg lat | L1 beam | L1 R@100 | L2 beam | L2 R@100 | Leaves |   Vecs |
+|    Tau |   Recall@10 |  Recall@100 |    Avg lat | L1 beam | L1 R@nprobe | L2 beam | L2 R@nprobe | Leaves |   Vecs |
 |--------|-------------|-------------|------------|---------|---------|---------|---------|--------|--------|
 |   0.01 |      56.90% |      32.29% |    130.9µs |      10 |   89.1% |      10 |   32.3% |     10 |    175 |
 |   0.02 |      56.90% |      32.29% |    128.4µs |      10 |   89.1% |      10 |   32.3% |     10 |    175 |
@@ -562,7 +562,7 @@ Corpus size: 100.0K | Queries: 100 | k: 100
 Recall@10: 97.60% | Recall@100: 70.71% | Avg latency: 18.52ms
 
 === Phase 3: Tau sweep (100 queries, min=10, max=5000) ===
-|    Tau |   Recall@10 |  Recall@100 |    Avg lat | L1 beam | L1 R@100 | L2 beam | L2 R@100 | Leaves |   Vecs |
+|    Tau |   Recall@10 |  Recall@100 |    Avg lat | L1 beam | L1 R@nprobe | L2 beam | L2 R@nprobe | Leaves |   Vecs |
 |--------|-------------|-------------|------------|---------|---------|---------|---------|--------|--------|
 |   0.01 |      56.90% |      32.30% |    231.5µs |      10 |   89.1% |      10 |   32.3% |     10 |    175 |
 |   0.02 |      56.90% |      32.30% |    230.6µs |      10 |   89.1% |      10 |   32.3% |     10 |    175 |

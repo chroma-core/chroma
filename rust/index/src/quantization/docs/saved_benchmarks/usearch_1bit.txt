@@ -64,6 +64,16 @@ drop     - remove() a centroid (from cluster split/merge)
 wall     - wall-clock time for the full SPANN simulation phase
 
 
+
+
+
+
+
+
+
+
+
+
 1M Centroids, 10k queries - thread scaling
 cargo bench -p chroma-index --bench usearch_spann_profile --features chroma-index/usearch -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 1000000 --data-vectors 10000 --phase-2 --phase-3 --nprobe 32,64 --rerank 1,2 --threads 1,16,32
     Finished `bench` profile [optimized + debuginfo] target(s) in 0.37s
@@ -110,6 +120,14 @@ Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
 |      32 |     32 |    2x |     81.40% |     66.42% |      374.6µs |      314.1µs |       60.3µs |       59.3µs |        941ns |       64.0 |    256.0KB |
 |      32 |     64 |    1x |     81.40% |     50.70% |      269.6µs |      269.6µs |          0ns |          0ns |          0ns |        0.0 |         0B |
 |      32 |     64 |    2x |     86.00% |     66.66% |      463.8µs |      346.9µs |      116.8µs |      114.8µs |        1.9µs |      128.0 |    512.0KB |
+
+
+
+
+
+
+
+
 
 
 
@@ -250,50 +268,3 @@ nohup cargo bench -p chroma-index --bench usearch_spann_profile -- --dataset wik
 === Recall Summary ===
 Corpus size: 1.01M | Queries: 200 | k: 100
 Recall@10: 90.45% | Recall@100: 59.08% | Avg latency: 555.8µs
-
-# Small scale (Simulating 1M+10k data vectors)
-
- cargo bench -p chroma-index --bench usearch_spann_profile -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 5700 --threads 32 --data-vectors 10000
-    Finished `bench` profile [optimized + debuginfo] target(s) in 0.34s
-     Running benches/usearch_spann_profile.rs (target/release/deps/usearch_spann_profile-2f17528a797d0cb1)
-Loading Wikipedia EN from HuggingFace Hub...
-Loading 7.0K vectors from wikipedia-en (dim=1024)...
-
-=== USearch SPANN Profile Benchmark ===
-Dim: 1024 | Metric: L2 | Centroid bits: 1 | ef_search: 128 | Threads: 32
-Initial centroids: 5.7K | Data vectors: 10.0K | Queries: 200
-Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
-
---- Phase 1: Bootstrap (5.7K centroids) ---
-Added 5.7K centroids in 506.48ms (11254 vec/s)
-Index size: 5700
-
---- Phase 2: SPANN workload (10.0K data vectors, 32 threads) ---
-Completed in 236.18ms | Index size: 5755
-
-=== Phase 2: Task Counts ===
-|   navigate |      spawn |       drop |
-|------------|------------|------------|
-|      30.5K |        114 |         59 |
-
-=== Phase 2: Task Total Time ===
-|   navigate |      spawn |       drop |       wall |
-|------------|------------|------------|------------|
-|      6.17s |    63.33ms |    23.18ms |   236.18ms |
-
-=== Phase 2: Task Avg Time ===
-|   navigate |      spawn |       drop |
-|------------|------------|------------|
-|    202.2µs |    555.6µs |    392.9µs |
-
---- Phase 3: Recall (200 queries, k=100) ---
-
-=== Recall Summary ===
-Corpus size: 5.8K | Queries: 200 | k: 100
-Recall@10: 98.05% | Recall@100: 70.08% | Avg latency: 109.4µs
-
-=== Legend ===
-navigate - search() the centroid HNSW index (nprobe=64)
-spawn    - add() a new centroid to the HNSW index (from cluster split)
-drop     - remove() a centroid from the HNSW index (from cluster split/merge)
-wall     - wall-clock time for the full SPANN simulation phase

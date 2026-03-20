@@ -1,7 +1,83 @@
-//! Hierarchical centroid tree index for SPANN-style centroid lookup.
+//! # Hierarchical Centroid Tree
 //!
-//! Builds a k-means tree top-down, with optional SPANN-style balanced clustering
-//! (lambda-penalized k-means) and posting list expansion (boundary vector replication).
+//! A tree-structured index for nearest-centroid lookup in a SPANN pipeline.
+//! Replaces HNSW (USearch) for the centroid index, targeting better write
+//! throughput and thread scaling at 1M+ centroids.
+//!
+//! ## Data structure
+//!
+//! The tree is a `CentroidTreeNode` enum with two variants:
+//!
+//! - **Internal**: holds k-means cluster centers (`centers: Vec<f32>`), optional
+//!   1-bit quantized codes (`codes: Option<Vec<u8>>`), and child nodes. Each
+//!   `centers[i]` is the centroid representing `children[i]`.
+//! - **Leaf**: holds the actual centroid vectors (`centroids: Vec<f32>`), their
+//!   keys (`keys: Vec<u32>`), and optional 1-bit codes.
+//!
+//! The `HierarchicalCentroidIndex` wraps the root node with search config
+//! (beam width, tau, distance function, quantization center) and concurrent
+//! mutation state (overflow buffer for adds, tombstone set for removes).
+//!
+//! ## Build (`build_tree_node`)
+//!
+//! Top-down recursive construction:
+//!
+//! 1. **Base case**: if `n <= branching_factor`, create a `Leaf` node directly.
+//! 2. **Partition**: run k-means (k = branching_factor) on the input vectors.
+//!    Two strategies available:
+//!    - *Unbalanced*: standard Lloyd's algorithm with k-means++ initialization.
+//!    - *Balanced*: SPANN's lambda-penalized k-means that discourages large clusters.
+//! 3. **Expansion** (optional, at penultimate level only): replicate boundary
+//!    vectors into multiple clusters. A vector is assigned to cluster j if
+//!    `dist(x, c_j) <= (1+eps)^2 * dist(x, c_nearest)`, up to `max_replicas`.
+//!    Improves recall at the cost of memory.
+//! 4. **Recurse**: sort vectors by cluster assignment, build child nodes from
+//!    each group's contiguous slice.
+//! 5. **Quantize**: if 1-bit mode is enabled, quantize each center/centroid
+//!    relative to the global quantization center (dataset mean).
+//!
+//! Depth is `ceil(log_bf(n))`. A tree with 1M centroids and bf=100 has depth 4.
+//!
+//! ## Search
+//!
+//! Three search modes, all using beam search down the tree:
+//!
+//! ### f32 search (`search_f32`)
+//! At each level, compute f32 distances from the query to all children of the
+//! current beam nodes. Sort, apply beam selection, descend into internal nodes,
+//! collect results from leaf nodes. Pure f32 throughout.
+//!
+//! ### 1-bit quantized search (`search_quantized`)
+//! Same structure as f32, but distances are computed using 1-bit RaBitQ codes.
+//! Cheaper per-distance but noisier, causing recall loss especially at deeper
+//! levels where errors compound.
+//!
+//! ### 1-bit search with per-level reranking (`search_with_rerank`)
+//! Addresses the recall/cost tradeoff:
+//! - **L1** (first level): score children with 1-bit codes only (cheap, high recall).
+//! - **L2+** (deeper levels): score children with 1-bit, keep `beam * rerank_factor`
+//!   candidates, then re-score those candidates using their f32 centers (stored in
+//!   the parent node's `centers` array). Re-sort by f32 distance, keep `beam`.
+//! - **Leaves**: always scored with f32 distances from the actual centroid vectors.
+//!
+//! This gives f32 routing accuracy where it matters (deeper levels with more
+//! candidates) while keeping L1 routing cheap.
+//!
+//! ## Beam selection
+//!
+//! Two modes for choosing beam width at each level:
+//!
+//! - **Fixed**: keep the top `beam_width` children (standard top-k).
+//! - **Dynamic** (SPFresh-style, `beam_tau`): keep all children with distance
+//!   `<= d_best * (1 + tau)`, clamped to `[beam_min, beam_max]`. Adapts the
+//!   beam per-query based on how clustered the nearest neighbors are.
+//!
+//! ## Mutations
+//!
+//! Designed for the SPANN workload where the centroid set evolves slowly:
+//! - **Add**: appends to an overflow buffer (lock-protected). Overflow entries
+//!   are scanned linearly alongside the tree during search.
+//! - **Remove**: adds to a tombstone set. Tombstoned keys are filtered from results.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;

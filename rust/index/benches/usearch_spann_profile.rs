@@ -759,7 +759,7 @@ fn main() {
         if has_spawn_drop {
             println!(
                 "\n=== {} ===\n| {:>7} | {:>6} | {:>6} | {:>10} | {:>10} | {:>12} | {:>12} | {:>12} | {:>12} | {:>12} | {:>10} | {:>10} | {:>12} | {:>12} | {:>12} |",
-                phase, "Threads", "nprobe", "Rerank", "R@10", "R@100",
+                phase, "Threads", "nprobe", "Rerank", "R@10", "R@nprobe",
                 "navigate", "search", "rerank", "rr_dist", "rr_sort", "rr_scored", "rr_bytes",
                 "spawn", "drop", "wall"
             );
@@ -769,7 +769,7 @@ fn main() {
         } else {
             println!(
                 "\n=== {} ===\n| {:>7} | {:>6} | {:>6} | {:>10} | {:>10} | {:>12} | {:>12} | {:>12} | {:>12} | {:>12} | {:>10} | {:>10} |",
-                phase, "Threads", "nprobe", "Rerank", "R@10", "R@100",
+                phase, "Threads", "nprobe", "Rerank", "R@10", "R@nprobe",
                 "navigate", "search", "rerank", "rr_dist", "rr_sort", "rr_scored", "rr_bytes"
             );
             println!(
