@@ -9,9 +9,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use biometrics::Sensor;
 use crate::client::ChromaHttpClientError;
 use crate::{ChromaCollection, ChromaHttpClient, ChromaHttpClientOptions};
+use biometrics::Sensor;
 use futures_util::future::join_all;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -164,6 +164,7 @@ fn append_collection_cache_record(
 ///
 /// Any collection found in the cache is rehydrated. Collections that are missing from the cache
 /// or fail to rehydrate are created with a retry loop.
+#[allow(clippy::too_many_arguments)]
 pub async fn get_or_create_collections_with_cache(
     client: &ChromaHttpClient,
     endpoint_label: &str,
@@ -277,8 +278,7 @@ async fn create_collections_with_progress(
     max_outstanding_ops: usize,
     max_retries: u32,
     label: &'static str,
-    #[allow(unused_parens)]
-    on_ddl_latency: &mut impl (FnMut(&str, Duration)) + Send,
+    on_ddl_latency: &mut (impl FnMut(&str, Duration) + Send),
 ) -> Result<Vec<ChromaCollection>, ChromaHttpClientError> {
     let total_collections = collection_names.len();
     let limiter = Arc::new(tokio::sync::Semaphore::new(max_outstanding_ops));
@@ -331,7 +331,7 @@ async fn create_collections_with_progress(
         .await
         .expect("warmup progress reporter should not panic");
 
-    collections
+    Ok(collections)
 }
 
 /// Gaussian Mixture Model for generating realistic embeddings.
@@ -463,7 +463,27 @@ pub struct LoadWorkerSummary {
 }
 
 /// Selects which collection each worker should write to for a given operation.
-pub type CollectionSelector = Box<dyn FnMut(usize, &mut StdRng) -> usize + Send>;
+pub trait CollectionSelector: Send {
+    /// Choose the target collection index for the next operation.
+    fn select(&mut self, num_collections: usize, rng: &mut StdRng) -> usize;
+}
+
+impl<F> CollectionSelector for F
+where
+    F: FnMut(usize, &mut StdRng) -> usize + Send,
+{
+    fn select(&mut self, num_collections: usize, rng: &mut StdRng) -> usize {
+        self(num_collections, rng)
+    }
+}
+
+/// Boxes a collection selector closure for use with shared load-generator helpers.
+pub fn boxed_collection_selector<F>(selector: F) -> Box<dyn CollectionSelector>
+where
+    F: FnMut(usize, &mut StdRng) -> usize + Send + 'static,
+{
+    Box::new(selector)
+}
 
 /// A collection of shared load-generator metrics for a specific example.
 pub struct LoadMetricRefs {
@@ -490,7 +510,10 @@ pub fn spawn_load_metrics_emitter(
     ddl_latency: &'static biometrics::Histogram,
     upsert_latency: &'static biometrics::Histogram,
     success_latency: &'static biometrics::Histogram,
-) -> (tokio::task::JoinHandle<()>, tokio::sync::oneshot::Sender<()>) {
+) -> (
+    tokio::task::JoinHandle<()>,
+    tokio::sync::oneshot::Sender<()>,
+) {
     let collector = biometrics::Collector::new();
     collector.register_counter(upsert_attempts);
     collector.register_counter(upsert_success);
@@ -532,6 +555,7 @@ pub fn spawn_load_metrics_emitter(
     (handle, stop_tx)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_backend_workers<SelFactory>(
     handles: &mut Vec<tokio::task::JoinHandle<LoadWorkerSummary>>,
     endpoint_label: &str,
@@ -548,7 +572,7 @@ fn spawn_backend_workers<SelFactory>(
     metrics: &LoadMetricRefs,
     selector_factory: &mut SelFactory,
 ) where
-    SelFactory: FnMut(usize, usize) -> CollectionSelector,
+    SelFactory: FnMut(usize, usize) -> Box<dyn CollectionSelector>,
 {
     if collections.is_empty() {
         return;
@@ -578,7 +602,7 @@ fn spawn_backend_workers<SelFactory>(
             ctx,
             task_id as u64 * 1000 + seed_base,
             task_label.clone(),
-            move |num_collections, rng| collection_selector(num_collections, rng),
+            move |num_collections, rng| collection_selector.select(num_collections, rng),
             move |sample: LoadOpSample| {
                 upsert_attempts.click();
                 upsert_success.click();
@@ -711,13 +735,14 @@ pub fn print_dual_backend_load_summary(
 }
 
 /// Runs the dual-backend load generation workload shared by load generator examples.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_dual_load_generator<UsSelectorFactory, EuSelectorFactory>(
     duration: Duration,
     pace_qps: u64,
     task_count: usize,
     batch_size: usize,
     max_outstanding_ops: usize,
-    metrics_prefix: &str,
+    metrics_prefix: &'static str,
     metrics: LoadMetricRefs,
     collections_us: Vec<ChromaCollection>,
     collections_eu: Vec<ChromaCollection>,
@@ -728,8 +753,8 @@ pub async fn run_dual_load_generator<UsSelectorFactory, EuSelectorFactory>(
     mut eu_selector_factory: EuSelectorFactory,
 ) -> Result<(), Box<dyn Error>>
 where
-    UsSelectorFactory: FnMut(usize, usize) -> CollectionSelector + Send,
-    EuSelectorFactory: FnMut(usize, usize) -> CollectionSelector + Send,
+    UsSelectorFactory: FnMut(usize, usize) -> Box<dyn CollectionSelector> + Send,
+    EuSelectorFactory: FnMut(usize, usize) -> Box<dyn CollectionSelector> + Send,
 {
     let start_time = Instant::now();
 
@@ -846,6 +871,7 @@ pub fn spawn_pacing_task(
 }
 
 /// Shared load worker that drives concurrent upserts and emits per-op samples.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_load_worker<F, OnSuccess, OnFailure>(
     collections: Vec<ChromaCollection>,
     collection_semaphores: Vec<Arc<Semaphore>>,
@@ -906,10 +932,7 @@ where
 
         let op_start = Instant::now();
         summary.attempts += 1;
-        match collection
-            .upsert(ids, embeddings, None, None, None)
-            .await
-        {
+        match collection.upsert(ids, embeddings, None, None, None).await {
             Ok(_response) => {
                 let latency_ms = op_start.elapsed().as_secs_f64() * 1000.;
                 summary.successes += 1;

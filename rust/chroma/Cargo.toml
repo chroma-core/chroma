@@ -12,6 +12,8 @@ bon = "3.8.1"
 murmur3.workspace = true
 opentelemetry = { version = ">=0.27,<0.32", optional = true }
 parking_lot.workspace = true
+biometrics = { path = "../../../blue/biometrics" }
+biometrics_prometheus = { path = "../../../blue/biometrics_prometheus" }
 reqwest = { version = ">=0.13.0,<0.14.0", features = ["json", "charset", "system-proxy", "http2", "query"], default-features = false }
 rust-stemmers = "1.2"
 serde.workspace = true
@@ -20,9 +22,7 @@ rand.workspace = true
 tokio = { version = ">=1,<2", features = ["sync"] }
 thiserror.workspace = true
 tracing.workspace = true
-
-biometrics = { path = "../../../blue/biometrics" }
-biometrics_prometheus = { path = "../../../blue/biometrics_prometheus" }
+utf8path = { path = "../../../blue/utf8path" }
 
 chroma-api-types.workspace = true
 chroma-error.workspace = true
@@ -41,7 +41,6 @@ dotenvy = "0.15.7"
 futures-util = "0.3.31"
 sig_fig_histogram = { path = "../../../blue/sig_fig_histogram" }
 guacamole = { version = "0.13", default-features = false }
-utf8path = { path = "../../../blue/utf8path" }
 rand.workspace = true
 test-log = { version = "0.2.18", features = ["trace"] }
 tokio.workspace = true

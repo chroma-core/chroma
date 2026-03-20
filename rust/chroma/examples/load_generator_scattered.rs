@@ -27,15 +27,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use biometrics::Counter;
-use biometrics::Sensor;
 use clap::Parser;
 use guacamole::combinators::map;
 use guacamole::{Guacamole, Zipf};
 
 use chroma::bench::{
-    collection_cache_file_path, create_client, get_or_create_collections_with_cache,
-    run_dual_load_generator, run_load_worker, spawn_pacing_task, BackendStats, CollectionSelector,
-    GaussianMixtureModel, LoadMetricRefs, LoadOpSample, WorkerContext,
+    boxed_collection_selector, collection_cache_file_path, create_client,
+    get_or_create_collections_with_cache, run_dual_load_generator, BackendStats,
+    GaussianMixtureModel, LoadMetricRefs,
 };
 
 /// Load generator for Chroma that creates concurrent upsert operations.
@@ -198,27 +197,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         stats_eu,
         |task_id, collection_count| {
             let mut collection_rng = Guacamole::new(task_id as u64 * 1000);
-            let mut zipf = Zipf::from_param(collection_count as u64, 0.8);
+            let zipf = Zipf::from_param(collection_count as u64, 0.8);
             let mut collection_idx = map(
                 move |guac| zipf.next(guac),
                 |value| (value as usize).saturating_sub(1),
             );
-            Box::new(move |num_collections, _rng| {
+            boxed_collection_selector(move |num_collections, _rng| {
                 let _ = _rng;
                 collection_idx(&mut collection_rng) % num_collections
-            }) as CollectionSelector
+            })
         },
         |task_id, collection_count| {
             let mut collection_rng = Guacamole::new((task_id as u64 + 500) * 1000);
-            let mut zipf = Zipf::from_param(collection_count as u64, 0.8);
+            let zipf = Zipf::from_param(collection_count as u64, 0.8);
             let mut collection_idx = map(
                 move |guac| zipf.next(guac),
                 |value| (value as usize).saturating_sub(1),
             );
-            Box::new(move |num_collections, _rng| {
+            boxed_collection_selector(move |num_collections, _rng| {
                 let _ = _rng;
                 collection_idx(&mut collection_rng) % num_collections
-            }) as CollectionSelector
+            })
         },
     )
     .await?;
