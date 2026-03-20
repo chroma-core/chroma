@@ -135,6 +135,28 @@ fn write_collection_cache_records(
     Ok(())
 }
 
+fn append_collection_cache_record(
+    cache_path: &Path,
+    endpoint_label: &str,
+    collection_name: &str,
+    dehydrated: &serde_json::Value,
+) -> io::Result<()> {
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(cache_path)?;
+    let record = CachedCollection {
+        endpoint: endpoint_label.to_string(),
+        name: collection_name.to_string(),
+        dehydrated: dehydrated.clone(),
+    };
+    let line = serde_json::to_string(&record).map_err(io::Error::other)?;
+    writeln!(file, "{}", line)?;
+    file.sync_all()?;
+
+    Ok(())
+}
+
 /// Loads cached collections for the endpoint, rehydrating when possible and creating the rest.
 ///
 /// Any collection found in the cache is rehydrated. Collections that are missing from the cache
@@ -150,8 +172,7 @@ pub async fn get_or_create_collections_with_cache(
 ) -> Result<Vec<ChromaCollection>, ChromaHttpClientError> {
     let cache_path = cache_path.as_ref();
     let mut cache = read_collection_cache_records(cache_path);
-    let endpoint_cache = cache.remove(endpoint_label).unwrap_or_default();
-    let endpoint_cache_baseline = endpoint_cache.clone();
+    let mut endpoint_cache = cache.remove(endpoint_label).unwrap_or_default();
 
     let mut pending: Vec<(usize, String)> = Vec::new();
     let mut collections: Vec<Option<ChromaCollection>> = vec![None; collection_names.len()];
@@ -197,11 +218,29 @@ pub async fn get_or_create_collections_with_cache(
             )
         })?;
 
-    let mut updated_endpoint_cache = endpoint_cache_baseline;
     for collection in &collections {
         match collection.dehydrate().await {
             Ok(dehydrated) => {
-                updated_endpoint_cache.insert(collection.name().to_string(), dehydrated);
+                let collection_name = collection.name().to_string();
+                let needs_append = endpoint_cache
+                    .get(&collection_name)
+                    .is_none_or(|cached| cached != &dehydrated);
+                endpoint_cache.insert(collection_name.clone(), dehydrated);
+
+                if needs_append {
+                    if let Err(err) = append_collection_cache_record(
+                        cache_path,
+                        endpoint_label,
+                        &collection_name,
+                        &dehydrated,
+                    ) {
+                        eprintln!(
+                            "Warning: Failed to append collection cache {}: {}",
+                            cache_path.display(),
+                            err
+                        );
+                    }
+                }
             }
             Err(err) => {
                 eprintln!(
@@ -214,7 +253,7 @@ pub async fn get_or_create_collections_with_cache(
         }
     }
 
-    cache.insert(endpoint_label.to_string(), updated_endpoint_cache);
+    cache.insert(endpoint_label.to_string(), endpoint_cache);
     if let Err(err) = write_collection_cache_records(cache_path, &cache) {
         eprintln!(
             "Warning: Failed to save collection cache {}: {}",
