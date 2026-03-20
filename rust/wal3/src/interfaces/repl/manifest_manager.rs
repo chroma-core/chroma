@@ -496,6 +496,7 @@ impl ManifestManager {
             })
             .collect();
         let exp_backoff = ExponentialBackoff::new(2_000.0, 1_500.0);
+        let mut last_err: Option<String> = None;
         for _ in 0..3 {
             let res = spanner
                 .read_write_transaction(|tx| {
@@ -511,12 +512,19 @@ impl ManifestManager {
                 Err(google_cloud_spanner::session::SessionError::GRPC(ref status))
                     if status.code() == Code::Aborted =>
                 {
+                    last_err = Some(format!("{status:?}"));
                     let backoff = exp_backoff.next_capped(Duration::from_secs(10));
                     tokio::time::sleep(backoff).await;
                     continue;
                 }
                 Err(err) => return Err(err.into()),
             }
+        }
+        if let Some(last_err) = last_err {
+            tracing::warn!(
+                error = last_err,
+                "set_ignore_dirty transaction exhausted retries",
+            );
         }
         Err(Error::Backoff)
     }
@@ -765,6 +773,7 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
     async fn apply_garbage(&self, garbage: Garbage) -> Result<(), Error> {
         garbage.check_invariants_for_repl()?;
         let exp_backoff = ExponentialBackoff::new(2_000.0, 1_500.0);
+        let mut last_err: Option<String> = None;
         for _ in 0..3 {
             let mut acc = Setsum::default();
             let res = self
@@ -873,23 +882,27 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
             match res {
                 Ok(_) => return Ok(()),
                 Err(Error::TonicError(ref status)) if status.code() == Code::Aborted => {
+                    last_err = Some(format!("{status:?}"));
                     let backoff = exp_backoff.next_capped(Duration::from_secs(10));
                     tokio::time::sleep(backoff).await;
                     continue;
                 }
-                Err(Error::SpannerError(err))
-                    if matches!(
-                        &*err,
-                        google_cloud_spanner::client::Error::GRPC(status)
-                            if status.code() == Code::Aborted
-                    ) =>
+                Err(Error::SpannerError(google_cloud_spanner::client::Error::GRPC(ref status)))
+                    if status.code() == Code::Aborted =>
                 {
+                    last_err = Some(format!("{status:?}"));
                     let backoff = exp_backoff.next_capped(Duration::from_secs(10));
                     tokio::time::sleep(backoff).await;
                     continue;
                 }
                 Err(err) => return Err(err),
             }
+        }
+        if let Some(last_err) = last_err {
+            tracing::warn!(
+                error = last_err,
+                "apply_garbage transaction exhausted retries",
+            );
         }
         Err(Error::Backoff)
     }
@@ -1067,6 +1080,7 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
     async fn destroy(&self) -> Result<(), Error> {
         let log_id = self.log_id.to_string();
         let exp_backoff = ExponentialBackoff::new(2_000.0, 1_500.0);
+        let mut last_err: Option<String> = None;
         for _ in 0..3 {
             let res = self
                 .spanner
@@ -1126,12 +1140,19 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                 Err(google_cloud_spanner::client::Error::GRPC(ref status))
                     if status.code() == Code::Aborted =>
                 {
+                    last_err = Some(format!("{status:?}"));
                     let backoff = exp_backoff.next_capped(Duration::from_secs(10));
                     tokio::time::sleep(backoff).await;
                     continue;
                 }
                 Err(err) => return Err(err.into()),
             }
+        }
+        if let Some(last_err) = last_err {
+            tracing::warn!(
+                error = last_err,
+                "destroy transaction exhausted retries",
+            );
         }
         Err(Error::Backoff)
     }
@@ -1191,6 +1212,7 @@ impl ManifestConsumer<FragmentUuid> for ManifestManager {
         let new_offset = position.offset() as i64;
         let writer = writer.to_string();
         let exp_backoff = ExponentialBackoff::new(2_000.0, 1_500.0);
+        let mut last_err: Option<String> = None;
         for _ in 0..3 {
             let res = self
                 .spanner
@@ -1244,12 +1266,19 @@ impl ManifestConsumer<FragmentUuid> for ManifestManager {
                 Err(google_cloud_spanner::client::Error::GRPC(ref status))
                     if status.code() == Code::Aborted =>
                 {
+                    last_err = Some(format!("{status:?}"));
                     let backoff = exp_backoff.next_capped(Duration::from_secs(10));
                     tokio::time::sleep(backoff).await;
                     continue;
                 }
                 Err(err) => return Err(err.into()),
             }
+        }
+        if let Some(last_err) = last_err {
+            tracing::warn!(
+                error = last_err,
+                "set_intrinsic_cursor transaction exhausted retries",
+            );
         }
         Err(Error::Backoff)
     }
