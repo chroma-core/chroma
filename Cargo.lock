@@ -1858,6 +1858,7 @@ version = "0.1.0"
 dependencies = [
  "arrow",
  "async-trait",
+ "backon",
  "bytes",
  "chroma-cache",
  "chroma-config",

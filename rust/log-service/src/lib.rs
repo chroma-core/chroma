@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
+use backon::{ExponentialBuilder, Retryable};
 use chroma_cache::CacheConfig;
 use chroma_config::helpers::{deserialize_duration_from_seconds, serialize_duration_to_seconds};
 use chroma_config::spanner::{SpannerChannelConfig, SpannerConfig, SpannerSessionPoolConfig};
@@ -1327,20 +1328,45 @@ impl LogServer {
             .map_err(|_| wal3::Error::internal(file!(), line!()))
             .unwrap()
             .as_micros() as u64;
-        let witness = log_reader
-            .update_intrinsic_cursor(
-                LogPosition::from_offset(adjusted_log_offset as u64),
-                epoch_us,
-                &self.config.my_member_id,
-                allow_rollback,
+        let log_reader = log_reader.clone();
+        let writer = self.config.my_member_id.clone();
+        let witness = (|| {
+            let log_reader = log_reader.clone();
+            let writer = writer.clone();
+            async move {
+                log_reader
+                    .update_intrinsic_cursor(
+                        LogPosition::from_offset(adjusted_log_offset as u64),
+                        epoch_us,
+                        &writer,
+                        allow_rollback,
+                    )
+                    .await
+            }
+        })
+        .retry(
+            ExponentialBuilder::new()
+                .with_min_delay(Duration::from_millis(20))
+                .with_max_delay(Duration::from_millis(200))
+                .with_max_times(3),
+        )
+        .when(|err: &wal3::Error| {
+            matches!(
+                err,
+                wal3::Error::StorageError(storage_error)
+                    if matches!(
+                        storage_error.as_ref(),
+                        chroma_storage::StorageError::Precondition { .. }
+                    )
             )
-            .await
-            .map_err(|err| {
-                Status::new(
-                    err.code().into(),
-                    format!("Failed to update intrinsic cursor: {}", err),
-                )
-            })?;
+        })
+        .await
+        .map_err(|err: wal3::Error| {
+            Status::new(
+                err.code().into(),
+                format!("Failed to update intrinsic cursor: {}", err),
+            )
+        })?;
         let Some(witness) = witness else {
             return Ok(Response::new(UpdateCollectionLogOffsetResponse {}));
         };
