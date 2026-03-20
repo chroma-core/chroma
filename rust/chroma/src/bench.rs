@@ -29,6 +29,79 @@ pub const NUM_CLUSTERS: usize = 1000;
 
 /// JSONL cache progress logging interval during collection bootstrap.
 const WARMUP_PROGRESS_INTERVAL: usize = 10;
+const US_ENDPOINT: &str = "https://api.devchroma.com:443";
+const EU_ENDPOINT: &str = "https://europe-west1.gcp.devchroma.com:443";
+const MAX_COLLECTION_RETRIES: u32 = 3;
+
+/// Shared CLI-style configuration used by example load generators.
+pub struct CommonLoadArgs {
+    /// Duration to run the load generator in seconds.
+    pub duration_secs: u64,
+    /// Number of concurrent tasks per backend.
+    pub tasks: usize,
+    /// Number of records per upsert batch.
+    pub batch_size: usize,
+    /// Target upsert rate across all workers.
+    pub pace_qps: u64,
+    /// Maximum number of outstanding operations per collection.
+    pub max_outstanding_ops: usize,
+}
+
+/// Prints the common load generator startup header.
+pub fn print_load_generator_header(target: &str, args: &CommonLoadArgs) {
+    println!("=== Chroma Load Generator ===");
+    println!("{target}");
+    println!("Duration: {} seconds", args.duration_secs);
+    println!("Tasks: {}", args.tasks);
+    println!("Batch size: {}", args.batch_size);
+    println!("Pace: {} qps", args.pace_qps.max(1));
+    println!(
+        "Max outstanding ops per collection: {}",
+        args.max_outstanding_ops
+    );
+    println!();
+}
+
+/// Creates or rehydrates matching collections on both production backends.
+pub async fn prepare_dual_collections(
+    cache_path: &str,
+    collection_names: &[String],
+    max_outstanding_ops: usize,
+    progress_labels: (&'static str, &'static str),
+    ddl_latency: &'static biometrics::Histogram,
+) -> Result<(Vec<ChromaCollection>, Vec<ChromaCollection>), Box<dyn Error>> {
+    let client_us = create_client(US_ENDPOINT)?;
+    let client_eu = create_client(EU_ENDPOINT)?;
+
+    let collections_us = get_or_create_collections_with_cache(
+        &client_us,
+        "us",
+        cache_path,
+        collection_names,
+        MAX_COLLECTION_RETRIES,
+        max_outstanding_ops,
+        progress_labels.0,
+        |_collection_name, elapsed| {
+            ddl_latency.observe(elapsed.as_secs_f64() * 1000.);
+        },
+    )
+    .await?;
+    let collections_eu = get_or_create_collections_with_cache(
+        &client_eu,
+        "eu",
+        cache_path,
+        collection_names,
+        MAX_COLLECTION_RETRIES,
+        max_outstanding_ops,
+        progress_labels.1,
+        |_collection_name, elapsed| {
+            ddl_latency.observe(elapsed.as_secs_f64() * 1000.);
+        },
+    )
+    .await?;
+
+    Ok((collections_us, collections_eu))
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct CachedCollection {
@@ -847,6 +920,44 @@ where
     );
 
     Ok(())
+}
+
+/// Runs the common dual-backend load generator flow used by the example binaries.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_load_generator<UsSelectorFactory, EuSelectorFactory>(
+    args: &CommonLoadArgs,
+    metrics_prefix: &'static str,
+    metrics: LoadMetricRefs,
+    collections_us: Vec<ChromaCollection>,
+    collections_eu: Vec<ChromaCollection>,
+    us_selector_factory: UsSelectorFactory,
+    eu_selector_factory: EuSelectorFactory,
+) -> Result<(), Box<dyn Error>>
+where
+    UsSelectorFactory: FnMut(usize, usize) -> Box<dyn CollectionSelector> + Send,
+    EuSelectorFactory: FnMut(usize, usize) -> Box<dyn CollectionSelector> + Send,
+{
+    let gmm = Arc::new(GaussianMixtureModel::new(42));
+    let stats_us = Arc::new(BackendStats::new());
+    let stats_eu = Arc::new(BackendStats::new());
+
+    run_dual_load_generator(
+        Duration::from_secs(args.duration_secs),
+        args.pace_qps,
+        args.tasks,
+        args.batch_size,
+        args.max_outstanding_ops,
+        metrics_prefix,
+        metrics,
+        collections_us,
+        collections_eu,
+        gmm,
+        stats_us,
+        stats_eu,
+        us_selector_factory,
+        eu_selector_factory,
+    )
+    .await
 }
 
 /// Spawn a pacing task that emits one token per target QPS until run duration elapses.

@@ -23,14 +23,10 @@
 //! - `CHROMA_TENANT` - Tenant ID (optional, will be auto-resolved)
 //! - `CHROMA_DATABASE` - Database name (optional, will be auto-resolved)
 
-use std::sync::Arc;
-use std::time::Duration;
-
 use biometrics::Counter;
 use chroma::bench::{
-    boxed_collection_selector, collection_cache_file_path, create_client,
-    get_or_create_collections_with_cache, run_dual_load_generator, BackendStats,
-    GaussianMixtureModel, LoadMetricRefs,
+    boxed_collection_selector, collection_cache_file_path, prepare_dual_collections,
+    print_load_generator_header, run_load_generator, CommonLoadArgs, LoadMetricRefs,
 };
 use clap::Parser;
 
@@ -70,8 +66,6 @@ fn cache_file_path() -> String {
     collection_cache_file_path("loadgen_collection_pointed", 1)
 }
 
-/// Maximum number of retry attempts for collection creation.
-const MAX_COLLECTION_RETRIES: u32 = 3;
 static LOAD_POINTED_UPSERT_ATTEMPTS: Counter =
     Counter::new("load_generator.pointed.upsert_attempts");
 static LOAD_POINTED_UPSERT_SUCCESS: Counter =
@@ -103,22 +97,18 @@ static LOAD_POINTED_DDL_LATENCY_SENSOR: biometrics::Histogram = biometrics::Hist
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
+    let common_args = CommonLoadArgs {
+        duration_secs: args.duration,
+        tasks: args.tasks,
+        batch_size: args.batch_size,
+        pace_qps: args.pace_qps,
+        max_outstanding_ops: args.max_outstanding_ops,
+    };
 
-    println!("=== Chroma Load Generator ===");
-    println!("Collection: {}", collection_name());
-    println!("Duration: {} seconds", args.duration);
-    println!("Tasks: {}", args.tasks);
-    println!("Batch size: {}", args.batch_size);
-    println!("Pace: {} qps", args.pace_qps.max(1));
-    println!(
-        "Max outstanding ops per collection: {}",
-        args.max_outstanding_ops
+    print_load_generator_header(
+        &format!("Collection: {}", collection_name()),
+        &common_args,
     );
-    println!();
-
-    // Create clients for both endpoints.
-    let client_us = create_client("https://api.devchroma.com:443")?;
-    let client_eu = create_client("https://europe-west1.gcp.devchroma.com:443")?;
 
     println!("Creating/getting collection on both endpoints...");
 
@@ -127,30 +117,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let collection_names = vec![collection_name.clone()];
     let cache_path = cache_file_path();
 
-    let collection_us = get_or_create_collections_with_cache(
-        &client_us,
-        "us",
+    let (collection_us, collection_eu) = prepare_dual_collections(
         &cache_path,
         &collection_names,
-        MAX_COLLECTION_RETRIES,
         args.max_outstanding_ops,
-        "US endpoint",
-        |_collection_name, elapsed| {
-            LOAD_POINTED_DDL_LATENCY_SENSOR.observe(elapsed.as_secs_f64() * 1000.);
-        },
-    )
-    .await?;
-    let collection_eu = get_or_create_collections_with_cache(
-        &client_eu,
-        "eu",
-        &cache_path,
-        &collection_names,
-        MAX_COLLECTION_RETRIES,
-        args.max_outstanding_ops,
-        "EU endpoint",
-        |_collection_name, elapsed| {
-            LOAD_POINTED_DDL_LATENCY_SENSOR.observe(elapsed.as_secs_f64() * 1000.);
-        },
+        ("US endpoint", "EU endpoint"),
+        &LOAD_POINTED_DDL_LATENCY_SENSOR,
     )
     .await?;
     let collection_us = collection_us.into_iter().next().ok_or_else(|| {
@@ -161,11 +133,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
     println!("Collections ready. Starting load generation...\n");
 
-    // Shared state
-    let gmm = Arc::new(GaussianMixtureModel::new(42));
-    let stats_us = Arc::new(BackendStats::new());
-    let stats_eu = Arc::new(BackendStats::new());
-
     let metrics = LoadMetricRefs {
         upsert_attempts: &LOAD_POINTED_UPSERT_ATTEMPTS,
         upsert_success: &LOAD_POINTED_UPSERT_SUCCESS,
@@ -175,19 +142,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         success_latency: &LOAD_POINTED_SUCCESS_LATENCY_SENSOR,
     };
 
-    run_dual_load_generator(
-        Duration::from_secs(args.duration),
-        args.pace_qps,
-        args.tasks,
-        args.batch_size,
-        args.max_outstanding_ops,
+    run_load_generator(
+        &common_args,
         "load_generator_pointed.",
         metrics,
         vec![collection_us.clone()],
         vec![collection_eu.clone()],
-        gmm,
-        stats_us,
-        stats_eu,
         |_task_id, _collection_count| boxed_collection_selector(|_num_collections, _rng| 0usize),
         |_task_id, _collection_count| boxed_collection_selector(|_num_collections, _rng| 0usize),
     )
