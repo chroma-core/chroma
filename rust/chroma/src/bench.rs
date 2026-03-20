@@ -1156,8 +1156,14 @@ where
 
 /// Creates a cloud client and overrides the endpoint.
 pub fn create_client(endpoint: &str) -> Result<ChromaHttpClient, Box<dyn Error>> {
-    let mut options = ChromaHttpClientOptions::from_cloud_env()?;
-    options.endpoint = endpoint.parse()?;
+    let endpoint: reqwest::Url = endpoint.parse()?;
+    let is_local = matches!(endpoint.host_str(), Some("localhost" | "127.0.0.1"));
+    let mut options = if is_local {
+        ChromaHttpClientOptions::from_env()?
+    } else {
+        ChromaHttpClientOptions::from_cloud_env()?
+    };
+    options.endpoint = endpoint;
     Ok(ChromaHttpClient::new(options))
 }
 
