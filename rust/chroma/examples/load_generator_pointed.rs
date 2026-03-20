@@ -26,7 +26,8 @@
 use biometrics::Counter;
 use chroma::bench::{
     boxed_collection_selector, collection_cache_file_path, prepare_dual_collections,
-    print_load_generator_header, run_load_generator, CommonLoadArgs, LoadMetricRefs,
+    print_load_generator_header, run_load_generator, CommonLoadArgs, DualLoadEndpoints,
+    LoadMetricRefs,
 };
 use clap::Parser;
 
@@ -54,6 +55,10 @@ struct Args {
     /// Maximum number of outstanding operations per collection.
     #[arg(long, default_value_t = 10)]
     max_outstanding_ops: usize,
+
+    /// Target local backends on ports 8000 and 8001 instead of cloud endpoints.
+    #[arg(long, default_value_t = false)]
+    local: bool,
 }
 
 /// Generates a deterministic collection name from the index.
@@ -118,6 +123,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cache_path = cache_file_path();
 
     let (collection_us, collection_eu) = prepare_dual_collections(
+        if args.local {
+            DualLoadEndpoints::LOCAL
+        } else {
+            DualLoadEndpoints::CLOUD
+        },
         &cache_path,
         &collection_names,
         args.max_outstanding_ops,

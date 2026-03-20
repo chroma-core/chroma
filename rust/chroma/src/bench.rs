@@ -30,6 +30,8 @@ pub const NUM_CLUSTERS: usize = 1000;
 const WARMUP_PROGRESS_INTERVAL: usize = 10;
 const US_ENDPOINT: &str = "https://api.devchroma.com:443";
 const EU_ENDPOINT: &str = "https://europe-west1.gcp.devchroma.com:443";
+const LOCAL_US_ENDPOINT: &str = "http://localhost:8000";
+const LOCAL_EU_ENDPOINT: &str = "http://localhost:8001";
 const MAX_COLLECTION_RETRIES: u32 = 3;
 type CollectionCache = HashMap<String, HashMap<String, serde_json::Value>>;
 static COLLECTION_CACHE_LOCKS: LazyLock<StdMutex<HashMap<PathBuf, Arc<Mutex<()>>>>> =
@@ -54,6 +56,28 @@ pub struct CommonLoadArgs {
     pub max_outstanding_ops: usize,
 }
 
+/// The pair of endpoints targeted by a dual-backend load generator.
+pub struct DualLoadEndpoints {
+    /// US endpoint base URL.
+    pub us: &'static str,
+    /// EU endpoint base URL.
+    pub eu: &'static str,
+}
+
+impl DualLoadEndpoints {
+    /// Production Chroma endpoints.
+    pub const CLOUD: Self = Self {
+        us: US_ENDPOINT,
+        eu: EU_ENDPOINT,
+    };
+
+    /// Local dual-backend endpoints.
+    pub const LOCAL: Self = Self {
+        us: LOCAL_US_ENDPOINT,
+        eu: LOCAL_EU_ENDPOINT,
+    };
+}
+
 /// Prints the common load generator startup header.
 pub fn print_load_generator_header(target: &str, args: &CommonLoadArgs) {
     println!("=== Chroma Load Generator ===");
@@ -71,14 +95,15 @@ pub fn print_load_generator_header(target: &str, args: &CommonLoadArgs) {
 
 /// Creates or rehydrates matching collections on both production backends.
 pub async fn prepare_dual_collections(
+    endpoints: DualLoadEndpoints,
     cache_path: &str,
     collection_names: &[String],
     max_outstanding_ops: usize,
     progress_labels: (&'static str, &'static str),
     ddl_latency: &'static biometrics::Histogram,
 ) -> Result<(Vec<ChromaCollection>, Vec<ChromaCollection>), Box<dyn Error>> {
-    let client_us = create_client(US_ENDPOINT)?;
-    let client_eu = create_client(EU_ENDPOINT)?;
+    let client_us = create_client(endpoints.us)?;
+    let client_eu = create_client(endpoints.eu)?;
 
     let collections_us = get_or_create_collections_with_cache(
         &client_us,
