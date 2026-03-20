@@ -889,12 +889,12 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                 }
                 Err(Error::SpannerError(err))
                     if matches!(
-                        &**err,
+                        err.as_ref(),
                         google_cloud_spanner::client::Error::GRPC(status)
                             if status.code() == Code::Aborted
                     ) =>
                 {
-                    let google_cloud_spanner::client::Error::GRPC(ref status) = &**err else {
+                    let google_cloud_spanner::client::Error::GRPC(status) = err.as_ref() else {
                         unreachable!("because the match arm above");
                     };
                     last_err = Some(format!("{status:?}"));
