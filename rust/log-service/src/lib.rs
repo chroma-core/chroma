@@ -103,6 +103,9 @@ fn to_channel_config(cfg: &SpannerChannelConfig) -> ChannelConfig {
         num_channels: cfg.num_channels,
         connect_timeout: Duration::from_secs(cfg.connect_timeout_secs),
         timeout: Duration::from_secs(cfg.timeout_secs),
+        http2_keep_alive_interval: Some(Duration::from_secs(cfg.http2_keep_alive_interval_secs)),
+        keep_alive_timeout: Some(Duration::from_secs(cfg.keep_alive_timeout_secs)),
+        keep_alive_while_idle: Some(cfg.keep_alive_while_idle),
     }
 }
 
@@ -3650,6 +3653,8 @@ mod tests {
     use std::pin::Pin;
     use std::{str::FromStr, sync::Arc};
 
+    use rand::Rng;
+
     use super::*;
     use crate::state_hash_table::Value;
 
@@ -4917,6 +4922,15 @@ mod tests {
         let dtor = Box::pin(async move {
             let admin_client_config = AdminClientConfig {
                 environment: Environment::Emulator(dtor_emulator.grpc_endpoint()),
+                timeout: Duration::from_secs(dtor_emulator.channel.timeout_secs),
+                connect_timeout: Duration::from_secs(dtor_emulator.channel.connect_timeout_secs),
+                http2_keep_alive_interval: Some(Duration::from_secs(
+                    dtor_emulator.channel.http2_keep_alive_interval_secs,
+                )),
+                keep_alive_timeout: Some(Duration::from_secs(
+                    dtor_emulator.channel.keep_alive_timeout_secs,
+                )),
+                keep_alive_while_idle: Some(dtor_emulator.channel.keep_alive_while_idle),
             };
             let admin_client = AdminClient::new(admin_client_config)
                 .await

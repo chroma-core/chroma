@@ -66,7 +66,7 @@ sha2 = "0.10.8"
 md5 = "0.7.0"
 pyo3 = { version = "0.24.1", features = ["abi3-py39"] }
 http = "1.1.0"
-tower-http = { version = "0.6.2", features = ["trace", "cors"] }
+tower-http = { version = "0.6.8", features = ["trace", "cors"] }
 bytemuck = { version = "1.21.0", features = ["derive"] }
 rayon = "1.10.0"
 fastbloom = { version = "0.17.0", features = ["serde"] }
@@ -75,7 +75,7 @@ rust-embed = { version = "8.5.0", features = ["include-exclude", "debug-embed"] 
 hnswlib = { version = "0.8.2", git = "https://github.com/chroma-core/hnswlib.git", branch = "master" }
 usearch = "2.23"
 faer = { version = "0.24.0", default-features = false, features = ["std", "rand"] }
-reqwest = { version = "0.12.9", features = ["rustls-tls-native-roots", "http2"], default-features = false }
+reqwest = { version = "0.13", features = ["rustls", "http2", "query"], default-features = false }
 random-port = "0.1.1"
 ndarray = { version = "0.16.1", features = ["approx"] }
 humantime = { version = "2.2.0" }
@@ -83,9 +83,9 @@ petgraph = { version = "0.8.1" }
 base64 = "0.22"
 bitpacking = "0.9"
 tikv-jemallocator = { version = "0.6.0", features = ["profiling"] }
-google-cloud-spanner = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20251222", package = "gcloud-spanner", features = ["trace"] }
-google-cloud-gax = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20251222", package = "gcloud-gax" }
-google-cloud-googleapis = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20251222", package = "gcloud-googleapis", features = ["spanner"] }
+google-cloud-spanner = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20260319", package = "gcloud-spanner", features = ["trace"] }
+google-cloud-gax = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20260319", package = "gcloud-gax" }
+google-cloud-googleapis = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20260319", package = "gcloud-googleapis", features = ["spanner"] }
 
 chroma = { path = "rust/chroma", version = "0.13.3" }
 chroma-api-types = { path = "rust/api-types", version = "0.13.3" }

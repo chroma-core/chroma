@@ -293,16 +293,13 @@ async fn download_s3_file(url: &str, path: &str) -> Result<(), Box<dyn std::erro
     }
 
     // Create the file and download
-    let resp = client.get(url).send().await?;
+    let mut resp = client.get(url).send().await?;
     let mut dest = File::create(path)?;
-    let mut stream = resp.bytes_stream();
 
     let mut downloaded: u64 = 0;
 
-    use futures_util::StreamExt;
-    while let Some(item) = stream.next().await {
-        let chunk = item?;
-        dest.write_all(&chunk)?;
+    while let Some(chunk) = resp.chunk().await? {
+        dest.write_all(chunk.as_ref())?;
         downloaded += chunk.len() as u64;
         progress_bar.set_position(downloaded);
     }

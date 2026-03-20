@@ -63,8 +63,8 @@ s3heap = { workspace = true }
 s3heap-service = { workspace = true }
 wal3 = { workspace = true }
 
-fastrace = "0.7"
-fastrace-opentelemetry = "0.8"
+fastrace = "=0.7.8"
+fastrace-opentelemetry = "=0.8.1"
 
 [dev-dependencies]
 random-port = { workspace = true }
