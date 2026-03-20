@@ -58,6 +58,10 @@ class GoogleGeminiEmbeddingFunction(EmbeddingFunction[Documents]):
             raise ValueError(
                 "Vertex AI and API key are mutually exclusive in the client initializer."
             )
+        if not self.api_key and not self.vertexai:
+            raise ValueError(
+                f"The {self.api_key_env_var} environment variable must be set if vertexai is not enabled."
+            )
 
         self.client = genai.Client(
             api_key=self.api_key, vertexai=vertexai, project=project, location=location
