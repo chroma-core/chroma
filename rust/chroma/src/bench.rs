@@ -16,7 +16,9 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, Mutex, Semaphore};
+use tokio::task::JoinHandle;
+use tokio::time;
 
 /// Embedding dimensionality shared by load generator examples.
 pub const EMBEDDING_DIM: usize = 1536;
@@ -169,6 +171,7 @@ pub async fn get_or_create_collections_with_cache(
     max_retries: u32,
     max_outstanding_ops: usize,
     progress_label: &'static str,
+    mut on_ddl_latency: impl FnMut(&str, Duration) + Send,
 ) -> Result<Vec<ChromaCollection>, ChromaHttpClientError> {
     let cache_path = cache_path.as_ref();
     let mut cache = read_collection_cache_records(cache_path);
@@ -201,6 +204,7 @@ pub async fn get_or_create_collections_with_cache(
             max_outstanding_ops,
             max_retries,
             progress_label,
+            &mut on_ddl_latency,
         )
         .await?;
         for ((idx, _), collection) in pending.into_iter().zip(created.into_iter()) {
@@ -225,7 +229,7 @@ pub async fn get_or_create_collections_with_cache(
                 let needs_append = endpoint_cache
                     .get(&collection_name)
                     .is_none_or(|cached| cached != &dehydrated);
-                endpoint_cache.insert(collection_name.clone(), dehydrated);
+                endpoint_cache.insert(collection_name.clone(), dehydrated.clone());
 
                 if needs_append {
                     if let Err(err) = append_collection_cache_record(
@@ -272,6 +276,7 @@ async fn create_collections_with_progress(
     max_outstanding_ops: usize,
     max_retries: u32,
     label: &'static str,
+    on_ddl_latency: &mut impl FnMut(&str, Duration) + Send,
 ) -> Result<Vec<ChromaCollection>, ChromaHttpClientError> {
     let total_collections = collection_names.len();
     let limiter = Arc::new(tokio::sync::Semaphore::new(max_outstanding_ops));
@@ -311,8 +316,15 @@ async fn create_collections_with_progress(
     }
     drop(progress_tx);
 
-    let results: Vec<Result<ChromaCollection, ChromaHttpClientError>> = join_all(futures).await;
-    let collections = results.into_iter().collect();
+    let results: Vec<Result<(ChromaCollection, Duration), ChromaHttpClientError>> =
+        join_all(futures).await;
+
+    let mut collections = Vec::with_capacity(total_collections);
+    for (name, result) in collection_names.iter().zip(results.into_iter()) {
+        let (collection, elapsed) = result?;
+        on_ddl_latency(name.as_str(), elapsed);
+        collections.push(collection);
+    }
     progress_handle
         .await
         .expect("warmup progress reporter should not panic");
@@ -426,6 +438,136 @@ pub struct WorkerContext {
     pub pacing_rx: Arc<Mutex<mpsc::Receiver<()>>>,
 }
 
+/// Per-operation sample emitted by shared load worker.
+#[derive(Debug, Clone, Copy)]
+pub struct LoadOpSample {
+    /// Observed latency in milliseconds.
+    pub latency_ms: f64,
+    /// Number of vectors in the upsert batch.
+    pub batch_size: usize,
+}
+
+/// Aggregate worker statistics returned after load worker completion.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct LoadWorkerSummary {
+    /// Upsert calls attempted by the worker.
+    pub attempts: u64,
+    /// Upsert calls that succeeded.
+    pub successes: u64,
+    /// Upsert calls that failed.
+    pub failures: u64,
+    /// Total records inserted successfully by the worker.
+    pub records: u64,
+}
+
+/// Spawn a pacing task that emits one token per target QPS until run duration elapses.
+pub fn spawn_pacing_task(
+    start_time: Instant,
+    duration: Duration,
+    pace_qps: u64,
+    ticket_tx: mpsc::Sender<()>,
+) -> JoinHandle<()> {
+    let pace_qps = pace_qps.max(1);
+    let ticket_interval = Duration::from_secs_f64(1.0 / pace_qps as f64);
+
+    tokio::spawn(async move {
+        let mut interval = time::interval(ticket_interval);
+        while start_time.elapsed() < duration {
+            interval.tick().await;
+            if ticket_tx.send(()).await.is_err() {
+                break;
+            }
+        }
+    })
+}
+
+/// Shared load worker that drives concurrent upserts and emits per-op samples.
+pub async fn run_load_worker<F, OnSuccess, OnFailure>(
+    collections: Vec<ChromaCollection>,
+    collection_semaphores: Vec<Arc<Semaphore>>,
+    ctx: WorkerContext,
+    seed: u64,
+    id_prefix: String,
+    mut select_collection: F,
+    mut on_success: OnSuccess,
+    mut on_failure: OnFailure,
+) -> LoadWorkerSummary
+where
+    F: FnMut(usize, &mut StdRng) -> usize + Send,
+    OnSuccess: FnMut(LoadOpSample) + Send,
+    OnFailure: FnMut(u64, String) + Send,
+{
+    let num_collections = collections.len();
+    if num_collections == 0 {
+        return LoadWorkerSummary::default();
+    }
+
+    let mut rng = StdRng::seed_from_u64(seed);
+    let mut record_counter: u64 = 0;
+    let mut summary = LoadWorkerSummary::default();
+
+    while ctx.start_time.elapsed() < ctx.duration {
+        let remaining = ctx.duration.saturating_sub(ctx.start_time.elapsed());
+        if remaining.is_zero() {
+            break;
+        }
+
+        let ticket = time::timeout(remaining, async {
+            let mut rx = ctx.pacing_rx.lock().await;
+            rx.recv().await
+        })
+        .await;
+
+        match ticket {
+            Ok(Some(())) => {}
+            _ => break,
+        }
+
+        let idx = select_collection(num_collections, &mut rng) % num_collections;
+        let collection = &collections[idx];
+        let semaphore = &collection_semaphores[idx];
+
+        let permit = match semaphore.clone().acquire_owned().await {
+            Ok(permit) => permit,
+            Err(_) => break,
+        };
+
+        let embeddings = ctx.gmm.generate_batch(&mut rng, ctx.batch_size);
+        let ids: Vec<String> = (0..ctx.batch_size)
+            .map(|i| {
+                record_counter += 1;
+                format!("{}_{}", id_prefix, record_counter + i as u64)
+            })
+            .collect();
+
+        let op_start = Instant::now();
+        summary.attempts += 1;
+        match collection
+            .upsert(ids, embeddings, None, None, None)
+            .await
+        {
+            Ok(_response) => {
+                let latency_ms = op_start.elapsed().as_secs_f64() * 1000.;
+                summary.successes += 1;
+                summary.records += ctx.batch_size as u64;
+                on_success(LoadOpSample {
+                    latency_ms,
+                    batch_size: ctx.batch_size,
+                });
+                ctx.stats.record_upsert(ctx.batch_size as u64);
+            }
+            Err(err) => {
+                summary.failures += 1;
+                on_failure(summary.attempts, err.to_string());
+            }
+        }
+
+        drop(permit);
+    }
+
+    summary
+}
+
 /// Creates a cloud client and overrides the endpoint.
 pub fn create_client(endpoint: &str) -> Result<ChromaHttpClient, Box<dyn Error>> {
     let mut options = ChromaHttpClientOptions::from_cloud_env()?;
@@ -438,11 +580,12 @@ pub async fn get_or_create_collection_with_retry(
     client: &ChromaHttpClient,
     name: &str,
     max_retries: u32,
-) -> Result<ChromaCollection, ChromaHttpClientError> {
+) -> Result<(ChromaCollection, Duration), ChromaHttpClientError> {
+    let start = Instant::now();
     let mut last_error = None;
     for attempt in 1..=max_retries {
         match client.get_or_create_collection(name, None, None).await {
-            Ok(collection) => return Ok(collection),
+            Ok(collection) => return Ok((collection, start.elapsed())),
             Err(e) => {
                 eprintln!(
                     "  Attempt {}/{} failed for collection '{}': {}",

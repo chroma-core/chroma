@@ -39,8 +39,9 @@ use tokio::sync::{mpsc, oneshot, Mutex, Semaphore};
 use utf8path::Path as Utf8Path;
 
 use chroma::bench::{
-    collection_cache_file_path, create_client, get_or_create_collections_with_cache, BackendStats,
-    GaussianMixtureModel, WorkerContext,
+    collection_cache_file_path, create_client, get_or_create_collections_with_cache,
+    run_load_worker, spawn_pacing_task, BackendStats, GaussianMixtureModel, LoadOpSample,
+    WorkerContext,
 };
 
 /// Load generator for Chroma that creates concurrent upsert operations.
@@ -106,11 +107,19 @@ static LOAD_SCATTERED_SUCCESS_LATENCY_SENSOR: biometrics::Histogram = biometrics
     &LOAD_SCATTERED_SUCCESS_LATENCY,
 );
 
+static LOAD_SCATTERED_DDL_LATENCY: sig_fig_histogram::LockFreeHistogram<450> =
+    sig_fig_histogram::LockFreeHistogram::new(2);
+static LOAD_SCATTERED_DDL_LATENCY_SENSOR: biometrics::Histogram = biometrics::Histogram::new(
+    "load_generator.scattered.collection_ddl_latency_ms",
+    &LOAD_SCATTERED_DDL_LATENCY,
+);
+
 fn spawn_metrics_emitter() -> (tokio::task::JoinHandle<()>, oneshot::Sender<()>) {
     let collector = Collector::new();
     collector.register_counter(&LOAD_SCATTERED_UPSERT_ATTEMPTS);
     collector.register_counter(&LOAD_SCATTERED_UPSERT_SUCCESS);
     collector.register_counter(&LOAD_SCATTERED_UPSERT_FAILURES);
+    collector.register_histogram(&LOAD_SCATTERED_DDL_LATENCY_SENSOR);
     collector.register_histogram(&LOAD_SCATTERED_UPSERT_LATENCY_SENSOR);
     collector.register_histogram(&LOAD_SCATTERED_SUCCESS_LATENCY_SENSOR);
     let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
@@ -262,6 +271,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         MAX_COLLECTION_RETRIES,
         args.max_outstanding_ops,
         "US",
+        |_collection_name, elapsed| {
+            LOAD_SCATTERED_DDL_LATENCY_SENSOR.observe(elapsed.as_secs_f64() * 1000.);
+        },
     )
     .await?;
     let collections_eu = get_or_create_collections_with_cache(
@@ -272,6 +284,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         MAX_COLLECTION_RETRIES,
         args.max_outstanding_ops,
         "EU",
+        |_collection_name, elapsed| {
+            LOAD_SCATTERED_DDL_LATENCY_SENSOR.observe(elapsed.as_secs_f64() * 1000.);
+        },
     )
     .await?;
     println!(
@@ -298,21 +313,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let start_time = Instant::now();
     let duration = Duration::from_secs(args.duration);
     let pace_qps = args.pace_qps.max(1);
-    let ticket_interval = Duration::from_secs_f64(1.0 / pace_qps as f64);
 
     let (ticket_tx, ticket_rx) = mpsc::channel::<()>(1024);
     let pacing_rx = Arc::new(Mutex::new(ticket_rx));
     let (metrics_handle, stop_metrics) = spawn_metrics_emitter();
 
-    let pacing_handle = {
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(ticket_interval);
-            while start_time.elapsed() < duration {
-                interval.tick().await;
-                let _ = ticket_tx.try_send(());
-            }
-        })
-    };
+    let pacing_handle = spawn_pacing_task(start_time, duration, pace_qps, ticket_tx);
 
     // Spawn worker tasks
     let mut handles = Vec::new();
@@ -327,12 +333,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             duration,
             pacing_rx: Arc::clone(&pacing_rx),
         };
-        let handle = tokio::spawn(run_worker(
+        let mut collection_rng = Guacamole::new(task_id as u64 * 1000);
+        let mut zipf = Zipf::from_param(collections_us.len() as u64, 0.8);
+        let mut collection_idx = map(
+            move |guac| zipf.next(guac),
+            |value| (value as usize).saturating_sub(1),
+        );
+        let us_collection_count = collections_us.len();
+        let us_task_label = format!("us_task{}", task_id);
+        let handle = tokio::spawn(run_load_worker(
             collections_us.clone(),
             semaphores_us.clone(),
             ctx,
             task_id as u64 * 1000,
-            format!("us_task{}", task_id),
+            us_task_label.clone(),
+            move |_num_collections, rng| {
+                let _ = rng;
+                collection_idx(&mut collection_rng) % us_collection_count
+            },
+            move |sample: LoadOpSample| {
+                LOAD_SCATTERED_UPSERT_ATTEMPTS.click();
+                LOAD_SCATTERED_UPSERT_SUCCESS.click();
+                LOAD_SCATTERED_UPSERT_LATENCY_SENSOR.observe(sample.latency_ms);
+                LOAD_SCATTERED_SUCCESS_LATENCY_SENSOR.observe(sample.latency_ms);
+            },
+            move |_attempt, err| {
+                LOAD_SCATTERED_UPSERT_ATTEMPTS.click();
+                LOAD_SCATTERED_UPSERT_FAILURES.click();
+                eprintln!("[{}] Upsert error: {}", us_task_label, err);
+            },
         ));
         handles.push(handle);
 
@@ -345,12 +374,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             duration,
             pacing_rx: Arc::clone(&pacing_rx),
         };
-        let handle = tokio::spawn(run_worker(
+        let mut collection_rng = Guacamole::new((task_id as u64 + 500) * 1000);
+        let mut zipf = Zipf::from_param(collections_eu.len() as u64, 0.8);
+        let mut collection_idx = map(
+            move |guac| zipf.next(guac),
+            |value| (value as usize).saturating_sub(1),
+        );
+        let eu_collection_count = collections_eu.len();
+        let eu_task_label = format!("eu_task{}", task_id);
+        let handle = tokio::spawn(run_load_worker(
             collections_eu.clone(),
             semaphores_eu.clone(),
             ctx,
             (task_id as u64 + 500) * 1000,
-            format!("eu_task{}", task_id),
+            eu_task_label.clone(),
+            move |_num_collections, rng| {
+                let _ = rng;
+                collection_idx(&mut collection_rng) % eu_collection_count
+            },
+            move |sample: LoadOpSample| {
+                LOAD_SCATTERED_UPSERT_ATTEMPTS.click();
+                LOAD_SCATTERED_UPSERT_SUCCESS.click();
+                LOAD_SCATTERED_UPSERT_LATENCY_SENSOR.observe(sample.latency_ms);
+                LOAD_SCATTERED_SUCCESS_LATENCY_SENSOR.observe(sample.latency_ms);
+            },
+            move |_attempt, err| {
+                LOAD_SCATTERED_UPSERT_ATTEMPTS.click();
+                LOAD_SCATTERED_UPSERT_FAILURES.click();
+                eprintln!("[{}] Upsert error: {}", eu_task_label, err);
+            },
         ));
         handles.push(handle);
     }
@@ -416,7 +468,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Wait for all tasks to complete
     for handle in handles {
-        let _ = handle.await;
+        match handle.await {
+            Ok(_summary) => {}
+            Err(err) => eprintln!("load worker panicked: {}", err),
+        }
     }
     let _ = stop_metrics.send(());
     let _ = metrics_handle.await;

@@ -10563,7 +10563,7 @@ dependencies = [
  "futures",
  "gcloud-gax",
  "gcloud-spanner",
- "guacamole",
+ "guacamole 0.11.0",
  "opentelemetry 0.27.1",
  "parquet",
  "proptest",

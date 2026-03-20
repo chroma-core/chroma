@@ -30,8 +30,7 @@ use biometrics::Sensor;
 use biometrics::{Collector, Counter};
 use chroma::bench::{
     collection_cache_file_path, create_client, get_or_create_collections_with_cache, BackendStats,
-    GaussianMixtureModel,
-    WorkerContext,
+    GaussianMixtureModel, LoadOpSample, WorkerContext, run_load_worker, spawn_pacing_task,
 };
 use chroma::ChromaCollection;
 use clap::Parser;
@@ -99,11 +98,19 @@ static LOAD_POINTED_SUCCESS_LATENCY_SENSOR: biometrics::Histogram = biometrics::
     &LOAD_POINTED_SUCCESS_LATENCY,
 );
 
+static LOAD_POINTED_DDL_LATENCY: sig_fig_histogram::LockFreeHistogram<450> =
+    sig_fig_histogram::LockFreeHistogram::new(2);
+static LOAD_POINTED_DDL_LATENCY_SENSOR: biometrics::Histogram = biometrics::Histogram::new(
+    "load_generator.pointed.collection_ddl_latency_ms",
+    &LOAD_POINTED_DDL_LATENCY,
+);
+
 fn spawn_metrics_emitter() -> (tokio::task::JoinHandle<()>, oneshot::Sender<()>) {
     let collector = Collector::new();
     collector.register_counter(&LOAD_POINTED_UPSERT_ATTEMPTS);
     collector.register_counter(&LOAD_POINTED_UPSERT_SUCCESS);
     collector.register_counter(&LOAD_POINTED_UPSERT_FAILURES);
+    collector.register_histogram(&LOAD_POINTED_DDL_LATENCY_SENSOR);
     collector.register_histogram(&LOAD_POINTED_UPSERT_LATENCY_SENSOR);
     collector.register_histogram(&LOAD_POINTED_SUCCESS_LATENCY_SENSOR);
     let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
@@ -250,6 +257,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         MAX_COLLECTION_RETRIES,
         args.max_outstanding_ops,
         "US endpoint",
+        |_collection_name, elapsed| {
+            LOAD_POINTED_DDL_LATENCY_SENSOR.observe(elapsed.as_secs_f64() * 1000.);
+        },
     )
     .await?;
     let collection_eu = get_or_create_collections_with_cache(
@@ -260,6 +270,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         MAX_COLLECTION_RETRIES,
         args.max_outstanding_ops,
         "EU endpoint",
+        |_collection_name, elapsed| {
+            LOAD_POINTED_DDL_LATENCY_SENSOR.observe(elapsed.as_secs_f64() * 1000.);
+        },
     )
     .await?;
     let collection_us = collection_us.into_iter().next().ok_or_else(|| {
@@ -286,19 +299,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let start_time = Instant::now();
     let duration = Duration::from_secs(args.duration);
     let pace_qps = args.pace_qps.max(1);
-    let ticket_interval = Duration::from_secs_f64(1.0 / pace_qps as f64);
 
     let (ticket_tx, ticket_rx) = mpsc::channel::<()>(1024);
     let pacing_rx = Arc::new(Mutex::new(ticket_rx));
     let (metrics_handle, stop_metrics) = spawn_metrics_emitter();
 
-    let pacing_handle = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(ticket_interval);
-        while start_time.elapsed() < duration {
-            interval.tick().await;
-            let _ = ticket_tx.try_send(());
-        }
-    });
+    let pacing_handle = spawn_pacing_task(start_time, duration, pace_qps, ticket_tx);
 
     // Spawn worker tasks
     let mut handles = Vec::new();
@@ -313,12 +319,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             duration,
             pacing_rx: Arc::clone(&pacing_rx),
         };
-        let handle = tokio::spawn(run_worker(
+        let us_task_label = format!("us_task{}", task_id);
+        let handle = tokio::spawn(run_load_worker(
             vec![collection_us.clone()],
             semaphores_us.clone(),
             ctx,
             task_id as u64 * 1000,
-            format!("us_task{}", task_id),
+            us_task_label.clone(),
+            |_num_collections, _rng| 0,
+            move |sample: LoadOpSample| {
+                LOAD_POINTED_UPSERT_ATTEMPTS.click();
+                LOAD_POINTED_UPSERT_SUCCESS.click();
+                LOAD_POINTED_UPSERT_LATENCY_SENSOR.observe(sample.latency_ms);
+                LOAD_POINTED_SUCCESS_LATENCY_SENSOR.observe(sample.latency_ms);
+            },
+            move |_attempt, err| {
+                LOAD_POINTED_UPSERT_ATTEMPTS.click();
+                LOAD_POINTED_UPSERT_FAILURES.click();
+                eprintln!("[{}] Upsert error: {}", us_task_label, err);
+            },
         ));
         handles.push(handle);
 
@@ -331,12 +350,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             duration,
             pacing_rx: Arc::clone(&pacing_rx),
         };
-        let handle = tokio::spawn(run_worker(
+        let eu_task_label = format!("eu_task{}", task_id);
+        let handle = tokio::spawn(run_load_worker(
             vec![collection_eu.clone()],
             semaphores_eu.clone(),
             ctx,
             (task_id as u64 + 500) * 1000,
-            format!("eu_task{}", task_id),
+            eu_task_label.clone(),
+            |_num_collections, _rng| 0,
+            move |sample: LoadOpSample| {
+                LOAD_POINTED_UPSERT_ATTEMPTS.click();
+                LOAD_POINTED_UPSERT_SUCCESS.click();
+                LOAD_POINTED_UPSERT_LATENCY_SENSOR.observe(sample.latency_ms);
+                LOAD_POINTED_SUCCESS_LATENCY_SENSOR.observe(sample.latency_ms);
+            },
+            move |_attempt, err| {
+                LOAD_POINTED_UPSERT_ATTEMPTS.click();
+                LOAD_POINTED_UPSERT_FAILURES.click();
+                eprintln!("[{}] Upsert error: {}", eu_task_label, err);
+            },
         ));
         handles.push(handle);
     }
@@ -402,7 +434,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Wait for all tasks to complete
     for handle in handles {
-        let _ = handle.await;
+        match handle.await {
+            Ok(_summary) => {}
+            Err(err) => eprintln!("load worker panicked: {}", err),
+        }
     }
     let _ = stop_metrics.send(());
     let _ = metrics_handle.await;
