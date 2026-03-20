@@ -23,14 +23,14 @@
 //! - `CHROMA_TENANT` - Tenant ID (optional, will be auto-resolved)
 //! - `CHROMA_DATABASE` - Database name (optional, will be auto-resolved)
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use biometrics::Sensor;
 use biometrics::{Collector, Counter};
 use chroma::bench::{
-    create_client, get_or_create_collection_with_retry, BackendStats, GaussianMixtureModel,
+    collection_cache_file_path, create_client, get_or_create_collections_with_cache, BackendStats,
+    GaussianMixtureModel,
     WorkerContext,
 };
 use chroma::ChromaCollection;
@@ -69,6 +69,11 @@ struct Args {
 /// Generates a deterministic collection name from the index.
 fn collection_name() -> String {
     "loadgen_collection_pointed".to_string()
+}
+
+/// Returns the path to the collection cache file.
+fn cache_file_path() -> String {
+    collection_cache_file_path("loadgen_collection_pointed", 1)
 }
 
 /// Maximum number of retry attempts for collection creation.
@@ -230,47 +235,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client_us = create_client("https://api.devchroma.com:443")?;
     let client_eu = create_client("https://europe-west1.gcp.devchroma.com:443")?;
 
-    println!("Creating/getting collection on both endpoints...",);
+    println!("Creating/getting collection on both endpoints...");
 
     // Load the collections for both endpoints.
-    println!("  Warmup progress: 0/2 collections");
-    let warmup_completed = Arc::new(AtomicU64::new(0));
+    let collection_name = collection_name();
+    let collection_names = vec![collection_name.clone()];
+    let cache_path = cache_file_path();
 
-    let us_progress = Arc::clone(&warmup_completed);
-    let us_future = async move {
-        let result = get_or_create_collection_with_retry(
-            &client_us,
-            &collection_name(),
-            MAX_COLLECTION_RETRIES,
-        )
-        .await;
-        let completed = us_progress.fetch_add(1, Ordering::SeqCst) + 1;
-        println!(
-            "  Warmup progress: {}/2 collections (US endpoint)",
-            completed
-        );
-        result
-    };
-
-    let eu_progress = Arc::clone(&warmup_completed);
-    let eu_future = async move {
-        let result = get_or_create_collection_with_retry(
-            &client_eu,
-            &collection_name(),
-            MAX_COLLECTION_RETRIES,
-        )
-        .await;
-        let completed = eu_progress.fetch_add(1, Ordering::SeqCst) + 1;
-        println!(
-            "  Warmup progress: {}/2 collections (EU endpoint)",
-            completed
-        );
-        result
-    };
-
-    let (collection_us, collection_eu) = tokio::join!(us_future, eu_future);
-    let collection_us = collection_us?;
-    let collection_eu = collection_eu?;
+    let collection_us = get_or_create_collections_with_cache(
+        &client_us,
+        "us",
+        &cache_path,
+        &collection_names,
+        MAX_COLLECTION_RETRIES,
+        args.max_outstanding_ops,
+        "US endpoint",
+    )
+    .await?;
+    let collection_eu = get_or_create_collections_with_cache(
+        &client_eu,
+        "eu",
+        &cache_path,
+        &collection_names,
+        MAX_COLLECTION_RETRIES,
+        args.max_outstanding_ops,
+        "EU endpoint",
+    )
+    .await?;
+    let collection_us = collection_us.into_iter().next().ok_or_else(|| {
+        std::io::Error::other("failed to load US pointed load generator collection")
+    })?;
+    let collection_eu = collection_eu.into_iter().next().ok_or_else(|| {
+        std::io::Error::other("failed to load EU pointed load generator collection")
+    })?;
     println!("Collections ready. Starting load generation...\n");
 
     // Create per-collection semaphores to limit outstanding operations

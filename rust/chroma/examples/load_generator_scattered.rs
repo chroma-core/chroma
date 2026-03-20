@@ -23,7 +23,6 @@
 //! - `CHROMA_TENANT` - Tenant ID (optional, will be auto-resolved)
 //! - `CHROMA_DATABASE` - Database name (optional, will be auto-resolved)
 
-use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -32,20 +31,16 @@ use biometrics::Sensor;
 use biometrics::{Collector, Counter};
 use chroma::{ChromaCollection, ChromaHttpClient};
 use clap::Parser;
-use futures_util::future::join_all;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot, Mutex, Semaphore};
 use utf8path::Path as Utf8Path;
 
 use chroma::bench::{
-    create_client, get_or_create_collection_with_retry, BackendStats, GaussianMixtureModel,
-    WorkerContext,
+    collection_cache_file_path, create_client, get_or_create_collections_with_cache, BackendStats,
+    GaussianMixtureModel, WorkerContext,
 };
 
-/// Print warmup progress every N completed collections.
-const WARMUP_PROGRESS_INTERVAL: usize = 10;
 /// Load generator for Chroma that creates concurrent upsert operations.
 #[derive(Parser, Debug)]
 #[command(name = "load_generator")]
@@ -83,165 +78,7 @@ fn collection_name(index: usize) -> String {
 
 /// Returns the path to the collection cache file.
 fn cache_file_path(num_collections: usize) -> String {
-    format!("loadgen_collections2_{}.json", num_collections)
-}
-
-/// Cached collection data for dehydration/rehydration.
-#[derive(Serialize, Deserialize)]
-struct CollectionCache {
-    us_collections: Vec<serde_json::Value>,
-    eu_collections: Vec<serde_json::Value>,
-}
-
-/// Attempts to load collections from the cache file.
-async fn load_collections_from_cache(
-    client_us: &ChromaHttpClient,
-    client_eu: &ChromaHttpClient,
-    num_collections: usize,
-) -> Option<(Vec<ChromaCollection>, Vec<ChromaCollection>)> {
-    let cache_path = cache_file_path(num_collections);
-    let path = Path::new(&cache_path);
-
-    if !path.exists() {
-        return None;
-    }
-
-    let content = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Failed to read cache file: {}", e);
-            return None;
-        }
-    };
-
-    let cache: CollectionCache = match serde_json::from_str(&content) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Failed to parse cache file: {}", e);
-            return None;
-        }
-    };
-
-    if cache.us_collections.len() != num_collections
-        || cache.eu_collections.len() != num_collections
-    {
-        eprintln!(
-            "Cache has wrong number of collections (expected {}, got US:{}, EU:{})",
-            num_collections,
-            cache.us_collections.len(),
-            cache.eu_collections.len()
-        );
-        return None;
-    }
-
-    let mut us_collections = Vec::with_capacity(num_collections);
-    for dehydrated in cache.us_collections {
-        match client_us.rehydrate_collection(dehydrated).await {
-            Ok(c) => us_collections.push(c),
-            Err(e) => {
-                eprintln!("Failed to rehydrate US collection: {}", e);
-                return None;
-            }
-        }
-    }
-
-    let mut eu_collections = Vec::with_capacity(num_collections);
-    for dehydrated in cache.eu_collections {
-        match client_eu.rehydrate_collection(dehydrated).await {
-            Ok(c) => eu_collections.push(c),
-            Err(e) => {
-                eprintln!("Failed to rehydrate EU collection: {}", e);
-                return None;
-            }
-        }
-    }
-
-    Some((us_collections, eu_collections))
-}
-
-/// Creates collections on a client concurrently and logs warmup progress as they complete.
-async fn create_collections_with_progress(
-    client: &ChromaHttpClient,
-    collection_names: Vec<String>,
-    max_outstanding_ops: usize,
-    label: &'static str,
-) -> Result<Vec<ChromaCollection>, chroma::client::ChromaHttpClientError> {
-    let total_collections = collection_names.len();
-    let limiter = Arc::new(Semaphore::new(max_outstanding_ops));
-    let (progress_tx, mut progress_rx) = mpsc::channel::<()>(max_outstanding_ops.max(1));
-
-    let progress_handle = tokio::spawn(async move {
-        let mut completed = 0usize;
-
-        while let Some(()) = progress_rx.recv().await {
-            completed += 1;
-            if completed.is_multiple_of(WARMUP_PROGRESS_INTERVAL) || completed == total_collections
-            {
-                let pct = if total_collections == 0 {
-                    100.0
-                } else {
-                    (completed as f64 / total_collections as f64) * 100.0
-                };
-                println!(
-                    "{} warmup progress: {}/{} collections ({:.0}%)",
-                    label, completed, total_collections, pct
-                );
-            }
-        }
-    });
-
-    let mut futures = Vec::with_capacity(total_collections);
-    for name in collection_names {
-        let client = client.clone();
-        let limiter = Arc::clone(&limiter);
-        let tx = progress_tx.clone();
-        futures.push(async move {
-            let _permit = limiter.acquire().await.unwrap();
-            let result =
-                get_or_create_collection_with_retry(&client, &name, MAX_COLLECTION_RETRIES).await;
-            let _ = tx.send(()).await;
-            result
-        });
-    }
-    drop(progress_tx);
-
-    let results: Vec<Result<ChromaCollection, chroma::client::ChromaHttpClientError>> =
-        join_all(futures).await;
-    let collections = results.into_iter().collect();
-    progress_handle
-        .await
-        .expect("warmup progress reporter should not panic");
-
-    collections
-}
-
-/// Saves collections to the cache file.
-async fn save_collections_to_cache(
-    us_collections: &[ChromaCollection],
-    eu_collections: &[ChromaCollection],
-    num_collections: usize,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut us_dehydrated = Vec::with_capacity(us_collections.len());
-    for collection in us_collections {
-        us_dehydrated.push(collection.dehydrate().await?);
-    }
-
-    let mut eu_dehydrated = Vec::with_capacity(eu_collections.len());
-    for collection in eu_collections {
-        eu_dehydrated.push(collection.dehydrate().await?);
-    }
-
-    let cache = CollectionCache {
-        us_collections: us_dehydrated,
-        eu_collections: eu_dehydrated,
-    };
-
-    let content = serde_json::to_string_pretty(&cache)?;
-    let cache_path = cache_file_path(num_collections);
-    std::fs::write(&cache_path, content)?;
-
-    println!("  Saved collections to cache: {}", cache_path);
-    Ok(())
+    collection_cache_file_path("loadgen_collections2", num_collections)
 }
 
 /// Maximum number of retry attempts for collection creation.
@@ -408,51 +245,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.collections
     );
 
-    // Try to load collections from cache first
-    let (collections_us, collections_eu) = if let Some((us, eu)) =
-        load_collections_from_cache(&client_us, &client_eu, args.collections).await
-    {
-        println!(
-            "  Loaded {} US collections and {} EU collections from cache",
-            us.len(),
-            eu.len()
-        );
-        (us, eu)
-    } else {
-        // Create or get collections on both endpoints concurrently with retry logic
-        let collection_names: Vec<String> = (0..args.collections).map(collection_name).collect();
-        let (collections_us, collections_eu) = tokio::join!(
-            create_collections_with_progress(
-                &client_us,
-                collection_names.clone(),
-                args.max_outstanding_ops,
-                "US",
-            ),
-            create_collections_with_progress(
-                &client_eu,
-                collection_names,
-                args.max_outstanding_ops,
-                "EU",
-            )
-        );
-        let collections_us = collections_us?;
-        let collections_eu = collections_eu?;
-
-        println!(
-            "  Created {} US collections and {} EU collections",
-            collections_us.len(),
-            collections_eu.len()
-        );
-
-        // Save to cache for next run
-        if let Err(e) =
-            save_collections_to_cache(&collections_us, &collections_eu, args.collections).await
-        {
-            eprintln!("  Warning: Failed to save collections to cache: {}", e);
-        }
-
-        (collections_us, collections_eu)
-    };
+    let collection_names: Vec<String> = (0..args.collections).map(collection_name).collect();
+    let cache_path = cache_file_path(args.collections);
+    let collections_us = get_or_create_collections_with_cache(
+        &client_us,
+        "us",
+        &cache_path,
+        &collection_names,
+        MAX_COLLECTION_RETRIES,
+        args.max_outstanding_ops,
+        "US",
+    )
+    .await?;
+    let collections_eu = get_or_create_collections_with_cache(
+        &client_eu,
+        "eu",
+        &cache_path,
+        &collection_names,
+        MAX_COLLECTION_RETRIES,
+        args.max_outstanding_ops,
+        "EU",
+    )
+    .await?;
+    println!(
+        "  Ready {} US collections and {} EU collections",
+        collections_us.len(),
+        collections_eu.len()
+    );
 
     println!("Collections ready. Starting load generation...\n");
 

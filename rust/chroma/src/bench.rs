@@ -1,14 +1,21 @@
 //! Shared helpers for example load generators.
 
 use std::error::Error;
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::{self, BufRead, BufReader, BufWriter, Write};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::client::ChromaHttpClientError;
 use crate::{ChromaCollection, ChromaHttpClient, ChromaHttpClientOptions};
+use futures_util::future::join_all;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use reqwest::StatusCode;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, Mutex};
 
 /// Embedding dimensionality shared by load generator examples.
@@ -16,6 +23,259 @@ pub const EMBEDDING_DIM: usize = 1536;
 
 /// Default number of GMM clusters shared by load generator examples.
 pub const NUM_CLUSTERS: usize = 1000;
+
+/// JSONL cache progress logging interval during collection bootstrap.
+const WARMUP_PROGRESS_INTERVAL: usize = 10;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CachedCollection {
+    endpoint: String,
+    name: String,
+    dehydrated: serde_json::Value,
+}
+
+/// Returns the cache file path for collection metadata.
+pub fn collection_cache_file_path(prefix: &str, num_collections: usize) -> String {
+    format!("{prefix}_{num_collections}.jsonl")
+}
+
+fn read_collection_cache_records(
+    cache_path: &Path,
+) -> HashMap<String, HashMap<String, serde_json::Value>> {
+    let mut cache = HashMap::<String, HashMap<String, serde_json::Value>>::new();
+    let file = match File::open(cache_path) {
+        Ok(file) => file,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return cache,
+        Err(err) => {
+            eprintln!("Failed to read collection cache {}: {}", cache_path.display(), err);
+            return cache;
+        }
+    };
+
+    let reader = BufReader::new(file);
+    for (line_number, raw_line) in reader.lines().enumerate() {
+        let line_number = line_number + 1;
+        let line = match raw_line {
+            Ok(line) => line,
+            Err(err) => {
+                eprintln!(
+                    "Failed to read line {line_number} from collection cache {}: {}",
+                    cache_path.display(),
+                    err
+                );
+                continue;
+            }
+        };
+
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        match serde_json::from_str::<CachedCollection>(line) {
+            Ok(record) => {
+                cache
+                    .entry(record.endpoint)
+                    .or_default()
+                    .insert(record.name, record.dehydrated);
+            }
+            Err(err) => {
+                eprintln!(
+                    "Failed to parse line {line_number} from collection cache {}: {}",
+                    cache_path.display(),
+                    err
+                );
+            }
+        }
+    }
+
+    cache
+}
+
+fn write_collection_cache_records(
+    cache_path: &Path,
+    cache: &HashMap<String, HashMap<String, serde_json::Value>>,
+) -> io::Result<()> {
+    let tmp_path = cache_path.with_extension("tmp");
+    let mut file = BufWriter::new(File::create(&tmp_path)?);
+    let mut endpoints: Vec<&str> = cache.keys().map(String::as_str).collect();
+    endpoints.sort_unstable();
+
+    for endpoint in endpoints {
+        let mut names: Vec<&str> = cache
+            .get(endpoint)
+            .map(|collections| collections.keys().map(String::as_str).collect())
+            .unwrap_or_default();
+        names.sort_unstable();
+
+        for name in names {
+            let dehydrated = cache
+                .get(endpoint)
+                .and_then(|collections| collections.get(name))
+                .ok_or_else(|| io::Error::other("cache mutation during write"))?;
+            let record = CachedCollection {
+                endpoint: endpoint.to_string(),
+                name: name.to_string(),
+                dehydrated: dehydrated.clone(),
+            };
+            let line = serde_json::to_string(&record).map_err(io::Error::other)?;
+            writeln!(file, "{}", line)?;
+        }
+    }
+
+    file.flush()?;
+    let file = file.into_inner()?;
+    file.sync_all()?;
+    std::fs::rename(&tmp_path, cache_path)?;
+
+    Ok(())
+}
+
+/// Loads cached collections for the endpoint, rehydrating when possible and creating the rest.
+///
+/// Any collection found in the cache is rehydrated. Collections that are missing from the cache
+/// or fail to rehydrate are created with a retry loop.
+pub async fn get_or_create_collections_with_cache(
+    client: &ChromaHttpClient,
+    endpoint_label: &str,
+    cache_path: impl AsRef<Path>,
+    collection_names: &[String],
+    max_retries: u32,
+    max_outstanding_ops: usize,
+    progress_label: &'static str,
+) -> Result<Vec<ChromaCollection>, ChromaHttpClientError> {
+    let cache_path = cache_path.as_ref();
+    let mut cache = read_collection_cache_records(cache_path);
+    let endpoint_cache = cache.remove(endpoint_label).unwrap_or_default();
+    let endpoint_cache_baseline = endpoint_cache.clone();
+
+    let mut pending: Vec<(usize, String)> = Vec::new();
+    let mut collections: Vec<Option<ChromaCollection>> = vec![None; collection_names.len()];
+
+    for (idx, name) in collection_names.iter().enumerate() {
+        match endpoint_cache.get(name) {
+            Some(dehydrated) => match client.rehydrate_collection(dehydrated.clone()).await {
+                Ok(collection) => collections[idx] = Some(collection),
+                Err(err) => {
+                    eprintln!(
+                        "Failed to rehydrate collection '{}' for '{}': {}",
+                        name, endpoint_label, err
+                    );
+                    pending.push((idx, name.clone()));
+                }
+            },
+            None => pending.push((idx, name.clone())),
+        }
+    }
+
+    if !pending.is_empty() {
+        let pending_names: Vec<String> = pending.iter().map(|(_, name)| name.clone()).collect();
+        let created = create_collections_with_progress(
+            client,
+            &pending_names,
+            max_outstanding_ops,
+            max_retries,
+            progress_label,
+        )
+        .await?;
+        for ((idx, _), collection) in pending.into_iter().zip(created.into_iter()) {
+            collections[*idx] = Some(collection);
+        }
+    }
+
+    let collections = collections
+        .into_iter()
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| {
+            ChromaHttpClientError::ApiError(
+                "Failed to prepare collections from cache or creation path".to_string(),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        })?;
+
+    let mut updated_endpoint_cache = endpoint_cache_baseline;
+    for collection in &collections {
+        match collection.dehydrate().await {
+            Ok(dehydrated) => {
+                updated_endpoint_cache.insert(collection.name().to_string(), dehydrated);
+            }
+            Err(err) => {
+                eprintln!(
+                    "Failed to dehydrate collection '{}' for cache '{}': {}",
+                    collection.name(),
+                    endpoint_label,
+                    err
+                );
+            }
+        }
+    }
+
+    cache.insert(endpoint_label.to_string(), updated_endpoint_cache);
+    if let Err(err) = write_collection_cache_records(cache_path, &cache) {
+        eprintln!(
+            "Warning: Failed to save collection cache {}: {}",
+            cache_path.display(),
+            err
+        );
+    }
+
+    Ok(collections)
+}
+
+/// Creates collections on a client concurrently and logs warmup progress as they complete.
+async fn create_collections_with_progress(
+    client: &ChromaHttpClient,
+    collection_names: &[String],
+    max_outstanding_ops: usize,
+    max_retries: u32,
+    label: &'static str,
+) -> Result<Vec<ChromaCollection>, ChromaHttpClientError> {
+    let total_collections = collection_names.len();
+    let limiter = Arc::new(tokio::sync::Semaphore::new(max_outstanding_ops));
+    let (progress_tx, mut progress_rx) = mpsc::channel::<()>(max_outstanding_ops.max(1));
+
+    let progress_handle = tokio::spawn(async move {
+        let mut completed = 0usize;
+
+        while let Some(()) = progress_rx.recv().await {
+            completed += 1;
+            if completed.is_multiple_of(WARMUP_PROGRESS_INTERVAL) || completed == total_collections
+            {
+                let pct = if total_collections == 0 {
+                    100.0
+                } else {
+                    (completed as f64 / total_collections as f64) * 100.0
+                };
+                println!(
+                    "{} warmup progress: {}/{} collections ({:.0}%)",
+                    label, completed, total_collections, pct
+                );
+            }
+        }
+    });
+
+    let mut futures = Vec::with_capacity(total_collections);
+    for name in collection_names {
+        let client = client.clone();
+        let limiter = Arc::clone(&limiter);
+        let tx = progress_tx.clone();
+        futures.push(async move {
+            let _permit = limiter.acquire().await.unwrap();
+            let result = get_or_create_collection_with_retry(&client, name, max_retries).await;
+            let _ = tx.send(()).await;
+            result
+        });
+    }
+    drop(progress_tx);
+
+    let results: Vec<Result<ChromaCollection, ChromaHttpClientError>> = join_all(futures).await;
+    let collections = results.into_iter().collect();
+    progress_handle
+        .await
+        .expect("warmup progress reporter should not panic");
+
+    collections
+}
 
 /// Gaussian Mixture Model for generating realistic embeddings.
 pub struct GaussianMixtureModel {
