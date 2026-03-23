@@ -203,6 +203,7 @@ jobs:
 
   lint:
     name: Lint
+    needs: change-detection
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
@@ -211,6 +212,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Setup Rust
+        if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
         uses: ./.github/actions/rust
         with:
           github-token: ${{ github.token }}
@@ -231,9 +233,11 @@ jobs:
           pre-commit run --all-files check-yaml
         continue-on-error: true
       - name: Cargo fmt check
+        if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
         shell: bash
         run: cargo fmt -- --check
       - name: Clippy
+        if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
         run: cargo clippy --all-targets --all-features --keep-going -- -D warnings -D clippy::large_futures -D clippy::all
 
   # This job exists for our branch protection rule.
