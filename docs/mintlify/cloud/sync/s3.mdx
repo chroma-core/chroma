@@ -37,7 +37,7 @@ The Sync API uses your Chroma Cloud API key for authentication. See the [Sync AP
 |-----------|----------|-------------|
 | `object_key` | Yes | Full S3 object key to sync. This is always relative to the bucket root, even if a `path_prefix` is configured on the source. The key must start with the `path_prefix` or the invocation will be rejected. |
 | `custom_id` | No | Custom document ID (max 120 bytes). Chunk IDs become `custom_id-{chunk}` instead of `sha256(object_key)-{chunk}`. Stored as `custom_id` metadata on each chunk. |
-| `metadata` | No | Additional metadata merged with standard chunk metadata. Values must be scalars (string, number, boolean, or null). No arrays or objects. |
+| `metadata` | No | Additional metadata merged with standard chunk metadata. Values can be scalars (string, number, boolean, or null) or homogeneous arrays of scalars (e.g. `["action", "comedy"]`). |
 | `target_collection_name` | No | Overrides the source's `collection_name`. Collection is created if it doesn't exist. |
 
 ## Supported File Types
@@ -110,7 +110,8 @@ A metadata file is any file with a `.meta.json` suffix. It can have any name and
   "target_collection_name": "my-collection",
   "metadata": {
     "author": "Jane Doe",
-    "year": 2024
+    "year": 2024,
+    "tags": ["quarterly", "finance"]
   }
 }
 ```
@@ -121,7 +122,7 @@ A metadata file is any file with a `.meta.json` suffix. It can have any name and
 | `id` | Yes | Custom ID for the document in Chroma. |
 | `path` | Yes | Full S3 object key of the document to index. |
 | `target_collection_name` | No | Overrides the target collection (created if it doesn't exist). |
-| `metadata` | No | Additional metadata. Values must be scalars only. |
+| `metadata` | No | Additional metadata. Values can be scalars (string, number, boolean, or null) or homogeneous arrays of scalars. |
 
 ### Example Workflow
 
