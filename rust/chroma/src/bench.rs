@@ -201,6 +201,7 @@ fn read_collection_cache_records(cache_path: &Path) -> CollectionCache {
     cache
 }
 
+#[cfg(test)]
 fn cached_collection_count(
     cache: &CollectionCache,
     endpoint_label: &str,
@@ -225,6 +226,19 @@ fn log_collection_progress(progress_label: &str, prepared: usize, total: usize) 
         "  [{}] Prepared {} / {} collections",
         progress_label, prepared, total
     );
+}
+
+struct PendingCollectionCreate {
+    index: usize,
+    name: String,
+    rewrite_cache: bool,
+}
+
+struct CreatedCollection {
+    index: usize,
+    name: String,
+    collection: ChromaCollection,
+    elapsed: Duration,
 }
 
 fn write_collection_cache_records(cache_path: &Path, cache: &CollectionCache) -> io::Result<()> {
@@ -334,7 +348,7 @@ pub async fn get_or_create_collections_with_cache(
     cache_path: impl AsRef<Path>,
     collection_names: &[String],
     max_retries: u32,
-    _max_outstanding_ops: usize,
+    max_outstanding_ops: usize,
     progress_label: &'static str,
     mut on_ddl_latency: impl FnMut(&str, Duration) + Send,
 ) -> Result<Vec<ChromaCollection>, ChromaHttpClientError> {
@@ -345,22 +359,12 @@ pub async fn get_or_create_collections_with_cache(
         collection_cache_state(cache_path)
     };
     let total_collections = collection_names.len();
-    let initial_cached = {
-        let cache = shared_cache.lock().await;
-        cached_collection_count(&cache, endpoint_label, collection_names)
-    };
-    if initial_cached > 0 {
-        println!(
-            "  [{}] Resumed {} / {} collections from cache",
-            progress_label, initial_cached, total_collections
-        );
-    }
-    let mut collections = Vec::with_capacity(collection_names.len());
-    let mut prepared = initial_cached;
+    let mut collections: Vec<Option<ChromaCollection>> = std::iter::repeat_with(|| None)
+        .take(total_collections)
+        .collect();
+    let mut pending = Vec::new();
 
-    for name in collection_names {
-        let entry_lock = collection_entry_lock(cache_path, endpoint_label, name);
-        let _entry_guard = entry_lock.lock().await;
+    for (index, name) in collection_names.iter().enumerate() {
         let cached = {
             let cache = shared_cache.lock().await;
             cache
@@ -369,89 +373,67 @@ pub async fn get_or_create_collections_with_cache(
                 .cloned()
         };
 
-        let collection = if let Some(dehydrated) = cached {
+        if let Some(dehydrated) = cached {
             match client.rehydrate_collection(dehydrated).await {
-                Ok(collection) => collection,
+                Ok(collection) => {
+                    collections[index] = Some(collection);
+                }
                 Err(err) => {
                     eprintln!(
                         "Failed to rehydrate collection '{}' for '{}': {}",
                         name, endpoint_label, err
                     );
-                    prepared = prepared.saturating_sub(1);
-                    let (collection, elapsed) =
-                        get_or_create_collection_with_retry(client, name, max_retries).await?;
-                    on_ddl_latency(name, elapsed);
-                    match collection.dehydrate().await {
-                        Ok(dehydrated) => {
-                            let _cache_guard = cache_lock.lock().await;
-                            let mut cache = shared_cache.lock().await;
-                            cache
-                                .entry(endpoint_label.to_string())
-                                .or_default()
-                                .insert(name.clone(), dehydrated);
-                            if let Err(err) = write_collection_cache_records(cache_path, &cache) {
-                                eprintln!(
-                                    "Warning: Failed to rewrite collection cache {}: {}",
-                                    cache_path.display(),
-                                    err
-                                );
-                            }
-                        }
-                        Err(err) => {
-                            eprintln!(
-                                "Failed to dehydrate collection '{}' for cache '{}': {}",
-                                name, endpoint_label, err
-                            );
-                        }
-                    }
-                    prepared += 1;
-                    collection
+                    pending.push(PendingCollectionCreate {
+                        index,
+                        name: name.clone(),
+                        rewrite_cache: true,
+                    });
                 }
             }
         } else {
-            let (collection, elapsed) =
-                get_or_create_collection_with_retry(client, name, max_retries).await?;
-            on_ddl_latency(name, elapsed);
-            match collection.dehydrate().await {
-                Ok(dehydrated) => {
-                    let _cache_guard = cache_lock.lock().await;
-                    if let Err(err) = append_collection_cache_record(
-                        cache_path,
-                        endpoint_label,
-                        name,
-                        &dehydrated,
-                    ) {
-                        eprintln!(
-                            "Warning: Failed to append collection cache {}: {}",
-                            cache_path.display(),
-                            err
-                        );
-                    } else {
-                        let mut cache = shared_cache.lock().await;
-                        cache
-                            .entry(endpoint_label.to_string())
-                            .or_default()
-                            .insert(name.clone(), dehydrated);
-                    }
-                }
-                Err(err) => {
-                    eprintln!(
-                        "Failed to dehydrate collection '{}' for cache '{}': {}",
-                        name, endpoint_label, err
-                    );
-                }
-            }
-            prepared += 1;
-            collection
-        };
-
-        if should_log_collection_progress(prepared, total_collections) {
-            log_collection_progress(progress_label, prepared, total_collections);
+            pending.push(PendingCollectionCreate {
+                index,
+                name: name.clone(),
+                rewrite_cache: false,
+            });
         }
-        collections.push(collection);
     }
 
-    Ok(collections)
+    let resumed = total_collections.saturating_sub(pending.len());
+    if resumed > 0 {
+        println!(
+            "  [{}] Resumed {} / {} collections from cache",
+            progress_label, resumed, total_collections
+        );
+    }
+
+    let created = create_collections_with_progress(
+        client,
+        endpoint_label,
+        cache_path,
+        Arc::clone(&cache_lock),
+        Arc::clone(&shared_cache),
+        pending,
+        max_outstanding_ops,
+        max_retries,
+        progress_label,
+        resumed,
+        total_collections,
+    )
+    .await?;
+
+    for created in created {
+        on_ddl_latency(created.name.as_str(), created.elapsed);
+        collections[created.index] = Some(created.collection);
+    }
+
+    Ok(collections
+        .into_iter()
+        .map(|collection| {
+            collection
+                .expect("collection warmup completed without producing every requested collection")
+        })
+        .collect())
 }
 
 #[cfg(test)]
@@ -484,64 +466,119 @@ mod tests {
 /// Creates collections on a client concurrently and logs warmup progress as they complete.
 async fn create_collections_with_progress(
     client: &ChromaHttpClient,
-    collection_names: &[String],
+    endpoint_label: &str,
+    cache_path: &Path,
+    cache_lock: Arc<Mutex<()>>,
+    shared_cache: Arc<Mutex<CollectionCache>>,
+    pending: Vec<PendingCollectionCreate>,
     max_outstanding_ops: usize,
     max_retries: u32,
-    label: &'static str,
-    on_ddl_latency: &mut (impl FnMut(&str, Duration) + Send),
-) -> Result<Vec<ChromaCollection>, ChromaHttpClientError> {
-    let total_collections = collection_names.len();
-    let limiter = Arc::new(tokio::sync::Semaphore::new(max_outstanding_ops));
+    progress_label: &'static str,
+    initial_prepared: usize,
+    total_collections: usize,
+) -> Result<Vec<CreatedCollection>, ChromaHttpClientError> {
+    if pending.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let limiter = Arc::new(tokio::sync::Semaphore::new(max_outstanding_ops.max(1)));
     let (progress_tx, mut progress_rx) = mpsc::channel::<()>(max_outstanding_ops.max(1));
 
     let progress_handle = tokio::spawn(async move {
-        let mut completed = 0usize;
+        let mut prepared = initial_prepared;
 
         while let Some(()) = progress_rx.recv().await {
-            completed += 1;
-            if completed.is_multiple_of(WARMUP_PROGRESS_INTERVAL) || completed == total_collections
-            {
-                let pct = if total_collections == 0 {
-                    100.0
-                } else {
-                    (completed as f64 / total_collections as f64) * 100.0
-                };
-                println!(
-                    "{} warmup progress: {}/{} collections ({:.0}%)",
-                    label, completed, total_collections, pct
-                );
+            prepared += 1;
+            if should_log_collection_progress(prepared, total_collections) {
+                log_collection_progress(progress_label, prepared, total_collections);
             }
         }
     });
 
-    let mut futures = Vec::with_capacity(total_collections);
-    for name in collection_names {
-        let client = client.clone();
+    let mut futures = Vec::with_capacity(pending.len());
+    for pending_collection in pending {
         let limiter = Arc::clone(&limiter);
         let tx = progress_tx.clone();
+        let cache_lock = Arc::clone(&cache_lock);
+        let shared_cache = Arc::clone(&shared_cache);
         futures.push(async move {
             let _permit = limiter.acquire().await.unwrap();
-            let result = get_or_create_collection_with_retry(&client, name, max_retries).await;
+            let entry_lock =
+                collection_entry_lock(cache_path, endpoint_label, pending_collection.name.as_str());
+            let _entry_guard = entry_lock.lock().await;
+            let result = get_or_create_collection_with_retry(
+                client,
+                pending_collection.name.as_str(),
+                max_retries,
+            )
+            .await;
+            let result = match result {
+                Ok((collection, elapsed)) => {
+                    match collection.dehydrate().await {
+                        Ok(dehydrated) => {
+                            let _cache_guard = cache_lock.lock().await;
+                            if pending_collection.rewrite_cache {
+                                let mut cache = shared_cache.lock().await;
+                                cache
+                                    .entry(endpoint_label.to_string())
+                                    .or_default()
+                                    .insert(pending_collection.name.clone(), dehydrated);
+                                if let Err(err) = write_collection_cache_records(cache_path, &cache)
+                                {
+                                    eprintln!(
+                                        "Warning: Failed to rewrite collection cache {}: {}",
+                                        cache_path.display(),
+                                        err
+                                    );
+                                }
+                            } else if let Err(err) = append_collection_cache_record(
+                                cache_path,
+                                endpoint_label,
+                                pending_collection.name.as_str(),
+                                &dehydrated,
+                            ) {
+                                eprintln!(
+                                    "Warning: Failed to append collection cache {}: {}",
+                                    cache_path.display(),
+                                    err
+                                );
+                            } else {
+                                let mut cache = shared_cache.lock().await;
+                                cache
+                                    .entry(endpoint_label.to_string())
+                                    .or_default()
+                                    .insert(pending_collection.name.clone(), dehydrated);
+                            }
+                        }
+                        Err(err) => {
+                            eprintln!(
+                                "Failed to dehydrate collection '{}' for cache '{}': {}",
+                                pending_collection.name, endpoint_label, err
+                            );
+                        }
+                    }
+
+                    Ok(CreatedCollection {
+                        index: pending_collection.index,
+                        name: pending_collection.name,
+                        collection,
+                        elapsed,
+                    })
+                }
+                Err(err) => Err(err),
+            };
             let _ = tx.send(()).await;
             result
         });
     }
     drop(progress_tx);
 
-    let results: Vec<Result<(ChromaCollection, Duration), ChromaHttpClientError>> =
-        join_all(futures).await;
-
-    let mut collections = Vec::with_capacity(total_collections);
-    for (name, result) in collection_names.iter().zip(results.into_iter()) {
-        let (collection, elapsed) = result?;
-        on_ddl_latency(name.as_str(), elapsed);
-        collections.push(collection);
-    }
+    let results: Vec<Result<CreatedCollection, ChromaHttpClientError>> = join_all(futures).await;
     progress_handle
         .await
         .expect("warmup progress reporter should not panic");
 
-    Ok(collections)
+    results.into_iter().collect()
 }
 
 /// Gaussian Mixture Model for generating realistic embeddings.
