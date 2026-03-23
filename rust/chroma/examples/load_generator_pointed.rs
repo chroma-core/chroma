@@ -110,10 +110,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_outstanding_ops: args.max_outstanding_ops,
     };
 
-    print_load_generator_header(
-        &format!("Collection: {}", collection_name()),
-        &common_args,
-    );
+    print_load_generator_header(&format!("Collection: {}", collection_name()), &common_args);
 
     println!("Creating/getting collection on both endpoints...");
 

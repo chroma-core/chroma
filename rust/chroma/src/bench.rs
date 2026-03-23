@@ -146,9 +146,7 @@ pub fn collection_cache_file_path(prefix: &str, num_collections: usize) -> Strin
     format!("{prefix}_{num_collections}.jsonl")
 }
 
-fn read_collection_cache_records(
-    cache_path: &Path,
-) -> CollectionCache {
+fn read_collection_cache_records(cache_path: &Path) -> CollectionCache {
     let mut cache = CollectionCache::new();
     let file = match File::open(cache_path) {
         Ok(file) => file,
@@ -203,10 +201,33 @@ fn read_collection_cache_records(
     cache
 }
 
-fn write_collection_cache_records(
-    cache_path: &Path,
+fn cached_collection_count(
     cache: &CollectionCache,
-) -> io::Result<()> {
+    endpoint_label: &str,
+    collection_names: &[String],
+) -> usize {
+    let Some(endpoint_cache) = cache.get(endpoint_label) else {
+        return 0;
+    };
+
+    collection_names
+        .iter()
+        .filter(|name| endpoint_cache.contains_key(*name))
+        .count()
+}
+
+fn should_log_collection_progress(prepared: usize, total: usize) -> bool {
+    prepared > 0 && (prepared.is_multiple_of(WARMUP_PROGRESS_INTERVAL) || prepared == total)
+}
+
+fn log_collection_progress(progress_label: &str, prepared: usize, total: usize) {
+    println!(
+        "  [{}] Prepared {} / {} collections",
+        progress_label, prepared, total
+    );
+}
+
+fn write_collection_cache_records(cache_path: &Path, cache: &CollectionCache) -> io::Result<()> {
     let tmp_path = cache_path.with_extension("tmp");
     let mut file = BufWriter::new(File::create(&tmp_path)?);
     let mut endpoints: Vec<&str> = cache.keys().map(String::as_str).collect();
@@ -323,15 +344,29 @@ pub async fn get_or_create_collections_with_cache(
         let _cache_guard = cache_lock.lock().await;
         collection_cache_state(cache_path)
     };
+    let total_collections = collection_names.len();
+    let initial_cached = {
+        let cache = shared_cache.lock().await;
+        cached_collection_count(&cache, endpoint_label, collection_names)
+    };
+    if initial_cached > 0 {
+        println!(
+            "  [{}] Resumed {} / {} collections from cache",
+            progress_label, initial_cached, total_collections
+        );
+    }
     let mut collections = Vec::with_capacity(collection_names.len());
-    let mut created = 0usize;
+    let mut prepared = initial_cached;
 
     for name in collection_names {
         let entry_lock = collection_entry_lock(cache_path, endpoint_label, name);
         let _entry_guard = entry_lock.lock().await;
         let cached = {
             let cache = shared_cache.lock().await;
-            cache.get(endpoint_label).and_then(|records| records.get(name)).cloned()
+            cache
+                .get(endpoint_label)
+                .and_then(|records| records.get(name))
+                .cloned()
         };
 
         let collection = if let Some(dehydrated) = cached {
@@ -342,37 +377,24 @@ pub async fn get_or_create_collections_with_cache(
                         "Failed to rehydrate collection '{}' for '{}': {}",
                         name, endpoint_label, err
                     );
+                    prepared = prepared.saturating_sub(1);
                     let (collection, elapsed) =
                         get_or_create_collection_with_retry(client, name, max_retries).await?;
                     on_ddl_latency(name, elapsed);
-                    created += 1;
-                    if created % WARMUP_PROGRESS_INTERVAL == 0 || created == collection_names.len() {
-                        println!(
-                            "  [{}] Prepared {} / {} collections",
-                            progress_label,
-                            created,
-                            collection_names.len()
-                        );
-                    }
                     match collection.dehydrate().await {
                         Ok(dehydrated) => {
                             let _cache_guard = cache_lock.lock().await;
-                            if let Err(err) = append_collection_cache_record(
-                                cache_path,
-                                endpoint_label,
-                                name,
-                                &dehydrated,
-                            ) {
+                            let mut cache = shared_cache.lock().await;
+                            cache
+                                .entry(endpoint_label.to_string())
+                                .or_default()
+                                .insert(name.clone(), dehydrated);
+                            if let Err(err) = write_collection_cache_records(cache_path, &cache) {
                                 eprintln!(
-                                    "Warning: Failed to append collection cache {}: {}",
+                                    "Warning: Failed to rewrite collection cache {}: {}",
                                     cache_path.display(),
                                     err
                                 );
-                            } else {
-                                let mut cache = shared_cache.lock().await;
-                                cache.entry(endpoint_label.to_string())
-                                    .or_default()
-                                    .insert(name.clone(), dehydrated);
                             }
                         }
                         Err(err) => {
@@ -382,6 +404,7 @@ pub async fn get_or_create_collections_with_cache(
                             );
                         }
                     }
+                    prepared += 1;
                     collection
                 }
             }
@@ -389,21 +412,15 @@ pub async fn get_or_create_collections_with_cache(
             let (collection, elapsed) =
                 get_or_create_collection_with_retry(client, name, max_retries).await?;
             on_ddl_latency(name, elapsed);
-            created += 1;
-            if created % WARMUP_PROGRESS_INTERVAL == 0 || created == collection_names.len() {
-                println!(
-                    "  [{}] Prepared {} / {} collections",
-                    progress_label,
-                    created,
-                    collection_names.len()
-                );
-            }
             match collection.dehydrate().await {
                 Ok(dehydrated) => {
                     let _cache_guard = cache_lock.lock().await;
-                    if let Err(err) =
-                        append_collection_cache_record(cache_path, endpoint_label, name, &dehydrated)
-                    {
+                    if let Err(err) = append_collection_cache_record(
+                        cache_path,
+                        endpoint_label,
+                        name,
+                        &dehydrated,
+                    ) {
                         eprintln!(
                             "Warning: Failed to append collection cache {}: {}",
                             cache_path.display(),
@@ -411,7 +428,8 @@ pub async fn get_or_create_collections_with_cache(
                         );
                     } else {
                         let mut cache = shared_cache.lock().await;
-                        cache.entry(endpoint_label.to_string())
+                        cache
+                            .entry(endpoint_label.to_string())
                             .or_default()
                             .insert(name.clone(), dehydrated);
                     }
@@ -423,13 +441,44 @@ pub async fn get_or_create_collections_with_cache(
                     );
                 }
             }
+            prepared += 1;
             collection
         };
 
+        if should_log_collection_progress(prepared, total_collections) {
+            log_collection_progress(progress_label, prepared, total_collections);
+        }
         collections.push(collection);
     }
 
     Ok(collections)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cached_collection_count_only_matches_requested_endpoint_and_names() {
+        let cache = CollectionCache::from([
+            (
+                "us".to_string(),
+                HashMap::from([
+                    ("alpha".to_string(), serde_json::json!({"id": 1})),
+                    ("beta".to_string(), serde_json::json!({"id": 2})),
+                ]),
+            ),
+            (
+                "eu".to_string(),
+                HashMap::from([("alpha".to_string(), serde_json::json!({"id": 3}))]),
+            ),
+        ]);
+        let requested = vec!["alpha".to_string(), "gamma".to_string(), "beta".to_string()];
+
+        assert_eq!(cached_collection_count(&cache, "us", &requested), 2);
+        assert_eq!(cached_collection_count(&cache, "eu", &requested), 1);
+        assert_eq!(cached_collection_count(&cache, "missing", &requested), 0);
+    }
 }
 
 /// Creates collections on a client concurrently and logs warmup progress as they complete.
