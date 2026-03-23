@@ -26,8 +26,8 @@
 use biometrics::Counter;
 use chroma::bench::{
     boxed_collection_selector, collection_cache_file_path, prepare_dual_collections,
-    print_load_generator_header, run_load_generator, CommonLoadArgs, DualLoadEndpoints,
-    LoadMetricRefs,
+    print_load_generator_header, run_load_generator, start_load_metrics_emitter, CommonLoadArgs,
+    DualLoadEndpoints, LoadMetricRefs,
 };
 use clap::Parser;
 
@@ -114,32 +114,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Creating/getting collection on both endpoints...");
 
-    // Load the collections for both endpoints.
-    let collection_name = collection_name();
-    let collection_names = vec![collection_name.clone()];
-    let cache_path = cache_file_path();
-
-    let (collection_us, collection_eu) = prepare_dual_collections(
-        if args.local {
-            DualLoadEndpoints::LOCAL
-        } else {
-            DualLoadEndpoints::CLOUD
-        },
-        &cache_path,
-        &collection_names,
-        args.max_outstanding_ops,
-        ("US endpoint", "EU endpoint"),
-        &LOAD_POINTED_DDL_LATENCY_SENSOR,
-    )
-    .await?;
-    let collection_us = collection_us.into_iter().next().ok_or_else(|| {
-        std::io::Error::other("failed to load US pointed load generator collection")
-    })?;
-    let collection_eu = collection_eu.into_iter().next().ok_or_else(|| {
-        std::io::Error::other("failed to load EU pointed load generator collection")
-    })?;
-    println!("Collections ready. Starting load generation...\n");
-
     let metrics = LoadMetricRefs {
         upsert_attempts: &LOAD_POINTED_UPSERT_ATTEMPTS,
         upsert_success: &LOAD_POINTED_UPSERT_SUCCESS,
@@ -148,17 +122,52 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         upsert_latency: &LOAD_POINTED_UPSERT_LATENCY_SENSOR,
         success_latency: &LOAD_POINTED_SUCCESS_LATENCY_SENSOR,
     };
+    let metrics_emitter = start_load_metrics_emitter("load_generator_pointed.", &metrics);
 
-    run_load_generator(
-        &common_args,
-        "load_generator_pointed.",
-        metrics,
-        vec![collection_us.clone()],
-        vec![collection_eu.clone()],
-        |_task_id, _collection_count| boxed_collection_selector(|_num_collections, _rng| 0usize),
-        |_task_id, _collection_count| boxed_collection_selector(|_num_collections, _rng| 0usize),
-    )
-    .await?;
+    let result = async {
+        // Load the collections for both endpoints.
+        let collection_name = collection_name();
+        let collection_names = vec![collection_name.clone()];
+        let cache_path = cache_file_path();
+
+        let (collection_us, collection_eu) = prepare_dual_collections(
+            if args.local {
+                DualLoadEndpoints::LOCAL
+            } else {
+                DualLoadEndpoints::CLOUD
+            },
+            &cache_path,
+            &collection_names,
+            args.max_outstanding_ops,
+            ("US endpoint", "EU endpoint"),
+            &LOAD_POINTED_DDL_LATENCY_SENSOR,
+        )
+        .await?;
+        let collection_us = collection_us.into_iter().next().ok_or_else(|| {
+            std::io::Error::other("failed to load US pointed load generator collection")
+        })?;
+        let collection_eu = collection_eu.into_iter().next().ok_or_else(|| {
+            std::io::Error::other("failed to load EU pointed load generator collection")
+        })?;
+        println!("Collections ready. Starting load generation...\n");
+
+        run_load_generator(
+            &common_args,
+            metrics,
+            vec![collection_us.clone()],
+            vec![collection_eu.clone()],
+            |_task_id, _collection_count| {
+                boxed_collection_selector(|_num_collections, _rng| 0usize)
+            },
+            |_task_id, _collection_count| {
+                boxed_collection_selector(|_num_collections, _rng| 0usize)
+            },
+        )
+        .await
+    }
+    .await;
+    metrics_emitter.finish().await;
+    result?;
 
     Ok(())
 }

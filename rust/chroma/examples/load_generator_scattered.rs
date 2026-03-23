@@ -30,8 +30,8 @@ use guacamole::{Guacamole, Zipf};
 
 use chroma::bench::{
     boxed_collection_selector, collection_cache_file_path, prepare_dual_collections,
-    print_load_generator_header, run_load_generator, CommonLoadArgs, DualLoadEndpoints,
-    LoadMetricRefs,
+    print_load_generator_header, run_load_generator, start_load_metrics_emitter, CommonLoadArgs,
+    DualLoadEndpoints, LoadMetricRefs,
 };
 
 /// Load generator for Chroma that creates concurrent upsert operations.
@@ -124,29 +124,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.collections
     );
 
-    let collection_names: Vec<String> = (0..args.collections).map(collection_name).collect();
-    let cache_path = cache_file_path(args.collections);
-    let (collections_us, collections_eu) = prepare_dual_collections(
-        if args.local {
-            DualLoadEndpoints::LOCAL
-        } else {
-            DualLoadEndpoints::CLOUD
-        },
-        &cache_path,
-        &collection_names,
-        args.max_outstanding_ops,
-        ("US", "EU"),
-        &LOAD_SCATTERED_DDL_LATENCY_SENSOR,
-    )
-    .await?;
-    println!(
-        "  Ready {} US collections and {} EU collections",
-        collections_us.len(),
-        collections_eu.len()
-    );
-
-    println!("Collections ready. Starting load generation...\n");
-
     let metrics = LoadMetricRefs {
         upsert_attempts: &LOAD_SCATTERED_UPSERT_ATTEMPTS,
         upsert_success: &LOAD_SCATTERED_UPSERT_SUCCESS,
@@ -155,39 +132,67 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         upsert_latency: &LOAD_SCATTERED_UPSERT_LATENCY_SENSOR,
         success_latency: &LOAD_SCATTERED_SUCCESS_LATENCY_SENSOR,
     };
+    let metrics_emitter = start_load_metrics_emitter("load_generator_scattered.", &metrics);
 
-    run_load_generator(
-        &common_args,
-        "load_generator_scattered.",
-        metrics,
-        collections_us,
-        collections_eu,
-        |task_id, collection_count| {
-            let mut collection_rng = Guacamole::new(task_id as u64 * 1000);
-            let zipf = Zipf::from_param(collection_count as u64, 0.8);
-            let mut collection_idx = map(
-                move |guac| zipf.next(guac),
-                |value| (value as usize).saturating_sub(1),
-            );
-            boxed_collection_selector(move |num_collections, _rng| {
-                let _ = _rng;
-                collection_idx(&mut collection_rng) % num_collections
-            })
-        },
-        |task_id, collection_count| {
-            let mut collection_rng = Guacamole::new((task_id as u64 + 500) * 1000);
-            let zipf = Zipf::from_param(collection_count as u64, 0.8);
-            let mut collection_idx = map(
-                move |guac| zipf.next(guac),
-                |value| (value as usize).saturating_sub(1),
-            );
-            boxed_collection_selector(move |num_collections, _rng| {
-                let _ = _rng;
-                collection_idx(&mut collection_rng) % num_collections
-            })
-        },
-    )
-    .await?;
+    let result = async {
+        let collection_names: Vec<String> = (0..args.collections).map(collection_name).collect();
+        let cache_path = cache_file_path(args.collections);
+        let (collections_us, collections_eu) = prepare_dual_collections(
+            if args.local {
+                DualLoadEndpoints::LOCAL
+            } else {
+                DualLoadEndpoints::CLOUD
+            },
+            &cache_path,
+            &collection_names,
+            args.max_outstanding_ops,
+            ("US", "EU"),
+            &LOAD_SCATTERED_DDL_LATENCY_SENSOR,
+        )
+        .await?;
+        println!(
+            "  Ready {} US collections and {} EU collections",
+            collections_us.len(),
+            collections_eu.len()
+        );
+
+        println!("Collections ready. Starting load generation...\n");
+
+        run_load_generator(
+            &common_args,
+            metrics,
+            collections_us,
+            collections_eu,
+            |task_id, collection_count| {
+                let mut collection_rng = Guacamole::new(task_id as u64 * 1000);
+                let zipf = Zipf::from_param(collection_count as u64, 0.8);
+                let mut collection_idx = map(
+                    move |guac| zipf.next(guac),
+                    |value| (value as usize).saturating_sub(1),
+                );
+                boxed_collection_selector(move |num_collections, _rng| {
+                    let _ = _rng;
+                    collection_idx(&mut collection_rng) % num_collections
+                })
+            },
+            |task_id, collection_count| {
+                let mut collection_rng = Guacamole::new((task_id as u64 + 500) * 1000);
+                let zipf = Zipf::from_param(collection_count as u64, 0.8);
+                let mut collection_idx = map(
+                    move |guac| zipf.next(guac),
+                    |value| (value as usize).saturating_sub(1),
+                );
+                boxed_collection_selector(move |num_collections, _rng| {
+                    let _ = _rng;
+                    collection_idx(&mut collection_rng) % num_collections
+                })
+            },
+        )
+        .await
+    }
+    .await;
+    metrics_emitter.finish().await;
+    result?;
 
     Ok(())
 }

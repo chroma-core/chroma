@@ -748,6 +748,22 @@ pub struct LoadMetricRefs {
     pub success_latency: &'static biometrics::Histogram,
 }
 
+/// Handle for a running load-generator metrics emitter.
+pub struct LoadMetricsEmitter {
+    handle: tokio::task::JoinHandle<()>,
+    stop_tx: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
+impl LoadMetricsEmitter {
+    /// Stops the emitter and flushes one final sample batch.
+    pub async fn finish(mut self) {
+        if let Some(stop_tx) = self.stop_tx.take() {
+            let _ = stop_tx.send(());
+        }
+        let _ = self.handle.await;
+    }
+}
+
 /// Spawns the shared metrics emitter loop used by load generators.
 pub fn spawn_load_metrics_emitter(
     options: biometrics_prometheus::Options,
@@ -800,6 +816,30 @@ pub fn spawn_load_metrics_emitter(
     });
 
     (handle, stop_tx)
+}
+
+/// Starts metrics emission for a load generator before collection warmup begins.
+pub fn start_load_metrics_emitter(
+    metrics_prefix: &'static str,
+    metrics: &LoadMetricRefs,
+) -> LoadMetricsEmitter {
+    let (handle, stop_tx) = spawn_load_metrics_emitter(
+        biometrics_prometheus::Options {
+            segment_size: 64 * 1024 * 1024 * 1024,
+            flush_interval: Duration::from_secs(3600),
+            prefix: utf8path::Path::new(metrics_prefix),
+        },
+        metrics.upsert_attempts,
+        metrics.upsert_success,
+        metrics.upsert_failures,
+        metrics.ddl_latency,
+        metrics.upsert_latency,
+        metrics.success_latency,
+    );
+    LoadMetricsEmitter {
+        handle,
+        stop_tx: Some(stop_tx),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -989,7 +1029,6 @@ pub async fn run_dual_load_generator<UsSelectorFactory, EuSelectorFactory>(
     task_count: usize,
     batch_size: usize,
     max_outstanding_ops: usize,
-    metrics_prefix: &'static str,
     metrics: LoadMetricRefs,
     collections_us: Vec<ChromaCollection>,
     collections_eu: Vec<ChromaCollection>,
@@ -1014,20 +1053,6 @@ where
 
     let (ticket_tx, ticket_rx) = mpsc::channel::<()>(1024);
     let pacing_rx = Arc::new(Mutex::new(ticket_rx));
-
-    let (metrics_handle, stop_metrics) = spawn_load_metrics_emitter(
-        biometrics_prometheus::Options {
-            segment_size: 64 * 1024 * 1024 * 1024,
-            flush_interval: Duration::from_secs(3600),
-            prefix: utf8path::Path::new(metrics_prefix),
-        },
-        metrics.upsert_attempts,
-        metrics.upsert_success,
-        metrics.upsert_failures,
-        metrics.ddl_latency,
-        metrics.upsert_latency,
-        metrics.success_latency,
-    );
 
     let pacing_handle = spawn_pacing_task(start_time, duration, pace_qps.max(1), ticket_tx);
     let mut handles = Vec::with_capacity(task_count.saturating_mul(2));
@@ -1079,8 +1104,6 @@ where
         }
     }
 
-    let _ = stop_metrics.send(());
-    let _ = metrics_handle.await;
     report_handle.abort();
     pacing_handle.abort();
 
@@ -1100,7 +1123,6 @@ where
 #[allow(clippy::too_many_arguments)]
 pub async fn run_load_generator<UsSelectorFactory, EuSelectorFactory>(
     args: &CommonLoadArgs,
-    metrics_prefix: &'static str,
     metrics: LoadMetricRefs,
     collections_us: Vec<ChromaCollection>,
     collections_eu: Vec<ChromaCollection>,
@@ -1121,7 +1143,6 @@ where
         args.tasks,
         args.batch_size,
         args.max_outstanding_ops,
-        metrics_prefix,
         metrics,
         collections_us,
         collections_eu,
