@@ -1,0 +1,83 @@
+---
+title: "Overview"
+description: "Cloud-hosted embedding models."
+---
+
+Chroma Cloud hosts open source embedding models that users can use with their
+Chroma API key.
+
+These embedding functions can be accessed directly via [our API](/reference/embeddings-api/generate-dense-embeddings), or through
+embedding functions in our SDKs.
+
+## Usage
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://embed.trychroma.com/embed \
+  --header 'Content-Type: application/json' \
+  --header 'x-chroma-embedding-model: <x-chroma-embedding-model>' \
+  --header 'x-chroma-token: <x-chroma-token>' \
+  --data '
+{
+  "texts": [
+    "<string>"
+  ],
+  "instructions": null
+}
+'
+}
+'
+```
+
+```python Python
+from chromadb.utils.embedding_functions import (
+    ChromaCloudQwenEmbeddingFunction,
+    ChromaCloudQwenEmbeddingModel,
+)
+import os
+
+os.environ["CHROMA_API_KEY"] = "YOUR_API_KEY"
+
+qwen_ef = ChromaCloudQwenEmbeddingFunction(
+    model=ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B,
+    task="document"
+)
+
+embeddings = qwen_ef(["Hello, world!", "How are you?"])
+```
+
+```typescript TypeScript
+import {
+  ChromaCloudQwenEmbeddingFunction,
+  ChromaCloudQwenEmbeddingModel,
+} from "@chroma-core/chroma-cloud-qwen";
+
+const embedder = new ChromaCloudQwenEmbeddingFunction({
+  apiKeyEnvVar: "CHROMA_API_KEY",
+  model: ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B,
+  task: "document",
+});
+
+const embeddings = await embedder.generate(["document1", "document2"]);
+```
+
+</CodeGroup>
+
+
+
+## Pricing
+
+| Model   | Type   | Price (per request) |
+|---------|--------|---------------------|
+| [Qwen/Qwen3-Embedding-0.6B](/integrations/embedding-models/chroma-cloud-qwen) | dense  | $0.0045 |
+| [prithivida/Splade_PP_en_v1](/integrations/embedding-models/chroma-cloud-splade) | sparse | $0.0045 |
+
+Batches of documents can be sent in one request. Requests are priced the same regardless of batch size.
+
+## Limits
+
+| Quota           | Limit      |
+|-----------------|-----------|
+| Maximum batch size | 100    |
