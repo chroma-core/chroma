@@ -1002,6 +1002,19 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
         );
         stmt2.add_param("log_id", &self.log_id.to_string());
         stmt2.add_param("threshold", &(first_to_keep.offset() as i64));
+        let mut iter = tx.query(stmt2).await?;
+        let first_to_keep = if let Some(row) = iter.next().await? {
+            let mut min_position_start = row.column::<i64>(0)?;
+            if min_position_start < 0 {
+                min_position_start = 0;
+            }
+            LogPosition::from_offset(first_to_keep.offset().min(min_position_start as u64))
+        } else {
+            if max_log_position < 0 {
+                max_log_position = 0;
+            }
+            LogPosition::from_offset(first_to_keep.offset().min(max_log_position as u64))
+        };
         let mut stmt3 = Statement::new(
             "
             SELECT MIN(fragments.ident) AS min_ident
@@ -1017,19 +1030,6 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
         stmt3.add_param("log_id", &self.log_id.to_string());
         stmt3.add_param("threshold", &(first_to_keep.offset() as i64));
         stmt3.add_param("local_region", &self.local_region);
-        let mut iter = tx.query(stmt2).await?;
-        let first_to_keep = if let Some(row) = iter.next().await? {
-            let mut min_position_start = row.column::<i64>(0)?;
-            if min_position_start < 0 {
-                min_position_start = 0;
-            }
-            LogPosition::from_offset(first_to_keep.offset().min(min_position_start as u64))
-        } else {
-            if max_log_position < 0 {
-                max_log_position = 0;
-            }
-            LogPosition::from_offset(first_to_keep.offset().min(max_log_position as u64))
-        };
         let mut iter = tx.query(stmt3).await?;
         let min_remaining_uuid = if let Some(row) = iter.next().await? {
             let min_ident = row.column_by_name::<Option<String>>("min_ident")?;
@@ -2451,6 +2451,145 @@ mod tests {
 
         println!(
             "test_k8s_mcmr_integration_compute_garbage_rejects_invalid_fragment_ident: passed"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_compute_garbage_uses_adjusted_threshold_for_uuid_floor() {
+        let Some(client) = setup_spanner_client().await else {
+            panic!("Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let log_id = Uuid::new_v4();
+        ManifestManager::init(
+            vec!["dummy".to_string()],
+            &client,
+            log_id,
+            &make_empty_manifest(),
+        )
+        .await
+        .expect("init failed");
+
+        let manager = ManifestManager::new(Arc::new(client.clone()), "dummy".to_string(), log_id);
+        let log_id_str = log_id.to_string();
+        let dropped_ident = "00000000-0000-0000-0000-000000000080";
+        let retained_ident = "00000000-0000-0000-0000-000000000095";
+        let spanning_ident = "00000000-0000-0000-0000-000000000120";
+
+        client
+            .read_write_transaction(|tx| {
+                let log_id_str = log_id_str.clone();
+                let dropped_ident = dropped_ident.to_string();
+                let retained_ident = retained_ident.to_string();
+                let spanning_ident = spanning_ident.to_string();
+                let dropped_setsum = make_setsum(1).hexdigest();
+                let retained_setsum = Setsum::default().hexdigest();
+                let spanning_setsum = Setsum::default().hexdigest();
+                Box::pin(async move {
+                    tx.buffer_write(vec![
+                        insert(
+                            "fragments",
+                            &[
+                                "log_id",
+                                "ident",
+                                "path",
+                                "position_start",
+                                "position_limit",
+                                "num_bytes",
+                                "setsum",
+                            ],
+                            &[
+                                &log_id_str,
+                                &dropped_ident,
+                                &"fragments/dropped.parquet",
+                                &0i64,
+                                &80i64,
+                                &100i64,
+                                &dropped_setsum,
+                            ],
+                        ),
+                        insert(
+                            "fragment_regions",
+                            &["log_id", "ident", "region"],
+                            &[&log_id_str, &dropped_ident, &"dummy"],
+                        ),
+                        insert(
+                            "fragments",
+                            &[
+                                "log_id",
+                                "ident",
+                                "path",
+                                "position_start",
+                                "position_limit",
+                                "num_bytes",
+                                "setsum",
+                            ],
+                            &[
+                                &log_id_str,
+                                &retained_ident,
+                                &"fragments/retained.parquet",
+                                &80i64,
+                                &95i64,
+                                &100i64,
+                                &retained_setsum,
+                            ],
+                        ),
+                        insert(
+                            "fragment_regions",
+                            &["log_id", "ident", "region"],
+                            &[&log_id_str, &retained_ident, &"dummy"],
+                        ),
+                        insert(
+                            "fragments",
+                            &[
+                                "log_id",
+                                "ident",
+                                "path",
+                                "position_start",
+                                "position_limit",
+                                "num_bytes",
+                                "setsum",
+                            ],
+                            &[
+                                &log_id_str,
+                                &spanning_ident,
+                                &"fragments/spanning.parquet",
+                                &90i64,
+                                &120i64,
+                                &100i64,
+                                &spanning_setsum,
+                            ],
+                        ),
+                        insert(
+                            "fragment_regions",
+                            &["log_id", "ident", "region"],
+                            &[&log_id_str, &spanning_ident, &"dummy"],
+                        ),
+                    ]);
+                    Ok::<_, google_cloud_spanner::session::SessionError>(())
+                })
+            })
+            .await
+            .expect("failed to insert fragments");
+
+        let options = crate::GarbageCollectionOptions::default();
+        let garbage = manager
+            .compute_garbage(&options, LogPosition::from_offset(100))
+            .await
+            .expect("compute_garbage failed")
+            .expect("expected garbage");
+
+        assert_eq!(
+            garbage.first_to_keep,
+            LogPosition::from_offset(90),
+            "manifest coverage should lower first_to_keep to the start of the spanning fragment"
+        );
+        assert_eq!(
+            garbage.fragments_to_drop_uuid_limit,
+            Some(FragmentUuid::from_uuid(
+                Uuid::parse_str(retained_ident).expect("retained uuid should parse")
+            )),
+            "uuid floor must be computed using the adjusted first_to_keep threshold"
         );
     }
 
