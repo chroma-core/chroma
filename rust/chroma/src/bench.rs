@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use crate::client::ChromaHttpClientError;
 use crate::{ChromaCollection, ChromaHttpClient, ChromaHttpClientOptions};
 use biometrics::Sensor;
-use futures_util::future::join_all;
+use futures_util::stream::{FuturesUnordered, StreamExt};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
@@ -28,6 +28,7 @@ pub const NUM_CLUSTERS: usize = 1000;
 
 /// JSONL cache progress logging interval during collection bootstrap.
 const WARMUP_PROGRESS_INTERVAL: usize = 10;
+const LOAD_METRICS_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
 const US_ENDPOINT: &str = "https://api.devchroma.com:443";
 const EU_ENDPOINT: &str = "https://europe-west1.gcp.devchroma.com:443";
 const LOCAL_US_ENDPOINT: &str = "http://localhost:8000";
@@ -419,11 +420,11 @@ pub async fn get_or_create_collections_with_cache(
         progress_label,
         resumed,
         total_collections,
+        &mut on_ddl_latency,
     )
     .await?;
 
     for created in created {
-        on_ddl_latency(created.name.as_str(), created.elapsed);
         collections[created.index] = Some(created.collection);
     }
 
@@ -476,6 +477,7 @@ async fn create_collections_with_progress(
     progress_label: &'static str,
     initial_prepared: usize,
     total_collections: usize,
+    mut on_ddl_latency: impl FnMut(&str, Duration) + Send,
 ) -> Result<Vec<CreatedCollection>, ChromaHttpClientError> {
     if pending.is_empty() {
         return Ok(Vec::new());
@@ -495,7 +497,7 @@ async fn create_collections_with_progress(
         }
     });
 
-    let mut futures = Vec::with_capacity(pending.len());
+    let mut futures = FuturesUnordered::new();
     for pending_collection in pending {
         let limiter = Arc::clone(&limiter);
         let tx = progress_tx.clone();
@@ -573,12 +575,30 @@ async fn create_collections_with_progress(
     }
     drop(progress_tx);
 
-    let results: Vec<Result<CreatedCollection, ChromaHttpClientError>> = join_all(futures).await;
+    let mut created = Vec::new();
+    let mut first_error = None;
+    while let Some(result) = futures.next().await {
+        match result {
+            Ok(created_collection) => {
+                on_ddl_latency(created_collection.name.as_str(), created_collection.elapsed);
+                created.push(created_collection);
+            }
+            Err(err) => {
+                if first_error.is_none() {
+                    first_error = Some(err);
+                }
+            }
+        }
+    }
     progress_handle
         .await
         .expect("warmup progress reporter should not panic");
 
-    results.into_iter().collect()
+    if let Some(err) = first_error {
+        Err(err)
+    } else {
+        Ok(created)
+    }
 }
 
 /// Gaussian Mixture Model for generating realistic embeddings.
@@ -788,7 +808,7 @@ pub fn spawn_load_metrics_emitter(
 
     let handle = tokio::spawn(async move {
         let mut emitter = biometrics_prometheus::Emitter::new(options);
-        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        let mut interval = tokio::time::interval(LOAD_METRICS_FLUSH_INTERVAL);
         interval.tick().await;
         loop {
             tokio::select! {
@@ -825,8 +845,8 @@ pub fn start_load_metrics_emitter(
 ) -> LoadMetricsEmitter {
     let (handle, stop_tx) = spawn_load_metrics_emitter(
         biometrics_prometheus::Options {
-            segment_size: 64 * 1024 * 1024 * 1024,
-            flush_interval: Duration::from_secs(3600),
+            segment_size: 64 * 1024 * 1024,
+            flush_interval: LOAD_METRICS_FLUSH_INTERVAL,
             prefix: utf8path::Path::new(metrics_prefix),
         },
         metrics.upsert_attempts,
