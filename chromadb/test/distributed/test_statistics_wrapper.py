@@ -11,6 +11,7 @@ import pytest
 from chromadb.api.client import Client as ClientCreator
 from chromadb.base_types import SparseVector
 from chromadb.config import System
+from chromadb.test.conftest import skip_if_not_cluster
 from chromadb.test.utils.wait_for_version_increase import (
     get_collection_version,
     wait_for_version_increase,
@@ -21,6 +22,8 @@ from chromadb.utils.statistics import (
     get_statistics,
     get_statistics_fn_name,
 )
+
+pytestmark = [skip_if_not_cluster()]
 
 
 def test_statistics_wrapper(basic_http_client: System) -> None:

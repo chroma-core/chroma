@@ -14,11 +14,14 @@ from chromadb.api.functions import (
 )
 from chromadb.config import System
 from chromadb.errors import ChromaError, NotFoundError
+from chromadb.test.conftest import skip_if_not_cluster
 from chromadb.test.utils.wait_for_version_increase import (
     get_collection_version,
     wait_for_version_increase,
 )
 from time import sleep
+
+pytestmark = [skip_if_not_cluster()]
 
 
 def test_count_function_attach_and_detach(basic_http_client: System) -> None:
