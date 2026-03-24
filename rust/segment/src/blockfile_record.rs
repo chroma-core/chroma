@@ -662,8 +662,8 @@ impl RecordSegmentWriter {
 
         let serialized_bloom_filter = match (self.bloom_filter.take(), &self.bloom_filter_manager) {
             (Some(bf), Some(manager)) => {
-                Some(manager.commit(bf, &self.prefix_path).await.map_err(|_| {
-                    Box::new(ApplyMaterializedLogError::BloomFilterSerializationError)
+                Some(manager.commit(bf, &self.prefix_path).await.map_err(|e| {
+                    Box::new(ApplyMaterializedLogError::BloomFilterSerializationError(e))
                         as Box<dyn ChromaError>
                 })?)
             }
@@ -706,8 +706,8 @@ pub enum ApplyMaterializedLogError {
     Materialization(#[from] LogMaterializerError),
     #[error("Error applying materialized records to spann segment: {0}")]
     SpannSegmentError(#[from] SpannSegmentWriterError),
-    #[error("Bloom filter serialization failed during commit")]
-    BloomFilterSerializationError,
+    #[error("Bloom filter serialization failed during commit: {0}")]
+    BloomFilterSerializationError(BloomFilterError),
     #[cfg(feature = "usearch")]
     #[error(transparent)]
     QuantizedSpannSegmentError(#[from] crate::quantized_spann::QuantizedSpannSegmentError),
@@ -725,7 +725,7 @@ impl ChromaError for ApplyMaterializedLogError {
             ApplyMaterializedLogError::HnswIndex(_) => ErrorCodes::Internal,
             ApplyMaterializedLogError::Materialization(e) => e.code(),
             ApplyMaterializedLogError::SpannSegmentError(e) => e.code(),
-            ApplyMaterializedLogError::BloomFilterSerializationError => ErrorCodes::Internal,
+            ApplyMaterializedLogError::BloomFilterSerializationError(e) => e.code(),
             #[cfg(feature = "usearch")]
             ApplyMaterializedLogError::QuantizedSpannSegmentError(e) => e.code(),
         }
@@ -822,19 +822,14 @@ impl RecordSegmentFlusher {
             }
         }
 
-        // Write serialized bloom filter to its pre-determined storage path.
-        // Failures are non-fatal — the bloom filter will be rebuilt on the next compaction cycle.
         if let Some(serialized_bloom_filter) = &self.serialized_bloom_filter {
             let bloom_filter_path = serialized_bloom_filter.path().to_string();
-            match serialized_bloom_filter.save().await {
-                Ok(()) => {
-                    tracing::info!(path = %bloom_filter_path, "Persisted bloom filter to storage");
-                    flushed_files.insert(USER_ID_BLOOM_FILTER.to_string(), vec![bloom_filter_path]);
-                }
-                Err(e) => {
-                    tracing::warn!(error = ?e, "Failed to persist bloom filter, skipping");
-                }
-            }
+            serialized_bloom_filter
+                .save()
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+            tracing::info!(path = %bloom_filter_path, "Persisted bloom filter to storage");
+            flushed_files.insert(USER_ID_BLOOM_FILTER.to_string(), vec![bloom_filter_path]);
         }
 
         Ok(flushed_files)
@@ -1020,7 +1015,9 @@ impl RecordSegmentReader<'_> {
 
     /// Lazily loads the bloom filter using the two-tier heuristic.
     /// Called internally when a plan requests bloom filter usage.
-    async fn ensure_bloom_filter(&self) {
+    /// Fetch the bloom filter from storage (via the manager cache) and populate
+    /// the local `OnceCell`. Only call when a storage fetch is acceptable.
+    async fn fetch_bloom_filter(&self) {
         self.bloom_filter
             .get_or_init(|| async {
                 let (manager, path) = match (&self.bloom_filter_manager, &self.bloom_filter_path) {
@@ -1032,17 +1029,35 @@ impl RecordSegmentReader<'_> {
             .await;
     }
 
+    /// Try to populate the local `OnceCell` from the manager's in-memory cache
+    /// without triggering a storage fetch. Returns quickly if already loaded or
+    /// if the bloom filter isn't cached.
+    async fn try_load_bloom_filter_from_cache(&self) {
+        if self.bloom_filter.get().is_some() {
+            return;
+        }
+        let (manager, path) = match (&self.bloom_filter_manager, &self.bloom_filter_path) {
+            (Some(mgr), Some(p)) => (mgr, p.as_str()),
+            _ => return,
+        };
+        if let Some(bf) = manager.get_if_cached(path).await {
+            let _ = self.bloom_filter.set(Some(bf));
+        }
+    }
+
     pub async fn get_offset_id_for_user_id(
         &self,
         user_id: &str,
         plan: &RecordSegmentReaderOptions,
     ) -> Result<Option<u32>, Box<dyn ChromaError>> {
         if plan.use_bloom_filter {
-            self.ensure_bloom_filter().await;
-            if let Some(Some(bf)) = self.bloom_filter.get() {
-                if !bf.contains(user_id) {
-                    return Ok(None);
-                }
+            self.fetch_bloom_filter().await;
+        } else {
+            self.try_load_bloom_filter_from_cache().await;
+        }
+        if let Some(Some(bf)) = self.bloom_filter.get() {
+            if !bf.contains(user_id) {
+                return Ok(None);
             }
         }
         self.user_id_to_id.get("", user_id).await
@@ -1141,7 +1156,9 @@ impl RecordSegmentReader<'_> {
     ) {
         // Lazy load the bloom filter if it is needed.
         if plan.use_bloom_filter {
-            self.ensure_bloom_filter().await;
+            self.fetch_bloom_filter().await;
+        } else {
+            self.try_load_bloom_filter_from_cache().await;
         }
 
         let filtered: Vec<&str> = if let Some(Some(bf)) = self.bloom_filter.get() {
