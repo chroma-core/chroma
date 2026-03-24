@@ -7,13 +7,14 @@
 //!
 //! - Dual endpoint support (api.trychroma.com and europe-west1.gcp.devchroma.com)
 //! - Configurable number of collections, tasks, batch size, and duration
-//! - Random collection selection within each task to avoid concurrency hotspots
+//! - Uniform collection selection by default, with optional Zipf skew via `--zipf`
 //! - Gaussian Mixture Model (GMM) for realistic embedding generation
 //!
 //! # Usage
 //!
 //! ```bash
 //! cargo run --example load_generator_scattered -- --collections 10 --duration 600 --tasks 4 --batch-size 100
+//! cargo run --example load_generator_scattered -- --collections 10 --zipf 0.8
 //! ```
 //!
 //! # Environment Variables
@@ -25,13 +26,12 @@
 
 use biometrics::Counter;
 use clap::Parser;
-use guacamole::combinators::map;
-use guacamole::{Guacamole, Zipf};
+use guacamole::{FromGuacamole, Guacamole, Zipf};
 
 use chroma::bench::{
     boxed_collection_selector, collection_cache_file_path, prepare_dual_collections,
-    print_load_generator_header, run_load_generator, start_load_metrics_emitter, CommonLoadArgs,
-    DualLoadEndpoints, LoadMetricRefs,
+    print_load_generator_header, run_load_generator, start_load_metrics_emitter,
+    CollectionSelector, CommonLoadArgs, DualLoadEndpoints, LoadMetricRefs,
 };
 
 /// Load generator for Chroma that creates concurrent upsert operations.
@@ -63,9 +63,39 @@ struct Args {
     #[arg(long, default_value_t = 10)]
     max_outstanding_ops: usize,
 
+    /// Zipf skew for collection selection over `(0, 1)`. Omit for uniform selection.
+    #[arg(long, value_name = "SKEW", value_parser = parse_zipf_param)]
+    zipf: Option<f64>,
+
     /// Target local backends on ports 8000 and 8001 instead of cloud endpoints.
     #[arg(long, default_value_t = false)]
     local: bool,
+}
+
+fn parse_zipf_param(value: &str) -> Result<f64, String> {
+    let skew: f64 = value
+        .parse()
+        .map_err(|err| format!("invalid Zipf skew {value:?}: {err}"))?;
+    if (0.0..1.0).contains(&skew) {
+        Ok(skew)
+    } else {
+        Err("Zipf skew must be between 0 and 1 (exclusive)".to_string())
+    }
+}
+
+fn build_collection_selector(task_seed: u64, zipf: Option<Zipf>) -> Box<dyn CollectionSelector> {
+    if let Some(zipf) = zipf {
+        let mut collection_rng = Guacamole::new(task_seed);
+        boxed_collection_selector(move |num_collections, _rng| {
+            let idx = zipf.next(&mut collection_rng) as usize;
+            idx.saturating_sub(1) % num_collections
+        })
+    } else {
+        let mut collection_rng = Guacamole::new(task_seed);
+        boxed_collection_selector(move |num_collections, _rng| {
+            usize::from_guacamole(&mut (), &mut collection_rng) % num_collections
+        })
+    }
 }
 
 /// Generates a deterministic collection name from the index.
@@ -109,6 +139,7 @@ static LOAD_SCATTERED_DDL_LATENCY_SENSOR: biometrics::Histogram = biometrics::Hi
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
+    let zipf = args.zipf;
     let common_args = CommonLoadArgs {
         duration_secs: args.duration,
         tasks: args.tasks,
@@ -118,6 +149,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     print_load_generator_header(&format!("Collections: {}", args.collections), &common_args);
+    match zipf {
+        Some(skew) => println!("Collection selection: Zipf skew {skew}"),
+        None => println!("Collection selection: uniform"),
+    }
+    println!();
 
     println!(
         "Creating/getting {} collections on both endpoints...",
@@ -155,6 +191,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             collections_us.len(),
             collections_eu.len()
         );
+        let zipf = zipf.map(|skew| Zipf::from_param(collections_us.len() as u64, skew));
 
         println!("Collections ready. Starting load generation...\n");
 
@@ -163,29 +200,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             metrics,
             collections_us,
             collections_eu,
-            |task_id, collection_count| {
-                let mut collection_rng = Guacamole::new(task_id as u64 * 1000);
-                let zipf = Zipf::from_param(collection_count as u64, 0.8);
-                let mut collection_idx = map(
-                    move |guac| zipf.next(guac),
-                    |value| (value as usize).saturating_sub(1),
-                );
-                boxed_collection_selector(move |num_collections, _rng| {
-                    let _ = _rng;
-                    collection_idx(&mut collection_rng) % num_collections
-                })
+            |task_id, _collection_count| {
+                build_collection_selector(task_id as u64 * 1000, zipf.clone())
             },
-            |task_id, collection_count| {
-                let mut collection_rng = Guacamole::new((task_id as u64 + 500) * 1000);
-                let zipf = Zipf::from_param(collection_count as u64, 0.8);
-                let mut collection_idx = map(
-                    move |guac| zipf.next(guac),
-                    |value| (value as usize).saturating_sub(1),
-                );
-                boxed_collection_selector(move |num_collections, _rng| {
-                    let _ = _rng;
-                    collection_idx(&mut collection_rng) % num_collections
-                })
+            |task_id, _collection_count| {
+                build_collection_selector((task_id as u64 + 500) * 1000, zipf.clone())
             },
         )
         .await

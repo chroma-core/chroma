@@ -35,13 +35,19 @@ const LOCAL_US_ENDPOINT: &str = "http://localhost:8000";
 const LOCAL_EU_ENDPOINT: &str = "http://localhost:8001";
 const MAX_COLLECTION_RETRIES: u32 = 3;
 type CollectionCache = HashMap<String, HashMap<String, serde_json::Value>>;
-static COLLECTION_CACHE_LOCKS: LazyLock<StdMutex<HashMap<PathBuf, Arc<Mutex<()>>>>> =
+type CollectionLock = Arc<Mutex<()>>;
+type CollectionCacheState = Arc<Mutex<CollectionCache>>;
+type CollectionEntryKey = (PathBuf, String, String);
+type CollectionCacheLocks = HashMap<PathBuf, CollectionLock>;
+type CollectionCacheStates = HashMap<PathBuf, CollectionCacheState>;
+type CollectionEntryLocks = HashMap<CollectionEntryKey, CollectionLock>;
+
+static COLLECTION_CACHE_LOCKS: LazyLock<StdMutex<CollectionCacheLocks>> =
     LazyLock::new(|| StdMutex::new(HashMap::new()));
-static COLLECTION_CACHE_STATES: LazyLock<StdMutex<HashMap<PathBuf, Arc<Mutex<CollectionCache>>>>> =
+static COLLECTION_CACHE_STATES: LazyLock<StdMutex<CollectionCacheStates>> =
     LazyLock::new(|| StdMutex::new(HashMap::new()));
-static COLLECTION_ENTRY_LOCKS: LazyLock<
-    StdMutex<HashMap<(PathBuf, String, String), Arc<Mutex<()>>>>,
-> = LazyLock::new(|| StdMutex::new(HashMap::new()));
+static COLLECTION_ENTRY_LOCKS: LazyLock<StdMutex<CollectionEntryLocks>> =
+    LazyLock::new(|| StdMutex::new(HashMap::new()));
 
 /// Shared CLI-style configuration used by example load generators.
 pub struct CommonLoadArgs {
@@ -235,6 +241,19 @@ struct PendingCollectionCreate {
     rewrite_cache: bool,
 }
 
+struct CollectionCreateContext<'a> {
+    client: &'a ChromaHttpClient,
+    endpoint_label: &'a str,
+    cache_path: &'a Path,
+    cache_lock: CollectionLock,
+    shared_cache: CollectionCacheState,
+    max_outstanding_ops: usize,
+    max_retries: u32,
+    progress_label: &'static str,
+    initial_prepared: usize,
+    total_collections: usize,
+}
+
 struct CreatedCollection {
     index: usize,
     name: String,
@@ -409,17 +428,19 @@ pub async fn get_or_create_collections_with_cache(
     }
 
     let created = create_collections_with_progress(
-        client,
-        endpoint_label,
-        cache_path,
-        Arc::clone(&cache_lock),
-        Arc::clone(&shared_cache),
+        CollectionCreateContext {
+            client,
+            endpoint_label,
+            cache_path,
+            cache_lock: Arc::clone(&cache_lock),
+            shared_cache: Arc::clone(&shared_cache),
+            max_outstanding_ops,
+            max_retries,
+            progress_label,
+            initial_prepared: resumed,
+            total_collections,
+        },
         pending,
-        max_outstanding_ops,
-        max_retries,
-        progress_label,
-        resumed,
-        total_collections,
         &mut on_ddl_latency,
     )
     .await?;
@@ -466,22 +487,26 @@ mod tests {
 
 /// Creates collections on a client concurrently and logs warmup progress as they complete.
 async fn create_collections_with_progress(
-    client: &ChromaHttpClient,
-    endpoint_label: &str,
-    cache_path: &Path,
-    cache_lock: Arc<Mutex<()>>,
-    shared_cache: Arc<Mutex<CollectionCache>>,
+    ctx: CollectionCreateContext<'_>,
     pending: Vec<PendingCollectionCreate>,
-    max_outstanding_ops: usize,
-    max_retries: u32,
-    progress_label: &'static str,
-    initial_prepared: usize,
-    total_collections: usize,
     mut on_ddl_latency: impl FnMut(&str, Duration) + Send,
 ) -> Result<Vec<CreatedCollection>, ChromaHttpClientError> {
     if pending.is_empty() {
         return Ok(Vec::new());
     }
+
+    let CollectionCreateContext {
+        client,
+        endpoint_label,
+        cache_path,
+        cache_lock,
+        shared_cache,
+        max_outstanding_ops,
+        max_retries,
+        progress_label,
+        initial_prepared,
+        total_collections,
+    } = ctx;
 
     let limiter = Arc::new(tokio::sync::Semaphore::new(max_outstanding_ops.max(1)));
     let (progress_tx, mut progress_rx) = mpsc::channel::<()>(max_outstanding_ops.max(1));

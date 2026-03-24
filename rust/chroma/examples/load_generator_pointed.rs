@@ -7,7 +7,7 @@
 //!
 //! - Dual endpoint support (api.trychroma.com and europe-west1.gcp.devchroma.com)
 //! - Configurable number of collections, tasks, batch size, and duration
-//! - Random collection selection within each task to avoid concurrency hotspots
+//! - Single shared collection target for hotspot-oriented load
 //! - Gaussian Mixture Model (GMM) for realistic embedding generation
 //!
 //! # Usage
@@ -56,9 +56,24 @@ struct Args {
     #[arg(long, default_value_t = 10)]
     max_outstanding_ops: usize,
 
+    /// Zipf skew for collection selection over `(0, 1)`. Ignored by this single-collection load.
+    #[arg(long, value_name = "SKEW", value_parser = parse_zipf_param)]
+    zipf: Option<f64>,
+
     /// Target local backends on ports 8000 and 8001 instead of cloud endpoints.
     #[arg(long, default_value_t = false)]
     local: bool,
+}
+
+fn parse_zipf_param(value: &str) -> Result<f64, String> {
+    let skew: f64 = value
+        .parse()
+        .map_err(|err| format!("invalid Zipf skew {value:?}: {err}"))?;
+    if (0.0..1.0).contains(&skew) {
+        Ok(skew)
+    } else {
+        Err("Zipf skew must be between 0 and 1 (exclusive)".to_string())
+    }
 }
 
 /// Generates a deterministic collection name from the index.
@@ -111,6 +126,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     print_load_generator_header(&format!("Collection: {}", collection_name()), &common_args);
+    if let Some(skew) = args.zipf {
+        println!(
+            "Collection selection: Zipf skew {skew} requested, but this load targets one collection"
+        );
+        println!();
+    }
 
     println!("Creating/getting collection on both endpoints...");
 
