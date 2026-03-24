@@ -100,7 +100,9 @@ export class ChromaCloudSpladeEmbeddingFunction
     this.model = model;
     this.apiKeyEnvVar = apiKeyEnvVar;
 
-    this.url = "https://embed.trychroma.com/embed_sparse";
+    const baseUrl =
+      process.env.CHROMA_EMBED_URL_BASE || "https://embed.trychroma.com";
+    this.url = `${baseUrl}/embed_sparse`;
     this.headers = {
       "x-chroma-token": apiKey ?? "",
       "x-chroma-embedding-model": model,
