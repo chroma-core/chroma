@@ -187,8 +187,12 @@ fn run_repro(seed: u64) {
                 handle.await.expect("worker should complete");
             }
 
-            let flusher = writer.commit().await.expect("commit should succeed");
-            let ids = flusher.flush().await.expect("flush should succeed");
+            let flusher = Box::pin(writer.commit())
+                .await
+                .expect("commit should succeed");
+            let ids = Box::pin(flusher.flush())
+                .await
+                .expect("flush should succeed");
             hnsw_id = Some(ids.hnsw_id);
             versions_map_id = Some(ids.versions_map_id);
             posting_list_id = Some(ids.pl_id);
@@ -197,7 +201,7 @@ fn run_repro(seed: u64) {
 
         let blockfile_provider = new_blockfile_provider(storage.clone());
         let hnsw_provider = new_hnsw_provider(storage, storage_root.path(), use_direct_hnsw);
-        let _reader = SpannIndexReader::from_id(
+        let _reader = Box::pin(SpannIndexReader::from_id(
             hnsw_id.as_ref(),
             &hnsw_provider,
             &collection_id,
@@ -210,7 +214,7 @@ fn run_repro(seed: u64) {
             prefix_path,
             true,
             params,
-        )
+        ))
         .await
         .expect("final reader open should reach the HNSW load");
     });
