@@ -2076,7 +2076,7 @@ impl LogServer {
         for record in push_logs.records {
             let mut buf = vec![];
             record.encode(&mut buf).map_err(|err| {
-                tracing::error!(err = %err, "proto decode failure");
+                tracing::error!(err = %err, "proto encode failure");
                 Status::unknown(err.to_string())
             })?;
             messages.push(buf);
