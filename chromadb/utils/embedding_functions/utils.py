@@ -7,6 +7,7 @@ DEFAULT_CHROMA_EMBED_URL = "https://embed.trychroma.com"
 
 
 def get_chroma_embed_url() -> str:
+    """Return embed base URL from CHROMA_EMBED_URL or default without trailing slash."""
     return (os.environ.get("CHROMA_EMBED_URL") or DEFAULT_CHROMA_EMBED_URL).rstrip("/")
 
 if TYPE_CHECKING:
