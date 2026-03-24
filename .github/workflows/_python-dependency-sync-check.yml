@@ -14,4 +14,4 @@ jobs:
         with:
           python-version: '3.11'
       - name: Check dependency sync
-        run: python3 bin/check-dependency-sync.py build
+        run: python3 bin/check-dependency-sync.py
