@@ -92,15 +92,15 @@ impl Operator<TruncateDirtyLogInput, TruncateDirtyLogOutput> for TruncateDirtyLo
         try_join_all(dirty_log_writers.into_iter().map(|(writer, index)| {
             let mut logs = self.logs.clone();
             async move {
-                match writer
+                let gc_state = match writer
                     .garbage_collect_phase1_compute_garbage(
                         &GarbageCollectionOptions::default(),
                         None,
                     )
                     .await
                 {
-                    Ok(true) => {}
-                    Ok(false) => return Ok(()),
+                    Ok(Some(state)) => state,
+                    Ok(None) => return Ok(()),
                     Err(wal3::Error::NoSuchCursor(_)) => {
                         tracing::warn!(
                             "dirty log has no cursor; this should not happen in steady state"
@@ -116,7 +116,10 @@ impl Operator<TruncateDirtyLogInput, TruncateDirtyLogOutput> for TruncateDirtyLo
                     .await
                     .map_err(TruncateDirtyLogError::Gc)?;
                 match writer
-                    .garbage_collect_phase3_delete_garbage(&GarbageCollectionOptions::default())
+                    .garbage_collect_phase3_delete_garbage(
+                        &GarbageCollectionOptions::default(),
+                        &gc_state,
+                    )
                     .await
                 {
                     Ok(()) => Ok(()),

@@ -813,7 +813,7 @@ mod tests {
                 "Waiting for new version to be created..."
             );
 
-            tokio::time::sleep(Duration::from_secs(2)).await;
+            tokio::time::sleep(Duration::from_secs(5)).await;
 
             let versions = clients
                 .list_collection_versions(

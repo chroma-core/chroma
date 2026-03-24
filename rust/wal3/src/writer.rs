@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use arrow::array::{ArrayRef, BinaryArray, RecordBatch, UInt64Array};
-use chroma_storage::StorageError;
+use chroma_storage::{GetOptions, StorageError};
 use chroma_types::Cmek;
 use opentelemetry::trace::TraceContextExt;
 use parquet::arrow::ArrowWriter;
@@ -21,9 +21,10 @@ use crate::interfaces::{
     ManifestPublisher,
 };
 use crate::{
-    BatchManager, CursorStore, CursorStoreOptions, Error, ExponentialBackoff, Fragment,
-    FragmentSeqNo, Garbage, GarbageCollectionOptions, LogPosition, LogReader, LogReaderOptions,
-    LogWriterOptions, Manifest, ManifestAndWitness, ManifestManager,
+    parse_fragment_path, BatchManager, CursorStore, CursorStoreOptions, Error, ExponentialBackoff,
+    Fragment, FragmentSeqNo, FragmentUuid, Garbage, GarbageCollectionOptions,
+    GarbageCollectionState, LogPosition, LogReader, LogReaderOptions, LogWriterOptions, Manifest,
+    ManifestAndWitness, ManifestManager,
 };
 
 /// The epoch writer is a counting writer.  Every epoch exists.  An epoch goes
@@ -289,7 +290,7 @@ impl<
         &self,
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,
-    ) -> Result<bool, Error> {
+    ) -> Result<Option<GarbageCollectionState>, Error> {
         let once_log_garbage_collect =
             move |log: &Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>| {
                 let options = options.clone();
@@ -320,12 +321,18 @@ impl<
     pub async fn garbage_collect_phase3_delete_garbage(
         &self,
         options: &GarbageCollectionOptions,
+        gc_state: &GarbageCollectionState,
     ) -> Result<(), Error> {
+        let gc_state = gc_state.clone();
         let once_log_garbage_collect =
             move |log: &Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>| {
                 let options = options.clone();
+                let gc_state = gc_state.clone();
                 let log = Arc::clone(log);
-                async move { log.garbage_collect_phase3_delete_garbage(&options).await }
+                async move {
+                    log.garbage_collect_phase3_delete_garbage(&options, &gc_state)
+                        .await
+                }
             };
         self.handle_errors_and_contention(once_log_garbage_collect)
             .await
@@ -727,14 +734,18 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
     /// - gc/GARBAGE exists as a non-empty file.
     /// - snapshots created by gc/GARBAGE get created.
     ///
-    /// Returns Ok(false) if there is no garbage to act upon (e.g., it's already been collected).
-    /// Returns Ok(true) if there is garbage to act upon.
+    /// Returns the GarbageCollectionState token that must be passed to phase 3.
+    /// The state carries the set of affirmatively collected UUID fragments so that phase 3 can
+    /// delete them unconditionally, while applying a grace period to unlisted orphans.
+    ///
+    /// Returns Ok(None) if there is no garbage to act upon.
+    /// Returns Ok(Some(state)) if there is garbage to act upon.
     #[tracing::instrument(skip(self, options))]
     pub(crate) async fn garbage_collect_phase1_compute_garbage(
         &self,
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,
-    ) -> Result<bool, Error> {
+    ) -> Result<Option<GarbageCollectionState>, Error> {
         let cutoff = self.garbage_collection_cutoff().await?;
         let cutoff = if let Some(keep_at_least) = keep_at_least {
             keep_at_least.min(cutoff)
@@ -780,7 +791,10 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
             };
             let e_tag = if let Some((garbage, e_tag)) = garbage_and_e_tag {
                 if !garbage.is_empty() {
-                    return Ok(true);
+                    let maw = self.manifest_manager.manifest_and_witness().await?;
+                    let state =
+                        GarbageCollectionState::from_manifest_and_garbage(&maw.manifest, &garbage);
+                    return Ok(Some(state));
                 }
                 e_tag
             } else {
@@ -791,8 +805,10 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                 .compute_garbage(options, cutoff)
                 .await?;
             let Some(garbage) = garbage else {
-                return Ok(false);
+                return Ok(None);
             };
+            let maw = self.manifest_manager.manifest_and_witness().await?;
+            let state = GarbageCollectionState::from_manifest_and_garbage(&maw.manifest, &garbage);
             match garbage
                 .install(
                     &self.manifest_manager,
@@ -802,7 +818,7 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                 )
                 .await
             {
-                Ok(_) => return Ok(true),
+                Ok(_) => return Ok(Some(state)),
                 Err(Error::LogContentionFailure)
                 | Err(Error::LogContentionRetry)
                 | Err(Error::LogContentionDurable) => {}
@@ -853,11 +869,37 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
     ///
     /// Post-condition:
     /// - gc/GARBAGE and the files it references get deleted.
-    #[tracing::instrument(skip(self, options))]
+    #[tracing::instrument(skip(self, options, gc_state))]
     pub(crate) async fn garbage_collect_phase3_delete_garbage(
         &self,
         options: &GarbageCollectionOptions,
+        gc_state: &GarbageCollectionState,
     ) -> Result<(), Error> {
+        async fn delete_paths_in_batches<I, F, Fut>(
+            paths: I,
+            batch_size: usize,
+            exp_backoff: ExponentialBackoff,
+            delete_batch: F,
+        ) -> Result<(), Error>
+        where
+            I: IntoIterator<Item = String>,
+            F: Fn(Vec<String>, ExponentialBackoff) -> Fut,
+            Fut: Future<Output = Result<(), Error>>,
+        {
+            let mut batch = vec![];
+            for path in paths {
+                batch.push(path);
+                if batch.len() >= batch_size {
+                    let batch = std::mem::take(&mut batch);
+                    delete_batch(batch, exp_backoff.clone()).await?;
+                }
+            }
+            if !batch.is_empty() {
+                delete_batch(batch, exp_backoff).await?;
+            }
+            Ok(())
+        }
+
         let exp_backoff: ExponentialBackoff = options.throttle.into();
         let start = Instant::now();
         let (garbage, e_tag) =
@@ -873,7 +915,6 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                 "loaded garbage without e_tag".to_string(),
             ));
         };
-        let mut batch = vec![];
         let storage = self.batch_manager.preferred_storage().await;
         let delete_batch = |batch: Vec<String>, exp_backoff: ExponentialBackoff| {
             let storage = storage.clone();
@@ -912,15 +953,63 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
             }
         };
         let prefix = self.batch_manager.preferred_prefix().await;
-        for path in garbage.prefixed_paths_to_delete(&prefix) {
-            batch.push(path);
-            if batch.len() >= 100 {
-                let batch = std::mem::take(&mut batch);
-                delete_batch(batch, exp_backoff.clone()).await?;
+        delete_paths_in_batches(
+            garbage.prefixed_paths_to_delete(&prefix),
+            100,
+            exp_backoff.clone(),
+            &delete_batch,
+        )
+        .await?;
+        if garbage.fragments_are_uuids {
+            if let Some(limit_uuid) = garbage.fragments_to_drop_uuid_limit {
+                let collected_uuids = gc_state.collected_uuids();
+                // The grace period protects fragments uploaded to storage but not yet linked
+                // into the manifest.  Fragments affirmatively collected in phase 1 (present
+                // in collected_uuids) are deleted unconditionally.  All other unlisted
+                // fragments older than the grace period are treated as orphans and deleted.
+                let grace_period = Duration::from_secs(options.uuid_grace_period_secs);
+                let grace_cutoff = FragmentUuid::cutoff_for_grace_period(grace_period);
+                let fragment_root = format!("{}/log/", prefix);
+                let possible_fragments = storage
+                    .list_prefix(&fragment_root, GetOptions::default())
+                    .await
+                    .map_err(Arc::new)?;
+                tracing::info!(num_fragments = %possible_fragments.len(), "deleting possible paths");
+                let candidate_paths = possible_fragments.into_iter().filter_map(|full_path| {
+                    let unprefixed_path = match full_path.strip_prefix(&prefix) {
+                        Some(unprefixed_path) => unprefixed_path,
+                        None => {
+                            return Some(Err(Error::GarbageCollection(format!(
+                                "got a fragment I don't trust: {full_path}"
+                            ))));
+                        }
+                    };
+                    let candidate = unprefixed_path.trim_start_matches('/');
+                    let fragment_id = match parse_fragment_path(candidate) {
+                        Some(fragment_id) => fragment_id,
+                        None => return None,
+                    };
+                    let uuid = match fragment_id.as_uuid() {
+                        Some(uuid) => uuid,
+                        None => return None,
+                    };
+                    let dominated_by_limit = uuid < limit_uuid;
+                    let affirmatively_collected = collected_uuids.contains(&uuid);
+                    let old_orphan = !affirmatively_collected && uuid < grace_cutoff;
+                    if dominated_by_limit && (affirmatively_collected || old_orphan) {
+                        Some(Ok(full_path))
+                    } else {
+                        None
+                    }
+                });
+                delete_paths_in_batches(
+                    candidate_paths.collect::<Result<Vec<_>, _>>()?,
+                    100,
+                    exp_backoff.clone(),
+                    &delete_batch,
+                )
+                .await?;
             }
-        }
-        if !batch.is_empty() {
-            delete_batch(batch, exp_backoff.clone()).await?;
         }
         self.batch_manager
             .reset_garbage(&self.options.throttle_manifest, e_tag)
@@ -934,10 +1023,13 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,
     ) -> Result<(), Error> {
-        self.garbage_collect_phase1_compute_garbage(options, keep_at_least)
-            .await?;
+        let gc_state = self
+            .garbage_collect_phase1_compute_garbage(options, keep_at_least)
+            .await?
+            .unwrap_or_default();
         self.garbage_collect_phase2_update_manifest(options).await?;
-        self.garbage_collect_phase3_delete_garbage(options).await?;
+        self.garbage_collect_phase3_delete_garbage(options, &gc_state)
+            .await?;
         Ok(())
     }
 
