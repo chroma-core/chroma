@@ -276,6 +276,7 @@ jobs:
     needs:
       - python-tests
       - python-vulnerability-scan
+      - python-dependency-sync-check
       - javascript-client-tests
       - rust-tests
       - rust-feature-tests

@@ -6,7 +6,8 @@ import re
 
 def normalize(dep: str) -> str:
     dep = dep.split(";")[0].strip()
-    return re.split(r"[><=!\s\[]", dep)[0].strip().lower()
+    name = re.split(r"[><=!\s\[]", dep)[0].strip().lower()
+    return re.sub(r"[-_.]+", "-", name)
 
 
 with open("pyproject.toml", "rb") as f:
