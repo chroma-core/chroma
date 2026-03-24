@@ -662,8 +662,8 @@ impl RecordSegmentWriter {
 
         let serialized_bloom_filter = match (self.bloom_filter.take(), &self.bloom_filter_manager) {
             (Some(bf), Some(manager)) => {
-                Some(manager.commit(bf, &self.prefix_path).await.map_err(|_| {
-                    Box::new(ApplyMaterializedLogError::BloomFilterSerializationError)
+                Some(manager.commit(bf, &self.prefix_path).await.map_err(|e| {
+                    Box::new(ApplyMaterializedLogError::BloomFilterSerializationError(e))
                         as Box<dyn ChromaError>
                 })?)
             }
@@ -706,8 +706,8 @@ pub enum ApplyMaterializedLogError {
     Materialization(#[from] LogMaterializerError),
     #[error("Error applying materialized records to spann segment: {0}")]
     SpannSegmentError(#[from] SpannSegmentWriterError),
-    #[error("Bloom filter serialization failed during commit")]
-    BloomFilterSerializationError,
+    #[error("Bloom filter serialization failed during commit: {0}")]
+    BloomFilterSerializationError(BloomFilterError),
     #[cfg(feature = "usearch")]
     #[error(transparent)]
     QuantizedSpannSegmentError(#[from] crate::quantized_spann::QuantizedSpannSegmentError),
@@ -725,7 +725,7 @@ impl ChromaError for ApplyMaterializedLogError {
             ApplyMaterializedLogError::HnswIndex(_) => ErrorCodes::Internal,
             ApplyMaterializedLogError::Materialization(e) => e.code(),
             ApplyMaterializedLogError::SpannSegmentError(e) => e.code(),
-            ApplyMaterializedLogError::BloomFilterSerializationError => ErrorCodes::Internal,
+            ApplyMaterializedLogError::BloomFilterSerializationError(e) => e.code(),
             #[cfg(feature = "usearch")]
             ApplyMaterializedLogError::QuantizedSpannSegmentError(e) => e.code(),
         }
@@ -822,19 +822,14 @@ impl RecordSegmentFlusher {
             }
         }
 
-        // Write serialized bloom filter to its pre-determined storage path.
-        // Failures are non-fatal — the bloom filter will be rebuilt on the next compaction cycle.
         if let Some(serialized_bloom_filter) = &self.serialized_bloom_filter {
             let bloom_filter_path = serialized_bloom_filter.path().to_string();
-            match serialized_bloom_filter.save().await {
-                Ok(()) => {
-                    tracing::info!(path = %bloom_filter_path, "Persisted bloom filter to storage");
-                    flushed_files.insert(USER_ID_BLOOM_FILTER.to_string(), vec![bloom_filter_path]);
-                }
-                Err(e) => {
-                    tracing::warn!(error = ?e, "Failed to persist bloom filter, skipping");
-                }
-            }
+            serialized_bloom_filter
+                .save()
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+            tracing::info!(path = %bloom_filter_path, "Persisted bloom filter to storage");
+            flushed_files.insert(USER_ID_BLOOM_FILTER.to_string(), vec![bloom_filter_path]);
         }
 
         Ok(flushed_files)
