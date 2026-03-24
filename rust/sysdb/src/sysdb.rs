@@ -2549,21 +2549,21 @@ impl ChromaError for GetLastCompactionTimeError {
 
 #[derive(Error, Debug)]
 pub enum FlushCompactionError {
-    #[error("Failed to flush compaction")]
+    #[error("Failed to flush compaction: {0}")]
     FailedToFlushCompaction(#[from] tonic::Status),
-    #[error("Failed to convert segment flush info")]
+    #[error("Failed to convert segment flush info: {0}")]
     SegmentFlushInfoConversionError(#[from] SegmentFlushInfoConversionError),
-    #[error("Failed to convert collection flush info")]
+    #[error("Failed to convert collection flush info: {0}")]
     CollectionFlushInfoConversionError(#[from] CollectionFlushInfoConversionError),
-    #[error("Failed to convert flush compaction response")]
+    #[error("Failed to convert flush compaction response: {0}")]
     FlushCompactionResponseConversionError(#[from] FlushCompactionResponseConversionError),
     #[error("Collection not found in sysdb")]
     CollectionNotFound,
     #[error("Segment not found in sysdb")]
     SegmentNotFound,
-    #[error("Failed to serialize schema")]
+    #[error("Failed to serialize schema: {0}")]
     Schema(#[from] SchemaError),
-    #[error("Failed to get client for database")]
+    #[error("Failed to get client for database: {0}")]
     ClientResolutionError(#[from] ClientResolutionError),
 }
 
