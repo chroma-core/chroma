@@ -1,6 +1,13 @@
 import base64
+import os
 import numpy as np
 from typing import TYPE_CHECKING
+
+DEFAULT_CHROMA_EMBED_URL = "https://embed.trychroma.com"
+
+
+def get_chroma_embed_url() -> str:
+    return (os.environ.get("CHROMA_EMBED_URL") or DEFAULT_CHROMA_EMBED_URL).rstrip("/")
 
 if TYPE_CHECKING:
     from chromadb.api.shared_system_client import SharedSystemClient
