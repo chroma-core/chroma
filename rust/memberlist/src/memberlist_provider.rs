@@ -111,7 +111,7 @@ impl Configurable<MemberlistProviderConfig> for CustomResourceMemberlistProvider
 
         let meter = opentelemetry::global::meter("chroma");
         let member_count_gauge = meter
-            .u64_gauge("memberlist.member_count")
+            .u64_gauge("memberlist_member_count")
             .with_description("Number of members in the memberlist")
             .build();
 
@@ -143,7 +143,7 @@ impl CustomResourceMemberlistProvider {
             Api::<MemberListKubeResource>::namespaced(kube_client.clone(), &kube_ns);
         let meter = opentelemetry::global::meter("chroma");
         let member_count_gauge = meter
-            .u64_gauge("memberlist.member_count")
+            .u64_gauge("memberlist_member_count")
             .with_description("Number of members in the memberlist")
             .build();
         CustomResourceMemberlistProvider {
