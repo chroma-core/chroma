@@ -98,7 +98,7 @@ export class ChromaCloudQwenEmbeddingFunction implements EmbeddingFunction {
     this.instructions = instructions;
 
     this.url =
-      process.env.CHROMA_EMBED_URL_BASE || "https://embed.trychroma.com";
+      process.env.CHROMA_EMBED_URL || "https://embed.trychroma.com";
     this.headers = {
       "x-chroma-token": apiKey ?? "",
       "x-chroma-embedding-model": model,
