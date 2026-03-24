@@ -39,7 +39,7 @@ def persist_dir():
 def local_persist_api(persist_dir):
     client = chromadb.Client(
         Settings(
-            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
             chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
             chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
             chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -60,7 +60,7 @@ def local_persist_api(persist_dir):
 def local_persist_api_cache_bust(persist_dir):
     client = chromadb.Client(
         Settings(
-            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
             chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
             chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
             chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",

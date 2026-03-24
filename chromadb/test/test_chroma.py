@@ -44,9 +44,9 @@ class GetDBTest(unittest.TestCase):
 
 
 class GetAPITest(unittest.TestCase):
-    @patch("chromadb.api.segment.SegmentAPI", autospec=True)
+    @patch("chromadb.api.rust.RustBindingsAPI", autospec=True)
     @patch.dict(
-        os.environ, {"CHROMA_API_IMPL": "chromadb.api.segment.SegmentAPI"}, clear=True
+        os.environ, {"CHROMA_API_IMPL": "chromadb.api.rust.RustBindingsAPI"}, clear=True
     )
     def test_local(self, mock_api: Mock) -> None:
         client = chromadb.Client(chromadb.config.Settings(persist_directory="./foo"))
@@ -55,7 +55,7 @@ class GetAPITest(unittest.TestCase):
 
     @patch("chromadb.db.impl.sqlite.SqliteDB", autospec=True)
     @patch.dict(
-        os.environ, {"CHROMA_API_IMPL": "chromadb.api.segment.SegmentAPI"}, clear=True
+        os.environ, {"CHROMA_API_IMPL": "chromadb.api.rust.RustBindingsAPI"}, clear=True
     )
     def test_local_db(self, mock_db: Mock) -> None:
         client = chromadb.Client(chromadb.config.Settings(persist_directory="./foo"))

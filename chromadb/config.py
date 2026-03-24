@@ -116,8 +116,15 @@ class Settings(BaseSettings):  # type: ignore
 
     environment: str = ""
 
-    # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI" or "chromadb.api.rust.RustBindingsAPI"
+    # Can be "chromadb.api.fastapi.FastAPI" or "chromadb.api.rust.RustBindingsAPI"
     chroma_api_impl: str = "chromadb.api.rust.RustBindingsAPI"
+
+    @field_validator("chroma_api_impl", mode="before")
+    @classmethod
+    def validate_api_impl(cls, v: str) -> str:
+        if v == "chromadb.api.segment.SegmentAPI":
+            raise ValueError("chromadb.api.segment.SegmentAPI is deprecated. Use chromadb.api.rust.RustBindingsAPI instead.")
+        return str(v)
 
     chroma_server_nofile: Optional[int] = None
 

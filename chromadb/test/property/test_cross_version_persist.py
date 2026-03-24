@@ -130,9 +130,7 @@ def configurations(versions: List[str]) -> List[Tuple[str, Settings]]:
         (
             version,
             Settings(
-                chroma_api_impl="chromadb.api.rust.RustBindingsAPI"
-                if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ
-                else "chromadb.api.segment.SegmentAPI",
+                chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
                 chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
                 chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
                 chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
