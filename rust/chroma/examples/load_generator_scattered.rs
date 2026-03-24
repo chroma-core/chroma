@@ -63,6 +63,11 @@ struct Args {
     #[arg(long, default_value_t = 10)]
     max_outstanding_ops: usize,
 
+    /// Maximum total number of outstanding operations per backend.
+    /// Defaults to the per-collection limit when omitted.
+    #[arg(long)]
+    global_max_outstanding_ops: Option<usize>,
+
     /// Zipf skew for collection selection over `(0, 1)`. Omit for uniform selection.
     #[arg(long, value_name = "SKEW", value_parser = parse_zipf_param)]
     zipf: Option<f64>,
@@ -148,6 +153,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         batch_size: args.batch_size,
         pace_qps: args.pace_qps,
         max_outstanding_ops: args.max_outstanding_ops,
+        global_max_outstanding_ops: args
+            .global_max_outstanding_ops
+            .unwrap_or(args.max_outstanding_ops),
     };
 
     print_load_generator_header(&format!("Collections: {}", args.collections), &common_args);

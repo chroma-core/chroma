@@ -62,6 +62,8 @@ pub struct CommonLoadArgs {
     pub pace_qps: u64,
     /// Maximum number of outstanding operations per collection.
     pub max_outstanding_ops: usize,
+    /// Maximum total number of outstanding operations per backend.
+    pub global_max_outstanding_ops: usize,
 }
 
 /// The pair of endpoints targeted by a dual-backend load generator.
@@ -97,6 +99,10 @@ pub fn print_load_generator_header(target: &str, args: &CommonLoadArgs) {
     println!(
         "Max outstanding ops per collection: {}",
         args.max_outstanding_ops
+    );
+    println!(
+        "Max outstanding ops per backend: {}",
+        args.global_max_outstanding_ops
     );
     println!();
 }
@@ -916,8 +922,9 @@ pub fn start_load_metrics_emitter(
 fn spawn_backend_workers<SelFactory>(
     handles: &mut Vec<tokio::task::JoinHandle<LoadWorkerSummary>>,
     endpoint_label: &str,
-    collections: Vec<ChromaCollection>,
-    collection_semaphores: Vec<Arc<Semaphore>>,
+    collections: Arc<[ChromaCollection]>,
+    collection_semaphores: Arc<[Arc<Semaphore>]>,
+    backend_semaphore: Arc<Semaphore>,
     task_count: usize,
     seed_base: u64,
     batch_size: usize,
@@ -955,8 +962,9 @@ fn spawn_backend_workers<SelFactory>(
         let success_latency = metrics.success_latency;
 
         let handle = tokio::spawn(run_load_worker(
-            collections.clone(),
-            collection_semaphores.clone(),
+            Arc::clone(&collections),
+            Arc::clone(&collection_semaphores),
+            Arc::clone(&backend_semaphore),
             ctx,
             task_id as u64 * 1000 + seed_base,
             task_label.clone(),
@@ -1105,6 +1113,7 @@ pub async fn run_dual_load_generator<UsSelectorFactory, EuSelectorFactory>(
     task_count: usize,
     batch_size: usize,
     max_outstanding_ops: usize,
+    global_max_outstanding_ops: usize,
     metrics: LoadMetricRefs,
     collections_us: Vec<ChromaCollection>,
     collections_eu: Vec<ChromaCollection>,
@@ -1119,13 +1128,21 @@ where
     EuSelectorFactory: FnMut(usize, usize) -> Box<dyn CollectionSelector> + Send,
 {
     let start_time = Instant::now();
+    let max_outstanding_ops = max_outstanding_ops.max(1);
+    let global_max_outstanding_ops = global_max_outstanding_ops.max(1);
 
-    let semaphores_us: Vec<Arc<Semaphore>> = (0..collections_us.len())
+    let semaphores_us: Arc<[Arc<Semaphore>]> = (0..collections_us.len())
         .map(|_| Arc::new(Semaphore::new(max_outstanding_ops)))
-        .collect();
-    let semaphores_eu: Vec<Arc<Semaphore>> = (0..collections_eu.len())
+        .collect::<Vec<_>>()
+        .into();
+    let semaphores_eu: Arc<[Arc<Semaphore>]> = (0..collections_eu.len())
         .map(|_| Arc::new(Semaphore::new(max_outstanding_ops)))
-        .collect();
+        .collect::<Vec<_>>()
+        .into();
+    let collections_us: Arc<[ChromaCollection]> = collections_us.into();
+    let collections_eu: Arc<[ChromaCollection]> = collections_eu.into();
+    let backend_semaphore_us = Arc::new(Semaphore::new(global_max_outstanding_ops));
+    let backend_semaphore_eu = Arc::new(Semaphore::new(global_max_outstanding_ops));
 
     let (ticket_tx, ticket_rx) = mpsc::channel::<()>(1024);
     let pacing_rx = Arc::new(Mutex::new(ticket_rx));
@@ -1138,6 +1155,7 @@ where
         "us",
         collections_us,
         semaphores_us,
+        backend_semaphore_us,
         task_count,
         0,
         batch_size,
@@ -1155,6 +1173,7 @@ where
         "eu",
         collections_eu,
         semaphores_eu,
+        backend_semaphore_eu,
         task_count,
         500 * 1000,
         batch_size,
@@ -1220,6 +1239,7 @@ where
         args.tasks,
         args.batch_size,
         args.max_outstanding_ops,
+        args.global_max_outstanding_ops,
         metrics,
         collections_us,
         collections_eu,
@@ -1256,8 +1276,9 @@ pub fn spawn_pacing_task(
 /// Shared load worker that drives concurrent upserts and emits per-op samples.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_load_worker<F, OnSuccess, OnFailure>(
-    collections: Vec<ChromaCollection>,
-    collection_semaphores: Vec<Arc<Semaphore>>,
+    collections: Arc<[ChromaCollection]>,
+    collection_semaphores: Arc<[Arc<Semaphore>]>,
+    backend_semaphore: Arc<Semaphore>,
     ctx: WorkerContext,
     seed: u64,
     id_prefix: String,
@@ -1336,9 +1357,20 @@ where
         let collection = collections[idx].clone();
         let semaphore = Arc::clone(&collection_semaphores[idx]);
 
+        let backend_permit = match Arc::clone(&backend_semaphore).try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(tokio::sync::TryAcquireError::NoPermits) => {
+                summary.dropped += 1;
+                on_drop(summary.dropped);
+                continue;
+            }
+            Err(tokio::sync::TryAcquireError::Closed) => break,
+        };
+
         let permit = match semaphore.try_acquire_owned() {
             Ok(permit) => permit,
             Err(tokio::sync::TryAcquireError::NoPermits) => {
+                drop(backend_permit);
                 summary.dropped += 1;
                 on_drop(summary.dropped);
                 continue;
@@ -1361,6 +1393,7 @@ where
             let op_start = Instant::now();
             let result = collection.upsert(ids, embeddings, None, None, None).await;
             drop(permit);
+            drop(backend_permit);
             match result {
                 Ok(_response) => LoadWorkerEvent::Success {
                     latency_ms: op_start.elapsed().as_secs_f64() * 1000.,
