@@ -60,6 +60,7 @@ pub struct CustomResourceMemberlistProvider {
     queue_size: usize,
     current_memberlist: RwLock<Memberlist>,
     subscribers: Vec<Box<dyn ReceiverForMessage<Memberlist> + Send>>,
+    member_count_gauge: opentelemetry::metrics::Gauge<u64>,
 }
 
 impl Debug for CustomResourceMemberlistProvider {
@@ -108,6 +109,12 @@ impl Configurable<MemberlistProviderConfig> for CustomResourceMemberlistProvider
             &my_config.kube_namespace,
         );
 
+        let meter = opentelemetry::global::meter("chroma");
+        let member_count_gauge = meter
+            .u64_gauge("memberlist.member_count")
+            .with_description("Number of members in the memberlist")
+            .build();
+
         let c: CustomResourceMemberlistProvider = CustomResourceMemberlistProvider {
             memberlist_name: my_config.memberlist_name.clone(),
             kube_ns: my_config.kube_namespace.clone(),
@@ -116,6 +123,7 @@ impl Configurable<MemberlistProviderConfig> for CustomResourceMemberlistProvider
             queue_size: my_config.queue_size,
             current_memberlist: RwLock::new(vec![]),
             subscribers: vec![],
+            member_count_gauge,
         };
         Ok(c)
     }
@@ -133,6 +141,11 @@ impl CustomResourceMemberlistProvider {
     ) -> Self {
         let memberlist_cr_client =
             Api::<MemberListKubeResource>::namespaced(kube_client.clone(), &kube_ns);
+        let meter = opentelemetry::global::meter("chroma");
+        let member_count_gauge = meter
+            .u64_gauge("memberlist.member_count")
+            .with_description("Number of members in the memberlist")
+            .build();
         CustomResourceMemberlistProvider {
             memberlist_name,
             kube_ns,
@@ -141,6 +154,7 @@ impl CustomResourceMemberlistProvider {
             queue_size,
             current_memberlist: RwLock::new(vec![]),
             subscribers: vec![],
+            member_count_gauge,
         }
     }
 
@@ -226,6 +240,13 @@ impl Handler<Option<MemberListKubeResource>> for CustomResourceMemberlistProvide
                     let mut curr_memberlist_handle = self.current_memberlist.write();
                     *curr_memberlist_handle = memberlist.clone();
                 }
+                self.member_count_gauge.record(
+                    memberlist.len() as u64,
+                    &[opentelemetry::KeyValue::new(
+                        "memberlist_name",
+                        self.memberlist_name.clone(),
+                    )],
+                );
                 // Inform subscribers
                 self.notify_subscribers().await;
             }
