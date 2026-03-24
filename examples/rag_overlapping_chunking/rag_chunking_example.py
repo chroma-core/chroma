@@ -26,7 +26,9 @@ def chunk_text(text: str, chunk_size: int = 500, overlap: int = 100) -> list[dic
     Returns:
         List of dicts with chunk text, start index, and end index.
     """
-    chunks = []
+if chunk_size <= 0 or overlap >= chunk_size:
+    raise ValueError("chunk_size must be > 0 and overlap must be < chunk_size")
+chunks = []
     start = 0
     while start < len(text):
         end = start + chunk_size
