@@ -48,7 +48,10 @@ fn deleted_heads_can_abort_a_future_reload() {
         return;
     }
 
-    let start_seed: u64 = env::var(SEED_START_ENV).ok().and_then(|raw| raw.parse().ok()).unwrap_or(0);
+    let start_seed: u64 = env::var(SEED_START_ENV)
+        .ok()
+        .and_then(|raw| raw.parse().ok())
+        .unwrap_or(0);
     let end_seed: u64 = env::var(SEED_END_ENV)
         .ok()
         .and_then(|raw| raw.parse().ok())
@@ -144,7 +147,8 @@ fn run_repro(seed: u64) {
 
         for batch in 0..batch_count {
             let blockfile_provider = new_blockfile_provider(storage.clone());
-            let hnsw_provider = new_hnsw_provider(storage.clone(), storage_root.path(), use_direct_hnsw);
+            let hnsw_provider =
+                new_hnsw_provider(storage.clone(), storage_root.path(), use_direct_hnsw);
             let writer = SpannIndexWriter::from_id(
                 &hnsw_provider,
                 hnsw_id.as_ref(),
