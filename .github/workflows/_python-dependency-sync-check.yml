@@ -1,13 +1,17 @@
-name: Dependency sync check
+name: Python dependency sync check
 
 on:
   workflow_call:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Setup Python
+        uses: ./.github/actions/python
+        with:
+          python-version: '3.11'
       - name: Check dependency sync
-        run: python3 bin/check-dependency-sync.py
+        run: python3 bin/check-dependency-sync.py build
