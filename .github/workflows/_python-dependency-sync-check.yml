@@ -1,0 +1,13 @@
+name: Dependency sync check
+
+on:
+  workflow_call:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Check dependency sync
+        run: python3 bin/check-dependency-sync.py
