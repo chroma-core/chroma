@@ -52,7 +52,7 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
             )
         self.model = model
         self.include_tokens = bool(include_tokens)
-        _base_url = os.environ.get("CHROMA_EMBED_URL", "https://embed.trychroma.com").rstrip("/")
+        _base_url = (os.environ.get("CHROMA_EMBED_URL") or "https://embed.trychroma.com").rstrip("/")
         self._api_url = f"{_base_url}/embed_sparse"
         self._session = httpx.Client()
         self._session.headers.update(

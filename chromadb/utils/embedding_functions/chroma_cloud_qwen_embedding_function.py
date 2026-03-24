@@ -74,7 +74,7 @@ class ChromaCloudQwenEmbeddingFunction(EmbeddingFunction[Documents]):
         self.task = task
         self.instructions = instructions
 
-        self._api_url = os.environ.get("CHROMA_EMBED_URL", "https://embed.trychroma.com")
+        self._api_url = os.environ.get("CHROMA_EMBED_URL") or "https://embed.trychroma.com"
         self._session = httpx.Client()
         self._session.headers.update(
             {
