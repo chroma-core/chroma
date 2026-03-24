@@ -32,6 +32,7 @@ from chromadb.api.functions import Function
 
 if TYPE_CHECKING:
     from chromadb.api.models.AttachedFunction import AttachedFunction
+    from chromadb.execution.expression.operator import Where as WhereExpression
 
 logger = logging.getLogger(__name__)
 
@@ -537,7 +538,7 @@ class Collection(CollectionCommon["ServerAPI"]):
     def delete(
         self,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = None,
+        where: Optional[Union[Where, "WhereExpression"]] = None,
         where_document: Optional[WhereDocument] = None,
         limit: Optional[int] = None,
     ) -> DeleteResult:
@@ -547,8 +548,11 @@ class Collection(CollectionCommon["ServerAPI"]):
 
         Args:
             ids: Record IDs to delete.
-            where: Metadata filter.
-            where_document: Document content filter.
+            where: Metadata filter. Accepts a dict or a Where DSL expression
+                (e.g. ``Key("field") == value``). DSL expressions can include
+                ``Key.DOCUMENT`` conditions, which replace ``where_document``.
+            where_document: Document content filter. Cannot be used together
+                with a Where DSL expression.
             limit: Maximum number of records to delete. Can only be used with where or where_document filters.
 
         Returns:
@@ -557,6 +561,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         Raises:
             ValueError: If no IDs or filters are provided.
             ValueError: If limit is specified without a where or where_document clause.
+            ValueError: If both a Where DSL expression and where_document are provided.
         """
         delete_request = self._validate_and_prepare_delete_request(
             ids, where, where_document, limit=limit
