@@ -114,6 +114,8 @@ static LOAD_SCATTERED_UPSERT_SUCCESS: Counter =
     Counter::new("load_generator.scattered.upsert_successes");
 static LOAD_SCATTERED_UPSERT_FAILURES: Counter =
     Counter::new("load_generator.scattered.upsert_failures");
+static LOAD_SCATTERED_UPSERT_DROPPED: Counter =
+    Counter::new("load_generator.scattered.upsert_dropped");
 
 static LOAD_SCATTERED_UPSERT_LATENCY: sig_fig_histogram::LockFreeHistogram<450> =
     sig_fig_histogram::LockFreeHistogram::new(2);
@@ -164,6 +166,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         upsert_attempts: &LOAD_SCATTERED_UPSERT_ATTEMPTS,
         upsert_success: &LOAD_SCATTERED_UPSERT_SUCCESS,
         upsert_failures: &LOAD_SCATTERED_UPSERT_FAILURES,
+        upsert_dropped: &LOAD_SCATTERED_UPSERT_DROPPED,
         ddl_latency: &LOAD_SCATTERED_DDL_LATENCY_SENSOR,
         upsert_latency: &LOAD_SCATTERED_UPSERT_LATENCY_SENSOR,
         success_latency: &LOAD_SCATTERED_SUCCESS_LATENCY_SENSOR,

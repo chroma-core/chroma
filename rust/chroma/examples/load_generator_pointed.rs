@@ -92,6 +92,7 @@ static LOAD_POINTED_UPSERT_SUCCESS: Counter =
     Counter::new("load_generator.pointed.upsert_successes");
 static LOAD_POINTED_UPSERT_FAILURES: Counter =
     Counter::new("load_generator.pointed.upsert_failures");
+static LOAD_POINTED_UPSERT_DROPPED: Counter = Counter::new("load_generator.pointed.upsert_dropped");
 
 static LOAD_POINTED_UPSERT_LATENCY: sig_fig_histogram::LockFreeHistogram<450> =
     sig_fig_histogram::LockFreeHistogram::new(2);
@@ -139,6 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         upsert_attempts: &LOAD_POINTED_UPSERT_ATTEMPTS,
         upsert_success: &LOAD_POINTED_UPSERT_SUCCESS,
         upsert_failures: &LOAD_POINTED_UPSERT_FAILURES,
+        upsert_dropped: &LOAD_POINTED_UPSERT_DROPPED,
         ddl_latency: &LOAD_POINTED_DDL_LATENCY_SENSOR,
         upsert_latency: &LOAD_POINTED_UPSERT_LATENCY_SENSOR,
         success_latency: &LOAD_POINTED_SUCCESS_LATENCY_SENSOR,

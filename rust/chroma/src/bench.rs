@@ -5,6 +5,7 @@ use std::error::Error;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex as StdMutex};
 use std::time::{Duration, Instant};
@@ -137,6 +138,7 @@ pub async fn prepare_dual_collections(
         },
     );
     let (collections_us, collections_eu) = tokio::try_join!(collections_us, collections_eu)?;
+    drop_collection_cache(cache_path.as_ref());
 
     Ok((collections_us, collections_eu))
 }
@@ -355,6 +357,21 @@ fn collection_entry_lock(
         ))
         .or_insert_with(|| Arc::new(Mutex::new(())))
         .clone()
+}
+
+fn drop_collection_cache(cache_path: &Path) {
+    COLLECTION_CACHE_STATES
+        .lock()
+        .expect("collection cache state table poisoned")
+        .remove(cache_path);
+    COLLECTION_CACHE_LOCKS
+        .lock()
+        .expect("collection cache lock table poisoned")
+        .remove(cache_path);
+    COLLECTION_ENTRY_LOCKS
+        .lock()
+        .expect("collection entry lock table poisoned")
+        .retain(|(path, _, _), _| path != cache_path);
 }
 
 /// Loads cached collections for the endpoint, rehydrating when possible and creating the rest.
@@ -752,6 +769,8 @@ pub struct LoadWorkerSummary {
     pub failures: u64,
     /// Total records inserted successfully by the worker.
     pub records: u64,
+    /// Operations dropped because the collection was already at its outstanding-op limit.
+    pub dropped: u64,
 }
 
 /// Selects which collection each worker should write to for a given operation.
@@ -785,6 +804,8 @@ pub struct LoadMetricRefs {
     pub upsert_success: &'static biometrics::Counter,
     /// Failed upserts.
     pub upsert_failures: &'static biometrics::Counter,
+    /// Dropped upserts because the pressure valve rejected new outstanding work.
+    pub upsert_dropped: &'static biometrics::Counter,
     /// DDL latency histogram.
     pub ddl_latency: &'static biometrics::Histogram,
     /// Upsert latency histogram.
@@ -810,11 +831,13 @@ impl LoadMetricsEmitter {
 }
 
 /// Spawns the shared metrics emitter loop used by load generators.
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_load_metrics_emitter(
     options: biometrics_prometheus::Options,
     upsert_attempts: &'static biometrics::Counter,
     upsert_success: &'static biometrics::Counter,
     upsert_failures: &'static biometrics::Counter,
+    upsert_dropped: &'static biometrics::Counter,
     ddl_latency: &'static biometrics::Histogram,
     upsert_latency: &'static biometrics::Histogram,
     success_latency: &'static biometrics::Histogram,
@@ -826,6 +849,7 @@ pub fn spawn_load_metrics_emitter(
     collector.register_counter(upsert_attempts);
     collector.register_counter(upsert_success);
     collector.register_counter(upsert_failures);
+    collector.register_counter(upsert_dropped);
     collector.register_histogram(ddl_latency);
     collector.register_histogram(upsert_latency);
     collector.register_histogram(success_latency);
@@ -877,6 +901,7 @@ pub fn start_load_metrics_emitter(
         metrics.upsert_attempts,
         metrics.upsert_success,
         metrics.upsert_failures,
+        metrics.upsert_dropped,
         metrics.ddl_latency,
         metrics.upsert_latency,
         metrics.success_latency,
@@ -925,6 +950,7 @@ fn spawn_backend_workers<SelFactory>(
         let upsert_attempts = metrics.upsert_attempts;
         let upsert_success = metrics.upsert_success;
         let upsert_failures = metrics.upsert_failures;
+        let upsert_dropped = metrics.upsert_dropped;
         let upsert_latency = metrics.upsert_latency;
         let success_latency = metrics.success_latency;
 
@@ -945,6 +971,9 @@ fn spawn_backend_workers<SelFactory>(
                 upsert_attempts.click();
                 upsert_failures.click();
                 eprintln!("[{}] Upsert error: {}", task_label, err);
+            },
+            move |_dropped| {
+                upsert_dropped.click();
             },
         ));
         handles.push(handle);
@@ -1023,6 +1052,7 @@ pub fn print_dual_backend_load_summary(
     upsert_attempts: &biometrics::Counter,
     upsert_success: &biometrics::Counter,
     upsert_failures: &biometrics::Counter,
+    upsert_dropped: &biometrics::Counter,
 ) {
     let elapsed_secs = elapsed.as_secs_f64();
     let us_upserts = stats_us.upserts();
@@ -1059,10 +1089,11 @@ pub fn print_dual_backend_load_summary(
         (us_records + eu_records) as f64 / elapsed_secs
     );
     println!(
-        "  Upsert attempts/success/failures: {}/{}/{}",
+        "  Upsert attempts/success/failures/dropped: {}/{}/{}/{}",
         upsert_attempts.read(),
         upsert_success.read(),
         upsert_failures.read(),
+        upsert_dropped.read(),
     );
 }
 
@@ -1159,6 +1190,7 @@ where
         metrics.upsert_attempts,
         metrics.upsert_success,
         metrics.upsert_failures,
+        metrics.upsert_dropped,
     );
 
     Ok(())
@@ -1232,20 +1264,49 @@ pub async fn run_load_worker<F, OnSuccess, OnFailure>(
     mut select_collection: F,
     mut on_success: OnSuccess,
     mut on_failure: OnFailure,
+    mut on_drop: impl FnMut(u64) + Send,
 ) -> LoadWorkerSummary
 where
     F: FnMut(usize, &mut StdRng) -> usize + Send,
     OnSuccess: FnMut(LoadOpSample) + Send,
     OnFailure: FnMut(u64, String) + Send,
 {
+    enum LoadWorkerEvent {
+        Success { latency_ms: f64, batch_size: usize },
+        Failure { attempt: u64, error: String },
+    }
+
     let num_collections = collections.len();
     if num_collections == 0 {
         return LoadWorkerSummary::default();
     }
 
+    let mut in_flight: FuturesUnordered<
+        Pin<Box<dyn futures_util::Future<Output = LoadWorkerEvent> + Send>>,
+    > = FuturesUnordered::new();
     let mut rng = StdRng::seed_from_u64(seed);
     let mut record_counter: u64 = 0;
     let mut summary = LoadWorkerSummary::default();
+
+    let mut handle_completed = |event: LoadWorkerEvent, summary: &mut LoadWorkerSummary| match event
+    {
+        LoadWorkerEvent::Success {
+            latency_ms,
+            batch_size,
+        } => {
+            summary.successes += 1;
+            summary.records += batch_size as u64;
+            on_success(LoadOpSample {
+                latency_ms,
+                batch_size,
+            });
+            ctx.stats.record_upsert(batch_size as u64);
+        }
+        LoadWorkerEvent::Failure { attempt, error } => {
+            summary.failures += 1;
+            on_failure(attempt, error);
+        }
+    };
 
     while ctx.start_time.elapsed() < ctx.duration {
         let remaining = ctx.duration.saturating_sub(ctx.start_time.elapsed());
@@ -1253,11 +1314,18 @@ where
             break;
         }
 
-        let ticket = time::timeout(remaining, async {
-            let mut rx = ctx.pacing_rx.lock().await;
-            rx.recv().await
-        })
-        .await;
+        let ticket = tokio::select! {
+            maybe_completed = in_flight.next(), if !in_flight.is_empty() => {
+                if let Some(completed) = maybe_completed {
+                    handle_completed(completed, &mut summary);
+                }
+                continue;
+            }
+            ticket = time::timeout(remaining, async {
+                let mut rx = ctx.pacing_rx.lock().await;
+                rx.recv().await
+            }) => ticket,
+        };
 
         match ticket {
             Ok(Some(())) => {}
@@ -1265,42 +1333,49 @@ where
         }
 
         let idx = select_collection(num_collections, &mut rng) % num_collections;
-        let collection = &collections[idx];
-        let semaphore = &collection_semaphores[idx];
+        let collection = collections[idx].clone();
+        let semaphore = Arc::clone(&collection_semaphores[idx]);
 
-        let permit = match semaphore.clone().acquire_owned().await {
+        let permit = match semaphore.try_acquire_owned() {
             Ok(permit) => permit,
-            Err(_) => break,
+            Err(tokio::sync::TryAcquireError::NoPermits) => {
+                summary.dropped += 1;
+                on_drop(summary.dropped);
+                continue;
+            }
+            Err(tokio::sync::TryAcquireError::Closed) => break,
         };
 
         let embeddings = ctx.gmm.generate_batch(&mut rng, ctx.batch_size);
+        summary.attempts += 1;
+        let attempt = summary.attempts;
         let ids: Vec<String> = (0..ctx.batch_size)
-            .map(|i| {
+            .map(|_| {
                 record_counter += 1;
-                format!("{}_{}", id_prefix, record_counter + i as u64)
+                format!("{}_{}", id_prefix, record_counter)
             })
             .collect();
+        let batch_size = ctx.batch_size;
 
-        let op_start = Instant::now();
-        summary.attempts += 1;
-        match collection.upsert(ids, embeddings, None, None, None).await {
-            Ok(_response) => {
-                let latency_ms = op_start.elapsed().as_secs_f64() * 1000.;
-                summary.successes += 1;
-                summary.records += ctx.batch_size as u64;
-                on_success(LoadOpSample {
-                    latency_ms,
-                    batch_size: ctx.batch_size,
-                });
-                ctx.stats.record_upsert(ctx.batch_size as u64);
+        in_flight.push(Box::pin(async move {
+            let op_start = Instant::now();
+            let result = collection.upsert(ids, embeddings, None, None, None).await;
+            drop(permit);
+            match result {
+                Ok(_response) => LoadWorkerEvent::Success {
+                    latency_ms: op_start.elapsed().as_secs_f64() * 1000.,
+                    batch_size,
+                },
+                Err(err) => LoadWorkerEvent::Failure {
+                    attempt,
+                    error: err.to_string(),
+                },
             }
-            Err(err) => {
-                summary.failures += 1;
-                on_failure(summary.attempts, err.to_string());
-            }
-        }
+        }));
+    }
 
-        drop(permit);
+    while let Some(completed) = in_flight.next().await {
+        handle_completed(completed, &mut summary);
     }
 
     summary
