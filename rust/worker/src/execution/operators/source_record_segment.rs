@@ -19,6 +19,18 @@ use thiserror::Error;
 #[derive(Clone, Debug)]
 pub struct SourceRecordSegmentOperator {}
 
+impl SourceRecordSegmentOperator {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl Default for SourceRecordSegmentOperator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SourceRecordSegmentInput {
     pub record_segment_reader: Option<RecordSegmentReader<'static>>,
@@ -66,7 +78,7 @@ impl Operator<SourceRecordSegmentInput, SourceRecordSegmentOutput> for SourceRec
                                     meta.into_iter().map(|(k, v)| (k, v.into())).collect()
                                 }),
                                 document: rec.document.map(ToString::to_string),
-                                operation: chroma_types::Operation::Upsert,
+                                operation: chroma_types::Operation::Add,
                             },
                         })
                     })
@@ -123,7 +135,7 @@ mod tests {
         for (offset, (record, _)) in source_output.iter().enumerate() {
             assert_eq!(record.log_offset, offset as i64 + 1);
             assert_eq!(record.record.id, int_as_id(offset + 1));
-            assert_eq!(record.record.operation, Operation::Upsert);
+            assert_eq!(record.record.operation, Operation::Add);
         }
     }
 }
