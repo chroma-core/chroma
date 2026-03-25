@@ -152,10 +152,32 @@ jobs:
           header: helm-chart-version-info
           delete: true
 
+  # Build Docker images once and warm the Blacksmith sticky disk cache.
+  # Downstream jobs that need Docker images (test-integration,
+  # test-mcmr-integration, test-cluster-rust-frontend) will clone this
+  # snapshot and get all BuildKit layers cached — avoiding ~6 min of
+  # redundant cargo compilation per job (~20 jobs × 6 min → 1 × 6 min).
+  build-images:
+    name: Build Docker images (warm sticky disk)
+    needs: change-detection
+    if: |
+      contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust') ||
+      contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Blacksmith builder
+        uses: useblacksmith/setup-docker-builder@v1
+      - name: Build all CI images (warms BuildKit cache on sticky disk)
+        run: docker buildx bake -f .github/actions/tilt-setup-prebuild/docker-bake.hcl --load
+
   python-tests:
     name: Python tests
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
+    needs: [change-detection, build-images]
+    if: |
+      !failure() && !cancelled() &&
+      contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
     uses: ./.github/workflows/_python-tests.yml
     secrets: inherit
     with:
@@ -175,8 +197,10 @@ jobs:
 
   rust-tests:
     name: Rust tests
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
+    needs: [change-detection, build-images]
+    if: |
+      !failure() && !cancelled() &&
+      contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
     uses: ./.github/workflows/_rust-tests.yml
     secrets: inherit
     with:
@@ -248,6 +272,7 @@ jobs:
   all-required-pr-checks-passed:
     if: always()
     needs:
+      - build-images
       - python-tests
       - python-vulnerability-scan
       - javascript-client-tests
@@ -264,12 +289,13 @@ jobs:
         uses: re-actors/alls-green@release/v1
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: python-tests,python-vulnerability-scan,javascript-client-tests,rust-tests,rust-feature-tests,go-tests,check-spanner-migrations,check-helm-version-bump,delete-helm-comment
+          allowed-skips: build-images,python-tests,python-vulnerability-scan,javascript-client-tests,rust-tests,rust-feature-tests,go-tests,check-spanner-migrations,check-helm-version-bump,delete-helm-comment
 
   notify-slack-on-failure:
     name: Notify Slack on Test Failure
     if: github.ref == 'refs/heads/main' && failure()
     needs:
+      - build-images
       - python-tests
       - python-vulnerability-scan
       - javascript-client-tests
