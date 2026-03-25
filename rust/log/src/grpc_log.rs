@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use chroma_config::assignment::assignment_policy::AssignmentPolicy;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
-use chroma_error::{ChromaError, ErrorCodes};
+use chroma_error::{source_chain_contains, ChromaError, ErrorCodes};
 use chroma_memberlist::client_manager::{
     ClientAssigner, ClientAssignmentError, ClientManager, ClientOptions, Tier,
 };
@@ -21,7 +21,6 @@ use chroma_types::{
     Cmek, CollectionUuid, DatabaseName, ForkLogsResponse, LogRecord, OperationRecord,
     RecordConversionError, TopologyName,
 };
-use std::error::Error as StdError;
 use std::fmt::Debug;
 use std::time::Duration;
 use thiserror::Error;
@@ -38,20 +37,6 @@ const BACKOFF_REASON_MD_KEY: &str = "backoff-reason";
 /// Extract the `backoff-reason` value from a `tonic::Status` metadata map.
 fn backoff_reason_from_status(status: &tonic::Status) -> Option<&str> {
     status.metadata().get(BACKOFF_REASON_MD_KEY)?.to_str().ok()
-}
-
-fn source_chain_contains(
-    source: &(dyn StdError + 'static),
-    predicate: impl Fn(&(dyn StdError + 'static)) -> bool,
-) -> bool {
-    let mut current = Some(source);
-    while let Some(err) = current {
-        if predicate(err) {
-            return true;
-        }
-        current = err.source();
-    }
-    false
 }
 
 fn is_retryable_transport_status(status: &tonic::Status) -> bool {

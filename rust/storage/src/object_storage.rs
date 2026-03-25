@@ -8,7 +8,7 @@ use std::{error::Error as StdError, sync::Arc, time::Duration};
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use chroma_config::{registry::Registry, Configurable};
-use chroma_error::ChromaError;
+use chroma_error::{source_chain_contains, ChromaError};
 use chroma_tracing::util::Stopwatch;
 use chroma_types::Cmek;
 use futures::stream::{self, StreamExt, TryStreamExt};
@@ -32,23 +32,10 @@ use crate::{
 const GCP_CMEK_HEADER: &str = "x-goog-encryption-kms-key-name";
 const GCS_STORE_NAME: &str = "GCS";
 
-fn source_chain_contains(
-    source: &(dyn StdError + 'static),
-    predicate: impl Fn(&str) -> bool,
-) -> bool {
-    let mut current = Some(source);
-    while let Some(err) = current {
-        if predicate(&err.to_string()) {
-            return true;
-        }
-        current = err.source();
-    }
-    false
-}
-
 fn is_gcs_backoff_error(store: &'static str, source: &(dyn StdError + 'static)) -> bool {
     store == GCS_STORE_NAME
-        && source_chain_contains(source, |message| {
+        && source_chain_contains(source, |err| {
+            let message = err.to_string();
             message.contains("429 Too Many Requests")
                 || message.contains("SlowDown")
                 || message.contains("rate limit for object mutation operations")
@@ -151,7 +138,7 @@ impl From<object_store::Error> for StorageError {
 
 #[cfg(test)]
 mod tests {
-    use std::fmt;
+    use std::{error::Error as StdError, fmt};
 
     use super::*;
 
@@ -194,41 +181,46 @@ mod tests {
         }
     }
 
+    fn generic_store_error(
+        store: &'static str,
+        source: impl StdError + Send + Sync + 'static,
+    ) -> object_store::Error {
+        object_store::Error::Generic {
+            store,
+            source: Box::new(source),
+        }
+    }
+
+    fn gcs_generic_error(source: impl StdError + Send + Sync + 'static) -> object_store::Error {
+        generic_store_error(GCS_STORE_NAME, source)
+    }
+
     #[test]
     fn test_gcs_generic_429_maps_to_backoff() {
-        let err = object_store::Error::Generic {
-            store: GCS_STORE_NAME,
-            source: Box::new(FakeError::new(
-                "Server returned non-2xx status code: 429 Too Many Requests",
-            )),
-        };
+        let err = gcs_generic_error(FakeError::new(
+            "Server returned non-2xx status code: 429 Too Many Requests",
+        ));
 
         assert!(matches!(StorageError::from(err), StorageError::Backoff));
     }
 
     #[test]
     fn test_gcs_generic_slowdown_in_source_chain_maps_to_backoff() {
-        let err = object_store::Error::Generic {
-            store: GCS_STORE_NAME,
-            source: Box::new(FakeError::with_source(
-                "retry exhausted",
-                FakeError::new(
-                    "<?xml version='1.0'?><Error><Code>SlowDown</Code><Message>Please reduce your request rate.</Message></Error>",
-                ),
-            )),
-        };
+        let err = gcs_generic_error(FakeError::with_source(
+            "retry exhausted",
+            FakeError::new(
+                "<?xml version='1.0'?><Error><Code>SlowDown</Code><Message>Please reduce your request rate.</Message></Error>",
+            ),
+        ));
 
         assert!(matches!(StorageError::from(err), StorageError::Backoff));
     }
 
     #[test]
     fn test_gcs_generic_non_throttling_error_stays_generic() {
-        let err = object_store::Error::Generic {
-            store: GCS_STORE_NAME,
-            source: Box::new(FakeError::new(
-                "Server returned non-2xx status code: 503 Service Unavailable",
-            )),
-        };
+        let err = gcs_generic_error(FakeError::new(
+            "Server returned non-2xx status code: 503 Service Unavailable",
+        ));
 
         assert!(matches!(
             StorageError::from(err),
@@ -238,12 +230,10 @@ mod tests {
 
     #[test]
     fn test_non_gcs_429_stays_generic() {
-        let err = object_store::Error::Generic {
-            store: "Azure",
-            source: Box::new(FakeError::new(
-                "Server returned non-2xx status code: 429 Too Many Requests",
-            )),
-        };
+        let err = generic_store_error(
+            "Azure",
+            FakeError::new("Server returned non-2xx status code: 429 Too Many Requests"),
+        );
 
         assert!(matches!(
             StorageError::from(err),
