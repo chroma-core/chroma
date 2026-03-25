@@ -1,14 +1,16 @@
 #![allow(dead_code)]
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
 use chroma_distance::DistanceFunction;
+use chroma_index::quantization::{Code, QuantizedQuery};
 use chroma_index::spann::utils::{self, EmbeddingPoint};
 use dashmap::{DashMap, DashSet};
 use parking_lot::RwLock;
+use simsimd::SpatialSimilarity;
 
 pub type NodeId = u32;
 
@@ -28,10 +30,12 @@ pub struct HierarchicalSpannConfig {
     pub beam_tau: f64,
     pub beam_min: usize,
     pub beam_max: usize,
-    pub nreplica_count: usize,
+    pub max_replicas: usize,
     pub write_rng_epsilon: f32,
     pub write_rng_factor: f32,
     pub reassign_neighbor_count: usize,
+    /// If true, navigate uses f32 centroid distances instead of quantized.
+    pub fp_navigation: bool,
 }
 
 impl Default for HierarchicalSpannConfig {
@@ -46,10 +50,11 @@ impl Default for HierarchicalSpannConfig {
             beam_tau: 1.0,
             beam_min: 10,
             beam_max: 50000,
-            nreplica_count: 2,
+            max_replicas: 2,
             write_rng_epsilon: 8.0,
             write_rng_factor: 4.0,
             reassign_neighbor_count: 32,
+            fp_navigation: false,
         }
     }
 }
@@ -59,13 +64,19 @@ impl Default for HierarchicalSpannConfig {
 // =============================================================================
 struct LeafNode {
     centroid: Vec<f32>,
+    /// 1-bit RaBitQ code of centroid as residual vs parent centroid.
+    centroid_code: Vec<u8>,
     ids: Vec<u32>,
     versions: Vec<u32>,
+    /// Per-vector 1-bit RaBitQ codes (residual vs this leaf's centroid).
+    codes: Vec<Vec<u8>>,
     parent_id: Option<NodeId>,
 }
 
 struct InternalNode {
     centroid: Vec<f32>,
+    /// 1-bit RaBitQ code of centroid as residual vs parent centroid.
+    centroid_code: Vec<u8>,
     children: Vec<NodeId>,
     parent_id: Option<NodeId>,
 }
@@ -80,6 +91,13 @@ impl TreeNode {
         match self {
             TreeNode::Leaf(l) => &l.centroid,
             TreeNode::Internal(i) => &i.centroid,
+        }
+    }
+
+    fn centroid_code(&self) -> &[u8] {
+        match self {
+            TreeNode::Leaf(l) => &l.centroid_code,
+            TreeNode::Internal(i) => &i.centroid_code,
         }
     }
 
@@ -125,9 +143,26 @@ pub struct WriterStats {
     /// register_in_leaf() target was missing or no longer a leaf (e.g. split
     /// by a balance cascade during merge).
     register_missing_nodes: AtomicU64,
-    /// Entries added to a leaf by concurrent add() between clone and remove
-    /// during split/merge, rescued and re-registered into new children.
-    rescued_entries: AtomicU64,
+
+    registers: AtomicU64,
+    register_nanos: AtomicU64,
+    register_lock_wait_nanos: AtomicU64,
+    register_quantize_nanos: AtomicU64,
+
+    // Sub-step timing breakdowns (nanos)
+    add_lock_wait_nanos: AtomicU64,
+    add_navigate_nanos: AtomicU64,
+    add_register_nanos: AtomicU64,
+    add_balance_nanos: AtomicU64,
+    split_kmeans_nanos: AtomicU64,
+    split_quantize_nanos: AtomicU64,
+    split_npa_nanos: AtomicU64,
+    reassign_navigate_nanos: AtomicU64,
+    reassign_register_nanos: AtomicU64,
+    reassign_balance_nanos: AtomicU64,
+    balance_lock_wait_nanos: AtomicU64,
+    navigate_dist_nanos: AtomicU64,
+    navigate_sort_nanos: AtomicU64,
 }
 
 impl Default for WriterStats {
@@ -149,25 +184,50 @@ impl Default for WriterStats {
             navigate_missing_nodes: AtomicU64::new(0),
             add_register_fallbacks: AtomicU64::new(0),
             register_missing_nodes: AtomicU64::new(0),
-            rescued_entries: AtomicU64::new(0),
+            registers: AtomicU64::new(0),
+            register_nanos: AtomicU64::new(0),
+            register_lock_wait_nanos: AtomicU64::new(0),
+            register_quantize_nanos: AtomicU64::new(0),
+            add_lock_wait_nanos: AtomicU64::new(0),
+            add_navigate_nanos: AtomicU64::new(0),
+            add_register_nanos: AtomicU64::new(0),
+            add_balance_nanos: AtomicU64::new(0),
+            split_kmeans_nanos: AtomicU64::new(0),
+            split_quantize_nanos: AtomicU64::new(0),
+            split_npa_nanos: AtomicU64::new(0),
+            reassign_navigate_nanos: AtomicU64::new(0),
+            reassign_register_nanos: AtomicU64::new(0),
+            reassign_balance_nanos: AtomicU64::new(0),
+            balance_lock_wait_nanos: AtomicU64::new(0),
+            navigate_dist_nanos: AtomicU64::new(0),
+            navigate_sort_nanos: AtomicU64::new(0),
         }
     }
 }
 
 pub const TASK_METHODS: &[&str] = &[
-    "add", "navigate", "split", "merge", "reassign", "scrub",
+    "add", "navigate", "register", "split", "merge", "reassign", "scrub",
 ];
 
 #[derive(Default, Clone)]
 pub struct WriterStatsSnapshot {
-    pub calls: [u64; 6],
-    pub nanos: [u64; 6],
+    pub calls: [u64; 7],
+    pub nanos: [u64; 7],
     pub scrub_removed: u64,
     pub wall_nanos: u64,
     pub navigate_missing_nodes: u64,
     pub add_missing_nodes: u64,
     pub register_missing_nodes: u64,
-    pub rescued_entries: u64,
+    // Sub-step breakdowns: [lock_wait, navigate, register, balance, balance_lock_wait]
+    pub add_substeps: [u64; 5],
+    // Sub-step breakdowns: [kmeans, quantize, npa]
+    pub split_substeps: [u64; 3],
+    // Sub-step breakdowns: [navigate, register, balance]
+    pub reassign_substeps: [u64; 3],
+    // Sub-step breakdowns: [lock_wait, quantize]
+    pub register_substeps: [u64; 2],
+    // Sub-step breakdowns: [dist, sort]
+    pub navigate_substeps: [u64; 2],
 }
 
 impl WriterStats {
@@ -176,6 +236,7 @@ impl WriterStats {
             calls: [
                 self.adds.load(Ordering::Relaxed),
                 self.navigates.load(Ordering::Relaxed),
+                self.registers.load(Ordering::Relaxed),
                 self.splits.load(Ordering::Relaxed),
                 self.merges.load(Ordering::Relaxed),
                 self.reassigns.load(Ordering::Relaxed),
@@ -184,6 +245,7 @@ impl WriterStats {
             nanos: [
                 self.add_nanos.load(Ordering::Relaxed),
                 self.navigate_nanos.load(Ordering::Relaxed),
+                self.register_nanos.load(Ordering::Relaxed),
                 self.split_nanos.load(Ordering::Relaxed),
                 self.merge_nanos.load(Ordering::Relaxed),
                 self.reassign_nanos.load(Ordering::Relaxed),
@@ -194,7 +256,31 @@ impl WriterStats {
             navigate_missing_nodes: self.navigate_missing_nodes.load(Ordering::Relaxed),
             add_missing_nodes: self.add_register_fallbacks.load(Ordering::Relaxed),
             register_missing_nodes: self.register_missing_nodes.load(Ordering::Relaxed),
-            rescued_entries: self.rescued_entries.load(Ordering::Relaxed),
+            add_substeps: [
+                self.add_lock_wait_nanos.load(Ordering::Relaxed),
+                self.add_navigate_nanos.load(Ordering::Relaxed),
+                self.add_register_nanos.load(Ordering::Relaxed),
+                self.add_balance_nanos.load(Ordering::Relaxed),
+                self.balance_lock_wait_nanos.load(Ordering::Relaxed),
+            ],
+            split_substeps: [
+                self.split_kmeans_nanos.load(Ordering::Relaxed),
+                self.split_quantize_nanos.load(Ordering::Relaxed),
+                self.split_npa_nanos.load(Ordering::Relaxed),
+            ],
+            reassign_substeps: [
+                self.reassign_navigate_nanos.load(Ordering::Relaxed),
+                self.reassign_register_nanos.load(Ordering::Relaxed),
+                self.reassign_balance_nanos.load(Ordering::Relaxed),
+            ],
+            register_substeps: [
+                self.register_lock_wait_nanos.load(Ordering::Relaxed),
+                self.register_quantize_nanos.load(Ordering::Relaxed),
+            ],
+            navigate_substeps: [
+                self.navigate_dist_nanos.load(Ordering::Relaxed),
+                self.navigate_sort_nanos.load(Ordering::Relaxed),
+            ],
         }
     }
 
@@ -214,9 +300,11 @@ impl WriterStats {
             register_missing_nodes: cur
                 .register_missing_nodes
                 .saturating_sub(prev.register_missing_nodes),
-            rescued_entries: cur
-                .rescued_entries
-                .saturating_sub(prev.rescued_entries),
+            add_substeps: std::array::from_fn::<_, 5, _>(|i| cur.add_substeps[i].saturating_sub(prev.add_substeps[i])),
+            split_substeps: std::array::from_fn(|i| cur.split_substeps[i].saturating_sub(prev.split_substeps[i])),
+            reassign_substeps: std::array::from_fn(|i| cur.reassign_substeps[i].saturating_sub(prev.reassign_substeps[i])),
+            register_substeps: std::array::from_fn(|i| cur.register_substeps[i].saturating_sub(prev.register_substeps[i])),
+            navigate_substeps: std::array::from_fn(|i| cur.navigate_substeps[i].saturating_sub(prev.navigate_substeps[i])),
         }
     }
 }
@@ -278,17 +366,16 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
 
     // Task Breakdowns (concurrency diagnostics)
     writeln!(out, "\n--- Task Breakdowns ---").unwrap();
-    writeln!(out, "| CP | navigate.missing_node | add.missing_nodes | register.missing_node | rescued_entries |").unwrap();
-    writeln!(out, "|----|----------------------|-------------------|----------------------|-----------------|").unwrap();
+    writeln!(out, "| CP | navigate.missing_node | add.missing_nodes | register.missing_node |").unwrap();
+    writeln!(out, "|----|----------------------|-------------------|----------------------|").unwrap();
     for (i, snap) in snapshots.iter().enumerate() {
         writeln!(
             out,
-            "| {:>2} | {:>20} | {:>17} | {:>20} | {:>15} |",
+            "| {:>2} | {:>20} | {:>17} | {:>20} |",
             i + 1,
             fmt_count(snap.navigate_missing_nodes),
             fmt_count(snap.add_missing_nodes),
             fmt_count(snap.register_missing_nodes),
-            fmt_count(snap.rescued_entries),
         )
         .unwrap();
     }
@@ -341,6 +428,76 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
         writeln!(out).unwrap();
     }
 
+    let add_sub_names  = ["rd_lock", "navigate", "register", "balance", "bal_wlock"];
+    let split_sub_names = ["kmeans", "quantize", "npa"];
+    let reassign_sub_names = ["navigate", "register", "balance"];
+
+    fn fmt_sub_avg(total_nanos: u64, count: u64) -> String {
+        if count == 0 { "-".into() } else { fmt_dur(total_nanos / count) }
+    }
+    fn fmt_sub_pct(part_nanos: u64, whole_nanos: u64) -> String {
+        if whole_nanos == 0 { "-".into() } else { format!("{:.0}%", part_nanos as f64 / whole_nanos as f64 * 100.0) }
+    }
+
+    fn write_substep_table(
+        out: &mut String,
+        title: &str,
+        sub_names: &[&str],
+        snapshots: &[WriterStatsSnapshot],
+        task_idx: usize,
+        get_substeps: &dyn Fn(&WriterStatsSnapshot) -> &[u64],
+    ) {
+        let w = 15usize;
+        let aw = 10usize;
+        writeln!(out, "\n--- {} Avg Breakdown ---", title).unwrap();
+        write!(out, "| CP | {:>aw$} |", "avg", aw = aw).unwrap();
+        for name in sub_names { write!(out, " {:>w$} |", name, w = w).unwrap(); }
+        writeln!(out).unwrap();
+        write!(out, "|----|").unwrap();
+        write!(out, "-{:-<aw$}-|", "", aw = aw).unwrap();
+        for _ in sub_names { write!(out, "-{:-<w$}-|", "", w = w).unwrap(); }
+        writeln!(out).unwrap();
+        for (i, snap) in snapshots.iter().enumerate() {
+            let n = snap.calls[task_idx];
+            let total = snap.nanos[task_idx];
+            let subs = get_substeps(snap);
+            let avg_total = if n > 0 { fmt_dur(total / n) } else { "-".into() };
+            write!(out, "| {:>2} | {:>aw$} |", i + 1, avg_total, aw = aw).unwrap();
+            for (j, _) in sub_names.iter().enumerate() {
+                let cell = if n > 0 {
+                    format!("{} ({})", fmt_sub_avg(subs[j], n), fmt_sub_pct(subs[j], total))
+                } else { "-".into() };
+                write!(out, " {:>w$} |", cell, w = w).unwrap();
+            }
+            writeln!(out).unwrap();
+        }
+    }
+
+    let register_sub_names = ["lock_wait", "quantize"];
+
+    let navigate_sub_names = ["dist", "sort"];
+
+    write_substep_table(
+        &mut out, "add()", &add_sub_names, snapshots, 0,
+        &|s| &s.add_substeps,
+    );
+    write_substep_table(
+        &mut out, "navigate()", &navigate_sub_names, snapshots, 1,
+        &|s| &s.navigate_substeps,
+    );
+    write_substep_table(
+        &mut out, "register_in_leaf()", &register_sub_names, snapshots, 2,
+        &|s| &s.register_substeps,
+    );
+    write_substep_table(
+        &mut out, "split()", &split_sub_names, snapshots, 3,
+        &|s| &s.split_substeps,
+    );
+    write_substep_table(
+        &mut out, "reassign()", &reassign_sub_names, snapshots, 5,
+        &|s| &s.reassign_substeps,
+    );
+
     out
 }
 
@@ -355,12 +512,13 @@ pub struct LevelRecall {
 // Writer (thread-safe)
 // =============================================================================
 
-/// Full-precision hierarchical SPANN index (thread-safe).
+/// 1-bit quantized hierarchical SPANN index (thread-safe).
 ///
-/// Stores data vectors in leaf nodes (posting lists). Internal nodes route
-/// queries via beam search using f32 centroid distances. The tree grows
-/// bottom-up: vectors are always added to leaf nodes, and splits propagate
-/// upward when a parent exceeds the branching factor.
+/// Stores data vectors as 1-bit RaBitQ codes in leaf nodes (posting lists).
+/// Node centroids are also stored as 1-bit codes (residuals vs parent centroid).
+/// Navigation uses quantized centroid distances by default, with optional f32
+/// fallback (fp_navigation). Search scores data vectors with quantized codes
+/// and optionally reranks with f32 embeddings.
 ///
 /// Thread safety:
 /// - `nodes` in `DashMap`: navigate and register use per-node shard locks (no global lock)
@@ -393,8 +551,10 @@ impl HierarchicalSpannWriter {
             0,
             TreeNode::Leaf(LeafNode {
                 centroid: vec![0.0; dim],
+                centroid_code: Vec::new(),
                 ids: Vec::new(),
                 versions: Vec::new(),
+                codes: Vec::new(),
                 parent_id: None,
             }),
         );
@@ -433,8 +593,9 @@ impl HierarchicalSpannWriter {
     /// Add a data vector to the index.
     ///
     /// Thread-safe: multiple threads can call add() concurrently.
-    /// Navigate and register use per-node DashMap access (no global lock).
-    /// Only balance/split/merge acquires the structure_lock.
+    /// Navigate and register hold structure_lock.read() so they are mutually
+    /// exclusive with split/merge (which hold structure_lock.write()).
+    /// Multiple adds run concurrently since read locks are shared.
     pub fn add(&self, id: u32, embedding: &[f32]) {
         let add_start = Instant::now();
 
@@ -447,31 +608,35 @@ impl HierarchicalSpannWriter {
             *v
         };
 
-        // Phase 1: navigate (per-node DashMap gets, no global lock)
-        let cluster_ids = {
+        let lock_start = Instant::now();
+        let clusters_to_balance = {
+            let _lock = self.structure_lock.read();
+            let lock_elapsed = lock_start.elapsed().as_nanos() as u64;
+            self.stats.add_lock_wait_nanos.fetch_add(lock_elapsed, Ordering::Relaxed);
+
             let nav_start = Instant::now();
-            let candidates = self.navigate(
+            let candidates = self.navigate_f32(
                 embedding,
                 Some(self.config.write_beam_tau),
                 self.config.write_beam_min,
                 self.config.write_beam_max,
             );
             let cluster_ids = self.rng_select(&candidates);
+            let nav_elapsed = nav_start.elapsed().as_nanos() as u64;
             self.stats.navigates.fetch_add(1, Ordering::Relaxed);
-            self.stats.navigate_nanos.fetch_add(
-                nav_start.elapsed().as_nanos() as u64,
-                Ordering::Relaxed,
-            );
-            cluster_ids
-        };
+            self.stats.navigate_nanos.fetch_add(nav_elapsed, Ordering::Relaxed);
+            self.stats.add_navigate_nanos.fetch_add(nav_elapsed, Ordering::Relaxed);
 
-        // Phase 2: register (per-leaf DashMap get_mut, no global lock)
-        let mut clusters_to_balance = Vec::new();
-        for &cluster_id in &cluster_ids {
-            if self.register_in_leaf(cluster_id, id, version) {
-                clusters_to_balance.push(cluster_id);
+            let reg_start = Instant::now();
+            let mut to_balance = Vec::new();
+            for &cluster_id in &cluster_ids {
+                if self.register_in_leaf(cluster_id, id, version, embedding) {
+                    to_balance.push(cluster_id);
+                }
             }
-        }
+            self.stats.add_register_nanos.fetch_add(reg_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            to_balance
+        };
 
         if clusters_to_balance.is_empty() {
             self.stats.add_register_fallbacks.fetch_add(1, Ordering::Relaxed);
@@ -479,10 +644,11 @@ impl HierarchicalSpannWriter {
             return;
         }
 
-        // Phase 3: balance (structure_lock acquired only if split/merge needed)
+        let balance_start = Instant::now();
         for cluster_id in clusters_to_balance {
             self.balance(cluster_id, 0);
         }
+        self.stats.add_balance_nanos.fetch_add(balance_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
         self.stats.adds.fetch_add(1, Ordering::Relaxed);
         self.stats.add_nanos.fetch_add(
@@ -492,29 +658,44 @@ impl HierarchicalSpannWriter {
     }
 
     /// Register a vector in a leaf. Uses per-leaf DashMap get_mut -- no global lock.
+    /// Also computes and stores the 1-bit RaBitQ code of the vector residual.
     fn register_in_leaf(
         &self,
         leaf_id: NodeId,
         id: u32,
         version: u32,
+        embedding: &[f32],
     ) -> bool {
+        let t0 = Instant::now();
+        let lock_start = Instant::now();
         if let Some(mut node_ref) = self.nodes.get_mut(&leaf_id) {
+            let lock_elapsed = lock_start.elapsed().as_nanos() as u64;
+            self.stats.register_lock_wait_nanos.fetch_add(lock_elapsed, Ordering::Relaxed);
             if let TreeNode::Leaf(leaf) = node_ref.value_mut() {
+                let q_start = Instant::now();
+                let code = Code::<1>::quantize(embedding, &leaf.centroid);
+                self.stats.register_quantize_nanos.fetch_add(q_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
                 leaf.ids.push(id);
                 leaf.versions.push(version);
+                leaf.codes.push(code.as_ref().to_vec());
+                drop(node_ref);
+                self.stats.registers.fetch_add(1, Ordering::Relaxed);
+                self.stats.register_nanos.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
                 return true;
             }
         }
+        self.stats.registers.fetch_add(1, Ordering::Relaxed);
+        self.stats.register_nanos.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
         false
     }
 
     // =========================================================================
-    // Navigate
+    // Navigate (f32 -- used by write path and --fp-navigation)
     // =========================================================================
 
-    /// Beam search the tree to find the nearest leaf nodes.
-    /// Uses per-node DashMap gets -- no global lock required.
-    fn navigate(
+    /// Beam search the tree using f32 centroid distances.
+    /// Used by the write path (always) and search path when fp_navigation is true.
+    fn navigate_f32(
         &self,
         query: &[f32],
         tau: Option<f64>,
@@ -535,10 +716,13 @@ impl HierarchicalSpannWriter {
 
         let mut leaves: Vec<(NodeId, f32)> = Vec::new();
         let mut beam: Vec<NodeId> = vec![root];
+        let mut dist_nanos = 0u64;
+        let mut sort_nanos = 0u64;
 
         loop {
             let mut child_scores: Vec<(NodeId, f32)> = Vec::new();
 
+            let dist_start = Instant::now();
             for &node_id in &beam {
                 if let Some(node_ref) = self.nodes.get(&node_id) {
                     if let TreeNode::Internal(internal) = node_ref.value() {
@@ -555,14 +739,17 @@ impl HierarchicalSpannWriter {
                     }
                 }
             }
+            dist_nanos += dist_start.elapsed().as_nanos() as u64;
 
             if child_scores.is_empty() {
                 break;
             }
 
+            let sort_start = Instant::now();
             child_scores.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
             let effective = Self::effective_beam(&child_scores, tau, beam_min, beam_max);
             child_scores.truncate(effective);
+            sort_nanos += sort_start.elapsed().as_nanos() as u64;
 
             let mut next_internals: Vec<NodeId> = Vec::new();
             for &(node_id, dist) in &child_scores {
@@ -580,7 +767,12 @@ impl HierarchicalSpannWriter {
             beam = next_internals;
         }
 
+        let sort_start = Instant::now();
         leaves.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        sort_nanos += sort_start.elapsed().as_nanos() as u64;
+
+        self.stats.navigate_dist_nanos.fetch_add(dist_nanos, Ordering::Relaxed);
+        self.stats.navigate_sort_nanos.fetch_add(sort_nanos, Ordering::Relaxed);
         leaves
     }
 
@@ -605,6 +797,141 @@ impl HierarchicalSpannWriter {
                 let floor = beam_min.min(beam_max);
                 count.clamp(floor, beam_max).min(sorted.len())
             }
+        }
+    }
+
+    // =========================================================================
+    // Navigate (quantized -- default search path)
+    // =========================================================================
+
+    /// Beam search using 1-bit quantized centroid distances.
+    /// At each level, scores children using QuantizedQuery against their centroid_code.
+    /// Optionally reranks with f32 if rerank_centroids > 1.
+    fn navigate_quantized(
+        &self,
+        query: &[f32],
+        tau: Option<f64>,
+        beam_min: usize,
+        beam_max: usize,
+        rerank_centroids: usize,
+    ) -> Vec<(NodeId, f32)> {
+        let root = self.root_id();
+        let Some(root_node) = self.nodes.get(&root) else {
+            return Vec::new();
+        };
+
+        if matches!(root_node.value(), TreeNode::Leaf(_)) {
+            let dist = self.dist(query, root_node.centroid());
+            drop(root_node);
+            return vec![(root, dist)];
+        }
+        drop(root_node);
+
+        let q_norm = Self::vec_norm(query);
+        let padded_bytes = self.padded_bytes();
+        let rerank_factor = rerank_centroids;
+
+        let mut leaves: Vec<(NodeId, f32)> = Vec::new();
+        let mut beam: Vec<NodeId> = vec![root];
+
+        loop {
+            let mut child_scores: Vec<(NodeId, f32)> = Vec::new();
+
+            for &node_id in &beam {
+                if let Some(node_ref) = self.nodes.get(&node_id) {
+                    if let TreeNode::Internal(internal) = node_ref.value() {
+                        let parent_centroid = internal.centroid.clone();
+                        let children: Vec<NodeId> = internal.children.clone();
+                        drop(node_ref);
+
+                        let c_norm = Self::vec_norm(&parent_centroid);
+                        let r_q: Vec<f32> = query.iter()
+                            .zip(parent_centroid.iter())
+                            .map(|(q, c)| q - c)
+                            .collect();
+                        let c_dot_q = f32::dot(&parent_centroid, query).unwrap_or(0.0) as f32;
+                        let qq = QuantizedQuery::new(&r_q, padded_bytes, c_norm, c_dot_q, q_norm);
+
+                        for child_id in children {
+                            if let Some(child) = self.nodes.get(&child_id) {
+                                let code_bytes = child.centroid_code();
+                                let dist = if code_bytes.is_empty() {
+                                    self.dist(query, child.centroid())
+                                } else {
+                                    Code::<1, _>::new(code_bytes)
+                                        .distance_quantized_query(&self.distance_fn, &qq)
+                                };
+                                child_scores.push((child_id, dist));
+                            } else {
+                                self.stats.navigate_missing_nodes.fetch_add(1, Ordering::Relaxed);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if child_scores.is_empty() {
+                break;
+            }
+
+            child_scores.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+
+            if rerank_factor > 1 {
+                let effective = Self::effective_beam(&child_scores, tau, beam_min, beam_max);
+                let rerank_count = (effective * rerank_factor).min(child_scores.len());
+                child_scores.truncate(rerank_count);
+
+                let mut reranked: Vec<(NodeId, f32)> = child_scores
+                    .iter()
+                    .map(|&(nid, _approx)| {
+                        let dist = self.nodes.get(&nid)
+                            .map(|n| self.dist(query, n.centroid()))
+                            .unwrap_or(f32::MAX);
+                        (nid, dist)
+                    })
+                    .collect();
+                reranked.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+                let final_beam = Self::effective_beam(&reranked, tau, beam_min, beam_max);
+                reranked.truncate(final_beam);
+                child_scores = reranked;
+            } else {
+                let effective = Self::effective_beam(&child_scores, tau, beam_min, beam_max);
+                child_scores.truncate(effective);
+            }
+
+            let mut next_internals: Vec<NodeId> = Vec::new();
+            for &(node_id, dist) in &child_scores {
+                if let Some(node_ref) = self.nodes.get(&node_id) {
+                    match node_ref.value() {
+                        TreeNode::Leaf(_) => leaves.push((node_id, dist)),
+                        TreeNode::Internal(_) => next_internals.push(node_id),
+                    }
+                }
+            }
+
+            if next_internals.is_empty() {
+                break;
+            }
+            beam = next_internals;
+        }
+
+        leaves.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        leaves
+    }
+
+    /// Dispatch to quantized or f32 navigate based on config.
+    fn navigate(
+        &self,
+        query: &[f32],
+        tau: Option<f64>,
+        beam_min: usize,
+        beam_max: usize,
+        rerank_centroids: usize,
+    ) -> Vec<(NodeId, f32)> {
+        if self.config.fp_navigation {
+            self.navigate_f32(query, tau, beam_min, beam_max)
+        } else {
+            self.navigate_quantized(query, tau, beam_min, beam_max, rerank_centroids)
         }
     }
 
@@ -649,7 +976,7 @@ impl HierarchicalSpannWriter {
             result.push(node_id);
             selected_centroids.push(centroid);
 
-            if result.len() >= self.config.nreplica_count {
+            if result.len() >= self.config.max_replicas {
                 break;
             }
         }
@@ -687,7 +1014,9 @@ impl HierarchicalSpannWriter {
                 return;
             }
 
+            let wlock_start = Instant::now();
             let _lock = self.structure_lock.write();
+            self.stats.balance_lock_wait_nanos.fetch_add(wlock_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
             // Re-check size under lock (may have changed)
             let len = match self.nodes.get(&cluster_id) {
@@ -705,9 +1034,9 @@ impl HierarchicalSpannWriter {
             };
 
             if len > self.config.split_threshold {
-                self.split_leaf_locked(cluster_id, depth);
+                self.split_leaf(cluster_id, depth);
             } else if len > 0 && len < self.config.merge_threshold {
-                self.merge_leaf_locked(cluster_id, depth);
+                self.merge_leaf(cluster_id, depth);
             }
 
             self.balancing.remove(&cluster_id);
@@ -733,6 +1062,7 @@ impl HierarchicalSpannWriter {
             if version < current_version {
                 leaf.ids.swap_remove(i);
                 leaf.versions.swap_remove(i);
+                leaf.codes.swap_remove(i);
                 removed += 1;
             } else {
                 i += 1;
@@ -750,15 +1080,16 @@ impl HierarchicalSpannWriter {
     // Split (leaf) - caller holds structure_lock.write()
     // =========================================================================
 
-    fn split_leaf_locked(&self, leaf_id: NodeId, depth: u32) {
+    fn split_leaf(&self, leaf_id: NodeId, depth: u32) {
         let t0 = Instant::now();
 
-        let (old_ids, old_versions, parent_id, old_centroid) = {
+        let (old_ids, old_versions, old_codes, parent_id, old_centroid) = {
             let Some(node_ref) = self.nodes.get(&leaf_id) else { return };
             let TreeNode::Leaf(leaf) = node_ref.value() else { return };
             (
                 leaf.ids.clone(),
                 leaf.versions.clone(),
+                leaf.codes.clone(),
                 leaf.parent_id,
                 leaf.centroid.clone(),
             )
@@ -781,8 +1112,16 @@ impl HierarchicalSpannWriter {
             return;
         }
 
+        let old_code_map: HashMap<u32, Vec<u8>> = old_ids
+            .iter()
+            .zip(old_codes.iter())
+            .map(|(&id, code)| (id, code.clone()))
+            .collect();
+
+        let kmeans_start = Instant::now();
         let (left_center, left_group, right_center, right_group) =
             utils::split(embeddings, &self.distance_fn);
+        self.stats.split_kmeans_nanos.fetch_add(kmeans_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
         let left_id = self.alloc_node_id();
         let right_id = self.alloc_node_id();
@@ -790,87 +1129,99 @@ impl HierarchicalSpannWriter {
         let left_centroid = left_center.to_vec();
         let right_centroid = right_center.to_vec();
 
+        let quantize_start = Instant::now();
+        let left_codes: Vec<Vec<u8>> = left_group
+            .iter()
+            .map(|(_, _, emb)| Code::<1>::quantize(emb, &left_centroid).as_ref().to_vec())
+            .collect();
+        let right_codes: Vec<Vec<u8>> = right_group
+            .iter()
+            .map(|(_, _, emb)| Code::<1>::quantize(emb, &right_centroid).as_ref().to_vec())
+            .collect();
+        self.stats.split_quantize_nanos.fetch_add(quantize_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+
         self.nodes.insert(
             left_id,
             TreeNode::Leaf(LeafNode {
-                centroid: left_centroid.clone(),
+                centroid: left_centroid,
+                centroid_code: Vec::new(),
                 ids: left_group.iter().map(|(id, _, _)| *id).collect(),
                 versions: left_group.iter().map(|(_, ver, _)| *ver).collect(),
+                codes: left_codes,
                 parent_id: None,
             }),
         );
         self.nodes.insert(
             right_id,
             TreeNode::Leaf(LeafNode {
-                centroid: right_centroid.clone(),
+                centroid: right_centroid,
+                centroid_code: Vec::new(),
                 ids: right_group.iter().map(|(id, _, _)| *id).collect(),
                 versions: right_group.iter().map(|(_, ver, _)| *ver).collect(),
+                codes: right_codes,
                 parent_id: None,
             }),
         );
 
-        // Atomically remove old leaf and rescue any entries added by concurrent
-        // add() threads between our initial clone and this remove.
-        let cloned_ids: HashSet<u32> = old_ids.iter().copied().collect();
-        if let Some((_, removed_node)) = self.nodes.remove(&leaf_id) {
-            if let TreeNode::Leaf(removed_leaf) = removed_node {
-                for (i, &id) in removed_leaf.ids.iter().enumerate() {
-                    if !cloned_ids.contains(&id) {
-                        let version = removed_leaf.versions[i];
-                        let current_ver = self.versions.get(&id).map(|r| *r).unwrap_or(0);
-                        if version >= current_ver {
-                            if let Some(emb) = self.embeddings.get(&id) {
-                                let ld = self.dist(emb.value(), &left_centroid);
-                                let rd = self.dist(emb.value(), &right_centroid);
-                                if ld <= rd {
-                                    self.register_in_leaf(left_id, id, version);
-                                } else {
-                                    self.register_in_leaf(right_id, id, version);
-                                }
-                                self.stats.rescued_entries.fetch_add(1, Ordering::Relaxed);
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        self.nodes.remove(&leaf_id);
 
         if let Some(pid) = parent_id {
-            self.replace_child_locked(pid, leaf_id, &[left_id, right_id]);
+            self.replace_child(pid, leaf_id, &[left_id, right_id]);
         } else {
-            self.create_root_above_locked(&[left_id, right_id]);
+            self.create_root_above(&[left_id, right_id]);
         }
 
-        self.stats.splits.fetch_add(1, Ordering::Relaxed);
-        self.stats.split_nanos.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
-
         if depth < MAX_BALANCE_DEPTH {
+            let npa_start = Instant::now();
             let mut evaluated = HashSet::new();
-            self.npa_split_points_locked(
-                &left_group, &old_centroid, &left_center, &mut evaluated, depth,
+            self.apply_npa_to_cluster(
+                &left_group, &old_centroid, &left_center, &old_code_map, &mut evaluated, depth,
             );
-            self.npa_split_points_locked(
-                &right_group, &old_centroid, &right_center, &mut evaluated, depth,
+            self.apply_npa_to_cluster(
+                &right_group, &old_centroid, &right_center, &old_code_map, &mut evaluated, depth,
             );
-            self.npa_neighbor_points_locked(
+            self.apply_npa_to_neighbors(
                 leaf_id, left_id, right_id,
                 &old_centroid, &left_center, &right_center,
                 &mut evaluated, depth,
             );
+            self.stats.split_npa_nanos.fetch_add(npa_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
         }
+
+        self.stats.splits.fetch_add(1, Ordering::Relaxed);
+        self.stats.split_nanos.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
     }
 
-    /// NPA for split points: reassign vectors that are farther from the new
-    /// centroid than the old. Caller holds structure_lock.write().
-    fn npa_split_points_locked(
+    /// Nearest neighbor posting assignment (NPA) for split points:
+    /// reassign vectors that are farther from the new
+    /// centroid than the old, using quantized distance estimation.
+    /// Uses old codes (quantized against old_center) with QuantizedQuery.
+    /// Caller holds structure_lock.write().
+    fn apply_npa_to_cluster(
         &self,
         group: &[EmbeddingPoint],
         old_center: &[f32],
         new_center: &[f32],
+        old_code_map: &HashMap<u32, Vec<u8>>,
         evaluated: &mut HashSet<u32>,
         depth: u32,
     ) {
-        for (id, version, embedding) in group {
+        let padded_bytes = self.padded_bytes();
+        let c_norm = Self::vec_norm(old_center);
+
+        // old_center as query relative to old_center: r_q = 0
+        let old_r_q = vec![0.0f32; old_center.len()];
+        let old_c_dot_q = c_norm * c_norm;
+        let old_q_norm = c_norm;
+        let old_qq = QuantizedQuery::new(&old_r_q, padded_bytes, c_norm, old_c_dot_q, old_q_norm);
+
+        // new_center as query relative to old_center: r_q = new_center - old_center
+        let new_r_q: Vec<f32> = new_center.iter().zip(old_center.iter()).map(|(a, b)| a - b).collect();
+        let new_c_dot_q = f32::dot(old_center, new_center).unwrap_or(0.0) as f32;
+        let new_q_norm = Self::vec_norm(new_center);
+        let new_qq = QuantizedQuery::new(&new_r_q, padded_bytes, c_norm, new_c_dot_q, new_q_norm);
+
+        for (id, version, _) in group {
             let current_ver = self.versions.get(id).map(|r| *r).unwrap_or(0);
             if *version < current_ver {
                 continue;
@@ -878,10 +1229,13 @@ impl HierarchicalSpannWriter {
             if !evaluated.insert(*id) {
                 continue;
             }
-            let old_dist = self.dist(embedding, old_center);
-            let new_dist = self.dist(embedding, new_center);
+            let Some(code_bytes) = old_code_map.get(id) else { continue };
+            let code = Code::<1, _>::new(code_bytes.as_slice());
+
+            let old_dist = code.distance_quantized_query(&self.distance_fn, &old_qq);
+            let new_dist = code.distance_quantized_query(&self.distance_fn, &new_qq);
             if new_dist > old_dist {
-                self.reassign_locked(*id, depth);
+                self.reassign(*id, depth);
             }
         }
     }
@@ -890,7 +1244,7 @@ impl HierarchicalSpannWriter {
     /// be closer to the new left/right centroids than to their current cluster.
     /// Follows the LIRE protocol from SPFresh (Section 3.2).
     /// Caller holds structure_lock.write().
-    fn npa_neighbor_points_locked(
+    fn apply_npa_to_neighbors(
         &self,
         old_leaf_id: NodeId,
         left_id: NodeId,
@@ -901,7 +1255,12 @@ impl HierarchicalSpannWriter {
         evaluated: &mut HashSet<u32>,
         depth: u32,
     ) {
-        let neighbors = self.navigate(
+        let padded_bytes = self.padded_bytes();
+        let old_q_norm = Self::vec_norm(old_center);
+        let left_q_norm = Self::vec_norm(left_center);
+        let right_q_norm = Self::vec_norm(right_center);
+
+        let neighbors = self.navigate_f32(
             old_center,
             Some(self.config.write_beam_tau),
             self.config.write_beam_min,
@@ -915,18 +1274,43 @@ impl HierarchicalSpannWriter {
 
             self.scrub(neighbor_id);
 
-            let (n_centroid, n_ids, n_versions) = {
+            let (n_centroid, n_ids, n_versions, n_codes) = {
                 let Some(node_ref) = self.nodes.get(&neighbor_id) else { continue };
                 let TreeNode::Leaf(leaf) = node_ref.value() else { continue };
                 (
                     leaf.centroid.clone(),
                     leaf.ids.clone(),
                     leaf.versions.clone(),
+                    leaf.codes.clone(),
                 )
             };
 
-            for (i, &id) in n_ids.iter().enumerate() {
+            let c_norm = Self::vec_norm(&n_centroid);
+
+            // Each center as a query residual relative to the neighbor's centroid
+            let old_r_q: Vec<f32> = old_center.iter().zip(n_centroid.iter()).map(|(a, b)| a - b).collect();
+            let old_c_dot_q = f32::dot(&n_centroid, old_center).unwrap_or(0.0) as f32;
+
+            let left_r_q: Vec<f32> = left_center.iter().zip(n_centroid.iter()).map(|(a, b)| a - b).collect();
+            let left_c_dot_q = f32::dot(&n_centroid, left_center).unwrap_or(0.0) as f32;
+
+            let right_r_q: Vec<f32> = right_center.iter().zip(n_centroid.iter()).map(|(a, b)| a - b).collect();
+            let right_c_dot_q = f32::dot(&n_centroid, right_center).unwrap_or(0.0) as f32;
+
+            // Neighbor centroid as query relative to itself: r_q = 0
+            let neighbor_r_q = vec![0.0f32; n_centroid.len()];
+            let neighbor_c_dot_q = c_norm * c_norm;
+            let neighbor_q_norm = c_norm;
+
+            let left_qq = QuantizedQuery::new(&left_r_q, padded_bytes, c_norm, left_c_dot_q, left_q_norm);
+            let right_qq = QuantizedQuery::new(&right_r_q, padded_bytes, c_norm, right_c_dot_q, right_q_norm);
+            let neighbor_qq = QuantizedQuery::new(&neighbor_r_q, padded_bytes, c_norm, neighbor_c_dot_q, neighbor_q_norm);
+            let old_qq = QuantizedQuery::new(&old_r_q, padded_bytes, c_norm, old_c_dot_q, old_q_norm);
+
+            for (i, code_bytes) in n_codes.iter().enumerate() {
+                let id = n_ids[i];
                 let version = n_versions[i];
+
                 let current_ver = self.versions.get(&id).map(|r| *r).unwrap_or(0);
                 if version < current_ver {
                     continue;
@@ -935,30 +1319,28 @@ impl HierarchicalSpannWriter {
                     continue;
                 }
 
-                let Some(embedding) = self.embeddings.get(&id).map(|e| e.value().clone()) else {
-                    continue;
-                };
+                let code = Code::<1, _>::new(code_bytes.as_slice());
 
-                let left_dist = self.dist(&embedding, left_center);
-                let right_dist = self.dist(&embedding, right_center);
-                let neighbor_dist = self.dist(&embedding, &n_centroid);
+                let left_dist = code.distance_quantized_query(&self.distance_fn, &left_qq);
+                let right_dist = code.distance_quantized_query(&self.distance_fn, &right_qq);
+                let neighbor_dist = code.distance_quantized_query(&self.distance_fn, &neighbor_qq);
 
                 if neighbor_dist <= left_dist && neighbor_dist <= right_dist {
                     continue;
                 }
 
-                let old_dist = self.dist(&embedding, old_center);
+                let old_dist = code.distance_quantized_query(&self.distance_fn, &old_qq);
                 if old_dist <= left_dist && old_dist <= right_dist {
                     continue;
                 }
 
-                self.reassign_locked(id, depth);
+                self.reassign(id, depth);
             }
         }
     }
 
     /// Reassign a vector to its best cluster. Caller holds structure_lock.write().
-    fn reassign_locked(&self, id: u32, depth: u32) {
+    fn reassign(&self, id: u32, depth: u32) {
         let t0 = Instant::now();
 
         let new_version = {
@@ -971,27 +1353,33 @@ impl HierarchicalSpannWriter {
             return;
         };
 
-        let candidates = self.navigate(
+        let nav_start = Instant::now();
+        let candidates = self.navigate_f32(
             &embedding,
             Some(self.config.write_beam_tau),
             self.config.write_beam_min,
             self.config.write_beam_max,
         );
         let cluster_ids = self.rng_select(&candidates);
+        self.stats.reassign_navigate_nanos.fetch_add(nav_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
+        let reg_start = Instant::now();
         let mut clusters_to_balance = Vec::new();
         for &cluster_id in &cluster_ids {
-            if self.register_in_leaf(cluster_id, id, new_version) {
+            if self.register_in_leaf(cluster_id, id, new_version, &embedding) {
                 clusters_to_balance.push(cluster_id);
             }
         }
+        self.stats.reassign_register_nanos.fetch_add(reg_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
-        self.stats.reassigns.fetch_add(1, Ordering::Relaxed);
-        self.stats.reassign_nanos.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
-
+        let balance_start = Instant::now();
         for cluster_id in clusters_to_balance {
             self.balance_under_lock(cluster_id, depth + 1);
         }
+        self.stats.reassign_balance_nanos.fetch_add(balance_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+
+        self.stats.reassigns.fetch_add(1, Ordering::Relaxed);
+        self.stats.reassign_nanos.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
     }
 
     /// Balance called when we already hold structure_lock.write() (from split/merge NPA).
@@ -1011,9 +1399,9 @@ impl HierarchicalSpannWriter {
         };
 
         if len > self.config.split_threshold {
-            self.split_leaf_locked(cluster_id, depth);
+            self.split_leaf(cluster_id, depth);
         } else if len > 0 && len < self.config.merge_threshold {
-            self.merge_leaf_locked(cluster_id, depth);
+            self.merge_leaf(cluster_id, depth);
         }
     }
 
@@ -1021,7 +1409,7 @@ impl HierarchicalSpannWriter {
     // Split (internal) - caller holds structure_lock.write()
     // =========================================================================
 
-    fn split_internal_locked(&self, node_id: NodeId) {
+    fn split_internal(&self, node_id: NodeId) {
         let (children, parent_id) = {
             let Some(node_ref) = self.nodes.get(&node_id) else { return };
             let TreeNode::Internal(internal) = node_ref.value() else { return };
@@ -1051,10 +1439,14 @@ impl HierarchicalSpannWriter {
         let left_id = self.alloc_node_id();
         let right_id = self.alloc_node_id();
 
+        let left_centroid = left_center.to_vec();
+        let right_centroid = right_center.to_vec();
+
         self.nodes.insert(
             left_id,
             TreeNode::Internal(InternalNode {
-                centroid: left_center.to_vec(),
+                centroid: left_centroid.clone(),
+                centroid_code: Vec::new(),
                 children: left_children.clone(),
                 parent_id: None,
             }),
@@ -1062,29 +1454,33 @@ impl HierarchicalSpannWriter {
         self.nodes.insert(
             right_id,
             TreeNode::Internal(InternalNode {
-                centroid: right_center.to_vec(),
+                centroid: right_centroid.clone(),
+                centroid_code: Vec::new(),
                 children: right_children.clone(),
                 parent_id: None,
             }),
         );
 
+        // Recompute centroid_codes for children relative to their new parent
         for &child_id in &left_children {
             if let Some(mut node_ref) = self.nodes.get_mut(&child_id) {
                 node_ref.set_parent_id(Some(left_id));
+                self.recompute_centroid_code(&mut node_ref, &left_centroid);
             }
         }
         for &child_id in &right_children {
             if let Some(mut node_ref) = self.nodes.get_mut(&child_id) {
                 node_ref.set_parent_id(Some(right_id));
+                self.recompute_centroid_code(&mut node_ref, &right_centroid);
             }
         }
 
         self.nodes.remove(&node_id);
 
         if let Some(pid) = parent_id {
-            self.replace_child_locked(pid, node_id, &[left_id, right_id]);
+            self.replace_child(pid, node_id, &[left_id, right_id]);
         } else {
-            self.create_root_above_locked(&[left_id, right_id]);
+            self.create_root_above(&[left_id, right_id]);
         }
     }
 
@@ -1092,12 +1488,14 @@ impl HierarchicalSpannWriter {
     // Merge - caller holds structure_lock.write()
     // =========================================================================
 
-    fn merge_leaf_locked(&self, leaf_id: NodeId, depth: u32) {
+    fn merge_leaf(&self, leaf_id: NodeId, depth: u32) {
         if depth > MAX_BALANCE_DEPTH {
             return;
         }
         let t0 = Instant::now();
 
+        // Safe to clone then remove: add() holds structure_lock.read() during
+        // register, so no concurrent register_in_leaf can race with our remove.
         let (source_centroid, source_ids, source_versions, parent_id) = {
             let Some(node_ref) = self.nodes.get(&leaf_id) else { return };
             let TreeNode::Leaf(leaf) = node_ref.value() else { return };
@@ -1109,7 +1507,7 @@ impl HierarchicalSpannWriter {
             )
         };
 
-        let candidates = self.navigate(
+        let candidates = self.navigate_f32(
             &source_centroid,
             Some(self.config.write_beam_tau),
             self.config.write_beam_min,
@@ -1125,9 +1523,7 @@ impl HierarchicalSpannWriter {
             None => return,
         };
 
-        // Atomically remove and capture the leaf to rescue concurrent additions.
-        let cloned_ids: HashSet<u32> = source_ids.iter().copied().collect();
-        let removed_data = self.nodes.remove(&leaf_id);
+        self.nodes.remove(&leaf_id);
         if let Some(pid) = parent_id {
             self.remove_child_locked(pid, leaf_id);
         }
@@ -1135,7 +1531,6 @@ impl HierarchicalSpannWriter {
         self.stats.merges.fetch_add(1, Ordering::Relaxed);
         self.stats.merge_nanos.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
-        // Re-register the vectors we knew about from our clone.
         for (&id, &version) in source_ids.iter().zip(source_versions.iter()) {
             let current_ver = self.versions.get(&id).map(|r| *r).unwrap_or(0);
             if version < current_ver {
@@ -1149,30 +1544,12 @@ impl HierarchicalSpannWriter {
             let dist_to_source = self.dist(&embedding, &source_centroid);
 
             if dist_to_target <= dist_to_source {
-                if !self.register_in_leaf(target_id, id, version) {
+                if !self.register_in_leaf(target_id, id, version, &embedding) {
                     self.stats.register_missing_nodes.fetch_add(1, Ordering::Relaxed);
-                    self.reassign_locked(id, depth);
+                    self.reassign(id, depth);
                 }
             } else {
-                self.reassign_locked(id, depth);
-            }
-        }
-
-        // Rescue entries added by concurrent add() between our clone and remove.
-        if let Some((_, TreeNode::Leaf(removed_leaf))) = removed_data {
-            for (i, &id) in removed_leaf.ids.iter().enumerate() {
-                if !cloned_ids.contains(&id) {
-                    let version = removed_leaf.versions[i];
-                    let current_ver = self.versions.get(&id).map(|r| *r).unwrap_or(0);
-                    if version >= current_ver {
-                        if self.embeddings.contains_key(&id) {
-                            if !self.register_in_leaf(target_id, id, version) {
-                                self.reassign_locked(id, depth);
-                            }
-                            self.stats.rescued_entries.fetch_add(1, Ordering::Relaxed);
-                        }
-                    }
-                }
+                self.reassign(id, depth);
             }
         }
 
@@ -1183,7 +1560,7 @@ impl HierarchicalSpannWriter {
     // Tree structure helpers - caller holds structure_lock.write()
     // =========================================================================
 
-    fn replace_child_locked(
+    fn replace_child(
         &self,
         parent_id: NodeId,
         old_child: NodeId,
@@ -1197,12 +1574,6 @@ impl HierarchicalSpannWriter {
             parent.children.clone()
         };
 
-        for &child_id in new_children {
-            if let Some(mut node_ref) = self.nodes.get_mut(&child_id) {
-                node_ref.set_parent_id(Some(parent_id));
-            }
-        }
-
         let new_centroid = self.compute_centroid_of(&children_clone);
         if let Some(mut node_ref) = self.nodes.get_mut(&parent_id) {
             if let TreeNode::Internal(parent) = node_ref.value_mut() {
@@ -1210,8 +1581,20 @@ impl HierarchicalSpannWriter {
             }
         }
 
+        // Get the parent centroid for recomputing children's centroid_codes
+        let parent_centroid = self.nodes.get(&parent_id)
+            .map(|n| n.centroid().to_vec())
+            .unwrap_or_else(|| vec![0.0; self.dim]);
+
+        for &child_id in new_children {
+            if let Some(mut node_ref) = self.nodes.get_mut(&child_id) {
+                node_ref.set_parent_id(Some(parent_id));
+                self.recompute_centroid_code(&mut node_ref, &parent_centroid);
+            }
+        }
+
         if children_clone.len() > self.config.branching_factor {
-            self.split_internal_locked(parent_id);
+            self.split_internal(parent_id);
         }
     }
 
@@ -1231,8 +1614,10 @@ impl HierarchicalSpannWriter {
                     new_root,
                     TreeNode::Leaf(LeafNode {
                         centroid: vec![0.0; self.dim],
+                        centroid_code: Vec::new(),
                         ids: Vec::new(),
                         versions: Vec::new(),
+                        codes: Vec::new(),
                         parent_id: None,
                     }),
                 );
@@ -1257,14 +1642,15 @@ impl HierarchicalSpannWriter {
         }
     }
 
-    fn create_root_above_locked(&self, children: &[NodeId]) {
+    fn create_root_above(&self, children: &[NodeId]) {
         let root_id = self.alloc_node_id();
         let centroid = self.compute_centroid_of(children);
 
         self.nodes.insert(
             root_id,
             TreeNode::Internal(InternalNode {
-                centroid,
+                centroid: centroid.clone(),
+                centroid_code: Vec::new(),
                 children: children.to_vec(),
                 parent_id: None,
             }),
@@ -1273,6 +1659,7 @@ impl HierarchicalSpannWriter {
         for &child_id in children {
             if let Some(mut node_ref) = self.nodes.get_mut(&child_id) {
                 node_ref.set_parent_id(Some(root_id));
+                self.recompute_centroid_code(&mut node_ref, &centroid);
             }
         }
 
@@ -1299,56 +1686,90 @@ impl HierarchicalSpannWriter {
         mean
     }
 
+    /// Recompute a node's centroid_code as a 1-bit quantization of its centroid
+    /// relative to the given parent centroid.
+    fn recompute_centroid_code(
+        &self,
+        node_ref: &mut dashmap::mapref::one::RefMut<'_, NodeId, TreeNode>,
+        parent_centroid: &[f32],
+    ) {
+        let centroid = node_ref.centroid().to_vec();
+        let code = Code::<1>::quantize(&centroid, parent_centroid);
+        let code_bytes = code.as_ref().to_vec();
+        match node_ref.value_mut() {
+            TreeNode::Leaf(leaf) => leaf.centroid_code = code_bytes,
+            TreeNode::Internal(internal) => internal.centroid_code = code_bytes,
+        }
+    }
+
+    /// Compute the padded byte length for 1-bit codes at this dimension.
+    fn padded_bytes(&self) -> usize {
+        Code::<1, Vec<u8>>::packed_len(self.dim)
+    }
+
+    /// Compute ||v||.
+    fn vec_norm(v: &[f32]) -> f32 {
+        (f32::dot(v, v).unwrap_or(0.0) as f32).sqrt()
+    }
+
     // =========================================================================
     // Search (no global lock - uses per-node DashMap gets)
     // =========================================================================
 
     /// Returns (results, vectors_scanned, leaves_scanned).
-    pub fn search(&self, query: &[f32], k: usize) -> (Vec<(u32, f32)>, usize, usize) {
-        self.search_with_tau(
-            query,
-            k,
-            self.config.beam_tau,
-            self.config.beam_min,
-            self.config.beam_max,
-        )
-    }
-
     /// Returns (top-k results, vectors_scanned, leaves_scanned).
-    pub fn search_with_tau(
+    /// Scores data vectors with 1-bit quantized distances, then optionally
+    /// reranks top candidates with f32 embeddings.
+    pub fn search(
         &self,
         query: &[f32],
         k: usize,
         tau: f64,
         beam_min: usize,
         beam_max: usize,
+        rerank_centroids: usize,
+        rerank_vectors: usize,
     ) -> (Vec<(u32, f32)>, usize, usize) {
-        let leaves = self.navigate(query, Some(tau), beam_min, beam_max);
+        let leaves = self.navigate(query, Some(tau), beam_min, beam_max, rerank_centroids);
         let leaves_scanned = leaves.len();
+        let padded_bytes = self.padded_bytes();
+        let q_norm = Self::vec_norm(query);
+        let rerank_factor = rerank_vectors;
 
         let mut results: Vec<(u32, f32)> = Vec::new();
 
         for &(leaf_id, _) in &leaves {
             if let Some(node_ref) = self.nodes.get(&leaf_id) {
                 if let TreeNode::Leaf(leaf) = node_ref.value() {
+                    let centroid = leaf.centroid.clone();
                     let ids = leaf.ids.clone();
                     let versions = leaf.versions.clone();
+                    let codes = leaf.codes.clone();
                     drop(node_ref);
+
+                    let r_q: Vec<f32> = query.iter()
+                        .zip(centroid.iter())
+                        .map(|(q, c)| q - c)
+                        .collect();
+                    let c_norm = Self::vec_norm(&centroid);
+                    let c_dot_q = f32::dot(&centroid, query).unwrap_or(0.0) as f32;
+                    let qq = QuantizedQuery::new(&r_q, padded_bytes, c_norm, c_dot_q, q_norm);
+
                     for (i, &id) in ids.iter().enumerate() {
                         let version = versions[i];
                         let current_ver = self.versions.get(&id).map(|r| *r).unwrap_or(0);
                         if version < current_ver {
                             continue;
                         }
-                        if let Some(emb) = self.embeddings.get(&id) {
-                            let dist = self.dist(query, emb.value());
-                            results.push((id, dist));
-                        }
+                        let dist = Code::<1, _>::new(codes[i].as_slice())
+                            .distance_quantized_query(&self.distance_fn, &qq);
+                        results.push((id, dist));
                     }
                 }
             }
         }
 
+        // Deduplicate (same vector in multiple leaves)
         let mut best: std::collections::HashMap<u32, f32> =
             std::collections::HashMap::with_capacity(results.len());
         for (id, dist) in results {
@@ -1361,8 +1782,29 @@ impl HierarchicalSpannWriter {
         let scanned = best.len();
         let mut deduped: Vec<(u32, f32)> = best.into_iter().collect();
         deduped.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-        deduped.truncate(k);
-        (deduped, scanned, leaves_scanned)
+
+        if rerank_factor > 1 {
+            let rerank_count = (k * rerank_factor).min(deduped.len());
+            deduped.truncate(rerank_count);
+
+            let mut reranked: Vec<(u32, f32)> = deduped
+                .into_iter()
+                .map(|(id, approx_dist)| {
+                    if let Some(emb) = self.embeddings.get(&id) {
+                        let dist = self.dist(query, emb.value());
+                        (id, dist)
+                    } else {
+                        (id, approx_dist)
+                    }
+                })
+                .collect();
+            reranked.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            reranked.truncate(k);
+            (reranked, scanned, leaves_scanned)
+        } else {
+            deduped.truncate(k);
+            (deduped, scanned, leaves_scanned)
+        }
     }
 
     // =========================================================================
@@ -1376,6 +1818,7 @@ impl HierarchicalSpannWriter {
         tau: f64,
         beam_min: usize,
         beam_max: usize,
+        rerank_centroids: usize,
     ) -> Vec<LevelRecall> {
         let root = self.root_id();
 
@@ -1395,6 +1838,11 @@ impl HierarchicalSpannWriter {
             }
         }
 
+        let use_quantized = !self.config.fp_navigation;
+        let q_norm = Self::vec_norm(query);
+        let padded_bytes = self.padded_bytes();
+        let rerank_factor = rerank_centroids;
+
         let mut levels = Vec::new();
         let mut beam: Vec<NodeId> = vec![root];
 
@@ -1404,12 +1852,37 @@ impl HierarchicalSpannWriter {
             for &node_id in &beam {
                 if let Some(node_ref) = self.nodes.get(&node_id) {
                     if let TreeNode::Internal(internal) = node_ref.value() {
+                        let parent_centroid = internal.centroid.clone();
                         let children: Vec<NodeId> = internal.children.clone();
                         drop(node_ref);
-                        for child_id in children {
-                            if let Some(child) = self.nodes.get(&child_id) {
-                                let dist = self.dist(query, child.centroid());
-                                child_scores.push((child_id, dist));
+
+                        if use_quantized {
+                            let c_norm = Self::vec_norm(&parent_centroid);
+                            let r_q: Vec<f32> = query.iter()
+                                .zip(parent_centroid.iter())
+                                .map(|(q, c)| q - c)
+                                .collect();
+                            let c_dot_q = f32::dot(&parent_centroid, query).unwrap_or(0.0) as f32;
+                            let qq = QuantizedQuery::new(&r_q, padded_bytes, c_norm, c_dot_q, q_norm);
+
+                            for child_id in children {
+                                if let Some(child) = self.nodes.get(&child_id) {
+                                    let code_bytes = child.centroid_code();
+                                    let dist = if code_bytes.is_empty() {
+                                        self.dist(query, child.centroid())
+                                    } else {
+                                        Code::<1, _>::new(code_bytes)
+                                            .distance_quantized_query(&self.distance_fn, &qq)
+                                    };
+                                    child_scores.push((child_id, dist));
+                                }
+                            }
+                        } else {
+                            for child_id in children {
+                                if let Some(child) = self.nodes.get(&child_id) {
+                                    let dist = self.dist(query, child.centroid());
+                                    child_scores.push((child_id, dist));
+                                }
                             }
                         }
                     }
@@ -1422,9 +1895,27 @@ impl HierarchicalSpannWriter {
 
             let total_candidates = child_scores.len();
             child_scores.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            let effective =
-                Self::effective_beam(&child_scores, Some(tau), beam_min, beam_max);
-            child_scores.truncate(effective);
+
+            if use_quantized && rerank_factor > 1 {
+                let effective = Self::effective_beam(&child_scores, Some(tau), beam_min, beam_max);
+                let rerank_count = (effective * rerank_factor).min(child_scores.len());
+                child_scores.truncate(rerank_count);
+                let mut reranked: Vec<(NodeId, f32)> = child_scores.iter()
+                    .map(|&(nid, _)| {
+                        let dist = self.nodes.get(&nid)
+                            .map(|n| self.dist(query, n.centroid()))
+                            .unwrap_or(f32::MAX);
+                        (nid, dist)
+                    })
+                    .collect();
+                reranked.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+                let final_beam = Self::effective_beam(&reranked, Some(tau), beam_min, beam_max);
+                reranked.truncate(final_beam);
+                child_scores = reranked;
+            } else {
+                let effective = Self::effective_beam(&child_scores, Some(tau), beam_min, beam_max);
+                child_scores.truncate(effective);
+            }
 
             let mut reachable: HashSet<u32> = HashSet::new();
             for &(node_id, _) in &child_scores {
@@ -1571,6 +2062,23 @@ impl HierarchicalSpannWriter {
             .sum()
     }
 
+    /// Count vectors in `embeddings` that have no valid (non-stale) entry in any leaf.
+    pub fn count_orphaned_vectors(&self) -> usize {
+        let mut valid_ids: HashSet<u32> = HashSet::new();
+        for entry in self.nodes.iter() {
+            if let TreeNode::Leaf(leaf) = entry.value() {
+                for (i, &id) in leaf.ids.iter().enumerate() {
+                    let version = leaf.versions[i];
+                    let current_ver = self.versions.get(&id).map(|r| *r).unwrap_or(0);
+                    if version >= current_ver {
+                        valid_ids.insert(id);
+                    }
+                }
+            }
+        }
+        self.embeddings.len().saturating_sub(valid_ids.len())
+    }
+
     pub fn print_tree_stats(&self, format_count_fn: fn(usize) -> String) {
         let root = self.root_id();
         let depth = self.depth_of(root);
@@ -1580,6 +2088,7 @@ impl HierarchicalSpannWriter {
             child_counts: Vec<usize>,
             leaf_count: usize,
             leaf_sizes: Vec<usize>,
+            child_to_parent_dists: Vec<f32>,
         }
 
         let mut levels: Vec<LevelStats> = (0..depth)
@@ -1588,6 +2097,7 @@ impl HierarchicalSpannWriter {
                 child_counts: Vec::new(),
                 leaf_count: 0,
                 leaf_sizes: Vec::new(),
+                child_to_parent_dists: Vec::new(),
             })
             .collect();
 
@@ -1603,9 +2113,17 @@ impl HierarchicalSpannWriter {
                     TreeNode::Internal(internal) => {
                         levels[level].internal_count += 1;
                         levels[level].child_counts.push(internal.children.len());
+                        let parent_centroid = internal.centroid.clone();
                         let children: Vec<NodeId> = internal.children.clone();
                         drop(node_ref);
                         for child_id in children {
+                            if let Some(child_ref) = self.nodes.get(&child_id) {
+                                let d = self.dist(child_ref.centroid(), &parent_centroid);
+                                let child_level = level + 1;
+                                if child_level < depth {
+                                    levels[child_level].child_to_parent_dists.push(d);
+                                }
+                            }
                             queue.push((child_id, level + 1));
                         }
                     }
@@ -1658,22 +2176,55 @@ impl HierarchicalSpannWriter {
                 );
             }
 
+            if !ls.child_to_parent_dists.is_empty() {
+                let dists = &ls.child_to_parent_dists;
+                let min_d = percentile_f32(dists, 0);
+                let p25_d = percentile_f32(dists, 25);
+                let p50_d = percentile_f32(dists, 50);
+                let p75_d = percentile_f32(dists, 75);
+                let max_d = percentile_f32(dists, 100);
+                println!(
+                    "  |            dist to parent: min={:.1}, p25={:.1}, p50={:.1}, p75={:.1}, max={:.1}",
+                    min_d, p25_d, p50_d, p75_d, max_d,
+                );
+            }
+
             if !is_last {
                 println!("  |");
             }
         }
 
         let total_vectors = self.total_vectors();
-        let replication = if total_vectors > 0 {
+        let _replication = if total_vectors > 0 {
             total_leaf_entries as f64 / total_vectors as f64
         } else {
             0.0
         };
+        let orphaned = self.count_orphaned_vectors();
+        let valid_entries: usize = self.nodes.iter()
+            .filter_map(|entry| match entry.value() {
+                TreeNode::Leaf(leaf) => {
+                    Some(leaf.ids.iter().enumerate().filter(|&(i, &id)| {
+                        let ver = leaf.versions[i];
+                        let cur = self.versions.get(&id).map(|r| *r).unwrap_or(0);
+                        ver >= cur
+                    }).count())
+                }
+                _ => None,
+            })
+            .sum();
+        let valid_replication = if total_vectors > 0 && orphaned < total_vectors {
+            valid_entries as f64 / (total_vectors - orphaned) as f64
+        } else {
+            0.0
+        };
         println!(
-            "\nTotal entries: {} | Unique vectors: {} | Avg replication: {:.2}x",
+            "\nTotal entries: {} ({} valid) | Unique vectors: {} ({} orphaned) | Avg replication: {:.2}x",
             format_count_fn(total_leaf_entries),
+            format_count_fn(valid_entries),
             format_count_fn(total_vectors),
-            replication,
+            format_count_fn(orphaned),
+            valid_replication,
         );
     }
 }
@@ -1684,6 +2235,16 @@ fn percentile_usize(data: &[usize], pct: usize) -> usize {
     }
     let mut sorted = data.to_vec();
     sorted.sort_unstable();
+    let idx = (pct as f64 / 100.0 * (sorted.len() - 1) as f64).round() as usize;
+    sorted[idx.min(sorted.len() - 1)]
+}
+
+fn percentile_f32(data: &[f32], pct: usize) -> f32 {
+    if data.is_empty() {
+        return 0.0;
+    }
+    let mut sorted = data.to_vec();
+    sorted.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let idx = (pct as f64 / 100.0 * (sorted.len() - 1) as f64).round() as usize;
     sorted[idx.min(sorted.len() - 1)]
 }

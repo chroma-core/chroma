@@ -1,6 +1,6 @@
-//! Benchmark for HierarchicalSpannWriter: incremental index build with
-//! recall evaluation at each checkpoint. Analogous to quantized_spann.rs
-//! but using the in-memory hierarchical tree instead of USearch + blockfiles.
+//! Benchmark for 1-bit quantized HierarchicalSpannWriter: incremental index
+//! build with recall evaluation at each checkpoint. Uses 1-bit RaBitQ codes
+//! for both data vectors and centroid navigation.
 
 #![recursion_limit = "256"]
 
@@ -17,7 +17,7 @@ use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 
 use datasets::{format_count, recall_at_k, Dataset, DatasetType, MetricType, Query};
-use hierarchical_index::writer::{
+use hierarchical_index::writer_quantized::{
     format_task_tables, HierarchicalSpannConfig, HierarchicalSpannWriter, WriterStatsSnapshot,
 };
 
@@ -26,8 +26,8 @@ use hierarchical_index::writer::{
 // =============================================================================
 
 #[derive(Parser, Debug)]
-#[command(name = "hierarchical_spann_profile")]
-#[command(about = "Benchmark for HierarchicalSpannWriter (full-precision hierarchical SPANN)")]
+#[command(name = "hierarchical_spann_profile_quantized")]
+#[command(about = "Benchmark for 1-bit quantized HierarchicalSpannWriter")]
 #[command(trailing_var_arg = true)]
 struct Args {
     #[arg(long, default_value = "wikipedia-en")]
@@ -43,10 +43,6 @@ struct Args {
     /// Vectors per checkpoint
     #[arg(long, default_value = "1000000")]
     checkpoint_size: usize,
-
-    /// Tau values for recall sweep, comma-separated
-    #[arg(long, default_value = "0.1,0.5,1")]
-    tau_values: String,
 
     /// Min beam width for dynamic beam
     #[arg(long, default_value = "10")]
@@ -79,7 +75,7 @@ struct Args {
 
     /// Max replicas per vector (RNG select)
     #[arg(long, default_value = "2")]
-    nreplica_count: usize,
+    max_replicas: usize,
 
     /// RNG epsilon filter
     #[arg(long, default_value = "8.0")]
@@ -108,6 +104,22 @@ struct Args {
     /// Number of threads for parallel add
     #[arg(long, default_value = "1")]
     threads: usize,
+
+    /// Use f32 centroid distances for navigation instead of quantized
+    #[arg(long)]
+    fp_navigation: bool,
+
+    /// Tau values for recall sweep, comma-separated
+    #[arg(long, default_value = "0.1,0.5,1")]
+    recall_tau_values: String,
+
+    /// Centroid rerank factors to sweep during recall
+    #[arg(long, default_value = "1,4,16", value_delimiter = ',')]
+    recall_rerank_centroids: Vec<usize>,
+
+    /// Vector rerank factors to sweep during recall
+    #[arg(long, default_value = "1,4,16", value_delimiter = ',')]
+    recall_rerank_vectors: Vec<usize>,
 
     /// Print legend explaining all table columns
     #[arg(long)]
@@ -287,7 +299,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .min(max_checkpoints);
 
     let tau_values: Vec<f64> = args
-        .tau_values
+        .recall_tau_values
         .split(',')
         .map(|s| s.trim().parse().expect("invalid tau value"))
         .collect();
@@ -302,13 +314,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         beam_tau: args.beam_tau,
         beam_min: args.beam_min,
         beam_max: args.beam_max,
-        nreplica_count: args.nreplica_count,
+        max_replicas: args.max_replicas,
         write_rng_epsilon: args.write_rng_epsilon,
         write_rng_factor: args.write_rng_factor,
         reassign_neighbor_count: 32,
+        fp_navigation: args.fp_navigation,
     };
 
-    println!("=== Hierarchical SPANN Writer Benchmark ===");
+    println!("=== 1-Bit Quantized Hierarchical SPANN Writer Benchmark ===");
     println!(
         "Dataset: {} ({} vectors, {} dims)",
         dataset.name(),
@@ -326,7 +339,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         config.branching_factor,
         config.split_threshold,
         config.merge_threshold,
-        config.nreplica_count,
+        config.max_replicas,
         config.write_rng_epsilon,
         config.write_rng_factor,
     );
@@ -336,7 +349,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     );
     println!(
         "Search beam: tau={} min={} max={} | Tau sweep: {:?} | Brute-force GT: {}",
-        config.beam_tau, config.beam_min, config.beam_max, tau_values, args.brute_force_gt
+        config.beam_tau, config.beam_min, config.beam_max, tau_values, args.brute_force_gt,
+    );
+    println!(
+        "Quantization: 1-bit | Nav: {} | Rerank centroids: {:?} | Rerank vectors: {:?}",
+        if args.fp_navigation { "f32" } else { "1-bit" },
+        args.recall_rerank_centroids, args.recall_rerank_vectors,
     );
     println!("Threads: {}", args.threads);
     println!();
@@ -504,10 +522,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         let level_counts = writer.level_node_counts();
 
-        // Build header: tau | R@10 | avg lat | [per-level] | scanned | R@100
         let mut header = format!(
-            "  | {:>6} | {:>8} | {:>10} |",
-            "tau", "R@10", "avg lat"
+            "  | {:>6} | {:>6} | {:>6} | {:>8} | {:>10} |",
+            "tau", "rr_c", "rr_v", "R@10", "avg lat"
         );
         for lvl in 1..=num_levels {
             header.push_str(&format!(
@@ -522,8 +539,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         ));
 
         let mut separator = format!(
-            "  |{:-^8}|{:-^10}|{:-^12}|",
-            "", "", ""
+            "  |{:-^8}|{:-^8}|{:-^8}|{:-^10}|{:-^12}|",
+            "", "", "", "", ""
         );
         for _ in 1..=num_levels {
             separator.push_str(&format!("{:-^14}|{:-^10}|", "", ""));
@@ -543,64 +560,70 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let recall_start = Instant::now();
 
         for &tau in &tau_values {
-            let mut total_r10 = 0.0;
-            let mut total_r100 = 0.0;
-            let mut total_nanos = 0u64;
-            let mut total_scanned = 0usize;
-            let mut level_r100_sums: Vec<f64> = vec![0.0; num_levels];
-            let mut level_beam_sums: Vec<u64> = vec![0; num_levels];
+            for &rr_c in &args.recall_rerank_centroids {
+                for &rr_v in &args.recall_rerank_vectors {
+                    let mut total_r10 = 0.0;
+                    let mut total_r100 = 0.0;
+                    let mut total_nanos = 0u64;
+                    let mut total_scanned = 0usize;
+                    let mut level_r100_sums: Vec<f64> = vec![0.0; num_levels];
+                    let mut level_beam_sums: Vec<u64> = vec![0; num_levels];
 
-            for gt in &checkpoint_queries {
-                let t0 = Instant::now();
-                let (results, scanned, _leaves_scanned) =
-                    writer.search_with_tau(&gt.vector, k, tau, beam_min, beam_max);
-                total_nanos += t0.elapsed().as_nanos() as u64;
-                total_scanned += scanned;
+                    for gt in &checkpoint_queries {
+                        let t0 = Instant::now();
+                        let (results, scanned, _leaves_scanned) =
+                            writer.search(&gt.vector, k, tau, beam_min, beam_max, rr_c, rr_v);
+                        total_nanos += t0.elapsed().as_nanos() as u64;
+                        total_scanned += scanned;
 
-                let result_ids: Vec<u32> = results.iter().map(|(id, _)| *id).collect();
-                total_r10 += recall_at_k(&result_ids, &gt.neighbors, 10);
-                total_r100 += recall_at_k(&result_ids, &gt.neighbors, 100);
+                        let result_ids: Vec<u32> = results.iter().map(|(id, _)| *id).collect();
+                        total_r10 += recall_at_k(&result_ids, &gt.neighbors, 10);
+                        total_r100 += recall_at_k(&result_ids, &gt.neighbors, 100);
 
-                let gt_100: HashSet<u32> =
-                    gt.neighbors.iter().take(100).copied().collect();
-                let level_recall =
-                    writer.diagnose_level_recall(&gt.vector, &gt_100, tau, beam_min, beam_max);
-                for lr in &level_recall {
-                    if lr.level <= num_levels {
-                        level_r100_sums[lr.level - 1] += lr.reachable_100;
-                        level_beam_sums[lr.level - 1] += lr.beam_size as u64;
+                        let gt_100: HashSet<u32> =
+                            gt.neighbors.iter().take(100).copied().collect();
+                        let level_recall =
+                            writer.diagnose_level_recall(&gt.vector, &gt_100, tau, beam_min, beam_max, rr_c);
+                        for lr in &level_recall {
+                            if lr.level <= num_levels {
+                                level_r100_sums[lr.level - 1] += lr.reachable_100;
+                                level_beam_sums[lr.level - 1] += lr.beam_size as u64;
+                            }
+                        }
                     }
+
+                    let n = num_queries as f64;
+                    let avg_r10 = total_r10 / n;
+                    let avg_r100 = total_r100 / n;
+                    let avg_lat = total_nanos / num_queries as u64;
+                    let avg_scanned = total_scanned / num_queries;
+
+                    let mut row = format!(
+                        "  | {:>6.2} | {:>5}x | {:>5}x | {:>7.2}% | {:>10} |",
+                        tau,
+                        rr_c,
+                        rr_v,
+                        avg_r10 * 100.0,
+                        format_latency(avg_lat),
+                    );
+                    for lvl in 0..num_levels {
+                        let avg_beam = level_beam_sums[lvl] / num_queries as u64;
+                        let avg_lr = level_r100_sums[lvl] / n * 100.0;
+                        let total_at_level = level_counts.get(lvl + 1).copied().unwrap_or(0);
+                        row.push_str(&format!(
+                            " {:>12} | {:>7.2}% |",
+                            format!("{}/{}", format_count(avg_beam as usize), format_count(total_at_level)),
+                            avg_lr,
+                        ));
+                    }
+                    row.push_str(&format!(
+                        " {:>15} | {:>7.2}% |",
+                        format_count(avg_scanned),
+                        avg_r100 * 100.0,
+                    ));
+                    println!("{}", row);
                 }
             }
-
-            let n = num_queries as f64;
-            let avg_r10 = total_r10 / n;
-            let avg_r100 = total_r100 / n;
-            let avg_lat = total_nanos / num_queries as u64;
-            let avg_scanned = total_scanned / num_queries;
-
-            let mut row = format!(
-                "  | {:>6.2} | {:>7.2}% | {:>10} |",
-                tau,
-                avg_r10 * 100.0,
-                format_latency(avg_lat),
-            );
-            for lvl in 0..num_levels {
-                let avg_beam = level_beam_sums[lvl] / num_queries as u64;
-                let avg_lr = level_r100_sums[lvl] / n * 100.0;
-                let total_at_level = level_counts.get(lvl + 1).copied().unwrap_or(0);
-                row.push_str(&format!(
-                    " {:>12} | {:>7.2}% |",
-                    format!("{}/{}", format_count(avg_beam as usize), format_count(total_at_level)),
-                    avg_lr,
-                ));
-            }
-            row.push_str(&format!(
-                " {:>15} | {:>7.2}% |",
-                format_count(avg_scanned),
-                avg_r100 * 100.0,
-            ));
-            println!("{}", row);
         }
         let recall_time = recall_start.elapsed();
         println!("  Recall duration: {}", format_duration(recall_time));
@@ -625,6 +648,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("                     node was missing from the DashMap (removed by concurrent split)");
         println!("add.missing_nodes     - add() failed to register in any navigated cluster (all gone)");
         println!("                     and fell back to inserting in the root node");
+        println!("register.missing_node - register_in_leaf target was gone (split by balance cascade),");
+        println!("                     fell back to reassign");
         println!();
         println!("--- Recall ---");
         println!("R@100      - fraction of true top-100 neighbors found");

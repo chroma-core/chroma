@@ -81,3 +81,7 @@ harness = false
 [[bench]]
 name = "hierarchical_spann_profile"
 harness = false
+
+[[bench]]
+name = "hierarchical_spann_profile_quantized"
+harness = false
