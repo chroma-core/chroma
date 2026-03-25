@@ -8,6 +8,7 @@ import {
 import {
   snakeCase,
   validateConfigSchema,
+  getChromaEmbedUrl,
 } from "@chroma-core/ai-embeddings-common";
 
 const NAME = "chroma-cloud-splade";
@@ -100,7 +101,7 @@ export class ChromaCloudSpladeEmbeddingFunction
     this.model = model;
     this.apiKeyEnvVar = apiKeyEnvVar;
 
-    this.url = "https://embed.trychroma.com/embed_sparse";
+    this.url = `${getChromaEmbedUrl()}/embed_sparse`;
     this.headers = {
       "x-chroma-token": apiKey ?? "",
       "x-chroma-embedding-model": model,

@@ -8,6 +8,7 @@ import {
 import {
   snakeCase,
   validateConfigSchema,
+  getChromaEmbedUrl,
 } from "@chroma-core/ai-embeddings-common";
 
 const NAME = "chroma-cloud-qwen";
@@ -97,7 +98,7 @@ export class ChromaCloudQwenEmbeddingFunction implements EmbeddingFunction {
     this.task = task;
     this.instructions = instructions;
 
-    this.url = "https://embed.trychroma.com";
+    this.url = getChromaEmbedUrl();
     this.headers = {
       "x-chroma-token": apiKey ?? "",
       "x-chroma-embedding-model": model,
