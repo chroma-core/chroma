@@ -187,9 +187,14 @@ export type Database = {
  */
 export type DeleteCollectionRecordsPayload = RawWhereFields & {
     ids?: Array<string> | null;
+    limit?: number | null;
 };
 
 export type DeleteCollectionRecordsResponse = {
+    deleted?: number;
+};
+
+export type DeleteCollectionResponse = {
     [key: string]: unknown;
 };
 
@@ -253,6 +258,16 @@ export type FloatValueType = {
 
 export type ForkCollectionPayload = {
     new_name: string;
+};
+
+/**
+ * Response containing the fork count for a collection.
+ */
+export type ForkCountResponse = {
+    /**
+     * The number of forks for this collection.
+     */
+    count: number;
 };
 
 export type FtsIndexConfig = {
@@ -1333,10 +1348,10 @@ export type DeleteCollectionResponses = {
     /**
      * Collection deleted successfully
      */
-    200: UpdateCollectionResponse;
+    200: DeleteCollectionResponse;
 };
 
-export type DeleteCollectionResponse = DeleteCollectionResponses[keyof DeleteCollectionResponses];
+export type DeleteCollectionResponse2 = DeleteCollectionResponses[keyof DeleteCollectionResponses];
 
 export type GetCollectionData = {
     body?: never;
@@ -1531,7 +1546,12 @@ export type CollectionCountData = {
          */
         collection_id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * Read level for consistency vs performance tradeoffs
+         */
+        read_level?: ReadLevel;
+    };
     url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/count';
 };
 
@@ -1652,6 +1672,52 @@ export type ForkCollectionResponses = {
 };
 
 export type ForkCollectionResponse = ForkCollectionResponses[keyof ForkCollectionResponses];
+
+export type ForkCountData = {
+    body?: never;
+    path: {
+        /**
+         * Tenant UUID
+         */
+        tenant: string;
+        /**
+         * Database name
+         */
+        database: string;
+        /**
+         * Collection UUID
+         */
+        collection_id: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork_count';
+};
+
+export type ForkCountErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Collection not found
+     */
+    404: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type ForkCountError = ForkCountErrors[keyof ForkCountErrors];
+
+export type ForkCountResponses = {
+    /**
+     * Fork count retrieved successfully
+     */
+    200: ForkCountResponse;
+};
+
+export type ForkCountResponse2 = ForkCountResponses[keyof ForkCountResponses];
 
 export type AttachFunctionData = {
     /**

@@ -69,22 +69,38 @@ pub fn scan_from_manifest(
     {
         return None;
     }
-    // If no there is no fragment with a limit later than the upper-bound LogPosition, that
+    // If no there is no fragment with a limit later-equal than the upper-bound LogPosition, that
     // means we have a stale manifest.  Since this is an in-memory only function, we return
     // "None" to indicate that it's not satisfiable and do no I/O.
     if !manifest
         .fragments
         .iter()
-        .any(|f| f.limit > log_position_range.1)
+        .any(|f| f.limit >= log_position_range.1)
     {
         return None;
     }
-    let fragments = manifest
+    let mut fragments = manifest
         .fragments
         .iter()
         .filter(|f| ranges_overlap(log_position_range, (f.start, f.limit)))
         .cloned()
         .collect::<Vec<_>>();
+    fragments.sort_by_key(|f| f.start.offset());
+    let mut covered_until = from;
+    for fragment in &fragments {
+        if fragment.start > covered_until {
+            return None;
+        }
+        if fragment.limit > covered_until {
+            covered_until = fragment.limit;
+        }
+        if covered_until > log_position_range.1 {
+            break;
+        }
+    }
+    if covered_until < log_position_range.1 {
+        return None;
+    }
     let mut short_read = false;
     Some(post_process_fragments(
         fragments,
@@ -827,6 +843,8 @@ mod tests {
             initial_seq_no: Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1))),
         };
 
+        println!("scan_from_manifest 1");
+
         // Boundary case 1: Request exactly at the manifest limit
         let from = LogPosition::from_offset(100);
         let limits = Limits {
@@ -840,6 +858,8 @@ mod tests {
             "Should succeed when request stays within manifest coverage"
         );
 
+        println!("scan_from_manifest 2");
+
         // Boundary case 2: Request exactly to the manifest limit
         let limits_at_limit = Limits {
             max_files: None,
@@ -848,9 +868,11 @@ mod tests {
         };
         let result_at_limit = scan_from_manifest(&manifest, from, limits_at_limit);
         assert!(
-            result_at_limit.is_none(),
-            "Should fail when request  exceeds limit"
+            result_at_limit.is_some(),
+            "Should succeed when request exactly matches manifest limit"
         );
+
+        println!("scan_from_manifest 3");
 
         // Boundary case 3: Request one beyond the manifest limit
         let limits_beyond = Limits {
@@ -864,6 +886,8 @@ mod tests {
             "Should return None when request exceeds manifest coverage"
         );
 
+        println!("scan_from_manifest 4");
+
         // Boundary case 4: Request from the very end of the manifest
         let from_end = LogPosition::from_offset(200);
         let limits_at_end = Limits {
@@ -873,8 +897,8 @@ mod tests {
         };
         let result_at_end = scan_from_manifest(&manifest, from_end, limits_at_end);
         assert!(
-            result_at_end.is_none(),
-            "Should fail when reading exactly at manifest boundary"
+            result_at_end.is_some(),
+            "Should succeed when request exactly matches manifest limit"
         );
 
         // Boundary case 5: Request from beyond the manifest
@@ -931,6 +955,108 @@ mod tests {
         assert!(
             result_overflow.is_none(),
             "Should handle potential overflow gracefully"
+        );
+    }
+
+    #[test]
+    fn scan_from_manifest_rejects_non_contiguous_fragments() {
+        let manifest = Manifest {
+            setsum: Setsum::default(),
+            collected: Setsum::default(),
+            acc_bytes: 3000,
+            writer: "test-writer".to_string(),
+            snapshots: vec![],
+            fragments: vec![
+                Fragment {
+                    path: "fragment1".to_string(),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+                    start: LogPosition::from_offset(1),
+                    limit: LogPosition::from_offset(101),
+                    num_bytes: 1000,
+                    setsum: Setsum::default(),
+                },
+                Fragment {
+                    path: "fragment3".to_string(),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3)),
+                    start: LogPosition::from_offset(201),
+                    limit: LogPosition::from_offset(301),
+                    num_bytes: 1000,
+                    setsum: Setsum::default(),
+                },
+            ],
+            initial_offset: Some(LogPosition::from_offset(1)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1))),
+        };
+
+        let result = scan_from_manifest(
+            &manifest,
+            LogPosition::from_offset(50),
+            Limits {
+                max_files: None,
+                max_bytes: None,
+                max_records: Some(200),
+            },
+        );
+
+        assert!(
+            result.is_none(),
+            "scan_from_manifest must reject fragment selections with interior gaps"
+        );
+    }
+
+    #[test]
+    fn scan_from_manifest_accepts_overlapping_contiguous_fragments() {
+        let manifest = Manifest {
+            setsum: Setsum::default(),
+            collected: Setsum::default(),
+            acc_bytes: 3000,
+            writer: "test-writer".to_string(),
+            snapshots: vec![],
+            fragments: vec![
+                Fragment {
+                    path: "fragment1".to_string(),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+                    start: LogPosition::from_offset(1),
+                    limit: LogPosition::from_offset(101),
+                    num_bytes: 1000,
+                    setsum: Setsum::default(),
+                },
+                Fragment {
+                    path: "fragment2".to_string(),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
+                    start: LogPosition::from_offset(90),
+                    limit: LogPosition::from_offset(201),
+                    num_bytes: 1000,
+                    setsum: Setsum::default(),
+                },
+                Fragment {
+                    path: "fragment3".to_string(),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3)),
+                    start: LogPosition::from_offset(201),
+                    limit: LogPosition::from_offset(301),
+                    num_bytes: 1000,
+                    setsum: Setsum::default(),
+                },
+            ],
+            initial_offset: Some(LogPosition::from_offset(1)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1))),
+        };
+
+        let result = scan_from_manifest(
+            &manifest,
+            LogPosition::from_offset(50),
+            Limits {
+                max_files: None,
+                max_bytes: None,
+                max_records: Some(200),
+            },
+        )
+        .expect("overlapping fragments that cover the full range should be accepted");
+
+        assert_eq!(
+            result.len(),
+            3,
+            "all covering fragments should be preserved"
         );
     }
 

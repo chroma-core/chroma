@@ -28,6 +28,7 @@ fn bench_limit(criterion: &mut Criterion) {
             record_segment: test_segment.record_segment,
             log_offset_ids: SignedRoaringBitmap::empty(),
             compact_offset_ids: SignedRoaringBitmap::full(),
+            bloom_filter_manager: None,
         };
 
         for offset in [0, record_count / 2, record_count - FETCH] {

@@ -68,10 +68,12 @@ use crate::types::SysDbError;
 use crate::types::{
     CountCollectionsRequest, CountCollectionsResponse, CreateCollectionRequest,
     CreateCollectionResponse, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest,
-    CreateTenantResponse, FlushCompactionRequest, FlushCompactionResponse,
-    GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetCollectionsRequest,
-    GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantsRequest,
-    GetTenantsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
+    CreateTenantResponse, FinishCollectionDeletionRequest, FinishCollectionDeletionResponse,
+    FlushCompactionRequest, FlushCompactionResponse, GetCollectionWithSegmentsRequest,
+    GetCollectionWithSegmentsResponse, GetCollectionsRequest, GetCollectionsResponse,
+    GetDatabaseRequest, GetDatabaseResponse, GetTenantsRequest, GetTenantsResponse,
+    ListCollectionsToGcRequest, ListCollectionsToGcResponse, UpdateCollectionRequest,
+    UpdateCollectionResponse,
 };
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
@@ -351,6 +353,16 @@ impl Backend {
         }
     }
 
+    /// Finish collection deletion (hard delete).
+    pub async fn finish_collection_deletion(
+        &self,
+        req: FinishCollectionDeletionRequest,
+    ) -> Result<FinishCollectionDeletionResponse, SysDbError> {
+        match self {
+            Backend::Spanner(s) => s.finish_collection_deletion(req).await,
+        }
+    }
+
     /// Flush collection compaction results to the database.
     pub async fn flush_collection_compaction(
         &self,
@@ -358,6 +370,40 @@ impl Backend {
     ) -> Result<FlushCompactionResponse, SysDbError> {
         match self {
             Backend::Spanner(s) => s.flush_collection_compaction(req).await,
+        }
+    }
+
+    /// List collections that need garbage collection.
+    pub async fn list_collections_to_gc(
+        &self,
+        req: ListCollectionsToGcRequest,
+    ) -> Result<ListCollectionsToGcResponse, SysDbError> {
+        match self {
+            Backend::Spanner(s) => s.list_collections_to_gc(req).await,
+        }
+    }
+
+    /// CAS update of version_file_name and related fields in collections table.
+    /// Returns true if the update succeeded (rows affected > 0), false if CAS failed.
+    pub async fn update_version_related_fields(
+        &self,
+        collection_id: &str,
+        old_version_file_name: &str,
+        new_version_file_name: &str,
+        oldest_version_ts: Option<i64>,
+        num_active_versions: i32,
+    ) -> Result<bool, SysDbError> {
+        match self {
+            Backend::Spanner(s) => {
+                s.update_version_related_fields(
+                    collection_id,
+                    old_version_file_name,
+                    new_version_file_name,
+                    oldest_version_ts,
+                    num_active_versions,
+                )
+                .await
+            }
         }
     }
 

@@ -46,8 +46,8 @@ export class OpenAIEmbeddingFunction implements EmbeddingFunction {
 
     const apiKey = args.apiKey || process.env[apiKeyEnvVar];
     if (!apiKey) {
-      throw new Error(
-        `OpenAI API key is required. Please provide it in the constructor or set the environment variable ${apiKeyEnvVar}.`,
+      console.warn(
+        `OpenAI API key is not set. Please provide it in the constructor or set the environment variable ${apiKeyEnvVar}.`,
       );
     }
 

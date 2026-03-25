@@ -4,6 +4,7 @@ use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_segment::{
+    bloom_filter::BloomFilterManager,
     distributed_hnsw::{DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader},
     distributed_spann::SpannSegmentReaderError,
 };
@@ -200,6 +201,9 @@ pub struct KnnFilterOrchestrator {
     // Pipelined operators
     filter: Filter,
 
+    // Bloom filter manager
+    bloom_filter_manager: Option<BloomFilterManager>,
+
     // Result channel
     result_channel: Option<Sender<KnnFilterResult>>,
 }
@@ -215,6 +219,7 @@ impl KnnFilterOrchestrator {
         fetch_log: FetchLogOperator,
         filter: Filter,
         read_level: ReadLevel,
+        bloom_filter_manager: Option<BloomFilterManager>,
     ) -> Self {
         let context = OrchestratorContext::new(dispatcher);
         Self {
@@ -227,6 +232,7 @@ impl KnnFilterOrchestrator {
             fetched_logs: None,
             read_level,
             filter,
+            bloom_filter_manager,
             result_channel: None,
         }
     }
@@ -243,6 +249,7 @@ impl KnnFilterOrchestrator {
                 blockfile_provider: self.blockfile_provider.clone(),
                 metadata_segment: self.collection_and_segments.metadata_segment.clone(),
                 record_segment: self.collection_and_segments.record_segment.clone(),
+                bloom_filter_manager: self.bloom_filter_manager.clone(),
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),

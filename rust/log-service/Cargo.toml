@@ -11,6 +11,7 @@ path = "src/bin/log.rs"
 arrow = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
+backon = { workspace = true }
 parquet = { workspace = true }
 prost = { workspace = true }
 figment = { workspace = true }

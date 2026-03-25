@@ -1,7 +1,10 @@
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_segment::blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError};
+use chroma_segment::{
+    blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    bloom_filter::BloomFilterManager,
+};
 use chroma_system::Operator;
 use chroma_types::{Chunk, LogRecord, Operation, Segment};
 use std::collections::HashSet;
@@ -21,6 +24,7 @@ pub(crate) struct CountRecordsInput {
     record_segment_definition: Segment,
     blockfile_provider: BlockfileProvider,
     log_records: Chunk<LogRecord>,
+    bloom_filter_manager: Option<BloomFilterManager>,
 }
 
 impl CountRecordsInput {
@@ -28,11 +32,13 @@ impl CountRecordsInput {
         record_segment_definition: Segment,
         blockfile_provider: BlockfileProvider,
         log_records: Chunk<LogRecord>,
+        bloom_filter_manager: Option<BloomFilterManager>,
     ) -> Self {
         Self {
             record_segment_definition,
             blockfile_provider,
             log_records,
+            bloom_filter_manager,
         }
     }
 }
@@ -74,6 +80,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
         let segment_reader = Box::pin(RecordSegmentReader::from_segment(
             &input.record_segment_definition,
             &input.blockfile_provider,
+            input.bloom_filter_manager.clone(),
         ))
         .await;
         let reader = match segment_reader {
@@ -208,7 +215,8 @@ mod tests {
     use chroma_blockstore::provider::BlockfileProvider;
     use chroma_segment::{
         blockfile_record::{
-            RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
+            RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
+            RecordSegmentWriter,
         },
         types::materialize_logs,
     };
@@ -239,6 +247,7 @@ mod tests {
                 &database_id,
                 &record_segment,
                 &in_memory_provider,
+                None,
                 None,
             )
             .await
@@ -280,7 +289,7 @@ mod tests {
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
             let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
-                RecordSegmentReader::from_segment(&record_segment, &in_memory_provider),
+                RecordSegmentReader::from_segment(&record_segment, &in_memory_provider, None),
             )
             .await
             {
@@ -310,10 +319,15 @@ mod tests {
                     }
                 }
             };
-            let mat_records = materialize_logs(&record_segment_reader, data, None)
-                .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
-                .await
-                .expect("Log materialization failed");
+            let mat_records = materialize_logs(
+                &record_segment_reader,
+                data,
+                None,
+                &RecordSegmentReaderOptions::default(),
+            )
+            .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
+            .await
+            .expect("Log materialization failed");
             segment_writer
                 .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await
@@ -365,6 +379,7 @@ mod tests {
             record_segment_definition: record_segment,
             blockfile_provider: in_memory_provider,
             log_records: data,
+            bloom_filter_manager: None,
         };
         let operator = CountRecordsOperator {};
         let count = operator
@@ -451,6 +466,7 @@ mod tests {
             record_segment_definition: record_segment,
             blockfile_provider: in_memory_provider,
             log_records: data,
+            bloom_filter_manager: None,
         };
         let operator = CountRecordsOperator {};
         let count = operator

@@ -2,7 +2,10 @@ use super::scheduler::Scheduler;
 use super::scheduler_policy::LasCompactionTimeSchedulerPolicy;
 use super::OneOffCompactMessage;
 use super::RebuildMessage;
-use crate::compactor::types::ScheduledCompactMessage;
+use crate::compactor::types::{
+    GetCollectionAssignmentMessage, GetCollectionAssignmentResponse, InProgressJobEntry,
+    ListInProgressJobsMessage, ScheduledCompactMessage,
+};
 use crate::config::CompactionServiceConfig;
 use crate::execution::operators::fragment_fetch::FragmentFetcher;
 use crate::execution::operators::purge_dirty_log::PurgeDirtyLog;
@@ -25,6 +28,7 @@ use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_index::usearch::USearchIndexProvider;
 use chroma_log::Log;
 use chroma_memberlist::memberlist_provider::Memberlist;
+use chroma_segment::bloom_filter::BloomFilterManager;
 use chroma_segment::spann_provider::SpannProvider;
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
@@ -101,6 +105,7 @@ pub(crate) struct CompactionManagerContext {
     use_fragment_fetch: bool,
     fragment_fetcher: Option<Arc<FragmentFetcher>>,
     collections_for_fragment_fetch: HashSet<CollectionUuid>,
+    bloom_filter_manager: Option<BloomFilterManager>,
 }
 
 pub(crate) struct CompactionManager {
@@ -154,6 +159,7 @@ impl CompactionManager {
         use_fragment_fetch: bool,
         fragment_fetcher: Option<Arc<FragmentFetcher>>,
         collections_for_fragment_fetch: HashSet<CollectionUuid>,
+        bloom_filter_manager: Option<BloomFilterManager>,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (compact_awaiter_tx, compact_awaiter_rx) =
             mpsc::channel::<CompactionTask>(compaction_manager_queue_size);
@@ -191,6 +197,7 @@ impl CompactionManager {
                 use_fragment_fetch,
                 fragment_fetcher,
                 collections_for_fragment_fetch,
+                bloom_filter_manager,
             },
             on_next_memberlist_signal: None,
             compact_awaiter_channel: compact_awaiter_tx,
@@ -391,6 +398,20 @@ impl Drop for CompactionManager {
 }
 
 impl CompactionManagerContext {
+    /// Return the bloom filter manager for the given collection, or `None` if bloom filters
+    /// are disabled for this collection.
+    fn bloom_filter_manager_for_collection(
+        &self,
+        collection_id: CollectionUuid,
+    ) -> Option<BloomFilterManager> {
+        let manager = self.bloom_filter_manager.as_ref()?;
+        if manager.is_enabled_for_collection(collection_id) {
+            Some(manager.clone())
+        } else {
+            None
+        }
+    }
+
     /// Return the fragment fetcher for the given collection, or `None` if fragment fetch is
     /// disabled for this collection.  Fragment fetch is enabled when `use_fragment_fetch` is
     /// true or the collection appears in `collections_for_fragment_fetch`.
@@ -424,9 +445,10 @@ impl CompactionManagerContext {
         };
 
         // fetch data to compact -> execute_task/compact -> register
-        // Use the compact function to handle the entire orchestration process
+        // Use the compact function to handle the entire orchestration process.
         let is_function_disabled = self.disabled_function_collections.contains(&collection_id);
         let fragment_fetcher = self.fragment_fetcher_for_collection(collection_id);
+        let bloom_filter_manager = self.bloom_filter_manager_for_collection(collection_id);
 
         let compact_result = Box::pin(compact(
             self.system.clone(),
@@ -446,6 +468,7 @@ impl CompactionManagerContext {
             dispatcher.clone(),
             is_function_disabled,
             fragment_fetcher,
+            bloom_filter_manager,
             #[cfg(test)]
             None,
         ))
@@ -610,13 +633,29 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         let needs_fragment_fetcher =
             config.compactor.use_fragment_fetch || !collections_for_fragment_fetch.is_empty();
         let fragment_fetcher = if needs_fragment_fetcher {
-            Some(Arc::new(
-                FragmentFetcher::new(storage.clone(), &config.compactor.fragment_fetcher_cache)
+            if let Some(fragment_storage_config) = config.fragment_storage.as_ref() {
+                let fragment_storage =
+                    Storage::try_from_config(fragment_storage_config, registry).await?;
+                Some(Arc::new(
+                    FragmentFetcher::new(
+                        fragment_storage,
+                        &config.compactor.fragment_fetcher_cache,
+                    )
                     .await?,
-            ))
+                ))
+            } else {
+                tracing::warn!("Fragment fetch is enabled but no fragment_storage is configured; disabling fragment fetch");
+                None
+            }
         } else {
             None
         };
+
+        let bloom_filter_manager = BloomFilterManager::try_from_config(
+            &(config.bloom_filter_manager.clone(), storage.clone()),
+            registry,
+        )
+        .await?;
 
         CompactionManager::new(
             system.clone(),
@@ -641,6 +680,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             config.compactor.use_fragment_fetch,
             fragment_fetcher,
             collections_for_fragment_fetch,
+            Some(bloom_filter_manager),
         )
     }
 }
@@ -752,7 +792,8 @@ impl Handler<OneOffCompactMessage> for CompactionManager {
         _ctx: &ComponentContext<CompactionManager>,
     ) {
         self.scheduler
-            .add_oneoff_collections(message.collection_ids);
+            .add_oneoff_collections(message.collection_ids)
+            .await;
         tracing::info!(
             "One-off collections queued: {:?}",
             self.scheduler.get_oneoff_collections()
@@ -853,6 +894,79 @@ impl Handler<RegisterOnReadySignal> for CompactionManager {
             }
         } else {
             self.on_next_memberlist_signal = Some(message.on_ready_tx);
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<ListInProgressJobsMessage> for CompactionManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: ListInProgressJobsMessage,
+        _ctx: &ComponentContext<CompactionManager>,
+    ) {
+        tracing::info!("Received ListInProgressJobs request");
+
+        let entries = self
+            .scheduler
+            .get_in_progress_jobs()
+            .into_iter()
+            .map(|(job_id, job)| InProgressJobEntry {
+                job_id,
+                database_name: job.database_name.as_ref().to_string(),
+                expires_at_epoch_secs: job
+                    .expires_at
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0),
+            })
+            .collect();
+
+        if let Err(e) = message.response_tx.send(entries) {
+            tracing::warn!("Failed to send in-progress jobs response: {:?}", e);
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<GetCollectionAssignmentMessage> for CompactionManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: GetCollectionAssignmentMessage,
+        _ctx: &ComponentContext<CompactionManager>,
+    ) {
+        // Get the current memberlist from scheduler
+        let memberlist = self.scheduler.get_memberlist();
+        let mut member_ids: Vec<String> = memberlist
+            .iter()
+            .map(|member| member.member_id.clone())
+            .collect();
+
+        // Sort memberlist for consistent output
+        member_ids.sort();
+
+        // Get the assignment policy from scheduler
+        let assignment_policy = self.scheduler.get_assignment_policy();
+
+        // Set the members in the assignment policy
+        assignment_policy.set_members(member_ids.clone());
+
+        // Determine which node this collection would be assigned to
+        let assigned_node = assignment_policy
+            .assign_one(&message.collection_id.0.to_string())
+            .unwrap_or_else(|_| "no_assignment".to_string());
+
+        let response = GetCollectionAssignmentResponse {
+            assigned_node,
+            memberlist: member_ids,
+        };
+
+        if let Err(e) = message.response_tx.send(response) {
+            tracing::warn!("Failed to send collection assignment response: {:?}", e);
         }
     }
 }
@@ -1132,6 +1246,7 @@ mod tests {
             false,          // use_fragment_fetch
             None,           // fragment_fetcher
             HashSet::new(), // collections_for_fragment_fetch
+            None,           // bloom_filter_manager
         )
         .expect("Failed to create compaction manager in test");
 
@@ -1141,6 +1256,8 @@ mod tests {
             dispatcher_queue_size: 100,
             worker_queue_size: 100,
             active_io_tasks: 100,
+            cpu_affinity_num_cores: None,
+            io_affinity_num_cores: None,
         });
         let dispatcher_handle = system.start_component(dispatcher);
         manager.set_dispatcher(dispatcher_handle);

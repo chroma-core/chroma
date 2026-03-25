@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use chroma_segment::{quantized_spann::QuantizedSpannSegmentReader, spann_provider::SpannProvider};
+use chroma_segment::{
+    bloom_filter::BloomFilterManager, quantized_spann::QuantizedSpannSegmentReader,
+    spann_provider::SpannProvider,
+};
 use chroma_system::{
     wrap, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     OrchestratorContext, TaskMessage, TaskResult,
@@ -53,6 +56,9 @@ pub struct QuantizedSpannKnnOrchestrator {
     num_bruteforces: Option<usize>,
     log_and_bruteforce_results: Vec<Vec<RecordMeasure>>,
 
+    // Bloom filter manager
+    bloom_filter_manager: Option<BloomFilterManager>,
+
     // Result channel.
     result_channel: Option<Sender<Result<Vec<RecordMeasure>, KnnError>>>,
 }
@@ -65,6 +71,7 @@ impl QuantizedSpannKnnOrchestrator {
         collection_and_segments: CollectionAndSegments,
         knn_filter_output: KnnFilterOutput,
         knn: Knn,
+        bloom_filter_manager: Option<BloomFilterManager>,
     ) -> Self {
         Self {
             collection_and_segments,
@@ -77,6 +84,7 @@ impl QuantizedSpannKnnOrchestrator {
             spann_provider,
             num_bruteforces: None,
             log_and_bruteforce_results: Vec::new(),
+            bloom_filter_manager,
             result_channel: None,
         }
     }
@@ -128,6 +136,7 @@ impl Orchestrator for QuantizedSpannKnnOrchestrator {
                 record_segment: self.collection_and_segments.record_segment.clone(),
                 log_offset_ids: self.knn_filter_output.filter_output.log_offset_ids.clone(),
                 distance_function: self.knn_filter_output.distance_function.clone(),
+                bloom_filter_manager: self.bloom_filter_manager.clone(),
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),

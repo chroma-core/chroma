@@ -1,6 +1,6 @@
 ---
 title: "Getting Started"
-description: "Chroma is an open-source search engine for AI. It comes with everything you need to get started built-in, and runs on your machine."
+description: "Chroma is the open-source data infrastructure for AI. It comes with everything you need to get started built-in, and runs on your machine."
 ---
 import { Callout } from '/snippets/callout.mdx';
 import { YouTube } from '/snippets/youtube.jsx';
@@ -344,7 +344,7 @@ summary.
 
     ```typescript TypeScript
     const results = await collection.query({
-      queryTexts: "This is a query document about hawaii", // Chroma will embed this for you
+      queryTexts: ["This is a query document about hawaii"], // Chroma will embed this for you
       nResults: 2, // how many results to return
     });
 

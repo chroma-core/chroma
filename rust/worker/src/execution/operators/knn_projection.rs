@@ -2,6 +2,7 @@ use crate::execution::operators::projection::ProjectionInput;
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
+use chroma_segment::bloom_filter::BloomFilterManager;
 use chroma_system::Operator;
 use chroma_types::{
     operator::{KnnProjection, KnnProjectionOutput, KnnProjectionRecord, RecordMeasure},
@@ -38,6 +39,7 @@ pub struct KnnProjectionInput {
     pub blockfile_provider: BlockfileProvider,
     pub record_segment: Segment,
     pub record_distances: Vec<RecordMeasure>,
+    pub bloom_filter_manager: Option<BloomFilterManager>,
 }
 
 #[derive(Error, Debug)]
@@ -71,6 +73,7 @@ impl Operator<KnnProjectionInput, KnnProjectionOutput> for KnnProjection {
                 .iter()
                 .map(|record| record.offset_id)
                 .collect(),
+            bloom_filter_manager: input.bloom_filter_manager.clone(),
         };
 
         let result = self.projection.run(&projection_input).await?;
@@ -129,6 +132,7 @@ mod tests {
                 blockfile_provider,
                 record_segment,
                 record_distances,
+                bloom_filter_manager: None,
             },
         )
     }

@@ -401,7 +401,7 @@ impl ManifestManager {
         let payload = serde_json::to_string(&initial)
             .map_err(|e| Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}")))?
             .into_bytes();
-        storage
+        match storage
             .put_bytes(
                 &crate::manifest::manifest_path(prefix),
                 payload,
@@ -410,8 +410,13 @@ impl ManifestManager {
                     .with_mode(PutMode::IfNotExist),
             )
             .await
-            .map_err(Arc::new)?;
-        Ok(())
+        {
+            Ok(_) => Ok(()),
+            Err(StorageError::AlreadyExists { .. } | StorageError::Precondition { .. }) => {
+                Err(Error::AlreadyInitialized)
+            }
+            Err(err) => Err(Arc::new(err).into()),
+        }
     }
 
     /// Validate the e_tag against the manifest on object storage.
@@ -477,9 +482,13 @@ impl ManifestManager {
                     // without an e_tag we cannot do anything.  The log contention backoff protocol
                     // cares for this case, rather than having to error-handle it separately
                     // because it "crashes" the log and reinitializes.
-                    return Err(Error::LogContentionFailure);
+                    //
+                    // Was: LogContentionFailure.  Changed to LogContentionDurable because the
+                    // manifest post-fragment is durable.
+                    return Err(Error::LogContentionDurable);
                 }
-                Err(StorageError::Precondition { path: _, source: _ }) => {
+                Err(StorageError::AlreadyExists { path: _, source: _ })
+                | Err(StorageError::Precondition { path: _, source: _ }) => {
                     // NOTE(rescrv):  This is "durable" because it's a manifest failure.  See the
                     // comment in the Error enum for why this makes sense.
                     return Err(Error::LogContentionDurable);
@@ -725,7 +734,8 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for ManifestManager {
                 Ok(_) => {
                     return Ok(snapshot.to_pointer());
                 }
-                Err(StorageError::Precondition { path: _, source: _ }) => {
+                Err(StorageError::AlreadyExists { path: _, source: _ })
+                | Err(StorageError::Precondition { path: _, source: _ }) => {
                     // NOTE(rescrv):  This is something of a lie.  We know that someone put the
                     // file before us, and we know the setsum of the file is embedded in the path.
                     // Because the setsum is only calculable if you have the file and we assume

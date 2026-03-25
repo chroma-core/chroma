@@ -1,15 +1,57 @@
 use crate::{
-    ChannelError, CleanupGuard, Component, ComponentContext, ComponentHandle, PanicError, System,
+    utils::duration_ms, ChannelError, CleanupGuard, Component, ComponentContext, ComponentHandle,
+    PanicError, System,
 };
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use core::fmt::Debug;
 use std::any::type_name;
+use std::sync::LazyLock;
+use std::time::Instant;
 use tokio::sync::oneshot::{self, error::RecvError, Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::Span;
 
 use crate::{Dispatcher, TaskMessage};
+
+struct OrchestratorMetrics {
+    run_total: opentelemetry::metrics::Counter<u64>,
+    terminate_total: opentelemetry::metrics::Counter<u64>,
+    initial_task_total: opentelemetry::metrics::Counter<u64>,
+    run_latency_ms: opentelemetry::metrics::Histogram<f64>,
+    cleanup_latency_ms: opentelemetry::metrics::Histogram<f64>,
+}
+
+impl OrchestratorMetrics {
+    fn new() -> Self {
+        let meter = opentelemetry::global::meter("chroma.system");
+        Self {
+            run_total: meter
+                .u64_counter("chroma.system.orchestrator.run_total")
+                .with_description("Orchestrator run invocations")
+                .build(),
+            terminate_total: meter
+                .u64_counter("chroma.system.orchestrator.terminate_total")
+                .with_description("Orchestrator terminations")
+                .build(),
+            initial_task_total: meter
+                .u64_counter("chroma.system.orchestrator.initial_task_total")
+                .with_description("Initial tasks submitted by orchestrators")
+                .build(),
+            run_latency_ms: meter
+                .f64_histogram("chroma.system.orchestrator.run_latency_ms")
+                .with_description("Orchestrator run latency in milliseconds")
+                .build(),
+            cleanup_latency_ms: meter
+                .f64_histogram("chroma.system.orchestrator.cleanup_latency_ms")
+                .with_description("Orchestrator cleanup latency in milliseconds")
+                .build(),
+        }
+    }
+}
+
+static ORCHESTRATOR_METRICS: LazyLock<OrchestratorMetrics> =
+    LazyLock::new(OrchestratorMetrics::new);
 
 #[derive(Debug)]
 pub struct OrchestratorContext {
@@ -64,6 +106,11 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
 
     /// Runs the orchestrator in a system and returns the result
     async fn run(mut self, system: System) -> Result<Self::Output, Self::Error> {
+        let started = Instant::now();
+        ORCHESTRATOR_METRICS.run_total.add(
+            1,
+            &[opentelemetry::KeyValue::new("orchestrator", Self::name())],
+        );
         let (tx, rx) = oneshot::channel();
         self.set_result_channel(tx);
         let mut handle = system.start_component(self);
@@ -72,6 +119,22 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
         // the orchestrator is finished.
         let _cleanup_guard = CleanupGuard::new(move || handle.stop());
         let res = rx.await;
+        match &res {
+            Ok(Ok(_)) => ORCHESTRATOR_METRICS.run_latency_ms.record(
+                duration_ms(started.elapsed()),
+                &[
+                    opentelemetry::KeyValue::new("orchestrator", Self::name()),
+                    opentelemetry::KeyValue::new("result", "ok"),
+                ],
+            ),
+            _ => ORCHESTRATOR_METRICS.run_latency_ms.record(
+                duration_ms(started.elapsed()),
+                &[
+                    opentelemetry::KeyValue::new("orchestrator", Self::name()),
+                    opentelemetry::KeyValue::new("result", "error"),
+                ],
+            ),
+        }
         res?
     }
 
@@ -97,6 +160,14 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
         res: Result<Self::Output, Self::Error>,
         ctx: &ComponentContext<Self>,
     ) {
+        let result_label = if res.is_ok() { "ok" } else { "error" };
+        ORCHESTRATOR_METRICS.terminate_total.add(
+            1,
+            &[
+                opentelemetry::KeyValue::new("orchestrator", Self::name()),
+                opentelemetry::KeyValue::new("result", result_label),
+            ],
+        );
         let cancel = if let Err(err) = &res {
             if err.should_trace_error() {
                 tracing::error!("Error running {}: {}", Self::name(), err);
@@ -138,7 +209,20 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
         res: Result<Self::Output, Self::Error>,
         ctx: &ComponentContext<Self>,
     ) {
+        let result_label = if res.is_ok() { "ok" } else { "error" };
+        ORCHESTRATOR_METRICS.terminate_total.add(
+            1,
+            &[
+                opentelemetry::KeyValue::new("orchestrator", Self::name()),
+                opentelemetry::KeyValue::new("result", result_label),
+            ],
+        );
+        let cleanup_started = Instant::now();
         self.cleanup().await;
+        ORCHESTRATOR_METRICS.cleanup_latency_ms.record(
+            duration_ms(cleanup_started.elapsed()),
+            &[opentelemetry::KeyValue::new("orchestrator", Self::name())],
+        );
         let cancel = if let Err(err) = &res {
             if err.should_trace_error() {
                 tracing::error!("Error running {}: {}", Self::name(), err);
@@ -195,7 +279,12 @@ impl<O: Orchestrator> Component for O {
     }
 
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
-        for (task, tracing_context) in self.initial_tasks(ctx).await {
+        let initial_tasks = self.initial_tasks(ctx).await;
+        ORCHESTRATOR_METRICS.initial_task_total.add(
+            initial_tasks.len() as u64,
+            &[opentelemetry::KeyValue::new("orchestrator", Self::name())],
+        );
+        for (task, tracing_context) in initial_tasks {
             if !self.send(task, ctx, tracing_context).await {
                 break;
             }
@@ -384,6 +473,8 @@ mod tests {
             dispatcher_queue_size: 3,
             worker_queue_size: 1,
             active_io_tasks: 10,
+            cpu_affinity_num_cores: None,
+            io_affinity_num_cores: None,
         });
         let dispatcher_handle = system.start_component(dispatcher);
 

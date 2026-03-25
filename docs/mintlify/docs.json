@@ -27,11 +27,7 @@
             "group": "Overview",
             "pages": [
               "docs/overview/introduction",
-              "docs/overview/getting-started",
-              "docs/overview/architecture",
-              "docs/overview/oss",
-              "docs/overview/migration",
-              "docs/overview/troubleshooting"
+              "docs/overview/getting-started"
             ]
           },
           {
@@ -70,15 +66,38 @@
             "group": "CLI",
             "pages": [
               "docs/cli/install",
-              "docs/cli/browse",
-              "docs/cli/copy",
-              "docs/cli/db",
-              "docs/cli/sample-apps",
-              "docs/cli/login",
-              "docs/cli/profile",
               "docs/cli/run",
-              "docs/cli/update",
-              "docs/cli/vacuum"
+              {
+                "group": "Data Management",
+                "pages": [
+                  "docs/cli/browse",
+                  "docs/cli/copy",
+                  "docs/cli/db",
+                  "docs/cli/vacuum"
+                ]
+              },
+              {
+                "group": "Cloud",
+                "pages": [
+                  "docs/cli/login",
+                  "docs/cli/profile"
+                ]
+              },
+              {
+                "group": "Other",
+                "pages": [
+                  "docs/cli/sample-apps",
+                  "docs/cli/update"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Other",
+            "pages": [
+              "docs/overview/oss",
+              "docs/overview/migration",
+              "docs/overview/troubleshooting"
             ]
           }
         ]
@@ -158,12 +177,19 @@
             "pages": [
               "guides/deploy/client-server-mode",
               "guides/deploy/python-thin-client",
-              "guides/deploy/performance",
               "guides/deploy/observability",
               "guides/deploy/docker",
               "guides/deploy/aws",
               "guides/deploy/azure",
               "guides/deploy/gcp"
+            ]
+          },
+          {
+            "group": "Performance",
+            "pages": [
+              "guides/performance/general",
+              "guides/performance/single-node",
+              "guides/performance/distributed"
             ]
           }
         ]
@@ -234,6 +260,12 @@
         "pages": [
           "reference/overview",
           {
+            "group": "Self-Hosted Chroma",
+            "pages": [
+              "reference/server-env-vars"
+            ]
+          },
+          {
             "group": "SDKs",
             "pages": [
               {
@@ -274,7 +306,7 @@
               {
                 "group": "Chroma Core API",
                 "openapi": {
-                  "source": "openapi.json",
+                  "source": "https://api.trychroma.com/openapi.json",
                   "directory": "/reference/chroma-api"
                 },
                 "pages": [
@@ -340,7 +372,7 @@
               {
                 "group": "Chroma Cloud API",
                 "openapi": {
-                  "source": "openapi.json",
+                  "source": "https://api.trychroma.com/openapi.json",
                   "directory": "api-reference"
                 },
                 "pages": [
@@ -366,13 +398,32 @@
                   "source": "sync.openapi.json",
                   "directory": "reference/sync-api"
                 }
+              },
+              {
+                "group": "Chroma Cloud Embeddings API",
+                "openapi": {
+                  "source": "https://embed.trychroma.com/openapi.json",
+                  "directory": "reference/embeddings-api"
+                },
+                "pages": [
+                  "POST /embed",
+                  "POST /embed_sparse"
+                ]
               }
             ]
           },
           {
-            "group": "Other",
+            "group": "Dictionary Syntax",
             "pages": [
+              "reference/search",
               "reference/where-filter"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "reference/architecture/overview",
+              "reference/architecture/distributed"
             ]
           }
         ]
@@ -471,6 +522,26 @@
       "destination": "/reference/overview"
     },
     {
+      "source": "/docs/overview/architecture",
+      "destination": "/reference/architecture/overview"
+    },
+    {
+      "source": "/reference/architecture",
+      "destination": "/reference/architecture/overview"
+    },
+    {
+      "source": "/references/architecture",
+      "destination": "/reference/architecture/overview"
+    },
+    {
+      "source": "/references/architecture/overview",
+      "destination": "/reference/architecture/overview"
+    },
+    {
+      "source": "/references/architecture/distributed",
+      "destination": "/reference/architecture/distributed"
+    },
+    {
       "source": "/reference/js/:slug*",
       "destination": "/reference/typescript/"
     },
@@ -489,6 +560,14 @@
     {
       "source": "/reference/typescript/index",
       "destination": "/reference/typescript/client"
+    },
+    {
+      "source": "/guides/deploy/performance",
+      "destination": "/guides/performance/single-node"
+    },
+    {
+      "source": "/guides/performance",
+      "destination": "/guides/performance/general"
     }
   ]
 }

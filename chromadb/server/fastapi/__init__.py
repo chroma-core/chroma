@@ -32,6 +32,7 @@ from chromadb.api.collection_configuration import (
 from pydantic import BaseModel
 from chromadb import __version__ as chromadb_version
 from chromadb.api.types import (
+    DeleteResult,
     Embedding,
     GetResult,
     QueryResult,
@@ -387,7 +388,7 @@ class FastAPI(Server):
             "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/delete",
             self.delete,
             methods=["POST"],
-            response_model=None,
+            response_model=DeleteResult,
             openapi_extra=self.get_openapi_extras_for_body_model(DeleteEmbedding),
         )
         self.router.add_api_route(
@@ -556,7 +557,9 @@ class FastAPI(Server):
         return cast(
             UserIdentity,
             await to_thread.run_sync(
-                lambda: cast(ServerAuthenticationProvider, self.authn_provider).authenticate_or_raise(dict(request.headers))  # type: ignore
+                lambda: cast(
+                    ServerAuthenticationProvider, self.authn_provider
+                ).authenticate_or_raise(dict(request.headers))  # type: ignore
             ),
         )
 
@@ -963,7 +966,9 @@ class FastAPI(Server):
     ) -> Dict[str, Any]:
         try:
 
-            def process_attach_function(request: Request, raw_body: bytes) -> Dict[str, Any]:
+            def process_attach_function(
+                request: Request, raw_body: bytes
+            ) -> Dict[str, Any]:
                 body = orjson.loads(raw_body)
                 # NOTE: Auth check for attaching functions
                 self.sync_auth_request(
@@ -1248,8 +1253,8 @@ class FastAPI(Server):
         tenant: str,
         database_name: str,
         request: Request,
-    ) -> None:
-        def process_delete(request: Request, raw_body: bytes) -> None:
+    ) -> DeleteResult:
+        def process_delete(request: Request, raw_body: bytes) -> DeleteResult:
             delete = validate_model(DeleteEmbedding, orjson.loads(raw_body))
             # NOTE(rescrv, iron will auth):  Implemented.
             self.sync_auth_request(
@@ -1266,11 +1271,12 @@ class FastAPI(Server):
                 ids=delete.ids,
                 where=delete.where,
                 where_document=delete.where_document,
+                limit=delete.limit,
                 tenant=tenant,
                 database=database_name,
             )
 
-        await to_thread.run_sync(
+        return await to_thread.run_sync(
             process_delete,
             request,
             await request.body(),
@@ -1499,7 +1505,7 @@ class FastAPI(Server):
             "/api/v1/collections/{collection_id}/delete",
             self.delete_v1,
             methods=["POST"],
-            response_model=None,
+            response_model=DeleteResult,
             openapi_extra=self.get_openapi_extras_for_body_model(DeleteEmbedding),
         )
         self.router.add_api_route(
@@ -2162,8 +2168,8 @@ class FastAPI(Server):
         self,
         collection_id: str,
         request: Request,
-    ) -> None:
-        def process_delete(request: Request, raw_body: bytes) -> None:
+    ) -> DeleteResult:
+        def process_delete(request: Request, raw_body: bytes) -> DeleteResult:
             delete = validate_model(DeleteEmbedding, orjson.loads(raw_body))
             # NOTE(rescrv, iron will auth):  v1
             self.sync_auth_and_get_tenant_and_database_for_request(
@@ -2178,9 +2184,10 @@ class FastAPI(Server):
                 ids=delete.ids,
                 where=delete.where,
                 where_document=delete.where_document,
+                limit=delete.limit,
             )
 
-        await to_thread.run_sync(
+        return await to_thread.run_sync(
             process_delete,
             request,
             await request.body(),

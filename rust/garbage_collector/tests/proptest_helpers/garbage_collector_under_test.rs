@@ -320,8 +320,11 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                             )
                             .unwrap();
 
+                            let db_name = DatabaseName::new(ref_state.db_name.clone())
+                                .expect("db_name should be valid");
                             let orchestrator = GarbageCollectorOrchestrator::new(
                                 collection_id,
+                                db_name,
                                 collection_to_gc.version_file_path.clone(),
                                 collection_to_gc.lineage_file_path.clone(),
                                 // This proptest does not test the cutoff time as the timestamps created by the SysDb (e.g. collection.created_at and timestamps in version files) cannot currently be faked/overridden.
@@ -376,7 +379,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
             let storage = state.storage.clone();
 
             async move {
-                let collection_statuses = sysdb.batch_get_collection_soft_delete_status(ref_state.collection_status.keys().cloned().collect()).await.unwrap();
+                let collection_statuses = sysdb.batch_get_collection_soft_delete_status(None, ref_state.collection_status.keys().cloned().collect()).await.unwrap();
                 for (collection_id, status) in ref_state.collection_status.iter() {
                     match status {
                         CollectionStatus::Deleted => {

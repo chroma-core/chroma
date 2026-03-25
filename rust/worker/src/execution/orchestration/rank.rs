@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_segment::bloom_filter::BloomFilterManager;
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
@@ -145,6 +146,9 @@ pub struct RankOrchestrator {
     // Collection information
     collection_and_segments: CollectionAndSegments,
 
+    // Bloom filter manager
+    bloom_filter_manager: Option<BloomFilterManager>,
+
     // Result channel
     result_channel: Option<Sender<Result<RankOrchestratorOutput, RankOrchestratorError>>>,
 }
@@ -162,6 +166,7 @@ impl RankOrchestrator {
         limit: Limit,
         select: Select,
         collection_and_segments: CollectionAndSegments,
+        bloom_filter_manager: Option<BloomFilterManager>,
     ) -> Self {
         let context = OrchestratorContext::new(dispatcher);
         Self {
@@ -175,6 +180,7 @@ impl RankOrchestrator {
             select,
             collection_and_segments,
             knn_filter_output,
+            bloom_filter_manager,
             result_channel: None,
         }
     }
@@ -188,6 +194,7 @@ impl RankOrchestrator {
                 logs: self.knn_filter_output.logs.clone(),
                 blockfile_provider: self.blockfile_provider.clone(),
                 record_segment: self.collection_and_segments.record_segment.clone(),
+                bloom_filter_manager: self.bloom_filter_manager.clone(),
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -251,6 +258,7 @@ impl Orchestrator for RankOrchestrator {
                         .filter_output
                         .compact_offset_ids
                         .clone(),
+                    bloom_filter_manager: self.bloom_filter_manager.clone(),
                 },
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),
@@ -329,6 +337,7 @@ impl Handler<TaskResult<RankOutput, RankError>> for RankOrchestrator {
                     logs: self.knn_filter_output.logs.clone(),
                     blockfile_provider: self.blockfile_provider.clone(),
                     record_segment: self.collection_and_segments.record_segment.clone(),
+                    bloom_filter_manager: self.bloom_filter_manager.clone(),
                 },
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),

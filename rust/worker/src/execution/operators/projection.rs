@@ -4,7 +4,10 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
-    blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    blockfile_record::{
+        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
+    },
+    bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},
 };
 use chroma_system::Operator;
@@ -36,6 +39,7 @@ pub struct ProjectionInput {
     pub blockfile_provider: BlockfileProvider,
     pub record_segment: Segment,
     pub offset_ids: Vec<u32>,
+    pub bloom_filter_manager: Option<BloomFilterManager>,
 }
 
 #[derive(Error, Debug)]
@@ -83,6 +87,7 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
         let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
+            input.bloom_filter_manager.clone(),
         ))
         .await
         {
@@ -111,9 +116,16 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
             }
         }
 
-        let materialized_logs = materialize_logs(&record_segment_reader, input.logs.clone(), None)
-            .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
-            .await?;
+        let plan = RecordSegmentReaderOptions {
+            use_bloom_filter: input
+                .bloom_filter_manager
+                .as_ref()
+                .is_some_and(|mgr| input.logs.len() >= mgr.storage_fetch_threshold()),
+        };
+        let materialized_logs =
+            materialize_logs(&record_segment_reader, input.logs.clone(), None, &plan)
+                .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
+                .await?;
 
         // Create a hash map that maps an offset id to the corresponding log
         // It contains all records from the logs that should be present in the final result
@@ -126,14 +138,14 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
             })
             .collect();
 
-        let current_span = Span::current();
-        let futures: Vec<_> = input
-            .offset_ids
-            .iter()
-            .map(|offset_id| {
-                async {
-                    if needs_data {
-                        // Full hydration path: get ID and data from hydrated record
+        let records: Vec<ProjectionRecord> = if needs_data {
+            // Full hydration: use concurrent futures (query result sets are typically bounded)
+            let current_span = Span::current();
+            let futures: Vec<_> = input
+                .offset_ids
+                .iter()
+                .map(|offset_id| {
+                    async {
                         let (id, document, embedding, metadata) =
                             match offset_id_to_log_record.get(offset_id) {
                                 Some(log) => {
@@ -173,41 +185,46 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
                                 }
                             };
 
-                        Ok(ProjectionRecord {
+                        Ok::<_, ProjectionError>(ProjectionRecord {
                             id,
                             document,
                             embedding,
                             metadata,
                         })
-                    } else {
-                        // Lightweight path: resolve user ID only via id_to_user_id blockfile
-                        let id = match offset_id_to_log_record.get(offset_id) {
-                            Some(log) => log
-                                .get_user_id(record_segment_reader.as_ref())
-                                .await
-                                .map_err(ProjectionError::LogMaterializer)?,
-                            None => match &record_segment_reader {
-                                Some(reader) => reader
-                                    .get_user_id_for_offset_id(*offset_id)
-                                    .await?
-                                    .to_string(),
-                                None => return Err(ProjectionError::RecordSegmentUninitialized),
-                            },
-                        };
-
-                        Ok(ProjectionRecord {
-                            id,
-                            document: None,
-                            embedding: None,
-                            metadata: None,
-                        })
                     }
-                }
-                .instrument(current_span.clone())
-            })
-            .collect();
-
-        let records: Vec<ProjectionRecord> = try_join_all(futures).await?;
+                    .instrument(current_span.clone())
+                })
+                .collect();
+            try_join_all(futures).await?
+        } else {
+            // Lightweight ID-only path (e.g. delete-where): iterate sequentially
+            // instead of spawning a future per offset ID. Blocks are already
+            // prefetched above, so each get_user_id_for_offset_id hits the cache
+            // and resolves without I/O.
+            let mut records = Vec::with_capacity(input.offset_ids.len());
+            for offset_id in &input.offset_ids {
+                let id = match offset_id_to_log_record.get(offset_id) {
+                    Some(log) => log
+                        .get_user_id(record_segment_reader.as_ref())
+                        .await
+                        .map_err(ProjectionError::LogMaterializer)?,
+                    None => match &record_segment_reader {
+                        Some(reader) => reader
+                            .get_user_id_for_offset_id(*offset_id)
+                            .await?
+                            .to_string(),
+                        None => return Err(ProjectionError::RecordSegmentUninitialized),
+                    },
+                };
+                records.push(ProjectionRecord {
+                    id,
+                    document: None,
+                    embedding: None,
+                    metadata: None,
+                });
+            }
+            records
+        };
 
         Ok(ProjectionOutput { records })
     }
@@ -245,6 +262,7 @@ mod tests {
                 blockfile_provider,
                 record_segment,
                 offset_ids,
+                bloom_filter_manager: None,
             },
         )
     }

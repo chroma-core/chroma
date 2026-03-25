@@ -51,6 +51,7 @@ from chromadb.api.collection_configuration import (
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from chromadb.api.types import (
     CollectionMetadata,
+    DeleteResult,
     Documents,
     Embeddable,
     EmbeddingFunction,
@@ -297,7 +298,8 @@ class BaseAPI(ABC):
         ids: Optional[IDs],
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-    ) -> None:
+        limit: Optional[int] = None,
+    ) -> DeleteResult:
         """[Internal] Deletes entries from a collection specified by UUID.
 
         Args:
@@ -305,9 +307,11 @@ class BaseAPI(ABC):
             ids: The IDs of the entries to delete. Defaults to None.
             where: Conditional filtering on metadata. Defaults to None.
             where_document: Conditional filtering on documents. Defaults to None.
+            limit: Maximum number of records to delete. Can only be used with
+                where or where_document. Defaults to None (no limit).
 
         Returns:
-            IDs: The list of IDs of the entries that were deleted.
+            DeleteResult: A dict containing the number of records deleted.
         """
         pass
 
@@ -699,6 +703,15 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         pass
 
     @abstractmethod
+    def _fork_count(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> int:
+        pass
+
+    @abstractmethod
     def _get_indexing_status(
         self,
         collection_id: UUID,
@@ -725,6 +738,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         collection_id: UUID,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        read_level: ReadLevel = ReadLevel.INDEX_AND_WAL,
     ) -> int:
         pass
 
@@ -824,9 +838,10 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
+        limit: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> None:
+    ) -> DeleteResult:
         pass
 
     @abstractmethod

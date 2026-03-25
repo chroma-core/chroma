@@ -1,7 +1,9 @@
 use chroma_types::chroma_proto::{
-    compactor_client::CompactorClient, CollectionIds, CompactRequest, RebuildRequest, SegmentScope,
+    compactor_client::CompactorClient, CollectionIds, CompactRequest,
+    GetCollectionAssignmentRequest, ListInProgressJobsRequest, RebuildRequest, SegmentScope,
 };
 use clap::{Parser, Subcommand};
+use std::io::Write;
 use thiserror::Error;
 use tonic::transport::Channel;
 use uuid::Uuid;
@@ -13,6 +15,8 @@ pub enum CompactionClientError {
     Compactor(String),
     #[error("Unable to connect to compactor: {0}")]
     Connection(#[from] tonic::transport::Error),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 /// Tool to control compaction service
@@ -44,6 +48,14 @@ pub enum CompactionCommand {
         #[arg(long = "segment", value_parser = ["metadata", "vector"])]
         segment_scopes: Vec<String>,
     },
+    /// List all in-progress compaction jobs
+    ListInProgressJobs,
+    /// Get collection assignment info (which node would handle a collection)
+    GetCollectionAssignment {
+        /// Collection ID to check assignment for
+        #[arg(short, long)]
+        collection_id: Uuid,
+    },
 }
 
 impl CompactionClient {
@@ -51,7 +63,7 @@ impl CompactionClient {
         Ok(CompactorClient::connect(self.url.clone()).await?)
     }
 
-    pub async fn run(&self) -> Result<(), CompactionClientError> {
+    pub async fn run(&self, w: &mut dyn Write) -> Result<(), CompactionClientError> {
         match &self.command {
             CompactionCommand::Compact { id } => {
                 let mut client = self.grpc_client().await?;
@@ -90,6 +102,49 @@ impl CompactionClient {
                     .await;
                 if let Err(status) = response {
                     return Err(CompactionClientError::Compactor(status.to_string()));
+                }
+            }
+            CompactionCommand::ListInProgressJobs => {
+                let mut client = self.grpc_client().await?;
+                let response = client
+                    .list_in_progress_jobs(ListInProgressJobsRequest {})
+                    .await
+                    .map_err(|e| CompactionClientError::Compactor(e.to_string()))?;
+
+                let jobs = response.into_inner().jobs;
+                writeln!(w, "In-progress compaction jobs:")?;
+                if jobs.is_empty() {
+                    writeln!(w, "  None")?;
+                } else {
+                    for job in jobs {
+                        writeln!(
+                            w,
+                            "  job_id={} database={} expires_at_epoch_secs={}",
+                            job.job_id, job.database_name, job.expires_at_epoch_secs
+                        )?;
+                    }
+                }
+            }
+            CompactionCommand::GetCollectionAssignment { collection_id } => {
+                let mut client = self.grpc_client().await?;
+                let response = client
+                    .get_collection_assignment(GetCollectionAssignmentRequest {
+                        collection_id: collection_id.to_string(),
+                    })
+                    .await
+                    .map_err(|e| CompactionClientError::Compactor(e.to_string()))?;
+
+                let assignment = response.into_inner();
+                writeln!(w, "Collection assignment information:")?;
+                writeln!(w, "  Collection ID: {}", collection_id)?;
+                writeln!(w, "  Assigned to node: {}", assignment.assigned_node)?;
+                writeln!(w, "  Current memberlist:")?;
+                if assignment.memberlist.is_empty() {
+                    writeln!(w, "    (empty)")?;
+                } else {
+                    for member in assignment.memberlist {
+                        writeln!(w, "    - {}", member)?;
+                    }
                 }
             }
         };

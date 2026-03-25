@@ -1,8 +1,9 @@
-use crate::spann_provider::SpannProvider;
+use crate::{blockfile_record::RecordSegmentReaderOptions, spann_provider::SpannProvider};
 
 use super::{
     blockfile_metadata::MetadataSegmentWriter, blockfile_record::RecordSegmentWriter,
-    distributed_hnsw::DistributedHNSWSegmentWriter, types::materialize_logs,
+    bloom_filter::BloomFilterManager, distributed_hnsw::DistributedHNSWSegmentWriter,
+    types::materialize_logs,
 };
 use chroma_blockstore::{provider::BlockfileProvider, test_arrow_blockfile_provider};
 use chroma_config::registry::Registry;
@@ -40,6 +41,7 @@ pub struct TestDistributedSegment {
     pub blockfile_provider: BlockfileProvider,
     pub hnsw_provider: HnswIndexProvider,
     pub spann_provider: SpannProvider,
+    pub bloom_filter_manager: Option<BloomFilterManager>,
     pub collection: Collection,
     pub metadata_segment: Segment,
     pub record_segment: Segment,
@@ -73,10 +75,15 @@ impl TestDistributedSegment {
         #[cfg(feature = "usearch")]
         temp_dirs.push(usearch_dir);
 
+        let bloom_filter_manager = blockfile_provider
+            .storage()
+            .map(BloomFilterManager::new_for_test);
+
         Self {
             temp_dirs,
             blockfile_provider: blockfile_provider.clone(),
             hnsw_provider: hnsw_provider.clone(),
+            bloom_filter_manager,
             spann_provider: SpannProvider {
                 adaptive_search_nprobe: true,
                 blockfile_provider,
@@ -96,10 +103,14 @@ impl TestDistributedSegment {
 
     // WARN: The size of the log chunk should not be too large
     pub async fn compact_log(&mut self, logs: Chunk<LogRecord>, next_offset: usize) {
-        let materialized_logs =
-            materialize_logs(&None, logs, Some(AtomicU32::new(next_offset as u32).into()))
-                .await
-                .expect("Should be able to materialize log.");
+        let materialized_logs = materialize_logs(
+            &None,
+            logs,
+            Some(AtomicU32::new(next_offset as u32).into()),
+            &RecordSegmentReaderOptions::default(),
+        )
+        .await
+        .expect("Should be able to materialize log.");
 
         let mut metadata_writer = MetadataSegmentWriter::from_segment(
             &self.collection.tenant,
@@ -127,13 +138,14 @@ impl TestDistributedSegment {
         .await
         .expect("Should be able to flush metadata.");
 
-        let record_writer = RecordSegmentWriter::from_segment(
+        let record_writer = Box::pin(RecordSegmentWriter::from_segment(
             &self.collection.tenant,
             &self.collection.database_id,
             &self.record_segment,
             &self.blockfile_provider,
             None,
-        )
+            self.bloom_filter_manager.clone(),
+        ))
         .await
         .expect("Should be able to initiaize record writer.");
         record_writer

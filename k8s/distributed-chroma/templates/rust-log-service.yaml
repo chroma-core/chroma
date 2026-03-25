@@ -41,7 +41,9 @@ metadata:
   namespace: {{ .Values.namespace }}
 spec:
   serviceName: rust-log-service
+  {{- if not .Values.rustLogService.hpa.enabled }}
   replicas: {{ .Values.rustLogService.replicaCount }}
+  {{- end }}
   selector:
     matchLabels:
       app: rust-log-service
@@ -137,6 +139,29 @@ spec:
           labelSelector:
             matchLabels:
               member-type: rust-log-service
+---
+
+{{- if .Values.rustLogService.hpa.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: rust-log-service
+  namespace: {{ .Values.namespace }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: rust-log-service
+  minReplicas: {{ .Values.rustLogService.replicaCount }}
+  maxReplicas: {{ .Values.rustLogService.hpa.maxReplicaCount }}
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: {{ .Values.rustLogService.hpa.averageUtilization }}
+{{- end }}
 
 ---
 

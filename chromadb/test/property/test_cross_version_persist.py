@@ -38,16 +38,22 @@ BASELINE_VERSIONS = ["0.4.1", "0.5.3"]
 version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 # Some modules do not work across versions, since we upgrade our support for them, and should be explicitly reimported in the subprocess
-VERSIONED_MODULES = ["pydantic", "numpy", "tokenizers"]
+VERSIONED_MODULES = ["pydantic", "pydantic_settings", "numpy", "tokenizers"]
 
 
 def versions() -> List[str]:
     """Returns the pinned minimum version and the latest version of chromadb."""
     url = "https://pypi.org/pypi/chromadb/json"
     data = json.load(request.urlopen(request.Request(url)))
-    versions = list(data["releases"].keys())
+    releases = data["releases"]
+    versions = list(releases.keys())
     # Older versions on pypi contain "devXYZ" suffixes
     versions = [v for v in versions if version_re.match(v)]
+    versions = [
+        v
+        for v in versions
+        if not any(file.get("yanked", False) for file in releases.get(v, []))
+    ]
     versions.sort(key=packaging_version.Version)
     return BASELINE_VERSIONS + [versions[-1]]
 

@@ -33,7 +33,8 @@ def test_get_builtins_holds() -> None:
         "GoogleGenerativeAiEmbeddingFunction",
         "GooglePalmEmbeddingFunction",
         "GoogleVertexEmbeddingFunction",
-        "GoogleGenaiEmbeddingFunction",
+        "GoogleGeminiEmbeddingFunction",
+        "GoogleGenaiEmbeddingFunction",  # Backward compatibility alias
         "HuggingFaceEmbeddingFunction",
         "HuggingFaceEmbeddingServer",
         "InstructorEmbeddingFunction",

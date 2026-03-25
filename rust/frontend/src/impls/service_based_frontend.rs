@@ -28,9 +28,9 @@ use chroma_types::{
     CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError,
     CreateTenantRequest, CreateTenantResponse, DatabaseName, DeleteCollectionError,
     DeleteCollectionRecordsError, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse,
-    DeleteCollectionRequest, DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse,
-    DetachFunctionError, DetachFunctionRequest, DetachFunctionResponse, ForkCollectionError,
-    ForkCollectionRequest, ForkCollectionResponse, GetCollectionByCrnError,
+    DeleteCollectionRequest, DeleteCollectionResponse, DeleteDatabaseError, DeleteDatabaseRequest,
+    DeleteDatabaseResponse, DetachFunctionError, DetachFunctionRequest, DetachFunctionResponse,
+    ForkCollectionError, ForkCollectionRequest, ForkCollectionResponse, GetCollectionByCrnError,
     GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionError,
     GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
     GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
@@ -706,7 +706,7 @@ impl ServiceBasedFrontend {
             collection_name,
             ..
         }: DeleteCollectionRequest,
-    ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionError> {
+    ) -> Result<DeleteCollectionResponse, DeleteCollectionError> {
         let db_name = DatabaseName::new(&database_name).ok_or_else(|| {
             DeleteCollectionError::Internal(Box::new(ValidationError::InvalidArgument(
                 "database name must be at least 3 characters".to_string(),
@@ -740,7 +740,7 @@ impl ServiceBasedFrontend {
             .remove(&collection.collection_id)
             .await;
 
-        Ok(DeleteCollectionRecordsResponse {})
+        Ok(DeleteCollectionResponse {})
     }
 
     pub async fn retryable_fork(
@@ -855,6 +855,13 @@ impl ServiceBasedFrontend {
             .fork_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
         res
+    }
+
+    pub async fn fork_count(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<usize, chroma_types::CountForksError> {
+        self.sysdb_client.count_forks(collection_id).await
     }
 
     pub async fn retryable_push_logs(
@@ -1188,8 +1195,10 @@ impl ServiceBasedFrontend {
             collection_id,
             ids,
             r#where,
+            limit,
             ..
         }: DeleteCollectionRecordsRequest,
+        region: String,
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionRecordsError> {
         let database_name_typed = DatabaseName::new(database_name.clone())
             .ok_or(DeleteCollectionRecordsError::InvalidDatabaseName)?;
@@ -1230,10 +1239,7 @@ impl ServiceBasedFrontend {
                         collection_and_segments,
                     },
                     filter,
-                    limit: Limit {
-                        offset: 0,
-                        limit: None,
-                    },
+                    limit: Limit { offset: 0, limit },
                     proj: Projection {
                         document: false,
                         embedding: false,
@@ -1300,13 +1306,18 @@ impl ServiceBasedFrontend {
                 database_name.clone(),
                 collection_id.0.to_string(),
                 WriteAction::Delete,
+                region,
             ));
+
+        let deleted = records.len() as u32;
 
         // Closure for write context operations
         (async {
             if records.is_empty() {
                 tracing::debug!("Bailing because no records were found");
-                return Ok::<_, DeleteCollectionRecordsError>(DeleteCollectionRecordsResponse {});
+                return Ok::<_, DeleteCollectionRecordsError>(DeleteCollectionRecordsResponse {
+                    deleted: 0,
+                });
             }
 
             let log_size_bytes = records.iter().map(OperationRecord::size_bytes).sum();
@@ -1335,7 +1346,7 @@ impl ServiceBasedFrontend {
                 context.log_size_bytes(log_size_bytes);
             });
 
-            Ok(DeleteCollectionRecordsResponse {})
+            Ok(DeleteCollectionRecordsResponse { deleted })
         })
         .meter(collection_write_context_container.clone())
         .await?;
@@ -1358,23 +1369,25 @@ impl ServiceBasedFrontend {
             }
         }
 
-        Ok(DeleteCollectionRecordsResponse {})
+        Ok(DeleteCollectionRecordsResponse { deleted })
     }
 
     pub async fn delete(
         &mut self,
         request: DeleteCollectionRecordsRequest,
+        region: String,
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionRecordsError> {
         let retries = Arc::new(AtomicUsize::new(0));
         let delete_to_retry = || {
             let mut self_clone = self.clone();
             let request_clone = request.clone();
+            let region_clone = region.clone();
             let cache_clone = self
                 .collections_with_segments_provider
                 .collections_with_segments_cache
                 .clone();
             async move {
-                let res = Box::pin(self_clone.retryable_delete(request_clone)).await;
+                let res = Box::pin(self_clone.retryable_delete(request_clone, region_clone)).await;
                 match res {
                     Ok(res) => Ok(res),
                     Err(e) => {
@@ -1416,6 +1429,7 @@ impl ServiceBasedFrontend {
         CountRequest {
             database_name,
             collection_id,
+            read_level,
             ..
         }: CountRequest,
     ) -> Result<CountResponse, QueryError> {
@@ -1438,6 +1452,7 @@ impl ServiceBasedFrontend {
                 scan: Scan {
                     collection_and_segments,
                 },
+                read_level,
             })
             .await?;
         let return_bytes = count_result.size_bytes();

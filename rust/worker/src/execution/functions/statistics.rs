@@ -500,7 +500,7 @@ mod tests {
     use std::collections::HashMap;
 
     use chroma_segment::{
-        blockfile_record::RecordSegmentReader,
+        blockfile_record::{RecordSegmentReader, RecordSegmentReaderOptions},
         test::TestDistributedSegment,
         types::{materialize_logs, MaterializeLogsResult},
     };
@@ -723,9 +723,10 @@ mod tests {
         );
 
         let logs = Chunk::new(vec![record_one, record_two].into());
-        let materialized = materialize_logs(&None, logs, None)
-            .await
-            .expect("materialization should succeed");
+        let materialized =
+            materialize_logs(&None, logs, None, &RecordSegmentReaderOptions::default())
+                .await
+                .expect("materialization should succeed");
         let hydrated = hydrate_records(&materialized, None).await;
         let input = Chunk::new(std::sync::Arc::from(hydrated));
 
@@ -835,9 +836,10 @@ mod tests {
         );
 
         let logs = Chunk::new(vec![record_one, record_two].into());
-        let materialized = materialize_logs(&None, logs, None)
-            .await
-            .expect("materialization should succeed");
+        let materialized =
+            materialize_logs(&None, logs, None, &RecordSegmentReaderOptions::default())
+                .await
+                .expect("materialization should succeed");
         let hydrated = hydrate_records(&materialized, None).await;
         let input = Chunk::new(std::sync::Arc::from(hydrated));
 
@@ -893,9 +895,10 @@ mod tests {
         );
 
         let logs = Chunk::new(vec![upsert_record, delete_record].into());
-        let materialized = materialize_logs(&None, logs, None)
-            .await
-            .expect("materialization should succeed");
+        let materialized =
+            materialize_logs(&None, logs, None, &RecordSegmentReaderOptions::default())
+                .await
+                .expect("materialization should succeed");
         let hydrated = hydrate_records(&materialized, None).await;
         let input = Chunk::new(std::sync::Arc::from(hydrated));
 
@@ -941,9 +944,10 @@ mod tests {
         );
 
         let logs = Chunk::new(vec![record].into());
-        let materialized = materialize_logs(&None, logs, None)
-            .await
-            .expect("materialization should succeed");
+        let materialized =
+            materialize_logs(&None, logs, None, &RecordSegmentReaderOptions::default())
+                .await
+                .expect("materialization should succeed");
         let hydrated = hydrate_records(&materialized, None).await;
         let input = Chunk::new(std::sync::Arc::from(hydrated));
 
@@ -970,9 +974,10 @@ mod tests {
         );
 
         let logs = Chunk::new(vec![record].into());
-        let materialized = materialize_logs(&None, logs, None)
-            .await
-            .expect("materialization should succeed");
+        let materialized =
+            materialize_logs(&None, logs, None, &RecordSegmentReaderOptions::default())
+                .await
+                .expect("materialization should succeed");
         let hydrated = hydrate_records(&materialized, None).await;
         let input = Chunk::new(std::sync::Arc::from(hydrated));
 
@@ -1005,6 +1010,7 @@ mod tests {
         let input_record_reader = Box::pin(RecordSegmentReader::from_segment(
             &input_segment.record_segment,
             &input_segment.blockfile_provider,
+            None,
         ))
         .await
         .expect("input record segment reader creation succeeds");
@@ -1019,6 +1025,7 @@ mod tests {
         let output_record_reader = Box::pin(RecordSegmentReader::from_segment(
             &output_segment.record_segment,
             &output_segment.blockfile_provider,
+            None,
         ))
         .await
         .expect("output record segment reader creation succeeds");
@@ -1034,9 +1041,14 @@ mod tests {
             ]
             .into(),
         );
-        let materialized = materialize_logs(&Some(input_record_reader.clone()), logs, None)
-            .await
-            .expect("materialization should succeed");
+        let materialized = materialize_logs(
+            &Some(input_record_reader.clone()),
+            logs,
+            None,
+            &RecordSegmentReaderOptions::default(),
+        )
+        .await
+        .expect("materialization should succeed");
 
         // Hydrate from INPUT collection to get proper metadata for the delete
         let hydrated = hydrate_records(&materialized, Some(&input_record_reader)).await;
@@ -1082,14 +1094,20 @@ mod tests {
         let record_reader = Box::pin(RecordSegmentReader::from_segment(
             &test_segment.record_segment,
             &test_segment.blockfile_provider,
+            None,
         ))
         .await
         .expect("record segment reader creation succeeds");
 
         let empty_logs: Chunk<LogRecord> = Chunk::new(Vec::<LogRecord>::new().into());
-        let materialized = materialize_logs(&None, empty_logs, None)
-            .await
-            .expect("materialization should succeed");
+        let materialized = materialize_logs(
+            &None,
+            empty_logs,
+            None,
+            &RecordSegmentReaderOptions::default(),
+        )
+        .await
+        .expect("materialization should succeed");
         let hydrated = hydrate_records(&materialized, Some(&record_reader)).await;
         let empty_input = Chunk::new(std::sync::Arc::from(hydrated));
 
@@ -1129,6 +1147,7 @@ mod tests {
         let input_record_reader = Box::pin(RecordSegmentReader::from_segment(
             &input_segment.record_segment,
             &input_segment.blockfile_provider,
+            None,
         ))
         .await
         .expect("input record segment reader creation succeeds");
@@ -1142,6 +1161,7 @@ mod tests {
         let output_record_reader = Box::pin(RecordSegmentReader::from_segment(
             &output_segment.record_segment,
             &output_segment.blockfile_provider,
+            None,
         ))
         .await
         .expect("output record segment reader creation succeeds");
@@ -1155,9 +1175,14 @@ mod tests {
             )]
             .into(),
         );
-        let materialized = materialize_logs(&Some(input_record_reader.clone()), logs, None)
-            .await
-            .expect("materialization should succeed");
+        let materialized = materialize_logs(
+            &Some(input_record_reader.clone()),
+            logs,
+            None,
+            &RecordSegmentReaderOptions::default(),
+        )
+        .await
+        .expect("materialization should succeed");
 
         // Hydrate from INPUT collection to get proper metadata for the delete
         let hydrated = hydrate_records(&materialized, Some(&input_record_reader)).await;
@@ -1373,6 +1398,7 @@ mod tests {
             false,
             None,
             None,
+            None,
         ))
         .await
         .expect("Compaction should succeed");
@@ -1408,6 +1434,7 @@ mod tests {
         let reader = Box::pin(RecordSegmentReader::from_segment(
             &output_info.record_segment,
             &test_segments.blockfile_provider,
+            None,
         ))
         .await
         .expect("Should create reader");

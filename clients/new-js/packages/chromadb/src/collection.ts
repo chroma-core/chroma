@@ -6,6 +6,7 @@ import {
 import {
   BaseRecordSet,
   CollectionMetadata,
+  DeleteResult,
   GetResult,
   IndexingStatus,
   Metadata,
@@ -44,7 +45,7 @@ import {
   processUpdateCollectionConfig,
   UpdateCollectionConfiguration,
 } from "./collection-configuration";
-import { SearchLike, SearchResult, toSearch } from "./execution/expression";
+import { SearchLike, SearchResult, toSearch } from "./execution";
 import { isPlainObject } from "./execution/expression/common";
 import { Schema, EMBEDDING_KEY, DOCUMENT_KEY } from "./schema";
 import type { SparseVectorIndexConfig } from "./schema";
@@ -70,8 +71,18 @@ export interface Collection {
   embeddingFunction?: EmbeddingFunction;
   /** Collection schema describing index configuration */
   schema?: Schema;
-  /** Gets the total number of records in the collection */
-  count(): Promise<number>;
+  /**
+   * Gets the total number of records in the collection.
+   * @param options - Optional settings
+   */
+  count(options?: {
+    /**
+     * Controls whether to read from the write-ahead log.
+     * - ReadLevel.INDEX_AND_WAL: Read from both index and WAL (default)
+     * - ReadLevel.INDEX_ONLY: Read only from index, faster but recent writes may not be visible
+     */
+    readLevel?: ReadLevel;
+  }): Promise<number>;
   /**
    * Adds new records to the collection.
    * @param args - Record data to add
@@ -157,6 +168,11 @@ export interface Collection {
    */
   fork({ name }: { name: string }): Promise<Collection>;
   /**
+   * Gets the number of forks for this collection.
+   * @returns Promise resolving to the number of forks
+   */
+  forkCount(): Promise<number>;
+  /**
    * Updates existing records in the collection.
    * @param args - Record data to update
    */
@@ -199,10 +215,13 @@ export interface Collection {
     where?: Where;
     /** Document content-based filtering for deletion */
     whereDocument?: WhereDocument;
-  }): Promise<void>;
+    /** Maximum number of records to delete. Can only be used with where or whereDocument filters. */
+    limit?: number;
+  }): Promise<DeleteResult>;
   /**
    * Performs hybrid search on the collection using expression builders.
    * @param searches - Single search payload or array of payloads
+   * @param options
    * @returns Promise resolving to column-major search results
    */
   search(
@@ -353,7 +372,9 @@ export class CollectionImpl implements Collection {
 
     if (!embeddingFunction) {
       throw new ChromaValueError(
-        "Embedding function must be defined for operations requiring embeddings.",
+        `No embedding function found for collection '${this._name}'. ` +
+          "You can either provide embeddings directly, or ensure the appropriate " +
+          "embedding function package (e.g. @chroma-core/default-embed) is installed.",
       );
     }
 
@@ -446,10 +467,8 @@ export class CollectionImpl implements Collection {
           // Get document at this position
           if (index < documentsList.length) {
             const doc = documentsList[index];
-            if (typeof doc === "string") {
-              inputs.push(doc);
-              positions.push(index);
-            }
+            inputs.push(doc);
+            positions.push(index);
           }
         });
 
@@ -740,16 +759,26 @@ export class CollectionImpl implements Collection {
     ids?: string[],
     where?: Where,
     whereDocument?: WhereDocument,
+    limit?: number,
   ) {
     if (ids) validateIDs(ids);
     if (where) validateWhere(where);
     if (whereDocument) validateWhereDocument(whereDocument);
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
+      throw new Error("limit must be a non-negative integer");
+    }
+    if (limit !== undefined && !where && !whereDocument) {
+      throw new Error(
+        "limit can only be specified when a where or whereDocument clause is provided",
+      );
+    }
   }
 
-  public async count(): Promise<number> {
+  public async count(options?: { readLevel?: ReadLevel }): Promise<number> {
     const { data } = await RecordService.collectionCount({
       client: this.apiClient,
       path: await this.path(),
+      query: options?.readLevel ? { read_level: options.readLevel } : undefined,
     });
 
     return data;
@@ -953,12 +982,12 @@ export class CollectionImpl implements Collection {
 
     const { updateConfiguration, updateEmbeddingFunction } = configuration
       ? await processUpdateCollectionConfig({
-        collectionName: this.name,
-        currentConfiguration: this.configuration,
-        newConfiguration: configuration,
-        currentEmbeddingFunction: this.embeddingFunction,
-        client: this.chromaClient,
-      })
+          collectionName: this.name,
+          currentConfiguration: this.configuration,
+          newConfiguration: configuration,
+          currentEmbeddingFunction: this.embeddingFunction,
+          client: this.chromaClient,
+        })
       : {};
 
     if (updateEmbeddingFunction) {
@@ -1002,6 +1031,15 @@ export class CollectionImpl implements Collection {
       metadata: deserializeMetadata(data.metadata ?? undefined) ?? undefined,
       configuration: data.configuration_json,
     });
+  }
+
+  public async forkCount(): Promise<number> {
+    const { data } = await CollectionService.forkCount({
+      client: this.apiClient,
+      path: await this.path(),
+    });
+
+    return data.count;
   }
 
   public async update({
@@ -1085,22 +1123,27 @@ export class CollectionImpl implements Collection {
     ids,
     where,
     whereDocument,
+    limit,
   }: {
     ids?: string[];
     where?: Where;
     whereDocument?: WhereDocument;
-  }): Promise<void> {
-    this.validateDelete(ids, where, whereDocument);
+    limit?: number;
+  }): Promise<DeleteResult> {
+    this.validateDelete(ids, where, whereDocument, limit);
 
-    await RecordService.collectionDelete({
+    const { data } = await RecordService.collectionDelete({
       client: this.apiClient,
       path: await this.path(),
       body: {
         ids,
         where,
         where_document: whereDocument,
+        limit,
       },
     });
+
+    return { deleted: data?.deleted ?? 0 };
   }
 
   public async getIndexingStatus(): Promise<IndexingStatus> {
@@ -1110,5 +1153,146 @@ export class CollectionImpl implements Collection {
     });
 
     return data;
+  }
+}
+
+/**
+ * Arguments for creating a CollectionHandle instance.
+ */
+export interface CollectionHandleArgs {
+  /** ChromaDB client instance */
+  chromaClient: ChromaClient;
+  /** HTTP API client */
+  apiClient: ReturnType<typeof createClient>;
+  /** Collection ID */
+  id: string;
+  /** Tenant name */
+  tenant: string;
+  /** Database name */
+  database: string;
+}
+
+const HANDLE_EMBEDDING_ERROR =
+  "This operation requires an embedding function, which is not available on " +
+  "a collection obtained via client.collection(id). Provide pre-computed " +
+  "embeddings directly, or use client.getCollection() to get a full " +
+  "collection with embedding support.";
+
+const HANDLE_NOT_SUPPORTED_ERROR =
+  "is not supported on a collection obtained via client.collection(id). " +
+  "Use client.getCollection() to get a full collection instance.";
+
+/**
+ * A lightweight collection handle that holds only the collection ID and
+ * client context. Supports operations that don't require an embedding
+ * function or schema. Obtained via {@link ChromaClient.collection}.
+ */
+export class CollectionHandle extends CollectionImpl {
+  constructor({ chromaClient, apiClient, id, tenant, database }: CollectionHandleArgs) {
+    super({
+      chromaClient,
+      apiClient,
+      id,
+      tenant,
+      database,
+      name: "",
+      configuration: {},
+    });
+  }
+
+  public override async add(args: {
+    ids: string[];
+    embeddings?: number[][];
+    metadatas?: Metadata[];
+    documents?: string[];
+    uris?: string[];
+  }): Promise<void> {
+    if (!args.embeddings) {
+      throw new ChromaValueError(HANDLE_EMBEDDING_ERROR);
+    }
+    return super.add(args);
+  }
+
+  public override async update(args: {
+    ids: string[];
+    embeddings?: number[][];
+    metadatas?: Metadata[];
+    documents?: string[];
+    uris?: string[];
+  }): Promise<void> {
+    if (!args.embeddings && args.documents) {
+      throw new ChromaValueError(HANDLE_EMBEDDING_ERROR);
+    }
+    return super.update(args);
+  }
+
+  public override async upsert(args: {
+    ids: string[];
+    embeddings?: number[][];
+    metadatas?: Metadata[];
+    documents?: string[];
+    uris?: string[];
+  }): Promise<void> {
+    if (!args.embeddings) {
+      throw new ChromaValueError(HANDLE_EMBEDDING_ERROR);
+    }
+    return super.upsert(args);
+  }
+
+  public override async query<TMeta extends Metadata = Metadata>(args: {
+    queryEmbeddings?: number[][];
+    queryTexts?: string[];
+    queryURIs?: string[];
+    ids?: string[];
+    nResults?: number;
+    where?: Where;
+    whereDocument?: WhereDocument;
+    include?: Include[];
+  }): Promise<QueryResult<TMeta>> {
+    if (!args.queryEmbeddings) {
+      throw new ChromaValueError(HANDLE_EMBEDDING_ERROR);
+    }
+    return super.query(args);
+  }
+
+  public override async search(
+    searches: SearchLike | SearchLike[],
+    options?: { readLevel?: ReadLevel },
+  ): Promise<SearchResult> {
+    const items = Array.isArray(searches) ? searches : [searches];
+    for (const search of items) {
+      const payload = toSearch(search).toPayload();
+      if (this.hasStringKnnQuery(payload.rank)) {
+        throw new ChromaValueError(HANDLE_EMBEDDING_ERROR);
+      }
+    }
+    return super.search(searches, options);
+  }
+
+  public override async modify(_args: {
+    name?: string;
+    metadata?: CollectionMetadata;
+    configuration?: UpdateCollectionConfiguration;
+  }): Promise<void> {
+    throw new ChromaValueError(`modify() ${HANDLE_NOT_SUPPORTED_ERROR}`);
+  }
+
+  public override async fork(_args: { name: string }): Promise<Collection> {
+    throw new ChromaValueError(`fork() ${HANDLE_NOT_SUPPORTED_ERROR}`);
+  }
+
+  private hasStringKnnQuery(obj: unknown): boolean {
+    if (!obj || typeof obj !== "object") return false;
+    if (Array.isArray(obj)) {
+      return obj.some((item) => this.hasStringKnnQuery(item));
+    }
+    const record = obj as Record<string, unknown>;
+    if ("$knn" in record && isPlainObject(record.$knn)) {
+      const knn = record.$knn as Record<string, unknown>;
+      if (typeof knn.query === "string") return true;
+    }
+    return Object.values(record).some((value) =>
+      this.hasStringKnnQuery(value),
+    );
   }
 }

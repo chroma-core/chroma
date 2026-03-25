@@ -168,7 +168,7 @@ Invocations on sources of the S3 type sync individual files from the bucket. The
 
 - `object_key` (required) is the full S3 object key to sync. Must include the `path_prefix` if one is configured on the source.
 - `custom_id` (optional) is a custom document ID (max 120 bytes). Chunk IDs become `custom_id-{chunk}` instead of `sha256(object_key)-{chunk}`.
-- `metadata` (optional) is additional metadata merged with standard chunk metadata. Values must be scalars (string, number, boolean, or null).
+- `metadata` (optional) is additional metadata merged with standard chunk metadata. Values can be scalars (string, number, boolean, or null) or homogeneous arrays of scalars (e.g. `["action", "comedy"]`).
 - `target_collection_name` (optional) overrides the source's `collection_name`. If not provided, defaults to the `collection_name` configured on the source.
 
 ## GitHub Repositories

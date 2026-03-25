@@ -113,7 +113,7 @@ func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64
 	}
 
 	query := s.read_db.Table("collections").
-		Select("collections.id, collections.name, collections.version_file_name, sub.min_oldest_version_ts AS oldest_version_ts, databases.tenant_id, NULLIF(collections.lineage_file_name, '') AS lineage_file_name").
+		Select("collections.id, collections.name, collections.version_file_name, sub.min_oldest_version_ts AS oldest_version_ts, databases.tenant_id, NULLIF(collections.lineage_file_name, '') AS lineage_file_name, databases.name AS database_name").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Joins("INNER JOIN (?) AS sub ON collections.id = sub.id", sub)
 
@@ -728,4 +728,33 @@ func (s *collectionDb) IncrementCompactionFailureCount(collectionID string) erro
 		return err
 	}
 	return nil
+}
+
+// GetDLQFailureCounts returns a map of compaction_failure_count to the number of collections with that count.
+// This uses the read replica to minimize overhead on the primary database.
+func (s *collectionDb) GetDLQFailureCounts() (map[int32]int64, error) {
+	type result struct {
+		CompactionFailureCount int32 `gorm:"column:compaction_failure_count"`
+		Count                  int64 `gorm:"column:count"`
+	}
+
+	var results []result
+	err := s.read_db.Model(&dbmodel.Collection{}).
+		Select("compaction_failure_count, COUNT(*) as count").
+		Where("compaction_failure_count > 0").
+		Group("compaction_failure_count").
+		Find(&results).Error
+
+	if err != nil {
+		log.Error("GetCompactionDLQSize failed", zap.Error(err))
+		return nil, err
+	}
+
+	// Convert to map for easier access
+	countMap := make(map[int32]int64)
+	for _, r := range results {
+		countMap[r.CompactionFailureCount] = r.Count
+	}
+
+	return countMap, nil
 }

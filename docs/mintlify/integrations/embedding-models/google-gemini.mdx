@@ -13,19 +13,31 @@ You can get an API key by signing up for an account at [Google AI Studio](https:
 This embedding function relies on the `google-genai` python package, which you can install with `pip install google-genai`.
 
 ```python
-# import
 import chromadb.utils.embedding_functions as embedding_functions
 
-# The GoogleGenaiEmbeddingFunction expects the API key in the GOOGLE_API_KEY environment variable.
-google_ef  = embedding_functions.GoogleGenaiEmbeddingFunction(model_name="models/gemini-embedding-001")
-google_ef(["document1","document2"])
+# The GoogleGeminiEmbeddingFunction expects the API key in the GEMINI_API_KEY environment variable.
+google_ef = embedding_functions.GoogleGeminiEmbeddingFunction(
+    model_name="gemini-embedding-001",
+    task_type="RETRIEVAL_DOCUMENT",
+)
+google_ef(["document1", "document2"])
 
 # pass documents to query for .add and .query
 collection = client.create_collection(name="name", embedding_function=google_ef)
 collection = client.get_collection(name="name", embedding_function=google_ef)
 ```
 
-You can view a more [complete example](https://github.com/chroma-core/chroma/tree/main/examples/gemini) chatting over documents with Gemini embedding and langauge models.
+You can optionally specify the `dimension` parameter to control the output dimensionality of the embeddings (supported range: 128–3072):
+
+```python
+google_ef = embedding_functions.GoogleGeminiEmbeddingFunction(
+    model_name="gemini-embedding-001",
+    task_type="RETRIEVAL_DOCUMENT",
+    dimension=768,
+)
+```
+
+You can view a more [complete example](https://github.com/chroma-core/chroma/tree/main/examples/gemini) chatting over documents with Gemini embedding and language models.
 
 For more info - please visit the [official Google docs](https://ai.google.dev/gemini-api/docs/embeddings).
 
@@ -65,3 +77,117 @@ For more info - please visit the [official Google docs](https://ai.google.dev/ge
 </Tab>
 
 </Tabs>
+
+## Multimodal Embeddings
+
+The `GoogleGeminiEmbeddingFunction` supports the new `gemini-embedding-2-preview` model from Google. It is Google's first fully multimodal embedding model that is capable of mapping text, image, video, audio, and PDFs and their interleaved combinations thereof into a single, unified vector space. By natively handling interleaved data without intermediate processing steps, this model simplifies complex pipelines and unlocks new capabilities for RAG, agentic search, recommendation systems, and more.
+
+### What are Multimodal Embeddings?
+
+Traditional embedding models work with a single modality—typically text. If you wanted to search across images, you'd need a separate image embedding model, and the two vector spaces wouldn't be compatible. Searching for "a red sports car" in a text collection and an image collection would require different queries and different indices.
+
+Multimodal embeddings solve this by projecting different types of content into the same vector space. A text description like "a chef mixing ingredients in a bowl" and an image of that scene will have similar embeddings—allowing you to:
+
+- **Search images with text**: Find frames in a video that match a natural language description
+- **Search text with images**: Find documents that describe what's shown in an image
+- **Cross-modal retrieval**: Build unified search experiences across documents, images, videos, and audio
+- **Simplified pipelines**: No need to maintain separate indices or embedding models for different content types
+
+This is particularly powerful for applications like:
+- **Video understanding**: Search through hours of video content using natural language
+- **Product search**: Find products by uploading a photo or describing what you want
+- **Document analysis**: Search PDFs that contain both text and images
+- **Agentic applications**: Give AI agents the ability to see and reason about visual content
+
+### Example: Video Search
+
+In the [Chroma Cookbooks](https://github.com/chroma-core/chroma-cookbooks/tree/master/multimodal-video-search) repo, we feature an example using multimodal embeddings to search through YouTube videos. The project downloads a video, extracts frames and transcript, embeds everything into a single Chroma collection, and then uses an agentic search loop with Gemini to answer questions about the video.
+
+For example, given a cooking video like [this apple tart recipe](https://www.youtube.com/shorts/wHI926TlQcM), you can ask questions like:
+- "How many bowls are shown in the video?"
+- "What ingredients are being mixed?"
+- "What happens at the end of the video?"
+
+The agent uses a `semantic_search` tool to query the collection, and can actually *see* the retrieved images—making it capable of answering visual questions that would be impossible with text-only search.
+
+#### How It Works
+
+1. **Video Processing**: The video is downloaded with `yt-dlp`, frames are extracted at 1-second intervals using `ffmpeg`, and the transcript is fetched via the YouTube API
+2. **Embedding**: Each frame is uploaded to Google's Files API and embedded using `gemini-embedding-2-preview`
+3. **Storage**: Frames are stored as embeddings, and transcript segments are stored as documents (auto-embedded by Chroma) in a collection named `multimodal-video-{video_id}`
+4. **Agentic Search**: Gemini 3.1 Pro runs in a loop with a `semantic_search` tool. When it retrieves image results, the actual images are passed to the model so it can see them
+
+#### Setup
+
+<Steps>
+
+<Step>
+[Log in](https://trychroma.com/login) to your Chroma Cloud account. If you don't have one yet, you can [sign up](https://trychroma.com/signup). You will get free credits that should be more than enough for running this project.
+</Step>
+
+<Step>
+Use the "Create Database" button on the top right of the Chroma Cloud dashboard, and name your DB `multimodal-video-search` (or any name of your choice). If you're a first-time user, you will be greeted with the "Create Database" modal after creating your account.
+</Step>
+
+<Step>
+Once your database is created, choose the "Settings" tab. At the bottom of the page, choose the `.env` tab. Create an API key, and copy the environment variables you will need for running the project: `CHROMA_API_KEY`, `CHROMA_TENANT`, and `CHROMA_DATABASE`.
+</Step>
+
+<Step>
+Clone the [Chroma Cookbooks](https://github.com/chroma-core/chroma-cookbooks) repo:
+
+```terminal
+git clone https://github.com/chroma-core/chroma-cookbooks.git
+```
+</Step>
+
+<Step>
+Navigate to the `multimodal-video-search` directory, and create a `.env` file at its root:
+
+```terminal
+cd chroma-cookbooks/multimodal-video-search
+touch .env
+```
+</Step>
+
+<Step>
+To run this project, you will also need a [Google AI API key](https://aistudio.google.com/) with access to `gemini-embedding-2-preview`. Set it in your `.env` file along with the Chroma credentials:
+
+```text
+GEMINI_API_KEY=<YOUR GEMINI API KEY>
+CHROMA_HOST=api.trychroma.com
+CHROMA_API_KEY=<YOUR CHROMA API KEY>
+CHROMA_TENANT=<YOUR CHROMA TENANT>
+CHROMA_DATABASE=multimodal-video-search
+```
+</Step>
+
+<Step>
+This project uses [uv](https://github.com/astral-sh/uv) for package management. Install dependencies:
+
+```terminal
+uv sync
+```
+</Step>
+
+<Step>
+You'll also need `ffmpeg` for video processing:
+
+```terminal
+brew install ffmpeg
+```
+</Step>
+
+</Steps>
+
+#### Running the Project
+
+Run the project with a YouTube URL and a question:
+
+```terminal
+uv run python main.py "https://youtube.com/shorts/wHI926TlQcM" "How many bowls are in the video?"
+```
+
+The first run will download the video, extract frames, embed them, and index everything to Chroma. Subsequent runs with the same video will skip indexing and go straight to answering your question.
+
+You can watch the agent's search process in the terminal output—it will show each search query and the number of results found before providing its final answer.

@@ -389,20 +389,23 @@ impl TryFrom<chroma_proto::GetCollectionsRequest> for GetCollectionsRequest {
 
         // Collect all IDs from both `id` and `ids_filter`
         let mut all_ids: Vec<CollectionUuid> = Vec::new();
+        let mut has_id_filter = false;
 
         if let Some(id_str) = req.id {
+            has_id_filter = true;
             let id = CollectionUuid(validate_uuid(&id_str)?);
             all_ids.push(id);
         }
 
         if let Some(ids_filter) = req.ids_filter {
+            has_id_filter = true;
             for id_str in ids_filter.ids {
                 let id = CollectionUuid(validate_uuid(&id_str)?);
                 all_ids.push(id);
             }
         }
 
-        if !all_ids.is_empty() {
+        if has_id_filter {
             filter = filter.ids(all_ids);
         }
 
@@ -458,12 +461,6 @@ impl TryFrom<chroma_proto::GetCollectionsRequest> for GetCollectionsRequest {
             filter = filter.limit(limit);
         }
         if let Some(offset) = req.offset {
-            if offset < 0 {
-                return Err(SysDbError::InvalidArgument(format!(
-                    "offset must be non-negative, got {}",
-                    offset
-                )));
-            }
             if offset > 0 {
                 if req.limit.is_none() {
                     return Err(SysDbError::InvalidArgument(
@@ -486,6 +483,21 @@ impl TryFrom<chroma_proto::GetCollectionsRequest> for GetCollectionsRequest {
         }
 
         Ok(Self { filter })
+    }
+}
+
+impl GetCollectionsRequest {
+    pub fn for_collection(
+        collection_id: CollectionUuid,
+        database_name: DatabaseName,
+        include_soft_deleted: bool,
+    ) -> Self {
+        Self {
+            filter: CollectionFilter::default()
+                .ids(vec![collection_id])
+                .database_name(database_name)
+                .include_soft_deleted(include_soft_deleted),
+        }
     }
 }
 
@@ -720,6 +732,7 @@ impl Assignable for GetCollectionsRequest {
         }
         // Fall back to default if no database filter
         // TODO(Sanket): Make database name mandatory in the filter.
+        tracing::warn!("No database filter provided, using default backend");
         Backend::Spanner(factory.one_spanner().clone())
     }
 }
@@ -1137,7 +1150,7 @@ impl TryFrom<SpannerRows> for Collection {
             }
         }
 
-        // Parse schema JSON (index_schema is NOT NULL, so parsing should succeed)
+        // Parse schema JSON (use default schema if no compaction cursor exists)
         let parsed_schema: Schema =
             serde_json::from_str(&schema_json).map_err(SysDbError::InvalidSchemaJson)?;
 
@@ -1410,6 +1423,8 @@ impl TryFrom<CreateCollectionResponse> for chroma_proto::CreateCollectionRespons
 #[derive(Debug, Clone)]
 pub struct GetCollectionsResponse {
     pub collections: Vec<Collection>,
+    /// Collection IDs that are soft-deleted (only populated when include_soft_deleted is true)
+    pub soft_deleted_ids: std::collections::HashSet<CollectionUuid>,
 }
 
 impl TryFrom<GetCollectionsResponse> for chroma_proto::GetCollectionsResponse {
@@ -1595,6 +1610,37 @@ impl TryFrom<FlushCompactionResponse> for chroma_proto::FlushCollectionCompactio
     }
 }
 
+impl TryFrom<chroma_proto::BatchGetCollectionSoftDeleteStatusRequest> for GetCollectionsRequest {
+    type Error = SysDbError;
+
+    fn try_from(
+        req: chroma_proto::BatchGetCollectionSoftDeleteStatusRequest,
+    ) -> Result<Self, Self::Error> {
+        let mut ids = Vec::new();
+        for id_str in req.collection_ids {
+            ids.push(CollectionUuid(validate_uuid(&id_str)?));
+        }
+
+        let mut filter = CollectionFilter::default()
+            .ids(ids)
+            .include_soft_deleted(true);
+
+        if let Some(db_str) = req.database_name {
+            if !db_str.is_empty() {
+                let database_name = DatabaseName::new(&db_str).ok_or_else(|| {
+                    SysDbError::InvalidArgument(format!(
+                        "database name must be at least 3 characters, got '{}'",
+                        db_str
+                    ))
+                })?;
+                filter = filter.database_name(database_name);
+            }
+        }
+
+        Ok(GetCollectionsRequest { filter })
+    }
+}
+
 impl TryFrom<chroma_proto::FlushCollectionCompactionRequest> for GetCollectionsRequest {
     type Error = SysDbError;
 
@@ -1616,6 +1662,185 @@ impl TryFrom<chroma_proto::FlushCollectionCompactionRequest> for GetCollectionsR
             .database_name(database_name);
         Ok(GetCollectionsRequest { filter })
     }
+}
+
+// ============================================================================
+// FinishCollectionDeletion Types
+// ============================================================================
+
+/// Internal request for finishing collection deletion (hard delete).
+#[derive(Debug, Clone)]
+pub struct FinishCollectionDeletionRequest {
+    pub collection_id: CollectionUuid,
+    pub database_name: DatabaseName,
+    pub tenant_id: String,
+}
+
+impl TryFrom<chroma_proto::FinishCollectionDeletionRequest> for FinishCollectionDeletionRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::FinishCollectionDeletionRequest) -> Result<Self, Self::Error> {
+        let database_name = DatabaseName::new(&req.database).ok_or_else(|| {
+            SysDbError::InvalidArgument(format!(
+                "database name must be at least 3 characters, got '{}'",
+                req.database
+            ))
+        })?;
+        Ok(Self {
+            collection_id: CollectionUuid(validate_uuid(&req.id)?),
+            database_name,
+            tenant_id: req.tenant,
+        })
+    }
+}
+
+/// Internal response for finishing collection deletion.
+#[derive(Debug, Clone)]
+pub struct FinishCollectionDeletionResponse {}
+
+impl From<FinishCollectionDeletionResponse> for chroma_proto::FinishCollectionDeletionResponse {
+    fn from(_: FinishCollectionDeletionResponse) -> Self {
+        chroma_proto::FinishCollectionDeletionResponse {}
+    }
+}
+
+impl Assignable for FinishCollectionDeletionRequest {
+    type Output = Backend;
+
+    fn assign(&self, factory: &BackendFactory) -> Backend {
+        // Route by topology prefix in database name
+        factory.backend_from_database_name(&self.database_name)
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for FinishCollectionDeletionRequest {
+    type Response = FinishCollectionDeletionResponse;
+    type Input = Backend;
+
+    async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
+        backend.finish_collection_deletion(self).await
+    }
+}
+
+// ============================================================================
+// ListCollectionsToGc Types
+// ============================================================================
+
+/// Internal request for listing collections to garbage collect.
+#[derive(Debug, Clone)]
+pub struct ListCollectionsToGcRequest {
+    pub cutoff_time: Option<prost_types::Timestamp>,
+    pub limit: Option<u64>,
+    pub tenant_id: Option<String>,
+    pub min_versions_if_alive: Option<u64>,
+}
+
+impl TryFrom<chroma_proto::ListCollectionsToGcRequest> for ListCollectionsToGcRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::ListCollectionsToGcRequest) -> Result<Self, Self::Error> {
+        Ok(Self {
+            cutoff_time: req.cutoff_time,
+            limit: req.limit,
+            tenant_id: req.tenant_id,
+            min_versions_if_alive: req.min_versions_if_alive,
+        })
+    }
+}
+
+/// Internal response for listing collections to garbage collect.
+#[derive(Debug, Clone)]
+pub struct ListCollectionsToGcResponse {
+    pub collections: Vec<chroma_proto::CollectionToGcInfo>,
+}
+
+impl From<ListCollectionsToGcResponse> for chroma_proto::ListCollectionsToGcResponse {
+    fn from(r: ListCollectionsToGcResponse) -> Self {
+        chroma_proto::ListCollectionsToGcResponse {
+            collections: r.collections,
+        }
+    }
+}
+
+impl Assignable for ListCollectionsToGcRequest {
+    type Output = Vec<Backend>;
+
+    fn assign(&self, factory: &BackendFactory) -> Vec<Backend> {
+        factory.get_all_backends()
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for ListCollectionsToGcRequest {
+    type Response = ListCollectionsToGcResponse;
+    type Input = Vec<Backend>;
+
+    async fn run(self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
+        let mut all_collections = Vec::new();
+        for backend in backends {
+            match backend.list_collections_to_gc(self.clone()).await {
+                Ok(resp) => all_collections.extend(resp.collections),
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "Failed to list collections to gc from backend, continuing with other backends"
+                    );
+                }
+            }
+        }
+        Ok(ListCollectionsToGcResponse {
+            collections: all_collections,
+        })
+    }
+}
+
+// ============================================================================
+// BatchGetCollectionVersionFilePaths Types
+// ============================================================================
+
+/// Internal request for batch getting collection version file paths.
+#[derive(Debug, Clone)]
+pub struct BatchGetCollectionVersionFilePathsRequest {
+    pub collection_ids: Vec<CollectionUuid>,
+    pub database_name: Option<DatabaseName>,
+}
+
+impl TryFrom<chroma_proto::BatchGetCollectionVersionFilePathsRequest> for GetCollectionsRequest {
+    type Error = SysDbError;
+
+    fn try_from(
+        req: chroma_proto::BatchGetCollectionVersionFilePathsRequest,
+    ) -> Result<Self, Self::Error> {
+        let filter = CollectionFilter::default().ids(
+            req.collection_ids
+                .into_iter()
+                .map(|id| validate_uuid(&id).map(CollectionUuid))
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+
+        let filter = if let Some(db_name) = req.database_name {
+            if let Some(valid_db_name) = DatabaseName::new(&db_name) {
+                filter.database_name(valid_db_name)
+            } else {
+                return Err(SysDbError::InvalidArgument(format!(
+                    "database name must be at least 3 characters, got '{}'",
+                    db_name
+                )));
+            }
+        } else {
+            filter
+        }
+        .include_soft_deleted(true);
+
+        Ok(GetCollectionsRequest { filter })
+    }
+}
+
+/// Internal response for batch getting collection version file paths.
+#[derive(Debug, Clone)]
+pub struct BatchGetCollectionVersionFilePathsResponse {
+    pub collection_id_to_version_file_path: HashMap<String, String>,
 }
 
 impl Assignable for FlushCompactionRequest {

@@ -826,7 +826,7 @@ pub fn query_quantized_cluster(
         .map(|(q, c)| q - c)
         .collect::<Vec<_>>();
 
-    let code_size = Code::<&[u8]>::size(cluster.center.len());
+    let code_size = Code::<4, &[u8]>::size(cluster.center.len());
     let mut seen = HashSet::new();
     let mut keys = Vec::new();
     let mut distances = Vec::new();
@@ -840,7 +840,7 @@ pub fn query_quantized_cluster(
         if !predicate(*id, *version) || !seen.insert(*id) {
             continue;
         }
-        let code = Code::<&[u8]>::new(code_bytes);
+        let code = Code::<4, &[u8]>::new(code_bytes);
         let distance = code.distance_query(distance_function, &r_q, c_norm, c_dot_q, q_norm);
         keys.push(*id);
         distances.push(distance);

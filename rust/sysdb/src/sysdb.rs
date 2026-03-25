@@ -567,10 +567,11 @@ impl SysDb {
     pub async fn batch_get_collection_version_file_paths(
         &mut self,
         collection_ids: Vec<CollectionUuid>,
+        database_name: Option<DatabaseName>,
     ) -> Result<HashMap<CollectionUuid, String>, BatchGetCollectionVersionFilePathsError> {
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.batch_get_collection_version_file_paths(collection_ids)
+                grpc.batch_get_collection_version_file_paths(collection_ids, database_name)
                     .await
             }
             SysDb::Sqlite(_) => todo!(),
@@ -583,11 +584,12 @@ impl SysDb {
 
     pub async fn batch_get_collection_soft_delete_status(
         &mut self,
+        database_name: Option<DatabaseName>,
         collection_ids: Vec<CollectionUuid>,
     ) -> Result<HashMap<CollectionUuid, bool>, BatchGetCollectionSoftDeleteStatusError> {
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.batch_get_collection_soft_delete_status(collection_ids)
+                grpc.batch_get_collection_soft_delete_status(database_name, collection_ids)
                     .await
             }
             SysDb::Sqlite(_) => todo!(),
@@ -683,9 +685,13 @@ impl SysDb {
         &mut self,
         epoch_id: i64,
         versions: Vec<VersionListForCollection>,
+        database_name: DatabaseName,
     ) -> Result<HashMap<String, bool>, MarkVersionForDeletionError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.mark_version_for_deletion(epoch_id, versions).await,
+            SysDb::Grpc(grpc) => {
+                grpc.mark_version_for_deletion(epoch_id, versions, database_name)
+                    .await
+            }
             SysDb::Test(test) => {
                 let versions_clone = versions.clone();
                 test.mark_version_for_deletion(epoch_id, versions_clone)
@@ -708,10 +714,13 @@ impl SysDb {
     pub async fn delete_collection_version(
         &mut self,
         versions: Vec<VersionListForCollection>,
+        database_name: DatabaseName,
     ) -> Result<HashMap<String, bool>, DeleteCollectionVersionError> {
         match self {
             SysDb::Grpc(client) => {
-                let response = client.delete_collection_version(versions).await?;
+                let response = client
+                    .delete_collection_version(versions, database_name)
+                    .await?;
                 Ok(response)
             }
             SysDb::Test(client) => Ok(client.delete_collection_version(versions).await),
@@ -848,6 +857,7 @@ impl Configurable<(GrpcSysDbConfig, Option<GrpcSysDbConfig>)> for GrpcSysDb {
 pub struct CollectionToGcInfo {
     pub id: CollectionUuid,
     pub tenant: String,
+    pub database: DatabaseName,
     pub name: String,
     pub version_file_path: String,
     pub lineage_file_path: Option<String>,
@@ -885,9 +895,16 @@ impl TryFrom<chroma_proto::CollectionToGcInfo> for CollectionToGcInfo {
             Err(e) => return Err(GetCollectionsToGcError::ParsingError(e)),
         };
         let collection_id = CollectionUuid(collection_uuid);
+        let database = value
+            .database_name
+            .and_then(|name| DatabaseName::new(&name))
+            .ok_or_else(|| {
+                GetCollectionsToGcError::Internal(Box::new(TonicMissingFieldError("database name")))
+            })?;
         Ok(CollectionToGcInfo {
             id: collection_id,
             tenant: value.tenant_id,
+            database,
             name: value.name,
             version_file_path: value.version_file_path,
             lineage_file_path: value.lineage_file_path,
@@ -1497,7 +1514,15 @@ impl GrpcSysDb {
         database: String,
         collection_id: CollectionUuid,
     ) -> Result<(), DeleteCollectionError> {
-        self.client
+        let database_name = DatabaseName::new(&database).ok_or_else(|| {
+            DeleteCollectionError::Internal(Box::new(TonicError(tonic::Status::invalid_argument(
+                format!("invalid database name: '{}'", database),
+            ))) as Box<dyn ChromaError>)
+        })?;
+        let mut client = self
+            .client(&database_name)
+            .map_err(|e| DeleteCollectionError::Internal(Box::new(e) as Box<dyn ChromaError>))?;
+        client
             .finish_collection_deletion(chroma_proto::FinishCollectionDeletionRequest {
                 tenant,
                 database,
@@ -1615,25 +1640,54 @@ impl GrpcSysDb {
         tenant: Option<String>,
         min_versions_if_alive: Option<u64>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
+        let req = chroma_proto::ListCollectionsToGcRequest {
+            cutoff_time: cutoff_time.map(|t| t.into()),
+            limit,
+            tenant_id: tenant,
+            min_versions_if_alive,
+        };
+
         let res = self
             .client
-            .list_collections_to_gc(chroma_proto::ListCollectionsToGcRequest {
-                cutoff_time: cutoff_time.map(|t| t.into()),
-                limit,
-                tenant_id: tenant,
-                min_versions_if_alive,
-            })
-            .await;
+            .list_collections_to_gc(req.clone())
+            .await
+            .map_err(GetCollectionsToGcError::RequestFailed)?;
 
-        match res {
-            Ok(collections) => collections
-                .into_inner()
-                .collections
-                .into_iter()
-                .map(|collection| collection.try_into())
-                .collect::<Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError>>(),
-            Err(e) => Err(GetCollectionsToGcError::RequestFailed(e)),
+        let mut collections: Vec<CollectionToGcInfo> = res
+            .into_inner()
+            .collections
+            .into_iter()
+            .map(|c| c.try_into())
+            .collect::<Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError>>()?;
+
+        // NOTE(tanujnay112): We actually end up returning <= limit * |topologies| collections.
+        if let Some(mcmr_client) = self._mcmr_client.as_mut() {
+            match mcmr_client.list_collections_to_gc(req).await {
+                Ok(mcmr_res) => {
+                    let mcmr_collections: Vec<CollectionToGcInfo> = mcmr_res
+                        .into_inner()
+                        .collections
+                        .into_iter()
+                        .filter_map(|c| c.try_into().ok())
+                        .collect();
+                    let len = mcmr_collections.len();
+                    collections.extend(mcmr_collections);
+                    tracing::debug!(
+                        "Successfully retrieved {} collections from mcmr_client",
+                        len
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(
+                        error = ?e,
+                        "Failed to get collections from mcmr_client - collections from mcmr sysdb will be missing from GC list"
+                    );
+                    // Intentionally continue
+                }
+            }
         }
+
+        Ok(collections)
     }
 
     pub async fn get_collection_to_gc(
@@ -1667,9 +1721,16 @@ impl GrpcSysDb {
 
         let collection = collections.remove(0);
 
+        let database_name = DatabaseName::new(&collection.database).ok_or_else(|| {
+            GetCollectionsToGcError::Internal(Box::new(chroma_error::TonicMissingFieldError(
+                "database_name",
+            )))
+        })?;
+
         Ok(CollectionToGcInfo {
             id: collection.collection_id,
             tenant: collection.tenant,
+            database: database_name,
             name: collection.name,
             version_file_path: collection.version_file_path.unwrap_or_default(),
             lineage_file_path: collection.lineage_file_path,
@@ -1781,15 +1842,20 @@ impl GrpcSysDb {
     async fn batch_get_collection_version_file_paths(
         &mut self,
         collection_ids: Vec<CollectionUuid>,
+        database_name: Option<DatabaseName>,
     ) -> Result<HashMap<CollectionUuid, String>, BatchGetCollectionVersionFilePathsError> {
-        let res = self
-            .client
+        let mut client = match &database_name {
+            Some(db_name) => self.client(db_name)?,
+            None => self.client.clone(),
+        };
+        let res = client
             .batch_get_collection_version_file_paths(
                 chroma_proto::BatchGetCollectionVersionFilePathsRequest {
                     collection_ids: collection_ids
                         .into_iter()
                         .map(|id| id.0.to_string())
                         .collect(),
+                    database_name: database_name.map(|d| d.into_string()),
                 },
             )
             .await?;
@@ -1807,26 +1873,36 @@ impl GrpcSysDb {
 
     async fn batch_get_collection_soft_delete_status(
         &mut self,
+        database_name: Option<DatabaseName>,
         collection_ids: Vec<CollectionUuid>,
     ) -> Result<HashMap<CollectionUuid, bool>, BatchGetCollectionSoftDeleteStatusError> {
-        let res = self
-            .client
+        let mut client = match &database_name {
+            Some(db_name) => self.client(db_name)?,
+            None => self.client.clone(),
+        };
+        let res = client
             .batch_get_collection_soft_delete_status(
                 chroma_proto::BatchGetCollectionSoftDeleteStatusRequest {
                     collection_ids: collection_ids
                         .into_iter()
                         .map(|id| id.0.to_string())
                         .collect(),
+                    database_name: database_name.map(|d| d.into_string()),
                 },
             )
             .await?;
         let collection_id_to_status = res.into_inner().collection_id_to_is_soft_deleted;
+        tracing::debug!(
+            "BatchGetCollectionSoftDeleteStatusResponse: {} entries",
+            collection_id_to_status.len()
+        );
         let mut result = HashMap::new();
         for (key, value) in collection_id_to_status {
             let collection_id = CollectionUuid(
                 Uuid::try_parse(&key)
                     .map_err(|err| BatchGetCollectionSoftDeleteStatusError::Uuid(err, key))?,
             );
+            tracing::debug!("Collection {} is soft deleted: {}", collection_id, value);
             result.insert(collection_id, value);
         }
         Ok(result)
@@ -2019,23 +2095,53 @@ impl GrpcSysDb {
         &mut self,
         epoch_id: i64,
         versions: Vec<chroma_proto::VersionListForCollection>,
+        database_name: DatabaseName,
     ) -> Result<HashMap<String, bool>, MarkVersionForDeletionError> {
-        let req = chroma_proto::MarkVersionForDeletionRequest { epoch_id, versions };
+        let database_name_str = Some(database_name.as_ref().to_string());
 
-        let res = self.client.mark_version_for_deletion(req).await?;
+        let req = chroma_proto::MarkVersionForDeletionRequest {
+            epoch_id,
+            versions,
+            database_name: database_name_str,
+        };
+
+        let res = self
+            .client(&database_name)
+            .map_err(|e| {
+                MarkVersionForDeletionError::FailedToMarkVersion(tonic::Status::internal(
+                    e.to_string(),
+                ))
+            })?
+            .mark_version_for_deletion(req)
+            .await?;
         Ok(res.into_inner().collection_id_to_success)
     }
 
     async fn delete_collection_version(
         &mut self,
         versions: Vec<chroma_proto::VersionListForCollection>,
+        database_name: DatabaseName,
     ) -> Result<HashMap<String, bool>, DeleteCollectionVersionError> {
         let req = chroma_proto::DeleteCollectionVersionRequest {
             epoch_id: 0, // TODO: Pass this through
             versions,
+            database_name: Some(database_name.as_ref().to_string()),
         };
+        tracing::trace!(
+            "delete_collection_version request: epoch_id={}, versions={:?}",
+            req.epoch_id,
+            req.versions,
+        );
 
-        let res = self.client.delete_collection_version(req).await?;
+        let res = self
+            .client(&database_name)
+            .map_err(|e| {
+                DeleteCollectionVersionError::FailedToDeleteVersion(tonic::Status::internal(
+                    e.to_string(),
+                ))
+            })?
+            .delete_collection_version(req)
+            .await?;
         Ok(res.into_inner().collection_id_to_success)
     }
 
@@ -2443,21 +2549,21 @@ impl ChromaError for GetLastCompactionTimeError {
 
 #[derive(Error, Debug)]
 pub enum FlushCompactionError {
-    #[error("Failed to flush compaction")]
+    #[error("Failed to flush compaction: {0}")]
     FailedToFlushCompaction(#[from] tonic::Status),
-    #[error("Failed to convert segment flush info")]
+    #[error("Failed to convert segment flush info: {0}")]
     SegmentFlushInfoConversionError(#[from] SegmentFlushInfoConversionError),
-    #[error("Failed to convert collection flush info")]
+    #[error("Failed to convert collection flush info: {0}")]
     CollectionFlushInfoConversionError(#[from] CollectionFlushInfoConversionError),
-    #[error("Failed to convert flush compaction response")]
+    #[error("Failed to convert flush compaction response: {0}")]
     FlushCompactionResponseConversionError(#[from] FlushCompactionResponseConversionError),
     #[error("Collection not found in sysdb")]
     CollectionNotFound,
     #[error("Segment not found in sysdb")]
     SegmentNotFound,
-    #[error("Failed to serialize schema")]
+    #[error("Failed to serialize schema: {0}")]
     Schema(#[from] SchemaError),
-    #[error("Failed to get client for database")]
+    #[error("Failed to get client for database: {0}")]
     ClientResolutionError(#[from] ClientResolutionError),
 }
 

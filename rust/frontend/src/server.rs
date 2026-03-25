@@ -13,23 +13,23 @@ use chroma_metering::{
 use chroma_system::System;
 use chroma_tracing::add_tracing_middleware;
 use chroma_types::{
-    decode_embeddings, maybe_decode_update_embeddings, validate_name, AddCollectionRecordsPayload,
-    AddCollectionRecordsResponse, AttachFunctionRequest, AttachFunctionResponse, ChecklistResponse,
-    Collection, CollectionConfiguration, CollectionMetadataUpdate, CollectionUuid,
-    CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
-    CreateCollectionPayload, CreateCollectionRequest, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, DatabaseName,
-    DeleteCollectionRecordsPayload, DeleteCollectionRecordsResponse, DeleteDatabaseRequest,
-    DeleteDatabaseResponse, DetachFunctionRequest, DetachFunctionResponse, ForkCollectionResponse,
-    GetAttachedFunctionResponse, GetCollectionByCrnRequest, GetCollectionRequest,
-    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetRequestPayload, GetResponse,
-    GetTenantRequest, GetTenantResponse, IndexStatusResponse, InternalCollectionConfiguration,
-    InternalUpdateCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesRequest, ListDatabasesResponse, QueryRequest, QueryRequestPayload, QueryResponse,
-    SearchRequest, SearchRequestPayload, SearchResponse, UpdateCollectionPayload,
-    UpdateCollectionRecordsPayload, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
-    UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsPayload,
-    UpsertCollectionRecordsResponse,
+    decode_embeddings, maybe_decode_update_embeddings, plan::ReadLevel, validate_name,
+    AddCollectionRecordsPayload, AddCollectionRecordsResponse, AttachFunctionRequest,
+    AttachFunctionResponse, ChecklistResponse, Collection, CollectionConfiguration,
+    CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
+    CountRequest, CountResponse, CreateCollectionPayload, CreateCollectionRequest,
+    CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
+    DatabaseName, DeleteCollectionRecordsPayload, DeleteCollectionRecordsResponse,
+    DeleteCollectionResponse, DeleteDatabaseRequest, DeleteDatabaseResponse, DetachFunctionRequest,
+    DetachFunctionResponse, ForkCollectionResponse, GetAttachedFunctionResponse,
+    GetCollectionByCrnRequest, GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse,
+    GetRequest, GetRequestPayload, GetResponse, GetTenantRequest, GetTenantResponse,
+    IndexStatusResponse, InternalCollectionConfiguration, InternalUpdateCollectionConfiguration,
+    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
+    QueryRequest, QueryRequestPayload, QueryResponse, SearchRequest, SearchRequestPayload,
+    SearchResponse, UpdateCollectionPayload, UpdateCollectionRecordsPayload,
+    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateTenantRequest,
+    UpdateTenantResponse, UpsertCollectionRecordsPayload, UpsertCollectionRecordsResponse,
 };
 use mdac::{Rule, Scorecard, ScorecardGuard};
 use opentelemetry::global;
@@ -71,6 +71,13 @@ impl chroma_error::ChromaError for RateLimitError {
     fn code(&self) -> chroma_error::ErrorCodes {
         chroma_error::ErrorCodes::ResourceExhausted
     }
+}
+
+/// Response containing the fork count for a collection.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ForkCountResponse {
+    /// The number of forks for this collection.
+    pub count: usize,
 }
 
 async fn graceful_shutdown(system: System) {
@@ -128,6 +135,7 @@ pub struct Metrics {
     update_collection: Counter<u64>,
     delete_collection: Counter<u64>,
     fork_collection: Counter<u64>,
+    fork_count: Counter<u64>,
     collection_add: Counter<u64>,
     collection_update: Counter<u64>,
     collection_upsert: Counter<u64>,
@@ -166,6 +174,7 @@ impl Metrics {
             update_collection: meter.u64_counter("update_collection").build(),
             delete_collection: meter.u64_counter("delete_collection").build(),
             fork_collection: meter.u64_counter("fork_collection").build(),
+            fork_count: meter.u64_counter("fork_count").build(),
             collection_add: meter.u64_counter("collection_add").build(),
             collection_update: meter.u64_counter("collection_update").build(),
             collection_upsert: meter.u64_counter("collection_upsert").build(),
@@ -286,6 +295,10 @@ impl FrontendServer {
             .route(
                 "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork",
                 post(fork_collection),
+            )
+            .route(
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork_count",
+                get(fork_count),
             )
             .route(
                 "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/add",
@@ -1582,7 +1595,7 @@ async fn update_collection(
         ("ApiKeyAuth" = [])
     ),
     responses(
-        (status = 200, description = "Collection deleted successfully", body = UpdateCollectionResponse),
+        (status = 200, description = "Collection deleted successfully", body = DeleteCollectionResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 404, description = "Collection not found", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
@@ -1616,7 +1629,7 @@ async fn delete_collection(
     headers: HeaderMap,
     Path((tenant, database, collection_name)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
-) -> Result<Json<UpdateCollectionResponse>, ServerError> {
+) -> Result<Json<DeleteCollectionResponse>, ServerError> {
     server.metrics.delete_collection.add(1, &[]);
     tracing::info!(name: "delete_collection", tenant_name = %tenant, database_name = %database);
     server
@@ -1636,9 +1649,8 @@ async fn delete_collection(
     ])?;
     let request =
         chroma_types::DeleteCollectionRequest::try_new(tenant, database, collection_name)?;
-    server.frontend.delete_collection(request).await?;
 
-    Ok(Json(UpdateCollectionResponse {}))
+    Ok(Json(server.frontend.delete_collection(request).await?))
 }
 
 /// Fork collection
@@ -1735,6 +1747,7 @@ async fn fork_collection(
             tenant.clone(),
             database.clone(),
             collection_id.0.to_string(),
+            server.config.region.clone(),
         ));
 
     let request = chroma_types::ForkCollectionRequest::try_new(
@@ -1751,6 +1764,79 @@ async fn fork_collection(
             .meter(metering_context_container)
             .await?,
     ))
+}
+
+/// Get fork count
+/// Returns the number of forks for a collection.
+#[utoipa::path(
+    get,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork_count",
+    summary = "Get fork count",
+    description = "Returns the number of forks for a collection.",
+    tag = "Collection",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
+    responses(
+        (status = 200, description = "Fork count retrieved successfully", body = ForkCountResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "typescript",
+                "label": "Get fork count",
+                "source": "const count = await collection.forkCount();"
+            },
+            {
+                "lang": "python",
+                "label": "Get fork count",
+                "source": "count = collection.fork_count()"
+            }
+        ]))
+    )
+)]
+async fn fork_count(
+    headers: HeaderMap,
+    Path((tenant, database, collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<ForkCountResponse>, ServerError> {
+    server.metrics.fork_count.add(1, &[]);
+    tracing::info!(name: "fork_count", tenant_name = %tenant, database_name = %database, collection_id = %collection_id);
+    let database_name = DatabaseName::new(&database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
+    let collection_uuid =
+        CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+    server
+        .authenticate_and_authorize_collection(
+            &headers,
+            AuthzAction::CountForks,
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
+                collection: Some(collection_id.clone()),
+            },
+            database_name,
+            collection_uuid,
+        )
+        .await?;
+    let _guard = server.scorecard_request(&[
+        "op:fork_count",
+        format!("tenant:{}", tenant).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+    ])?;
+
+    let count = server.frontend.fork_count(collection_uuid).await?;
+
+    Ok(Json(ForkCountResponse { count }))
 }
 
 /// Add records
@@ -1857,6 +1943,7 @@ async fn collection_add(
             database.clone(),
             collection_id.0.to_string(),
             WriteAction::Add,
+            server.config.region.clone(),
         ));
 
     metering_context_container.enter();
@@ -1991,6 +2078,7 @@ async fn collection_update(
             database.clone(),
             collection_id.0.to_string(),
             WriteAction::Update,
+            server.config.region.clone(),
         ));
 
     metering_context_container.enter();
@@ -2125,6 +2213,7 @@ async fn collection_upsert(
             database.clone(),
             collection_id.0.to_string(),
             WriteAction::Upsert,
+            server.config.region.clone(),
         ));
 
     metering_context_container.enter();
@@ -2265,6 +2354,7 @@ async fn collection_delete(
             database.clone(),
             collection_id.0.to_string(),
             ReadAction::GetForDelete,
+            server.config.region.clone(),
         ));
 
     tracing::info!(name: "collection_delete", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.as_ref().map_or(0, |ids| ids.len()), has_where = r#where.is_some());
@@ -2274,17 +2364,24 @@ async fn collection_delete(
         collection_id,
         payload.ids,
         r#where,
+        payload.limit,
     )?;
 
-    Box::pin(
+    let response = Box::pin(
         server
             .frontend
-            .delete(request)
+            .delete(request, server.config.region.clone())
             .meter(metering_context_container),
     )
     .await?;
 
-    Ok(Json(DeleteCollectionRecordsResponse {}))
+    Ok(Json(response))
+}
+
+#[derive(Deserialize, ToSchema, Debug)]
+struct CountParams {
+    #[serde(default)]
+    read_level: ReadLevel,
 }
 
 /// Get number of records
@@ -2307,7 +2404,8 @@ async fn collection_delete(
     params(
         ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name"),
-        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
+        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("read_level" = Option<ReadLevel>, Query, description = "Read level for consistency vs performance tradeoffs")
     ),
     extensions(
         ("x-codeSamples" = json!([
@@ -2332,6 +2430,7 @@ async fn collection_delete(
 async fn collection_count(
     headers: HeaderMap,
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
+    Query(CountParams { read_level }): Query<CountParams>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<CountResponse>, ServerError> {
     server.metrics.collection_count.add(1, &[]);
@@ -2372,6 +2471,7 @@ async fn collection_count(
             database.clone(),
             collection_id.clone(),
             ReadAction::Count,
+            server.config.region.clone(),
         ))
     } else {
         chroma_metering::create::<ExternalCollectionReadContext>(
@@ -2380,6 +2480,7 @@ async fn collection_count(
                 database.clone(),
                 collection_id.clone(),
                 ReadAction::Count,
+                server.config.region.clone(),
             ),
         )
     };
@@ -2388,6 +2489,7 @@ async fn collection_count(
         tenant,
         database,
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
+        read_level,
     )?;
 
     Ok(Json(
@@ -2484,6 +2586,7 @@ async fn indexing_status(
             database.clone(),
             collection_id.clone(),
             ReadAction::Query,
+            server.config.region.clone(),
         ));
 
     metering_context_container.enter();
@@ -2636,6 +2739,7 @@ async fn collection_get(
             database.clone(),
             collection_id.0.to_string(),
             ReadAction::Get,
+            server.config.region.clone(),
         ))
     } else {
         chroma_metering::create::<ExternalCollectionReadContext>(
@@ -2644,6 +2748,7 @@ async fn collection_get(
                 database.clone(),
                 collection_id.0.to_string(),
                 ReadAction::Get,
+                server.config.region.clone(),
             ),
         )
     };
@@ -2811,6 +2916,7 @@ async fn collection_query(
             database.clone(),
             collection_id.0.to_string(),
             ReadAction::Query,
+            server.config.region.clone(),
         ))
     } else {
         chroma_metering::create::<ExternalCollectionReadContext>(
@@ -2819,6 +2925,7 @@ async fn collection_query(
                 database.clone(),
                 collection_id.0.to_string(),
                 ReadAction::Query,
+                server.config.region.clone(),
             ),
         )
     };
@@ -2969,6 +3076,7 @@ async fn collection_search(
             database.clone(),
             collection_id.0.to_string(),
             ReadAction::Search,
+            server.config.region.clone(),
         ))
     } else {
         chroma_metering::create::<ExternalCollectionReadContext>(
@@ -2977,6 +3085,7 @@ async fn collection_search(
                 database.clone(),
                 collection_id.0.to_string(),
                 ReadAction::Search,
+                server.config.region.clone(),
             ),
         )
     };
@@ -3257,6 +3366,7 @@ impl Modify for ChromaTokenSecurityAddon {
         update_collection,
         delete_collection,
         fork_collection,
+        fork_count,
         collection_add,
         collection_update,
         collection_upsert,

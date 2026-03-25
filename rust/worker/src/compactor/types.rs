@@ -22,3 +22,27 @@ pub struct RebuildMessage {
     /// Segment scopes to rebuild. If empty, rebuilds all segments (metadata + vector).
     pub segment_scopes: HashSet<SegmentScope>,
 }
+
+#[derive(Debug)]
+pub struct InProgressJobEntry {
+    pub job_id: JobId,
+    pub database_name: String,
+    pub expires_at_epoch_secs: i64,
+}
+
+#[derive(Debug)]
+pub struct ListInProgressJobsMessage {
+    pub response_tx: oneshot::Sender<Vec<InProgressJobEntry>>,
+}
+
+#[derive(Debug)]
+pub struct GetCollectionAssignmentMessage {
+    pub collection_id: CollectionUuid,
+    pub response_tx: oneshot::Sender<GetCollectionAssignmentResponse>,
+}
+
+#[derive(Debug)]
+pub struct GetCollectionAssignmentResponse {
+    pub assigned_node: String,
+    pub memberlist: Vec<String>,
+}

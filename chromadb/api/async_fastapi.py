@@ -28,6 +28,7 @@ from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.execution.expression.plan import Search
 
 from chromadb.api.types import (
+    DeleteResult,
     Documents,
     Embeddings,
     IDs,
@@ -416,6 +417,20 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         model = CollectionModel.from_json(resp_json)
         return model
 
+    @trace_method("AsyncFastAPI._fork_count", OpenTelemetryGranularity.OPERATION)
+    @override
+    async def _fork_count(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> int:
+        resp_json = await self._make_request(
+            "get",
+            f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork_count",
+        )
+        return int(resp_json["count"])
+
     @trace_method(
         "AsyncFastAPI._get_indexing_status", OpenTelemetryGranularity.OPERATION
     )
@@ -493,11 +508,13 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         collection_id: UUID,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        read_level: ReadLevel = ReadLevel.INDEX_AND_WAL,
     ) -> int:
         """Returns the number of embeddings in the database"""
         resp_json = await self._make_request(
             "get",
             f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/count",
+            params={"read_level": read_level.value},
         )
 
         return cast(int, resp_json)
@@ -576,15 +593,19 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
+        limit: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> None:
-        await self._make_request(
+    ) -> DeleteResult:
+        body: dict = {"where": where, "ids": ids, "where_document": where_document}
+        if limit is not None:
+            body["limit"] = limit
+        resp = await self._make_request(
             "post",
             f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete",
-            json={"where": where, "ids": ids, "where_document": where_document},
+            json=body,
         )
-        return None
+        return DeleteResult(deleted=resp.get("deleted", 0) if resp else 0)
 
     @trace_method("AsyncFastAPI._submit_batch", OpenTelemetryGranularity.ALL)
     async def _submit_batch(

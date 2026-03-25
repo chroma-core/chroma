@@ -136,14 +136,14 @@ func InitTracing(ctx context.Context, config *TracingConfig) (err error) {
 		return
 	}
 
+	// Create resource with service name that will be used for both traces and metrics.
+	res := resource.NewWithAttributes(semconv.SchemaURL, semconv.ServiceNameKey.String(config.Service))
+
 	// Create a new tracer provider with a batch span processor and the OTLP exporter.
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exp),
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
-		sdktrace.WithResource(resource.NewWithAttributes(
-			semconv.SchemaURL,
-			semconv.ServiceNameKey.String(config.Service),
-		)),
+		sdktrace.WithResource(res),
 	)
 	otel.SetTracerProvider(tp)
 
@@ -153,7 +153,10 @@ func InitTracing(ctx context.Context, config *TracingConfig) (err error) {
 		return
 	}
 
-	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter, sdkmetric.WithInterval(5*time.Second))), sdkmetric.WithResource(resource.NewWithAttributes(semconv.SchemaURL, semconv.ServiceNameKey.String(config.Service))))
+	mp := sdkmetric.NewMeterProvider(
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter, sdkmetric.WithInterval(5*time.Second))),
+		sdkmetric.WithResource(res),
+	)
 	otel.SetMeterProvider(mp)
 
 	Tracer = otel.Tracer(config.Service)

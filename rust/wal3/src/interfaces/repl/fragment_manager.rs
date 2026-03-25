@@ -2107,10 +2107,24 @@ mod tests {
             "data should match what was uploaded"
         );
 
-        // Wait for the async read repair task to complete.
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Poll until the async read repair task completes.
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            if storage1
+                .get(&format!("prefix1/{}", test_path), GetOptions::default())
+                .await
+                .is_ok()
+            {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "read repair should complete for storage1"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
 
-        // Verify storage1 now has the data from read repair.
+        // Verify storage1 now has the correct data from read repair.
         let repaired_data = storage1
             .get(&format!("prefix1/{}", test_path), GetOptions::default())
             .await
@@ -2337,15 +2351,15 @@ mod tests {
         // Immediately after read, permit may be in use by the spawned task.
         // We cannot reliably check this due to timing, so we skip this assertion.
 
-        // Wait for the repair task to complete.
-        tokio::time::sleep(Duration::from_millis(200)).await;
-
-        // After repair completes, permit should be released.
-        assert_eq!(
-            semaphore.available_permits(),
-            1,
-            "permit should be released after repair completes"
-        );
+        // Poll until the repair task completes and releases the permit.
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while semaphore.available_permits() != 1 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "permit should be released after repair completes"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
 
         println!("read_repair_releases_semaphore_permit: passed");
     }
@@ -2389,10 +2403,28 @@ mod tests {
         assert!(result.is_ok(), "read_bytes should succeed via fallback");
         assert_eq!(result.unwrap().as_slice(), test_data);
 
-        // Wait for read repair tasks to complete.
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        // Poll until both storage1 and storage2 have the repaired data.
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            let ok1 = storage1
+                .get(&format!("prefix1/{}", test_path), GetOptions::default())
+                .await
+                .is_ok();
+            let ok2 = storage2
+                .get(&format!("prefix2/{}", test_path), GetOptions::default())
+                .await
+                .is_ok();
+            if ok1 && ok2 {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "read repair should complete for both storage1 and storage2"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
 
-        // Verify both storage1 and storage2 now have the data.
+        // Verify the data is correct.
         let repaired_data1 = storage1
             .get(&format!("prefix1/{}", test_path), GetOptions::default())
             .await
@@ -2455,10 +2487,12 @@ mod tests {
         assert!(result.is_ok(), "read_bytes should succeed");
         assert_eq!(result.unwrap().as_slice(), test_data);
 
-        // Read should complete quickly (< 50ms) without waiting for repair.
-        // The repair task runs asynchronously after the read returns.
+        // Read should complete without waiting for repair.  The repair task runs asynchronously
+        // after the read returns.  Under heavy test parallelism the S3 GETs that make up the read
+        // can be slow, so we use a generous threshold that still catches the case where the read
+        // accidentally awaits the repair PUT.
         assert!(
-            read_duration < Duration::from_millis(50),
+            read_duration < Duration::from_secs(5),
             "read should complete quickly without waiting for repair, took {:?}",
             read_duration
         );
@@ -2526,10 +2560,28 @@ mod tests {
             handle.await.expect("task should not panic");
         }
 
-        // Wait for repair tasks to complete.
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        // Poll until all files are repaired to storage1.
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            let mut all_repaired = true;
+            for i in 0..num_files {
+                let path = format!("prefix1/test-concurrent-{}.parquet", i);
+                if storage1.get(&path, GetOptions::default()).await.is_err() {
+                    all_repaired = false;
+                    break;
+                }
+            }
+            if all_repaired {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "all concurrent files should be repaired to storage1"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
 
-        // Verify all files were repaired to storage1.
+        // Verify all files have the correct data.
         for i in 0..num_files {
             let path = format!("prefix1/test-concurrent-{}.parquet", i);
             let expected_data = format!("data for file {}", i);
@@ -2614,8 +2666,15 @@ mod tests {
             handle.await.expect("task should not panic");
         }
 
-        // Wait for repairs to complete.
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        // Poll until all in-flight repairs finish (semaphore fully released).
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while shared_semaphore.available_permits() != 2 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "repair permits should be released"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
 
         // The test verifies that with only 2 permits, some repairs may be skipped.
         // Count how many files were actually repaired.

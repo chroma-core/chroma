@@ -343,7 +343,8 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
                 .await
             {
                 Ok(e_tag) => return Ok(e_tag),
-                Err(StorageError::Precondition { path: _, source: _ }) => {
+                Err(StorageError::AlreadyExists { path: _, source: _ })
+                | Err(StorageError::Precondition { path: _, source: _ }) => {
                     return Err(Error::LogContentionFailure);
                 }
                 Err(e) => {
@@ -410,8 +411,12 @@ pub async fn upload_parquet(
             Err(err @ StorageError::PermissionDenied { .. }) => {
                 return Err(Error::StorageError(Arc::new(err)));
             }
-            Err(StorageError::Precondition { path: _, source: _ }) => {
-                return Err(Error::LogContentionFailure);
+            Err(StorageError::AlreadyExists { path: _, source: _ })
+            | Err(StorageError::Precondition { path: _, source: _ }) => {
+                // NOTE(rescrv):  It's gotta be a retry here because there was no write; the data
+                // is safe to retry; percolates as an error to the user otherwise when the requests
+                // are retryable.
+                return Err(Error::LogContentionRetry);
             }
             Err(err) => {
                 tracing::error!(
@@ -445,6 +450,43 @@ mod tests {
     use crate::interfaces::s3::manifest_manager::ManifestManager;
     use crate::interfaces::s3::S3FragmentUploader;
     use crate::{FragmentSeqNo, LogWriterOptions, SnapshotOptions, ThrottleOptions};
+
+    #[tokio::test]
+    async fn test_k8s_integration_upload_parquet_returns_retry_on_already_exists() {
+        let storage = s3_client_for_test_with_new_bucket().await;
+        let prefix = "test-upload-parquet-retry";
+        let options = LogWriterOptions::default();
+        let fragment_identifier = FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(42));
+        let unprefixed_path = crate::unprefixed_fragment_path(fragment_identifier);
+        let path = format!("{prefix}/{unprefixed_path}");
+        // Pre-populate the path so that IfNotExist triggers AlreadyExists.
+        storage
+            .put_bytes(
+                &path,
+                b"pre-existing data".to_vec(),
+                chroma_storage::PutOptions::default(),
+            )
+            .await
+            .expect("pre-population should succeed");
+        let messages = vec![vec![1, 2, 3]];
+        let result = upload_parquet(
+            &options,
+            &storage,
+            prefix,
+            fragment_identifier,
+            Some(LogPosition::from_offset(1)),
+            messages,
+            None,
+            1_000_000,
+        )
+        .await;
+        let err = result.expect_err("upload_parquet should fail with LogContentionRetry");
+        println!("upload_parquet_returns_retry_on_already_exists: err={err:?}");
+        assert!(
+            matches!(err, Error::LogContentionRetry),
+            "expected LogContentionRetry, got {err:?}"
+        );
+    }
 
     #[tokio::test]
     async fn test_k8s_integration_batches() {

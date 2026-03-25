@@ -2,7 +2,10 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
-    blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    blockfile_record::{
+        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
+    },
+    bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},
 };
 use chroma_system::Operator;
@@ -24,6 +27,7 @@ pub struct SelectInput {
     pub logs: FetchLogOutput,
     pub blockfile_provider: BlockfileProvider,
     pub record_segment: Segment,
+    pub bloom_filter_manager: Option<BloomFilterManager>,
 }
 
 /// Output from the Select operator - returns SearchPayloadResult
@@ -72,6 +76,7 @@ impl Operator<SelectInput, SelectOutput> for Select {
         let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
+            input.bloom_filter_manager.clone(),
         ))
         .instrument(tracing::trace_span!(parent: Span::current(), "Create record segment reader"))
         .await
@@ -129,9 +134,16 @@ impl Operator<SelectInput, SelectOutput> for Select {
             }
         }
 
-        let materialized_logs = materialize_logs(&record_segment_reader, input.logs.clone(), None)
-            .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
-            .await?;
+        let plan = RecordSegmentReaderOptions {
+            use_bloom_filter: input
+                .bloom_filter_manager
+                .as_ref()
+                .is_some_and(|mgr| input.logs.len() >= mgr.storage_fetch_threshold()),
+        };
+        let materialized_logs =
+            materialize_logs(&record_segment_reader, input.logs.clone(), None, &plan)
+                .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
+                .await?;
 
         // Create a hash map that maps an offset id to the corresponding log
         let offset_id_to_log_record = materialized_logs
@@ -143,12 +155,12 @@ impl Operator<SelectInput, SelectOutput> for Select {
             })
             .collect::<HashMap<_, _>>();
 
-        let futures = input
-            .records
-            .iter()
-            .map(|record| async {
-                if needs_data {
-                    // Full hydration path: get ID and data from hydrated record
+        let records: Vec<SearchRecord> = if needs_data {
+            // Full hydration: use buffered stream (query result sets are typically bounded)
+            let futures = input
+                .records
+                .iter()
+                .map(|record| async {
                     let (id, document, embedding, mut full_metadata) = match offset_id_to_log_record
                         .get(&record.offset_id)
                     {
@@ -189,7 +201,7 @@ impl Operator<SelectInput, SelectOutput> for Select {
                         full_metadata.retain(|key, _| metadata_fields_to_select.contains(key));
                     }
 
-                    Ok(SearchRecord {
+                    Ok::<_, SelectError>(SearchRecord {
                         id,
                         document,
                         embedding,
@@ -200,38 +212,43 @@ impl Operator<SelectInput, SelectOutput> for Select {
                         },
                         score: select_score.then_some(record.measure),
                     })
-                } else {
-                    // Lightweight path: resolve user ID only via id_to_user_id blockfile
-                    let id = match offset_id_to_log_record.get(&record.offset_id) {
-                        Some(log) => log
-                            .get_user_id(record_segment_reader.as_ref())
-                            .await
-                            .map_err(SelectError::LogMaterializer)?,
-                        None => match &record_segment_reader {
-                            Some(reader) => reader
-                                .get_user_id_for_offset_id(record.offset_id)
-                                .await?
-                                .to_string(),
-                            None => return Err(SelectError::RecordSegmentUninitialized),
-                        },
-                    };
+                })
+                .collect::<Vec<_>>();
 
-                    Ok(SearchRecord {
-                        id,
-                        document: None,
-                        embedding: None,
-                        metadata: None,
-                        score: select_score.then_some(record.measure),
-                    })
-                }
-            })
-            .collect::<Vec<_>>();
-
-        let records = stream::iter(futures)
-            .buffered(32)
-            .try_collect()
-            .instrument(tracing::trace_span!(parent: Span::current(), "Select records", num_records = input.records.len()))
-            .await?;
+            stream::iter(futures)
+                .buffered(32)
+                .try_collect()
+                .instrument(tracing::trace_span!(parent: Span::current(), "Select records", num_records = input.records.len()))
+                .await?
+        } else {
+            // Lightweight ID-only path: iterate sequentially instead of
+            // allocating a future per record. Blocks are already prefetched
+            // so each lookup resolves from cache without I/O.
+            let mut records = Vec::with_capacity(input.records.len());
+            for record in &input.records {
+                let id = match offset_id_to_log_record.get(&record.offset_id) {
+                    Some(log) => log
+                        .get_user_id(record_segment_reader.as_ref())
+                        .await
+                        .map_err(SelectError::LogMaterializer)?,
+                    None => match &record_segment_reader {
+                        Some(reader) => reader
+                            .get_user_id_for_offset_id(record.offset_id)
+                            .await?
+                            .to_string(),
+                        None => return Err(SelectError::RecordSegmentUninitialized),
+                    },
+                };
+                records.push(SearchRecord {
+                    id,
+                    document: None,
+                    embedding: None,
+                    metadata: None,
+                    score: select_score.then_some(record.measure),
+                });
+            }
+            records
+        };
 
         Ok(SearchPayloadResult { records })
     }
@@ -271,6 +288,7 @@ mod tests {
             logs: upsert_generator.generate_chunk(11..=15),
             blockfile_provider: test_segment.blockfile_provider.clone(),
             record_segment: test_segment.record_segment.clone(),
+            bloom_filter_manager: None,
         };
 
         (test_segment, input)
@@ -368,6 +386,7 @@ mod tests {
             logs: upsert_generator.generate_chunk(11..=15),
             blockfile_provider: test_segment.blockfile_provider.clone(),
             record_segment: test_segment.record_segment.clone(),
+            bloom_filter_manager: None,
         };
 
         let mut keys = HashSet::new();
@@ -432,6 +451,7 @@ mod tests {
             logs: upsert_generator.generate_chunk(8..=12),
             blockfile_provider: test_segment.blockfile_provider.clone(),
             record_segment: test_segment.record_segment.clone(),
+            bloom_filter_manager: None,
         };
 
         let mut keys = HashSet::new();
@@ -469,6 +489,7 @@ mod tests {
             logs: upsert_generator.generate_chunk(1..=5),
             blockfile_provider: test_segment.blockfile_provider,
             record_segment: test_segment.record_segment,
+            bloom_filter_manager: None,
         };
 
         let mut keys = HashSet::new();

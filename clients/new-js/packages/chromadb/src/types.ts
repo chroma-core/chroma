@@ -1,4 +1,5 @@
 import {
+  DeleteCollectionRecordsResponse,
   GetUserIdentityResponse,
   Include,
   IndexStatusResponse,
@@ -353,6 +354,11 @@ export class QueryResult<TMeta extends Metadata = Metadata> {
     return queries;
   }
 }
+
+/**
+ * Result of a delete operation.
+ */
+export type DeleteResult = DeleteCollectionRecordsResponse;
 
 /**
  * Re-export IndexStatusResponse type for external use

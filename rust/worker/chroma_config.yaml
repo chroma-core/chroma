@@ -96,6 +96,19 @@ query_service:
   fragment_fetcher_cache:
     memory:
       capacity: 100000000 # 100 MB
+  fragment_storage:
+    admission_controlled_s3:
+      s3_config:
+        bucket: "chroma-storage"
+        credentials: "Minio"
+        connect_timeout_ms: 5000
+        request_timeout_ms: 30000
+        upload_part_size_bytes: 536870912 # 512MiB
+        download_part_size_bytes: 8388608 # 8MiB
+      rate_limiting_policy:
+        count_based_policy:
+          max_concurrent_requests: 30
+          bandwidth_allocation: [0.7, 0.3]
 compaction_service:
   service_name: "compaction-service"
   otel_endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"
@@ -251,11 +264,13 @@ garbage_collector:
     request_timeout_ms: 60000
   dispatcher_config:
     num_worker_threads: 4
-    dispatcher_queue_size: 100
-    worker_queue_size: 100
+    dispatcher_queue_size: 1000
+    worker_queue_size: 1000
   storage_config:
     s3:
       bucket: "chroma-storage"
+      connect_timeout_ms: 60000
+      request_timeout_ms: 60000 # 1 minute
   assignment_policy:
     rendezvous_hashing:
       hasher: Murmur3

@@ -77,8 +77,8 @@ export class JinaEmbeddingFunction implements EmbeddingFunction {
     const apiKey = args.apiKey || process.env[apiKeyEnvVar];
 
     if (!apiKey) {
-      throw new Error(
-        `Jina AI API key is required. Please provide it in the constructor or set the environment variable ${apiKeyEnvVar}.`,
+      console.warn(
+        `Jina AI API key is not set. Please provide it in the constructor or set the environment variable ${apiKeyEnvVar}.`,
       );
     }
 

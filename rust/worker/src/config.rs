@@ -1,6 +1,7 @@
 use chroma_config::assignment;
 use chroma_config::helpers::deserialize_duration_from_seconds;
 use chroma_index::config::SpannProviderConfig;
+use chroma_segment::bloom_filter::BloomFilterManagerConfig;
 use chroma_sysdb::SysDbConfig;
 use chroma_tracing::{OtelFilter, OtelFilterLevel};
 use figment::providers::{Env, Format, Yaml};
@@ -179,6 +180,19 @@ pub struct QueryServiceConfig {
     #[serde(default)]
     pub fragment_fetcher_cache: chroma_cache::CacheConfig,
 
+    /// Optional separate storage configuration for fragment pulling.
+    ///
+    /// When set, the fragment fetcher uses this storage (with its own admission
+    /// control / rate-limiting) instead of the main `storage` config.  This
+    /// isolates fragment pull I/O from the rest of the query pipeline.
+    #[serde(default)]
+    pub fragment_storage: Option<chroma_storage::config::StorageConfig>,
+
+    /// The configuration for the bloom filter manager used by the record segment reader
+    /// for existence checks during queries.
+    #[serde(default)]
+    pub bloom_filter_manager: BloomFilterManagerConfig,
+
     /// The grace period for shutting down the gRPC server.
     #[serde(
         rename = "grpc_shutdown_grace_period_seconds",
@@ -311,9 +325,22 @@ pub struct CompactionServiceConfig {
     #[serde(default)]
     pub jemalloc_pprof_server_port: Option<u16>,
 
+    /// The configuration for the bloom filter manager, which caches bloom filters
+    /// for existence checks during compaction.
+    #[serde(default)]
+    pub bloom_filter_manager: BloomFilterManagerConfig,
+
     /// The cache configuration for the fragment fetcher used by pointer-based log fetch.
     #[serde(default)]
     pub fragment_fetcher_cache: chroma_cache::CacheConfig,
+
+    /// Optional separate storage configuration for fragment pulling.
+    ///
+    /// When set, the fragment fetcher uses this storage (with its own admission
+    /// control / rate-limiting) instead of the main `storage` config.  This
+    /// isolates fragment pull I/O from the rest of the compaction pipeline.
+    #[serde(default)]
+    pub fragment_storage: Option<chroma_storage::config::StorageConfig>,
 }
 
 impl CompactionServiceConfig {

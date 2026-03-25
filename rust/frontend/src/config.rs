@@ -155,6 +155,10 @@ pub fn default_min_records_for_invocation() -> u64 {
     100
 }
 
+fn default_region() -> String {
+    String::new()
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct FrontendServerConfig {
     #[serde(flatten)]
@@ -180,6 +184,8 @@ pub struct FrontendServerConfig {
     pub cors_allow_origins: Option<Vec<String>>,
     #[serde(default = "default_enable_span_indexing")]
     pub enable_span_indexing: bool,
+    #[serde(default = "default_region")]
+    pub region: String,
 }
 
 const DEFAULT_CONFIG_PATH: &str = "sample_configs/distributed.yaml";

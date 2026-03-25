@@ -8,8 +8,8 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentWriter},
     blockfile_record::{
-        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
-        RecordSegmentWriterCreationError,
+        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
+        RecordSegmentWriter, RecordSegmentWriterCreationError,
     },
     distributed_hnsw::{DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentWriter},
     distributed_spann::SpannSegmentWriterError,
@@ -398,12 +398,21 @@ impl AttachedFunctionOrchestrator {
             collection_info.collection.total_records_post_compaction = count;
         }
 
+        let total_log_count: usize = partitions.iter().map(|p| p.len()).sum();
+        let plan = RecordSegmentReaderOptions {
+            use_bloom_filter: self
+                .output_context
+                .bloom_filter_manager
+                .as_ref()
+                .is_some_and(|mgr| total_log_count >= mgr.storage_fetch_threshold()),
+        };
         for partition in partitions.iter() {
             let operator = MaterializeLogOperator::new();
             let input = MaterializeLogInput::new(
                 partition.clone(),
                 record_reader.clone(),
                 next_max_offset_id.clone(),
+                plan,
             );
             let task = wrap(
                 operator,
@@ -651,6 +660,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
                     &message.record_segment,
                     &self.output_context.blockfile_provider,
                     cmek.clone(),
+                    self.output_context.bloom_filter_manager.clone(),
                 )
                 .await,
                 ctx,
@@ -739,6 +749,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
                 match Box::pin(RecordSegmentReader::from_segment(
                     &message.record_segment,
                     &self.output_context.blockfile_provider,
+                    self.output_context.bloom_filter_manager.clone(),
                 ))
                 .await
                 {
@@ -841,6 +852,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
             blockfile_provider: self.output_context.blockfile_provider.clone(),
             is_rebuild: self.output_context.is_rebuild,
             is_for_backfill: self.is_for_backfill,
+            bloom_filter_manager: self.output_context.bloom_filter_manager.clone(),
         };
 
         let task = wrap(

@@ -5,7 +5,10 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::ChromaError;
 use chroma_segment::{
-    blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    blockfile_record::{
+        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
+    },
+    bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},
 };
 use chroma_system::Operator;
@@ -24,6 +27,7 @@ pub struct KnnLogInput {
     pub record_segment: Segment,
     pub log_offset_ids: SignedRoaringBitmap,
     pub distance_function: DistanceFunction,
+    pub bloom_filter_manager: Option<BloomFilterManager>,
 }
 
 #[derive(Error, Debug)]
@@ -54,6 +58,7 @@ impl Operator<KnnLogInput, KnnOutput> for Knn {
         let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
+            input.bloom_filter_manager.clone(),
         ))
         .await
         {
@@ -64,7 +69,14 @@ impl Operator<KnnLogInput, KnnOutput> for Knn {
             Err(e) => Err(*e),
         }?;
 
-        let logs = materialize_logs(&record_segment_reader, input.logs.clone(), None).await?;
+        let plan = RecordSegmentReaderOptions {
+            use_bloom_filter: input
+                .bloom_filter_manager
+                .as_ref()
+                .is_some_and(|mgr| input.logs.len() >= mgr.storage_fetch_threshold()),
+        };
+        let logs =
+            materialize_logs(&record_segment_reader, input.logs.clone(), None, &plan).await?;
 
         let target_vector;
         let target_embedding = if let DistanceFunction::Cosine = input.distance_function {
@@ -144,6 +156,7 @@ mod tests {
             record_segment: test_segment.record_segment,
             distance_function: metric,
             log_offset_ids,
+            bloom_filter_manager: None,
         }
     }
 

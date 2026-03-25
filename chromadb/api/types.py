@@ -781,9 +781,11 @@ class DeleteRequest(TypedDict):
     ids: Optional[IDs]
     where: Optional[Where]
     where_document: Optional[WhereDocument]
+    limit: Optional[int]
 
 
-# Delete result doesn't exist.
+class DeleteResult(TypedDict):
+    deleted: int
 
 
 class IndexMetadata(TypedDict):
@@ -836,8 +838,7 @@ class EmbeddingFunction(Protocol[D]):
     """
 
     @abstractmethod
-    def __call__(self, input: D) -> Embeddings:
-        ...
+    def __call__(self, input: D) -> Embeddings: ...
 
     def embed_query(self, input: D) -> Embeddings:
         """Embed a query input.
@@ -995,8 +996,7 @@ def validate_embedding_function(
 
 
 class DataLoader(Protocol[L]):
-    def __call__(self, uris: URIs) -> L:
-        ...
+    def __call__(self, uris: URIs) -> L: ...
 
 
 def validate_ids(ids: IDs) -> IDs:
@@ -1494,8 +1494,7 @@ class SparseEmbeddingFunction(Protocol[D]):
     """
 
     @abstractmethod
-    def __call__(self, input: D) -> SparseVectors:
-        ...
+    def __call__(self, input: D) -> SparseVectors: ...
 
     def embed_query(self, input: D) -> SparseVectors:
         """Embed a query input.
@@ -1675,9 +1674,9 @@ class VectorIndexConfig(BaseModel):
 
     space: Optional[Space] = None
     embedding_function: Optional[Any] = DefaultEmbeddingFunction()
-    source_key: Optional[
-        str
-    ] = None  # key to source the vector from (accepts str or Key)
+    source_key: Optional[str] = (
+        None  # key to source the vector from (accepts str or Key)
+    )
     hnsw: Optional[HnswIndexConfig] = None
     spann: Optional[SpannIndexConfig] = None
 
@@ -1726,9 +1725,9 @@ class SparseVectorIndexConfig(BaseModel):
 
     # TODO(Sanket): Change this to the appropriate sparse ef and use a default here.
     embedding_function: Optional[Any] = None
-    source_key: Optional[
-        str
-    ] = None  # key to source the sparse vector from (accepts str or Key)
+    source_key: Optional[str] = (
+        None  # key to source the sparse vector from (accepts str or Key)
+    )
     bm25: Optional[bool] = None
 
     @field_validator("source_key", mode="before")
@@ -2204,9 +2203,7 @@ class Schema:
 
         # Disallow using special internal key #embedding
         if key is not None and key == EMBEDDING_KEY:
-            raise ValueError(
-                "Cannot modify #embedding. Currently not supported"
-            )
+            raise ValueError("Cannot modify #embedding. Currently not supported")
 
         # Only allow #document with FtsIndexConfig (to disable FTS)
         if key == DOCUMENT_KEY and not isinstance(config, FtsIndexConfig):
@@ -2307,8 +2304,6 @@ class Schema:
         self.keys[EMBEDDING_KEY].float_list.vector_index = VectorIndexType(
             enabled=current_enabled, config=embedding_config
         )  # type: ignore[union-attr]
-
-
 
     def _set_index_in_defaults(self, config: IndexConfig, enabled: bool) -> None:
         """Set an index configuration in the defaults."""

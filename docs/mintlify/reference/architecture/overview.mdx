@@ -1,0 +1,49 @@
+---
+title: "Architecture Overview"
+description: "How Chroma is structured across local, single-node, and distributed deployments."
+---
+
+Chroma is designed with a modular architecture that prioritizes performance and ease of use. It scales from local development to large-scale production while exposing a consistent API across deployment modes.
+
+Chroma delegates as much as possible to durable, well-understood subsystems such as SQLite and cloud object storage, so the core system can stay focused on data management and information retrieval.
+
+## Deployment Modes
+
+Chroma supports three deployment modes:
+
+- **Local**: an embedded library for prototyping and experimentation.
+- **Single-Node**: a single server for small to medium workloads, typically fewer than 10 million records across a handful of collections.
+- **Distributed**: a scalable multi-service deployment for large production workloads and millions of collections.
+
+You can use [Chroma Cloud](https://www.trychroma.com/signup?utm_source=docs-architecture), which is the managed offering of distributed Chroma.
+
+<Card title="Distributed Architecture" href="/reference/architecture/distributed">
+  Learn how Chroma scales out with independent services, object storage, SSD caches, and a shared system database.
+</Card>
+
+## Chroma Data Model
+
+Chroma's data model balances simplicity, flexibility, and scalability. It introduces a few core abstractions: **tenants**, **databases**, and **collections**.
+
+### Collections
+
+A **collection** is the fundamental unit of storage and querying in Chroma. Each collection contains items with:
+
+- A unique ID
+- An embedding vector
+- Optional metadata
+- A document
+
+Collections are independently indexed and optimized for vector similarity, full-text search, and metadata filtering.
+
+### Databases
+
+Collections are grouped into **databases**, which provide a logical namespace for environments or applications.
+
+Each database contains multiple collections, and each collection name must be unique within that database.
+
+### Tenants
+
+At the top level of the model is the **tenant**, which represents a user, team, or account.
+
+Tenants provide complete isolation. Access control, quota enforcement, and billing are all scoped to the tenant level.

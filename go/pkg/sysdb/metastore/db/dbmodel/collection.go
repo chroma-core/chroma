@@ -38,6 +38,7 @@ type CollectionToGc struct {
 	VersionFileName string    `gorm:"version_file_name"`
 	OldestVersionTs time.Time `gorm:"oldest_version_ts;type:timestamp"`
 	LineageFileName *string   `gorm:"lineage_file_name"`
+	DatabaseName    string    `gorm:"database_name"`
 }
 
 func (v Collection) TableName() string {
@@ -75,4 +76,5 @@ type ICollectionDb interface {
 	BatchGetCollectionVersionFilePaths(collectionIDs []string) (map[string]string, error)
 	BatchGetCollectionSoftDeleteStatus(collectionIDs []string) (map[string]bool, error)
 	IncrementCompactionFailureCount(collectionID string) error
+	GetDLQFailureCounts() (map[int32]int64, error)
 }

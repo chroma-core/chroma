@@ -47,6 +47,7 @@ use chroma_types::chroma_proto::{
     UpdateSegmentRequest, UpdateSegmentResponse,
 };
 use chroma_types::{Collection, CollectionUuid, DatabaseName};
+use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 use tokio::{
     select,
@@ -383,11 +384,17 @@ impl SysDb for SysdbService {
 
     async fn finish_collection_deletion(
         &self,
-        _request: Request<FinishCollectionDeletionRequest>,
+        request: Request<FinishCollectionDeletionRequest>,
     ) -> Result<Response<FinishCollectionDeletionResponse>, Status> {
-        Err(Status::unimplemented(
-            "finish_collection_deletion is not supported",
-        ))
+        let proto_req = request.into_inner();
+        let internal_req: internal::FinishCollectionDeletionRequest = proto_req
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
+
+        let backend = internal_req.assign(&self.backends);
+        let internal_resp = internal_req.run(backend).await?;
+
+        Ok(Response::new(internal_resp.into()))
     }
 
     async fn get_collection(
@@ -583,47 +590,170 @@ impl SysDb for SysdbService {
 
     async fn list_collections_to_gc(
         &self,
-        _request: Request<ListCollectionsToGcRequest>,
+        request: Request<ListCollectionsToGcRequest>,
     ) -> Result<Response<ListCollectionsToGcResponse>, Status> {
-        Err(Status::unimplemented(
-            "list_collections_to_gc is not supported",
-        ))
-    }
+        let proto_req = request.into_inner();
+        let internal_req: internal::ListCollectionsToGcRequest = proto_req
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
 
+        let backends = internal_req.assign(&self.backends);
+        let internal_resp = internal_req.run(backends).await?;
+
+        let proto_resp: ListCollectionsToGcResponse = internal_resp.into();
+
+        Ok(Response::new(proto_resp))
+    }
     async fn mark_version_for_deletion(
         &self,
-        _request: Request<MarkVersionForDeletionRequest>,
+        request: Request<MarkVersionForDeletionRequest>,
     ) -> Result<Response<MarkVersionForDeletionResponse>, Status> {
-        Err(Status::unimplemented(
-            "mark_version_for_deletion is not supported",
-        ))
+        let proto_req = request.into_inner();
+        let database_name = proto_req
+            .database_name
+            .as_ref()
+            .and_then(DatabaseName::new)
+            .ok_or_else(|| Status::invalid_argument("valid database_name is required"))?;
+
+        let mut collection_id_to_success = HashMap::new();
+        for version_list in &proto_req.versions {
+            let collection_id_str = version_list.collection_id.clone();
+            let success = match self
+                .update_version_file_single_collection(
+                    version_list,
+                    &database_name,
+                    VersionFileOperation::MarkForDeletion,
+                )
+                .await
+            {
+                Ok(_) => true,
+                Err(e) => {
+                    tracing::error!(
+                        collection_id = %collection_id_str,
+                        error = ?e,
+                        "Failed to mark versions for deletion after retries"
+                    );
+                    false
+                }
+            };
+            collection_id_to_success.insert(collection_id_str, success);
+        }
+
+        Ok(Response::new(MarkVersionForDeletionResponse {
+            collection_id_to_success,
+        }))
     }
 
     async fn delete_collection_version(
         &self,
-        _request: Request<DeleteCollectionVersionRequest>,
+        request: Request<DeleteCollectionVersionRequest>,
     ) -> Result<Response<DeleteCollectionVersionResponse>, Status> {
-        Err(Status::unimplemented(
-            "delete_collection_version is not supported",
-        ))
+        let proto_req = request.into_inner();
+        let database_name = proto_req
+            .database_name
+            .ok_or_else(|| Status::invalid_argument("database_name is required"))
+            .and_then(|name| {
+                DatabaseName::new(name).ok_or_else(|| {
+                    Status::invalid_argument("database_name must be at least 3 characters")
+                })
+            })?;
+
+        let mut collection_id_to_success = std::collections::HashMap::new();
+        for version_list in &proto_req.versions {
+            let collection_id_str = version_list.collection_id.clone();
+            let success = match self
+                .update_version_file_single_collection(
+                    version_list,
+                    &database_name,
+                    VersionFileOperation::DeleteVersions,
+                )
+                .await
+            {
+                Ok(_) => true,
+                Err(e) => {
+                    tracing::error!(
+                        collection_id = %collection_id_str,
+                        error = ?e,
+                        "Failed to delete versions for collection"
+                    );
+                    false
+                }
+            };
+            collection_id_to_success.insert(collection_id_str, success);
+        }
+
+        Ok(Response::new(DeleteCollectionVersionResponse {
+            collection_id_to_success,
+        }))
     }
 
     async fn batch_get_collection_version_file_paths(
         &self,
-        _request: Request<BatchGetCollectionVersionFilePathsRequest>,
+        request: Request<BatchGetCollectionVersionFilePathsRequest>,
     ) -> Result<Response<BatchGetCollectionVersionFilePathsResponse>, Status> {
-        Err(Status::unimplemented(
-            "batch_get_collection_version_file_paths is not supported",
-        ))
+        // TODO(tanujnay112): This is inefficient. Augment the GetCollections spanner API
+        // to specify SELECT columns.
+        let proto_req = request.into_inner();
+        let internal_req: internal::GetCollectionsRequest = proto_req
+            .try_into()
+            .map_err(|e: internal::SysDbError| Status::from(e))?;
+
+        let backend = internal_req.assign(&self.backends);
+        let collections_resp = internal_req.run(backend).await?;
+        let mut collection_id_to_version_file_path = HashMap::new();
+        let mut missing_paths = Vec::new();
+
+        for collection in collections_resp.collections {
+            let collection_id_str = collection.collection_id.to_string();
+            if let Some(version_file_path) = collection.version_file_path {
+                collection_id_to_version_file_path.insert(collection_id_str, version_file_path);
+            } else {
+                missing_paths.push(collection_id_str);
+            }
+        }
+
+        if !missing_paths.is_empty() {
+            return Err(Status::not_found(format!(
+                "Version file paths not found for collections: {}",
+                missing_paths.join(", ")
+            )));
+        }
+
+        Ok(Response::new(BatchGetCollectionVersionFilePathsResponse {
+            collection_id_to_version_file_path,
+        }))
     }
 
     async fn batch_get_collection_soft_delete_status(
         &self,
-        _request: Request<BatchGetCollectionSoftDeleteStatusRequest>,
+        request: Request<BatchGetCollectionSoftDeleteStatusRequest>,
     ) -> Result<Response<BatchGetCollectionSoftDeleteStatusResponse>, Status> {
-        Err(Status::unimplemented(
-            "batch_get_collection_soft_delete_status is not supported",
-        ))
+        tracing::debug!("batch_get_collection_soft_delete_status: called");
+        let proto_req = request.into_inner();
+        let internal_req: internal::GetCollectionsRequest = proto_req
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
+
+        let backend = internal_req.assign(&self.backends);
+        let internal_resp = internal_req.run(backend).await?;
+
+        let mut collection_id_to_is_soft_deleted = std::collections::HashMap::new();
+        for collection in &internal_resp.collections {
+            let is_deleted = internal_resp
+                .soft_deleted_ids
+                .contains(&collection.collection_id);
+            collection_id_to_is_soft_deleted
+                .insert(collection.collection_id.0.to_string(), is_deleted);
+        }
+
+        tracing::debug!(
+            "BatchGetCollectionSoftDeleteStatusResponse: {} entries",
+            collection_id_to_is_soft_deleted.len()
+        );
+
+        Ok(Response::new(BatchGetCollectionSoftDeleteStatusResponse {
+            collection_id_to_is_soft_deleted,
+        }))
     }
 
     async fn cleanup_expired_partial_attached_functions(
@@ -937,7 +1067,261 @@ impl SysdbService {
                 tracing::error!("Failed to upload version file: {}", e);
                 e
             })?;
+
         Ok((version_file_pb, new_version_file_path))
+    }
+
+    /// Update a single collection's version file using a CAS retry loop.
+    async fn update_version_file_single_collection(
+        &self,
+        version_list: &chroma_types::chroma_proto::VersionListForCollection,
+        database_name: &DatabaseName,
+        operation: VersionFileOperation,
+    ) -> Result<(), SysDbError> {
+        let collection_id =
+            CollectionUuid(crate::types::validate_uuid(&version_list.collection_id)?);
+
+        // Validate that versions list is not empty
+        if version_list.versions.is_empty() {
+            return Err(SysDbError::InvalidArgument(
+                "versions list cannot be empty".to_string(),
+            ));
+        }
+
+        let target_versions: std::collections::HashSet<i64> =
+            version_list.versions.iter().copied().collect();
+
+        let backoff = ConstantBuilder::default()
+            .with_delay(std::time::Duration::from_millis(100))
+            .with_max_times(10);
+
+        (|| async {
+            // 1. Get collection to obtain current version_file_path
+            let get_req = internal::GetCollectionsRequest::for_collection(
+                collection_id,
+                database_name.clone(),
+                true,
+            );
+            let backend = get_req.assign(&self.backends);
+            let collection_response = get_req.run(backend.clone()).await?;
+            let collection = collection_response
+                .collections
+                .first()
+                .ok_or_else(|| {
+                    SysDbError::NotFound(format!("Collection {} not found", collection_id))
+                })?
+                .clone();
+
+            let old_version_file_path = collection.version_file_path.clone().unwrap_or_default();
+
+            // 2. Fetch the existing version file from storage
+            let version_file_manager =
+                VersionFileManager::new(self.local_region_object_storage.clone());
+            let mut version_file = version_file_manager.fetch(&collection).await.map_err(|e| {
+                tracing::error!(
+                    collection_id = %collection_id,
+                    error = ?e,
+                    "Failed to fetch version file for {}",
+                    operation.name()
+                );
+                SysDbError::Internal(format!("Failed to fetch version file: {}", e))
+            })?;
+
+            // 3. Apply the operation to the version file
+            let version_history = version_file
+                .version_history
+                .as_mut()
+                .ok_or_else(|| SysDbError::Internal("Version history not found".to_string()))?;
+
+            match operation {
+                VersionFileOperation::MarkForDeletion => {
+                    let mut versions_found = 0;
+                    for version_info in version_history.versions.iter_mut() {
+                        if target_versions.contains(&version_info.version) {
+                            version_info.marked_for_deletion = true;
+                            versions_found += 1;
+                        }
+                    }
+                    if versions_found != target_versions.len() {
+                        let found_versions: HashSet<i64> = version_history.versions
+                            .iter()
+                            .filter_map(|v| target_versions.contains(&v.version).then_some(v.version))
+                            .collect();
+                        let missing: Vec<i64> = target_versions.difference(&found_versions).copied().collect();
+                        return Err(SysDbError::Internal(format!(
+                            "Versions not found in version file: {:?}", missing
+                        )));
+                    }
+                }
+                VersionFileOperation::DeleteVersions => {
+                    // First check which versions actually exist
+                    let existing_versions: HashSet<i64> = version_history.versions
+                        .iter()
+                        .map(|v| v.version)
+                        .collect();
+
+                    // Find any requested versions that don't exist
+                    let missing: Vec<i64> = target_versions
+                        .iter()
+                        .filter(|v| !existing_versions.contains(v))
+                        .copied()
+                        .collect();
+
+                    if !missing.is_empty() {
+                        return Err(SysDbError::Internal(format!(
+                            "Versions not found in version file: {:?}", missing
+                        )));
+                    }
+
+                    // Now remove the versions
+                    version_history
+                        .versions
+                        .retain(|v| !target_versions.contains(&v.version));
+
+                    // Ensure at least one version remains unless collection is soft-deleted
+                    // Don't have access to soft deleted status here
+                    if version_history.versions.is_empty() && !collection.name.starts_with("_deleted_") {
+                        return Err(SysDbError::Internal(
+                            "Cannot delete all versions for non-deleted collection".to_string()
+                        ));
+                    }
+                }
+            }
+
+            // Calculate oldest version timestamp and active version count
+            // Find the oldest timestamp among all non-deleted versions
+            let oldest_version_ts = version_history
+                .versions
+                .iter()
+                .filter(|v| !v.marked_for_deletion)
+                .map(|v| v.created_at_secs)
+                .min();
+            let num_active_versions = version_history
+                .versions
+                .iter()
+                .filter(|v| !v.marked_for_deletion)
+                .count() as i32;
+
+            tracing::debug!(
+                collection_id = %collection_id,
+                oldest_version_ts = ?oldest_version_ts,
+                num_active_versions = num_active_versions,
+                total_versions = version_history.versions.len(),
+                "Calculated version metadata for update"
+            );
+
+            let new_version_file_path = version_file_manager.generate_file_path(
+                &collection,
+                collection.version as i64,
+                operation.version_file_type(),
+            );
+
+            // 4. Upload the new version file
+            version_file_manager
+                .upload(
+                    &new_version_file_path,
+                    &version_file,
+                    &collection,
+                    collection.version as i64,
+                )
+                .await
+                .map_err(|e| {
+                    tracing::error!(
+                        collection_id = %collection_id,
+                        error = ?e,
+                        "Failed to upload {} version file",
+                        operation.name()
+                    );
+                    SysDbError::Internal(format!(
+                        "Failed to upload {} version file: {}",
+                        operation.name(),
+                        e
+                    ))
+                })?;
+
+            // 5. CAS update version_file_name and related fields in the DB
+            tracing::debug!(
+                collection_id = %collection_id,
+                old_version_file_path = %old_version_file_path,
+                new_version_file_path = %new_version_file_path,
+                "Calling update_version_related_fields"
+            );
+
+            let updated = backend
+                .update_version_related_fields(
+                    &collection_id.0.to_string(),
+                    &old_version_file_path,
+                    &new_version_file_path,
+                    oldest_version_ts,
+                    num_active_versions,
+                )
+                .await
+                .map_err(|e| {
+                    tracing::error!(
+                        collection_id = %collection_id,
+                        error = ?e,
+                        "Failed to update version related fields"
+                    );
+                    e
+                })?;
+
+            tracing::debug!(
+                collection_id = %collection_id,
+                updated = updated,
+                "Database update completed"
+            );
+
+            if !updated {
+                tracing::info!(
+                    collection_id = %collection_id,
+                    "CAS failed for {}, retrying",
+                    operation.name()
+                );
+                // TODO: delete the orphaned version file from storage
+                tracing::error!(
+                    collection_id = %collection_id,
+                    orphaned_file_path = %new_version_file_path,
+                    operation = %operation.name(),
+                    "Orphaned version file created due to CAS failure - manual cleanup may be required"
+                );
+                return Err(SysDbError::CollectionEntryIsStale);
+            }
+
+            tracing::info!(
+                collection_id = %collection_id,
+                versions = ?version_list.versions,
+                new_version_file_path = %new_version_file_path,
+                "Successfully completed {}",
+                operation.name()
+            );
+
+            Ok(())
+        })
+        .retry(backoff)
+        .when(|e: &SysDbError| matches!(e, SysDbError::CollectionEntryIsStale))
+        .await
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum VersionFileOperation {
+    MarkForDeletion,
+    DeleteVersions,
+}
+
+impl VersionFileOperation {
+    fn name(&self) -> &'static str {
+        match self {
+            VersionFileOperation::MarkForDeletion => "mark_version_for_deletion",
+            VersionFileOperation::DeleteVersions => "delete_collection_version",
+        }
+    }
+
+    fn version_file_type(&self) -> VersionFileType {
+        match self {
+            VersionFileOperation::MarkForDeletion => VersionFileType::GarbageCollectionMark,
+            VersionFileOperation::DeleteVersions => VersionFileType::GarbageCollectionDelete,
+        }
     }
 }
 
@@ -2671,5 +3055,88 @@ mod tests {
         // (even though chroma_types::Collection doesn't expose is_deleted field)
         // because the proto structure is different. The main test is that
         // soft delete works and the collection is not found when trying to get it.
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_mcmr_batch_get_collection_soft_delete_status() {
+        let Some(backend): Option<SpannerBackend> = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (service, _temp_dir) = setup_test_service(backend.clone()).await;
+        let (tenant_id, database_name) = setup_tenant_and_database(&backend).await;
+
+        // Create two collections
+        let active_collection_id = CollectionUuid(Uuid::new_v4());
+        let deleted_collection_id = CollectionUuid(Uuid::new_v4());
+
+        for (cid, name) in [
+            (active_collection_id, "active_collection"),
+            (deleted_collection_id, "deleted_collection"),
+        ] {
+            let req = CreateCollectionRequest {
+                id: cid,
+                tenant_id: tenant_id.clone(),
+                database_name: database_name.clone(),
+                name: name.to_string(),
+                dimension: Some(128),
+                metadata: Some(HashMap::new()),
+                segments: vec![Segment {
+                    id: SegmentUuid(Uuid::new_v4()),
+                    r#type: SegmentType::BlockfileMetadata,
+                    scope: SegmentScope::METADATA,
+                    collection: cid,
+                    file_path: HashMap::new(),
+                    metadata: None,
+                }],
+                index_schema: Schema::default(),
+                get_or_create: false,
+            };
+            let backend_for_create = req.assign(&service.backends);
+            req.run(backend_for_create).await.unwrap();
+        }
+
+        // Soft-delete one collection
+        let delete_req = chroma_types::chroma_proto::DeleteCollectionRequest {
+            tenant: tenant_id.clone(),
+            database: database_name.as_ref().to_string(),
+            id: deleted_collection_id.0.to_string(),
+            segment_ids: vec![],
+        };
+        service
+            .delete_collection(Request::new(delete_req))
+            .await
+            .expect("Failed to soft-delete collection");
+
+        // Call batch_get_collection_soft_delete_status via the gRPC handler
+        let status_req = BatchGetCollectionSoftDeleteStatusRequest {
+            collection_ids: vec![
+                active_collection_id.0.to_string(),
+                deleted_collection_id.0.to_string(),
+            ],
+            database_name: Some(database_name.as_ref().to_string()),
+        };
+        let response = service
+            .batch_get_collection_soft_delete_status(Request::new(status_req))
+            .await
+            .expect("Failed to get soft delete status");
+
+        let statuses = response.into_inner().collection_id_to_is_soft_deleted;
+
+        // Active collection should be false
+        assert_eq!(
+            statuses.get(&active_collection_id.0.to_string()),
+            Some(&false),
+            "Active collection should not be soft deleted"
+        );
+
+        // Deleted collection should be true
+        assert_eq!(
+            statuses.get(&deleted_collection_id.0.to_string()),
+            Some(&true),
+            "Soft-deleted collection should be marked as deleted"
+        );
+
+        assert_eq!(statuses.len(), 2, "Should have exactly 2 entries");
     }
 }

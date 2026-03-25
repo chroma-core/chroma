@@ -546,7 +546,7 @@ impl Bindings {
     }
 
     #[pyo3(
-        signature = (collection_id, ids = None, r#where = None, where_document = None, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+        signature = (collection_id, ids = None, r#where = None, where_document = None, limit = None, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
     )]
     #[allow(clippy::too_many_arguments)]
     fn delete(
@@ -555,9 +555,10 @@ impl Bindings {
         ids: Option<Vec<String>>,
         r#where: Option<String>,
         where_document: Option<String>,
+        limit: Option<u32>,
         tenant: String,
         database: String,
-    ) -> ChromaPyResult<()> {
+    ) -> ChromaPyResult<u32> {
         let r#where = chroma_types::RawWhereFields::from_json_str(
             r#where.as_deref(),
             where_document.as_deref(),
@@ -574,12 +575,14 @@ impl Bindings {
             collection_id,
             ids,
             r#where,
+            limit,
         )?;
 
         let mut frontend_clone = self.frontend.clone();
-        self.runtime
-            .block_on(async { Box::pin(frontend_clone.delete(request)).await })?;
-        Ok(())
+        let response = self
+            .runtime
+            .block_on(async { Box::pin(frontend_clone.delete(request, String::new())).await })?;
+        Ok(response.deleted)
     }
 
     #[pyo3(
@@ -595,7 +598,12 @@ impl Bindings {
             uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
         );
 
-        let request = chroma_types::CountRequest::try_new(tenant, database, collection_id)?;
+        let request = chroma_types::CountRequest::try_new(
+            tenant,
+            database,
+            collection_id,
+            chroma_types::plan::ReadLevel::default(),
+        )?;
 
         let mut frontend_clone = self.frontend.clone();
         let result = self

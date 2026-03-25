@@ -14,7 +14,7 @@ import {
   ChecklistResponse,
 } from "./api";
 import { CollectionMetadata, UserIdentity } from "./types";
-import { Collection, CollectionImpl } from "./collection";
+import { Collection, CollectionHandle, CollectionImpl } from "./collection";
 import { EmbeddingFunction, getEmbeddingFunction } from "./embedding-function";
 import { chromaFetch } from "./chroma-fetch";
 import * as process from "node:process";
@@ -259,7 +259,6 @@ export class ChromaClient {
         const schemaEmbeddingFunction = resolveSchemaEmbeddingFunction(schema);
         const resolvedEmbeddingFunction =
           (await getEmbeddingFunction({
-            collectionName: collection.name,
             client: this,
             efConfig:
               collection.configuration_json.embedding_function ?? undefined,
@@ -346,7 +345,6 @@ export class ChromaClient {
     const resolvedEmbeddingFunction =
       embeddingFunction ??
       (await getEmbeddingFunction({
-        collectionName: data.name,
         client: this,
         efConfig: data.configuration_json.embedding_function ?? undefined,
       })) ??
@@ -391,7 +389,6 @@ export class ChromaClient {
     const resolvedEmbeddingFunction =
       embeddingFunction ??
       (await getEmbeddingFunction({
-        collectionName: data.name,
         client: this,
         efConfig: data.configuration_json.embedding_function ?? undefined,
       })) ??
@@ -426,7 +423,6 @@ export class ChromaClient {
     const schemaEmbeddingFunction = resolveSchemaEmbeddingFunction(schema);
     const resolvedEmbeddingFunction =
       (await getEmbeddingFunction({
-        collectionName: data.name,
         efConfig: data.configuration_json.embedding_function ?? undefined,
         client: this,
       })) ?? schemaEmbeddingFunction;
@@ -523,7 +519,6 @@ export class ChromaClient {
     const resolvedEmbeddingFunction =
       embeddingFunction ??
       (await getEmbeddingFunction({
-        collectionName: name,
         efConfig: data.configuration_json.embedding_function ?? undefined,
         client: this,
       })) ??
@@ -540,6 +535,33 @@ export class ChromaClient {
       embeddingFunction: resolvedEmbeddingFunction,
       id: data.id,
       schema: serverSchema,
+    });
+  }
+
+  /**
+   * Returns a lightweight collection handle for the given collection ID.
+   * The handle supports operations that don't require an embedding function
+   * or schema (e.g., add with pre-computed embeddings, get, delete, count, search).
+   * Operations that require an embedding function will throw a clear error
+   * directing you to use {@link getCollection} instead.
+   * @param id - The collection ID
+   * @returns A Collection handle for the given ID
+   * @throws ChromaValueError if tenant or database are not set on the client
+   */
+  public collection(id: string): Collection {
+    if (!this._tenant || !this._database) {
+      throw new ChromaValueError(
+        "tenant and database must be set on the client before calling collection(). " +
+          "Provide them in the ChromaClient constructor or use getCollection() instead.",
+      );
+    }
+
+    return new CollectionHandle({
+      chromaClient: this,
+      apiClient: this.apiClient,
+      id,
+      tenant: this._tenant,
+      database: this._database,
     });
   }
 

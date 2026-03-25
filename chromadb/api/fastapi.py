@@ -22,6 +22,7 @@ from chromadb.api import ServerAPI
 from chromadb.execution.expression.plan import Search
 
 from chromadb.api.types import (
+    DeleteResult,
     Documents,
     Embeddings,
     IDs,
@@ -381,6 +382,21 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         model = CollectionModel.from_json(resp_json)
         return model
 
+    @trace_method("FastAPI._fork_count", OpenTelemetryGranularity.OPERATION)
+    @override
+    def _fork_count(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> int:
+        """Gets the number of forks for a collection"""
+        resp_json = self._make_request(
+            "get",
+            f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork_count",
+        )
+        return int(resp_json["count"])
+
     @trace_method("FastAPI._get_indexing_status", OpenTelemetryGranularity.OPERATION)
     @override
     def _get_indexing_status(
@@ -460,11 +476,13 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         collection_id: UUID,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        read_level: ReadLevel = ReadLevel.INDEX_AND_WAL,
     ) -> int:
         """Returns the number of embeddings in the database"""
         resp_json = self._make_request(
             "get",
             f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/count",
+            params={"read_level": read_level.value},
         )
         return cast(int, resp_json)
 
@@ -544,20 +562,24 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
+        limit: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> None:
+    ) -> DeleteResult:
         """Deletes embeddings from the database"""
-        self._make_request(
+        body: dict = {
+            "ids": ids,
+            "where": where,
+            "where_document": where_document,
+        }
+        if limit is not None:
+            body["limit"] = limit
+        resp = self._make_request(
             "post",
             f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete",
-            json={
-                "ids": ids,
-                "where": where,
-                "where_document": where_document,
-            },
+            json=body,
         )
-        return None
+        return DeleteResult(deleted=resp.get("deleted", 0) if resp else 0)
 
     @trace_method("FastAPI._submit_batch", OpenTelemetryGranularity.ALL)
     def _submit_batch(

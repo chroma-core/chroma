@@ -7,7 +7,7 @@ use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
 use chroma_storage::{GetOptions, Storage, StorageError};
 use chroma_types::chroma_proto;
 use chroma_types::{LogRecord, OperationRecord, RecordConversionError};
-use futures::future::try_join_all;
+use futures::stream::StreamExt;
 use prost::Message;
 use thiserror::Error;
 use wal3::LogPosition;
@@ -153,10 +153,12 @@ impl FragmentFetcher {
     /// Fetch and decode log records from a set of fragment pointers.
     ///
     /// Records are filtered to the half-open range [start_offset, limit_offset)
-    /// and returned sorted by log_offset.  At most `max_concurrency` fragment
-    /// fetches are in flight at any given time.
+    /// and returned sorted by log_offset. At most `max_concurrency` fragment
+    /// fetches are in flight at any given time.  Futures are constructed lazily
+    /// so that no more than `max_concurrency` are alive at once.
+    #[tracing::instrument(skip(self, pointers), fields(num_fragments = pointers.len()))]
     pub async fn fetch_records(
-        &self,
+        self: &Arc<Self>,
         pointers: &[FragmentPointer],
         start_offset: u64,
         limit_offset: u64,
@@ -171,20 +173,22 @@ impl FragmentFetcher {
             }
             return Ok(Vec::new());
         }
-        let sema = Arc::new(tokio::sync::Semaphore::new(max_concurrency));
-        let futures: Vec<_> = pointers
-            .iter()
+        // NOTE(rescrv): The way this works, it will construct at most max_concurrency futures at
+        // once.
+        let max_concurrency = max_concurrency.max(1);
+        let mut stream = futures::stream::iter(pointers.iter().cloned())
             .map(|pointer| {
-                let sema = Arc::clone(&sema);
+                let this = Arc::clone(self);
                 async move {
-                    let _permit = sema.acquire().await;
-                    self.fetch_fragment(pointer, start_offset, limit_offset)
+                    this.fetch_fragment(&pointer, start_offset, limit_offset)
                         .await
                 }
             })
-            .collect();
-        let results = try_join_all(futures).await?;
-        let mut all_records: Vec<LogRecord> = results.into_iter().flatten().collect();
+            .buffer_unordered(max_concurrency);
+        let mut all_records: Vec<LogRecord> = Vec::new();
+        while let Some(result) = stream.next().await {
+            all_records.extend(result?);
+        }
         all_records.sort_by_key(|r| r.log_offset);
         if all_records.is_empty() && start_offset < limit_offset {
             return Err(FragmentFetchError::HoleInLog {
@@ -197,6 +201,7 @@ impl FragmentFetcher {
     }
 
     /// Fetch a single fragment from storage, using the cache if available.
+    #[tracing::instrument(skip(self))]
     async fn fetch_fragment(
         &self,
         pointer: &FragmentPointer,
@@ -238,6 +243,7 @@ impl FragmentFetcher {
         };
         let (parsed_records, _num_bytes, _now_us) =
             wal3::interfaces::s3::parse_parquet_fast(&bytes, starting_position).await?;
+        drop(bytes);
 
         let fragment_capacity = pointer
             .limit_offset
@@ -289,8 +295,12 @@ fn check_contiguous(records: &[LogRecord], start_offset: u64) -> Result<(), Frag
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::{check_contiguous, FragmentFetchError, FragmentFetcher, FragmentPointer};
     use chroma_types::{LogRecord, Operation, OperationRecord};
+    use prost::Message;
+    use wal3::{upload_parquet, FragmentIdentifier, FragmentSeqNo, LogPosition, LogWriterOptions};
 
     fn make_record(log_offset: i64) -> LogRecord {
         LogRecord {
@@ -304,6 +314,42 @@ mod tests {
                 operation: Operation::Add,
             },
         }
+    }
+
+    fn make_proto_record(log_offset: i64) -> chroma_types::chroma_proto::OperationRecord {
+        let record = make_record(log_offset).record;
+        record
+            .try_into()
+            .expect("OperationRecord should convert to proto")
+    }
+
+    async fn write_fragment(
+        storage: &chroma_storage::Storage,
+        storage_prefix: &str,
+        seq_no: u64,
+        start_offset: u64,
+        offsets: &[i64],
+    ) -> String {
+        let messages = offsets
+            .iter()
+            .map(|offset| {
+                let proto = make_proto_record(*offset);
+                proto.encode_to_vec()
+            })
+            .collect::<Vec<_>>();
+        let (path, _, _) = upload_parquet(
+            &LogWriterOptions::default(),
+            storage,
+            storage_prefix,
+            FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(seq_no)),
+            Some(LogPosition::from_offset(start_offset)),
+            messages,
+            None,
+            0,
+        )
+        .await
+        .expect("fragment write should succeed");
+        path
     }
 
     #[test]
@@ -426,7 +472,7 @@ mod tests {
     #[tokio::test]
     async fn fetch_records_empty_pointers_nonempty_range() {
         let (_tmp, storage) = chroma_storage::test_storage();
-        let fetcher = FragmentFetcher::new_for_test(storage);
+        let fetcher = Arc::new(FragmentFetcher::new_for_test(storage));
         let err = fetcher
             .fetch_records(&[], 5, 10, 10)
             .await
@@ -443,11 +489,91 @@ mod tests {
     #[tokio::test]
     async fn fetch_records_empty_pointers_empty_range() {
         let (_tmp, storage) = chroma_storage::test_storage();
-        let fetcher = FragmentFetcher::new_for_test(storage);
+        let fetcher = Arc::new(FragmentFetcher::new_for_test(storage));
         let records = fetcher
             .fetch_records(&[], 5, 5, 10)
             .await
             .expect("empty pointers with start == limit should succeed");
         assert!(records.is_empty(), "should return no records");
+    }
+
+    #[tokio::test]
+    async fn fetch_records_rejects_non_contiguous_fragments() {
+        let (_tmp, storage) = chroma_storage::test_storage();
+        let storage_prefix = "tenant/database/collection";
+        let path1 = write_fragment(&storage, storage_prefix, 1, 5, &[5, 6]).await;
+        let path2 = write_fragment(&storage, storage_prefix, 2, 8, &[8, 9]).await;
+        let fetcher = Arc::new(FragmentFetcher::new_for_test(storage));
+        let pointers = vec![
+            FragmentPointer {
+                path: path1,
+                start_offset: 5,
+                limit_offset: 7,
+                num_bytes: 0,
+                storage_prefix: storage_prefix.to_string(),
+                absolute_offsets: true,
+            },
+            FragmentPointer {
+                path: path2,
+                start_offset: 8,
+                limit_offset: 10,
+                num_bytes: 0,
+                storage_prefix: storage_prefix.to_string(),
+                absolute_offsets: true,
+            },
+        ];
+
+        let err = fetcher
+            .fetch_records(&pointers, 5, 10, 2)
+            .await
+            .expect_err("fragment fetch should reject stitched records with gaps");
+        match err {
+            FragmentFetchError::HoleInLog { expected, found } => {
+                assert_eq!(expected, 7, "expected the first missing offset");
+                assert_eq!(found, 8, "found the next available offset after the gap");
+            }
+            other => panic!("expected HoleInLog error, got: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn fetch_records_accepts_contiguous_fragments_out_of_order() {
+        let (_tmp, storage) = chroma_storage::test_storage();
+        let storage_prefix = "tenant/database/collection";
+        let path1 = write_fragment(&storage, storage_prefix, 1, 5, &[5, 6]).await;
+        let path2 = write_fragment(&storage, storage_prefix, 2, 7, &[7, 8, 9]).await;
+        let fetcher = Arc::new(FragmentFetcher::new_for_test(storage));
+        let pointers = vec![
+            FragmentPointer {
+                path: path2,
+                start_offset: 7,
+                limit_offset: 10,
+                num_bytes: 0,
+                storage_prefix: storage_prefix.to_string(),
+                absolute_offsets: true,
+            },
+            FragmentPointer {
+                path: path1,
+                start_offset: 5,
+                limit_offset: 7,
+                num_bytes: 0,
+                storage_prefix: storage_prefix.to_string(),
+                absolute_offsets: true,
+            },
+        ];
+
+        let records = fetcher
+            .fetch_records(&pointers, 5, 10, 2)
+            .await
+            .expect("contiguous fragments should fetch successfully");
+
+        assert_eq!(
+            records
+                .iter()
+                .map(|record| record.log_offset)
+                .collect::<Vec<_>>(),
+            vec![5, 6, 7, 8, 9],
+            "records should be sorted and contiguous across fragment boundaries"
+        );
     }
 }

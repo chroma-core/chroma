@@ -8,6 +8,7 @@ import {
 import {
   snakeCase,
   validateConfigSchema,
+  getChromaEmbedUrl,
 } from "@chroma-core/ai-embeddings-common";
 
 const NAME = "chroma-cloud-splade";
@@ -92,17 +93,17 @@ export class ChromaCloudSpladeEmbeddingFunction
     }
 
     if (!apiKey) {
-      throw new Error(
-        `Chroma Embedding API key is required. Please provide it in the constructor or set the environment variable ${apiKeyEnvVar}.`,
+      console.warn(
+        `Chroma Embedding API key is not set. Please provide it in the constructor or set the environment variable ${apiKeyEnvVar}.`,
       );
     }
 
     this.model = model;
     this.apiKeyEnvVar = apiKeyEnvVar;
 
-    this.url = "https://embed.trychroma.com/embed_sparse";
+    this.url = `${getChromaEmbedUrl()}/embed_sparse`;
     this.headers = {
-      "x-chroma-token": apiKey,
+      "x-chroma-token": apiKey ?? "",
       "x-chroma-embedding-model": model,
       "Content-Type": "application/json",
     };

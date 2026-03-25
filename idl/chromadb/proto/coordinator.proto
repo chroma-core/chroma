@@ -517,6 +517,7 @@ message CollectionToGcInfo {
   reserved 4; // used to be "latest_version"
   string tenant_id = 5;
   optional string lineage_file_path = 6;
+  optional string database_name = 7;
 }
 
 message ListCollectionsToGcResponse {
@@ -526,6 +527,7 @@ message ListCollectionsToGcResponse {
 message MarkVersionForDeletionRequest {
   int64 epoch_id = 1;
   repeated VersionListForCollection versions = 2;
+  optional string database_name = 3;
 }
 
 message MarkVersionForDeletionResponse {
@@ -535,6 +537,7 @@ message MarkVersionForDeletionResponse {
 message DeleteCollectionVersionRequest {
   int64 epoch_id = 1;
   repeated VersionListForCollection versions = 2;
+  optional string database_name = 3;
 }
 
 message DeleteCollectionVersionResponse {
@@ -543,6 +546,7 @@ message DeleteCollectionVersionResponse {
 
 message BatchGetCollectionVersionFilePathsRequest {
   repeated string collection_ids = 1;
+  optional string database_name = 2;
 }
 
 message BatchGetCollectionVersionFilePathsResponse {
@@ -551,6 +555,7 @@ message BatchGetCollectionVersionFilePathsResponse {
 
 message BatchGetCollectionSoftDeleteStatusRequest {
   repeated string collection_ids = 1;
+  optional string database_name = 2;
 }
 
 message BatchGetCollectionSoftDeleteStatusResponse {
