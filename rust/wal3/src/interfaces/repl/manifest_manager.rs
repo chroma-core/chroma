@@ -137,7 +137,7 @@ impl ManifestManager {
                 Err(google_cloud_spanner::session::SessionError::GRPC(ref status))
                     if status.code() == Code::AlreadyExists =>
                 {
-                    return Err(Error::LogContentionRetry);
+                    return Err(Error::AlreadyInitialized);
                 }
                 Err(google_cloud_spanner::session::SessionError::GRPC(ref status))
                     if status.code() == Code::Aborted =>
