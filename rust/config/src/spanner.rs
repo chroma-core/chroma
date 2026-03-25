@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+/// Admin/DDL RPCs (e.g., CreateDatabase, DropDatabase, UpdateDatabaseDdl) routinely run for
+/// minutes, so they need a much larger deadline than the data-plane channel timeout.
+pub const ADMIN_RPC_TIMEOUT_SECS: u64 = 30 * 60;
+
 /// Session pool configuration for Spanner connections.
 ///
 /// The default values are tuned for production workloads with higher concurrency and longer

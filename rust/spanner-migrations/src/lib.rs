@@ -17,6 +17,7 @@ pub use migrations::MIGRATION_DIRS;
 use std::time::Duration;
 
 use chroma_config::spanner::{SpannerChannelConfig, SpannerConfig, SpannerSessionPoolConfig};
+use chroma_config::ADMIN_RPC_TIMEOUT_SECS;
 use google_cloud_gax::conn::Environment;
 use google_cloud_spanner::admin::client::Client as AdminClient;
 use google_cloud_spanner::admin::AdminClientConfig;
@@ -24,8 +25,6 @@ use google_cloud_spanner::client::{ChannelConfig, Client, ClientConfig};
 use google_cloud_spanner::session::SessionConfig;
 use runner::MigrationRunner;
 use thiserror::Error;
-
-const ADMIN_RPC_TIMEOUT_SECS: u64 = 30 * 60;
 
 /// Converts a SpannerSessionPoolConfig to the library's SessionConfig.
 fn to_session_config(cfg: &SpannerSessionPoolConfig) -> SessionConfig {

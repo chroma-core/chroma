@@ -12,7 +12,7 @@ use std::time::Duration;
 use serial_test::serial;
 
 use chroma_config::spanner::{SpannerChannelConfig, SpannerSessionPoolConfig};
-use chroma_config::{registry::Registry, Configurable};
+use chroma_config::{registry::Registry, Configurable, ADMIN_RPC_TIMEOUT_SECS};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::DatabaseUuid;
 use google_cloud_gax::conn::Environment;
@@ -32,8 +32,6 @@ use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::config::{SpannerBackendConfig, SpannerConfig};
-
-const ADMIN_RPC_TIMEOUT_SECS: u64 = 30 * 60;
 
 /// Converts a SpannerSessionPoolConfig to the library's SessionConfig.
 fn to_session_config(cfg: &SpannerSessionPoolConfig) -> SessionConfig {
