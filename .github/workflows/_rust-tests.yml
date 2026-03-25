@@ -2,6 +2,14 @@ name: Rust tests
 
 on:
   workflow_call:
+    inputs:
+      # PR workflow passes false to save runner time; release keeps benches enabled.
+      # If benchmarks prove useful for regression detection, add a scheduled workflow
+      # (e.g. nightly) that calls this reusable workflow with run_rust_benchmarks: true.
+      run_rust_benchmarks:
+        description: Whether to run the cargo bench matrix jobs
+        type: boolean
+        default: true
 
 jobs:
   test:
@@ -108,6 +116,7 @@ jobs:
         with:
           artifact-name: "rust-integration-test-${{ matrix.nextest_profile }}-${{ matrix.partition }}"
   test-benches:
+    if: inputs.run_rust_benchmarks
     strategy:
       matrix:
         platform: [blacksmith-16vcpu-ubuntu-2404]
