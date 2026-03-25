@@ -1905,6 +1905,7 @@ dependencies = [
  "futures",
  "k8s-openapi",
  "kube",
+ "opentelemetry",
  "parking_lot",
  "schemars",
  "serde",
