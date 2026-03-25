@@ -31,15 +31,24 @@ use crate::{
 
 const GCP_CMEK_HEADER: &str = "x-goog-encryption-kms-key-name";
 const GCS_STORE_NAME: &str = "GCS";
+const GCS_TOO_MANY_REQUESTS_MESSAGE: &str =
+    "Server returned non-2xx status code: 429 Too Many Requests";
+const GCS_SLOWDOWN_CODE: &str = "<Code>SlowDown</Code>";
+const GCS_MUTATION_RATE_LIMIT_MESSAGE: &str = "rate limit for object mutation operations";
+
+fn is_gcs_backoff_message(message: &str) -> bool {
+    // object_store wraps GCS status/body failures in private retry types, so the
+    // formatted status/body text is the only stable signal exposed here.
+    //
+    // TODO(rescrv):  When object store gives a better error, match on something other than strings
+    message.contains(GCS_TOO_MANY_REQUESTS_MESSAGE)
+        || message.contains(GCS_SLOWDOWN_CODE)
+        || message.contains(GCS_MUTATION_RATE_LIMIT_MESSAGE)
+}
 
 fn is_gcs_backoff_error(store: &'static str, source: &(dyn StdError + 'static)) -> bool {
     store == GCS_STORE_NAME
-        && source_chain_contains(source, |err| {
-            let message = err.to_string();
-            message.contains("429 Too Many Requests")
-                || message.contains("SlowDown")
-                || message.contains("rate limit for object mutation operations")
-        })
+        && source_chain_contains(source, |err| is_gcs_backoff_message(&err.to_string()))
 }
 
 #[derive(Debug)]
@@ -211,6 +220,15 @@ mod tests {
             FakeError::new(
                 "<?xml version='1.0'?><Error><Code>SlowDown</Code><Message>Please reduce your request rate.</Message></Error>",
             ),
+        ));
+
+        assert!(matches!(StorageError::from(err), StorageError::Backoff));
+    }
+
+    #[test]
+    fn test_gcs_generic_mutation_rate_limit_message_maps_to_backoff() {
+        let err = gcs_generic_error(FakeError::new(
+            "Quota exceeded: rate limit for object mutation operations",
         ));
 
         assert!(matches!(StorageError::from(err), StorageError::Backoff));
