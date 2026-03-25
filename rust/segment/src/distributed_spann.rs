@@ -33,6 +33,7 @@ use thiserror::Error;
 pub struct SpannSegmentWriter {
     index: SpannIndexWriter,
     pub id: SegmentUuid,
+    collection_version: i32,
 }
 
 impl Debug for SpannSegmentWriter {
@@ -222,6 +223,7 @@ impl SpannSegmentWriter {
         Ok(SpannSegmentWriter {
             index: index_writer,
             id: segment.id,
+            collection_version: collection.version,
         })
     }
 
@@ -335,6 +337,7 @@ impl SpannSegmentWriter {
             Err(e) => Err(Box::new(e)),
             Ok(index_flusher) => Ok(SpannSegmentFlusher {
                 id: self.id,
+                collection_version: self.collection_version,
                 index_flusher,
             }),
         }
@@ -347,6 +350,7 @@ impl SpannSegmentWriter {
 
 pub struct SpannSegmentFlusher {
     pub id: SegmentUuid,
+    collection_version: i32,
     index_flusher: SpannIndexFlusher,
 }
 
@@ -358,7 +362,11 @@ impl Debug for SpannSegmentFlusher {
 
 impl SpannSegmentFlusher {
     pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
-        tracing::info!("Flushing spann segment flusher {}", self.id);
+        tracing::info!(
+            segment_id = %self.id,
+            collection_version = self.collection_version,
+            "Flushing spann segment flusher"
+        );
         let index_flusher_res = Box::pin(self.index_flusher.flush()).await.map_err(|e| {
             tracing::error!("Error flushing spann index segment {}: {:?}", self.id, e);
             SpannSegmentWriterError::SpannSegmentWriterFlushError(e)
@@ -396,8 +404,10 @@ impl SpannSegmentFlusher {
                     )],
                 );
                 tracing::info!(
-                    "Flushed file paths for spann segment flusher {:?}",
-                    index_id_map
+                    segment_id = %self.id,
+                    collection_version = self.collection_version,
+                    flushed_files = ?index_id_map,
+                    "Flushed spann segment flusher"
                 );
                 Ok(index_id_map)
             }
@@ -688,6 +698,7 @@ mod test {
             tenant: "test".to_string(),
             database: "test".to_string(),
             database_id: db_id,
+            version: 7,
             ..Default::default()
         };
         collection.schema = Some(
@@ -751,6 +762,7 @@ mod test {
             .commit()
             .await
             .expect("Error committing spann writer");
+        assert_eq!(flusher.collection_version, collection.version);
         spann_segment.file_path = flusher.flush().await.expect("Error flushing spann writer");
         assert_eq!(spann_segment.file_path.len(), 4);
         assert!(spann_segment.file_path.contains_key("hnsw_path"));

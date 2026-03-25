@@ -26,7 +26,7 @@ jobs:
       matrix:
         python: ${{ fromJson(inputs.python_versions) }}
         test-glob:
-          - "--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*'"
+          - "chromadb/test --ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*'"
           - "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
           - "chromadb/test/property/test_cross_version_persist.py"
         include:
@@ -65,7 +65,7 @@ jobs:
       matrix:
         python: ${{ fromJson(inputs.python_versions) }}
         test-glob:
-          - "--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*'"
+          - "chromadb/test --ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*'"
           - "chromadb/test/property/test_add.py"
           - "chromadb/test/property/test_collections.py"
           - "chromadb/test/property/test_collections_with_database_tenant.py"
