@@ -51,11 +51,16 @@ use crate::execution::{
             SourceRecordSegmentError, SourceRecordSegmentInput, SourceRecordSegmentOperator,
             SourceRecordSegmentOutput,
         },
+        source_record_segment_v2::{
+            SourceRecordSegmentV2Error, SourceRecordSegmentV2Input, SourceRecordSegmentV2Operator,
+            SourceRecordSegmentV2Output,
+        },
     },
-    orchestration::compact::CompactionContextError,
+    orchestration::compact::{
+        CollectionCompactInfo, CompactWriters, CompactionContext, CompactionContextError,
+        ExecutionState,
+    },
 };
-
-use super::compact::{CollectionCompactInfo, CompactWriters, CompactionContext, ExecutionState};
 
 #[derive(Error, Debug)]
 pub enum LogFetchOrchestratorError {
@@ -97,6 +102,8 @@ pub enum LogFetchOrchestratorError {
     SpannSegment(#[from] SpannSegmentWriterError),
     #[error("Error sourcing record segment: {0}")]
     SourceRecordSegment(#[from] SourceRecordSegmentError),
+    #[error("Error sourcing record segment v2: {0}")]
+    SourceRecordSegmentV2(#[from] SourceRecordSegmentV2Error),
     #[error("Could not count current segment: {0}")]
     CountError(Box<dyn chroma_error::ChromaError>),
 }
@@ -133,6 +140,7 @@ impl ChromaError for LogFetchOrchestratorError {
                 Self::RecvError(_) => true,
                 Self::SpannSegment(e) => e.should_trace_error(),
                 Self::SourceRecordSegment(e) => e.should_trace_error(),
+                Self::SourceRecordSegmentV2(e) => e.should_trace_error(),
                 Self::CountError(e) => e.should_trace_error(),
             }
         }
@@ -472,17 +480,34 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         };
 
         let log_task = if self.context.is_rebuild {
-            wrap(
-                Box::new(SourceRecordSegmentOperator {}),
-                SourceRecordSegmentInput {
-                    record_segment_reader: record_reader.clone(),
-                },
-                ctx.receiver(),
-                self.context
-                    .orchestrator_context
-                    .task_cancellation_token
-                    .clone(),
-            )
+            // TODO(tanujnay112): Remove this once we've fully baked in SourceRecordSegmentV2Operator
+            if self.context.is_full_rebuild() {
+                wrap(
+                    Box::new(SourceRecordSegmentOperator::new()),
+                    SourceRecordSegmentInput {
+                        record_segment_reader: record_reader.clone(),
+                    },
+                    ctx.receiver(),
+                    self.context
+                        .orchestrator_context
+                        .task_cancellation_token
+                        .clone(),
+                )
+            } else {
+                wrap(
+                    Box::new(SourceRecordSegmentV2Operator::new(
+                        self.context.max_partition_size,
+                    )),
+                    SourceRecordSegmentV2Input {
+                        record_segment_reader: record_reader.clone(),
+                    },
+                    ctx.receiver(),
+                    self.context
+                        .orchestrator_context
+                        .task_cancellation_token
+                        .clone(),
+                )
+            }
         } else {
             let database_name = match chroma_types::DatabaseName::new(collection.database.clone()) {
                 Some(name) => name,
@@ -678,11 +703,8 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         };
 
         let writers = CompactWriters {
-            // If we are rebuilding but not applying to the record segment,
-            // we should still read the record segment to get its offset ids.
-            record_reader: record_reader
-                .clone()
-                .filter(|_| !self.context.is_full_rebuild()),
+            // No record reader when rebuilding
+            record_reader: record_reader.clone().filter(|_| !self.context.is_rebuild),
             metadata_writer,
             record_writer,
             vector_writer,
@@ -867,6 +889,96 @@ impl Handler<TaskResult<SourceRecordSegmentOutput, SourceRecordSegmentError>>
 }
 
 #[async_trait]
+impl Handler<TaskResult<SourceRecordSegmentV2Output, SourceRecordSegmentV2Error>>
+    for LogFetchOrchestrator
+{
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<SourceRecordSegmentV2Output, SourceRecordSegmentV2Error>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
+            Some(output) => output,
+            None => return,
+        };
+
+        tracing::info!(
+            "Sourced and materialized {} records in {} partitions",
+            output.total_records,
+            output.partitions.len()
+        );
+
+        // Update total records count
+        let collection_info = match self.context.get_collection_info_mut() {
+            Ok(info) => info,
+            Err(err) => {
+                self.terminate_with_result(Err(err.into()), ctx).await;
+                return;
+            }
+        };
+        collection_info.collection.total_records_post_compaction = output.total_records as u64;
+
+        // If no records, terminate early
+        if output.partitions.is_empty() {
+            let collection_info = match self.context.get_collection_info() {
+                Ok(info) => info,
+                Err(err) => {
+                    self.terminate_with_result(Err(err.into()), ctx).await;
+                    return;
+                }
+            };
+            self.terminate_with_result(
+                Ok(Success::new(vec![], collection_info.clone()).into()),
+                ctx,
+            )
+            .await;
+            return;
+        }
+
+        // Update handler to work with MaterializeLogOutput directly
+        self.num_uncompleted_materialization_tasks = 0;
+        for partition in output.partitions {
+            if partition.result.has_backfill() {
+                self.has_backfill = true;
+            }
+
+            if !partition.result.is_empty() {
+                self.materialized_outputs.push(partition);
+            }
+        }
+
+        // Complete the rebuild flow
+        let collection_info = match self.context.collection_info.take() {
+            Some(info) => info,
+            None => {
+                self.terminate_with_result(
+                    Err(LogFetchOrchestratorError::InvariantViolation(
+                        "self.collection_info not set",
+                    )),
+                    ctx,
+                )
+                .await;
+                return;
+            }
+        };
+
+        let materialized = std::mem::take(&mut self.materialized_outputs);
+        if self.has_backfill {
+            self.terminate_with_result(
+                Ok(RequireFunctionBackfill::new(materialized, collection_info).into()),
+                ctx,
+            )
+            .await;
+            return;
+        }
+        self.terminate_with_result(Ok(Success::new(materialized, collection_info).into()), ctx)
+            .await;
+    }
+}
+
+#[async_trait]
 impl Handler<TaskResult<PartitionOutput, PartitionError>> for LogFetchOrchestrator {
     type Result = ();
 
@@ -921,6 +1033,7 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
                     return;
                 }
             };
+
             let materialized = std::mem::take(&mut self.materialized_outputs);
             if self.has_backfill {
                 self.terminate_with_result(

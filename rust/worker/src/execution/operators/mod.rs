@@ -34,5 +34,6 @@ pub mod ranked_group_by;
 pub mod repair_log_offsets;
 pub mod select;
 pub mod source_record_segment;
+pub mod source_record_segment_v2;
 pub mod sparse_index_knn;
 pub mod sparse_log_knn;
