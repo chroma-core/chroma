@@ -50,8 +50,8 @@ impl Default for HierarchicalSpannConfig {
             beam_min: 10,
             beam_max: 50000,
             max_replicas: 2,
-            write_rng_epsilon: 8.0,
-            write_rng_factor: 4.0,
+            write_rng_epsilon: 4.0,
+            write_rng_factor: 2.0,
             reassign_neighbor_count: 32,
             fp_navigation: false,
         }
@@ -138,7 +138,7 @@ pub struct WriterStats {
     navigate_missing_nodes: AtomicU64,
     /// add() could not register in any navigated cluster (all gone) and fell
     /// back to root.
-    add_register_fallbacks: AtomicU64,
+    add_missing_nodes: AtomicU64,
     /// register_in_leaf() target was missing or no longer a leaf (e.g. split
     /// by a balance cascade during merge).
     register_missing_nodes: AtomicU64,
@@ -154,7 +154,18 @@ pub struct WriterStats {
     add_balance_nanos: AtomicU64,
     split_kmeans_nanos: AtomicU64,
     split_quantize_nanos: AtomicU64,
-    split_npa_nanos: AtomicU64,
+    split_npa_cluster_nanos: AtomicU64,
+    split_npa_neighbor_nanos: AtomicU64,
+    /// Number of neighbor leaves visited by apply_npa_to_neighbors
+    split_npa_neighbors_visited: AtomicU64,
+    /// Neighbors where >1% of vectors were reassigned
+    split_npa_neighbors_active: AtomicU64,
+    /// Sum of balance depth values across all splits (for computing average)
+    split_depth_sum: AtomicU64,
+    /// Total vectors reassigned by apply_npa_to_neighbors (across all splits)
+    split_npa_neighbor_reassigns: AtomicU64,
+    /// Total vectors evaluated by apply_npa_to_neighbors (across all splits)
+    split_npa_neighbor_evaluated: AtomicU64,
     reassign_navigate_nanos: AtomicU64,
     reassign_register_nanos: AtomicU64,
     reassign_balance_nanos: AtomicU64,
@@ -179,7 +190,7 @@ impl Default for WriterStats {
             scrub_nanos: AtomicU64::new(0),
             scrub_removed: AtomicU64::new(0),
             navigate_missing_nodes: AtomicU64::new(0),
-            add_register_fallbacks: AtomicU64::new(0),
+            add_missing_nodes: AtomicU64::new(0),
             register_missing_nodes: AtomicU64::new(0),
             registers: AtomicU64::new(0),
             register_nanos: AtomicU64::new(0),
@@ -190,7 +201,13 @@ impl Default for WriterStats {
             add_balance_nanos: AtomicU64::new(0),
             split_kmeans_nanos: AtomicU64::new(0),
             split_quantize_nanos: AtomicU64::new(0),
-            split_npa_nanos: AtomicU64::new(0),
+            split_npa_cluster_nanos: AtomicU64::new(0),
+            split_npa_neighbor_nanos: AtomicU64::new(0),
+            split_npa_neighbors_visited: AtomicU64::new(0),
+            split_npa_neighbors_active: AtomicU64::new(0),
+            split_depth_sum: AtomicU64::new(0),
+            split_npa_neighbor_reassigns: AtomicU64::new(0),
+            split_npa_neighbor_evaluated: AtomicU64::new(0),
             reassign_navigate_nanos: AtomicU64::new(0),
             reassign_register_nanos: AtomicU64::new(0),
             reassign_balance_nanos: AtomicU64::new(0),
@@ -215,8 +232,13 @@ pub struct WriterStatsSnapshot {
     pub register_missing_nodes: u64,
     // Sub-step breakdowns: [navigate, register, balance]
     pub add_substeps: [u64; 3],
-    // Sub-step breakdowns: [kmeans, quantize, npa]
-    pub split_substeps: [u64; 3],
+    // Sub-step breakdowns: [kmeans, quantize, npa_cluster, npa_neighbor]
+    pub split_substeps: [u64; 4],
+    pub split_npa_neighbors_visited: u64,
+    pub split_npa_neighbors_active: u64,
+    pub split_depth_sum: u64,
+    pub split_npa_neighbor_reassigns: u64,
+    pub split_npa_neighbor_evaluated: u64,
     // Sub-step breakdowns: [navigate, register, balance]
     pub reassign_substeps: [u64; 3],
     // Sub-step breakdowns: [lock_wait, quantize]
@@ -249,7 +271,7 @@ impl WriterStats {
             scrub_removed: self.scrub_removed.load(Ordering::Relaxed),
             wall_nanos: 0,
             navigate_missing_nodes: self.navigate_missing_nodes.load(Ordering::Relaxed),
-            add_missing_nodes: self.add_register_fallbacks.load(Ordering::Relaxed),
+            add_missing_nodes: self.add_missing_nodes.load(Ordering::Relaxed),
             register_missing_nodes: self.register_missing_nodes.load(Ordering::Relaxed),
             add_substeps: [
                 self.add_navigate_nanos.load(Ordering::Relaxed),
@@ -259,8 +281,14 @@ impl WriterStats {
             split_substeps: [
                 self.split_kmeans_nanos.load(Ordering::Relaxed),
                 self.split_quantize_nanos.load(Ordering::Relaxed),
-                self.split_npa_nanos.load(Ordering::Relaxed),
+                self.split_npa_cluster_nanos.load(Ordering::Relaxed),
+                self.split_npa_neighbor_nanos.load(Ordering::Relaxed),
             ],
+            split_npa_neighbors_visited: self.split_npa_neighbors_visited.load(Ordering::Relaxed),
+            split_npa_neighbors_active: self.split_npa_neighbors_active.load(Ordering::Relaxed),
+            split_depth_sum: self.split_depth_sum.load(Ordering::Relaxed),
+            split_npa_neighbor_reassigns: self.split_npa_neighbor_reassigns.load(Ordering::Relaxed),
+            split_npa_neighbor_evaluated: self.split_npa_neighbor_evaluated.load(Ordering::Relaxed),
             reassign_substeps: [
                 self.reassign_navigate_nanos.load(Ordering::Relaxed),
                 self.reassign_register_nanos.load(Ordering::Relaxed),
@@ -297,6 +325,11 @@ impl WriterStats {
             split_substeps: std::array::from_fn(|i| {
                 cur.split_substeps[i].saturating_sub(prev.split_substeps[i])
             }),
+            split_npa_neighbors_visited: cur.split_npa_neighbors_visited.saturating_sub(prev.split_npa_neighbors_visited),
+            split_npa_neighbors_active: cur.split_npa_neighbors_active.saturating_sub(prev.split_npa_neighbors_active),
+            split_depth_sum: cur.split_depth_sum.saturating_sub(prev.split_depth_sum),
+            split_npa_neighbor_reassigns: cur.split_npa_neighbor_reassigns.saturating_sub(prev.split_npa_neighbor_reassigns),
+            split_npa_neighbor_evaluated: cur.split_npa_neighbor_evaluated.saturating_sub(prev.split_npa_neighbor_evaluated),
             reassign_substeps: std::array::from_fn(|i| {
                 cur.reassign_substeps[i].saturating_sub(prev.reassign_substeps[i])
             }),
@@ -438,7 +471,7 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
     }
 
     let add_sub_names = ["navigate", "register", "balance"];
-    let split_sub_names = ["kmeans", "quantize", "npa"];
+    let split_sub_names = ["kmeans", "quantize", "npa_clust", "npa_neigh"];
     let reassign_sub_names = ["navigate", "register", "balance"];
 
     fn fmt_sub_avg(total_nanos: u64, count: u64) -> String {
@@ -530,6 +563,31 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
     write_substep_table(&mut out, "split()", &split_sub_names, snapshots, 3, &|s| {
         &s.split_substeps
     });
+    // NPA neighbor stats (appended to split breakdown)
+    {
+        writeln!(out, "\n--- split() NPA Neighbor Stats ---").unwrap();
+        writeln!(out, "| CP | avg_depth |   neighbors |     active |  active% | eval/neigh | reassign/neigh | reassign% |").unwrap();
+        writeln!(out, "|----|----------|-------------|------------|----------|------------|----------------|-----------|").unwrap();
+        for (i, snap) in snapshots.iter().enumerate() {
+            let n_splits = snap.calls[3];
+            let visited = snap.split_npa_neighbors_visited;
+            let active = snap.split_npa_neighbors_active;
+            let evaluated = snap.split_npa_neighbor_evaluated;
+            let reassigned = snap.split_npa_neighbor_reassigns;
+            let avg_visited = if n_splits > 0 { visited as f64 / n_splits as f64 } else { 0.0 };
+            let avg_active = if n_splits > 0 { active as f64 / n_splits as f64 } else { 0.0 };
+            let active_pct = if visited > 0 { active as f64 / visited as f64 * 100.0 } else { 0.0 };
+            let avg_depth = if n_splits > 0 { snap.split_depth_sum as f64 / n_splits as f64 } else { 0.0 };
+            let eval_per_neigh = if visited > 0 { evaluated as f64 / visited as f64 } else { 0.0 };
+            let reassign_per_neigh = if visited > 0 { reassigned as f64 / visited as f64 } else { 0.0 };
+            let reassign_pct = if evaluated > 0 { reassigned as f64 / evaluated as f64 * 100.0 } else { 0.0 };
+            writeln!(
+                out,
+                "| {:>2} | {:>8.2} | {:>5.1}/split | {:>4.1}/split | {:>6.1}% | {:>10.1} | {:>14.1} | {:>7.1}% |",
+                i + 1, avg_depth, avg_visited, avg_active, active_pct, eval_per_neigh, reassign_per_neigh, reassign_pct,
+            ).unwrap();
+        }
+    }
     write_substep_table(
         &mut out,
         "reassign()",
@@ -672,7 +730,7 @@ impl HierarchicalSpannWriter {
 
             if clusters_to_balance.is_empty() {
                 self.stats
-                    .add_register_fallbacks
+                    .add_missing_nodes
                     .fetch_add(1, Ordering::Relaxed);
                 version = {
                     let mut v = self.versions.entry(id).or_insert(0);
@@ -750,7 +808,9 @@ impl HierarchicalSpannWriter {
         let root = self.root_id();
         let Some(root_node) = self.nodes.get(&root) else {
             self.stats.navigates.fetch_add(1, Ordering::Relaxed);
-            self.stats.navigate_nanos.fetch_add(nav_t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            self.stats
+                .navigate_nanos
+                .fetch_add(nav_t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
             return Vec::new();
         };
 
@@ -758,7 +818,9 @@ impl HierarchicalSpannWriter {
             let dist = self.dist(query, root_node.centroid());
             drop(root_node);
             self.stats.navigates.fetch_add(1, Ordering::Relaxed);
-            self.stats.navigate_nanos.fetch_add(nav_t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            self.stats
+                .navigate_nanos
+                .fetch_add(nav_t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
             return vec![(root, dist)];
         }
         drop(root_node);
@@ -829,7 +891,9 @@ impl HierarchicalSpannWriter {
             .navigate_sort_nanos
             .fetch_add(sort_nanos, Ordering::Relaxed);
         self.stats.navigates.fetch_add(1, Ordering::Relaxed);
-        self.stats.navigate_nanos.fetch_add(nav_t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        self.stats
+            .navigate_nanos
+            .fetch_add(nav_t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
         leaves
     }
 
@@ -1238,8 +1302,9 @@ impl HierarchicalSpannWriter {
         }
 
         if depth < MAX_BALANCE_DEPTH {
-            let npa_start = Instant::now();
             let mut evaluated = HashSet::new();
+
+            let npa_cluster_start = Instant::now();
             self.apply_npa_to_cluster(
                 &left_group,
                 &old_centroid,
@@ -1256,6 +1321,12 @@ impl HierarchicalSpannWriter {
                 &mut evaluated,
                 depth,
             );
+            self.stats.split_npa_cluster_nanos.fetch_add(
+                npa_cluster_start.elapsed().as_nanos() as u64,
+                Ordering::Relaxed,
+            );
+
+            let npa_neighbor_start = Instant::now();
             self.apply_npa_to_neighbors(
                 leaf_id,
                 left_id,
@@ -1266,12 +1337,14 @@ impl HierarchicalSpannWriter {
                 &mut evaluated,
                 depth,
             );
-            self.stats
-                .split_npa_nanos
-                .fetch_add(npa_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            self.stats.split_npa_neighbor_nanos.fetch_add(
+                npa_neighbor_start.elapsed().as_nanos() as u64,
+                Ordering::Relaxed,
+            );
         }
 
         self.stats.splits.fetch_add(1, Ordering::Relaxed);
+        self.stats.split_depth_sum.fetch_add(depth as u64, Ordering::Relaxed);
         self.stats
             .split_nanos
             .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -1356,6 +1429,11 @@ impl HierarchicalSpannWriter {
             self.config.write_beam_max,
         );
 
+        let mut neighbors_visited = 0u64;
+        let mut neighbors_active = 0u64;
+        let mut total_evaluated = 0u64;
+        let mut total_reassigned = 0u64;
+
         for &(neighbor_id, _) in neighbors.iter().take(self.config.reassign_neighbor_count) {
             if neighbor_id == old_leaf_id || neighbor_id == left_id || neighbor_id == right_id {
                 continue;
@@ -1377,6 +1455,10 @@ impl HierarchicalSpannWriter {
                     leaf.codes.clone(),
                 )
             };
+
+            neighbors_visited += 1;
+            let n_total = n_ids.len();
+            let mut n_reassigned = 0usize;
 
             let c_norm = Self::vec_norm(&n_centroid);
 
@@ -1426,6 +1508,7 @@ impl HierarchicalSpannWriter {
             let old_qq =
                 QuantizedQuery::new(&old_r_q, padded_bytes, c_norm, old_c_dot_q, old_q_norm);
 
+            let mut n_evaluated = 0usize;
             for (i, code_bytes) in n_codes.iter().enumerate() {
                 let id = n_ids[i];
                 let version = n_versions[i];
@@ -1438,6 +1521,7 @@ impl HierarchicalSpannWriter {
                     continue;
                 }
 
+                n_evaluated += 1;
                 let code = Code::<1, _>::new(code_bytes.as_slice());
 
                 let left_dist = code.distance_quantized_query(&self.distance_fn, &left_qq);
@@ -1453,9 +1537,21 @@ impl HierarchicalSpannWriter {
                     continue;
                 }
 
+                n_reassigned += 1;
                 self.reassign(id, depth);
             }
+
+            total_evaluated += n_evaluated as u64;
+            total_reassigned += n_reassigned as u64;
+            if n_total > 0 && n_reassigned * 100 > n_total {
+                neighbors_active += 1;
+            }
         }
+
+        self.stats.split_npa_neighbors_visited.fetch_add(neighbors_visited, Ordering::Relaxed);
+        self.stats.split_npa_neighbors_active.fetch_add(neighbors_active, Ordering::Relaxed);
+        self.stats.split_npa_neighbor_evaluated.fetch_add(total_evaluated, Ordering::Relaxed);
+        self.stats.split_npa_neighbor_reassigns.fetch_add(total_reassigned, Ordering::Relaxed);
     }
 
     /// Reassign a vector to its best cluster.
@@ -1503,7 +1599,7 @@ impl HierarchicalSpannWriter {
 
             if clusters_to_balance.is_empty() {
                 self.stats
-                    .add_register_fallbacks
+                    .add_missing_nodes
                     .fetch_add(1, Ordering::Relaxed);
                 continue;
             }
@@ -1530,17 +1626,31 @@ impl HierarchicalSpannWriter {
     // =========================================================================
 
     fn split_internal(&self, node_id: NodeId) {
-        let (children, parent_id) = {
-            let Some(node_ref) = self.nodes.get(&node_id) else {
-                return;
-            };
-            let TreeNode::Internal(internal) = node_ref.value() else {
-                return;
-            };
-            if internal.children.len() <= self.config.branching_factor {
+        if !self.balancing.insert(node_id) {
+            return;
+        }
+
+        let (children, parent_id, _old_centroid) = match self.nodes.remove(&node_id) {
+            Some((_, TreeNode::Internal(internal))) => {
+                if internal.children.len() <= self.config.branching_factor {
+                    self.nodes.insert(
+                        node_id,
+                        TreeNode::Internal(internal),
+                    );
+                    self.balancing.remove(&node_id);
+                    return;
+                }
+                (internal.children, internal.parent_id, internal.centroid)
+            }
+            Some((_, node)) => {
+                self.nodes.insert(node_id, node);
+                self.balancing.remove(&node_id);
                 return;
             }
-            (internal.children.clone(), internal.parent_id)
+            None => {
+                self.balancing.remove(&node_id);
+                return;
+            }
         };
 
         let child_embeddings: Vec<EmbeddingPoint> = children
@@ -1600,7 +1710,7 @@ impl HierarchicalSpannWriter {
             }
         }
 
-        self.nodes.remove(&node_id);
+        self.balancing.remove(&node_id);
 
         if let Some(pid) = parent_id {
             self.replace_child(pid, node_id, &[left_id, right_id]);
@@ -1717,6 +1827,9 @@ impl HierarchicalSpannWriter {
     fn replace_child(&self, parent_id: NodeId, old_child: NodeId, new_children: &[NodeId]) {
         let children_clone = {
             let Some(mut node_ref) = self.nodes.get_mut(&parent_id) else {
+                // parent is gone, new children are orphaned
+                // TODO insert them into the tree where appropriate
+                println!("ERROR: parent is gone, new children are orphaned");
                 return;
             };
             let TreeNode::Internal(parent) = node_ref.value_mut() else {

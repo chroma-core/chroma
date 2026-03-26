@@ -12,6 +12,8 @@ use std::io::Write as _;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use rayon::prelude::*;
+
 use chroma_distance::DistanceFunction;
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -272,7 +274,9 @@ async fn main() {
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let args = Args::parse();
+    let args = Args::parse_from(
+        std::env::args().filter(|a| a != "--bench"),
+    );
 
     let distance_fn = args.metric.to_distance_function();
 
@@ -322,20 +326,24 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     };
 
     println!("=== 1-Bit Quantized Hierarchical SPANN Writer Benchmark ===");
+    println!();
+    println!("--- Dataset ---");
     println!(
-        "Dataset: {} ({} vectors, {} dims)",
+        "  Source: {} ({} vectors, {} dims)",
         dataset.name(),
         format_count(data_len),
         dimension
     );
     println!(
-        "Metric: {:?} | Checkpoints: {} ({}/CP)",
+        "  Metric: {:?} | Checkpoints: {} ({}/CP)",
         distance_fn,
         num_checkpoints,
         format_count(batch_size),
     );
+    println!();
+    println!("--- Indexing ---");
     println!(
-        "Config: bf={} split={} merge={} replicas={} eps={} rng_f={}",
+        "  Tree: bf={} split={} merge={} replicas={} eps={} rng_f={}",
         config.branching_factor,
         config.split_threshold,
         config.merge_threshold,
@@ -344,19 +352,25 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         config.write_rng_factor,
     );
     println!(
-        "Write beam: tau={} min={} max={}",
+        "  Write beam: tau={} min={} max={}",
         config.write_beam_tau, config.write_beam_min, config.write_beam_max,
     );
     println!(
-        "Search beam: tau={} min={} max={} | Tau sweep: {:?} | Brute-force GT: {}",
-        config.beam_tau, config.beam_min, config.beam_max, tau_values, args.brute_force_gt,
+        "  Quantization: 1-bit | Nav: {}",
+        if args.fp_navigation { "f32" } else { "1-bit" },
+    );
+    println!("  Threads: {}", args.threads);
+    println!();
+    println!("--- Recall ---");
+    println!(
+        "  Search beam: tau={} min={} max={} | Tau sweep: {:?}",
+        config.beam_tau, config.beam_min, config.beam_max, tau_values,
     );
     println!(
-        "Quantization: 1-bit | Nav: {} | Rerank centroids: {:?} | Rerank vectors: {:?}",
-        if args.fp_navigation { "f32" } else { "1-bit" },
+        "  Rerank centroids: {:?} | Rerank vectors: {:?}",
         args.recall_rerank_centroids, args.recall_rerank_vectors,
     );
-    println!("Threads: {}", args.threads);
+    println!("  Brute-force GT: {}", args.brute_force_gt);
     println!();
 
     let all_queries = dataset.queries(distance_fn.clone())?;
@@ -559,36 +573,66 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         let recall_start = Instant::now();
 
+        let recall_pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(args.threads)
+            .build()
+            .expect("failed to build rayon pool");
+
         for &tau in &tau_values {
             for &rr_c in &args.recall_rerank_centroids {
                 for &rr_v in &args.recall_rerank_vectors {
-                    let mut total_r10 = 0.0;
-                    let mut total_r100 = 0.0;
+                    struct QueryResult {
+                        r10: f64,
+                        r100: f64,
+                        nanos: u64,
+                        scanned: usize,
+                        level_r100: Vec<f64>,
+                        level_beam: Vec<u64>,
+                    }
+
+                    let results: Vec<QueryResult> = recall_pool.install(|| {
+                        checkpoint_queries.par_iter().map(|gt| {
+                            let t0 = Instant::now();
+                            let (results, scanned, _leaves_scanned) =
+                                writer.search(&gt.vector, k, tau, beam_min, beam_max, rr_c, rr_v);
+                            let nanos = t0.elapsed().as_nanos() as u64;
+
+                            let result_ids: Vec<u32> = results.iter().map(|(id, _)| *id).collect();
+                            let r10 = recall_at_k(&result_ids, &gt.neighbors, 10);
+                            let r100 = recall_at_k(&result_ids, &gt.neighbors, 100);
+
+                            let gt_100: HashSet<u32> =
+                                gt.neighbors.iter().take(100).copied().collect();
+                            let level_recall =
+                                writer.diagnose_level_recall(&gt.vector, &gt_100, tau, beam_min, beam_max, rr_c);
+
+                            let mut level_r100 = vec![0.0f64; num_levels];
+                            let mut level_beam = vec![0u64; num_levels];
+                            for lr in &level_recall {
+                                if lr.level <= num_levels {
+                                    level_r100[lr.level - 1] = lr.reachable_100;
+                                    level_beam[lr.level - 1] = lr.beam_size as u64;
+                                }
+                            }
+
+                            QueryResult { r10, r100, nanos, scanned, level_r100, level_beam }
+                        }).collect()
+                    });
+
+                    let mut total_r10 = 0.0f64;
+                    let mut total_r100 = 0.0f64;
                     let mut total_nanos = 0u64;
                     let mut total_scanned = 0usize;
-                    let mut level_r100_sums: Vec<f64> = vec![0.0; num_levels];
-                    let mut level_beam_sums: Vec<u64> = vec![0; num_levels];
-
-                    for gt in &checkpoint_queries {
-                        let t0 = Instant::now();
-                        let (results, scanned, _leaves_scanned) =
-                            writer.search(&gt.vector, k, tau, beam_min, beam_max, rr_c, rr_v);
-                        total_nanos += t0.elapsed().as_nanos() as u64;
-                        total_scanned += scanned;
-
-                        let result_ids: Vec<u32> = results.iter().map(|(id, _)| *id).collect();
-                        total_r10 += recall_at_k(&result_ids, &gt.neighbors, 10);
-                        total_r100 += recall_at_k(&result_ids, &gt.neighbors, 100);
-
-                        let gt_100: HashSet<u32> =
-                            gt.neighbors.iter().take(100).copied().collect();
-                        let level_recall =
-                            writer.diagnose_level_recall(&gt.vector, &gt_100, tau, beam_min, beam_max, rr_c);
-                        for lr in &level_recall {
-                            if lr.level <= num_levels {
-                                level_r100_sums[lr.level - 1] += lr.reachable_100;
-                                level_beam_sums[lr.level - 1] += lr.beam_size as u64;
-                            }
+                    let mut level_r100_sums = vec![0.0f64; num_levels];
+                    let mut level_beam_sums = vec![0u64; num_levels];
+                    for qr in &results {
+                        total_r10 += qr.r10;
+                        total_r100 += qr.r100;
+                        total_nanos += qr.nanos;
+                        total_scanned += qr.scanned;
+                        for i in 0..num_levels {
+                            level_r100_sums[i] += qr.level_r100[i];
+                            level_beam_sums[i] += qr.level_beam[i];
                         }
                     }
 
