@@ -133,11 +133,7 @@ impl ManifestManager {
                 google_cloud_spanner::session::SessionError::GRPC(status)
                     if status.code() == Code::AlreadyExists =>
                 {
-<<<<<<< HEAD
-                    Error::LogContentionRetry
-=======
-                    return Err(Error::AlreadyInitialized);
->>>>>>> 1509bedab ([BUG](wal3): return AlreadyInitialized on duplicate init (#6733))
+                    Error::AlreadyInitialized
                 }
                 err => err.into(),
             })?;
