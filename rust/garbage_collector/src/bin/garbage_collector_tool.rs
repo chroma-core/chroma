@@ -323,11 +323,10 @@ async fn main() {
 
                         for version in decoded_version_file.version_history.unwrap().versions {
                             for segment in version.segment_info.unwrap().segment_compaction_info {
-                                for (_, value) in segment
-                                    .file_paths
-                                    .into_iter()
-                                    .filter(|(k, _)| !k.contains("hnsw"))
-                                {
+                                for (_, value) in segment.file_paths.into_iter().filter(|(k, _)| {
+                                    !k.contains("hnsw")
+                                        && k.as_str() != chroma_types::USER_ID_BLOOM_FILTER
+                                }) {
                                     for path in value.paths {
                                         let (prefix, id) =
                                             Segment::extract_prefix_and_id(&path).unwrap();

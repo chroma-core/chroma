@@ -367,6 +367,7 @@ impl RecordSegmentWriter {
                 .await?,
             )
         } else {
+            tracing::info!("No bloom filter manager provided, so no bloom filter will be used.");
             // No bloom filter manager provided, so no bloom filter will be used.
             None
         };
@@ -832,6 +833,8 @@ impl RecordSegmentFlusher {
             flushed_files.insert(USER_ID_BLOOM_FILTER.to_string(), vec![bloom_filter_path]);
         }
 
+        tracing::info!("Flushed record segment files: {:?}", flushed_files);
+
         Ok(flushed_files)
     }
 
@@ -1013,36 +1016,30 @@ impl RecordSegmentReader<'_> {
         self.max_offset_id
     }
 
-    /// Lazily loads the bloom filter using the two-tier heuristic.
-    /// Called internally when a plan requests bloom filter usage.
-    /// Fetch the bloom filter from storage (via the manager cache) and populate
-    /// the local `OnceCell`. Only call when a storage fetch is acceptable.
-    async fn fetch_bloom_filter(&self) {
-        self.bloom_filter
-            .get_or_init(|| async {
+    /// Lazily load the bloom filter into the local `OnceCell`.
+    ///
+    /// When `allow_storage_fetch` is true, falls back to storage on a cache
+    /// miss.  When false, only checks the manager's in-memory cache and
+    /// leaves the cell empty on a miss so a later call can retry.
+    ///
+    /// Uses `get_or_try_init` so that transient failures (storage errors,
+    /// cache misses) leave the cell uninitialized for retry, while permanent
+    /// states (no manager/path configured) are cached as `None`.
+    async fn load_bloom_filter(&self, allow_storage_fetch: bool) {
+        let _ = self
+            .bloom_filter
+            .get_or_try_init(|| async {
                 let (manager, path) = match (&self.bloom_filter_manager, &self.bloom_filter_path) {
                     (Some(mgr), Some(p)) => (mgr, p.as_str()),
-                    _ => return None,
+                    _ => return Ok(None),
                 };
-                manager.get(path).await.ok()
+
+                match manager.get(path, allow_storage_fetch).await {
+                    Ok(bf) => Ok(Some(bf)),
+                    Err(_) => Err(()),
+                }
             })
             .await;
-    }
-
-    /// Try to populate the local `OnceCell` from the manager's in-memory cache
-    /// without triggering a storage fetch. Returns quickly if already loaded or
-    /// if the bloom filter isn't cached.
-    async fn try_load_bloom_filter_from_cache(&self) {
-        if self.bloom_filter.get().is_some() {
-            return;
-        }
-        let (manager, path) = match (&self.bloom_filter_manager, &self.bloom_filter_path) {
-            (Some(mgr), Some(p)) => (mgr, p.as_str()),
-            _ => return,
-        };
-        if let Some(bf) = manager.get_if_cached(path).await {
-            let _ = self.bloom_filter.set(Some(bf));
-        }
     }
 
     pub async fn get_offset_id_for_user_id(
@@ -1050,11 +1047,7 @@ impl RecordSegmentReader<'_> {
         user_id: &str,
         plan: &RecordSegmentReaderOptions,
     ) -> Result<Option<u32>, Box<dyn ChromaError>> {
-        if plan.use_bloom_filter {
-            self.fetch_bloom_filter().await;
-        } else {
-            self.try_load_bloom_filter_from_cache().await;
-        }
+        self.load_bloom_filter(plan.use_bloom_filter).await;
         if let Some(Some(bf)) = self.bloom_filter.get() {
             if !bf.contains(user_id) {
                 return Ok(None);
@@ -1073,7 +1066,14 @@ impl RecordSegmentReader<'_> {
     pub async fn data_exists_for_user_id(
         &self,
         user_id: &str,
+        plan: &RecordSegmentReaderOptions,
     ) -> Result<bool, Box<dyn ChromaError>> {
+        self.load_bloom_filter(plan.use_bloom_filter).await;
+        if let Some(Some(bf)) = self.bloom_filter.get() {
+            if !bf.contains(user_id) {
+                return Ok(false);
+            }
+        }
         if !self.user_id_to_id.contains("", user_id).await? {
             return Ok(false);
         }
@@ -1154,12 +1154,7 @@ impl RecordSegmentReader<'_> {
         keys: impl Iterator<Item = &str>,
         plan: &RecordSegmentReaderOptions,
     ) {
-        // Lazy load the bloom filter if it is needed.
-        if plan.use_bloom_filter {
-            self.fetch_bloom_filter().await;
-        } else {
-            self.try_load_bloom_filter_from_cache().await;
-        }
+        self.load_bloom_filter(plan.use_bloom_filter).await;
 
         let filtered: Vec<&str> = if let Some(Some(bf)) = self.bloom_filter.get() {
             keys.filter(|k| bf.contains(k)).collect()
