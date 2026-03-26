@@ -2,9 +2,14 @@ use chroma_blockstore::arrow::provider::BlockManager;
 use chroma_blockstore::test_utils::sparse_index_test_utils::create_test_sparse_index;
 use chroma_blockstore::RootManager;
 use chroma_index::hnsw_provider::{HnswIndexProvider, FILES};
+use chroma_index::usearch::USearchIndex;
+use chroma_index::IndexUuid;
 use chroma_segment::types::ChromaSegmentFlusher;
 use chroma_storage::Storage;
-use chroma_types::{CollectionUuid, DatabaseUuid, SegmentFlushInfo, SegmentUuid};
+use chroma_types::{
+    CollectionUuid, DatabaseUuid, SegmentFlushInfo, SegmentUuid,
+    QUANTIZED_SPANN_QUANTIZED_CENTROID, QUANTIZED_SPANN_RAW_CENTROID,
+};
 use futures::StreamExt;
 use proptest::prelude::{any, any_with, Arbitrary, BoxedStrategy};
 use proptest::strategy::Strategy;
@@ -23,6 +28,8 @@ enum SegmentFileReferenceType {
     SparseIndex {
         name: String,
     },
+    USearchRawCentroid,
+    USearchQuantizedCentroid,
 }
 
 impl Arbitrary for SegmentFileReferenceType {
@@ -36,6 +43,8 @@ impl Arbitrary for SegmentFileReferenceType {
             (0..=10).prop_map(|name| SegmentFileReferenceType::SparseIndex {
                 name: format!("sparse_index_{}", name)
             }),
+            Just(SegmentFileReferenceType::USearchRawCentroid),
+            Just(SegmentFileReferenceType::USearchQuantizedCentroid),
         ]
         .boxed()
     }
@@ -47,6 +56,10 @@ impl SegmentFileReferenceType {
             SegmentFileReferenceType::HNSWIndex => "hnsw_index",
             SegmentFileReferenceType::HNSWPath => "hnsw_path",
             SegmentFileReferenceType::SparseIndex { name } => name,
+            SegmentFileReferenceType::USearchRawCentroid => QUANTIZED_SPANN_RAW_CENTROID,
+            SegmentFileReferenceType::USearchQuantizedCentroid => {
+                QUANTIZED_SPANN_QUANTIZED_CENTROID
+            }
         }
     }
 }
@@ -60,6 +73,9 @@ enum FileReference {
     Hnsw {
         file_paths: Vec<String>,
     },
+    USearch {
+        file_path: String,
+    },
 }
 
 impl FileReference {
@@ -71,6 +87,7 @@ impl FileReference {
                 paths
             }
             FileReference::Hnsw { file_paths, .. } => file_paths.clone(),
+            FileReference::USearch { file_path } => vec![file_path.clone()],
         }
     }
 }
@@ -98,6 +115,21 @@ fn new_hnsw_index_strategy(prefix_path: String) -> BoxedStrategy<SegmentFileRefe
     Just(SegmentFileReference {
         reference_id: hnsw_index_id,
         reference: hnsw_index,
+    })
+    .boxed()
+}
+
+fn new_usearch_index_strategy(
+    prefix_path: String,
+    quantized: bool,
+) -> BoxedStrategy<SegmentFileReference> {
+    let usearch_id = Uuid::new_v4();
+    let file_path =
+        USearchIndex::format_storage_key(&prefix_path, IndexUuid(usearch_id), quantized);
+    let usearch_ref = FileReference::USearch { file_path };
+    Just(SegmentFileReference {
+        reference_id: usearch_id,
+        reference: usearch_ref,
     })
     .boxed()
 }
@@ -192,6 +224,12 @@ impl Arbitrary for SegmentFilePaths {
                     SegmentFileReferenceType::SparseIndex { .. } => {
                         new_or_forked_sparse_index_strategy(None, prefix_path.clone())
                     }
+                    SegmentFileReferenceType::USearchRawCentroid => {
+                        new_usearch_index_strategy(prefix_path.clone(), false)
+                    }
+                    SegmentFileReferenceType::USearchQuantizedCentroid => {
+                        new_usearch_index_strategy(prefix_path.clone(), true)
+                    }
                 };
                 (Just(segment_file_reference_type), refs)
             }),
@@ -252,6 +290,7 @@ impl SegmentFilePaths {
 
     pub fn next_version_strategy(&self) -> BoxedStrategy<Self> {
         let prefix_path = self.prefix_path.clone();
+        let hnsw_prefix_path = prefix_path.clone();
         let hnsw_references_strategy = (
             any::<Option<bool>>(),
             prop_oneof![
@@ -278,7 +317,7 @@ impl SegmentFilePaths {
                                     .iter()
                                     .map(|file_name| {
                                         HnswIndexProvider::format_key(
-                                            &prefix_path,
+                                            &hnsw_prefix_path,
                                             &chroma_index::IndexUuid(hnsw_index_id),
                                             file_name,
                                         )
@@ -291,6 +330,77 @@ impl SegmentFilePaths {
                                 vec![SegmentFileReference {
                                     reference_id: hnsw_index_id,
                                     reference: hnsw_index,
+                                }],
+                            );
+                        }
+                        None => {}
+                    }
+
+                    refs
+                }
+            });
+
+        // USearch centroid files behave like HNSW in GC: when a version is deleted,
+        // the older version's centroid files are always marked unused. So we use the
+        // same inherit/new/drop pattern as HNSW.
+        let usearch_references_strategy =
+            (any::<Option<bool>>(), any::<Option<bool>>()).prop_map({
+                let current_refs = self.paths.clone();
+                let prefix_path = prefix_path.clone();
+                move |(raw_action, quantized_action)| {
+                    let mut refs = HashMap::new();
+
+                    // Handle raw centroid
+                    match raw_action {
+                        Some(true) => {
+                            if let Some(parent) =
+                                current_refs.get(&SegmentFileReferenceType::USearchRawCentroid)
+                            {
+                                refs.insert(
+                                    SegmentFileReferenceType::USearchRawCentroid,
+                                    parent.clone(),
+                                );
+                            }
+                        }
+                        Some(false) => {
+                            let id = Uuid::new_v4();
+                            let file_path = USearchIndex::format_storage_key(
+                                &prefix_path,
+                                IndexUuid(id),
+                                false,
+                            );
+                            refs.insert(
+                                SegmentFileReferenceType::USearchRawCentroid,
+                                vec![SegmentFileReference {
+                                    reference_id: id,
+                                    reference: FileReference::USearch { file_path },
+                                }],
+                            );
+                        }
+                        None => {}
+                    }
+
+                    // Handle quantized centroid
+                    match quantized_action {
+                        Some(true) => {
+                            if let Some(parent) = current_refs
+                                .get(&SegmentFileReferenceType::USearchQuantizedCentroid)
+                            {
+                                refs.insert(
+                                    SegmentFileReferenceType::USearchQuantizedCentroid,
+                                    parent.clone(),
+                                );
+                            }
+                        }
+                        Some(false) => {
+                            let id = Uuid::new_v4();
+                            let file_path =
+                                USearchIndex::format_storage_key(&prefix_path, IndexUuid(id), true);
+                            refs.insert(
+                                SegmentFileReferenceType::USearchQuantizedCentroid,
+                                vec![SegmentFileReference {
+                                    reference_id: id,
+                                    reference: FileReference::USearch { file_path },
                                 }],
                             );
                         }
@@ -383,17 +493,24 @@ impl SegmentFilePaths {
 
         let segment_id = self.root_segment_id;
         let prefix_path = self.prefix_path.clone();
-        (hnsw_references_strategy, sparse_indices_strategy)
-            .prop_map(move |(hnsw_references, sparse_indices)| {
-                let mut references = hnsw_references;
-                references.extend(sparse_indices);
+        (
+            hnsw_references_strategy,
+            usearch_references_strategy,
+            sparse_indices_strategy,
+        )
+            .prop_map(
+                move |(hnsw_references, usearch_references, sparse_indices)| {
+                    let mut references = hnsw_references;
+                    references.extend(usearch_references);
+                    references.extend(sparse_indices);
 
-                Self {
-                    paths: references,
-                    root_segment_id: segment_id,
-                    prefix_path: prefix_path.clone(),
-                }
-            })
+                    Self {
+                        paths: references,
+                        root_segment_id: segment_id,
+                        prefix_path: prefix_path.clone(),
+                    }
+                },
+            )
             .boxed()
     }
 }
@@ -490,6 +607,13 @@ async fn write_files_for_segment(storage: &Storage, file_paths: &SegmentFilePath
                         .buffer_unordered(32)
                         .collect()
                         .await
+                }
+                FileReference::USearch { file_path } => {
+                    let contents = vec![0; 8];
+                    storage
+                        .put_bytes(file_path, contents, Default::default())
+                        .await
+                        .unwrap();
                 }
             }
         }
