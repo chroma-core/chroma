@@ -810,7 +810,20 @@ impl SpannerBackend {
     /// - `limit` and `offset`: Pagination
     ///
     /// Returns a list of matching collections.
-    #[instrument(skip(self, req), level = "info")]
+    #[instrument(
+        skip(self, req),
+        fields(
+            tenant_id = ?req.filter.tenant_id,
+            database_name = ?req.filter.database_name,
+            topology_name = ?req.filter.topology_name,
+            collection_name = ?req.filter.name,
+            ids_count = ?req.filter.ids.as_ref().map(Vec::len),
+            include_soft_deleted = req.filter.include_soft_deleted,
+            limit = ?req.filter.limit,
+            offset = ?req.filter.offset
+        ),
+        level = "info"
+    )]
     pub async fn get_collections(
         &self,
         req: GetCollectionsRequest,
