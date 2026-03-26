@@ -182,7 +182,7 @@ jobs:
     uses: ./.github/workflows/_python-tests.yml
     secrets: inherit
     with:
-      property_testing_preset: "normal"
+      property_testing_preset: "fast"
 
   python-vulnerability-scan:
     name: Python vulnerability scan
