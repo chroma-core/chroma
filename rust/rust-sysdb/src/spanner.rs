@@ -970,7 +970,7 @@ impl SpannerBackend {
                 let is_deleted: bool = rows[0]
                     .column_by_name("is_deleted")
                     .map_err(SysDbError::FailedToReadColumn)?;
-                tracing::debug!(
+                tracing::trace!(
                     "Collection {} has is_deleted: {}",
                     collection_id,
                     is_deleted
