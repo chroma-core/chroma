@@ -90,6 +90,13 @@ query_service:
         weighted_lru:
           name: "usearch_cache"
           capacity: 8192 # 8192 MiB = 8GB
+  bloom_filter_manager:
+    cache_config:
+      lru:
+        name: "bloom_filter_cache"
+        capacity: 1000
+    enabled_collection_ids: ["all"]
+    storage_fetch_threshold: 100
   fetch_log_batch_size: 1000
   use_fragment_fetch: true
   fragment_fetcher_cache:
@@ -190,6 +197,13 @@ compaction_service:
           lru:
             name: "sparse_index_cache"
             capacity: 1000
+  bloom_filter_manager:
+    cache_config:
+      lru:
+        name: "bloom_filter_cache"
+        capacity: 1000
+    enabled_collection_ids: ["all"]
+    storage_fetch_threshold: 100
   hnsw_provider:
     hnsw_temporary_path: "~/tmp"
     hnsw_cache_config:
