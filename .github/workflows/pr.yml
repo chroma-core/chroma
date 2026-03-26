@@ -179,6 +179,9 @@ jobs:
     if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
     uses: ./.github/workflows/_rust-tests.yml
     secrets: inherit
+    with:
+      # Benches are off on PRs; see _rust-tests.yml for a note on running them on a schedule.
+      run_rust_benchmarks: false
 
   rust-feature-tests:
     name: Rust feature tests
