@@ -477,7 +477,6 @@ impl BloomFilterManager {
     ) -> Result<BloomFilter<str>, BloomFilterError> {
         let cache_key = Self::cache_key_from_path(path);
         if let Ok(Some(cached)) = self.inner.cache.get(&cache_key).await {
-            tracing::info!("Bloom filter found in cache: {:?}, live count: {:?}, stale count: {:?}, capacity: {:?}", cached.id(), cached.live_count(), cached.stale_count(), cached.capacity());
             return Ok(cached.clone());
         }
         if !allow_storage_fetch {
@@ -503,7 +502,6 @@ impl BloomFilterManager {
             )
             .await
             .map_err(BloomFilterError::Storage)?;
-        tracing::info!("Bloom filter loaded from storage: {:?}", bf.id());
         Ok(bf)
     }
 
