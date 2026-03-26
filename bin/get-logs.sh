@@ -20,7 +20,7 @@ fetch_namespace() {
   echo "Namespace: $namespace"
 
   # Get the list of all pods in the namespace
-  pods=$(kubectl get pods -n "$namespace" -o jsonpath='{.items[*].metadata.name}')
+  pods=$(kubectl get pods -n "$namespace" -o jsonpath='{.items[*].metadata.name}' || true)
   echo "Got all the pods in $namespace: $pods"
 
   # Iterate over each pod and get the logs
