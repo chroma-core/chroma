@@ -7,6 +7,7 @@ use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_system::Dispatcher;
 use chroma_system::Orchestrator;
 use chroma_types::chroma_proto::CollectionVersionFile;
+use chroma_types::chroma_proto::FilePaths;
 use chroma_types::Segment;
 use chrono::DateTime;
 use chrono::Utc;
@@ -28,6 +29,13 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
+
+/// Returns true if the file type represents a sparse index (i.e. not an HNSW
+/// index, USearch centroid, or bloom filter). Only sparse index entries need
+/// their root fetched and block IDs resolved.
+fn is_sparse_index_file_type((key, _): &(String, FilePaths)) -> bool {
+    !key.contains("hnsw") && key.as_str() != chroma_types::USER_ID_BLOOM_FILTER
+}
 
 #[derive(Debug, clap::ValueEnum, Clone)]
 enum CliCleanupMode {
@@ -326,7 +334,7 @@ async fn main() {
                                 for (_, value) in segment
                                     .file_paths
                                     .into_iter()
-                                    .filter(|(k, _)| !k.contains("hnsw"))
+                                    .filter(is_sparse_index_file_type)
                                 {
                                     for path in value.paths {
                                         let (prefix, id) =
