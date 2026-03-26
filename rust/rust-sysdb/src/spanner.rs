@@ -810,7 +810,20 @@ impl SpannerBackend {
     /// - `limit` and `offset`: Pagination
     ///
     /// Returns a list of matching collections.
-    #[instrument(skip(self), level = "info")]
+    #[instrument(
+        skip(self, req),
+        fields(
+            tenant_id = ?req.filter.tenant_id,
+            database_name = ?req.filter.database_name,
+            topology_name = ?req.filter.topology_name,
+            collection_name = ?req.filter.name,
+            ids_count = ?req.filter.ids.as_ref().map(Vec::len),
+            include_soft_deleted = req.filter.include_soft_deleted,
+            limit = ?req.filter.limit,
+            offset = ?req.filter.offset
+        ),
+        level = "info"
+    )]
     pub async fn get_collections(
         &self,
         req: GetCollectionsRequest,
@@ -970,11 +983,6 @@ impl SpannerBackend {
                 let is_deleted: bool = rows[0]
                     .column_by_name("is_deleted")
                     .map_err(SysDbError::FailedToReadColumn)?;
-                tracing::debug!(
-                    "Collection {} has is_deleted: {}",
-                    collection_id,
-                    is_deleted
-                );
                 let collection = Collection::try_from(SpannerRows { rows })?;
                 if is_deleted {
                     tracing::debug!(
