@@ -810,7 +810,7 @@ impl SpannerBackend {
     /// - `limit` and `offset`: Pagination
     ///
     /// Returns a list of matching collections.
-    #[instrument(skip(self), level = "info")]
+    #[instrument(skip(self, req), level = "info")]
     pub async fn get_collections(
         &self,
         req: GetCollectionsRequest,
