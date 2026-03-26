@@ -367,8 +367,7 @@ impl RecordSegmentWriter {
                 .await?,
             )
         } else {
-            tracing::info!("No bloom filter manager provided, so no bloom filter will be used.");
-            // No bloom filter manager provided, so no bloom filter will be used.
+            tracing::info!("No bloom filter manager provided, skipping bloom filter");
             None
         };
         Ok(RecordSegmentWriter {
@@ -405,7 +404,7 @@ impl RecordSegmentWriter {
                 return Ok(bf);
             }
         }
-        tracing::info!("Bloom filter needs rebuild, will rebuild from reader");
+        tracing::info!("Bloom filter needs rebuild, rebuilding from reader");
 
         let reader = match Box::pin(RecordSegmentReader::from_segment(
             segment,
@@ -596,7 +595,7 @@ impl RecordSegmentWriter {
         }
         self.max_new_offset_id
             .fetch_max(max_new_offset_id, atomic::Ordering::SeqCst);
-        tracing::info!("Applied {} records to record segment", count,);
+        tracing::info!(count, "Applied records to record segment");
         Ok(())
     }
 
@@ -833,7 +832,7 @@ impl RecordSegmentFlusher {
             flushed_files.insert(USER_ID_BLOOM_FILTER.to_string(), vec![bloom_filter_path]);
         }
 
-        tracing::info!("Flushed record segment files: {:?}", flushed_files);
+        tracing::info!(flushed_files = ?flushed_files, "Flushed record segment files");
 
         Ok(flushed_files)
     }

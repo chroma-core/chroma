@@ -460,7 +460,7 @@ impl BloomFilterManager {
         let path = Self::format_key(prefix_path, bf.id());
         let key = Self::cache_key_from_path(&path);
         self.inner.cache.insert(key, bf.deep_clone()).await;
-        tracing::info!("Committing bloom filter to cache: {:?}, live count: {:?}, stale count: {:?}, capacity: {:?}", bf.id(), bf.live_count(), bf.stale_count(), bf.capacity());
+        tracing::info!(id = %bf.id(), live_count = bf.live_count(), stale_count = bf.stale_count(), capacity = bf.capacity(), "Committing bloom filter to cache");
         bf.into_bytes(self.inner.storage.clone(), path)
     }
 
@@ -511,10 +511,7 @@ impl BloomFilterManager {
 
     /// Create a brand-new bloom filter sized for `expected_items`.
     pub fn create(&self, expected_items: u64) -> BloomFilter<str> {
-        tracing::info!(
-            "Creating new bloom filter with expected items: {}",
-            expected_items
-        );
+        tracing::info!(expected_items, "Creating new bloom filter");
         BloomFilter::new(expected_items)
     }
 
@@ -523,14 +520,7 @@ impl BloomFilterManager {
     pub async fn fork(&self, old_path: &str) -> Result<BloomFilter<str>, BloomFilterError> {
         let mut bf = self.get(old_path, true).await?.deep_clone();
         bf.id = uuid::Uuid::new_v4();
-        tracing::info!(
-            "Forked bloom filter from path: {:?} to new id: {:?} with live count: {:?}, stale count: {:?}, capacity: {:?}",
-            old_path,
-            bf.id(),
-            bf.live_count(),
-            bf.stale_count(),
-            bf.capacity()
-        );
+        tracing::info!(old_path, new_id = %bf.id(), live_count = bf.live_count(), stale_count = bf.stale_count(), capacity = bf.capacity(), "Forked bloom filter");
         Ok(bf)
     }
 
