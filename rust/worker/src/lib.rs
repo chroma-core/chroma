@@ -7,8 +7,6 @@ use chroma_config::Configurable;
 use chroma_memberlist::memberlist_provider::{
     CustomResourceMemberlistProvider, MemberlistProvider,
 };
-use clap::Parser;
-use compactor::compaction_client::CompactionClient;
 use compactor::compaction_server::CompactionServer;
 use tokio::runtime::Handle;
 use tokio::select;
@@ -179,11 +177,4 @@ pub async fn compaction_service_entrypoint() {
         },
     };
     println!("Server stopped");
-}
-
-pub async fn compaction_client_entrypoint() {
-    let client = CompactionClient::parse();
-    if let Err(e) = client.run(&mut std::io::stdout()).await {
-        eprintln!("{e}");
-    }
 }
