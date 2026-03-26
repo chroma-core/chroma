@@ -164,7 +164,7 @@ type SpannIndexConfig struct {
 	EfSearch              *int     `json:"ef_search,omitempty"`
 	MaxNeighbors          *int     `json:"max_neighbors,omitempty"`
 	CenterDriftThreshold  *float64 `json:"center_drift_threshold,omitempty"`
-	Quantize              bool     `json:"quantize,omitempty"`
+	Quantize              string   `json:"quantize,omitempty"`
 }
 
 type VectorIndexType struct {
