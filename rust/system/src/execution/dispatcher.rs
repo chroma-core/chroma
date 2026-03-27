@@ -512,11 +512,12 @@ mod tests {
     use tokio::{
         fs::File,
         io::{AsyncReadExt, AsyncWriteExt},
+        sync::Notify,
     };
     use uuid::Uuid;
 
     use super::*;
-    use crate::{operator::*, ComponentHandle};
+    use crate::{operator::*, ComponentHandle, OneshotMessageReceiver};
     use std::{
         collections::HashSet,
         sync::{
@@ -580,6 +581,30 @@ mod tests {
                 String::from_utf8(buffer.to_vec()).expect("Error creating string from utf8");
             assert_eq!(read_value, String::from("Test write"));
             Ok(input.to_string())
+        }
+
+        fn get_type(&self) -> OperatorType {
+            OperatorType::IO
+        }
+    }
+
+    #[derive(Debug)]
+    struct BlockingIoOperator {
+        started: Arc<Notify>,
+        release: Arc<Notify>,
+    }
+    #[async_trait]
+    impl Operator<String, String> for BlockingIoOperator {
+        type Error = std::io::Error;
+
+        fn get_name(&self) -> &'static str {
+            "BlockingIoOperator"
+        }
+
+        async fn run(&self, input: &String) -> Result<String, Self::Error> {
+            self.started.notify_one();
+            self.release.notified().await;
+            Ok(input.clone())
         }
 
         fn get_type(&self) -> OperatorType {
@@ -792,63 +817,72 @@ mod tests {
     async fn test_dispatcher_non_io_tasks_reject() {
         let system = System::new();
         let dispatcher = Dispatcher::new(DispatcherConfig {
-            num_worker_threads: THREAD_COUNT,
-            // Must be zero to fail things.
+            num_worker_threads: 0,
             task_queue_limit: 0,
-            dispatcher_queue_size: 1,
+            dispatcher_queue_size: 10,
             worker_queue_size: 1,
             active_io_tasks: 1,
             cpu_affinity_num_cores: None,
             io_affinity_num_cores: None,
         });
-        let dispatcher_handle = system.start_component(dispatcher);
-        let counter = Arc::new(AtomicUsize::new(0));
-        let sent_tasks = Arc::new(Mutex::new(HashSet::new()));
-        let received_tasks = Arc::new(Mutex::new(HashSet::new()));
-        let dispatch_user = MockDispatchUser {
-            dispatcher: dispatcher_handle,
-            counter: counter.clone(),
-            sent_tasks: sent_tasks.clone(),
-            received_tasks: received_tasks.clone(),
-        };
-        let dispatch_user_handle = system.start_component(dispatch_user);
-        let mut is_err = false;
-        for _ in 0..1000 {
-            is_err |= dispatch_user_handle.request((), None).await.is_err();
-        }
-        assert!(is_err);
+        let mut dispatcher_handle = system.start_component(dispatcher);
+        let (result_receiver, result_rx) = OneshotMessageReceiver::new();
+        let task = wrap(
+            Box::new(MockOperator {}),
+            42.0,
+            Box::new(result_receiver),
+            tokio_util::sync::CancellationToken::new(),
+        );
+
+        dispatcher_handle.send(task, None).await.unwrap();
+
+        let result = result_rx.await.unwrap();
+        assert!(matches!(result.into_inner(), Err(TaskError::Aborted)));
     }
 
     #[tokio::test]
     async fn test_dispatcher_io_tasks_reject() {
         let system = System::new();
         let dispatcher = Dispatcher::new(DispatcherConfig {
-            num_worker_threads: THREAD_COUNT,
-            // Must be zero to fail things.
+            num_worker_threads: 0,
             task_queue_limit: 0,
-            dispatcher_queue_size: 1,
+            dispatcher_queue_size: 10,
             worker_queue_size: 1,
             active_io_tasks: 1,
             cpu_affinity_num_cores: None,
             io_affinity_num_cores: None,
         });
-        let dispatcher_handle = system.start_component(dispatcher);
-        let counter = Arc::new(AtomicUsize::new(0));
-        let sent_tasks = Arc::new(Mutex::new(HashSet::new()));
-        let received_tasks = Arc::new(Mutex::new(HashSet::new()));
-        let dispatch_user = MockIoDispatchUser {
-            dispatcher: dispatcher_handle,
-            counter: counter.clone(),
-            sent_tasks: sent_tasks.clone(),
-            received_tasks: received_tasks.clone(),
-        };
-        let dispatch_user_handle = system.start_component(dispatch_user);
-        // yield to allow the component to process the messages
-        tokio::task::yield_now().await;
-        let mut is_err = false;
-        for _ in 0..1000 {
-            is_err |= dispatch_user_handle.request((), None).await.is_err();
-        }
-        assert!(is_err);
+        let mut dispatcher_handle = system.start_component(dispatcher);
+
+        let started = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let (first_result_receiver, first_result_rx) = OneshotMessageReceiver::new();
+        let first_task = wrap(
+            Box::new(BlockingIoOperator {
+                started: Arc::clone(&started),
+                release: Arc::clone(&release),
+            }),
+            "first".to_string(),
+            Box::new(first_result_receiver),
+            tokio_util::sync::CancellationToken::new(),
+        );
+        dispatcher_handle.send(first_task, None).await.unwrap();
+        started.notified().await;
+
+        let (second_result_receiver, second_result_rx) = OneshotMessageReceiver::new();
+        let second_task = wrap(
+            Box::new(MockIoOperator {}),
+            "second".to_string(),
+            Box::new(second_result_receiver),
+            tokio_util::sync::CancellationToken::new(),
+        );
+        dispatcher_handle.send(second_task, None).await.unwrap();
+
+        let second_result = second_result_rx.await.unwrap();
+        assert!(matches!(second_result.into_inner(), Err(TaskError::Aborted)));
+
+        release.notify_one();
+        let first_result = first_result_rx.await.unwrap();
+        assert_eq!(first_result.into_inner().unwrap(), "first");
     }
 }
