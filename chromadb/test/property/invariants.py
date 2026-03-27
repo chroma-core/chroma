@@ -321,11 +321,19 @@ def ann_accuracy(
 
     # Quantized SPANN (e.g. 4-bit RaBitQ) introduces approximation error in
     # distance computation that exceeds the tight tolerance used for exact indices.
-    # Widen the threshold when quantization is active.
-    cfg_json = collection.configuration_json
-    if cfg_json is not None:
-        spann_cfg = cfg_json.get("spann", {})
-        if spann_cfg and spann_cfg.get("quantize") not in (None, "none"):
+    # Widen the threshold when quantization is active. The quantize field lives in
+    # the schema (under #embedding key), not in configuration_json.
+    serialized_schema = collection._model.serialized_schema
+    if serialized_schema is not None:
+        embedding_spann_cfg = (
+            serialized_schema.get("keys", {})
+            .get("#embedding", {})
+            .get("float_list", {})
+            .get("vector_index", {})
+            .get("config", {})
+            .get("spann", {})
+        )
+        if embedding_spann_cfg.get("quantize") not in (None, "none"):
             accuracy_threshold = max(accuracy_threshold, 1e-2)
 
     # Perform exact distance computation
