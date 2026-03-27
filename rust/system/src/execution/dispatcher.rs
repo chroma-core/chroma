@@ -879,7 +879,10 @@ mod tests {
         dispatcher_handle.send(second_task, None).await.unwrap();
 
         let second_result = second_result_rx.await.unwrap();
-        assert!(matches!(second_result.into_inner(), Err(TaskError::Aborted)));
+        assert!(matches!(
+            second_result.into_inner(),
+            Err(TaskError::Aborted)
+        ));
 
         release.notify_one();
         let first_result = first_result_rx.await.unwrap();
