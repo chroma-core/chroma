@@ -688,10 +688,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         };
 
         let writers = CompactWriters {
-<<<<<<< HEAD
-=======
             // No record reader when rebuilding
->>>>>>> 974a673d8 ([BUG]: Create a new SourceRecordSegment operator for segment rebuild (#6714))
             record_reader: record_reader.clone().filter(|_| !self.context.is_rebuild),
             metadata_writer,
             record_writer,
