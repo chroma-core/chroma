@@ -1674,7 +1674,7 @@ class VectorIndexConfig(BaseModel):
 
     space: Optional[Space] = None
     embedding_function: Optional[Any] = DefaultEmbeddingFunction()
-    source_key: Optional[str] = (
+    source_key: Optional[Union[str, "Key"]] = (
         None  # key to source the vector from (accepts str or Key)
     )
     hnsw: Optional[HnswIndexConfig] = None
@@ -1725,7 +1725,7 @@ class SparseVectorIndexConfig(BaseModel):
 
     # TODO(Sanket): Change this to the appropriate sparse ef and use a default here.
     embedding_function: Optional[Any] = None
-    source_key: Optional[str] = (
+    source_key: Optional[Union[str, "Key"]] = (
         None  # key to source the sparse vector from (accepts str or Key)
     )
     bm25: Optional[bool] = None
