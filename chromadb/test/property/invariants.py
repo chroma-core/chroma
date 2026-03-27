@@ -319,6 +319,14 @@ def ann_accuracy(
     dim = len(embeddings[0])
     accuracy_threshold = accuracy_threshold * math.pow(10, int(math.log10(dim)))
 
+    # Quantized SPANN (e.g. 4-bit RaBitQ) introduces approximation error in
+    # distance computation that exceeds the tight tolerance used for exact indices.
+    # Widen the threshold when quantization is active.
+    if collection._model.configuration_json is not None:
+        spann_cfg = collection._model.configuration_json.get("spann", {})
+        if spann_cfg and spann_cfg.get("quantize") not in (None, "none"):
+            accuracy_threshold = max(accuracy_threshold, 1e-2)
+
     # Perform exact distance computation
     if query_embeddings is None:
         query_embeddings = (
@@ -448,7 +456,8 @@ def _query_results_are_correct_shape(
     for result_type in ["distances", "embeddings", "documents", "metadatas"]:
         assert query_results[result_type] is not None  # type: ignore[literal-required]
         assert all(
-            len(result) == n_results for result in query_results[result_type]  # type: ignore[literal-required]
+            len(result) == n_results
+            for result in query_results[result_type]  # type: ignore[literal-required]
         )
 
 

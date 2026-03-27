@@ -291,7 +291,7 @@ class DeterministicSparseEmbeddingFunction(SparseEmbeddingFunction[List[str]]):
 
     @staticmethod
     def build_from_config(
-        config: Dict[str, Any]
+        config: Dict[str, Any],
     ) -> "DeterministicSparseEmbeddingFunction":
         return DeterministicSparseEmbeddingFunction(config.get("label", "det_sparse"))
 
@@ -2344,14 +2344,24 @@ def test_modify_collection_no_initial_config_creates_default_schema(
     # Verify schema was updated
     updated_schema = collection.schema
     assert updated_schema is not None
-    assert updated_schema.defaults.float_list.vector_index.config.spann.search_nprobe == 32  # type: ignore
-    assert updated_schema.keys["#embedding"].float_list.vector_index.config.spann.search_nprobe == 32  # type: ignore
+    assert (
+        updated_schema.defaults.float_list.vector_index.config.spann.search_nprobe == 32
+    )  # type: ignore
+    assert (
+        updated_schema.keys[
+            "#embedding"
+        ].float_list.vector_index.config.spann.search_nprobe
+        == 32
+    )  # type: ignore
 
     # Re-fetch from server
     collection_refreshed = client.get_collection(collection_name)
     refreshed_schema = collection_refreshed.schema
     assert refreshed_schema is not None
-    assert refreshed_schema.defaults.float_list.vector_index.config.spann.search_nprobe == 32  # type: ignore
+    assert (
+        refreshed_schema.defaults.float_list.vector_index.config.spann.search_nprobe
+        == 32
+    )  # type: ignore
 
 
 @pytest.mark.skipif(not is_spann_disabled_mode, reason="SPANN is disabled")
@@ -2379,13 +2389,18 @@ def test_modify_collection_no_initial_config_creates_default_schema_local(
     updated_schema = collection.schema
     assert updated_schema is not None
     assert updated_schema.defaults.float_list.vector_index.config.hnsw.ef_search == 100  # type: ignore
-    assert updated_schema.keys["#embedding"].float_list.vector_index.config.hnsw.ef_search == 100  # type: ignore
+    assert (
+        updated_schema.keys["#embedding"].float_list.vector_index.config.hnsw.ef_search
+        == 100
+    )  # type: ignore
 
     # Re-fetch from server
     collection_refreshed = client.get_collection(collection_name)
     refreshed_schema = collection_refreshed.schema
     assert refreshed_schema is not None
-    assert refreshed_schema.defaults.float_list.vector_index.config.hnsw.ef_search == 100  # type: ignore
+    assert (
+        refreshed_schema.defaults.float_list.vector_index.config.hnsw.ef_search == 100
+    )  # type: ignore
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
@@ -2417,20 +2432,35 @@ def test_modify_collection_with_initial_spann_schema(client: ClientAPI) -> None:
     # Verify update
     updated_schema = collection.schema
     assert updated_schema is not None
-    assert updated_schema.defaults.float_list.vector_index.config.spann.search_nprobe == 20  # type: ignore
+    assert (
+        updated_schema.defaults.float_list.vector_index.config.spann.search_nprobe == 20
+    )  # type: ignore
     # ef_search should remain unchanged
     assert updated_schema.defaults.float_list.vector_index.config.spann.ef_search == 50  # type: ignore
 
     # Verify both locations updated
-    assert updated_schema.keys["#embedding"].float_list.vector_index.config.spann.search_nprobe == 20  # type: ignore
-    assert updated_schema.keys["#embedding"].float_list.vector_index.config.spann.ef_search == 50  # type: ignore
+    assert (
+        updated_schema.keys[
+            "#embedding"
+        ].float_list.vector_index.config.spann.search_nprobe
+        == 20
+    )  # type: ignore
+    assert (
+        updated_schema.keys["#embedding"].float_list.vector_index.config.spann.ef_search
+        == 50
+    )  # type: ignore
 
     # Re-fetch and verify
     collection_refreshed = client.get_collection(collection_name)
     refreshed_schema = collection_refreshed.schema
     assert refreshed_schema is not None
-    assert refreshed_schema.defaults.float_list.vector_index.config.spann.search_nprobe == 20  # type: ignore
-    assert refreshed_schema.defaults.float_list.vector_index.config.spann.ef_search == 50  # type: ignore
+    assert (
+        refreshed_schema.defaults.float_list.vector_index.config.spann.search_nprobe
+        == 20
+    )  # type: ignore
+    assert (
+        refreshed_schema.defaults.float_list.vector_index.config.spann.ef_search == 50
+    )  # type: ignore
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
@@ -2445,6 +2475,14 @@ def test_modify_collection_updates_schema_spann_multiple_fields(
         name=collection_name,
         configuration={"spann": {"search_nprobe": 64, "ef_search": 100}},
     )
+
+    # Capture the server-assigned default for write_nprobe before modifying.
+    # This value depends on whether quantization is enabled (32 without, 64 with).
+    initial_schema = collection.schema
+    assert initial_schema is not None
+    initial_write_nprobe = (
+        initial_schema.defaults.float_list.vector_index.config.spann.write_nprobe
+    )  # type: ignore
 
     # Modify multiple fields
     collection.modify(
@@ -2462,20 +2500,36 @@ def test_modify_collection_updates_schema_spann_multiple_fields(
     assert schema.defaults.float_list.vector_index.config.spann.search_nprobe == 128  # type: ignore
     assert schema.defaults.float_list.vector_index.config.spann.ef_search == 200  # type: ignore
 
-    # Verify other fields were preserved
-    assert schema.defaults.float_list.vector_index.config.spann.write_nprobe == 32  # type: ignore
+    # Verify other fields were preserved (not changed by the modify)
+    assert (
+        schema.defaults.float_list.vector_index.config.spann.write_nprobe
+        == initial_write_nprobe
+    )  # type: ignore
 
     # Verify in both locations
-    assert schema.keys["#embedding"].float_list.vector_index.config.spann.search_nprobe == 128  # type: ignore
-    assert schema.keys["#embedding"].float_list.vector_index.config.spann.ef_search == 200  # type: ignore
+    assert (
+        schema.keys["#embedding"].float_list.vector_index.config.spann.search_nprobe
+        == 128
+    )  # type: ignore
+    assert (
+        schema.keys["#embedding"].float_list.vector_index.config.spann.ef_search == 200
+    )  # type: ignore
 
     # Re-fetch from server
     collection_refreshed = client.get_collection(collection_name)
     refreshed_schema = collection_refreshed.schema
     assert refreshed_schema is not None
-    assert refreshed_schema.defaults.float_list.vector_index.config.spann.search_nprobe == 128  # type: ignore
-    assert refreshed_schema.defaults.float_list.vector_index.config.spann.ef_search == 200  # type: ignore
-    assert refreshed_schema.defaults.float_list.vector_index.config.spann.write_nprobe == 32  # type: ignore
+    assert (
+        refreshed_schema.defaults.float_list.vector_index.config.spann.search_nprobe
+        == 128
+    )  # type: ignore
+    assert (
+        refreshed_schema.defaults.float_list.vector_index.config.spann.ef_search == 200
+    )  # type: ignore
+    assert (
+        refreshed_schema.defaults.float_list.vector_index.config.spann.write_nprobe
+        == initial_write_nprobe
+    )  # type: ignore
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
@@ -2530,7 +2584,10 @@ def test_modify_collection_preserves_other_schema_fields(client: ClientAPI) -> N
     assert updated_schema.keys["#document"].string.fts_index.enabled is True
 
     # Verify vector index WAS updated
-    assert updated_schema.defaults.float_list.vector_index.config.spann.search_nprobe == 128  # type: ignore
+    assert (
+        updated_schema.defaults.float_list.vector_index.config.spann.search_nprobe
+        == 128
+    )  # type: ignore
 
     # Re-fetch from server to verify persistence
     collection_refreshed = client.get_collection(collection_name)
@@ -2538,7 +2595,10 @@ def test_modify_collection_preserves_other_schema_fields(client: ClientAPI) -> N
     assert refreshed_schema is not None
 
     # Verify vector index was updated on server
-    assert refreshed_schema.defaults.float_list.vector_index.config.spann.search_nprobe == 128  # type: ignore
+    assert (
+        refreshed_schema.defaults.float_list.vector_index.config.spann.search_nprobe
+        == 128
+    )  # type: ignore
 
     # Verify other value types are still intact on server
     assert refreshed_schema.defaults.string is not None
@@ -2837,7 +2897,5 @@ def test_fts_disabled_search_api_blocks_document_filter(
     )
 
     with pytest.raises(InvalidArgumentError) as exc_info:
-        collection.search(
-            Search(where=Key.DOCUMENT.contains("alpha"))
-        )
+        collection.search(Search(where=Key.DOCUMENT.contains("alpha")))
     assert "fts" in str(exc_info.value).lower()
