@@ -46,7 +46,7 @@ compactionService:
   jemallocConfig: "prof:true,prof_active:true,lg_prof_sample:19"
   resources:
     limits:
-      cpu: 200m
+      cpu: 500m
     requests:
       cpu: 200m
 
