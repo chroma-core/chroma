@@ -158,6 +158,8 @@ impl FetchLogOperator {
                     FragmentFetchError::NotConfigured,
                 ))?;
 
+        println!("[DEBUG run_pointer_fetch] calling scout_log_fragments collection_uuid={} database_name={:?} start_log_offset_id={}", self.collection_uuid, self.database_name, self.start_log_offset_id);
+
         let mut log_client = self.log_client.clone();
         let response = log_client
             .scout_log_fragments(
@@ -171,11 +173,17 @@ impl FetchLogOperator {
             .await?;
 
         let mut limit_offset = response.first_uninserted_record_offset;
+        println!("[DEBUG run_pointer_fetch] scout_log_fragments response collection_uuid={} first_uninserted_record_offset={} num_fragment_pointers={} start_log_offset_id={}", self.collection_uuid, response.first_uninserted_record_offset, response.fragments.len(), self.start_log_offset_id);
         if let Some(maximum_fetch_count) = self.maximum_fetch_count {
             limit_offset = std::cmp::min(
                 limit_offset,
                 self.start_log_offset_id + maximum_fetch_count as u64,
             );
+        }
+
+        if limit_offset <= self.start_log_offset_id {
+            println!("[DEBUG run_pointer_fetch] no records to fetch (limit <= start) collection_uuid={} limit_offset={} start_log_offset_id={}", self.collection_uuid, limit_offset, self.start_log_offset_id);
+            return Ok(Chunk::new(Vec::new().into()));
         }
 
         let pointers: Vec<FragmentPointer> = response
@@ -192,6 +200,12 @@ impl FetchLogOperator {
                 self.fetch_log_concurrency,
             )
             .await?;
+
+        println!(
+            "[DEBUG run_pointer_fetch] fetch complete collection_uuid={} fetched_records={}",
+            self.collection_uuid,
+            fetched.len()
+        );
 
         Ok(Chunk::new(fetched.into()))
     }
