@@ -322,8 +322,9 @@ def ann_accuracy(
     # Quantized SPANN (e.g. 4-bit RaBitQ) introduces approximation error in
     # distance computation that exceeds the tight tolerance used for exact indices.
     # Widen the threshold when quantization is active.
-    if collection._model.configuration_json is not None:
-        spann_cfg = collection._model.configuration_json.get("spann", {})
+    cfg_json = collection.configuration_json
+    if cfg_json is not None:
+        spann_cfg = cfg_json.get("spann", {})
         if spann_cfg and spann_cfg.get("quantize") not in (None, "none"):
             accuracy_threshold = max(accuracy_threshold, 1e-2)
 
