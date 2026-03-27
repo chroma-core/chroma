@@ -2,7 +2,9 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
-    blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    blockfile_record::{
+        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
+    },
     bloom_filter::BloomFilterManager,
 };
 use chroma_system::Operator;
@@ -133,6 +135,12 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
         // in both deleted and not deleted state).
         let mut deleted_and_non_deleted_present_in_segment: HashSet<String> = HashSet::new();
         let mut res_count: i32 = 0;
+        let options = RecordSegmentReaderOptions {
+            use_bloom_filter: input
+                .bloom_filter_manager
+                .as_ref()
+                .is_some_and(|mgr| input.log_records.len() >= mgr.storage_fetch_threshold()),
+        };
         // In theory, we can sort all the ids here
         // and send them to the reader so that the reader
         // can process all in one iteration of the sparse index.
@@ -141,7 +149,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
         // should not be significant.
         for (log_record, _) in input.log_records.iter() {
             match reader
-                .data_exists_for_user_id(log_record.record.id.as_str())
+                .data_exists_for_user_id(log_record.record.id.as_str(), &options)
                 .await
             {
                 Ok(exists) => {

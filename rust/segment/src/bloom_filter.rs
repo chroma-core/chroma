@@ -140,6 +140,8 @@ pub enum BloomFilterError {
     Deserialization(String),
     #[error("Invalid config: {0}")]
     InvalidConfig(String),
+    #[error("Bloom filter not in cache")]
+    CacheMiss,
 }
 
 impl ChromaError for BloomFilterError {
@@ -149,6 +151,7 @@ impl ChromaError for BloomFilterError {
             BloomFilterError::Serialization(_) => chroma_error::ErrorCodes::Internal,
             BloomFilterError::Deserialization(_) => chroma_error::ErrorCodes::Internal,
             BloomFilterError::InvalidConfig(_) => chroma_error::ErrorCodes::InvalidArgument,
+            BloomFilterError::CacheMiss => chroma_error::ErrorCodes::NotFound,
         }
     }
 }
@@ -457,15 +460,27 @@ impl BloomFilterManager {
         let path = Self::format_key(prefix_path, bf.id());
         let key = Self::cache_key_from_path(&path);
         self.inner.cache.insert(key, bf.deep_clone()).await;
+        tracing::info!(id = %bf.id(), live_count = bf.live_count(), stale_count = bf.stale_count(), capacity = bf.capacity(), "Committing bloom filter to cache");
         bf.into_bytes(self.inner.storage.clone(), path)
     }
 
-    /// Look up a bloom filter by its storage path. Returns from cache if present,
-    /// otherwise loads from storage, caches it, and returns it.
-    pub async fn get(&self, path: &str) -> Result<BloomFilter<str>, BloomFilterError> {
+    /// Look up a bloom filter by its storage path.
+    ///
+    /// Always checks the in-memory cache first.  When
+    /// `allow_storage_fetch` is true, falls back to loading from storage
+    /// (and caches the result) on a cache miss.  When false, returns
+    /// `CacheMiss` immediately if the filter isn't cached.
+    pub async fn get(
+        &self,
+        path: &str,
+        allow_storage_fetch: bool,
+    ) -> Result<BloomFilter<str>, BloomFilterError> {
         let cache_key = Self::cache_key_from_path(path);
         if let Ok(Some(cached)) = self.inner.cache.get(&cache_key).await {
-            return Ok(cached);
+            return Ok(cached.clone());
+        }
+        if !allow_storage_fetch {
+            return Err(BloomFilterError::CacheMiss);
         }
         let inner = self.inner.clone();
         let (bf, _) = self
@@ -490,27 +505,22 @@ impl BloomFilterManager {
         Ok(bf)
     }
 
-    /// Returns the bloom filter only if it's already in the cache.
-    /// Does NOT fetch from storage. Near-zero cost.
-    pub async fn get_if_cached(&self, path: &str) -> Option<BloomFilter<str>> {
-        let cache_key = Self::cache_key_from_path(path);
-        self.inner.cache.get(&cache_key).await.ok().flatten()
-    }
-
     pub fn storage_fetch_threshold(&self) -> usize {
         self.inner.storage_fetch_threshold
     }
 
     /// Create a brand-new bloom filter sized for `expected_items`.
     pub fn create(&self, expected_items: u64) -> BloomFilter<str> {
+        tracing::info!(expected_items, "Creating new bloom filter");
         BloomFilter::new(expected_items)
     }
 
     /// Load an existing bloom filter from cache or storage with a fresh id
     /// for the new compaction cycle.
     pub async fn fork(&self, old_path: &str) -> Result<BloomFilter<str>, BloomFilterError> {
-        let mut bf = self.get(old_path).await?;
+        let mut bf = self.get(old_path, true).await?.deep_clone();
         bf.id = uuid::Uuid::new_v4();
+        tracing::info!(old_path, new_id = %bf.id(), live_count = bf.live_count(), stale_count = bf.stale_count(), capacity = bf.capacity(), "Forked bloom filter");
         Ok(bf)
     }
 
@@ -551,7 +561,7 @@ mod tests {
 
         // After commit the BF should be in the cache; get() should return it
         // without needing to read from storage (we haven't called save() yet).
-        let cached = manager.get(&path).await.unwrap();
+        let cached = manager.get(&path, true).await.unwrap();
         assert!(cached.contains("alice"));
         assert!(cached.contains("bob"));
         assert!(!cached.contains("charlie"));
@@ -575,7 +585,7 @@ mod tests {
         let manager2 = BloomFilterManager::new_for_test(manager.inner.storage.clone());
 
         // get() should load from storage, deserialize, cache, and return.
-        let loaded = manager2.get(&path).await.unwrap();
+        let loaded = manager2.get(&path, true).await.unwrap();
         for i in 0..50 {
             assert!(
                 loaded.contains(&format!("user_{i}")),
@@ -598,11 +608,11 @@ mod tests {
 
         // First get: loads from storage (fresh manager).
         let manager2 = BloomFilterManager::new_for_test(manager.inner.storage.clone());
-        let first = manager2.get(&path).await.unwrap();
+        let first = manager2.get(&path, true).await.unwrap();
         assert!(first.contains("cached_item"));
 
         // Second get: should return from cache (same result).
-        let second = manager2.get(&path).await.unwrap();
+        let second = manager2.get(&path, true).await.unwrap();
         assert!(second.contains("cached_item"));
         assert_eq!(second.live_count(), first.live_count());
     }
