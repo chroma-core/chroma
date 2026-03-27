@@ -85,7 +85,7 @@ jobs:
       with:
           github-token: ${{ github.token }}
     - name: Rust Integration Test
-      run: bin/rust-integration-test.sh ${{ matrix.test-glob }}
+      run: bin/rust-integration-test.sh -x ${{ matrix.test-glob }}
       shell: bash
       env:
         ENV_FILE: ${{ contains(inputs.runner, 'ubuntu') && 'compose-env.linux' || 'compose-env.windows' }}
@@ -114,7 +114,7 @@ jobs:
         with:
           github-token: ${{ github.token }}
       - name: Test
-        run: bin/rust-integration-test.sh ${{ matrix.test-glob }}
+        run: bin/rust-integration-test.sh -x ${{ matrix.test-glob }}
         shell: bash
         env:
           CHROMA_THIN_CLIENT: "1"
