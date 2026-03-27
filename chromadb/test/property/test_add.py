@@ -8,8 +8,10 @@ import hypothesis.strategies as st
 from hypothesis import given, settings
 from chromadb.api import ClientAPI
 from chromadb.api.types import Embeddings, Metadatas
-from chromadb.test.conftest import multi_region_test
+from chromadb.config import DEFAULT_DATABASE
 from chromadb.test.conftest import (
+    DEFAULT_MCMR_DATABASE,
+    MULTI_REGION_ENABLED,
     NOT_CLUSTER_ONLY,
     override_hypothesis_profile,
     create_isolated_database,
@@ -23,6 +25,22 @@ MIN_RECORDS_BETWEEN_COMPACTION_WAITS = 10
 
 
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
+
+TEST_DATABASE_NAMES = [pytest.param(DEFAULT_DATABASE, id="classic")]
+
+if MULTI_REGION_ENABLED:
+    TEST_DATABASE_NAMES.append(
+        pytest.param(
+            DEFAULT_MCMR_DATABASE,
+            id="multi-region-db",
+            marks=pytest.mark.test_with_multi_region,
+        )
+    )
+
+
+@pytest.fixture(params=TEST_DATABASE_NAMES)
+def database_name(request: pytest.FixtureRequest) -> str:
+    return cast(str, request.param)
 
 
 @given(
@@ -83,7 +101,6 @@ def test_add_small(
     _test_add(client, collection, record_set, should_compact)
 
 
-@multi_region_test
 @given(
     collection=collection_st,
     record_set=strategies.recordsets(
