@@ -310,7 +310,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         new_name: str,
     ) -> "Collection":
         """Fork the current collection under a new name. The returning collection should contain identical data to the current collection.
-        This is an experimental API that only works for Hosted Chroma for now.
+        This only works for Hosted Chroma for now.
 
         Args:
             new_name: The name of the new collection.
@@ -329,6 +329,19 @@ class Collection(CollectionCommon["ServerAPI"]):
             model=model,
             embedding_function=self._embedding_function,
             data_loader=self._data_loader,
+        )
+
+    def fork_count(self) -> int:
+        """Get the number of forks that exist for this collection.
+        This only works for Hosted Chroma for now.
+
+        Returns:
+            int: The number of forks for this collection.
+        """
+        return self._client._fork_count(
+            collection_id=self.id,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     def search(
