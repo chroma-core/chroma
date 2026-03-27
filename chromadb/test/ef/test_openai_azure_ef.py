@@ -7,7 +7,7 @@ openai package level. Tests run without a real API key.
 Covers the fix for: https://github.com/chroma-core/chroma/issues/1770
 """
 import os
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 import pytest
 
 pytest.importorskip("openai", reason="openai not installed")
@@ -30,7 +30,7 @@ def _make_ef(**overrides):
     """Build an OpenAIEmbeddingFunction with Azure params, patching the clients."""
     kwargs = {**AZURE_PARAMS, **overrides}
     with patch.dict(os.environ, _ENV), \
-         patch("openai.OpenAI", return_value=MagicMock()) as mock_std, \
+         patch("openai.OpenAI", return_value=MagicMock()), \
          patch("openai.AzureOpenAI", return_value=MagicMock()) as mock_azure:
         ef = OpenAIEmbeddingFunction(**kwargs)
         return ef, mock_azure
