@@ -159,6 +159,7 @@ jobs:
     secrets: inherit
     with:
       python_versions: '["3.9", "3.10", "3.11", "3.12"]'
+      # TEMPORARILY SLOW DOWN TESTS TO 10 MINUTES
       property_testing_preset: "slow"
 
   # TEMPORARILY DISABLED — focusing CI on test_add_medium cluster repro
