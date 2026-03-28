@@ -13,6 +13,7 @@ pub use chroma_types::operator::QueryVector;
 pub use chroma_types::operator::Rank;
 pub use chroma_types::operator::RankExpr;
 pub use chroma_types::operator::Select;
+pub use chroma_types::plan::ReadLevel;
 pub use chroma_types::plan::SearchPayload;
 pub use chroma_types::regex::hir::ChromaHir;
 pub use chroma_types::regex::ChromaRegex;

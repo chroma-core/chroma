@@ -182,7 +182,7 @@ impl ChromaCollection {
     /// # Example
     ///
     /// ```
-    /// use chroma_types::plan::ReadLevel;
+    /// use chroma::types::ReadLevel;
     ///
     /// # async fn example(collection: &chroma::ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
     /// // Skip WAL for faster count (may miss recent writes)
@@ -576,7 +576,7 @@ impl ChromaCollection {
     /// # Example
     ///
     /// ```
-    /// use chroma_types::plan::{SearchPayload, ReadLevel};
+    /// use chroma::types::{SearchPayload, ReadLevel};
     ///
     /// # async fn example(collection: &chroma::ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
     /// let search = SearchPayload::default().limit(Some(10), 0);
