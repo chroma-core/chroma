@@ -159,7 +159,7 @@ jobs:
     secrets: inherit
     with:
       python_versions: '["3.9", "3.10", "3.11", "3.12"]'
-      property_testing_preset: "normal"
+      property_testing_preset: "slow"
 
   # TEMPORARILY DISABLED — focusing CI on test_add_medium cluster repro
   # python-vulnerability-scan:
