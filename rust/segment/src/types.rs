@@ -110,8 +110,6 @@ pub enum LogMaterializerError {
     LogIndexOutOfBounds(usize),
     #[error("Record segment reader required but not available")]
     RecordSegmentReaderRequired,
-    #[error("Unsupported operation for rebuild: {0:?}")]
-    UnsupportedOperationForRebuild(Operation),
 }
 
 impl ChromaError for LogMaterializerError {
@@ -122,7 +120,6 @@ impl ChromaError for LogMaterializerError {
             LogMaterializerError::RecordSegment(e) => e.code(),
             LogMaterializerError::LogIndexOutOfBounds(_) => ErrorCodes::Internal,
             LogMaterializerError::RecordSegmentReaderRequired => ErrorCodes::Internal,
-            LogMaterializerError::UnsupportedOperationForRebuild(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -967,38 +964,6 @@ pub async fn materialize_logs(
         logs,
         materialized: Chunk::new(res.into()),
         has_backfill,
-    })
-}
-
-pub async fn materialize_logs_for_rebuild(
-    logs: Chunk<LogRecord>,
-    offset_ids: Vec<u32>,
-) -> Result<MaterializeLogsResult, LogMaterializerError> {
-    TOTAL_LOGS_PRE_MATERIALIZED.add(logs.len() as u64, &[]);
-
-    let mut res = Vec::with_capacity(logs.len());
-
-    for ((log_record, log_index), offset_id) in logs.iter().zip(offset_ids.into_iter()) {
-        if log_record.record.operation != Operation::Add {
-            return Err(LogMaterializerError::UnsupportedOperationForRebuild(
-                log_record.record.operation,
-            ));
-        }
-
-        let mut materialized =
-            MaterializedLogRecord::from_log_record(offset_id, log_index, log_record)?;
-        materialized.offset_id_exists_in_segment = true;
-        materialized.final_operation = MaterializedLogOperation::AddNew;
-
-        res.push(materialized);
-    }
-
-    TOTAL_LOGS_POST_MATERIALIZED.add(res.len() as u64, &[]);
-
-    Ok(MaterializeLogsResult {
-        logs,
-        materialized: Chunk::new(res.into()),
-        has_backfill: false, // Rebuild path never has backfill
     })
 }
 

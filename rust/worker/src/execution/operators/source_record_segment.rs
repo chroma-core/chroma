@@ -19,18 +19,6 @@ use thiserror::Error;
 #[derive(Clone, Debug)]
 pub struct SourceRecordSegmentOperator {}
 
-impl SourceRecordSegmentOperator {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
-impl Default for SourceRecordSegmentOperator {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct SourceRecordSegmentInput {
     pub record_segment_reader: Option<RecordSegmentReader<'static>>,
