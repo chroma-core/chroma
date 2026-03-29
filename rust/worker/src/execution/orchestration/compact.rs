@@ -1231,7 +1231,6 @@ mod tests {
             false,
             None,
             None,
-            None,
         ))
         .await;
         assert!(compact_result.is_ok());
@@ -1289,7 +1288,6 @@ mod tests {
             filter.clone(),
             limit.clone(),
             project.clone(),
-            None,
         );
 
         let old_results = get_orchestrator
@@ -1334,7 +1332,6 @@ mod tests {
             false,
             None,
             None,
-            None,
         ))
         .await;
         assert!(rebuild_result.is_ok());
@@ -1369,7 +1366,6 @@ mod tests {
             filter,
             limit,
             project,
-            None,
         );
 
         let new_results = get_orchestrator_new
