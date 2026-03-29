@@ -1053,7 +1053,6 @@ mod tests {
         let record_reader = Box::pin(RecordSegmentReader::from_segment(
             record_segment,
             blockfile_provider,
-            None,
         ))
         .await
         .expect("Should create record reader");
@@ -1466,7 +1465,6 @@ mod tests {
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
-            None,
             None,
             None,
         ))
