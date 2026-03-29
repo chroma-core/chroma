@@ -154,6 +154,10 @@ impl<T: AsRef<[u8]>> TurboQuantCode<T> {
     ///
     /// Each stored 2-bit code maps to a Lloyd-Max centroid, then is divided by
     /// `√dim` to undo the pre-quantization scaling.
+    ///
+    /// Used only in tests; the production `distance_query` / `distance_code`
+    /// paths dequantize inline to avoid this heap allocation.
+    #[cfg(test)]
     fn unpack_polar(&self, dim: usize) -> Vec<f32> {
         let packed = self.polar_packed(dim);
         let inv_sqrt_dim = 1.0 / (dim as f32).sqrt();
@@ -171,33 +175,16 @@ impl<T: AsRef<[u8]>> TurboQuantCode<T> {
         result
     }
 
-    /// Compute `⟨sign(e), v⟩` from QJL bits, where `sign(e)[i] = 2·bit[i] − 1`.
-    fn qjl_signed_dot(&self, v: &[f32], dim: usize) -> f32 {
-        let qjl = self.qjl_packed(dim);
-        let mut positive_sum = 0.0f32;
-        let mut total_sum = 0.0f32;
-
-        for (byte_idx, &byte) in qjl.iter().enumerate() {
-            let base = byte_idx * 8;
-            let end = (base + 8).min(dim);
-            for bit in 0..(end - base) {
-                let val = v[base + bit];
-                total_sum += val;
-                if (byte >> bit) & 1 == 1 {
-                    positive_sum += val;
-                }
-            }
-        }
-        // ⟨sign(e), v⟩ = 2·Σ(bit[i]·v[i]) − Σv[i]
-        2.0 * positive_sum - total_sum
-    }
-
     /// Estimates distance from data vector `d` to query `q`.
     ///
     /// Combines PolarQuant reconstruction and QJL correction:
     /// ```text
     /// ⟨g, r_q⟩ = ⟨n_hat, r_q⟩ + qjl_scale · ⟨sign(e), r_q⟩
     /// ```
+    ///
+    /// **Zero-allocation**: iterates through packed codes directly, dequantizing
+    /// each coordinate on the fly and immediately accumulating the dot product
+    /// with `r_q`. No intermediate `Vec<f32>` is created.
     pub fn distance_query(
         &self,
         distance_fn: &DistanceFunction,
@@ -207,11 +194,33 @@ impl<T: AsRef<[u8]>> TurboQuantCode<T> {
         q_norm: f32,
     ) -> f32 {
         let dim = r_q.len();
-        let n_hat = self.unpack_polar(dim);
-        let polar_dot = f32::dot(&n_hat, r_q).unwrap_or(0.0) as f32;
         let h = self.header();
-        let qjl_correction = h.qjl_scale * self.qjl_signed_dot(r_q, dim);
-        let g_dot_r_q = polar_dot + qjl_correction;
+        let inv_sqrt_dim = 1.0 / (dim as f32).sqrt();
+        let polar = self.polar_packed(dim);
+        let qjl = self.qjl_packed(dim);
+
+        // Fused pass: accumulate ⟨n_hat, r_q⟩ and ⟨sign(e), r_q⟩ simultaneously
+        // without allocating an intermediate n_hat vector.
+        let mut polar_dot = 0.0f32;
+        let mut qjl_positive_sum = 0.0f32;
+        let mut qjl_total_sum = 0.0f32;
+
+        for i in 0..dim {
+            let rq_i = r_q[i];
+
+            // PolarQuant: dequantize 2-bit code inline
+            let code = (polar[i / 4] >> ((i % 4) * 2)) & 0x03;
+            polar_dot += scalar_dequantize(code) * inv_sqrt_dim * rq_i;
+
+            // QJL: accumulate signed dot product
+            qjl_total_sum += rq_i;
+            if (qjl[i / 8] >> (i % 8)) & 1 == 1 {
+                qjl_positive_sum += rq_i;
+            }
+        }
+
+        let qjl_signed_dot = 2.0 * qjl_positive_sum - qjl_total_sum;
+        let g_dot_r_q = polar_dot + h.qjl_scale * qjl_signed_dot;
 
         rabitq_distance_query(
             g_dot_r_q,
@@ -229,6 +238,9 @@ impl<T: AsRef<[u8]>> TurboQuantCode<T> {
     ///
     /// Reconstructs the combined `g` vectors from both codes and computes
     /// `⟨g_a, g_b⟩` for use in the shared distance formula.
+    ///
+    /// **Zero-allocation**: dequantizes each coordinate on the fly from both
+    /// packed code buffers, avoiding intermediate `Vec<f32>` allocations.
     pub fn distance_code(
         &self,
         other: &TurboQuantCode<impl AsRef<[u8]>>,
@@ -238,29 +250,29 @@ impl<T: AsRef<[u8]>> TurboQuantCode<T> {
     ) -> f32 {
         let ha = self.header();
         let hb = other.header();
+        let inv_sqrt_dim = 1.0 / (dim as f32).sqrt();
 
-        // Reconstruct g_a[i] = n_hat_a[i] + qjl_scale_a · sign(e_a)[i]
-        // Reconstruct g_b[i] = n_hat_b[i] + qjl_scale_b · sign(e_b)[i]
-        // Then compute ⟨g_a, g_b⟩ directly.
-        let n_hat_a = self.unpack_polar(dim);
-        let n_hat_b = other.unpack_polar(dim);
+        let polar_a = self.polar_packed(dim);
+        let polar_b = other.polar_packed(dim);
         let qjl_a = self.qjl_packed(dim);
         let qjl_b = other.qjl_packed(dim);
 
+        // Fused pass: reconstruct g_a[i] and g_b[i] inline and accumulate ⟨g_a, g_b⟩.
+        // g[i] = n_hat[i] + qjl_scale · sign(e)[i]
         let mut g_a_dot_g_b = 0.0f32;
         for i in 0..dim {
-            let sign_a = if (qjl_a[i / 8] >> (i % 8)) & 1 == 1 {
-                1.0f32
-            } else {
-                -1.0
-            };
-            let sign_b = if (qjl_b[i / 8] >> (i % 8)) & 1 == 1 {
-                1.0f32
-            } else {
-                -1.0
-            };
-            let ga = n_hat_a[i] + ha.qjl_scale * sign_a;
-            let gb = n_hat_b[i] + hb.qjl_scale * sign_b;
+            // PolarQuant: dequantize 2-bit codes inline
+            let code_a = (polar_a[i / 4] >> ((i % 4) * 2)) & 0x03;
+            let code_b = (polar_b[i / 4] >> ((i % 4) * 2)) & 0x03;
+            let nhat_a = scalar_dequantize(code_a) * inv_sqrt_dim;
+            let nhat_b = scalar_dequantize(code_b) * inv_sqrt_dim;
+
+            // QJL: extract sign bits
+            let sign_a = if (qjl_a[i / 8] >> (i % 8)) & 1 == 1 { 1.0f32 } else { -1.0 };
+            let sign_b = if (qjl_b[i / 8] >> (i % 8)) & 1 == 1 { 1.0f32 } else { -1.0 };
+
+            let ga = nhat_a + ha.qjl_scale * sign_a;
+            let gb = nhat_b + hb.qjl_scale * sign_b;
             g_a_dot_g_b += ga * gb;
         }
 
@@ -401,7 +413,7 @@ mod tests {
     use simsimd::SpatialSimilarity;
 
     use super::*;
-    use crate::quantization::Code;
+    use crate::quantization::{Code, QuantizedQuery};
 
     // ── Helper: generate random vectors near a centroid ──────────────────
 
@@ -726,14 +738,17 @@ mod tests {
                 for j in (i + 1)..sample_size {
                     let exact = exact_distance(&vectors[i], &vectors[j], &distance_fn);
 
-                    // Query-path distances (more common in practice)
+                    // Query-path distances (the search hot path in practice)
                     let q = &vectors[j];
                     let q_norm = (f32::dot(q, q).unwrap_or(0.0) as f32).sqrt();
                     let c_dot_q = f32::dot(&centroid, q).unwrap_or(0.0) as f32;
                     let r_q: Vec<f32> = centroid.iter().zip(q).map(|(c, q)| q - c).collect();
 
-                    let est_1bit =
-                        codes_1bit[i].distance_code(&codes_1bit[j], &distance_fn, c_norm, dim);
+                    // 1-bit: use the proper quantized-query path (AND+popcount)
+                    let padded_bytes = Code::<1, Vec<u8>>::packed_len(dim);
+                    let qq = QuantizedQuery::new(&r_q, padded_bytes, c_norm, c_dot_q, q_norm);
+                    let code_ref = Code::<1, _>::new(codes_1bit[i].as_ref());
+                    let est_1bit = code_ref.distance_quantized_query(&distance_fn, &qq);
                     let est_4bit =
                         codes_4bit[i].distance_query(&distance_fn, &r_q, c_norm, c_dot_q, q_norm);
                     let est_turbo = codes_turbo[i].distance_query(
