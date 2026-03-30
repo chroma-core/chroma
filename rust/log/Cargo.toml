@@ -18,6 +18,7 @@ serde_json = { workspace = true }
 bytemuck = { workspace = true }
 futures = { workspace = true }
 opentelemetry = { workspace = true }
+hyper = { workspace = true }
 
 chroma-tracing = { workspace = true, features = ["grpc"] }
 chroma-config = { workspace = true }

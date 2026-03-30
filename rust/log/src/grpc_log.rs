@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use chroma_config::assignment::assignment_policy::AssignmentPolicy;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
-use chroma_error::{ChromaError, ErrorCodes};
+use chroma_error::{source_chain_contains, ChromaError, ErrorCodes};
 use chroma_memberlist::client_manager::{
     ClientAssigner, ClientAssignmentError, ClientManager, ClientOptions, Tier,
 };
@@ -37,6 +37,26 @@ const BACKOFF_REASON_MD_KEY: &str = "backoff-reason";
 /// Extract the `backoff-reason` value from a `tonic::Status` metadata map.
 fn backoff_reason_from_status(status: &tonic::Status) -> Option<&str> {
     status.metadata().get(BACKOFF_REASON_MD_KEY)?.to_str().ok()
+}
+
+fn is_retryable_transport_status(status: &tonic::Status) -> bool {
+    match status.code() {
+        tonic::Code::Unavailable => true,
+        tonic::Code::Cancelled => {
+            source_chain_contains(status, |err| err.is::<tonic::transport::Error>())
+                && source_chain_contains(status, |err| {
+                    err.downcast_ref::<hyper::Error>()
+                        .map(|hyper_err| {
+                            hyper_err.is_canceled()
+                                || hyper_err.is_closed()
+                                || hyper_err.is_incomplete_message()
+                                || hyper_err.is_timeout()
+                        })
+                        .unwrap_or(false)
+                })
+        }
+        _ => false,
+    }
 }
 
 //////////////// Errors ////////////////
@@ -116,7 +136,13 @@ impl ChromaError for GrpcPushLogsError {
         match self {
             GrpcPushLogsError::Backoff => ErrorCodes::ResourceExhausted,
             GrpcPushLogsError::BackoffCompaction => ErrorCodes::ResourceExhausted,
-            GrpcPushLogsError::FailedToPushLogs(_) => ErrorCodes::Internal,
+            GrpcPushLogsError::FailedToPushLogs(status) => {
+                if is_retryable_transport_status(status) {
+                    ErrorCodes::Unavailable
+                } else {
+                    status.code().into()
+                }
+            }
             GrpcPushLogsError::ConversionError(_) => ErrorCodes::Internal,
             GrpcPushLogsError::Sealed => ErrorCodes::FailedPrecondition,
             GrpcPushLogsError::ClientAssignerError(e) => e.code(),
@@ -780,6 +806,26 @@ impl GrpcLog {
 mod tests {
     use super::*;
     use chroma_types::chroma_proto::CollectionInfo as ProtoCollectionInfo;
+
+    #[test]
+    fn grpc_push_logs_unavailable_stays_unavailable() {
+        let status = tonic::Status::unavailable("transport unavailable");
+
+        assert_eq!(
+            GrpcPushLogsError::FailedToPushLogs(status).code(),
+            ErrorCodes::Unavailable
+        );
+    }
+
+    #[test]
+    fn grpc_push_logs_plain_cancelled_stays_cancelled() {
+        let status = tonic::Status::cancelled("cancelled by caller");
+
+        assert_eq!(
+            GrpcPushLogsError::FailedToPushLogs(status).code(),
+            ErrorCodes::Cancelled
+        );
+    }
 
     #[test]
     fn post_process_get_all_returns_smaller_first_log_offset() {

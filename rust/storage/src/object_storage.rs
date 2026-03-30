@@ -3,13 +3,12 @@
 //!
 //! ## ETag Implementation Note
 //! The `UpdateVersion` struct is serialized to JSON and stored as an ETag string.
-use std::sync::Arc;
-use std::time::Duration;
+use std::{error::Error as StdError, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use chroma_config::{registry::Registry, Configurable};
-use chroma_error::ChromaError;
+use chroma_error::{source_chain_contains, ChromaError};
 use chroma_tracing::util::Stopwatch;
 use chroma_types::Cmek;
 use futures::stream::{self, StreamExt, TryStreamExt};
@@ -31,6 +30,26 @@ use crate::{
 };
 
 const GCP_CMEK_HEADER: &str = "x-goog-encryption-kms-key-name";
+const GCS_STORE_NAME: &str = "GCS";
+const GCS_TOO_MANY_REQUESTS_MESSAGE: &str =
+    "Server returned non-2xx status code: 429 Too Many Requests";
+const GCS_SLOWDOWN_CODE: &str = "<Code>SlowDown</Code>";
+const GCS_MUTATION_RATE_LIMIT_MESSAGE: &str = "rate limit for object mutation operations";
+
+fn is_gcs_backoff_message(message: &str) -> bool {
+    // object_store wraps GCS status/body failures in private retry types, so the
+    // formatted status/body text is the only stable signal exposed here.
+    //
+    // TODO(rescrv):  When object store gives a better error, match on something other than strings
+    message.contains(GCS_TOO_MANY_REQUESTS_MESSAGE)
+        || message.contains(GCS_SLOWDOWN_CODE)
+        || message.contains(GCS_MUTATION_RATE_LIMIT_MESSAGE)
+}
+
+fn is_gcs_backoff_error(store: &'static str, source: &(dyn StdError + 'static)) -> bool {
+    store == GCS_STORE_NAME
+        && source_chain_contains(source, |err| is_gcs_backoff_message(&err.to_string()))
+}
 
 #[derive(Debug)]
 struct HttpClientWrapper {
@@ -104,9 +123,15 @@ impl From<object_store::Error> for StorageError {
             object_store::Error::InvalidPath { source } => StorageError::Generic {
                 source: Arc::new(source),
             },
-            err @ object_store::Error::Generic { .. } => StorageError::Generic {
-                source: Arc::new(err),
-            },
+            object_store::Error::Generic { store, source } => {
+                if is_gcs_backoff_error(store, source.as_ref()) {
+                    StorageError::Backoff
+                } else {
+                    StorageError::Generic {
+                        source: Arc::new(object_store::Error::Generic { store, source }),
+                    }
+                }
+            }
             object_store::Error::JoinError { source } => StorageError::Generic {
                 source: Arc::new(source),
             },
@@ -117,6 +142,121 @@ impl From<object_store::Error> for StorageError {
                 source: Arc::new(err),
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{error::Error as StdError, fmt};
+
+    use super::*;
+
+    #[derive(Debug)]
+    struct FakeError {
+        message: &'static str,
+        source: Option<Box<dyn StdError + Send + Sync + 'static>>,
+    }
+
+    impl FakeError {
+        fn new(message: &'static str) -> Self {
+            Self {
+                message,
+                source: None,
+            }
+        }
+
+        fn with_source(
+            message: &'static str,
+            source: impl StdError + Send + Sync + 'static,
+        ) -> Self {
+            Self {
+                message,
+                source: Some(Box::new(source)),
+            }
+        }
+    }
+
+    impl fmt::Display for FakeError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "{}", self.message)
+        }
+    }
+
+    impl StdError for FakeError {
+        fn source(&self) -> Option<&(dyn StdError + 'static)> {
+            self.source
+                .as_deref()
+                .map(|err| err as &(dyn StdError + 'static))
+        }
+    }
+
+    fn generic_store_error(
+        store: &'static str,
+        source: impl StdError + Send + Sync + 'static,
+    ) -> object_store::Error {
+        object_store::Error::Generic {
+            store,
+            source: Box::new(source),
+        }
+    }
+
+    fn gcs_generic_error(source: impl StdError + Send + Sync + 'static) -> object_store::Error {
+        generic_store_error(GCS_STORE_NAME, source)
+    }
+
+    #[test]
+    fn test_gcs_generic_429_maps_to_backoff() {
+        let err = gcs_generic_error(FakeError::new(
+            "Server returned non-2xx status code: 429 Too Many Requests",
+        ));
+
+        assert!(matches!(StorageError::from(err), StorageError::Backoff));
+    }
+
+    #[test]
+    fn test_gcs_generic_slowdown_in_source_chain_maps_to_backoff() {
+        let err = gcs_generic_error(FakeError::with_source(
+            "retry exhausted",
+            FakeError::new(
+                "<?xml version='1.0'?><Error><Code>SlowDown</Code><Message>Please reduce your request rate.</Message></Error>",
+            ),
+        ));
+
+        assert!(matches!(StorageError::from(err), StorageError::Backoff));
+    }
+
+    #[test]
+    fn test_gcs_generic_mutation_rate_limit_message_maps_to_backoff() {
+        let err = gcs_generic_error(FakeError::new(
+            "Quota exceeded: rate limit for object mutation operations",
+        ));
+
+        assert!(matches!(StorageError::from(err), StorageError::Backoff));
+    }
+
+    #[test]
+    fn test_gcs_generic_non_throttling_error_stays_generic() {
+        let err = gcs_generic_error(FakeError::new(
+            "Server returned non-2xx status code: 503 Service Unavailable",
+        ));
+
+        assert!(matches!(
+            StorageError::from(err),
+            StorageError::Generic { .. }
+        ));
+    }
+
+    #[test]
+    fn test_non_gcs_429_stays_generic() {
+        let err = generic_store_error(
+            "Azure",
+            FakeError::new("Server returned non-2xx status code: 429 Too Many Requests"),
+        );
+
+        assert!(matches!(
+            StorageError::from(err),
+            StorageError::Generic { .. }
+        ));
     }
 }
 
