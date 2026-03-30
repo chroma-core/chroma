@@ -1,0 +1,85 @@
+
+with forked usearch
+cargo bench -p chroma-index --features chroma-index/usearch --bench usearch_rerank -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 1000000
+   Compiling usearch v2.24.0 (/home/ubuntu/USearch)
+   Compiling chroma-index v0.1.0 (/home/ubuntu/chroma/rust/index)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 32.73s
+     Running benches/usearch_rerank.rs (target/release/deps/usearch_rerank-6c7d8085e5b16f0f)
+Loading Wikipedia EN from HuggingFace Hub...
+Loading 1.00M vectors from wikipedia-en (dim=1024)...
+
+=== Centroid Rerank Sweep ===
+Dim: 1024 | Metric: L2 | Centroid bits: 1 | ef_search: 128
+Centroids: 1.00M | Queries: 200
+
+--- Bootstrap (1.00M centroids) ---
+Added 1.00M centroids in 4.1m (4051 vec/s)
+Cached to target/usearch_cache/bootstrap_WikipediaEn_1000000_L2_1.bin
+
+Loading cached ground truth from target/usearch_cache/gt_WikipediaEn_1000000_L2_200.bin ...
+
+=== Rerank Sweep (k=100) ===
+|  Rerank |      Fetch |   Recall@10 |  Recall@100 |    Avg lat |     search |      fetch |     rerank |
+|---------|------------|-------------|-------------|------------|------------|------------|------------|
+|     1x |        100 |      84.75% |      50.88% |    354.5µs |    354.5µs |        0ns |        0ns |
+|     2x |        200 |      90.50% |      68.18% |    638.8µs |    510.5µs |     20.4µs |    107.9µs |
+|     4x |        400 |      95.70% |      81.98% |     1.23ms |    982.1µs |     39.4µs |    209.9µs |
+|     8x |        800 |      98.20% |      91.25% |     2.37ms |     1.88ms |     73.3µs |    417.7µs |
+|    16x |       1600 |      99.20% |      96.07% |     4.74ms |     3.73ms |    138.9µs |    876.0µs |
+
+
+
+with normal usearch
+cargo bench -p chroma-index --bench usearch_rerank -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 1000000
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.34s
+     Running benches/usearch_rerank.rs (target/release/deps/usearch_rerank-686cc4beca39a120)
+Loading Wikipedia EN from HuggingFace Hub...
+Loading 1.00M vectors from wikipedia-en (dim=1024)...
+
+=== Centroid Rerank Sweep ===
+Dim: 1024 | Metric: L2 | Centroid bits: 1 | ef_search: 128 | Centroids: 1.00M | Queries: 200
+
+--- Loading cached index from target/usearch_cache/bootstrap_WikipediaEn_1000000_L2_1.bin ---
+Loaded 1000000 centroids from cache
+
+Loading cached ground truth from target/usearch_cache/gt_WikipediaEn_1000000_L2_200.bin ...
+
+=== Rerank Sweep (k=100) ===
+|  Rerank |      Fetch |   Recall@10 |  Recall@100 |    Avg lat |     search |      fetch |     rerank |
+|---------|------------|-------------|-------------|------------|------------|------------|------------|
+|     1x |        100 |      84.75% |      50.88% |    383.3µs |    383.3µs |        0ns |        0ns |
+|     2x |        200 |      90.50% |      68.18% |    647.6µs |    519.8µs |     20.2µs |    107.6µs |
+|     4x |        400 |      95.70% |      81.98% |     1.25ms |     1.00ms |     39.1µs |    209.8µs |
+|     8x |        800 |      98.20% |      91.25% |     2.39ms |     1.90ms |     71.3µs |    418.1µs |
+|    16x |       1600 |      99.20% |      96.07% |     4.82ms |     3.80ms |    139.1µs |    880.5µs |
+
+
+
+
+
+
+
+cargo bench -p chroma-index --bench centroid_rerank_sweep -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 10000
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.34s
+     Running benches/centroid_rerank_sweep.rs (target/release/deps/centroid_rerank_sweep-2dfc0467bd6bde1c)
+Loading Wikipedia EN from HuggingFace Hub...
+Loading 10.7K vectors from wikipedia-en (dim=1024)...
+
+=== Centroid Rerank Sweep ===
+Dim: 1024 | Metric: L2 | Centroid bits: 1 | ef_search: 128
+Centroids: 10.0K | Queries: 200
+
+--- Bootstrap (10.0K centroids) ---
+Added 10.0K centroids in 1.01s (9885 vec/s)
+Cached to target/usearch_cache/bootstrap_WikipediaEn_10000_L2_1.bin
+
+Computing brute-force ground truth...
+
+=== Rerank Sweep (k=100) ===
+|  Rerank |      Fetch |   Recall@10 |  Recall@100 |    Avg lat |
+|---------|------------|-------------|-------------|------------|
+|     1x |        100 |      97.30% |      62.85% |    115.1µs |
+|     2x |        200 |      99.15% |      82.61% |    251.3µs |
+|     4x |        400 |      99.85% |      93.83% |    480.8µs |
+|     8x |        800 |     100.00% |      98.41% |    886.3µs |
+|    16x |       1600 |     100.00% |      99.72% |     1.50ms |

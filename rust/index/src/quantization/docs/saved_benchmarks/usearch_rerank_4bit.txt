@@ -1,0 +1,26 @@
+cargo bench -p chroma-index --bench usearch_rerank -- --dataset wikipedia-en --centroid-bits 4 --initial-centroids 1000000
+   Compiling chroma-index v0.1.0 (/home/ubuntu/chroma/rust/index)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 19.63s
+     Running benches/usearch_rerank.rs (target/release/deps/usearch_rerank-686cc4beca39a120)
+Loading Wikipedia EN from HuggingFace Hub...
+Loading 1.00M vectors from wikipedia-en (dim=1024)...
+
+=== Centroid Rerank Sweep ===
+Dim: 1024 | Metric: L2 | Centroid bits: 4 | ef_search: 128
+Centroids: 1.00M | Queries: 200
+
+--- Loading cached index from target/usearch_cache/bootstrap_WikipediaEn_1000000_L2_4.bin ---
+Loaded 1000000 centroids from cache
+
+Computing brute-force ground truth...
+Cached ground truth to target/usearch_cache/gt_WikipediaEn_1000000_L2_200.bin
+
+=== Rerank Sweep (k=100) ===
+|  Rerank |      Fetch |   Recall@10 |  Recall@100 |    Avg lat |     search |      fetch |     rerank |
+|---------|------------|-------------|-------------|------------|------------|------------|------------|
+|     1x |        100 |      94.25% |      81.56% |     2.72ms |     2.72ms |        0ns |        0ns |
+|     2x |        200 |      96.15% |      89.45% |     3.99ms |     3.86ms |     22.3µs |    108.4µs |
+|     4x |        400 |      98.60% |      94.98% |     7.13ms |     6.87ms |     41.3µs |    213.6µs |
+|     8x |        800 |      99.65% |      97.80% |    13.15ms |    12.64ms |     75.6µs |    427.5µs |
+|    16x |       1600 |      99.85% |      99.17% |    24.32ms |    23.26ms |    150.2µs |    903.8µs |
+ubuntu@ip-172-31-75-166:~/chroma$

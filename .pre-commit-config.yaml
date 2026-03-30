@@ -36,6 +36,8 @@ repos:
     rev: "v1.10.0"
     hooks:
       - id: mypy
+        # Standalone bench script; not typed for strict mypy
+        exclude: ^rust/index/benches/scripts/compute_msmarco_ground_truth\.py$
         args:
           [
             --strict,

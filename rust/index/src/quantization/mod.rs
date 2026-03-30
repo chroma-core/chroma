@@ -86,9 +86,17 @@
 mod multi_bit;
 mod single_bit;
 
+use std::sync::Arc;
+
 use chroma_distance::DistanceFunction;
 
 pub struct Code<const BITS: u8, T = Vec<u8>>(T);
+
+impl<const BITS: u8, T> Code<BITS, T> {
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
 
 impl<const BITS: u8, T: AsRef<[u8]>> AsRef<[u8]> for Code<BITS, T> {
     fn as_ref(&self) -> &[u8] {
@@ -97,6 +105,27 @@ impl<const BITS: u8, T: AsRef<[u8]>> AsRef<[u8]> for Code<BITS, T> {
 }
 
 pub use single_bit::QuantizedQuery;
+
+// ── Runtime bit-width dispatch ────────────────────────────────────────────────
+
+pub fn code_size(bits: u8, dim: usize) -> usize {
+    match bits {
+        1 => Code::<1>::size(dim),
+        _ => Code::<4>::size(dim),
+    }
+}
+
+pub fn quantize(bits: u8, embedding: &[f32], centroid: &[f32]) -> Arc<[u8]> {
+    match bits {
+        1 => Code::<1>::quantize(embedding, centroid).as_ref().into(),
+        _ => Code::<4>::quantize(embedding, centroid).as_ref().into(),
+    }
+}
+
+/// Padded byte length of 1-bit codes for a given dimension (for building [`QuantizedQuery`]).
+pub fn packed_len_1bit(dim: usize) -> usize {
+    Code::<1>::packed_len(dim)
+}
 
 // ── Shared math helpers ───────────────────────────────────────────────────────
 //
@@ -180,5 +209,46 @@ pub(crate) fn rabitq_distance_code(
         }
         DistanceFunction::Euclidean => d_a_norm_sq + d_b_norm_sq - 2.0 * d_a_dot_d_b,
         DistanceFunction::InnerProduct => 1.0 - d_a_dot_d_b,
+    }
+}
+
+/// Public version of `rabitq_distance_code`.
+pub fn rabitq_distance_code_public(
+    g_a_dot_g_b: f32,
+    correction_a: f32,
+    norm_a: f32,
+    radial_a: f32,
+    correction_b: f32,
+    norm_b: f32,
+    radial_b: f32,
+    c_norm: f32,
+    distance_fn: &DistanceFunction,
+) -> f32 {
+    rabitq_distance_code(
+        g_a_dot_g_b,
+        correction_a,
+        norm_a,
+        radial_a,
+        correction_b,
+        norm_b,
+        radial_b,
+        c_norm,
+        distance_fn,
+    )
+}
+
+
+impl<const BITS: u8, T: AsRef<[u8]>> Code<BITS, T> {
+    /// Correction factor `⟨g, n⟩`.
+    pub fn correction(&self) -> f32 {
+        bytemuck::pod_read_unaligned::<f32>(&self.0.as_ref()[0..4])
+    }
+    /// Data residual norm `‖r‖`.
+    pub fn norm(&self) -> f32 {
+        bytemuck::pod_read_unaligned::<f32>(&self.0.as_ref()[4..8])
+    }
+    /// Radial component `⟨r, c⟩`.
+    pub fn radial(&self) -> f32 {
+        bytemuck::pod_read_unaligned::<f32>(&self.0.as_ref()[8..12])
     }
 }

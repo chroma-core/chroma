@@ -1,0 +1,532 @@
+RUSTFLAGS="-C target-cpu=native" cargo bench -p chroma-index --bench quantization_performance
+
+                             ] per-call; 4-bit ray-walk codes
+quantize/quant-4bit/1024
+                        time:   [51.776 µs 51.795 µs 51.826 µs]
+                        thrpt:  [150.74 MiB/s 150.83 MiB/s 150.89 MiB/s]
+
+  [quant-1bit/1024                                 ] per-call; sign-bit codes
+quantize/quant-1bit/1024
+                        time:   [1.0664 µs 1.0665 µs 1.0666 µs]
+                        thrpt:  [7.1533 GiB/s 7.1539 GiB/s 7.1544 GiB/s]
+
+
+  [quant-query/1024                                ] per-call; residual alloc + c_dot_q + q_norm + QuantizedQuery::new
+quantize/quant-query/1024
+                        time:   [4.7667 µs 4.7669 µs 4.7672 µs]
+                        thrpt:  [819.41 MiB/s 819.45 MiB/s 819.49 MiB/s]
+
+
+
+quantize_scan/quant-4bit/1024
+                        time:   [82.222 µs 82.552 µs 83.297 µs]
+                        thrpt:  [93.791 MiB/s 94.638 MiB/s 95.018 MiB/s]
+
+quantize_scan/quant-1bit/1024
+                        time:   [1.0412 µs 1.0413 µs 1.0415 µs]
+                        thrpt:  [7.3256 GiB/s 7.3265 GiB/s 7.3274 GiB/s]
+
+quantize_scan/quant-query/1024
+                        time:   [4.7923 µs 4.7960 µs 4.8010 µs]
+                        thrpt:  [813.64 MiB/s 814.49 MiB/s 815.11 MiB/s]
+
+
+  [dc-1bit/1024                                    ] per-call; simsimd hamming (NEON CNT / AVX-512 VPOPCNTDQ)
+distance/dc-1bit/1024   time:   [38.391 ns 38.425 ns 38.457 ns]
+                        thrpt:  [6.9745 GiB/s 6.9803 GiB/s 6.9866 GiB/s]
+
+  [dc-1bit/simsimd_hamming/1024                    ] per-call; <u8 as BinarySimilarity>::hamming (SIMD popcount)
+distance/dc-1bit/simsimd_hamming/1024
+                        time:   [5.6612 ns 5.6685 ns 5.6758 ns]
+                        thrpt:  [47.257 GiB/s 47.317 GiB/s 47.379 GiB/s]
+
+  [dc-1bit/rabitq_distance_code/1024               ] per-call; rabitq_distance_code
+distance/dc-1bit/rabitq_distance_code/1024
+                        time:   [2.6615 ns 2.6619 ns 2.6625 ns]
+                        thrpt:  [100.74 GiB/s 100.76 GiB/s 100.78 GiB/s]
+
+
+  [dc-4bit/1024                                    ] per-call; nibble unpack + dot
+distance/dc-4bit/1024   time:   [575.31 ns 575.45 ns 575.62 ns]
+                        thrpt:  [1.6956 GiB/s 1.6961 GiB/s 1.6965 GiB/s]
+
+  [dq-fp/1024                                      ] per-call; DistanceFunction::distance f32*f32 (ground truth)
+distance/dq-fp/1024     time:   [73.631 ns 73.670 ns 73.711 ns]
+                        thrpt:  [103.50 GiB/s 103.56 GiB/s 103.62 GiB/s]
+
+
+  [dq-4f/1024                                      ] per-call; grid unpack + f32 dot (reference quality ceiling)
+distance/dq-4f/1024     time:   [330.08 ns 330.10 ns 330.13 ns]
+                        thrpt:  [13.033 GiB/s 13.034 GiB/s 13.035 GiB/s]
+
+  [dq-bw/1024                                      ] per-call; QuantizedQuery built once, AND+popcount (§3.3.1)
+distance/dq-bw/1024     time:   [21.767 ns 21.770 ns 21.774 ns]
+                        thrpt:  [28.059 GiB/s 28.063 GiB/s 28.067 GiB/s]
+
+
+  [dq-fp/scan                                      ] per-call avg over 100000 vectors @ dim=1024; DistanceFunction::distance f32*f32 (ground truth)
+distance_scan/dq-fp/scan
+                        time:   [319.23 ns 319.29 ns 319.36 ns]
+                        thrpt:  [11.945 GiB/s 11.947 GiB/s 11.950 GiB/s]
+
+  dq-fp/scan iterations: 32427165
+  [dq-4f/scan                                      ] per-call avg over 100000 codes @ dim=1024; grid unpack + f32 dot (quality ceiling)
+distance_scan/dq-4f/scan
+                        time:   [365.49 ns 365.54 ns 365.60 ns]
+                        thrpt:  [1.3348 GiB/s 1.3350 GiB/s 1.3352 GiB/s]
+
+  dq-4f/scan iterations: 22053907
+  [dq-bw/scan                                      ] per-call avg over 100000 codes @ dim=1024; QuantizedQuery built once, AND+popcount (§3.3.1)
+distance_scan/dq-bw/scan
+                        time:   [25.493 ns 25.496 ns 25.500 ns]
+                        thrpt:  [5.2593 GiB/s 5.2600 GiB/s 5.2607 GiB/s]
+
+  dq-bw/scan iterations: 328501327
+  [dc-1bit/scan                                    ] per-pair avg over 50000 pairs @ dim=1024; simsimd hamming code-vs-code
+distance_scan/dc-1bit/scan
+                        time:   [20.148 ns 20.156 ns 20.164 ns]
+                        thrpt:  [13.302 GiB/s 13.307 GiB/s 13.313 GiB/s]
+
+  dc-1bit/scan iterations: 523273605
+  [dc-1bit/scan/simsimd_hamming                    ] per-pair avg over 50000 pairs @ dim=1024; <u8 as BinarySimilarity>::hamming
+distance_scan/dc-1bit/scan/simsimd_hamming
+                        time:   [12.322 ns 12.323 ns 12.324 ns]
+                        thrpt:  [21.763 GiB/s 21.766 GiB/s 21.768 GiB/s]
+
+  dc-1bit/scan/simsimd_hamming iterations: 674975605
+  [dc-1bit/scan/rabitq_distance_code               ] per-pair avg over 50000 pairs @ dim=1024; rabitq_distance_code
+distance_scan/dc-1bit/scan/rabitq_distance_code
+                        time:   [9.9137 ns 9.9145 ns 9.9155 ns]
+                        thrpt:  [27.051 GiB/s 27.053 GiB/s 27.056 GiB/s]
+
+  dc-1bit/scan/rabitq_distance_code iterations: 1041027561
+  [dc-4bit/scan                                    ] per-pair avg over 50000 pairs @ dim=1024; nibble unpack + dot code-vs-code
+distance_scan/dc-4bit/scan
+                        time:   [620.14 ns 620.22 ns 620.32 ns]
+                        thrpt:  [1.5734 GiB/s 1.5737 GiB/s 1.5739 GiB/s]
+
+  dc-4bit/scan iterations: 16463557
+
+  [quant-4bit/1t                                   ] 1024 embeddings → 4-bit, 1 thread(s)
+Benchmarking thread_scaling/quant-4bit/1: Warming up for 3.0000 s
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 8.4s, or reduce sample count to 50.
+thread_scaling/quant-4bit/1
+                        time:   [84.064 ms 84.075 ms 84.086 ms]
+                        thrpt:  [47.570 MiB/s 47.576 MiB/s 47.583 MiB/s]
+
+  [quant-1bit/1t                                   ] 1024 embeddings → 1-bit, 1 thread(s)
+Benchmarking thread_scaling/quant-1bit/1: Warming up for 3.0000 s
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 6.0s, enable flat sampling, or reduce sample count to 60.
+thread_scaling/quant-1bit/1
+                        time:   [1.1870 ms 1.1896 ms 1.1922 ms]
+                        thrpt:  [3.2766 GiB/s 3.2837 GiB/s 3.2909 GiB/s]
+
+
+  [dq-4f/1t                                        ] 1024 cold 4-bit queries, 1 thread(s)
+thread_scaling/dq-4f/1  time:   [2.9265 ms 2.9297 ms 2.9334 ms]
+                        thrpt:  [1.5020 GiB/s 1.5039 GiB/s 1.5056 GiB/s]
+
+
+  [dq-bw/1t                                        ] 1024 cold 1-bit queries (AND+popcount §3.3.1), 1 thread(s)
+thread_scaling/dq-bw/1  time:   [4.8278 ms 4.8305 ms 4.8340 ms]
+                        thrpt:  [933.33 MiB/s 934.00 MiB/s 934.54 MiB/s]
+
+  [quant-4bit/2t                                   ] 1024 embeddings → 4-bit, 2 thread(s)
+thread_scaling/quant-4bit/2
+                        time:   [42.503 ms 42.544 ms 42.588 ms]
+                        thrpt:  [93.923 MiB/s 94.019 MiB/s 94.112 MiB/s]
+
+
+  [quant-1bit/2t                                   ] 1024 embeddings → 1-bit, 2 thread(s)
+thread_scaling/quant-1bit/2
+                        time:   [639.76 µs 642.97 µs 646.16 µs]
+                        thrpt:  [6.0454 GiB/s 6.0754 GiB/s 6.1058 GiB/s]
+
+
+  [dq-4f/2t                                        ] 1024 cold 4-bit queries, 2 thread(s)
+Benchmarking thread_scaling/dq-4f/2: Warming up for 3.0000 s
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 8.4s, enable flat sampling, or reduce sample count to 50.
+thread_scaling/dq-4f/2  time:   [1.6512 ms 1.6649 ms 1.6786 ms]
+                        thrpt:  [2.6248 GiB/s 2.6464 GiB/s 2.6683 GiB/s]
+
+  [dq-bw/2t                                        ] 1024 cold 1-bit queries (AND+popcount §3.3.1), 2 thread(s)
+thread_scaling/dq-bw/2  time:   [2.6424 ms 2.6621 ms 2.6811 ms]
+                        thrpt:  [1.6433 GiB/s 1.6551 GiB/s 1.6674 GiB/s]
+  [quant-4bit/4t                                   ] 1024 embeddings → 4-bit, 4 thread(s)
+thread_scaling/quant-4bit/4
+                        time:   [21.949 ms 21.989 ms 22.031 ms]
+                        thrpt:  [181.57 MiB/s 181.91 MiB/s 182.24 MiB/s]
+
+  [quant-1bit/4t                                   ] 1024 embeddings → 1-bit, 4 thread(s)
+thread_scaling/quant-1bit/4
+                        time:   [428.61 µs 434.76 µs 441.13 µs]
+                        thrpt:  [8.8550 GiB/s 8.9847 GiB/s 9.1137 GiB/s]
+
+  [dq-4f/4t                                        ] 1024 cold 4-bit queries, 4 thread(s)
+thread_scaling/dq-4f/4  time:   [942.11 µs 947.48 µs 953.00 µs]
+                        thrpt:  [4.6233 GiB/s 4.6502 GiB/s 4.6767 GiB/s]
+
+
+  [dq-bw/4t                                        ] 1024 cold 1-bit queries (AND+popcount §3.3.1), 4 thread(s)
+Benchmarking thread_scaling/dq-bw/4: Warming up for 3.0000 s
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 7.1s, enable flat sampling, or reduce sample count to 50.
+thread_scaling/dq-bw/4  time:   [1.3978 ms 1.4135 ms 1.4293 ms]
+                        thrpt:  [3.0827 GiB/s 3.1171 GiB/s 3.1520 GiB/s]
+
+  [quant-4bit/8t                                   ] 1024 embeddings → 4-bit, 8 thread(s)
+thread_scaling/quant-4bit/8
+                        time:   [11.674 ms 11.730 ms 11.783 ms]
+                        thrpt:  [339.47 MiB/s 340.99 MiB/s 342.64 MiB/s]
+
+
+  [quant-1bit/8t                                   ] 1024 embeddings → 1-bit, 8 thread(s)
+thread_scaling/quant-1bit/8
+                        time:   [159.36 µs 159.40 µs 159.45 µs]
+                        thrpt:  [24.499 GiB/s 24.505 GiB/s 24.512 GiB/s]
+
+  [dq-4f/8t                                        ] 1024 cold 4-bit queries, 8 thread(s)
+thread_scaling/dq-4f/8  time:   [594.95 µs 605.77 µs 615.52 µs]
+                        thrpt:  [7.1582 GiB/s 7.2733 GiB/s 7.4056 GiB/s]
+
+  [dq-bw/8t                                        ] 1024 cold 1-bit queries (AND+popcount §3.3.1), 8 thread(s)
+thread_scaling/dq-bw/8  time:   [848.22 µs 857.54 µs 866.90 µs]
+                        thrpt:  [5.0824 GiB/s 5.1379 GiB/s 5.1944 GiB/s]
+
+
+
+
+  [quant-4bit/16t                                  ] 1024 embeddings → 4-bit, 16 thread(s)
+thread_scaling/quant-4bit/16
+                        time:   [6.8978 ms 6.9392 ms 6.9799 ms]
+                        thrpt:  [573.07 MiB/s 576.44 MiB/s 579.89 MiB/s]
+
+  [quant-1bit/16t                                  ] 1024 embeddings → 1-bit, 16 thread(s)
+thread_scaling/quant-1bit/16
+                        time:   [296.04 µs 341.69 µs 382.11 µs]
+                        thrpt:  [10.223 GiB/s 11.432 GiB/s 13.195 GiB/s]
+
+  [dq-4f/16t                                       ] 1024 cold 4-bit queries, 16 thread(s)
+thread_scaling/dq-4f/16 time:   [220.04 µs 232.10 µs 250.17 µs]
+                        thrpt:  [17.612 GiB/s 18.983 GiB/s 20.023 GiB/s]
+  [dq-bw/16t                                       ] 1024 cold 1-bit queries (AND+popcount §3.3.1), 16 thread(s)
+thread_scaling/dq-bw/16 time:   [708.04 µs 718.55 µs 728.80 µs]
+                        thrpt:  [6.0455 GiB/s 6.1318 GiB/s 6.2228 GiB/s]
+
+  [quant-4bit/32t                                  ] 1024 embeddings → 4-bit, 32 thread(s)
+thread_scaling/quant-4bit/32
+                        time:   [4.9993 ms 5.0643 ms 5.1293 ms]
+                        thrpt:  [779.83 MiB/s 789.84 MiB/s 800.11 MiB/s]
+
+
+  [quant-1bit/32t                                  ] 1024 embeddings → 1-bit, 32 thread(s)
+thread_scaling/quant-1bit/32
+                        time:   [84.540 µs 84.596 µs 84.661 µs]
+                        thrpt:  [46.140 GiB/s 46.175 GiB/s 46.206 GiB/s]
+
+  [dq-4f/32t                                       ] 1024 cold 4-bit queries, 32 thread(s)
+thread_scaling/dq-4f/32 time:   [157.04 µs 157.11 µs 157.20 µs]
+                        thrpt:  [28.028 GiB/s 28.044 GiB/s 28.057 GiB/s]
+
+
+  [dq-bw/32t                                       ] 1024 cold 1-bit queries (AND+popcount §3.3.1), 32 thread(s)
+thread_scaling/dq-bw/32 time:   [193.73 µs 194.17 µs 194.78 µs]
+                        thrpt:  [22.620 GiB/s 22.691 GiB/s 22.743 GiB/s]
+
+  [quant-1bit/vec_sub/1024                         ] r = emb − centroid  [reference: 8 KB read baseline, not used in fused path]
+primitives/quant-1bit/vec_sub/1024
+                        time:   [133.78 ns 133.80 ns 133.82 ns]
+                        thrpt:  [57.014 GiB/s 57.022 GiB/s 57.029 GiB/s]
+
+  [quant-1bit/simsimd_dot/1024                     ] ⟨a, b⟩ via simsimd  [reference: SIMD ceiling for a single dot product]
+primitives/quant-1bit/simsimd_dot/1024
+                        time:   [72.844 ns 72.849 ns 72.855 ns]
+                        thrpt:  [104.72 GiB/s 104.73 GiB/s 104.74 GiB/s]
+
+  [quant-1bit/abs_sum/1024                         ] Σ|r[i]| single accumulator (sequential dep chain, does NOT auto-vectorize)
+primitives/quant-1bit/abs_sum/1024
+                        time:   [1.1212 µs 1.1213 µs 1.1214 µs]
+                        thrpt:  [3.4019 GiB/s 3.4021 GiB/s 3.4022 GiB/s]
+
+
+  [quant-1bit/fused_reductions/1024                ] sub + abs_sum + norm² + radial, dual accumulators over chunks_exact(16)
+primitives/quant-1bit/fused_reductions/1024
+                        time:   [675.76 ns 675.80 ns 675.84 ns]
+                        thrpt:  [11.289 GiB/s 11.289 GiB/s 11.290 GiB/s]
+
+
+  [quant-1bit/sign_pack/1024                       ] sign-bit extract + byte pack via chunks_exact(16), 16 f32 → 2 bytes
+primitives/quant-1bit/sign_pack/1024
+                        time:   [318.47 ns 318.50 ns 318.52 ns]
+                        thrpt:  [11.976 GiB/s 11.977 GiB/s 11.978 GiB/s]
+
+  [quant-1bit/popcount/1024                        ] u64 popcount over packed bytes  [quantize: signed_sum]
+primitives/quant-1bit/popcount/1024
+                        time:   [2.5941 ns 2.5942 ns 2.5944 ns]
+                        thrpt:  [45.949 GiB/s 45.952 GiB/s 45.955 GiB/s]
+
+
+  [dc-1bit/hamming/scalar/1024                     ] scalar u64 XOR + POPCNT  [distance_code kernel, baseline]
+primitives/dc-1bit/hamming/scalar/1024
+                        time:   [13.227 ns 13.227 ns 13.228 ns]
+                        thrpt:  [18.023 GiB/s 18.025 GiB/s 18.026 GiB/s]
+
+
+  [dc-1bit/hamming/simsimd/1024                    ] simsimd::BinarySimilarity::hamming (NEON CNT / AVX-512 VPOPCNTDQ)  [C1]
+primitives/dc-1bit/hamming/simsimd/1024
+                        time:   [4.7553 ns 4.7555 ns 4.7558 ns]
+                        thrpt:  [50.132 GiB/s 50.135 GiB/s 50.138 GiB/s]
+
+
+  [dq-bw/and_popcount/sequential/1024              ] 4 sequential passes over x_b (baseline)  [distance_query_bitwise kernel]
+primitives/dq-bw/and_popcount/sequential/1024
+                        time:   [59.277 ns 59.280 ns 59.283 ns]
+                        thrpt:  [10.054 GiB/s 10.055 GiB/s 10.055 GiB/s]
+
+
+  [dq-bw/and_popcount/interleaved/1024             ] [B1] 1 pass over x_b, 4 planes per word  [distance_query_bitwise kernel]
+primitives/dq-bw/and_popcount/interleaved/1024
+                        time:   [43.010 ns 43.020 ns 43.030 ns]
+                        thrpt:  [13.852 GiB/s 13.855 GiB/s 13.858 GiB/s]
+
+  [dq-bw/and_popcount/chunks/1024                  ] [B2] chunks_exact(8) — eliminates index bounds check  [distance_query_bitwise kernel]
+primitives/dq-bw/and_popcount/chunks/1024
+                        time:   [15.782 ns 15.783 ns 15.785 ns]
+                        thrpt:  [37.761 GiB/s 37.764 GiB/s 37.767 GiB/s]
+
+  [dq-bw/and_popcount/interleaved_chunks/1024      ] [B1+B2] interleaved + chunks_exact  [distance_query_bitwise kernel]
+primitives/dq-bw/and_popcount/interleaved_chunks/1024
+                        time:   [13.417 ns 13.418 ns 13.419 ns]
+                        thrpt:  [44.418 GiB/s 44.422 GiB/s 44.426 GiB/s]
+
+
+  [quant-query/min_max/two_pass/1024               ] two separate fold passes for min and max (baseline)
+primitives/quant-query/min_max/two_pass/1024
+                        time:   [152.47 ns 152.47 ns 152.48 ns]
+                        thrpt:  [25.017 GiB/s 25.019 GiB/s 25.020 GiB/s]
+
+  [quant-query/min_max/fused/1024                  ] [P1] single fold pass for min+max simultaneously
+primitives/quant-query/min_max/fused/1024
+                        time:   [2.0395 µs 2.0396 µs 2.0398 µs]
+                        thrpt:  [1.8702 GiB/s 1.8703 GiB/s 1.8704 GiB/s]
+
+
+  [quant-query/quantize_elements/1024              ] round((v-v_l)/delta), clamp to 0..15 — allocates Vec<u32>  [baseline]
+primitives/quant-query/quantize_elements/1024
+                        time:   [1.5420 µs 1.5422 µs 1.5423 µs]
+                        thrpt:  [2.4733 GiB/s 2.4736 GiB/s 2.4738 GiB/s]
+
+
+  [quant-query/bit_plane_decompose/baseline/1024   ] 4 × Vec alloc + scatter with branch  [baseline]
+primitives/quant-query/bit_plane_decompose/baseline/1024
+                        time:   [2.8555 µs 2.8573 µs 2.8596 µs]
+                        thrpt:  [1.3340 GiB/s 1.3351 GiB/s 1.3359 GiB/s]
+
+  [quant-query/bit_plane_decompose/flat_alloc/1024 ] [P4] 1 flat Vec alloc + scatter with branch
+primitives/quant-query/bit_plane_decompose/flat_alloc/1024
+                        time:   [3.2957 µs 3.2959 µs 3.2962 µs]
+                        thrpt:  [1.1573 GiB/s 1.1574 GiB/s 1.1575 GiB/s]
+
+
+  [quant-query/bit_plane_decompose/byte_chunks/1024] [P4+] flat alloc + process 8 elements→1 byte per plane
+primitives/quant-query/bit_plane_decompose/byte_chunks/1024
+                        time:   [1.2789 µs 1.2790 µs 1.2790 µs]
+                        thrpt:  [2.9825 GiB/s 2.9827 GiB/s 2.9828 GiB/s]
+
+
+  [quant-query/full/fused/1024                     ] [P1+P2+P4] single pass: fused min/max + quantize + scatter, flat alloc
+primitives/quant-query/full/fused/1024
+                        time:   [5.9097 µs 5.9103 µs 5.9110 µs]
+                        thrpt:  [660.84 MiB/s 660.92 MiB/s 660.99 MiB/s]
+
+
+  [quant-query/full/two_pass_fused/1024            ] [P2+P4] two-pass min/max + fused quantize+sum+scatter via chunks_exact(8)
+primitives/quant-query/full/two_pass_fused/1024
+                        time:   [2.2307 µs 2.2308 µs 2.2310 µs]
+                        thrpt:  [1.7099 GiB/s 1.7100 GiB/s 1.7101 GiB/s]
+
+
+  [quant-1bit/full/1024                            ] Code::<1>::quantize end-to-end  [compare vs sum of primitives]
+primitives/quant-1bit/full/1024
+                        time:   [1.0206 µs 1.0206 µs 1.0207 µs]
+                        thrpt:  [7.4747 GiB/s 7.4751 GiB/s 7.4755 GiB/s]
+
+  [quant-query/full/1024                           ] QuantizedQuery::new alone, single vector, hot cache. Lower latency than quantize/quant-query (which includes residual alloc + c_dot_q + q_norm + cache-cold batch effects).
+primitives/quant-query/full/1024
+                        time:   [2.2263 µs 2.2265 µs 2.2267 µs]
+                        thrpt:  [1.7132 GiB/s 1.7133 GiB/s 1.7135 GiB/s]
+
+
+thread_scaling/quant-4bit/1
+                        time:   [84.851 µs 84.976 µs 85.111 µs]
+                        thrpt:  [45.896 MiB/s 45.969 MiB/s 46.037 MiB/s]
+                 change:
+                        time:   [−99.902% −99.902% −99.902%] (p = 0.00 < 0.05)
+                        thrpt:  [+102026% +102212% +102402%]
+                        Performance has improved.
+Found 4 outliers among 100 measurements (4.00%)
+  2 (2.00%) high mild
+  2 (2.00%) high severe
+Benchmarking thread_scaling/quant-1bit/1: Warming up for 3.0000 s
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 6.3s, enable flat sampling, or reduce sample count to 60.
+thread_scaling/quant-1bit/1
+                        time:   [1.0821 µs 1.0827 µs 1.0833 µs]
+                        thrpt:  [3.5214 GiB/s 3.5235 GiB/s 3.5253 GiB/s]
+                 change:
+                        time:   [+0.2842% +0.3917% +0.4993%] (p = 0.00 < 0.05)
+                        thrpt:  [−0.4968% −0.3902% −0.2834%]
+                        Change within noise threshold.
+Found 5 outliers among 100 measurements (5.00%)
+  2 (2.00%) high mild
+  3 (3.00%) high severe
+thread_scaling/dq-4f/1  time:   [2.8325 µs 2.8337 µs 2.8349 µs]
+                        thrpt:  [1.5177 GiB/s 1.5184 GiB/s 1.5190 GiB/s]
+                 change:
+                        time:   [−99.903% −99.903% −99.903%] (p = 0.00 < 0.05)
+                        thrpt:  [+103098% +103197% +103309%]
+                        Performance has improved.
+thread_scaling/dq-bw/1  time:   [4.6346 µs 4.6357 µs 4.6369 µs]
+                        thrpt:  [950.20 MiB/s 950.45 MiB/s 950.66 MiB/s]
+                 change:
+                        time:   [−99.905% −99.905% −99.904%] (p = 0.00 < 0.05)
+                        thrpt:  [+104496% +104634% +104780%]
+                        Performance has improved.
+Found 11 outliers among 100 measurements (11.00%)
+  4 (4.00%) high mild
+  7 (7.00%) high severe
+thread_scaling/dc-1bit/1
+                        time:   [54.336 ns 54.372 ns 54.413 ns]
+                        thrpt:  [4.9293 GiB/s 4.9330 GiB/s 4.9363 GiB/s]
+                 change:
+                        time:   [−99.531% −99.530% −99.530%] (p = 0.00 < 0.05)
+                        thrpt:  [+21173% +21193% +21217%]
+                        Performance has improved.
+Found 4 outliers among 100 measurements (4.00%)
+  4 (4.00%) low mild
+thread_scaling/dc-4bit/1
+                        time:   [623.07 ns 623.67 ns 624.28 ns]
+                        thrpt:  [1.5634 GiB/s 1.5650 GiB/s 1.5665 GiB/s]
+                 change:
+                        time:   [−99.834% −99.833% −99.832%] (p = 0.00 < 0.05)
+                        thrpt:  [+59499% +59744% +59999%]
+                        Performance has improved.
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+thread_scaling/quant-4bit/16
+                        time:   [83.505 µs 83.527 µs 83.548 µs]
+                        thrpt:  [46.754 MiB/s 46.767 MiB/s 46.779 MiB/s]
+                 change:
+                        time:   [−98.789% −98.781% −98.774%] (p = 0.00 < 0.05)
+                        thrpt:  [+8053.9% +8104.6% +8154.9%]
+                        Performance has improved.
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+thread_scaling/quant-1bit/16
+                        time:   [1.5147 µs 1.5628 µs 1.6070 µs]
+                        thrpt:  [2.3738 GiB/s 2.4409 GiB/s 2.5184 GiB/s]
+                 change:
+                        time:   [−12.484% −7.3506% −2.4093%] (p = 0.01 < 0.05)
+                        thrpt:  [+2.4688% +7.9338% +14.265%]
+                        Performance has improved.
+thread_scaling/dq-4f/16 time:   [3.0016 µs 3.0047 µs 3.0082 µs]
+                        thrpt:  [1.4303 GiB/s 1.4320 GiB/s 1.4335 GiB/s]
+                 change:
+                        time:   [−99.536% −99.527% −99.517%] (p = 0.00 < 0.05)
+                        thrpt:  [+20602% +21040% +21447%]
+                        Performance has improved.
+Found 10 outliers among 100 measurements (10.00%)
+  3 (3.00%) high mild
+  7 (7.00%) high severe
+thread_scaling/dq-bw/16 time:   [4.6403 µs 4.6414 µs 4.6423 µs]
+                        thrpt:  [949.09 MiB/s 949.28 MiB/s 949.50 MiB/s]
+                 change:
+                        time:   [−98.589% −98.585% −98.583%] (p = 0.00 < 0.05)
+                        thrpt:  [+6957.7% +6968.0% +6986.0%]
+                        Performance has improved.
+Found 12 outliers among 100 measurements (12.00%)
+  4 (4.00%) low severe
+  6 (6.00%) low mild
+  2 (2.00%) high severe
+thread_scaling/dc-1bit/16
+                        time:   [56.785 ns 56.829 ns 56.892 ns]
+                        thrpt:  [4.7146 GiB/s 4.7198 GiB/s 4.7235 GiB/s]
+                 change:
+                        time:   [−99.796% −99.795% −99.795%] (p = 0.00 < 0.05)
+                        thrpt:  [+48590% +48695% +48833%]
+                        Performance has improved.
+Found 6 outliers among 100 measurements (6.00%)
+  1 (1.00%) low severe
+  2 (2.00%) low mild
+  1 (1.00%) high mild
+  2 (2.00%) high severe
+thread_scaling/dc-4bit/16
+                        time:   [644.47 ns 645.43 ns 646.73 ns]
+                        thrpt:  [1.5092 GiB/s 1.5122 GiB/s 1.5145 GiB/s]
+                 change:
+                        time:   [−98.596% −98.592% −98.587%] (p = 0.00 < 0.05)
+                        thrpt:  [+6976.9% +6999.8% +7023.2%]
+                        Performance has improved.
+Found 11 outliers among 100 measurements (11.00%)
+  1 (1.00%) low severe
+  1 (1.00%) low mild
+  4 (4.00%) high mild
+  5 (5.00%) high severe
+Benchmarking thread_scaling/quant-4bit/32: Collecting 100 samples in estimated 5.3972 s (1100 iterations
+thread_scaling/quant-4bit/32
+                        time:   [94.538 µs 94.646 µs 94.760 µs]
+                        thrpt:  [41.222 MiB/s 41.272 MiB/s 41.319 MiB/s]
+                 change:
+                        time:   [−98.132% −98.107% −98.082%] (p = 0.00 < 0.05)
+                        thrpt:  [+5113.3% +5183.6% +5253.4%]
+                        Performance has improved.
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+thread_scaling/quant-1bit/32
+                        time:   [1.1073 µs 1.1076 µs 1.1079 µs]
+                        thrpt:  [3.4431 GiB/s 3.4440 GiB/s 3.4449 GiB/s]
+                 change:
+                        time:   [−0.1974% −0.1044% −0.0078%] (p = 0.03 < 0.05)
+                        thrpt:  [+0.0078% +0.1045% +0.1978%]
+                        Change within noise threshold.
+Found 10 outliers among 100 measurements (10.00%)
+  2 (2.00%) low severe
+  3 (3.00%) low mild
+  2 (2.00%) high mild
+  3 (3.00%) high severe
+thread_scaling/dq-4f/32 time:   [3.0762 µs 3.0774 µs 3.0786 µs]
+                        thrpt:  [1.3976 GiB/s 1.3982 GiB/s 1.3987 GiB/s]
+                 change:
+                        time:   [−98.038% −98.035% −98.032%] (p = 0.00 < 0.05)
+                        thrpt:  [+4981.4% +4988.6% +4996.4%]
+                        Performance has improved.
+Found 5 outliers among 100 measurements (5.00%)
+  1 (1.00%) low mild
+  3 (3.00%) high mild
+  1 (1.00%) high severe
+thread_scaling/dq-bw/32 time:   [4.8044 µs 4.8060 µs 4.8076 µs]
+                        thrpt:  [916.45 MiB/s 916.77 MiB/s 917.07 MiB/s]
+                 change:
+                        time:   [−97.585% −97.581% −97.574%] (p = 0.00 < 0.05)
+                        thrpt:  [+4022.6% +4033.7% +4040.7%]
+                        Performance has improved.
+Found 5 outliers among 100 measurements (5.00%)
+  2 (2.00%) low mild
+  1 (1.00%) high mild
+  2 (2.00%) high severe
+thread_scaling/dc-1bit/32
+                        time:   [61.015 ns 61.046 ns 61.078 ns]
+                        thrpt:  [4.3914 GiB/s 4.3938 GiB/s 4.3960 GiB/s]
+                 change:
+                        time:   [−99.870% −99.870% −99.870%] (p = 0.00 < 0.05)
+                        thrpt:  [+76771% +76883% +76989%]
+                        Performance has improved.
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high severe
+thread_scaling/dc-4bit/32
+                        time:   [655.80 ns 656.93 ns 658.34 ns]
+                        thrpt:  [1.4826 GiB/s 1.4857 GiB/s 1.4883 GiB/s]
+                 change:
+                        time:   [−98.833% −98.830% −98.827%] (p = 0.00 < 0.05)
+                        thrpt:  [+8425.8% +8450.2% +8472.4%]
+                        Performance has improved.
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high severe

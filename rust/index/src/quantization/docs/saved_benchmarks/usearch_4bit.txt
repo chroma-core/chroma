@@ -1,0 +1,324 @@
+cargo bench -p chroma-index --bench usearch_spann_profile --features chroma-index/usearch -- --dataset wikipedia-en --centroid-bits 4 --initial-centroids 1000000 --data-vectors 10000 --phase-2 --phase-3
+   Compiling chroma-index v0.1.0 (/home/ubuntu/chroma/rust/index)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 20.60s
+     Running benches/usearch_spann_profile.rs (target/release/deps/usearch_spann_profile-b580f88df037e4ac)
+Loading Wikipedia EN from HuggingFace Hub...
+Loading 1.00M vectors from wikipedia-en (dim=1024)...
+
+=== USearch SPANN Profile Benchmark ===
+Dim: 1024 | Metric: L2 | Centroid bits: 4 | ef_search: 128 | Threads: [32]
+Initial centroids: 1.00M | Data vectors: 10.0K | Queries: 200
+Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
+
+--- Phase 1: Using cached bootstrap from target/usearch_cache/bootstrap_WikipediaEn_1000000_L2_4.bin ---
+  Computing ground truth (1000000 corpus, 200 queries, k=256, 32 threads)...
+
+=== Phase 2: SPANN Workload (10.0K data vectors) ===
+| Threads | nprobe | Rerank |       R@10 |      R@100 |     navigate |       search |       rerank |      rr_dist |      rr_sort |  rr_scored |   rr_bytes |        spawn |         drop |         wall |
+|---------|--------|--------|------------|------------|--------------|--------------|--------------|--------------|--------------|------------|------------|--------------|--------------|--------------|
+|      32 |     32 |    1x |     94.80% |     83.20% |       3.46ms |       3.46ms |          0ns |          0ns |          0ns |        0.0 |         0B |       7.84ms |       7.74ms |        3.48s |
+|      32 |     32 |    4x |     94.80% |     91.27% |       3.67ms |       3.55ms |      120.7µs |      118.6µs |        2.0µs |      127.3 |    509.3KB |       7.87ms |       7.08ms |        3.73s |
+|      32 |     32 |    8x |     97.45% |     95.45% |       6.12ms |       5.85ms |      274.3µs |      270.2µs |        4.1µs |      255.3 |   1021.0KB |      10.49ms |      10.12ms |        6.21s |
+|      32 |     32 |   16x |     99.10% |     98.06% |      10.66ms |      10.09ms |      572.2µs |      563.3µs |        8.8µs |      511.2 |      2.0MB |      15.70ms |      15.85ms |       10.93s |
+|      32 |     64 |    1x |     94.80% |     82.74% |       3.45ms |       3.45ms |          0ns |          0ns |          0ns |        0.0 |         0B |       7.98ms |       7.59ms |        3.53s |
+|      32 |     64 |    4x |     97.45% |     93.65% |       6.18ms |       5.90ms |      273.9µs |      269.7µs |        4.1µs |      255.2 |   1020.9KB |      10.76ms |      11.14ms |        6.28s |
+|      32 |     64 |    8x |     99.10% |     97.13% |      10.64ms |      10.07ms |      572.2µs |      563.2µs |        8.8µs |      511.2 |      2.0MB |      15.43ms |      14.93ms |       10.96s |
+|      32 |     64 |   16x |     99.75% |     98.92% |      18.96ms |      17.77ms |       1.18ms |       1.15ms |       33.8µs |     1023.1 |      4.0MB |      26.52ms |      23.66ms |       19.61s |
+|      32 |    128 |    1x |     94.80% |     79.93% |       3.46ms |       3.46ms |          0ns |          0ns |          0ns |        0.0 |         0B |       7.84ms |       7.41ms |        3.55s |
+|      32 |    128 |    4x |     99.10% |     95.55% |      10.68ms |      10.11ms |      571.6µs |      562.7µs |        8.8µs |      511.2 |      2.0MB |      15.69ms |      16.51ms |       11.07s |
+|      32 |    128 |    8x |     99.75% |     98.16% |      18.95ms |      17.77ms |       1.18ms |       1.15ms |       33.9µs |     1023.1 |      4.0MB |      24.59ms |      25.20ms |       19.53s |
+|      32 |    128 |   16x |     99.85% |     99.31% |      33.75ms |      31.35ms |       2.40ms |       2.32ms |       74.9µs |     2047.0 |      8.0MB |      40.79ms |      41.47ms |       35.91s |
+|      32 |    256 |    1x |     97.45% |     82.87% |       5.76ms |       5.76ms |          0ns |          0ns |          0ns |        0.0 |         0B |      10.89ms |      10.67ms |        5.93s |
+|      32 |    256 |    4x |     99.75% |     96.96% |      18.87ms |      17.70ms |       1.18ms |       1.15ms |       34.2µs |     1023.1 |      4.0MB |      26.17ms |      22.97ms |       19.71s |
+|      32 |    256 |    8x |     99.85% |     98.87% |      33.75ms |      31.36ms |       2.40ms |       2.32ms |       74.7µs |     2046.9 |      8.0MB |      40.40ms |      40.21ms |       35.10s |
+|      32 |    256 |   16x |     99.90% |     99.64% |      61.71ms |      56.88ms |       4.83ms |       4.70ms |      132.7µs |     4094.8 |     16.0MB |      72.99ms |      72.42ms |         1.1m |
+
+=== Phase 3: Search-Only Recall (200 queries) ===
+| Threads | nprobe | Rerank |       R@10 |      R@100 |     navigate |       search |       rerank |      rr_dist |      rr_sort |  rr_scored |   rr_bytes |
+|---------|--------|--------|------------|------------|--------------|--------------|--------------|--------------|--------------|------------|------------|
+|      32 |     32 |    1x |     94.25% |     85.00% |       2.68ms |       2.68ms |          0ns |          0ns |          0ns |        0.0 |         0B |
+|      32 |     32 |    4x |     94.25% |     91.09% |       2.82ms |       2.69ms |      128.5µs |      126.3µs |        2.1µs |      128.0 |    512.0KB |
+|      32 |     32 |    8x |     97.05% |     95.30% |       5.23ms |       4.97ms |      260.1µs |      256.1µs |        3.9µs |      256.0 |      1.0MB |
+|      32 |     32 |   16x |     99.10% |     98.09% |       9.56ms |       9.03ms |      527.9µs |      519.4µs |        8.4µs |      512.0 |      2.0MB |
+|      32 |     64 |    1x |     94.25% |     83.18% |       2.89ms |       2.89ms |          0ns |          0ns |          0ns |        0.0 |         0B |
+|      32 |     64 |    4x |     97.05% |     93.54% |       5.68ms |       5.37ms |      314.3µs |      309.8µs |        4.3µs |      256.0 |      1.0MB |
+|      32 |     64 |    8x |     99.10% |     97.14% |       9.78ms |       9.22ms |      555.9µs |      547.3µs |        8.4µs |      512.0 |      2.0MB |
+|      32 |     64 |   16x |     99.75% |     98.88% |      28.60ms |      26.85ms |       1.75ms |       1.72ms |       32.1µs |     1024.0 |      4.0MB |
+|      32 |    128 |    1x |     94.25% |     79.92% |       2.82ms |       2.82ms |          0ns |          0ns |          0ns |        0.0 |         0B |
+|      32 |    128 |    4x |     99.10% |     95.50% |       9.13ms |       8.62ms |      502.3µs |      494.0µs |        8.2µs |      512.0 |      2.0MB |
+|      32 |    128 |    8x |     99.75% |     98.14% |      18.12ms |      16.93ms |       1.20ms |       1.16ms |       32.6µs |     1024.0 |      4.0MB |
+|      32 |    128 |   16x |     99.85% |     99.30% |      33.55ms |      31.06ms |       2.49ms |       2.42ms |       67.4µs |     2048.0 |      8.0MB |
+|      32 |    256 |    1x |     97.05% |     82.89% |       4.99ms |       4.99ms |          0ns |          0ns |          0ns |        0.0 |         0B |
+|      32 |    256 |    4x |     99.75% |     96.94% |      17.83ms |      16.72ms |       1.11ms |       1.08ms |       30.4µs |     1024.0 |      4.0MB |
+|      32 |    256 |    8x |     99.85% |     98.86% |      30.29ms |      28.25ms |       2.04ms |       1.99ms |       56.2µs |     2048.0 |      8.0MB |
+|      32 |    256 |   16x |     99.90% |     99.64% |      56.34ms |      52.08ms |       4.26ms |       4.16ms |       96.4µs |     4096.0 |     16.0MB |
+
+=== Legend ===
+nprobe   - number of nearest neighbors to retrieve per search
+navigate - total navigate latency: search + rerank
+search   - index.search() across the HNSW graph
+rerank   - re-score candidates with exact f32 distance and sort
+spawn    - add() a new centroid (from cluster split)
+drop     - remove() a centroid (from cluster split/merge)
+wall     - wall-clock time for the full SPANN simulation phase
+
+
+
+cargo bench -p chroma-index --bench usearch_spann_profile --features chroma-index/usearch -- --dataset wikipedia-en --centroid-bits 4 --initial-centroids 1000000 --data-vectors 10000 --phase-2 --phase-3
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.36s
+     Running benches/usearch_spann_profile.rs (target/release/deps/usearch_spann_profile-b580f88df037e4ac)
+Loading Wikipedia EN from HuggingFace Hub...
+Loading 1.00M vectors from wikipedia-en (dim=1024)...
+
+=== USearch SPANN Profile Benchmark ===
+Dim: 1024 | Metric: L2 | Centroid bits: 4 | ef_search: 128 | Threads: 32
+Initial centroids: 1.00M | Data vectors: 10.0K | Queries: 200
+Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
+
+--- Phase 1: Using cached bootstrap from target/usearch_cache/bootstrap_WikipediaEn_1000000_L2_4.bin ---
+  Computing ground truth (1000000 corpus, 200 queries, k=256, 32 threads)...
+
+=== Phase 2: SPANN Workload (10.0K data vectors, 32 threads) ===
+| nprobe | Rerank |       R@10 |      R@100 |     navigate |       search |       rerank |      rr_dist |      rr_sort |  rr_scored |   rr_bytes |        spawn |         drop |         wall |
+|--------|--------|------------|------------|--------------|--------------|--------------|--------------|--------------|------------|------------|--------------|--------------|--------------|
+|     32 |    1x |     94.80% |     83.20% |       2.48ms |       2.48ms |          0ns |          0ns |          0ns |        0.0 |         0B |       4.11ms |       4.51ms |        2.54s |
+|     32 |    4x |     94.80% |     91.28% |       2.69ms |       2.57ms |      117.3µs |      115.4µs |        1.8µs |      127.3 |    509.3KB |       4.37ms |       4.73ms |        2.82s |
+|     32 |    8x |     97.45% |     95.44% |       4.98ms |       4.71ms |      274.9µs |      270.9µs |        3.9µs |      255.2 |   1020.9KB |       4.04ms |       4.57ms |        5.19s |
+|     32 |   16x |     99.10% |     98.06% |       9.17ms |       8.59ms |      579.9µs |      571.0µs |        8.7µs |      511.2 |      2.0MB |       4.10ms |       4.50ms |        9.90s |
+|     64 |    1x |     94.80% |     82.74% |       2.46ms |       2.46ms |          0ns |          0ns |          0ns |        0.0 |         0B |       4.31ms |       4.20ms |        2.60s |
+|     64 |    4x |     97.45% |     93.66% |       5.01ms |       4.73ms |      274.9µs |      270.9µs |        3.9µs |      255.2 |   1021.0KB |       4.25ms |       4.41ms |        5.66s |
+|     64 |    8x |     99.10% |     97.13% |       9.19ms |       8.60ms |      584.1µs |      575.1µs |        8.8µs |      511.2 |      2.0MB |       4.13ms |       4.42ms |        9.54s |
+|     64 |   16x |     99.75% |     98.91% |      16.81ms |      15.61ms |       1.20ms |       1.17ms |       34.6µs |     1023.1 |      4.0MB |       4.28ms |       4.58ms |       17.26s |
+|    128 |    1x |     94.80% |     79.92% |       2.45ms |       2.45ms |          0ns |          0ns |          0ns |        0.0 |         0B |       4.05ms |       4.33ms |        2.60s |
+|    128 |    4x |     99.10% |     95.55% |       9.17ms |       8.59ms |      585.3µs |      576.3µs |        8.9µs |      511.2 |      2.0MB |       4.16ms |       4.29ms |        9.53s |
+|    128 |    8x |     99.75% |     98.16% |      16.89ms |      15.68ms |       1.21ms |       1.17ms |       34.5µs |     1023.1 |      4.0MB |       4.23ms |       4.50ms |       18.00s |
+|    128 |   16x |     99.85% |     99.31% |      30.57ms |      28.11ms |       2.46ms |       2.38ms |       76.9µs |     2047.0 |      8.0MB |       4.38ms |       4.26ms |       32.15s |
+|    256 |    1x |     97.40% |     82.86% |       4.58ms |       4.58ms |          0ns |          0ns |          0ns |        0.0 |         0B |       4.05ms |       4.29ms |        5.01s |
+|    256 |    4x |     99.75% |     96.96% |      16.86ms |      15.65ms |       1.21ms |       1.17ms |       34.4µs |     1023.1 |      4.0MB |       4.32ms |       4.44ms |       18.75s |
+|    256 |    8x |     99.85% |     98.87% |      30.56ms |      28.09ms |       2.46ms |       2.39ms |       77.0µs |     2047.0 |      8.0MB |       4.42ms |       4.34ms |       32.48s |
+|    256 |   16x |     99.90% |     99.64% |      56.38ms |      51.41ms |       4.96ms |       4.83ms |      136.0µs |     4094.8 |     16.0MB |       4.68ms |       4.38ms |       59.12s |
+
+=== Phase 3: Search-Only Recall (200 queries, 32 threads) ===
+| nprobe | Rerank |       R@10 |      R@100 |     navigate |       search |       rerank |      rr_dist |      rr_sort |  rr_scored |   rr_bytes |
+|--------|--------|------------|------------|--------------|--------------|--------------|--------------|--------------|------------|------------|
+|     32 |    1x |     94.25% |     85.00% |       2.69ms |       2.69ms |          0ns |          0ns |          0ns |        0.0 |         0B |
+|     32 |    4x |     94.25% |     91.09% |       2.85ms |       2.73ms |      124.1µs |      122.0µs |        2.0µs |      128.0 |    512.0KB |
+|     32 |    8x |     97.05% |     95.30% |       5.08ms |       4.83ms |      244.4µs |      240.2µs |        4.1µs |      256.0 |      1.0MB |
+|     32 |   16x |     99.10% |     98.09% |       9.15ms |       8.66ms |      485.8µs |      477.3µs |        8.5µs |      512.0 |      2.0MB |
+|     64 |    1x |     94.25% |     83.18% |       2.71ms |       2.71ms |          0ns |          0ns |          0ns |        0.0 |         0B |
+|     64 |    4x |     97.05% |     93.54% |       5.05ms |       4.81ms |      245.3µs |      241.1µs |        4.1µs |      256.0 |      1.0MB |
+|     64 |    8x |     99.10% |     97.14% |       9.20ms |       8.71ms |      485.9µs |      477.2µs |        8.6µs |      512.0 |      2.0MB |
+|     64 |   16x |     99.75% |     98.88% |      16.28ms |      15.29ms |      994.9µs |      961.6µs |       33.2µs |     1024.0 |      4.0MB |
+|    128 |    1x |     94.25% |     79.92% |       2.72ms |       2.72ms |          0ns |          0ns |          0ns |        0.0 |         0B |
+|    128 |    4x |     99.10% |     95.50% |       8.84ms |       8.36ms |      486.2µs |      477.7µs |        8.4µs |      512.0 |      2.0MB |
+|    128 |    8x |     99.75% |     98.14% |      16.35ms |      15.34ms |       1.01ms |      978.7µs |       33.8µs |     1024.0 |      4.0MB |
+|    128 |   16x |     99.85% |     99.30% |      30.18ms |      28.12ms |       2.05ms |       2.00ms |       58.0µs |     2048.0 |      8.0MB |
+|    256 |    1x |     97.05% |     82.89% |       4.62ms |       4.62ms |          0ns |          0ns |          0ns |        0.0 |         0B |
+|    256 |    4x |     99.75% |     96.94% |      16.29ms |      15.29ms |       1.00ms |      977.0µs |       24.3µs |     1024.0 |      4.0MB |
+|    256 |    8x |     99.85% |     98.86% |      30.27ms |      28.20ms |       2.07ms |       2.01ms |       57.7µs |     2048.0 |      8.0MB |
+|    256 |   16x |     99.90% |     99.64% |      56.91ms |      52.59ms |       4.33ms |       4.23ms |       96.7µs |     4096.0 |     16.0MB |
+
+=== Legend ===
+nprobe   - number of nearest neighbors to retrieve per search
+navigate - total navigate latency: search + rerank
+search   - index.search() across the HNSW graph
+rerank   - re-score candidates with exact f32 distance and sort
+spawn    - add() a new centroid (from cluster split)
+drop     - remove() a centroid (from cluster split/merge)
+wall     - wall-clock time for the full SPANN simulation phase
+
+
+
+
+
+nohup cargo bench -p chroma-index --bench usearch_spann_profile -- --dataset wikipedia-en --centroid-bits 4 --initial-centroids 1000000 --threads 32 --data-vectors 1000000 > usearch_spann_profile_4bit.txt  2>&1 &
+
+Loading Wikipedia EN from HuggingFace Hub...
+Loading 1.01M vectors from wikipedia-en (dim=1024)...
+
+=== USearch SPANN Profile Benchmark ===
+Dim: 1024 | Metric: L2 | Centroid bits: 4 | ef_search: 128 | Threads: 32
+Initial centroids: 1.00M | Data vectors: 1.00M | Queries: 200
+Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
+
+--- Phase 1: Bootstrap (1.00M centroids) ---
+Added 1.00M centroids in 51.2m (325 vec/s)
+Index size: 1000000
+Cached bootstrap to target/usearch_cache/bootstrap_WikipediaEn_1000000_L2_4.bin
+
+--- Phase 2: SPANN workload (1.00M data vectors, 32 threads) ---
+Completed in 5.4m | Index size: 1005905
+
+=== Phase 2: Task Counts ===
+|   navigate |      spawn |       drop |
+|------------|------------|------------|
+|      3.05M |      11.5K |       5.6K |
+
+=== Phase 2: Task Total Time ===
+|   navigate |      spawn |       drop |       wall |
+|------------|------------|------------|------------|
+|     166.8m |       1.4m |     41.01s |       5.4m |
+
+=== Phase 2: Task Avg Time ===
+|   navigate |      spawn |       drop |
+|------------|------------|------------|
+|     3.28ms |     7.26ms |     7.33ms |
+
+--- Phase 3: Recall (200 queries, k=100) ---
+
+=== Recall Summary ===
+Corpus size: 1.01M | Queries: 200 | k: 100
+Recall@10: 96.85% | Recall@100: 86.07% | Avg latency: 2.75ms
+
+=== Legend ===
+navigate - search() the centroid HNSW index (nprobe=64)
+spawn    - add() a new centroid to the HNSW index (from cluster split)
+drop     - remove() a centroid from the HNSW index (from cluster split/merge)
+wall     - wall-clock time for the full SPANN simulation phase
+
+
+
+
+
+
+
+
+
+# Thread scalling
+
+Summary
+|threads|   navigate |      spawn |       drop |
+|-------|------------|------------|------------|
+|      4|     2.31ms |     5.36ms |     5.39ms |
+|      8|     2.42ms |     5.88ms |     5.89ms |
+|     16|     2.69ms |     6.48ms |     6.48ms |
+|     32|     3.28ms |     7.26ms |     7.33ms |
+
+=== USearch SPANN Profile Benchmark ===
+Dim: 1024 | Metric: L2 | Centroid bits: 4 | ef_search: 128 | Threads: 4
+Initial centroids: 1.00M | Data vectors: 1.00M | Queries: 200
+Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
+
+## 4 Threads
+nohup cargo bench -p chroma-index --bench usearch_spann_profile -- --dataset wikipedia-en --centroid-bits 4 --initial-centroids 1000000 --threads 4 --data-vectors 1000000 > usearch_spann_profile_4bit.txt  2>&1 &
+--- Phase 2: SPANN workload (1.00M data vectors, 4 threads) ---
+Completed in 30.5m | Index size: 1005929
+
+
+=== Phase 2: Task Total Time ===
+|   navigate |      spawn |       drop |       wall |
+|------------|------------|------------|------------|
+|     117.2m |       1.0m |     29.92s |      30.5m |
+
+=== Phase 2: Task Avg Time ===
+|   navigate |      spawn |       drop |
+|------------|------------|------------|
+|     2.31ms |     5.36ms |     5.39ms |
+
+--- Phase 3: Recall (200 queries, k=100) ---
+
+=== Recall Summary ===
+Corpus size: 1.01M | Queries: 200 | k: 100
+
+
+## 8 Threads
+nohup cargo bench -p chroma-index --bench usearch_spann_profile -- --dataset wikipedia-en --centroid-bits 4 --initial-centroids 1000000 --threads 8 --data-vectors 1000000 > usearch_spann_profile_4bit.txt  2>&1 &
+
+--- Phase 2: SPANN workload (1.00M data vectors, 8 threads) ---
+Completed in 15.9m | Index size: 1005915
+
+
+=== Phase 2: Task Total Time ===
+|   navigate |      spawn |       drop |       wall |
+|------------|------------|------------|------------|
+|     122.9m |       1.1m |     33.07s |      15.9m |
+
+=== Phase 2: Task Avg Time ===
+|   navigate |      spawn |       drop |
+|------------|------------|------------|
+|     2.42ms |     5.88ms |     5.89ms |
+
+--- Phase 3: Recall (200 queries, k=100) ---
+
+=== Recall Summary ===
+Corpus size: 1.01M | Queries: 200 | k: 100
+Recall@10: 92.85% | Recall@100: 86.63% | Avg latency: 2.76ms
+
+## 16 Threads
+
+nohup cargo bench -p chroma-index --bench usearch_spann_profile -- --dataset wikipedia-en --centroid-bits 4 --initial-centroids 1000000 --threads 16 --data-vectors 1000000 > usearch_spann_profile_4bit.txt  2>&1 &
+
+--- Phase 2: SPANN workload (1.00M data vectors, 16 threads) ---
+Completed in 8.9m | Index size: 1005918
+
+=== Phase 2: Task Total Time ===
+|   navigate |      spawn |       drop |       wall |
+|------------|------------|------------|------------|
+|     136.8m |       1.2m |     36.18s |       8.9m |
+
+=== Phase 2: Task Avg Time ===
+|   navigate |      spawn |       drop |
+|------------|------------|------------|
+|     2.69ms |     6.48ms |     6.48ms |
+
+--- Phase 3: Recall (200 queries, k=100) ---
+
+=== Recall Summary ===
+Corpus size: 1.01M | Queries: 200 | k: 100
+Recall@10: 94.05% | Recall@100: 86.35% | Avg latency: 2.75ms
+
+--- Phase 3b: Rerank sweep (200 queries) ---
+|  Rerank |      Fetch |   Recall@10 |  Recall@100 |    Avg lat |
+|---------|------------|-------------|-------------|------------|
+|     1x |        100 |      95.05% |      85.74% |     2.80ms |
+|     2x |        200 |      96.65% |      92.81% |     3.67ms |
+|     4x |        400 |      98.60% |      96.58% |     6.97ms |
+|     8x |        800 |      99.15% |      98.44% |    13.14ms |
+|    16x |       1600 |      99.50% |      99.36% |    24.42ms |
+
+# Small scale (Simulating 1M+10k data vectors)
+
+cargo bench -p chroma-index --bench usearch_spann_profile -- --dataset wikipedia-en --centroid-bits 4 --initial-centroids 5700 --threads 32 --data-vectors 10000
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.34s
+     Running benches/usearch_spann_profile.rs (target/release/deps/usearch_spann_profile-2f17528a797d0cb1)
+Loading Wikipedia EN from HuggingFace Hub...
+Loading 7.0K vectors from wikipedia-en (dim=1024)...
+
+=== USearch SPANN Profile Benchmark ===
+Dim: 1024 | Metric: L2 | Centroid bits: 4 | ef_search: 128 | Threads: 32
+Initial centroids: 5.7K | Data vectors: 10.0K | Queries: 200
+Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
+
+--- Phase 1: Bootstrap (5.7K centroids) ---
+Added 5.7K centroids in 8.02s (711 vec/s)
+Index size: 5700
+
+--- Phase 2: SPANN workload (10.0K data vectors, 32 threads) ---
+Completed in 1.69s | Index size: 5767
+
+=== Phase 2: Task Counts ===
+|   navigate |      spawn |       drop |
+|------------|------------|------------|
+|      30.5K |        123 |         56 |
+
+=== Phase 2: Task Total Time ===
+|   navigate |      spawn |       drop |       wall |
+|------------|------------|------------|------------|
+|     50.48s |   458.86ms |   104.53ms |      1.69s |
+
+=== Phase 2: Task Avg Time ===
+|   navigate |      spawn |       drop |
+|------------|------------|------------|
+|     1.65ms |     3.73ms |     1.87ms |
+
+--- Phase 3: Recall (200 queries, k=100) ---
+
+=== Recall Summary ===
+Corpus size: 5.8K | Queries: 200 | k: 100
+Recall@10: 99.15% | Recall@100: 93.19% | Avg latency: 1.23ms
+
+=== Legend ===
+navigate - search() the centroid HNSW index (nprobe=64)
+spawn    - add() a new centroid to the HNSW index (from cluster split)
+drop     - remove() a centroid from the HNSW index (from cluster split/merge)
+wall     - wall-clock time for the full SPANN simulation phase

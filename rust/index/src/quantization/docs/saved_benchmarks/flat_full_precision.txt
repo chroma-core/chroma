@@ -1,0 +1,163 @@
+1M centroids (insert 1k data vectors)
+cargo bench -p chroma-index --bench flat_centroid_profile -- --dataset wikipedia-en --initial-centroids 1000000 --data-vectors 1000 --threads 1 --phase-3
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.35s
+     Running benches/flat_centroid_profile.rs (target/release/deps/flat_centroid_profile-38cd2afab553f60e)
+Loading Wikipedia EN from HuggingFace Hub...
+Loading 1.00M vectors from wikipedia-en (dim=1024)...
+
+=== Flat Centroid Index Profile ===
+Dim: 1024 | Metric: L2 | Centroid bits: f32 | Threads: 1
+Initial centroids: 1.00M | Data vectors: 1.0K | Queries: 100
+Scan footprint: 3906.2 MB (full precision)
+Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
+
+--- Phase 1: Loading cached flat index from target/flat_cache/flat_WikipediaEn_1000000_f32_L2.bin ---
+Loaded 1.00M centroids in 4.10s
+Index size: 1000000
+Recall evaluated (100 queries, k=100)
+
+--- Phase 2 skipped (pass --phase-2 to enable) ---
+
+--- Phase 3: Search only (100 queries, 1 threads, k=100, rerank: 1x) ---
+| rerank |   Recall@10 |   Recall@100 |   scan_avg | rerank_avg |  total_avg |       wall |
+|--------|-------------|--------------|------------|------------|------------|------------|
+|     1x |     100.00% |      100.00% |   300.34ms |        0ns |   300.34ms |     30.03s |
+
+=== Legend ===
+Shared columns:
+  rerank     - rerank multiplier
+  Recall@10  - fraction of true top-10 neighbors found
+  Recall@100 - fraction of true top-100 neighbors found
+  scan_avg   - average quantized/f32 scan time per query
+  rerank_avg - average rerank time per query
+  total_avg  - scan + rerank_avg (= end-to-end query latency)
+  wall       - wall-clock time for the full phase
+Phase 2 extra columns:
+  spawn_avg  - avg time to append a new centroid (from cluster split)
+  drop_avg   - avg time to tombstone a centroid (from cluster split/merge)
+
+
+
+
+
+1M centroids (insert 10k data vectors)
+cargo bench -p chroma-index --bench flat_centroid_profile -- --dataset wikipedia-en --initial-centroids 1000000 --data-vectors 10000 --threads 32
+   Compiling chroma-index v0.1.0 (/home/ubuntu/chroma/rust/index)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 20.55s
+     Running benches/flat_centroid_profile.rs (target/release/deps/flat_centroid_profile-38cd2afab553f60e)
+Loading Wikipedia EN from HuggingFace Hub...
+Loading 1.00M vectors from wikipedia-en (dim=1024)...
+
+=== Flat Centroid Index Profile ===
+Dim: 1024 | Metric: L2 | Centroid bits: f32 | Threads: 32
+Initial centroids: 1.00M | Data vectors: 1.0K | Queries: 100
+Scan footprint: 3906.2 MB (full precision)
+Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
+
+--- Phase 1: Build flat index (1.00M centroids) ---
+Built flat index with 1.00M centroids in 1.93s (517940 vec/s)
+Memory: 3910.1 MB
+Cached flat index to target/flat_cache/flat_WikipediaEn_1000000_f32_L2.bin (3910.1 MB)
+Index size: 1000000
+
+--- Phase 2: SPANN workload (1.0K data vectors, 32 threads) ---
+Completed in 54.99s | Index size: 1000004
+
+=== Phase 2: Task Counts ===
+|   navigate |      spawn |       drop |
+|------------|------------|------------|
+|       3.1K |         11 |          7 |
+
+=== Phase 2: Task Total Time ===
+|   navigate |      spawn |       drop |       wall |
+|------------|------------|------------|------------|
+|      27.7m |      3.94s |      2.68s |     54.99s |
+
+=== Phase 2: Task Avg Time ===
+|   navigate |      spawn |       drop |
+|------------|------------|------------|
+|   542.85ms |   357.85ms |   382.61ms |
+
+--- Phase 3: Scale sweep (4 sizes, 100 queries, k=100) ---
+Scales: 1.0K, 10.0K, 100.0K, 1.00M
+
+|  Centroids |    FP MB |   Recall@10 |   Recall@100 |    Avg lat |       Wall |
+|------------|----------|-------------|--------------|------------|------------|
+|       1.0K |     3.9 |     100.00% |      100.00% |    211.5µs |     4.38ms |
+|      10.0K |    39.1 |     100.00% |      100.00% |     2.45ms |    13.27ms |
+|     100.0K |   390.6 |     100.00% |      100.00% |    52.70ms |   242.16ms |
+|      1.00M |  3906.2 |     100.00% |      100.00% |   529.73ms |      2.12s |
+
+=== Legend ===
+Phase 2 columns:
+  navigate  - flat scan the centroid index (nprobe=100, rerank=1x)
+  spawn     - append a new centroid to the flat index (from cluster split)
+  drop      - tombstone a centroid in the flat index (from cluster split/merge)
+  wall      - wall-clock time for the full SPANN simulation phase
+Phase 3 columns:
+  Centroids - number of centroid vectors in the flat index
+  FP MB     - memory footprint of the full-precision f32 vector array
+  Recall@10 - fraction of true top-10 neighbors found
+  Recall@100- fraction of true top-100 neighbors found
+  Avg lat   - average single-query search latency
+  Wall      - wall-clock time for all queries at this scale/rerank combo
+
+
+
+
+
+1M centroids, 1 thread
+cargo bench -p chroma-index --bench flat_centroid_profile -- --dataset wikipedia-en --initial-centroids 1000000 --data-vectors 1000 --threads 1 --phase-3
+
+
+
+
+
+
+cargo bench -p chroma-index --bench flat_centroid_profile -- --dataset db-pedia --initial-centroids 5700 --data-vectors 1000 --threads 32
+   Compiling usearch v2.24.0 (/home/ubuntu/USearch)
+   Compiling chroma-index v0.1.0 (/home/ubuntu/chroma/rust/index)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 1m 24s
+     Running benches/flat_centroid_profile.rs (target/release/deps/flat_centroid_profile-3b4b58e13cda851a)
+Loading DBPedia from HuggingFace Hub...
+Loading 6.9K vectors from dbpedia (dim=1536)...
+
+=== Flat Centroid Index Profile ===
+Dim: 1536 | Metric: L2 | Centroid bits: f32 | Threads: 32
+Initial centroids: 5.7K | Data vectors: 1.0K | Queries: 200
+Scan footprint: 33.4 MB (full precision)
+Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
+
+--- Phase 1: Loading cached flat index from target/flat_cache/flat_DbPedia_5700_f32_L2.bin ---
+Loaded 5.7K centroids in 61.06ms
+Index size: 5700
+
+--- Phase 2: SPANN workload (1.0K data vectors, 32 threads) ---
+Completed in 657.77ms | Index size: 5703
+
+=== Phase 2: Task Counts ===
+|   navigate |      spawn |       drop |
+|------------|------------|------------|
+|       3.1K |         10 |          7 |
+
+=== Phase 2: Task Total Time ===
+|   navigate |      spawn |       drop |       wall |
+|------------|------------|------------|------------|
+|     18.73s |    80.87ms |    47.17ms |   657.77ms |
+
+=== Phase 2: Task Avg Time ===
+|   navigate |      spawn |       drop |
+|------------|------------|------------|
+|     6.13ms |     8.09ms |     6.74ms |
+
+--- Phase 3: Recall (200 queries, k=64) ---
+
+=== Recall Summary (full precision) ===
+Corpus size: 5.7K | Queries: 200 | k: 64
+Recall@10: 100.00% | Recall@64: 100.00% | Avg latency: 11.05ms
+
+=== Legend ===
+navigate - flat scan the centroid index (nprobe=64, rerank=1x)
+spawn    - append a new centroid to the flat index (from cluster split)
+drop     - tombstone a centroid in the flat index (from cluster split/merge)
+wall     - wall-clock time for the full SPANN simulation phase

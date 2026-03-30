@@ -1,0 +1,46 @@
+cargo bench -p chroma-index --bench quantized_spann -- --dataset db-pedia --checkpoint 1 --data-bits 1 --centroid-bits 1 --threads 16
+   Compiling chroma-index v0.1.0 (/home/ubuntu/chroma/rust/index)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 35.10s
+     Running benches/quantized_spann.rs (target/release/deps/quantized_spann-554c6eafbcac2f54)
+Loading DBPedia from HuggingFace Hub...
+=== QuantizedSpannIndexWriter Benchmark ===
+Dataset: dbpedia (1.00M vectors, 1536 dims)
+Metric: Euclidean | Checkpoints: 1 | Threads: 16 | Data bits: 1 | Centroid bits: 1
+Total vectors to index: 1.00M
+
+Checkpoint 1: 1.00M vec | load 33.09s | raw 14.46s | index 1.7m | commit 2.43s | 9874 vec/s
+  Recall: np16=0.82/0.71 np32=0.89/0.77 np64=0.92/0.80 np128=0.94/0.82 np256=0.97/0.84
+
+=== Cluster Statistics ===
+| CP | Centroids |   Min |   Max | Median |   P90 |   P99 |    Avg |    Std |
+|----|-----------|-------|-------|--------|-------|-------|--------|--------|
+|  1 |      5.7K |     5 |   512 |    377 |   486 |   511 |  368.0 |   93.9 |
+
+=== Task Counts ===
+| CP |      add | navigate | register |    spawn |    scrub |    split |    merge | reassign |     drop |     load | load_raw | quantize |   search |  raw_add |   raw_rm |    q_add |     q_rm |
+|----|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|
+|  1 |    1.00M |    3.93M |        0 |    11.3K |   194.3K |     5.7K |        0 |    2.96M |     5.7K |   194.3K |    11.3K |    7.24M |        0 |    11.3K |     5.7K |    11.3K |     5.7K |
+
+=== Task Total Time ===
+| CP |      add | navigate | register |    spawn |    scrub |    split |    merge | reassign |     drop |     load | load_raw | quantize |   search |  raw_add |   raw_rm |    q_add |     q_rm | raw_pts |  raw/pt |    total |
+|----|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|---------|---------|----------|
+|  1 | 1489.28s |  337.26s |      0ns |   15.49s |   11.45s | 1272.91s |      0ns |  509.54s |    2.89s |   8.12ms |   1.53ms |   20.02s |      0ns |   10.29s | 448.60ms |    5.18s |    2.18s |       0 |       - |  151.25s |
+
+=== Task Avg Time ===
+| CP |      add | navigate | register |    spawn |    scrub |    split |    merge | reassign |     drop |     load | load_raw | quantize |   search |  raw_add |   raw_rm |    q_add |     q_rm |
+|----|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|
+|  1 |   1.49ms |   85.9µs |        - |   1.37ms |   58.9µs | 224.86ms |        - |  172.2µs |  510.7µs |     41ns |    135ns |    2.8µs |        - |  909.4µs |   79.2µs |  457.8µs |  384.5µs |
+
+
+=== Indexing Summary ===
+Total vectors: 1.00M
+Total time: 2.7m
+Overall throughput: 6252 vec/s
+
+=== Recall Summary ===
+|  CP |  Vectors |    Index |   Commit | Queries |      nprobe=16      |      nprobe=32      |      nprobe=64      |     nprobe=128      |     nprobe=256      |
+|     |          |          |          |         |  R@10 R@100    Lat |  R@10 R@100    Lat |  R@10 R@100    Lat |  R@10 R@100    Lat |  R@10 R@100    Lat |
+|-----|----------|----------|----------|---------|---------------------|---------------------|---------------------|---------------------|---------------------|
+|   1 |    1.00M |     1.7m |    2.43s |     100 |  0.82  0.71   48ms |  0.89  0.77   77ms |  0.92  0.80  145ms |  0.94  0.82  276ms |  0.97  0.84  537ms |
+
+Done!

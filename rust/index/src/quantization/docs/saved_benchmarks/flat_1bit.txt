@@ -1,0 +1,495 @@
+need
+
+
+
+
+
+1M centroids, 32 threads (insert 10k data vectors) distance_query - reranking and recall
+cargo bench -p chroma-index --bench flat_centroid_profile -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 1000000 --data-vectors 10000 --phase-3 --phase-2
+cargo bench -p chroma-index --bench flat_centroid_profile -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 1000000 --data-vectors 10000 --phase-3 --phase-2
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.34s
+     Running benches/flat_centroid_profile.rs (target/release/deps/flat_centroid_profile-38cd2afab553f60e)
+Loading Wikipedia EN from HuggingFace Hub...
+Loading 1.00M vectors from wikipedia-en (dim=1024)...
+
+=== Flat Centroid Index Profile ===
+Dim: 1024 | Metric: L2 | Centroid bits: 1 | Threads: 32
+Initial centroids: 1.00M | Data vectors: 10.0K | Queries: 100
+Rerank factors: 1x, 4x, 16x | Distance: code-to-code (hamming)
+Scan footprint: 137.3 MB (quantized codes)
+Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
+
+--- Phase 1: Loading cached flat index from target/flat_cache/flat_WikipediaEn_1000000_1_L2.bin ---
+Loaded 1.00M centroids in 4.32s
+Index size: 1000000
+Recall evaluated (100 queries, k=100)
+
+--- Phase 2: SPANN workload (10.0K data vectors, 32 threads, rerank: 1x, 4x, 16x) ---
+   1x  completed in 40.77s | Index size: 1000058
+   4x  completed in 41.70s | Index size: 1000058
+  16x  completed in 44.37s | Index size: 1000058
+
+=== Phase 2: Task Counts (same across all runs) ===
+|   navigate |      spawn |       drop |
+|------------|------------|------------|
+|      30.5K |        109 |         51 |
+
+=== Phase 2: SPANN Workload (32 threads) ===
+| rerank |   Recall@10 |   Recall@100 |   scan_avg | rerank_avg |  total_avg |  spawn_avg |   drop_avg |       wall |
+|--------|-------------|--------------|------------|------------|------------|------------|------------|------------|
+|     1x |      89.60% |       49.53% |    39.87ms |        0ns |    39.87ms |    38.19ms |    32.24ms |     40.77s |
+|     4x |      97.50% |       80.01% |    40.77ms |    362.3µs |    41.14ms |    40.70ms |    36.40ms |     41.70s |
+|    16x |      99.90% |       95.56% |    41.71ms |     1.41ms |    43.12ms |    39.53ms |    34.09ms |     44.37s |
+
+--- Phase 3: Search only (100 queries, 32 threads, k=100, rerank: 1x, 4x, 16x) ---
+| rerank |   Recall@10 |   Recall@100 |   scan_avg | rerank_avg |  total_avg |       wall |
+|--------|-------------|--------------|------------|------------|------------|------------|
+|     1x |      89.60% |       49.53% |    24.34ms |        0ns |    24.34ms |   102.08ms |
+|     4x |      97.50% |       80.01% |    24.67ms |    296.9µs |    24.97ms |   106.57ms |
+|    16x |      99.90% |       95.56% |    25.24ms |     1.25ms |    26.49ms |   111.16ms |
+
+=== Legend ===
+Shared columns:
+  rerank     - rerank multiplier
+  Recall@10  - fraction of true top-10 neighbors found
+  Recall@100 - fraction of true top-100 neighbors found
+  scan_avg   - average quantized/f32 scan time per query
+  rerank_avg - average rerank time per query
+  total_avg  - scan + rerank_avg (= end-to-end query latency)
+  wall       - wall-clock time for the full phase
+Phase 2 extra columns:
+  spawn_avg  - avg time to append a new centroid (from cluster split)
+  drop_avg   - avg time to tombstone a centroid (from cluster split/merge)
+
+
+
+
+1M centroids, 1 thread
+cargo bench -p chroma-index --bench flat_centroid_profile -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 1000000 --data-vectors 1000 --threads 1 --phase-3
+   Compiling chroma-index v0.1.0 (/home/ubuntu/chroma/rust/index)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 20.71s
+     Running benches/flat_centroid_profile.rs (target/release/deps/flat_centroid_profile-38cd2afab553f60e)
+Loading Wikipedia EN from HuggingFace Hub...
+Loading 1.00M vectors from wikipedia-en (dim=1024)...
+
+=== Flat Centroid Index Profile ===
+Dim: 1024 | Metric: L2 | Centroid bits: 1 | Threads: 1
+Initial centroids: 1.00M | Data vectors: 1.0K | Queries: 100
+Rerank factors: 1x, 4x, 16x | Distance: code-to-code (hamming)
+Scan footprint: 137.3 MB (quantized codes)
+Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
+
+--- Phase 1: Loading cached flat index from target/flat_cache/flat_WikipediaEn_1000000_1_L2.bin ---
+Loaded 1.00M centroids in 4.30s
+Index size: 1000000
+Recall evaluated (100 queries, k=100)
+
+--- Phase 2 skipped (pass --phase-2 to enable) ---
+
+--- Phase 3: Search only (100 queries, 1 threads, k=100, rerank: 1x, 4x, 16x) ---
+| rerank |   Recall@10 |   Recall@100 |   scan_avg | rerank_avg |  total_avg |       wall |
+|--------|-------------|--------------|------------|------------|------------|------------|
+|     1x |      89.60% |       49.53% |    22.33ms |        0ns |    22.33ms |      2.23s |
+|     4x |      97.50% |       80.01% |    22.63ms |    202.9µs |    22.83ms |      2.28s |
+|    16x |      99.90% |       95.56% |    23.38ms |    788.6µs |    24.17ms |      2.42s |
+
+
+
+debugging rerank latency
+cargo bench -p chroma-index --bench flat_centroid_profile -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 1000000 --data-vectors 1000 --phase-3 --phase-2
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.34s
+     Running benches/flat_centroid_profile.rs (target/release/deps/flat_centroid_profile-38cd2afab553f60e)
+Loading Wikipedia EN from HuggingFace Hub...
+Loading 1.00M vectors from wikipedia-en (dim=1024)...
+
+=== Flat Centroid Index Profile ===
+Dim: 1024 | Metric: L2 | Centroid bits: 1 | Threads: 32
+Initial centroids: 1.00M | Data vectors: 1.0K | Queries: 100
+Rerank factors: 1x, 4x, 16x | Distance: code-to-code (hamming)
+Scan footprint: 137.3 MB (quantized codes)
+Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
+
+--- Phase 1: Loading cached flat index from target/flat_cache/flat_WikipediaEn_1000000_1_L2.bin ---
+Loaded 1.00M centroids in 4.36s
+Index size: 1000000
+Recall evaluated (100 queries, k=100)
+
+--- Phase 2: SPANN workload (1.0K data vectors, 32 threads, rerank: 1x, 4x, 16x) ---
+   1x  completed in 3.95s | Index size: 1000004
+   4x  completed in 3.94s | Index size: 1000004
+  16x  completed in 4.15s | Index size: 1000004
+
+=== Phase 2: SPANN Workload (32 threads) ===
+| rerank |   Recall@10 |   Recall@100 |   scan_avg |    rr_lock |    rr_dist |    rr_sort |   rr_total |  total_avg |  spawn_avg |   drop_avg |       wall |
+|--------|-------------|--------------|------------|------------|------------|------------|------------|------------|------------|------------|------------|
+|     1x |      89.60% |       49.53% |    36.73ms |        0ns |        0ns |        0ns |        0ns |    36.73ms |    36.26ms |    37.96ms |      3.95s |
+|     4x |      97.50% |       80.01% |    38.08ms |      1.3µs |    332.9µs |      7.0µs |    341.4µs |    38.42ms |    38.15ms |    29.86ms |      3.94s |
+|    16x |      99.90% |       95.56% |    37.79ms |      1.1µs |     1.29ms |     29.9µs |     1.32ms |    39.12ms |    33.44ms |    29.74ms |      4.15s |
+
+--- Phase 3: Search only (100 queries, 32 threads, k=100, rerank: 1x, 4x, 16x) ---
+
+=== Phase 3: Search Only (32 threads) ===
+| rerank |   Recall@10 |   Recall@100 |   scan_avg |    rr_lock |    rr_dist |    rr_sort |   rr_total |  total_avg |       wall |
+|--------|-------------|--------------|------------|------------|------------|------------|------------|------------|------------|
+|     1x |      89.60% |       49.53% |    24.07ms |        0ns |        0ns |        0ns |        0ns |    24.07ms |   101.65ms |
+|     4x |      97.50% |       80.01% |    24.33ms |      961ns |    282.1µs |      6.9µs |    290.1µs |    24.62ms |   105.03ms |
+|    16x |      99.90% |       95.56% |    24.87ms |      952ns |     1.21ms |     30.6µs |     1.24ms |    26.11ms |   109.22ms |
+
+=== Legend ===
+Shared columns:
+  rerank     - rerank multiplier (fetch rerank*k candidates, rerank with f32)
+  Recall@10  - fraction of true top-10 neighbors found
+  Recall@100 - fraction of true top-100 neighbors found
+  scan_avg   - average quantized/f32 scan time per query
+  rr_lock    - avg time to acquire read lock on vectors
+  rr_dist    - avg time to compute exact distances for candidates
+  rr_sort    - avg time to sort+truncate reranked results
+  rr_total   - total rerank time (lock+dist+sort)
+  total_avg  - scan + rr_total (= end-to-end query latency)
+  wall       - wall-clock time for the full phase
+Phase 2 extra columns:
+  spawn_avg  - avg time to append a new centroid (from cluster split)
+  drop_avg   - avg time to tombstone a centroid (from cluster split/merge)
+
+
+
+
+
+1M centroids (insert 1k data vectors) distance_query - reranking and recall
+cargo bench -p chroma-index --bench flat_centroid_profile -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 1000000 --threads 32 --data-vectors 1000
+   Compiling chroma-index v0.1.0 (/home/ubuntu/chroma/rust/index)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 20.66s
+     Running benches/flat_centroid_profile.rs (target/release/deps/flat_centroid_profile-38cd2afab553f60e)
+Loading Wikipedia EN from HuggingFace Hub...
+Loading 1.00M vectors from wikipedia-en (dim=1024)...
+
+=== Flat Centroid Index Profile ===
+Dim: 1024 | Metric: L2 | Centroid bits: 1 | Threads: 32
+Initial centroids: 1.00M | Data vectors: 1.0K | Queries: 100
+Rerank factor: 1x | Distance: code-to-code (hamming)
+Scan footprint: 137.3 MB (quantized codes)
+Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
+
+--- Phase 1: Loading cached flat index from target/flat_cache/flat_WikipediaEn_1000000_1_L2.bin ---
+Loaded 1.00M centroids in 4.38s
+Index size: 1000000
+
+--- Phase 2: SPANN workload (1.0K data vectors, threads: 1, 2, 4, 8, 16, 32, rerank: 1x, 4x, 8x, 16x) ---
+Recall evaluated (100 queries, k=100)
+   1T  1x  completed in 1.6m | Index size: 1000001
+   1T  4x  completed in 3.8m | Index size: 1000001
+   1T  8x  completed in 3.8m | Index size: 1000001
+   1T 16x  completed in 3.9m | Index size: 1000001
+   2T  1x  completed in 47.34s | Index size: 1000006
+   2T  4x  completed in 2.2m | Index size: 1000006
+   2T  8x  completed in 2.3m | Index size: 1000006
+   2T 16x  completed in 2.3m | Index size: 1000006
+   4T  1x  completed in 23.73s | Index size: 1000005
+   4T  4x  completed in 1.2m | Index size: 1000005
+   4T  8x  completed in 1.2m | Index size: 1000005
+   4T 16x  completed in 1.2m | Index size: 1000005
+   8T  1x  completed in 11.96s | Index size: 1000006
+   8T  4x  completed in 38.54s | Index size: 1000006
+   8T  8x  completed in 44.04s | Index size: 1000006
+   8T 16x  completed in 39.38s | Index size: 1000006
+  16T  1x  completed in 6.69s | Index size: 1000004
+  16T  4x  completed in 22.43s | Index size: 1000004
+  16T  8x  completed in 22.48s | Index size: 1000004
+  16T 16x  completed in 23.03s | Index size: 1000004
+  32T  1x  completed in 3.76s | Index size: 1000004
+  32T  4x  completed in 16.55s | Index size: 1000004
+  32T  8x  completed in 16.82s | Index size: 1000004
+  32T 16x  completed in 16.69s | Index size: 1000004
+
+=== Phase 2: Task Counts (same across all runs) ===
+|   navigate |      spawn |       drop |
+|------------|------------|------------|
+|       3.0K |          8 |          7 |
+
+=== Phase 2: Task Total Time ===
+|  threads | rerank |   nav_scan | nav_rerank |  nav_total |      spawn |       drop |       wall |
+|----------|--------|------------|------------|------------|------------|------------|------------|
+|        1 |     1x |       1.6m |        0ns |       1.6m |    12.37ms |      4.7µs |       1.6m |
+|        1 |     4x |       1.6m |       2.1m |       3.8m |    11.83ms |      3.2µs |       3.8m |
+|        1 |     8x |       1.6m |       2.1m |       3.8m |    10.90ms |      3.1µs |       3.8m |
+|        1 |    16x |       1.6m |       2.2m |       3.9m |    10.94ms |      3.1µs |       3.9m |
+|        2 |     1x |       1.6m |        0ns |       1.6m |    77.92ms |    88.83ms |     47.34s |
+|        2 |     4x |       1.6m |       2.7m |       4.4m |   151.73ms |    85.68ms |       2.2m |
+|        2 |     8x |       1.7m |       2.7m |       4.5m |   180.87ms |    11.92ms |       2.3m |
+|        2 |    16x |       1.6m |       2.8m |       4.5m |   167.27ms |    21.75ms |       2.3m |
+|        4 |     1x |       1.5m |        0ns |       1.5m |   164.75ms |    65.50ms |     23.73s |
+|        4 |     4x |       1.4m |       3.1m |       4.7m |   222.27ms |    52.28ms |       1.2m |
+|        4 |     8x |       1.4m |       3.1m |       4.6m |   159.23ms |    32.59ms |       1.2m |
+|        4 |    16x |       1.5m |       3.1m |       4.7m |   183.05ms |    54.70ms |       1.2m |
+|        8 |     1x |       1.6m |        0ns |       1.6m |   214.51ms |    90.70ms |     11.96s |
+|        8 |     4x |       1.6m |       3.4m |       5.1m |   380.00ms |    39.98ms |     38.54s |
+|        8 |     8x |       1.7m |       4.0m |       5.8m |   354.20ms |    51.66ms |     44.04s |
+|        8 |    16x |       1.6m |       3.4m |       5.2m |   359.61ms |    49.63ms |     39.38s |
+|       16 |     1x |       1.7m |        0ns |       1.7m |   224.92ms |    55.96ms |      6.69s |
+|       16 |     4x |       1.8m |       3.9m |       5.9m |   436.40ms |    71.88ms |     22.43s |
+|       16 |     8x |       1.8m |       3.9m |       5.9m |   443.22ms |    76.94ms |     22.48s |
+|       16 |    16x |       1.8m |       3.9m |       6.0m |   407.77ms |    85.72ms |     23.03s |
+|       32 |     1x |       1.8m |        0ns |       1.8m |   365.09ms |   190.80ms |      3.76s |
+|       32 |     4x |       2.0m |       5.3m |       8.3m |   941.88ms |   224.84ms |     16.55s |
+|       32 |     8x |       2.0m |       5.3m |       8.4m |   965.44ms |   222.42ms |     16.82s |
+|       32 |    16x |       2.0m |       5.4m |       8.4m |   958.26ms |   200.40ms |     16.69s |
+
+=== Phase 2: Task Avg Time ===
+|  threads | rerank |   Recall@10 |   Recall@100 |   scan_avg | rerank_avg |  total_avg |  spawn_avg |   drop_avg |
+|----------|--------|-------------|--------------|------------|------------|------------|------------|------------|
+|        1 |     1x |      89.60% |       49.53% |    30.85ms |        0ns |    30.85ms |     1.55ms |      670ns |
+|        1 |     4x |      97.50% |       80.01% |    31.77ms |    41.60ms |    74.89ms |     1.48ms |      457ns |
+|        1 |     8x |      99.70% |       90.22% |    31.61ms |    41.67ms |    74.79ms |     1.36ms |      440ns |
+|        1 |    16x |      99.90% |       95.56% |    32.11ms |    42.69ms |    76.45ms |     1.37ms |      440ns |
+|        2 |     1x |      89.60% |       49.53% |    30.88ms |        0ns |    30.88ms |     8.66ms |    29.61ms |
+|        2 |     4x |      97.50% |       80.01% |    31.09ms |    53.60ms |    86.74ms |    16.86ms |    28.56ms |
+|        2 |     8x |      99.70% |       90.22% |    32.83ms |    53.87ms |    88.58ms |    20.10ms |     3.97ms |
+|        2 |    16x |      99.90% |       95.56% |    32.02ms |    54.61ms |    88.92ms |    18.59ms |     7.25ms |
+|        4 |     1x |      89.60% |       49.53% |    28.72ms |        0ns |    28.72ms |    20.59ms |    21.83ms |
+|        4 |     4x |      97.50% |       80.01% |    28.19ms |    60.92ms |    91.66ms |    27.78ms |    17.43ms |
+|        4 |     8x |      99.70% |       90.22% |    27.99ms |    60.14ms |    91.12ms |    19.90ms |    10.86ms |
+|        4 |    16x |      99.90% |       95.56% |    28.48ms |    61.52ms |    92.61ms |    22.88ms |    18.23ms |
+|        8 |     1x |      89.60% |       49.53% |    30.73ms |        0ns |    30.73ms |    23.83ms |    30.23ms |
+|        8 |     4x |      97.50% |       80.01% |    30.53ms |    66.51ms |    99.83ms |    42.22ms |    13.33ms |
+|        8 |     8x |      99.70% |       90.22% |    32.84ms |    78.16ms |   114.17ms |    39.36ms |    17.22ms |
+|        8 |    16x |      99.90% |       95.56% |    31.89ms |    67.05ms |   101.75ms |    39.96ms |    16.54ms |
+|       16 |     1x |      89.60% |       49.53% |    33.34ms |        0ns |    33.34ms |    32.13ms |    18.65ms |
+|       16 |     4x |      97.50% |       80.01% |    34.84ms |    76.21ms |   115.14ms |    62.34ms |    23.96ms |
+|       16 |     8x |      99.70% |       90.22% |    34.75ms |    76.25ms |   115.22ms |    63.32ms |    25.65ms |
+|       16 |    16x |      99.90% |       95.56% |    35.85ms |    76.72ms |   117.02ms |    58.25ms |    28.57ms |
+|       32 |     1x |      89.60% |       49.53% |    35.47ms |        0ns |    35.47ms |    33.19ms |    27.26ms |
+|       32 |     4x |      97.50% |       80.01% |    38.35ms |   104.07ms |   162.76ms |    85.63ms |    32.12ms |
+|       32 |     8x |      99.70% |       90.22% |    38.94ms |   104.50ms |   165.03ms |    87.77ms |    31.77ms |
+|       32 |    16x |      99.90% |       95.56% |    39.10ms |   105.25ms |   164.45ms |    87.11ms |    28.63ms |
+
+--- Phase 3 skipped (pass --phase-3 to enable) ---
+
+
+
+1M centroids (insert 10k data vectors) distance_query - reranking in profile.
+cargo bench -p chroma-index --bench flat_centroid_profile -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 1000000 --threads 32 --data-vectors 10000
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.34s
+     Running benches/flat_centroid_profile.rs (target/release/deps/flat_centroid_profile-38cd2afab553f60e)
+Loading Wikipedia EN from HuggingFace Hub...
+Loading 1.00M vectors from wikipedia-en (dim=1024)...
+
+=== Flat Centroid Index Profile ===
+Dim: 1024 | Metric: L2 | Centroid bits: 1 | Threads: 32
+Initial centroids: 1.00M | Data vectors: 1.0K | Queries: 100
+Rerank factor: 1x | Distance: code-to-code (hamming)
+Scan footprint: 137.3 MB (quantized codes)
+Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
+
+--- Phase 1: Loading cached flat index from target/flat_cache/flat_WikipediaEn_1000000_1_L2.bin ---
+Loaded 1.00M centroids in 4.51s
+Index size: 1000000
+
+--- Phase 2: SPANN workload (1.0K data vectors, threads: 1, 2, 4, 8, 16, 32, rerank: 1x, 4x, 8x, 16x) ---
+   1T  1x  completed in 1.6m | Index size: 1000001
+   1T  4x  completed in 4.1m | Index size: 1000001
+   1T  8x  completed in 4.1m | Index size: 1000001
+   1T 16x  completed in 4.2m | Index size: 1000001
+   2T  1x  completed in 46.77s | Index size: 1000006
+   2T  4x  completed in 2.5m | Index size: 1000006
+   2T  8x  completed in 2.6m | Index size: 1000006
+   2T 16x  completed in 2.5m | Index size: 1000006
+   4T  1x  completed in 24.91s | Index size: 1000005
+   4T  4x  completed in 1.3m | Index size: 1000005
+   4T  8x  completed in 1.3m | Index size: 1000005
+   4T 16x  completed in 1.4m | Index size: 1000005
+   8T  1x  completed in 12.07s | Index size: 1000006
+   8T  4x  completed in 48.66s | Index size: 1000006
+   8T  8x  completed in 43.65s | Index size: 1000006
+   8T 16x  completed in 44.41s | Index size: 1000006
+  16T  1x  completed in 6.68s | Index size: 1000004
+  16T  4x  completed in 24.99s | Index size: 1000004
+  16T  8x  completed in 25.04s | Index size: 1000004
+  16T 16x  completed in 25.28s | Index size: 1000004
+  32T  1x  completed in 3.77s | Index size: 1000004
+  32T  4x  completed in 18.13s | Index size: 1000004
+  32T  8x  completed in 19.74s | Index size: 1000004
+  32T 16x  completed in 17.92s | Index size: 1000004
+
+=== Phase 2: Task Counts (same across all runs) ===
+|   navigate |      spawn |       drop |
+|------------|------------|------------|
+|       3.0K |          8 |          7 |
+
+=== Phase 2: Task Total Time ===
+|  threads | rerank |   nav_scan | nav_rerank |  nav_total |      spawn |       drop |       wall |
+|----------|--------|------------|------------|------------|------------|------------|------------|
+|        1 |     1x |       1.6m |        0ns |       1.6m |    12.60ms |      4.8µs |       1.6m |
+|        1 |     4x |       1.6m |       2.4m |       4.1m |    12.17ms |      3.7µs |       4.1m |
+|        1 |     8x |       1.6m |       2.4m |       4.1m |    11.15ms |      3.4µs |       4.1m |
+|        1 |    16x |       1.6m |       2.5m |       4.2m |    11.07ms |      3.3µs |       4.2m |
+|        2 |     1x |       1.6m |        0ns |       1.6m |   179.25ms |    43.21ms |     46.77s |
+|        2 |     4x |       1.6m |       3.2m |       4.9m |   136.72ms |    64.68ms |       2.5m |
+|        2 |     8x |       1.7m |       3.4m |       5.2m |   250.76ms |    56.27ms |       2.6m |
+|        2 |    16x |       1.6m |       3.3m |       5.0m |   197.20ms |    21.76ms |       2.5m |
+|        4 |     1x |       1.6m |        0ns |       1.6m |   148.70ms |    97.35ms |     24.91s |
+|        4 |     4x |       1.4m |       3.6m |       5.2m |   194.27ms |    33.04ms |       1.3m |
+|        4 |     8x |       1.5m |       3.7m |       5.3m |   229.88ms |    21.35ms |       1.3m |
+|        4 |    16x |       1.5m |       3.7m |       5.4m |   306.44ms |    38.91ms |       1.4m |
+|        8 |     1x |       1.6m |        0ns |       1.6m |   293.92ms |    91.46ms |     12.07s |
+|        8 |     4x |       1.7m |       4.5m |       6.3m |   566.59ms |    58.68ms |     48.66s |
+|        8 |     8x |       1.6m |       4.0m |       5.8m |   455.07ms |    52.85ms |     43.65s |
+|        8 |    16x |       1.6m |       4.0m |       5.8m |   389.23ms |    45.67ms |     44.41s |
+|       16 |     1x |       1.7m |        0ns |       1.7m |   212.96ms |    90.88ms |      6.68s |
+|       16 |     4x |       1.8m |       4.5m |       6.4m |   313.22ms |    85.64ms |     24.99s |
+|       16 |     8x |       1.8m |       4.5m |       6.5m |   539.69ms |    84.38ms |     25.04s |
+|       16 |    16x |       1.8m |       4.5m |       6.5m |   447.67ms |    55.61ms |     25.28s |
+|       32 |     1x |       1.8m |        0ns |       1.8m |   431.88ms |   218.76ms |      3.77s |
+|       32 |     4x |       2.0m |       6.0m |       8.9m |      1.03s |   150.85ms |     18.13s |
+|       32 |     8x |       2.2m |       6.8m |      10.0m |      1.22s |   135.80ms |     19.74s |
+|       32 |    16x |       2.0m |       6.0m |       9.1m |      1.18s |   169.22ms |     17.92s |
+
+=== Phase 2: Task Avg Time ===
+|  threads | rerank |   scan_avg | rerank_avg |  total_avg |  spawn_avg |   drop_avg |
+|----------|--------|------------|------------|------------|------------|------------|
+|        1 |     1x |    30.87ms |        0ns |    30.87ms |     1.57ms |      682ns |
+|        1 |     4x |    31.82ms |    47.30ms |    80.75ms |     1.52ms |      528ns |
+|        1 |     8x |    31.64ms |    47.68ms |    81.05ms |     1.39ms |      492ns |
+|        1 |    16x |    32.16ms |    48.65ms |    82.55ms |     1.38ms |      475ns |
+|        2 |     1x |    30.53ms |        0ns |    30.53ms |    19.92ms |    14.40ms |
+|        2 |     4x |    31.35ms |    63.42ms |    96.69ms |    15.19ms |    21.56ms |
+|        2 |     8x |    32.84ms |    66.40ms |   101.26ms |    27.86ms |    18.76ms |
+|        2 |    16x |    32.02ms |    64.18ms |    98.25ms |    21.91ms |     7.25ms |
+|        4 |     1x |    32.22ms |        0ns |    32.22ms |    18.59ms |    32.45ms |
+|        4 |     4x |    28.03ms |    71.34ms |   101.81ms |    24.28ms |    11.01ms |
+|        4 |     8x |    28.76ms |    72.25ms |   103.41ms |    28.74ms |     7.12ms |
+|        4 |    16x |    29.93ms |    72.86ms |   105.15ms |    38.31ms |    12.97ms |
+|        8 |     1x |    30.90ms |        0ns |    30.90ms |    32.66ms |    30.49ms |
+|        8 |     4x |    32.72ms |    87.87ms |   123.44ms |    62.95ms |    19.56ms |
+|        8 |     8x |    31.55ms |    78.68ms |   112.95ms |    50.56ms |    17.62ms |
+|        8 |    16x |    32.24ms |    78.97ms |   113.87ms |    43.25ms |    15.22ms |
+|       16 |     1x |    33.10ms |        0ns |    33.10ms |    30.42ms |    30.29ms |
+|       16 |     4x |    34.72ms |    87.54ms |   126.33ms |    44.75ms |    28.55ms |
+|       16 |     8x |    35.15ms |    88.21ms |   127.55ms |    77.10ms |    28.13ms |
+|       16 |    16x |    35.56ms |    88.69ms |   128.49ms |    63.95ms |    18.54ms |
+|       32 |     1x |    35.61ms |        0ns |    35.61ms |    39.26ms |    31.25ms |
+|       32 |     4x |    39.10ms |   118.01ms |   174.11ms |    94.01ms |    21.55ms |
+|       32 |     8x |    42.97ms |   134.32ms |   195.36ms |   110.52ms |    19.40ms |
+|       32 |    16x |    39.89ms |   118.67ms |   177.81ms |   107.10ms |    24.17ms |
+
+
+--- Phase 3: Scale sweep (4 sizes, 100 queries, k=100) ---
+Scales: 1.0K, 10.0K, 100.0K, 1.00M
+
+|  Centroids |  Scan MB |  Rerank |   Recall@10 |   Recall@100 |       Scan |     Rerank |      Total |       Wall |
+|------------|----------|---------|-------------|--------------|------------|------------|------------|------------|
+|       1.0K |     0.1 |     1x |      96.90% |       64.33% |     60.0µs |        0ns |     60.0µs |     5.14ms |
+|       1.0K |     0.1 |     2x |      99.70% |       86.27% |     80.0µs |     72.6µs |    152.6µs |     5.11ms |
+|       1.0K |     0.1 |     4x |     100.00% |       97.61% |     83.4µs |    118.7µs |    202.1µs |     2.45ms |
+|       1.0K |     0.1 |     8x |     100.00% |       99.98% |     85.4µs |    215.0µs |    300.4µs |     2.09ms |
+|       1.0K |     0.1 |    16x |     100.00% |      100.00% |     83.9µs |    264.3µs |    348.2µs |     2.19ms |
+|      10.0K |     1.4 |     1x |      93.50% |       55.60% |    263.4µs |        0ns |    263.4µs |     3.64ms |
+|      10.0K |     1.4 |     2x |      97.30% |       74.56% |    338.3µs |    382.7µs |    721.0µs |     3.79ms |
+|      10.0K |     1.4 |     4x |      99.20% |       88.44% |    344.9µs |    288.0µs |    632.9µs |     3.44ms |
+|      10.0K |     1.4 |     8x |      99.80% |       96.41% |    421.7µs |    391.5µs |    813.2µs |     4.16ms |
+|      10.0K |     1.4 |    16x |      99.80% |       99.41% |    521.0µs |    638.2µs |     1.16ms |     5.98ms |
+|     100.0K |    13.7 |     1x |      90.30% |       51.75% |     2.01ms |        0ns |     2.01ms |    10.95ms |
+|     100.0K |    13.7 |     2x |      96.00% |       69.29% |     2.17ms |     3.24ms |     5.41ms |    25.82ms |
+|     100.0K |    13.7 |     4x |      98.80% |       83.88% |     2.29ms |     3.38ms |     5.67ms |    25.95ms |
+|     100.0K |    13.7 |     8x |      99.70% |       92.76% |     2.43ms |     3.98ms |     6.42ms |    28.85ms |
+|     100.0K |    13.7 |    16x |      99.90% |       97.49% |     2.65ms |     4.93ms |     7.58ms |    36.14ms |
+|      1.00M |   137.3 |     1x |      89.60% |       49.53% |    24.15ms |        0ns |    24.15ms |   101.92ms |
+|      1.00M |   137.3 |     2x |      94.80% |       66.43% |    25.21ms |   103.83ms |   129.04ms |   599.83ms |
+|      1.00M |   137.3 |     4x |      97.50% |       80.01% |    25.38ms |   104.31ms |   129.69ms |   602.72ms |
+|      1.00M |   137.3 |     8x |      99.70% |       90.22% |    25.58ms |   105.05ms |   130.63ms |   610.00ms |
+|      1.00M |   137.3 |    16x |      99.90% |       95.56% |    26.06ms |   105.71ms |   131.77ms |   613.75ms |
+
+|  Centroids |    FP MB |   Recall@10 |   Recall@100 | FP Avg lat |       Wall |
+|------------|----------|-------------|--------------|------------|------------|
+|       1.0K |     3.9 |     100.00% |      100.00% |    217.8µs |     5.49ms |
+|      10.0K |    39.1 |     100.00% |      100.00% |     2.47ms |    14.95ms |
+|     100.0K |   390.6 |     100.00% |      100.00% |    52.11ms |   213.37ms |
+|      1.00M |  3906.2 |     100.00% |      100.00% |   516.66ms |      2.07s |
+
+
+
+
+
+
+1M centroids (1k data vectors) distance_code
+cargo bench -p chroma-index --bench flat_centroid_profile -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 1000000 --threads 32 --data-vectors 1000 --code-to-code
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.36s
+     Running benches/flat_centroid_profile.rs (target/release/deps/flat_centroid_profile-38cd2afab553f60e)
+Loading Wikipedia EN from HuggingFace Hub...
+Loading 1.00M vectors from wikipedia-en (dim=1024)...
+
+=== Flat Centroid Index Profile ===
+Dim: 1024 | Metric: L2 | Centroid bits: 1 | Threads: 32
+Initial centroids: 1.00M | Data vectors: 1.0K | Queries: 100
+Rerank factor: 1x | Distance: code-to-code (hamming)
+Scan footprint: 137.3 MB (quantized codes)
+Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
+
+--- Phase 1: Loading cached flat index from target/flat_cache/flat_WikipediaEn_1000000_1_L2.bin ---
+Loaded 1.00M centroids in 4.35s
+Index size: 1000000
+
+--- Phase 2: SPANN workload (1.0K data vectors, threads: 1, 2, 4, 8, 16, 32) ---
+   1T  completed in 1.6m | Index size: 1000001
+   2T  completed in 47.35s | Index size: 1000006
+   4T  completed in 23.52s | Index size: 1000005
+   8T  completed in 12.06s | Index size: 1000006
+  16T  completed in 6.68s | Index size: 1000004
+  32T  completed in 3.87s | Index size: 1000004
+
+=== Phase 2: Task Counts (same for all thread counts) ===
+|   navigate |      spawn |       drop |
+|------------|------------|------------|
+|       3.0K |          8 |          7 |
+
+=== Phase 2: Task Total Time ===
+|  threads |   navigate |      spawn |       drop |       wall |
+|----------|------------|------------|------------|------------|
+|        1 |       1.6m |    11.12ms |      4.1µs |       1.6m |
+|        2 |       1.6m |   168.31ms |    55.30ms |     47.35s |
+|        4 |       1.5m |   183.02ms |    56.36ms |     23.52s |
+|        8 |       1.6m |   271.46ms |    66.92ms |     12.06s |
+|       16 |       1.7m |   228.14ms |    89.00ms |      6.68s |
+|       32 |       1.8m |   343.90ms |   194.45ms |      3.87s |
+
+=== Phase 2: Task Avg Time ===
+|  threads |   navigate |      spawn |       drop |
+|----------|------------|------------|------------|
+|        1 |    30.94ms |     1.39ms |      589ns |
+|        2 |    30.88ms |    18.70ms |    18.43ms |
+|        4 |    28.65ms |    22.88ms |    18.79ms |
+|        8 |    30.74ms |    30.16ms |    22.31ms |
+|       16 |    33.38ms |    32.59ms |    29.67ms |
+|       32 |    36.16ms |    31.26ms |    27.78ms |
+
+--- Phase 3: Scale sweep (4 sizes, 100 queries, k=100) ---
+Scales: 1.0K, 10.0K, 100.0K, 1.00M
+
+|  Centroids |  Scan MB |  Rerank |   Recall@10 |   Recall@100 |       Scan |     Rerank |      Total |       Wall |
+|------------|----------|---------|-------------|--------------|------------|------------|------------|------------|
+|       1.0K |     0.1 |     1x |      96.90% |       64.33% |     58.3µs |        0ns |     58.3µs |     7.31ms |
+|       1.0K |     0.1 |     2x |      99.70% |       86.27% |     66.2µs |     67.7µs |    134.0µs |     5.50ms |
+|       1.0K |     0.1 |     4x |     100.00% |       97.61% |     79.5µs |    116.7µs |    196.2µs |     2.45ms |
+|       1.0K |     0.1 |     8x |     100.00% |       99.98% |     89.5µs |    212.5µs |    302.0µs |     2.32ms |
+|       1.0K |     0.1 |    16x |     100.00% |      100.00% |     81.8µs |    264.6µs |    346.3µs |     2.21ms |
+|      10.0K |     1.4 |     1x |      93.50% |       55.60% |    269.0µs |        0ns |    269.0µs |     6.73ms |
+|      10.0K |     1.4 |     2x |      97.30% |       74.56% |    288.3µs |    342.7µs |    631.0µs |     3.85ms |
+|      10.0K |     1.4 |     4x |      99.20% |       88.44% |    340.8µs |    287.6µs |    628.4µs |     4.23ms |
+|      10.0K |     1.4 |     8x |      99.80% |       96.41% |    676.8µs |    417.2µs |     1.09ms |     5.65ms |
+|      10.0K |     1.4 |    16x |      99.80% |       99.41% |    633.4µs |    673.7µs |     1.31ms |     6.40ms |
+|     100.0K |    13.7 |     1x |      90.30% |       51.75% |     2.05ms |        0ns |     2.05ms |    12.64ms |
+|     100.0K |    13.7 |     2x |      96.00% |       69.29% |     2.15ms |     3.27ms |     5.41ms |    24.88ms |
+|     100.0K |    13.7 |     4x |      98.80% |       83.88% |     2.34ms |     3.42ms |     5.76ms |    26.76ms |
+|     100.0K |    13.7 |     8x |      99.70% |       92.76% |     2.45ms |     3.99ms |     6.43ms |    30.10ms |
+|     100.0K |    13.7 |    16x |      99.90% |       97.49% |     2.70ms |     4.93ms |     7.64ms |    36.39ms |
+|      1.00M |   137.3 |     1x |      89.60% |       49.53% |    24.17ms |        0ns |    24.17ms |   101.86ms |
+|      1.00M |   137.3 |     2x |      94.80% |       66.43% |    25.15ms |   102.96ms |   128.11ms |   597.81ms |
+|      1.00M |   137.3 |     4x |      97.50% |       80.01% |    25.44ms |   102.87ms |   128.31ms |   599.75ms |
+|      1.00M |   137.3 |     8x |      99.70% |       90.22% |    25.49ms |   103.93ms |   129.42ms |   608.95ms |
+|      1.00M |   137.3 |    16x |      99.90% |       95.56% |    26.18ms |   104.36ms |   130.54ms |   604.84ms |
+
+|  Centroids |    FP MB |   Recall@10 |   Recall@100 | FP Avg lat |       Wall |
+|------------|----------|-------------|--------------|------------|------------|
+|       1.0K |     3.9 |     100.00% |      100.00% |    220.0µs |     2.96ms |
+|      10.0K |    39.1 |     100.00% |      100.00% |     2.45ms |    15.63ms |
+|     100.0K |   390.6 |     100.00% |      100.00% |    51.55ms |   212.07ms |
+|      1.00M |  3906.2 |     100.00% |      100.00% |   511.56ms |      2.05s |

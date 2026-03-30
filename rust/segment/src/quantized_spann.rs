@@ -338,8 +338,10 @@ impl QuantizedSpannSegmentFlusher {
 
 #[derive(Clone)]
 pub struct QuantizedSpannSegmentReader {
-    // Centroid index (for navigate)
+    // Centroid indexes (for navigate + rerank)
     quantized_centroid: USearchIndex,
+    raw_centroid: USearchIndex,
+    centroid_rerank_factor: u32,
 
     // Quantization parameters (for rotate + scoring)
     dimension: usize,
@@ -429,7 +431,7 @@ impl QuantizedSpannSegmentReader {
         let cluster_id = parsed[0].1;
         let embedding_metadata_id = parsed[1].1;
         let quantized_centroid_id = IndexUuid(parsed[2].1);
-        // parsed[3] is raw_centroid — not needed for the reader.
+        let raw_centroid_id = IndexUuid(parsed[3].1);
         let scalar_metadata_id = parsed[4].1;
 
         // Step 1: Open embedding_metadata → load rotation matrix + center.
@@ -494,6 +496,7 @@ impl QuantizedSpannSegmentReader {
             expansion_add: ef_construction,
             expansion_search: ef_search,
             quantization_center: Some(center),
+            centroid_quantization_bits: spann_config.centroid_bits(),
         };
         let quantized_centroid = usearch_provider
             .open(&usearch_config, OpenMode::Open(quantized_centroid_id))
@@ -507,6 +510,26 @@ impl QuantizedSpannSegmentReader {
                     "failed to open quantized centroid index: {e}"
                 ))
             })?;
+
+        // Step 2b: Open raw centroid usearch index (for reranking).
+        let raw_usearch_config = USearchIndexConfig {
+            quantization_center: None,
+            ..usearch_config
+        };
+        let raw_centroid = usearch_provider
+            .open(&raw_usearch_config, OpenMode::Open(raw_centroid_id))
+            .instrument(tracing::trace_span!(
+                "Open raw centroid index",
+                index_id = %raw_centroid_id.0
+            ))
+            .await
+            .map_err(|e| {
+                QuantizedSpannSegmentError::Data(format!(
+                    "failed to open raw centroid index: {e}"
+                ))
+            })?;
+
+        let centroid_rerank_factor = spann_config.centroid_rerank_factor();
 
         // Step 3: Open quantized cluster blockfile reader.
         let cluster_options = BlockfileReaderOptions::new(cluster_id, prefix_path.clone());
@@ -534,6 +557,8 @@ impl QuantizedSpannSegmentReader {
             dimension,
             distance_function,
             quantized_centroid,
+            raw_centroid,
+            centroid_rerank_factor,
             quantized_cluster_reader,
             rotation,
             versions_reader,
@@ -562,6 +587,8 @@ impl QuantizedSpannSegmentReader {
 
     /// Find nearest cluster heads using the quantized centroid index.
     /// `rotated_query` must be the output of `rotate()`.
+    /// When `centroid_rerank_factor > 1`, fetches extra candidates and
+    /// reranks them by exact distance from the raw centroid index.
     pub fn navigate(
         &self,
         rotated_query: &[f32],
@@ -574,13 +601,39 @@ impl QuantizedSpannSegmentReader {
             });
         }
 
+        let rerank_factor = self.centroid_rerank_factor as usize;
+
+        if rerank_factor <= 1 {
+            let result = self
+                .quantized_centroid
+                .search(rotated_query, count)
+                .map_err(|e| {
+                    QuantizedSpannSegmentError::Data(format!("centroid search failed: {e}"))
+                })?;
+            return Ok(result.keys);
+        }
+
         let result = self
             .quantized_centroid
-            .search(rotated_query, count)
+            .search(rotated_query, count * rerank_factor)
             .map_err(|e| {
                 QuantizedSpannSegmentError::Data(format!("centroid search failed: {e}"))
             })?;
-        Ok(result.keys)
+
+        let mut reranked: Vec<(u32, f32)> = result
+            .keys
+            .iter()
+            .filter_map(|&key| {
+                let raw_vec = self.raw_centroid.get(key).ok()??;
+                let dist = self.distance_function.distance(rotated_query, &raw_vec);
+                Some((key, dist))
+            })
+            .collect();
+
+        reranked.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        reranked.truncate(count);
+
+        Ok(reranked.into_iter().map(|(k, _)| k).collect())
     }
 
     /// Read a single cluster from the blockfile.

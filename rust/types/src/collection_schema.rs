@@ -19,7 +19,8 @@ use crate::{
     default_construction_ef_spann, default_initial_lambda, default_m, default_m_spann,
     default_merge_threshold, default_nreplica_count, default_num_centers_to_merge_to,
     default_num_samples_kmeans, default_num_threads, default_reassign_neighbor_count,
-    default_resize_factor, default_search_ef, default_search_ef_spann, default_search_nprobe,
+    default_centroid_rerank_factor, default_data_rerank_factor, default_resize_factor, default_search_ef,
+    default_search_ef_spann, default_search_nprobe,
     default_search_rng_epsilon, default_search_rng_factor, default_space, default_split_threshold,
     default_sync_threshold, default_write_nprobe, default_write_rng_epsilon,
     default_write_rng_factor, ConversionError, HnswParametersFromSegmentError,
@@ -816,6 +817,9 @@ impl Schema {
                         max_neighbors: Some(default_m_spann()),
                         center_drift_threshold: None,
                         quantize: Quantization::None,
+                        centroid_bits: None,
+                        centroid_rerank_factor: None,
+                        data_rerank_factor: None,
                     }),
                 },
             },
@@ -911,6 +915,9 @@ impl Schema {
                                 max_neighbors: Some(default_m_spann()),
                                 center_drift_threshold: None,
                                 quantize: Quantization::None,
+                                centroid_bits: None,
+                                centroid_rerank_factor: None,
+                                data_rerank_factor: None,
                             }),
                         },
                     },
@@ -1055,7 +1062,7 @@ impl Schema {
                     quantize: variant,
                     ..*spann_config
                 },
-                Quantization::FourBitRabitQWithUSearch => SpannIndexConfig {
+                Quantization::FourBitRabitQWithUSearch | Quantization::OneBitRabitQWithUSearch => SpannIndexConfig {
                     search_nprobe: Some(64),
                     nreplica_count: Some(2),
                     write_rng_factor: Some(4.0),
@@ -1732,6 +1739,13 @@ impl Schema {
                         .center_drift_threshold
                         .or(default.center_drift_threshold),
                     quantize: Quantization::None, // Always None - quantization is set programmatically
+                    centroid_bits: user.centroid_bits.or(default.centroid_bits),
+                    centroid_rerank_factor: user
+                        .centroid_rerank_factor
+                        .or(default.centroid_rerank_factor),
+                    data_rerank_factor: user
+                        .data_rerank_factor
+                        .or(default.data_rerank_factor),
                 }))
             }
             (Some(default), None) => {
@@ -2829,6 +2843,17 @@ pub enum Quantization {
     #[default]
     None,
     FourBitRabitQWithUSearch,
+    OneBitRabitQWithUSearch,
+}
+
+impl Quantization {
+    pub fn data_bits(&self) -> Option<u8> {
+        match self {
+            Quantization::None => Option::None,
+            Quantization::FourBitRabitQWithUSearch => Some(4),
+            Quantization::OneBitRabitQWithUSearch => Some(1),
+        }
+    }
 }
 
 fn is_default_quantization(v: &Quantization) -> bool {
@@ -2894,9 +2919,40 @@ pub struct SpannIndexConfig {
     /// Quantization implementation for vector search (cloud-only feature)
     #[serde(default, skip_serializing_if = "is_default_quantization")]
     pub quantize: Quantization,
+    /// Quantization bit-width for centroids in the HNSW index (1 or 4).
+    /// When not set, defaults to `data_bits` from `quantize`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub centroid_bits: Option<u8>,
+    /// Rerank factor for centroid search. When > 1, navigate fetches
+    /// `count * factor` candidates from the quantized HNSW index and
+    /// reranks them using exact distances from the raw centroid index.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 1, max = 20))]
+    pub centroid_rerank_factor: Option<u32>,
+    /// Rerank factor for data vectors. When > 1, search keeps
+    /// `k * factor` candidates from the quantized cluster scan and
+    /// reranks them using full-precision embeddings.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 1, max = 100))]
+    pub data_rerank_factor: Option<u32>,
 }
 
 impl SpannIndexConfig {
+    pub fn centroid_bits(&self) -> u8 {
+        self.centroid_bits
+            .unwrap_or_else(|| self.quantize.data_bits().unwrap_or(4))
+    }
+
+    pub fn centroid_rerank_factor(&self) -> u32 {
+        self.centroid_rerank_factor
+            .unwrap_or(default_centroid_rerank_factor())
+    }
+
+    pub fn data_rerank_factor(&self) -> u32 {
+        self.data_rerank_factor
+            .unwrap_or(default_data_rerank_factor())
+    }
+
     /// Check if this config has default values
     /// None values are considered default (not set by user)
     pub fn is_default(&self) -> bool {
@@ -2982,6 +3038,16 @@ impl SpannIndexConfig {
         }
         if let Some(center_drift_threshold) = self.center_drift_threshold {
             if center_drift_threshold != default_center_drift_threshold() {
+                return false;
+            }
+        }
+        if let Some(centroid_rerank_factor) = self.centroid_rerank_factor {
+            if centroid_rerank_factor != default_centroid_rerank_factor() {
+                return false;
+            }
+        }
+        if let Some(data_rerank_factor) = self.data_rerank_factor {
+            if data_rerank_factor != default_data_rerank_factor() {
                 return false;
             }
         }
@@ -3152,6 +3218,9 @@ impl TryFrom<&InternalCollectionConfiguration> for Schema {
                     max_neighbors: Some(spann_config.max_neighbors),
                     center_drift_threshold: None,
                     quantize: Quantization::None,
+                    centroid_bits: None,
+                    centroid_rerank_factor: None,
+                    data_rerank_factor: None,
                 }),
             },
         };
@@ -3523,6 +3592,7 @@ mod tests {
                         max_neighbors: Some(20),
                         center_drift_threshold: None,
                         quantize: Quantization::None,
+                        ..Default::default()
                     });
                 }
             }
@@ -3701,6 +3771,7 @@ mod tests {
             max_neighbors: Some(16),
             center_drift_threshold: None,
             quantize: Quantization::None,
+            ..Default::default()
         };
 
         let user_spann = SpannIndexConfig {
@@ -3722,6 +3793,7 @@ mod tests {
             max_neighbors: None,
             center_drift_threshold: None,
             quantize: Quantization::None,
+            ..Default::default()
         };
 
         let result = Schema::merge_spann_configs(Some(&default_spann), Some(&user_spann))
@@ -3761,6 +3833,7 @@ mod tests {
             max_neighbors: Some(16),
             center_drift_threshold: None,
             quantize: Quantization::None,
+            ..Default::default()
         };
 
         let user_spann_with_quantize = SpannIndexConfig {
@@ -3782,6 +3855,7 @@ mod tests {
             max_neighbors: None,
             center_drift_threshold: None,
             quantize: Quantization::FourBitRabitQWithUSearch, // This should be rejected
+            ..Default::default()
         };
 
         // Should reject user schema with quantize: true
@@ -3815,6 +3889,7 @@ mod tests {
             max_neighbors: Some(16),
             center_drift_threshold: None,
             quantize: Quantization::FourBitRabitQWithUSearch, // This should be rejected
+            ..Default::default()
         };
 
         let result = Schema::merge_spann_configs(Some(&default_spann_with_quantize), None);
@@ -3858,6 +3933,7 @@ mod tests {
             max_neighbors: Some(32),
             center_drift_threshold: None,
             quantize: Quantization::None,
+            ..Default::default()
         };
 
         let with_space: InternalSpannConfiguration = (Some(&Space::Cosine), &config).into();
@@ -3974,6 +4050,7 @@ mod tests {
                 max_neighbors: None,
                 center_drift_threshold: None,
                 quantize: Quantization::None,
+                ..Default::default()
             }), // Add SPANN config
         };
 
@@ -6496,6 +6573,9 @@ mod tests {
                         max_neighbors,
                         center_drift_threshold: None,
                         quantize: Quantization::None,
+                        centroid_bits: None,
+                        centroid_rerank_factor: None,
+                        data_rerank_factor: None,
                     },
                 )
         }
@@ -6682,6 +6762,7 @@ mod tests {
                         max_neighbors: Some(spann_config.max_neighbors),
                         center_drift_threshold: None,
                         quantize: Quantization::None,
+                        ..Default::default()
                     }),
                 },
             }
@@ -6848,6 +6929,9 @@ mod tests {
                 max_neighbors: Some(config.max_neighbors),
                 center_drift_threshold: None,
                 quantize: Quantization::None,
+                centroid_bits: None,
+                centroid_rerank_factor: None,
+                data_rerank_factor: None,
             })
         }
 
