@@ -331,8 +331,3 @@ def test_add_large(
         invariants.metadatas_match(coll, cast(strategies.RecordSet, normalized_record_set))
         invariants.documents_match(coll, cast(strategies.RecordSet, normalized_record_set))
         invariants.embeddings_match(coll, cast(strategies.RecordSet, normalized_record_set))
-
-def embeddings_match(collection: Collection, record_set: RecordSet) -> None:
-    """The actual embedding documents is equal to the expected documents"""
-    normalized_record_set = wrap_all(record_set)
-    _field_matches(collection, normalized_record_set, "embeddings")
