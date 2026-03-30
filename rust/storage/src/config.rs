@@ -112,7 +112,8 @@ impl S3StorageConfig {
     }
 
     fn default_read_timeout_ms() -> u64 {
-        2000
+        // NOTE(rescrv): Set to 15s.  This is request_timeout_ms/(retry_count + 1)
+        15000
     }
 
     fn default_request_timeout_ms() -> u64 {
