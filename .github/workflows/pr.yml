@@ -167,6 +167,12 @@ jobs:
     if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
     uses: ./.github/workflows/_python-vulnerability-scan.yml
 
+  python-dependency-sync-check:
+    name: Python dependency sync check
+    needs: change-detection
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
+    uses: ./.github/workflows/_python-dependency-sync-check.yml
+
   javascript-client-tests:
     name: JavaScript client tests
     needs: change-detection
@@ -250,6 +256,7 @@ jobs:
     needs:
       - python-tests
       - python-vulnerability-scan
+      - python-dependency-sync-check
       - javascript-client-tests
       - rust-tests
       - rust-feature-tests
@@ -264,7 +271,7 @@ jobs:
         uses: re-actors/alls-green@release/v1
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: python-tests,python-vulnerability-scan,javascript-client-tests,rust-tests,rust-feature-tests,go-tests,check-spanner-migrations,check-helm-version-bump,delete-helm-comment
+          allowed-skips: python-tests,python-vulnerability-scan,python-dependency-sync-check,javascript-client-tests,rust-tests,rust-feature-tests,go-tests,check-spanner-migrations,check-helm-version-bump,delete-helm-comment
 
   notify-slack-on-failure:
     name: Notify Slack on Test Failure
@@ -272,6 +279,7 @@ jobs:
     needs:
       - python-tests
       - python-vulnerability-scan
+      - python-dependency-sync-check
       - javascript-client-tests
       - rust-tests
       - rust-feature-tests
