@@ -10,15 +10,22 @@ use thiserror::Error;
 use crate::{hnsw_provider::HnswIndexRef, quantization::Code, SearchResult};
 
 /// A point with its ID, version, and embedding.
-pub type EmbeddingPoint = (u32, u32, Arc<[f32]>);
+#[derive(Clone)]
+pub struct EmbeddingPoint {
+    pub id: u32,
+    pub version: u32,
+    pub embedding: Arc<[f32]>,
+}
 
 /// Result of a 2-means split: (center, points) for each of the two clusters.
-pub type SplitResult = (
-    Arc<[f32]>,
-    Vec<EmbeddingPoint>,
-    Arc<[f32]>,
-    Vec<EmbeddingPoint>,
-);
+pub struct SplitResult {
+    pub left_center: Arc<[f32]>,
+    pub left_group: Vec<EmbeddingPoint>,
+    pub right_center: Arc<[f32]>,
+    pub right_group: Vec<EmbeddingPoint>,
+    /// Offset IDs of entries removed during embedding deduplication.
+    pub removed_duplicate_ids: Vec<u32>,
+}
 
 // TODO(Sanket): I don't understand why the reference implementation defined
 // max_distance this way.
@@ -615,48 +622,95 @@ pub async fn rng_query(
 ///
 /// Returns (left_center, left_group, right_center, right_group) where centers
 /// are the averages of the corresponding groups.
-pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFunction) -> SplitResult {
-    let n = embeddings.len();
-
-    if n < 2 {
+pub fn split(
+    mut embeddings: Vec<EmbeddingPoint>,
+    distance_function: &DistanceFunction,
+) -> SplitResult {
+    if embeddings.len() < 2 {
         let c = embeddings
             .first()
-            .map(|(_, _, e)| e.clone())
+            .map(|p| p.embedding.clone())
             .unwrap_or(Vec::new().into());
-        return (c.clone(), embeddings, c, Vec::new());
+        return SplitResult {
+            left_center: c.clone(),
+            left_group: embeddings,
+            right_center: c,
+            right_group: Vec::new(),
+            removed_duplicate_ids: Vec::new(),
+        };
     }
 
-    let dim = embeddings[0].2.len();
+    let dim = embeddings[0].embedding.len();
 
     // Initialization: try 4 random seeds, keep best
     let mut rng = thread_rng();
-    let mut best_c_0 = embeddings[0].2.as_ref();
-    let mut best_c_1 = embeddings[1].2.as_ref();
+    let mut best_c_0 = embeddings[0].embedding.as_ref();
+    let mut best_c_1 = embeddings[1].embedding.as_ref();
     let mut best_total_dist = f32::MAX;
 
     for _ in 0..4 {
         let picked = embeddings.iter().choose_multiple(&mut rng, 2);
-        let c_0 = picked[0].2.as_ref();
-        let c_1 = picked[1].2.as_ref();
+        let c_0 = picked[0].embedding.as_ref();
+        let c_1 = picked[1].embedding.as_ref();
 
         let total_dist = embeddings
             .iter()
-            .map(|(_, _, e)| {
+            .map(|p| {
                 distance_function
-                    .distance(e, c_0)
-                    .min(distance_function.distance(e, c_1))
+                    .distance(&p.embedding, c_0)
+                    .min(distance_function.distance(&p.embedding, c_1))
             })
             .sum::<f32>();
 
         if total_dist < best_total_dist {
             best_total_dist = total_dist;
-            best_c_0 = picked[0].2.as_ref();
-            best_c_1 = picked[1].2.as_ref();
+            best_c_0 = picked[0].embedding.as_ref();
+            best_c_1 = picked[1].embedding.as_ref();
         }
     }
 
     let mut c_0 = best_c_0.to_vec();
     let mut c_1 = best_c_1.to_vec();
+
+    // Deduplicate entries with identical embeddings before running 2-means.
+    // Identical embeddings produce identical distances to any reference point,
+    // so we sort by (dist_c0, dist_c1, offset_id desc) and compare adjacent
+    // entries. For each group of duplicates, the largest offset_id is kept.
+    let mut removed_duplicate_ids = Vec::new();
+    {
+        let mut entries: Vec<(f32, f32, EmbeddingPoint)> = embeddings
+            .into_iter()
+            .map(|p| {
+                let d0 = distance_function.distance(&p.embedding, &c_0);
+                let d1 = distance_function.distance(&p.embedding, &c_1);
+                (d0, d1, p)
+            })
+            .collect();
+
+        entries.sort_by(|a, b| {
+            a.0.total_cmp(&b.0)
+                .then(a.1.total_cmp(&b.1))
+                .then(b.2.id.cmp(&a.2.id))
+        });
+
+        let mut deduped: Vec<(f32, f32, EmbeddingPoint)> = Vec::with_capacity(entries.len());
+        for (d0, d1, point) in entries {
+            if let Some((ld0, ld1, last)) = deduped.last() {
+                if (d0 - ld0).abs() <= f32::EPSILON
+                    && (d1 - ld1).abs() <= f32::EPSILON
+                    && point.embedding.as_ref() == last.embedding.as_ref()
+                {
+                    removed_duplicate_ids.push(point.id);
+                    continue;
+                }
+            }
+            deduped.push((d0, d1, point));
+        }
+
+        embeddings = deduped.into_iter().map(|(_, _, p)| p).collect();
+    }
+
+    let n = embeddings.len();
 
     // 2-means iteration
     let mut dists_0 = vec![0.0f32; n];
@@ -667,9 +721,9 @@ pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFuncti
     for _ in 0..128 {
         // Assignment
         let mut total_dist = 0.0;
-        for (i, (_, _, e)) in embeddings.iter().enumerate() {
-            dists_0[i] = distance_function.distance(e, &c_0);
-            dists_1[i] = distance_function.distance(e, &c_1);
+        for (i, p) in embeddings.iter().enumerate() {
+            dists_0[i] = distance_function.distance(&p.embedding, &c_0);
+            dists_1[i] = distance_function.distance(&p.embedding, &c_1);
             total_dist += dists_0[i].min(dists_1[i]);
         }
 
@@ -679,14 +733,14 @@ pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFuncti
         let mut count_0 = 0usize;
         let mut count_1 = 0usize;
 
-        for (i, (_, _, e)) in embeddings.iter().enumerate() {
+        for (i, p) in embeddings.iter().enumerate() {
             if dists_1[i] < dists_0[i] {
-                for (j, v) in e.iter().enumerate() {
+                for (j, v) in p.embedding.iter().enumerate() {
                     new_c_1[j] += v;
                 }
                 count_1 += 1;
             } else {
-                for (j, v) in e.iter().enumerate() {
+                for (j, v) in p.embedding.iter().enumerate() {
                     new_c_0[j] += v;
                 }
                 count_0 += 1;
@@ -759,14 +813,14 @@ pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFuncti
         let mut new_c_1 = vec![0.0; dim];
         let mut cnt_0 = 0usize;
         let mut cnt_1 = 0usize;
-        for (i, (_, _, e)) in embeddings.iter().enumerate() {
+        for (i, p) in embeddings.iter().enumerate() {
             if labels[i] {
-                for (j, v) in e.iter().enumerate() {
+                for (j, v) in p.embedding.iter().enumerate() {
                     new_c_1[j] += v;
                 }
                 cnt_1 += 1;
             } else {
-                for (j, v) in e.iter().enumerate() {
+                for (j, v) in p.embedding.iter().enumerate() {
                     new_c_0[j] += v;
                 }
                 cnt_0 += 1;
@@ -789,15 +843,21 @@ pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFuncti
     let mut group_0 = Vec::with_capacity(final_count_0);
     let mut group_1 = Vec::with_capacity(final_count_1);
 
-    for ((id, version, embedding), label) in embeddings.into_iter().zip(labels) {
+    for (point, label) in embeddings.into_iter().zip(labels) {
         if label {
-            group_1.push((id, version, embedding));
+            group_1.push(point);
         } else {
-            group_0.push((id, version, embedding));
+            group_0.push(point);
         }
     }
 
-    (c_0.into(), group_0, c_1.into(), group_1)
+    SplitResult {
+        left_center: c_0.into(),
+        left_group: group_0,
+        right_center: c_1.into(),
+        right_group: group_1,
+        removed_duplicate_ids,
+    }
 }
 
 /// Query a quantized cluster, returning deduplicated, sorted results.

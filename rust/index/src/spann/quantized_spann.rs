@@ -592,9 +592,11 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             .filter_map(|(id, version)| {
                 self.is_valid(*id, *version)
                     .then(|| {
-                        self.embeddings
-                            .get(id)
-                            .map(|emb| (*id, *version, emb.clone()))
+                        self.embeddings.get(id).map(|emb| utils::EmbeddingPoint {
+                            id: *id,
+                            version: *version,
+                            embedding: emb.clone(),
+                        })
                     })
                     .flatten()
             })
@@ -609,18 +611,31 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             return Ok(());
         }
 
-        let (left_center, left_group, right_center, right_group) =
-            utils::split(embeddings, &self.distance_function);
+        let utils::SplitResult {
+            left_center,
+            left_group,
+            right_center,
+            right_group,
+            removed_duplicate_ids,
+        } = utils::split(embeddings, &self.distance_function);
+
+        for id in &removed_duplicate_ids {
+            self.remove(*id);
+        }
 
         let left_delta = QuantizedDelta {
             center: left_center.clone(),
             codes: left_group
                 .iter()
-                .map(|(_, _, emb)| Code::<4>::quantize(emb, &left_center).as_ref().into())
+                .map(|p| {
+                    Code::<4>::quantize(&p.embedding, &left_center)
+                        .as_ref()
+                        .into()
+                })
                 .collect(),
-            ids: left_group.iter().map(|(id, _, _)| *id).collect(),
+            ids: left_group.iter().map(|p| p.id).collect(),
             length: left_group.len(),
-            versions: left_group.iter().map(|(_, version, _)| *version).collect(),
+            versions: left_group.iter().map(|p| p.version).collect(),
         };
         let left_cluster_id = self.spawn(left_delta)?;
 
@@ -628,11 +643,15 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             center: right_center.clone(),
             codes: right_group
                 .iter()
-                .map(|(_, _, emb)| Code::<4>::quantize(emb, &right_center).as_ref().into())
+                .map(|p| {
+                    Code::<4>::quantize(&p.embedding, &right_center)
+                        .as_ref()
+                        .into()
+                })
                 .collect(),
-            ids: right_group.iter().map(|(id, _, _)| *id).collect(),
+            ids: right_group.iter().map(|p| p.id).collect(),
             length: right_group.len(),
-            versions: right_group.iter().map(|(_, version, _)| *version).collect(),
+            versions: right_group.iter().map(|p| p.version).collect(),
         };
         let right_cluster_id = self.spawn(right_delta)?;
 
@@ -642,32 +661,38 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
 
         // NPA check for split points
         let evaluated = DashSet::new();
-        for (id, version, embedding) in &left_group {
-            if !self.is_valid(*id, *version) {
+        for p in &left_group {
+            if !self.is_valid(p.id, p.version) {
                 continue;
             }
-            if !evaluated.insert(*id) {
+            if !evaluated.insert(p.id) {
                 continue;
             }
-            let old_dist = self.distance(embedding, &old_center);
-            let new_dist = self.distance(embedding, &left_center);
+            let old_dist = self.distance(&p.embedding, &old_center);
+            let new_dist = self.distance(&p.embedding, &left_center);
             if new_dist > old_dist {
-                self.reassign(left_cluster_id, *id, *version, embedding.clone(), depth)
+                self.reassign(left_cluster_id, p.id, p.version, p.embedding.clone(), depth)
                     .await?;
             }
         }
-        for (id, version, embedding) in &right_group {
-            if !self.is_valid(*id, *version) {
+        for p in &right_group {
+            if !self.is_valid(p.id, p.version) {
                 continue;
             }
-            if !evaluated.insert(*id) {
+            if !evaluated.insert(p.id) {
                 continue;
             }
-            let old_dist = self.distance(embedding, &old_center);
-            let new_dist = self.distance(embedding, &right_center);
+            let old_dist = self.distance(&p.embedding, &old_center);
+            let new_dist = self.distance(&p.embedding, &right_center);
             if new_dist > old_dist {
-                self.reassign(right_cluster_id, *id, *version, embedding.clone(), depth)
-                    .await?;
+                self.reassign(
+                    right_cluster_id,
+                    p.id,
+                    p.version,
+                    p.embedding.clone(),
+                    depth,
+                )
+                .await?;
             }
         }
 
