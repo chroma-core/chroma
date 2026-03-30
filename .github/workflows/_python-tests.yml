@@ -52,7 +52,7 @@ jobs:
         shell: bash
         run: pip install --no-index --find-links target/wheels/ chromadb
       - name: Test
-        run: python -m pytest ${{ matrix.test-glob }} ${{ matrix.parallelized && '-n auto --dist worksteal' || '' }} -v --color=yes --durations 10
+        run: python -m pytest -x ${{ matrix.test-glob }} ${{ matrix.parallelized && '-n auto --dist worksteal' || '' }} -v --color=yes --durations 10
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
@@ -85,7 +85,7 @@ jobs:
       with:
           github-token: ${{ github.token }}
     - name: Rust Integration Test
-      run: bin/rust-integration-test.sh ${{ matrix.test-glob }}
+      run: bin/rust-integration-test.sh -x ${{ matrix.test-glob }}
       shell: bash
       env:
         ENV_FILE: ${{ contains(inputs.runner, 'ubuntu') && 'compose-env.linux' || 'compose-env.windows' }}
@@ -114,7 +114,7 @@ jobs:
         with:
           github-token: ${{ github.token }}
       - name: Test
-        run: bin/rust-integration-test.sh ${{ matrix.test-glob }}
+        run: bin/rust-integration-test.sh -x ${{ matrix.test-glob }}
         shell: bash
         env:
           CHROMA_THIN_CLIENT: "1"
@@ -176,7 +176,7 @@ jobs:
       - name: Start Tilt services
         uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-glob }}" ${{ matrix.parallelized && '-n auto --dist worksteal' || '' }} --durations 10'
+        run: bin/cluster-test.sh bash -c 'python -m pytest -x "${{ matrix.test-glob }}" ${{ matrix.parallelized && '-n auto --dist worksteal' || '' }} --durations 10'
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
@@ -229,7 +229,7 @@ jobs:
         shell: bash
         run: pip install --no-index --find-links target/wheels/ chromadb
       - name: Test
-        run: python -m pytest chromadb/test/stress --durations 10
+        run: python -m pytest -x chromadb/test/stress --durations 10
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
@@ -258,7 +258,7 @@ jobs:
       shell: bash
       run: pip install --no-index --find-links target/wheels/ chromadb
     - name: Integration Test
-      run: python -m pytest "chromadb/test/test_cli.py"
+      run: python -m pytest -x "chromadb/test/test_cli.py"
       shell: bash
       env:
         ENV_FILE: ${{ contains(inputs.runner, 'ubuntu') && 'compose-env.linux' || 'compose-env.windows' }}
@@ -293,7 +293,7 @@ jobs:
         shell: bash
         run: pip install --no-index --find-links target/wheels/ chromadb
       - name: Run tests
-        run: python -m pytest chromadb/test/test_api.py ${{ matrix.parallelized && '-n auto --dist worksteal' || '' }} -v --color=yes --durations 10
+        run: python -m pytest -x chromadb/test/test_api.py ${{ matrix.parallelized && '-n auto --dist worksteal' || '' }} -v --color=yes --durations 10
         shell: bash
         env:
           CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
