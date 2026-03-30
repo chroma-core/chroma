@@ -152,6 +152,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ddl_latency: &LOAD_POINTED_DDL_LATENCY_SENSOR,
         upsert_latency: &LOAD_POINTED_UPSERT_LATENCY_SENSOR,
         success_latency: &LOAD_POINTED_SUCCESS_LATENCY_SENSOR,
+        search_attempts: None,
+        search_success: None,
+        search_failures: None,
+        search_dropped: None,
+        search_latency: None,
+        search_success_latency: None,
     };
     let metrics_emitter = start_load_metrics_emitter("load_generator_pointed.", &metrics);
 

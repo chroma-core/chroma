@@ -818,6 +818,18 @@ pub struct LoadMetricRefs {
     pub upsert_latency: &'static biometrics::Histogram,
     /// Success-path latency histogram.
     pub success_latency: &'static biometrics::Histogram,
+    /// Optional total read/search attempts.
+    pub search_attempts: Option<&'static biometrics::Counter>,
+    /// Optional successful reads/searches.
+    pub search_success: Option<&'static biometrics::Counter>,
+    /// Optional failed reads/searches.
+    pub search_failures: Option<&'static biometrics::Counter>,
+    /// Optional dropped reads/searches because the pressure valve rejected new outstanding work.
+    pub search_dropped: Option<&'static biometrics::Counter>,
+    /// Optional read/search latency histogram.
+    pub search_latency: Option<&'static biometrics::Histogram>,
+    /// Optional success-path read/search latency histogram.
+    pub search_success_latency: Option<&'static biometrics::Histogram>,
 }
 
 /// Handle for a running load-generator metrics emitter.
@@ -847,6 +859,12 @@ pub fn spawn_load_metrics_emitter(
     ddl_latency: &'static biometrics::Histogram,
     upsert_latency: &'static biometrics::Histogram,
     success_latency: &'static biometrics::Histogram,
+    options_search_attempts: Option<&'static biometrics::Counter>,
+    options_search_success: Option<&'static biometrics::Counter>,
+    options_search_failures: Option<&'static biometrics::Counter>,
+    options_search_dropped: Option<&'static biometrics::Counter>,
+    options_search_latency: Option<&'static biometrics::Histogram>,
+    options_search_success_latency: Option<&'static biometrics::Histogram>,
 ) -> (
     tokio::task::JoinHandle<()>,
     tokio::sync::oneshot::Sender<()>,
@@ -859,6 +877,24 @@ pub fn spawn_load_metrics_emitter(
     collector.register_histogram(ddl_latency);
     collector.register_histogram(upsert_latency);
     collector.register_histogram(success_latency);
+    if let Some(search_attempts) = options_search_attempts {
+        collector.register_counter(search_attempts);
+    }
+    if let Some(search_success) = options_search_success {
+        collector.register_counter(search_success);
+    }
+    if let Some(search_failures) = options_search_failures {
+        collector.register_counter(search_failures);
+    }
+    if let Some(search_dropped) = options_search_dropped {
+        collector.register_counter(search_dropped);
+    }
+    if let Some(search_latency) = options_search_latency {
+        collector.register_histogram(search_latency);
+    }
+    if let Some(search_success_latency) = options_search_success_latency {
+        collector.register_histogram(search_success_latency);
+    }
     let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
 
     let handle = tokio::spawn(async move {
@@ -911,6 +947,12 @@ pub fn start_load_metrics_emitter(
         metrics.ddl_latency,
         metrics.upsert_latency,
         metrics.success_latency,
+        metrics.search_attempts,
+        metrics.search_success,
+        metrics.search_failures,
+        metrics.search_dropped,
+        metrics.search_latency,
+        metrics.search_success_latency,
     );
     LoadMetricsEmitter {
         handle,
