@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+/// Admin/DDL RPCs (e.g., CreateDatabase, DropDatabase, UpdateDatabaseDdl) routinely run for
+/// minutes, so they need a much larger deadline than the data-plane channel timeout.
+pub const ADMIN_RPC_TIMEOUT_SECS: u64 = 30 * 60;
+
 /// Session pool configuration for Spanner connections.
 ///
 /// The default values are tuned for production workloads with higher concurrency and longer
@@ -55,6 +59,15 @@ pub struct SpannerChannelConfig {
     /// Request timeout in seconds.  Default: 30.
     #[serde(default = "SpannerChannelConfig::default_timeout_secs")]
     pub timeout_secs: u64,
+    /// HTTP/2 keep-alive ping interval in seconds. Default: 30.
+    #[serde(default = "SpannerChannelConfig::default_http2_keep_alive_interval_secs")]
+    pub http2_keep_alive_interval_secs: u64,
+    /// Keep-alive response timeout in seconds. Default: 30.
+    #[serde(default = "SpannerChannelConfig::default_keep_alive_timeout_secs")]
+    pub keep_alive_timeout_secs: u64,
+    /// Whether to send keep-alives while idle. Default: true.
+    #[serde(default = "SpannerChannelConfig::default_keep_alive_while_idle")]
+    pub keep_alive_while_idle: bool,
 }
 
 impl SpannerChannelConfig {
@@ -69,6 +82,18 @@ impl SpannerChannelConfig {
     fn default_timeout_secs() -> u64 {
         30
     }
+
+    fn default_http2_keep_alive_interval_secs() -> u64 {
+        30
+    }
+
+    fn default_keep_alive_timeout_secs() -> u64 {
+        30
+    }
+
+    fn default_keep_alive_while_idle() -> bool {
+        true
+    }
 }
 
 impl Default for SpannerChannelConfig {
@@ -77,6 +102,9 @@ impl Default for SpannerChannelConfig {
             num_channels: Self::default_num_channels(),
             connect_timeout_secs: Self::default_connect_timeout_secs(),
             timeout_secs: Self::default_timeout_secs(),
+            http2_keep_alive_interval_secs: Self::default_http2_keep_alive_interval_secs(),
+            keep_alive_timeout_secs: Self::default_keep_alive_timeout_secs(),
+            keep_alive_while_idle: Self::default_keep_alive_while_idle(),
         }
     }
 }

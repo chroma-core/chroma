@@ -7,8 +7,8 @@ edition = "2021"
 unexpected_cfgs = { check-cfg = ['cfg(tokio_unstable)'], level = "warn" }
 
 [dependencies]
-fastrace = "0.7.8"
-fastrace-opentelemetry = "0.8"
+fastrace = "=0.7.8"
+fastrace-opentelemetry = "=0.8.1"
 http = { version = "1", optional = true }
 opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }

@@ -12,7 +12,7 @@ use std::time::Duration;
 use serial_test::serial;
 
 use chroma_config::spanner::{SpannerChannelConfig, SpannerSessionPoolConfig};
-use chroma_config::{registry::Registry, Configurable};
+use chroma_config::{registry::Registry, Configurable, ADMIN_RPC_TIMEOUT_SECS};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::DatabaseUuid;
 use google_cloud_gax::conn::Environment;
@@ -48,6 +48,22 @@ fn to_channel_config(cfg: &SpannerChannelConfig) -> ChannelConfig {
         num_channels: cfg.num_channels,
         connect_timeout: Duration::from_secs(cfg.connect_timeout_secs),
         timeout: Duration::from_secs(cfg.timeout_secs),
+        http2_keep_alive_interval: Some(Duration::from_secs(cfg.http2_keep_alive_interval_secs)),
+        keep_alive_timeout: Some(Duration::from_secs(cfg.keep_alive_timeout_secs)),
+        keep_alive_while_idle: Some(cfg.keep_alive_while_idle),
+    }
+}
+
+fn admin_client_config(environment: Environment, cfg: &SpannerChannelConfig) -> AdminClientConfig {
+    // DDL operations can run for minutes, so they need a larger deadline than the data-plane RPC
+    // timeout used by regular Spanner traffic.
+    AdminClientConfig {
+        environment,
+        timeout: Duration::from_secs(ADMIN_RPC_TIMEOUT_SECS),
+        connect_timeout: Duration::from_secs(cfg.connect_timeout_secs),
+        http2_keep_alive_interval: Some(Duration::from_secs(cfg.http2_keep_alive_interval_secs)),
+        keep_alive_timeout: Some(Duration::from_secs(cfg.keep_alive_timeout_secs)),
+        keep_alive_while_idle: Some(cfg.keep_alive_while_idle),
     }
 }
 
@@ -2065,9 +2081,10 @@ impl SpannerBackend {
         // Step 2: Create admin client for DDL operations
         let (admin_client, database_path) = match &self.spanner_config {
             SpannerConfig::Emulator(emulator) => {
-                let admin_config = AdminClientConfig {
-                    environment: Environment::Emulator(emulator.grpc_endpoint()),
-                };
+                let admin_config = admin_client_config(
+                    Environment::Emulator(emulator.grpc_endpoint()),
+                    &emulator.channel,
+                );
                 let client = AdminClient::new(admin_config).await.map_err(|e| {
                     SysDbError::Internal(format!("Failed to create admin client: {}", e))
                 })?;
@@ -2198,10 +2215,12 @@ impl<'a> Configurable<SpannerBackendConfig<'a>> for SpannerBackend {
             SpannerConfig::Emulator(emulator) => {
                 let channel_config = to_channel_config(config.spanner.channel());
                 let client_config = ClientConfig {
-                    environment: Environment::Emulator(emulator.grpc_endpoint()),
                     session_config,
                     channel_config,
-                    ..Default::default()
+                    endpoint: google_cloud_spanner::apiv1::conn_pool::SPANNER.to_string(),
+                    environment: Environment::Emulator(emulator.grpc_endpoint()),
+                    disable_route_to_leader: false,
+                    metrics: google_cloud_spanner::metrics::MetricsConfig::default(),
                 };
 
                 let client = Client::new(&emulator.database_path(), client_config)
@@ -2317,6 +2336,37 @@ pub mod tests {
                 None
             }
         }
+    }
+
+    #[test]
+    fn admin_timeout_is_not_coupled_to_data_rpc_timeout() {
+        let channel_config = SpannerChannelConfig {
+            num_channels: 4,
+            connect_timeout_secs: 7,
+            timeout_secs: 30,
+            http2_keep_alive_interval_secs: 11,
+            keep_alive_timeout_secs: 13,
+            keep_alive_while_idle: false,
+        };
+        let admin_client_config = admin_client_config(
+            Environment::Emulator("localhost:9010".to_string()),
+            &channel_config,
+        );
+
+        assert_eq!(
+            admin_client_config.timeout,
+            Duration::from_secs(ADMIN_RPC_TIMEOUT_SECS)
+        );
+        assert_eq!(admin_client_config.connect_timeout, Duration::from_secs(7));
+        assert_eq!(
+            admin_client_config.http2_keep_alive_interval,
+            Some(Duration::from_secs(11))
+        );
+        assert_eq!(
+            admin_client_config.keep_alive_timeout,
+            Some(Duration::from_secs(13))
+        );
+        assert_eq!(admin_client_config.keep_alive_while_idle, Some(false));
     }
 
     #[tokio::test]

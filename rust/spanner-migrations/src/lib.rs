@@ -17,6 +17,7 @@ pub use migrations::MIGRATION_DIRS;
 use std::time::Duration;
 
 use chroma_config::spanner::{SpannerChannelConfig, SpannerConfig, SpannerSessionPoolConfig};
+use chroma_config::ADMIN_RPC_TIMEOUT_SECS;
 use google_cloud_gax::conn::Environment;
 use google_cloud_spanner::admin::client::Client as AdminClient;
 use google_cloud_spanner::admin::AdminClientConfig;
@@ -40,7 +41,21 @@ fn to_channel_config(cfg: &SpannerChannelConfig) -> ChannelConfig {
         num_channels: cfg.num_channels,
         connect_timeout: Duration::from_secs(cfg.connect_timeout_secs),
         timeout: Duration::from_secs(cfg.timeout_secs),
+        http2_keep_alive_interval: Some(Duration::from_secs(cfg.http2_keep_alive_interval_secs)),
+        keep_alive_timeout: Some(Duration::from_secs(cfg.keep_alive_timeout_secs)),
+        keep_alive_while_idle: Some(cfg.keep_alive_while_idle),
     }
+}
+
+fn apply_admin_channel_config(config: &mut AdminClientConfig, cfg: &SpannerChannelConfig) {
+    // Admin RPCs such as CreateDatabase and UpdateDatabaseDdl routinely run for minutes, so they
+    // need a much larger deadline than the online data-plane RPC timeout.
+    config.timeout = Duration::from_secs(ADMIN_RPC_TIMEOUT_SECS);
+    config.connect_timeout = Duration::from_secs(cfg.connect_timeout_secs);
+    config.http2_keep_alive_interval =
+        Some(Duration::from_secs(cfg.http2_keep_alive_interval_secs));
+    config.keep_alive_timeout = Some(Duration::from_secs(cfg.keep_alive_timeout_secs));
+    config.keep_alive_while_idle = Some(cfg.keep_alive_while_idle);
 }
 
 /// Errors that can occur during migration execution.
@@ -135,6 +150,15 @@ pub async fn run_migrations(
             };
             let admin_client_config = AdminClientConfig {
                 environment: Environment::Emulator(emulator.grpc_endpoint()),
+                timeout: Duration::from_secs(ADMIN_RPC_TIMEOUT_SECS),
+                connect_timeout: Duration::from_secs(emulator.channel.connect_timeout_secs),
+                http2_keep_alive_interval: Some(Duration::from_secs(
+                    emulator.channel.http2_keep_alive_interval_secs,
+                )),
+                keep_alive_timeout: Some(Duration::from_secs(
+                    emulator.channel.keep_alive_timeout_secs,
+                )),
+                keep_alive_while_idle: Some(emulator.channel.keep_alive_while_idle),
             };
 
             tracing::info!(
@@ -151,10 +175,11 @@ pub async fn run_migrations(
                 .map_err(|e| RunMigrationsError::ClientConfigError(e.to_string()))?;
             client_config.session_config = session_config;
             client_config.channel_config = channel_config;
-            let admin_client_config = AdminClientConfig::default()
+            let mut admin_client_config = AdminClientConfig::default()
                 .with_auth()
                 .await
                 .map_err(|e| RunMigrationsError::ClientConfigError(e.to_string()))?;
+            apply_admin_channel_config(&mut admin_client_config, &gcp.channel);
 
             tracing::info!(
                 "Connecting to Spanner database {} in gcp",
@@ -205,4 +230,39 @@ pub async fn run_migrations(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn admin_timeout_is_not_coupled_to_data_rpc_timeout() {
+        let channel_config = SpannerChannelConfig {
+            timeout_secs: 30,
+            connect_timeout_secs: 7,
+            http2_keep_alive_interval_secs: 11,
+            keep_alive_timeout_secs: 13,
+            keep_alive_while_idle: false,
+            ..Default::default()
+        };
+        let mut admin_client_config = AdminClientConfig::default();
+
+        apply_admin_channel_config(&mut admin_client_config, &channel_config);
+
+        assert_eq!(
+            admin_client_config.timeout,
+            Duration::from_secs(ADMIN_RPC_TIMEOUT_SECS)
+        );
+        assert_eq!(admin_client_config.connect_timeout, Duration::from_secs(7));
+        assert_eq!(
+            admin_client_config.http2_keep_alive_interval,
+            Some(Duration::from_secs(11))
+        );
+        assert_eq!(
+            admin_client_config.keep_alive_timeout,
+            Some(Duration::from_secs(13))
+        );
+        assert_eq!(admin_client_config.keep_alive_while_idle, Some(false));
+    }
 }

@@ -134,10 +134,33 @@ pub enum Error {
 }
 
 impl Error {
+    /// Create an internal error with file and line information.
     pub fn internal(file: impl Into<String>, line: impl Into<u32>) -> Self {
         let file = file.into();
         let line = line.into();
         Self::Internal { file, line }
+    }
+
+    /// Returns true if this error represents an aborted transaction that may be retried.
+    pub fn is_aborted(&self) -> bool {
+        match self {
+            Self::TonicError(status) => status.code() == tonic::Code::Aborted,
+            Self::SpannerError(err) => {
+                matches!(
+                    err.as_ref(),
+                    google_cloud_spanner::client::Error::GRPC(status)
+                    if status.code() == tonic::Code::Aborted
+                )
+            }
+            Self::SpannerSessionError(err) => {
+                matches!(
+                    err.as_ref(),
+                    google_cloud_spanner::session::SessionError::GRPC(status)
+                    if status.code() == tonic::Code::Aborted
+                )
+            }
+            _ => false,
+        }
     }
 }
 
@@ -1203,6 +1226,7 @@ impl<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use google_cloud_spanner::client;
 
     #[test]
     fn paths() {
@@ -1506,5 +1530,19 @@ mod tests {
 
         let next_millis = FragmentUuid::minimum_for_millis_since_unix_epoch(timestamp_millis + 1);
         assert!(greater < next_millis);
+    }
+
+    #[test]
+    fn is_aborted_recognizes_spanner_grpc_aborted() {
+        let err = Error::from(client::Error::GRPC(tonic::Status::aborted("aborted")));
+        assert!(err.is_aborted());
+    }
+
+    #[test]
+    fn is_aborted_ignores_non_aborted_spanner_grpc() {
+        let err = Error::from(client::Error::GRPC(tonic::Status::deadline_exceeded(
+            "deadline exceeded",
+        )));
+        assert!(!err.is_aborted());
     }
 }

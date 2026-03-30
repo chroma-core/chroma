@@ -68,7 +68,7 @@ async fn test_k8s_integration_ab_stringy_setsum_mismatch() {
         seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
         start: 1,
         limit: 2,
-        num_bytes: 1044,
+        num_bytes: 1092,
         data: vec![(position1, vec![10, 11, 12, 13])],
     };
     let position2 = log.append(vec![20, 21, 22, 23]).await.unwrap();
@@ -77,7 +77,7 @@ async fn test_k8s_integration_ab_stringy_setsum_mismatch() {
         seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
         start: 2,
         limit: 3,
-        num_bytes: 1044,
+        num_bytes: 1092,
         data: vec![(position2, vec![20, 21, 22, 23])],
     };
     let position3 = log.append(vec![30, 31, 32, 33]).await.unwrap();
@@ -86,7 +86,7 @@ async fn test_k8s_integration_ab_stringy_setsum_mismatch() {
         seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3)),
         start: 3,
         limit: 4,
-        num_bytes: 1044,
+        num_bytes: 1092,
         data: vec![(position3, vec![30, 31, 32, 33])],
     };
     let position4 = log.append(vec![40, 41, 42, 43]).await.unwrap();
@@ -95,7 +95,7 @@ async fn test_k8s_integration_ab_stringy_setsum_mismatch() {
         seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(4)),
         start: 4,
         limit: 5,
-        num_bytes: 1044,
+        num_bytes: 1092,
         data: vec![(position4, vec![40, 41, 42, 43])],
     };
     wal3::CursorStore::new(
@@ -117,13 +117,13 @@ async fn test_k8s_integration_ab_stringy_setsum_mismatch() {
     .unwrap();
     let postconditions = [
         Condition::Manifest(ManifestCondition {
-            acc_bytes: 4176,
+            acc_bytes: 4368,
             writer: writer.to_string(),
             snapshots: vec![SnapshotCondition {
                 depth: 1,
                 start: LogPosition::from_offset(1),
                 limit: LogPosition::from_offset(3),
-                num_bytes: 2088,
+                num_bytes: 2184,
                 writer: writer.to_string(),
                 snapshots: vec![],
                 fragments: vec![fragment1.clone(), fragment2.clone()],
@@ -156,13 +156,13 @@ async fn test_k8s_integration_ab_stringy_setsum_mismatch() {
                 depth: 1,
                 start: LogPosition::from_offset(2),
                 limit: LogPosition::from_offset(3),
-                num_bytes: 1044,
+                num_bytes: 1092,
                 writer: writer.to_string(),
                 snapshots: vec![SnapshotCondition {
                     depth: 1,
                     start: LogPosition::from_offset(2),
                     limit: LogPosition::from_offset(3),
-                    num_bytes: 1044,
+                    num_bytes: 1092,
                     writer: writer.to_string(),
                     snapshots: vec![],
                     fragments: vec![fragment2.clone()],
@@ -173,7 +173,7 @@ async fn test_k8s_integration_ab_stringy_setsum_mismatch() {
                 depth: 1,
                 start: LogPosition::from_offset(1),
                 limit: LogPosition::from_offset(3),
-                num_bytes: 2088,
+                num_bytes: 2184,
                 writer: writer.to_string(),
                 snapshots: vec![],
                 fragments: vec![fragment1.clone(), fragment2.clone()],
@@ -182,20 +182,20 @@ async fn test_k8s_integration_ab_stringy_setsum_mismatch() {
                 depth: 1,
                 start: LogPosition::from_offset(2),
                 limit: LogPosition::from_offset(3),
-                num_bytes: 1044,
+                num_bytes: 1092,
                 writer: "garbage collection".to_string(),
                 snapshots: vec![],
                 fragments: vec![fragment2.clone()],
             }],
         }),
         Condition::Manifest(ManifestCondition {
-            acc_bytes: 4176,
+            acc_bytes: 4368,
             writer: writer.to_string(),
             snapshots: vec![SnapshotCondition {
                 depth: 1,
                 start: LogPosition::from_offset(2),
                 limit: LogPosition::from_offset(3),
-                num_bytes: 1044,
+                num_bytes: 1092,
                 writer: "garbage collection".to_string(),
                 snapshots: vec![],
                 fragments: vec![fragment2.clone()],

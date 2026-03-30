@@ -1,5 +1,7 @@
 //! Bootstrap functionality for Spanner emulator.
 
+use std::time::Duration;
+
 use chroma_config::spanner::SpannerEmulatorConfig;
 use google_cloud_gax::conn::Environment;
 use google_cloud_googleapis::spanner::admin::database::v1::CreateDatabaseRequest;
@@ -20,6 +22,15 @@ pub async fn bootstrap_emulator(
     // Configure client to connect to emulator
     let admin_client_config = AdminClientConfig {
         environment: Environment::Emulator(emulator.grpc_endpoint().to_string()),
+        timeout: Duration::from_secs(super::ADMIN_RPC_TIMEOUT_SECS),
+        connect_timeout: Duration::from_secs(emulator.channel.connect_timeout_secs),
+        http2_keep_alive_interval: Some(Duration::from_secs(
+            emulator.channel.http2_keep_alive_interval_secs,
+        )),
+        keep_alive_timeout: Some(Duration::from_secs(
+            emulator.channel.keep_alive_timeout_secs,
+        )),
+        keep_alive_while_idle: Some(emulator.channel.keep_alive_while_idle),
     };
 
     let admin_client = AdminClient::new(admin_client_config).await?;

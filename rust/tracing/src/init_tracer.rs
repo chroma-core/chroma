@@ -143,10 +143,9 @@ pub fn init_otel_layer(
         .with_endpoint(otel_endpoint)
         .build()
         .expect("could not build span exporter for tracing");
-    let trace_config = opentelemetry_sdk::trace::Config::default().with_resource(resource.clone());
     let tracer_provider = opentelemetry_sdk::trace::TracerProvider::builder()
         .with_batch_exporter(tracing_span_exporter, opentelemetry_sdk::runtime::Tokio)
-        .with_config(trace_config)
+        .with_resource(resource.clone())
         .build();
     let tracer = tracer_provider.tracer(service_name.clone());
     let fastrace_span_exporter = opentelemetry_otlp::SpanExporter::builder()

@@ -329,7 +329,7 @@ pub mod test_utils {
     }
 
     pub fn new_test_db_persist_path() -> Option<String> {
-        let path = tempdir().unwrap().into_path();
+        let path = tempdir().unwrap().keep();
         Some(path.to_str().unwrap().to_string() + "/chroma.sqlite3")
     }
 
