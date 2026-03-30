@@ -923,7 +923,7 @@ mod tests {
 
     use crate::spann::utils::{
         cluster, kmeansassign_finish, kmeansassign_for_centerinit, kmeansassign_for_main_loop,
-        KMeansAlgorithmInput,
+        split, EmbeddingPoint, KMeansAlgorithmInput,
     };
 
     #[test]
@@ -1084,5 +1084,145 @@ mod tests {
             100.0,
         );
         let _ = cluster(&mut kmeans_algo).expect("Failed to cluster");
+    }
+
+    fn emb(values: &[f32]) -> Arc<[f32]> {
+        Arc::from(values)
+    }
+
+    fn point(id: u32, values: &[f32]) -> EmbeddingPoint {
+        EmbeddingPoint {
+            id,
+            version: 1,
+            embedding: emb(values),
+        }
+    }
+
+    #[test]
+    fn test_split_basic() {
+        // Two well-separated clusters, no duplicates.
+        let embeddings = vec![
+            point(1, &[0.0, 0.0]),
+            point(2, &[1.0, 0.0]),
+            point(3, &[0.0, 1.0]),
+            point(4, &[100.0, 100.0]),
+            point(5, &[101.0, 100.0]),
+            point(6, &[100.0, 101.0]),
+        ];
+        let result = split(embeddings, &chroma_distance::DistanceFunction::Euclidean);
+
+        assert!(result.removed_duplicate_ids.is_empty());
+        assert_eq!(result.left_group.len() + result.right_group.len(), 6);
+        // One group should have IDs {1,2,3}, the other {4,5,6}.
+        let mut left_ids: Vec<u32> = result.left_group.iter().map(|p| p.id).collect();
+        let mut right_ids: Vec<u32> = result.right_group.iter().map(|p| p.id).collect();
+        left_ids.sort();
+        right_ids.sort();
+        assert!(
+            (left_ids == vec![1, 2, 3] && right_ids == vec![4, 5, 6])
+                || (left_ids == vec![4, 5, 6] && right_ids == vec![1, 2, 3])
+        );
+    }
+
+    #[test]
+    fn test_split_dedup() {
+        // Mix of unique and duplicate embeddings.
+        // IDs 10, 20, 30 share the same embedding near origin.
+        // IDs 40, 50 share the same embedding far away.
+        // ID 60 is unique far away.
+        let near = emb(&[1.0, 1.0]);
+        let far = emb(&[100.0, 100.0]);
+        let embeddings = vec![
+            EmbeddingPoint {
+                id: 10,
+                version: 1,
+                embedding: near.clone(),
+            },
+            EmbeddingPoint {
+                id: 20,
+                version: 1,
+                embedding: near.clone(),
+            },
+            EmbeddingPoint {
+                id: 30,
+                version: 1,
+                embedding: near.clone(),
+            },
+            EmbeddingPoint {
+                id: 40,
+                version: 1,
+                embedding: far.clone(),
+            },
+            EmbeddingPoint {
+                id: 50,
+                version: 1,
+                embedding: far.clone(),
+            },
+            point(60, &[101.0, 101.0]),
+        ];
+        let result = split(embeddings, &chroma_distance::DistanceFunction::Euclidean);
+
+        // Near group: 10, 20, 30 are duplicates. Keep 30 (largest id). Remove 10, 20.
+        // Far group: 40, 50 are duplicates. Keep 50 (largest id). Remove 40.
+        let mut removed = result.removed_duplicate_ids.clone();
+        removed.sort();
+        assert_eq!(removed, vec![10, 20, 40]);
+
+        // Total remaining should be 3: ids 30, 50, 60.
+        let total = result.left_group.len() + result.right_group.len();
+        assert_eq!(total, 3);
+
+        let mut all_ids: Vec<u32> = result
+            .left_group
+            .iter()
+            .chain(result.right_group.iter())
+            .map(|p| p.id)
+            .collect();
+        all_ids.sort();
+        assert_eq!(all_ids, vec![30, 50, 60]);
+    }
+
+    #[test]
+    fn test_split_all_identical() {
+        // All entries have the same embedding, different offset IDs.
+        let e = emb(&[5.0, 5.0]);
+        let embeddings = vec![
+            EmbeddingPoint {
+                id: 1,
+                version: 1,
+                embedding: e.clone(),
+            },
+            EmbeddingPoint {
+                id: 2,
+                version: 1,
+                embedding: e.clone(),
+            },
+            EmbeddingPoint {
+                id: 3,
+                version: 1,
+                embedding: e.clone(),
+            },
+            EmbeddingPoint {
+                id: 4,
+                version: 1,
+                embedding: e.clone(),
+            },
+            EmbeddingPoint {
+                id: 5,
+                version: 1,
+                embedding: e.clone(),
+            },
+        ];
+        let result = split(embeddings, &chroma_distance::DistanceFunction::Euclidean);
+
+        // Only ID 5 (largest) should remain. IDs 1-4 removed.
+        let mut removed = result.removed_duplicate_ids.clone();
+        removed.sort();
+        assert_eq!(removed, vec![1, 2, 3, 4]);
+
+        // One entry in left group, none in right (< 2 entries after dedup).
+        assert_eq!(result.left_group.len(), 1);
+        assert_eq!(result.left_group[0].id, 5);
+        assert!(result.right_group.is_empty());
     }
 }
