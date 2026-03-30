@@ -25,18 +25,17 @@ class SparseVectorTransportDict(TypedDict):
     tokens: NotRequired[Optional[List[str]]]
 
 
-class TypedSparseVectorTransportDict(SparseVectorTransportDict):
-    """Transport format for SparseVector with required type tag."""
-
-    __type: Literal["sparse_vector"]  # Uses __type to avoid conflicts with #type
+# Use functional syntax to avoid name mangling with special keys
+TypedSparseVectorTransportDict = TypedDict("TypedSparseVectorTransportDict", {
+    "indices": List[int],
+    "values": List[float],
+    "tokens": Optional[List[str]],  # NotRequired not needed in functional syntax
+    "#type": Literal["sparse_vector"]  # Real key name without mangling
+})
 
 
 # Where expression types
 WhereValue = Union[str, int, float, bool]
-WhereOperator = Literal["$eq", "$ne", "$gt", "$gte", "$lt", "$lte"]
-ArrayOperator = Literal["$in", "$nin"]
-ContainsOperator = Literal["$contains", "$not_contains"]
-RegexOperator = Literal["$regex", "$not_regex"]
 
 
 class WhereEqDict(TypedDict):
@@ -281,16 +280,14 @@ class MaxKAggregateDict(TypedDict):
     k: int
 
 
-class MinKDict(TypedDict):
-    """Aggregate expression for MinK."""
+# Use functional syntax to avoid name mangling with $ keys
+MinKDict = TypedDict("MinKDict", {
+    "$min_k": MinKAggregateDict
+})
 
-    __min_k: MinKAggregateDict
-
-
-class MaxKDict(TypedDict):
-    """Aggregate expression for MaxK."""
-
-    __max_k: MaxKAggregateDict
+MaxKDict = TypedDict("MaxKDict", {
+    "$max_k": MaxKAggregateDict
+})
 
 
 AggregateDict = Union[MinKDict, MaxKDict]

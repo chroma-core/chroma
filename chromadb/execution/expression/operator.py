@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Set, Any, Union, cast
-from typing_extensions import TypedDict, NotRequired, Literal
+from typing_extensions import TypedDict, NotRequired
 
 from chromadb.base_types import LiteralValue
 
@@ -56,16 +56,14 @@ class MaxKAggregateDict(TypedDict):
     k: int
 
 
-class MinKDict(TypedDict):
-    """Aggregate expression for MinK."""
+# Use functional TypedDict syntax to avoid name mangling with $ keys
+MinKDict = TypedDict("MinKDict", {
+    "$min_k": MinKAggregateDict
+})
 
-    __min_k: MinKAggregateDict  # Use __min_k to avoid conflict with $min_k
-
-
-class MaxKDict(TypedDict):
-    """Aggregate expression for MaxK."""
-
-    __max_k: MaxKAggregateDict  # Use __max_k to avoid conflict with $max_k
+MaxKDict = TypedDict("MaxKDict", {
+    "$max_k": MaxKAggregateDict
+})
 
 
 AggregateDict = Union[MinKDict, MaxKDict]
@@ -76,6 +74,16 @@ class GroupByDict(TypedDict, total=False):
 
     keys: List[str]  # Required if not empty
     aggregate: AggregateDict  # Required if not empty
+
+
+# Basic Rank expression types (simplified for practical use)
+# Use functional syntax to avoid $ key issues
+ValRankDict = TypedDict("ValRankDict", {
+    "$val": Union[int, float]
+})
+
+# Union of common rank expression types
+RankDict = Union[ValRankDict, Dict[str, Any]]  # Keep flexible for complex cases
 
 
 @dataclass
@@ -705,7 +713,7 @@ class Rank:
         raise NotImplementedError("Subclasses must implement to_dict()")
 
     @staticmethod
-    def from_dict(data: Union[Dict[str, Any]]) -> "Rank":
+    def from_dict(data: Union[RankDict, Dict[str, Any]]) -> "Rank":
         """Create Rank expression from dictionary.
 
         Supports operators:
