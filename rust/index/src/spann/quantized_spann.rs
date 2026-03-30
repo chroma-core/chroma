@@ -623,6 +623,26 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             self.remove(*id);
         }
 
+        if left_group.is_empty() || right_group.is_empty() {
+            let (center, group) = if left_group.is_empty() {
+                (right_center, right_group)
+            } else {
+                (left_center, left_group)
+            };
+            let new_delta = QuantizedDelta {
+                center: center.clone(),
+                codes: group
+                    .iter()
+                    .map(|p| Code::<4>::quantize(&p.embedding, &center).as_ref().into())
+                    .collect(),
+                ids: group.iter().map(|p| p.id).collect(),
+                length: group.len(),
+                versions: group.iter().map(|p| p.version).collect(),
+            };
+            self.spawn(new_delta)?;
+            return Ok(());
+        }
+
         let left_delta = QuantizedDelta {
             center: left_center.clone(),
             codes: left_group

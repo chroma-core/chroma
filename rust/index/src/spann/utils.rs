@@ -710,6 +710,21 @@ pub fn split(
         embeddings = deduped.into_iter().map(|(_, _, p)| p).collect();
     }
 
+    // After dedup, re-check if we still have enough points to split.
+    if embeddings.len() < 2 {
+        let c = embeddings
+            .first()
+            .map(|p| p.embedding.clone())
+            .unwrap_or(Vec::new().into());
+        return SplitResult {
+            left_center: c.clone(),
+            left_group: embeddings,
+            right_center: c,
+            right_group: Vec::new(),
+            removed_duplicate_ids,
+        };
+    }
+
     let n = embeddings.len();
 
     // 2-means iteration
