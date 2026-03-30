@@ -35,7 +35,7 @@ def test_add_miniscule(
     collection: strategies.Collection,
     record_set: strategies.RecordSet,
 ) -> None:
-    _test_add(collection, record_set, True, always_compact=True)
+    _test_add(collection, record_set, True)
 
 
 # Hypothesis tends to generate smaller values so we explicitly segregate the
@@ -145,7 +145,6 @@ def _test_add(
     record_set: strategies.RecordSet,
     should_compact: bool,
     batch_ann_accuracy: bool = False,
-    always_compact: bool = False,
     topology: str = "tilt-spanning",
 ) -> None:
     """Test adding records to a collection across multiple regions.
@@ -155,7 +154,6 @@ def _test_add(
         record_set: The records to add.
         should_compact: Whether to wait for compaction.
         batch_ann_accuracy: Whether to batch the ANN accuracy checks.
-        always_compact: Whether to always wait for compaction regardless of size.
         topology: Topology identifier for MCMR testing.
             Creates two clients connected to localhost:8000 and localhost:8001.
     """
@@ -200,7 +198,7 @@ def _test_add(
     if (
         not NOT_CLUSTER_ONLY
         and should_compact
-        and (len(normalized_record_set["ids"]) > 10 or always_compact)
+        and (len(normalized_record_set["ids"]) > 10)
     ):
         # Wait for the model to be updated in each region
         wait_for_version_increase(client1, collection.name, initial_version1)
