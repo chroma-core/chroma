@@ -46,8 +46,9 @@ use tokio::time;
 
 use chroma::bench::{
     boxed_collection_selector, collection_cache_file_path, prepare_dual_collections,
-    print_load_generator_header, run_load_generator, spawn_pacing_task, start_load_metrics_emitter,
-    CollectionSelector, CommonLoadArgs, DualLoadEndpoints, GaussianMixtureModel, LoadMetricRefs,
+    print_load_generator_header, run_load_generator, run_load_generator_dry_run, spawn_pacing_task,
+    start_load_metrics_emitter, CollectionSelector, CommonLoadArgs, DualLoadEndpoints,
+    GaussianMixtureModel, LoadMetricRefs,
 };
 use chroma::types::{Key, QueryVector, RankExpr, SearchPayload};
 use chroma::ChromaCollection;
@@ -116,6 +117,11 @@ struct Args {
     /// Target local backends on ports 8000 and 8001 instead of cloud endpoints.
     #[arg(long, default_value_t = false)]
     local: bool,
+
+    /// Print each selected write collection and a final rank-ordered histogram without
+    /// contacting any backend.
+    #[arg(long, default_value_t = false)]
+    dry_run: bool,
 }
 
 fn parse_zipf_param(value: &str) -> Result<f64, String> {
@@ -260,7 +266,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Some(skew) => println!("Collection selection: Zipf skew {skew}"),
         None => println!("Collection selection: uniform"),
     }
-    if read_args.enabled() {
+    if args.dry_run {
+        println!("Concurrent reads: dry-run skips reads");
+    } else if read_args.enabled() {
         println!(
             "Concurrent reads: {} tasks @ {} qps, limit {}, max outstanding {}/{}",
             read_args.tasks,
@@ -273,6 +281,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("Concurrent reads: disabled");
     }
     println!();
+
+    if args.dry_run {
+        println!(
+            "Dry run: skipping backend warmup and reads; printing the Zipf-rank summary on termination.\n"
+        );
+        let collection_names: Vec<String> = (0..args.collections).map(collection_name).collect();
+        let zipf = zipf.map(|skew| Zipf::from_param(collection_names.len() as u64, skew));
+        run_load_generator_dry_run(
+            &common_args,
+            collection_names,
+            |task_id, _collection_count| {
+                build_collection_selector(task_id as u64 * 1000, zipf.clone())
+            },
+            |task_id, _collection_count| {
+                build_collection_selector((task_id as u64 + 500) * 1000, zipf.clone())
+            },
+        )
+        .await?;
+        return Ok(());
+    }
 
     println!(
         "Creating/getting {} collections on both endpoints...",

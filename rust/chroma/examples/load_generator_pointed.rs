@@ -26,8 +26,8 @@
 use biometrics::Counter;
 use chroma::bench::{
     boxed_collection_selector, collection_cache_file_path, prepare_dual_collections,
-    print_load_generator_header, run_load_generator, start_load_metrics_emitter, CommonLoadArgs,
-    DualLoadEndpoints, LoadMetricRefs,
+    print_load_generator_header, run_load_generator, run_load_generator_dry_run,
+    start_load_metrics_emitter, CommonLoadArgs, DualLoadEndpoints, LoadMetricRefs,
 };
 use clap::Parser;
 
@@ -68,6 +68,11 @@ struct Args {
     /// Target local backends on ports 8000 and 8001 instead of cloud endpoints.
     #[arg(long, default_value_t = false)]
     local: bool,
+
+    /// Print each selected write collection and a final rank-ordered histogram without
+    /// contacting any backend.
+    #[arg(long, default_value_t = false)]
+    dry_run: bool,
 }
 
 fn parse_zipf_param(value: &str) -> Result<f64, String> {
@@ -140,6 +145,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "Collection selection: Zipf skew {skew} requested, but this load targets one collection"
         );
         println!();
+    }
+
+    if args.dry_run {
+        println!("Dry run: printing the summary on termination.\n");
+        run_load_generator_dry_run(
+            &common_args,
+            vec![collection_name()],
+            |_task_id, _collection_count| {
+                boxed_collection_selector(|_num_collections, _rng| 0usize)
+            },
+            |_task_id, _collection_count| {
+                boxed_collection_selector(|_num_collections, _rng| 0usize)
+            },
+        )
+        .await?;
+        return Ok(());
     }
 
     println!("Creating/getting collection on both endpoints...");

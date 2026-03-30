@@ -960,6 +960,209 @@ pub fn start_load_metrics_emitter(
     }
 }
 
+struct DryRunWorkerContext {
+    start_time: Instant,
+    duration: Duration,
+    pacing_rx: Arc<Mutex<mpsc::Receiver<()>>>,
+}
+
+fn print_collection_rank_histogram(
+    collection_names: &[String],
+    counts: &[u64],
+    total_attempts: u64,
+) {
+    println!("\n=== Collection Histogram ===");
+    println!("Total attempted updates: {}", total_attempts);
+    println!("Zipf ranks: 1..{}", collection_names.len());
+
+    if total_attempts == 0 {
+        return;
+    }
+
+    let max_count = counts.iter().copied().max().unwrap_or(0);
+    let name_width = collection_names
+        .iter()
+        .map(|name| name.len())
+        .max()
+        .unwrap_or(0);
+    let rank_width = collection_names.len().to_string().len();
+
+    for (index, (name, count)) in collection_names.iter().zip(counts.iter()).enumerate() {
+        let bar_width = if max_count == 0 {
+            0
+        } else {
+            ((*count as f64 / max_count as f64) * 40.0).round() as usize
+        };
+        let bar = if *count > 0 {
+            "#".repeat(bar_width.max(1))
+        } else {
+            String::new()
+        };
+        let percent = *count as f64 * 100.0 / total_attempts as f64;
+        println!(
+            "  rank{rank:>rank_width$} {name:name_width$} | {bar:<40} {count:>8} {percent:>6.2}%",
+            rank = index + 1,
+            rank_width = rank_width,
+            name = name,
+            name_width = name_width,
+            bar = bar,
+            count = count,
+            percent = percent,
+        );
+    }
+}
+
+async fn run_dry_run_worker<F>(
+    collection_names: Arc<[String]>,
+    histogram: Arc<[AtomicU64]>,
+    ctx: DryRunWorkerContext,
+    seed: u64,
+    mut select_collection: F,
+) -> u64
+where
+    F: FnMut(usize, &mut StdRng) -> usize + Send,
+{
+    let num_collections = collection_names.len();
+    if num_collections == 0 {
+        return 0;
+    }
+
+    let mut rng = StdRng::seed_from_u64(seed);
+    let mut attempts = 0;
+
+    while ctx.start_time.elapsed() < ctx.duration {
+        let remaining = ctx.duration.saturating_sub(ctx.start_time.elapsed());
+        if remaining.is_zero() {
+            break;
+        }
+
+        let ticket = time::timeout(remaining, async {
+            let mut rx = ctx.pacing_rx.lock().await;
+            rx.recv().await
+        })
+        .await;
+
+        match ticket {
+            Ok(Some(())) => {}
+            _ => break,
+        }
+
+        let idx = select_collection(num_collections, &mut rng) % num_collections;
+        histogram[idx].fetch_add(1, Ordering::Relaxed);
+        attempts += 1;
+    }
+
+    attempts
+}
+
+fn spawn_dry_run_backend_workers<SelFactory>(
+    handles: &mut Vec<tokio::task::JoinHandle<u64>>,
+    collection_names: Arc<[String]>,
+    histogram: Arc<[AtomicU64]>,
+    task_count: usize,
+    seed_base: u64,
+    start_time: Instant,
+    duration: Duration,
+    pacing_rx: Arc<Mutex<mpsc::Receiver<()>>>,
+    selector_factory: &mut SelFactory,
+) where
+    SelFactory: FnMut(usize, usize) -> Box<dyn CollectionSelector>,
+{
+    if collection_names.is_empty() {
+        return;
+    }
+
+    for task_id in 0..task_count {
+        let collection_count = collection_names.len();
+        let mut collection_selector = selector_factory(task_id, collection_count);
+        let ctx = DryRunWorkerContext {
+            start_time,
+            duration,
+            pacing_rx: Arc::clone(&pacing_rx),
+        };
+
+        let handle = tokio::spawn(run_dry_run_worker(
+            Arc::clone(&collection_names),
+            Arc::clone(&histogram),
+            ctx,
+            task_id as u64 * 1000 + seed_base,
+            move |num_collections, rng| collection_selector.select(num_collections, rng),
+        ));
+        handles.push(handle);
+    }
+}
+
+/// Runs the shared dry-run mode for load generators and prints a final rank-ordered histogram
+/// once the benchmark terminates.
+pub async fn run_load_generator_dry_run<UsSelectorFactory, EuSelectorFactory>(
+    args: &CommonLoadArgs,
+    collection_names: Vec<String>,
+    mut us_selector_factory: UsSelectorFactory,
+    mut eu_selector_factory: EuSelectorFactory,
+) -> Result<(), Box<dyn Error>>
+where
+    UsSelectorFactory: FnMut(usize, usize) -> Box<dyn CollectionSelector> + Send,
+    EuSelectorFactory: FnMut(usize, usize) -> Box<dyn CollectionSelector> + Send,
+{
+    if collection_names.is_empty() {
+        return Err(io::Error::other("dry run requires at least one collection").into());
+    }
+
+    let start_time = Instant::now();
+    let duration = Duration::from_secs(args.duration_secs);
+    let collection_names: Arc<[String]> = collection_names.into();
+    let histogram: Arc<[AtomicU64]> = (0..collection_names.len())
+        .map(|_| AtomicU64::new(0))
+        .collect::<Vec<_>>()
+        .into();
+
+    let (ticket_tx, ticket_rx) = mpsc::channel::<()>(1024);
+    let pacing_rx = Arc::new(Mutex::new(ticket_rx));
+    let pacing_handle = spawn_pacing_task(start_time, duration, args.pace_qps.max(1), ticket_tx);
+    let mut handles = Vec::with_capacity(args.tasks.saturating_mul(2));
+
+    spawn_dry_run_backend_workers(
+        &mut handles,
+        Arc::clone(&collection_names),
+        Arc::clone(&histogram),
+        args.tasks,
+        0,
+        start_time,
+        duration,
+        Arc::clone(&pacing_rx),
+        &mut us_selector_factory,
+    );
+
+    spawn_dry_run_backend_workers(
+        &mut handles,
+        Arc::clone(&collection_names),
+        Arc::clone(&histogram),
+        args.tasks,
+        500 * 1000,
+        start_time,
+        duration,
+        Arc::clone(&pacing_rx),
+        &mut eu_selector_factory,
+    );
+
+    let mut total_attempts = 0;
+    for handle in handles {
+        match handle.await {
+            Ok(attempts) => total_attempts += attempts,
+            Err(err) => eprintln!("dry-run worker panicked: {err}"),
+        }
+    }
+    pacing_handle.abort();
+
+    let counts: Vec<u64> = histogram
+        .iter()
+        .map(|count| count.load(Ordering::Relaxed))
+        .collect();
+    print_collection_rank_histogram(collection_names.as_ref(), &counts, total_attempts);
+
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn spawn_backend_workers<SelFactory>(
     handles: &mut Vec<tokio::task::JoinHandle<LoadWorkerSummary>>,
