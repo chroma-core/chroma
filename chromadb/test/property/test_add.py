@@ -1,3 +1,4 @@
+import time
 import uuid
 from random import randint
 from typing import cast, List, Any, Dict
@@ -144,12 +145,26 @@ def _test_add(
         embedding_function=collection.embedding_function,
         configuration=collection.collection_config,
     )
-    initial_version = cast(int, coll.get_model()["version"])
+    model = coll.get_model()
+    initial_version = cast(int, model["version"])
 
     normalized_record_set = invariants.wrap_all(record_set)
+    total_records = len(normalized_record_set["ids"])
+
+    print(
+        f"[DEBUG _test_add] START collection_id={model.id} "  # type: ignore[union-attr]
+        f"name={model.name} "  # type: ignore[union-attr]
+        f"database={model.database} "  # type: ignore[union-attr]
+        f"version={initial_version} "
+        f"total_records={total_records} "
+        f"should_compact={should_compact} "
+        f"ts={time.time():.3f}",
+        flush=True,
+    )
 
     # TODO: The type of add() is incorrect as it does not allow for metadatas
     # like [{"a": 1}, None, {"a": 3}]
+    batch_num = 0
     for batch in create_batches(
         api=client,
         ids=cast(List[str], record_set["ids"]),
@@ -157,7 +172,29 @@ def _test_add(
         metadatas=cast(Metadatas, record_set["metadatas"]),
         documents=cast(List[str], record_set["documents"]),
     ):
+        batch_num += 1
+        batch_size = len(batch[0]) if batch[0] else 0
+        t_before = time.time()
         coll.add(*batch)
+        t_after = time.time()
+        print(
+            f"[DEBUG _test_add] ADD batch={batch_num} "
+            f"size={batch_size} "
+            f"collection_id={model.id} "  # type: ignore[union-attr]
+            f"elapsed={t_after - t_before:.3f}s "
+            f"ts={t_after:.3f}",
+            flush=True,
+        )
+
+    print(
+        f"[DEBUG _test_add] ALL ADDS COMPLETE "
+        f"collection_id={model.id} "  # type: ignore[union-attr]
+        f"batches={batch_num} "
+        f"total_records={total_records} "
+        f"ts={time.time():.3f}",
+        flush=True,
+    )
+
     # Only wait for compaction if the size of the collection is
     # some minimal size
     if (
@@ -165,9 +202,27 @@ def _test_add(
         and should_compact
         and (len(normalized_record_set["ids"]) > 10 or always_compact)
     ):
+        print(
+            f"[DEBUG _test_add] WAITING FOR COMPACTION "
+            f"collection_id={model.id} "  # type: ignore[union-attr]
+            f"ts={time.time():.3f}",
+            flush=True,
+        )
         # Wait for the model to be updated
         wait_for_version_increase(client, collection.name, initial_version)
+        print(
+            f"[DEBUG _test_add] COMPACTION DONE "
+            f"collection_id={model.id} "  # type: ignore[union-attr]
+            f"ts={time.time():.3f}",
+            flush=True,
+        )
 
+    print(
+        f"[DEBUG _test_add] CALLING COUNT "
+        f"collection_id={model.id} "  # type: ignore[union-attr]
+        f"ts={time.time():.3f}",
+        flush=True,
+    )
     invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
     n_results = max(1, (len(normalized_record_set["ids"]) // 10))
 

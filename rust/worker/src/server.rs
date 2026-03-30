@@ -259,13 +259,13 @@ impl WorkerServer {
                 .ok_or_else(|| Status::invalid_argument("Invalid database name"))?;
         let collection_id = collection_and_segments.collection.collection_id;
         let fragment_fetcher = self.fragment_fetcher_for_collection(collection_id);
+        let start_log_offset_id =
+            u64::try_from(collection_and_segments.collection.log_position + 1).unwrap_or_default();
+        println!("[DEBUG fetch_log] constructing FetchLogOperator collection_id={} database_name={:?} log_position={} start_log_offset_id={} use_fragment_fetch={} collection_version={}", collection_id, database_name, collection_and_segments.collection.log_position, start_log_offset_id, fragment_fetcher.is_some(), collection_and_segments.collection.version);
         Ok(FetchLogOperator {
             log_client: self.log.clone(),
             batch_size,
-            // The collection log position is inclusive, and we want to start from the next log
-            // Note that we query using the incoming log position this is critical for correctness
-            start_log_offset_id: u64::try_from(collection_and_segments.collection.log_position + 1)
-                .unwrap_or_default(),
+            start_log_offset_id,
             maximum_fetch_count: None,
             collection_uuid: collection_id,
             tenant: collection_and_segments.collection.tenant.clone(),
@@ -316,6 +316,7 @@ impl WorkerServer {
 
         let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
         let collection_id = collection_and_segments.collection.collection_id;
+        println!("[DEBUG orchestrate_count] starting count orchestration collection_id={} read_level={:?}", collection_id, read_level);
         let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size)?;
 
         let count_orchestrator = CountOrchestrator::new(
@@ -330,11 +331,20 @@ impl WorkerServer {
         );
 
         match count_orchestrator.run(self.system.clone()).await {
-            Ok((count, pulled_log_bytes)) => Ok(Response::new(chroma_proto::CountResult {
-                count,
-                pulled_log_bytes,
-            })),
-            Err(err) => Err(Status::new(err.code().into(), err.to_string())),
+            Ok((count, pulled_log_bytes)) => {
+                println!("[DEBUG orchestrate_count] count result collection_id={} count={} pulled_log_bytes={}", collection_id, count, pulled_log_bytes);
+                Ok(Response::new(chroma_proto::CountResult {
+                    count,
+                    pulled_log_bytes,
+                }))
+            }
+            Err(err) => {
+                println!(
+                    "[DEBUG orchestrate_count] count failed collection_id={} err={}",
+                    collection_id, err
+                );
+                Err(Status::new(err.code().into(), err.to_string()))
+            }
         }
     }
 

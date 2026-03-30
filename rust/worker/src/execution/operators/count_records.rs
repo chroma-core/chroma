@@ -79,6 +79,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
         &self,
         input: &CountRecordsInput,
     ) -> Result<CountRecordsOutput, CountRecordsError> {
+        println!("[DEBUG CountRecordsOperator] starting count collection_id={} log_records_len={} segment_id={}", input.record_segment_definition.collection, input.log_records.len(), input.record_segment_definition.id);
         let segment_reader = Box::pin(RecordSegmentReader::from_segment(
             &input.record_segment_definition,
             &input.blockfile_provider,
@@ -107,9 +108,9 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
                                 Operation::BackfillFn => {}
                             }
                         }
-                        return Ok(CountRecordsOutput {
-                            count: seen_id_set.len(),
-                        });
+                        let count = seen_id_set.len();
+                        println!("[DEBUG CountRecordsOperator] uninitialized segment path — returning count={} log_records_len={} collection_id={}", count, input.log_records.len(), input.record_segment_definition.collection);
+                        return Ok(CountRecordsOutput { count });
                     }
                     RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
                         return Err(CountRecordsError::RecordSegmentCreateError(*e));
@@ -211,6 +212,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
                 return Err(CountRecordsError::RecordSegmentReadError(e));
             }
         };
+        println!("[DEBUG CountRecordsOperator] segment path — returning count={} segment_count_added={} deleted_in_log={} added_in_log={} collection_id={}", res_count, res_count - non_deleted_absent_in_segment.len() as i32 + (deleted_and_non_deleted_present_in_segment.len() - non_deleted_present_in_segment.len()) as i32, deleted_and_non_deleted_present_in_segment.len() - non_deleted_present_in_segment.len(), non_deleted_absent_in_segment.len(), input.record_segment_definition.collection);
         Ok(CountRecordsOutput {
             count: res_count as usize,
         })

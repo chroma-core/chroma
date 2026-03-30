@@ -1,6 +1,7 @@
 import gc
 import math
 import os.path
+import time
 from uuid import UUID
 from contextlib import contextmanager
 
@@ -108,11 +109,26 @@ def check_metadata(
 
 def count(collection: Collection, record_set: RecordSet) -> None:
     """The given collection count is equal to the number of embeddings"""
-    count = collection.count()
     normalized_record_set = wrap_all(record_set)
-    if count != len(normalized_record_set["ids"]):
-        print("count mismatch:", count, "=!", len(normalized_record_set["ids"]))
-    assert count == len(normalized_record_set["ids"])
+    expected = len(normalized_record_set["ids"])
+    model = collection.get_model()
+    t0 = time.time()
+    print(
+        f"[DEBUG count] collection_id={model.id} "  # type: ignore[union-attr]
+        f"name={model.name} "  # type: ignore[union-attr]
+        f"database={getattr(model, 'database', 'N/A')} "
+        f"expected={expected} "
+        f"ts={t0:.3f}",
+        flush=True,
+    )
+    count = collection.count()
+    if count != expected:
+        print(
+            f"[DEBUG count] MISMATCH collection_id={model.id} "  # type: ignore[union-attr]
+            f"got={count} expected={expected}",
+            flush=True,
+        )
+    assert count == expected, f"count mismatch: {count} =! {expected}"
 
 
 def _field_matches(
