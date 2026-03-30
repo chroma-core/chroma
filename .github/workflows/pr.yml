@@ -22,7 +22,7 @@ jobs:
       # Helm version check
       helm-version-changed: ${{ steps.helm-version.outputs.version_changed }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 2
 
@@ -121,7 +121,7 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Comment warning
         if: needs.change-detection.outputs.helm-version-changed == 'false'
         uses: marocchino/sticky-pull-request-comment@v2
@@ -209,7 +209,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - uses: ./.github/actions/python
         with:
           python-version: "3.11"

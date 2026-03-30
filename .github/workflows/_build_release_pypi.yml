@@ -46,7 +46,7 @@ jobs:
       version: ${{ steps.resolve_version.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Resolve version
         shell: bash
         id: resolve_version
@@ -72,14 +72,14 @@ jobs:
           - { os: macos, runner: macos-14, target: aarch64 }
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Setup Rust
         uses: ./.github/actions/rust
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: 3.x
 
@@ -110,7 +110,7 @@ jobs:
           container: "off"
 
       - name: Upload wheels
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: wheels-${{ matrix.platform.os }}-${{ matrix.platform.target }}
           path: dist
@@ -120,7 +120,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: version
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Setup Rust
         uses: ./.github/actions/rust
         with:
@@ -153,7 +153,7 @@ jobs:
           pip install dist/*.tar.gz
           python -c "import chromadb; api = chromadb.Client(); print(api.heartbeat())"
       - name: Upload sdist
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: wheels-sdist
           path: dist
@@ -171,10 +171,10 @@ jobs:
       # Used to generate artifact attestation
       attestations: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
 
       - name: Generate artifact attestation
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v2
         with:
           subject-path: 'wheels-*/*'
 

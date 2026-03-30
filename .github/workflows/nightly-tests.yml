@@ -17,7 +17,7 @@ jobs:
                    "chromadb/test/property/test_embeddings.py"]
     runs-on: "blacksmith-8vcpu-ubuntu-2404"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/python
         with:
           python-version: "3.12"
@@ -50,7 +50,7 @@ jobs:
     needs: test-cluster
     steps:
       - name: Merge
-        uses: actions/upload-artifact/merge@v4
+        uses: actions/upload-artifact/merge@v5
         with:
           name: cluster_test_logs
           pattern: cluster_logs_*

@@ -23,7 +23,7 @@ jobs:
       RUST_MIN_STACK_SIZE: 8388608
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup
         uses: ./.github/actions/rust
         with:
@@ -42,7 +42,7 @@ jobs:
       RUST_MIN_STACK_SIZE: 8388608
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup
         uses: ./.github/actions/rust
         with:
@@ -58,7 +58,7 @@ jobs:
       RUST_MIN_STACK_SIZE: 8388608
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup
         uses: ./.github/actions/rust
         with:
@@ -94,7 +94,7 @@ jobs:
       RUST_MIN_STACK_SIZE: 8388608
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup
         uses: ./.github/actions/rust
         with:
@@ -134,7 +134,7 @@ jobs:
       CARGO_TERM_COLOR: always
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup
         uses: ./.github/actions/rust
         with:
@@ -154,7 +154,7 @@ jobs:
       MULTI_REGION: "true"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup
         uses: ./.github/actions/rust
         with:
@@ -199,7 +199,7 @@ jobs:
       CARGO_TERM_COLOR: always
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup
         uses: ./.github/actions/rust
         with:

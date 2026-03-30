@@ -12,7 +12,7 @@ runs:
   steps:
     - name: Cache Rust toolchain
       id: cache-rustup
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       if: ${{ runner.os != 'windows' }}
       with:
         path: ~/.rustup
