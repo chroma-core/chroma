@@ -12,6 +12,7 @@ type Collection struct {
 	ConfigurationJsonStr       string
 	SchemaStr                  *string
 	Dimension                  *int32
+	Description                *string
 	Metadata                   *CollectionMetadata[CollectionMetadataValueType]
 	TenantID                   string
 	DatabaseName               string
@@ -46,6 +47,7 @@ type CreateCollection struct {
 	ConfigurationJsonStr       string
 	SchemaStr                  *string
 	Dimension                  *int32
+	Description                *string
 	Metadata                   *CollectionMetadata[CollectionMetadataValueType]
 	GetOrCreate                bool
 	TenantID                   string
@@ -69,6 +71,8 @@ type UpdateCollection struct {
 	ID                      types.UniqueID
 	Name                    *string
 	Dimension               *int32
+	Description             *string
+	ResetDescription        bool
 	Metadata                *CollectionMetadata[CollectionMetadataValueType]
 	ResetMetadata           bool
 	NewConfigurationJsonStr *string

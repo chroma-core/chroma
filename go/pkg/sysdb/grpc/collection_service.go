@@ -383,6 +383,7 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 		ID:                      parsedCollectionID,
 		Name:                    req.Name,
 		Dimension:               req.Dimension,
+		Description:             req.Description,
 		NewConfigurationJsonStr: req.ConfigurationJsonStr,
 	}
 

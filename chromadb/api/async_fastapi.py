@@ -309,6 +309,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
+        description: Optional[str] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -326,6 +327,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             json={
                 "name": name,
                 "metadata": metadata,
+                "description": description,
                 "configuration": config_json,
                 "schema": serialized_schema,
                 "get_or_create": get_or_create,
@@ -362,6 +364,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
+        description: Optional[str] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
@@ -370,6 +373,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             schema=schema,
             configuration=configuration,
             metadata=metadata,
+            description=description,
             get_or_create=True,
             tenant=tenant,
             database=database,
@@ -383,6 +387,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
         new_configuration: Optional[UpdateCollectionConfiguration] = None,
+        new_description: Optional[str] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
@@ -397,6 +402,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
                 )
                 if new_configuration
                 else None,
+                "new_description": new_description,
             },
         )
 

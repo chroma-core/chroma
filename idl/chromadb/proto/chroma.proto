@@ -77,6 +77,7 @@ message Collection {
   // Number of consecutive compaction failures for this collection
   // Defaults to 0.
   int32 compaction_failure_count = 19;
+  optional string description = 20;
 }
 
 message Database {
