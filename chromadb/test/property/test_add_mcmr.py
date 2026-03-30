@@ -98,13 +98,8 @@ def test_add_medium(
     _test_add(collection, record_set, should_compact, batch_ann_accuracy=True)
 
 
-def _create_mcmr_clients(
-    topology: str,
-) -> Tuple[ClientAPI, ClientAPI]:
+def _create_mcmr_clients() -> Tuple[ClientAPI, ClientAPI]:
     """Create two clients connected to different regions for MCMR testing.
-
-    Args:
-        topology: The topology identifier for the test.
 
     Returns:
         A tuple of two ClientAPI instances connected to localhost:8000 and localhost:8001.
@@ -157,7 +152,7 @@ def _test_add(
         topology: Topology identifier for MCMR testing.
             Creates two clients connected to localhost:8000 and localhost:8001.
     """
-    client1, client2 = _create_mcmr_clients(topology)
+    client1, client2 = _create_mcmr_clients()
     _create_isolated_database_mcmr(client1, client2, topology)
 
     coll1 = client1.create_collection(
@@ -266,7 +261,7 @@ def test_add_large(
         should_compact: Whether to wait for compaction.
     """
     topology = "tilt-spanning"
-    client1, client2 = _create_mcmr_clients(topology)
+    client1, client2 = _create_mcmr_clients()
     _create_isolated_database_mcmr(client1, client2, topology)
 
     if (
