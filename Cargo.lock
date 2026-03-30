@@ -4438,7 +4438,7 @@ dependencies = [
 [[package]]
 name = "hnswlib"
 version = "0.8.2"
-source = "git+https://github.com/chroma-core/hnswlib.git?branch=master#b5c642880e92063b5ddb7c364ba76d8337017f88"
+source = "git+https://github.com/chroma-core/hnswlib.git?branch=master#6868102bde454dc761136e1994490133a6a026bb"
 dependencies = [
  "cc",
  "thiserror 1.0.69",
@@ -7068,7 +7068,7 @@ version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "343d3bd7056eda839b03204e68deff7d1b13aba7af2b2fd16890697274262ee7"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "itertools 0.14.0",
  "log",
  "multimap",
