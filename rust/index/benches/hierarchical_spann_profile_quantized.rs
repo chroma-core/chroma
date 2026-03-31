@@ -20,7 +20,8 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 use datasets::{format_count, recall_at_k, Dataset, DatasetType, MetricType, Query};
 use hierarchical_index::writer_quantized::{
-    format_task_tables, HierarchicalSpannConfig, HierarchicalSpannWriter, WriterStatsSnapshot,
+    format_task_tables, HierarchicalSpannConfig, HierarchicalSpannWriter, NavigationMode,
+    SearchTimings, WriterStatsSnapshot,
 };
 
 // =============================================================================
@@ -107,9 +108,13 @@ struct Args {
     #[arg(long, default_value = "1")]
     threads: usize,
 
-    /// Use f32 centroid distances for navigation instead of quantized
-    #[arg(long)]
-    fp_navigation: bool,
+    /// Navigation mode: fp (f32), 1bit (code-to-code), 4bit (QuantizedQuery)
+    #[arg(long, default_value = "4bit")]
+    navigation: String,
+
+    /// Use full precision f32 distances for NPA instead of quantized
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    fp_npa: bool,
 
     /// Tau values for recall sweep, comma-separated
     #[arg(long, default_value = "0.1,0.5,1")]
@@ -154,6 +159,16 @@ fn format_latency(nanos: u64) -> String {
         format!("{:.1}ms", us / 1000.0)
     } else {
         format!("{:.2}s", us / 1_000_000.0)
+    }
+}
+
+fn format_mb(mb: f64) -> String {
+    if mb < 1.0 {
+        format!("{:.1}KB", mb * 1024.0)
+    } else if mb < 1024.0 {
+        format!("{:.1}MB", mb)
+    } else {
+        format!("{:.2}GB", mb / 1024.0)
     }
 }
 
@@ -308,6 +323,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .map(|s| s.trim().parse().expect("invalid tau value"))
         .collect();
 
+    let nav_mode = match args.navigation.as_str() {
+        "fp" => NavigationMode::Fp,
+        "1bit" => NavigationMode::OneBit,
+        "4bit" => NavigationMode::FourBit,
+        other => panic!("invalid --navigation value '{}': must be fp, 1bit, or 4bit", other),
+    };
+
     let config = HierarchicalSpannConfig {
         branching_factor: args.branching_factor,
         split_threshold: args.split_threshold,
@@ -322,7 +344,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         write_rng_epsilon: args.write_rng_epsilon,
         write_rng_factor: args.write_rng_factor,
         reassign_neighbor_count: 32,
-        fp_navigation: args.fp_navigation,
+        navigation: nav_mode,
+        fp_npa: args.fp_npa,
     };
 
     println!("=== 1-Bit Quantized Hierarchical SPANN Writer Benchmark ===");
@@ -356,27 +379,22 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         config.write_beam_tau, config.write_beam_min, config.write_beam_max,
     );
     println!(
-        "  Quantization: 1-bit | Nav: {}",
-        if args.fp_navigation { "f32" } else { "1-bit" },
+        "  Quantization: 1-bit | Nav: {:?} | NPA: {}",
+        nav_mode,
+        if args.fp_npa { "f32" } else { "1-bit" },
     );
     println!("  Threads: {}", args.threads);
-    println!();
-    println!("--- Recall ---");
-    println!(
-        "  Search beam: tau={} min={} max={} | Tau sweep: {:?}",
-        config.beam_tau, config.beam_min, config.beam_max, tau_values,
-    );
-    println!(
-        "  Rerank centroids: {:?} | Rerank vectors: {:?}",
-        args.recall_rerank_centroids, args.recall_rerank_vectors,
-    );
-    println!("  Brute-force GT: {}", args.brute_force_gt);
     println!();
 
     let all_queries = dataset.queries(distance_fn.clone())?;
     let query_vectors: Vec<Vec<f32>> =
         all_queries.iter().take(100).map(|q| q.vector.clone()).collect();
     let queries_by_checkpoint = group_queries_by_checkpoint(all_queries);
+
+    let sample_queries_as_gt = query_vectors.is_empty() && args.brute_force_gt;
+    if sample_queries_as_gt {
+        println!("  No precomputed queries; will sample 100 data vectors as queries for brute-force GT.");
+    }
 
     let writer = HierarchicalSpannWriter::new(dimension, distance_fn.clone(), config);
 
@@ -483,10 +501,40 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     );
 
     println!("=== Recall ===");
+    println!(
+        "  Search beam: tau={} min={} max={} | Tau sweep: {:?}",
+        args.beam_tau, args.beam_min, args.beam_max, tau_values,
+    );
+    println!(
+        "  Rerank centroids: {:?} | Rerank vectors: {:?}",
+        args.recall_rerank_centroids, args.recall_rerank_vectors,
+    );
+    println!(
+        "  Nav: {:?} | Brute-force GT: {}",
+        nav_mode,
+        args.brute_force_gt,
+    );
+
     let precomputed: Vec<&Query> = queries_by_checkpoint
         .get(&(total_vectors as u64))
         .map(|qs| qs.iter().collect())
         .unwrap_or_default();
+
+    let sampled_query_vectors: Vec<Vec<f32>>;
+    let effective_query_vectors = if sample_queries_as_gt {
+        use rand::seq::SliceRandom;
+        let mut rng = rand::thread_rng();
+        let sample_count = 100.min(all_indexed_vectors.len());
+        let mut indices: Vec<usize> = (0..all_indexed_vectors.len()).collect();
+        indices.shuffle(&mut rng);
+        sampled_query_vectors = indices[..sample_count]
+            .iter()
+            .map(|&i| all_indexed_vectors[i].1.to_vec())
+            .collect();
+        &sampled_query_vectors
+    } else {
+        &query_vectors
+    };
 
     let computed_gt;
     let cached_gt;
@@ -494,7 +542,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         dataset.name(),
         &format!("{:?}", distance_fn),
         total_vectors,
-        query_vectors.len(),
+        effective_query_vectors.len(),
     );
 
     let checkpoint_queries: Vec<&Query> = if !precomputed.is_empty() {
@@ -506,12 +554,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     } else if args.brute_force_gt {
         println!(
             "  Computing ground truth ({} queries x {} vectors)...",
-            query_vectors.len(),
+            effective_query_vectors.len(),
             all_indexed_vectors.len()
         );
         let gt_start = Instant::now();
         computed_gt = compute_ground_truth(
-            &query_vectors,
+            effective_query_vectors,
             &all_indexed_vectors,
             &distance_fn,
             k,
@@ -536,30 +584,43 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         let level_counts = writer.level_node_counts();
 
-        let mut header = format!(
-            "  | {:>6} | {:>6} | {:>6} | {:>8} | {:>10} |",
-            "tau", "rr_c", "rr_v", "R@10", "avg lat"
-        );
+        let mut beam_col_headers: Vec<String> = Vec::new();
         for lvl in 1..=num_levels {
+            let total_at_level = level_counts.get(lvl).copied().unwrap_or(0);
+            beam_col_headers.push(format!("L{} beam ({})", lvl, format_count(total_at_level)));
+        }
+        let beam_col_width = beam_col_headers.iter().map(|h| h.len()).max().unwrap_or(12).max(12);
+
+        let mut header = format!(
+            "  | {:>6} | {:>6} | {:>6} |",
+            "tau", "rr_c", "rr_v",
+        );
+        for lvl in 0..num_levels {
             header.push_str(&format!(
-                " {:>12} | {:>8} |",
-                format!("L{} beam", lvl),
-                format!("L{} R@100", lvl),
+                " {:>width$} | {:>8} | {:>7} |",
+                beam_col_headers[lvl],
+                format!("L{} R@100", lvl + 1),
+                format!("L{} MB", lvl + 1),
+                width = beam_col_width,
             ));
         }
         header.push_str(&format!(
-            " {:>15} | {:>8} |",
-            "scanned_vectors", "R@100"
+            " {:>15} | {:>7} | {:>7} | {:>7} | {:>8} | {:>10} | {:>15} | {:>15} | {:>15} | {:>15} | {:>15} |",
+            "scanned_vectors", "scan MB", "tot MB", "MB/s", "R@100", "avg lat",
+            "lat_nav", "lat_quant", "lat_dist", "lat_sort", "lat_rerank",
         ));
 
         let mut separator = format!(
-            "  |{:-^8}|{:-^8}|{:-^8}|{:-^10}|{:-^12}|",
-            "", "", "", "", ""
+            "  |{:-^8}|{:-^8}|{:-^8}|",
+            "", "", "",
         );
         for _ in 1..=num_levels {
-            separator.push_str(&format!("{:-^14}|{:-^10}|", "", ""));
+            separator.push_str(&format!("{:-^w$}|{:-^10}|{:-^9}|", "", "", "", w = beam_col_width + 2));
         }
-        separator.push_str(&format!("{:-^17}|{:-^10}|", "", ""));
+        separator.push_str(&format!(
+            "{:-^17}|{:-^9}|{:-^9}|{:-^9}|{:-^10}|{:-^12}|{:-^17}|{:-^17}|{:-^17}|{:-^17}|{:-^17}|",
+            "", "", "", "", "", "", "", "", "", "", "",
+        ));
 
         println!(
             "  Recall ({} queries, k={}, depth={}):",
@@ -582,23 +643,23 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             for &rr_c in &args.recall_rerank_centroids {
                 for &rr_v in &args.recall_rerank_vectors {
                     struct QueryResult {
-                        r10: f64,
                         r100: f64,
                         nanos: u64,
                         scanned: usize,
                         level_r100: Vec<f64>,
                         level_beam: Vec<u64>,
+                        level_candidates: Vec<u64>,
+                        timings: SearchTimings,
                     }
 
                     let results: Vec<QueryResult> = recall_pool.install(|| {
                         checkpoint_queries.par_iter().map(|gt| {
                             let t0 = Instant::now();
-                            let (results, scanned, _leaves_scanned) =
+                            let (results, scanned, _leaves_scanned, timings) =
                                 writer.search(&gt.vector, k, tau, beam_min, beam_max, rr_c, rr_v);
                             let nanos = t0.elapsed().as_nanos() as u64;
 
                             let result_ids: Vec<u32> = results.iter().map(|(id, _)| *id).collect();
-                            let r10 = recall_at_k(&result_ids, &gt.neighbors, 10);
                             let r100 = recall_at_k(&result_ids, &gt.neighbors, 100);
 
                             let gt_100: HashSet<u32> =
@@ -608,62 +669,113 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
                             let mut level_r100 = vec![0.0f64; num_levels];
                             let mut level_beam = vec![0u64; num_levels];
+                            let mut level_candidates = vec![0u64; num_levels];
                             for lr in &level_recall {
                                 if lr.level <= num_levels {
                                     level_r100[lr.level - 1] = lr.reachable_100;
                                     level_beam[lr.level - 1] = lr.beam_size as u64;
+                                    level_candidates[lr.level - 1] = lr.total_candidates as u64;
                                 }
                             }
 
-                            QueryResult { r10, r100, nanos, scanned, level_r100, level_beam }
+                            QueryResult { r100, nanos, scanned, level_r100, level_beam, level_candidates, timings }
                         }).collect()
                     });
 
-                    let mut total_r10 = 0.0f64;
                     let mut total_r100 = 0.0f64;
                     let mut total_nanos = 0u64;
                     let mut total_scanned = 0usize;
                     let mut level_r100_sums = vec![0.0f64; num_levels];
                     let mut level_beam_sums = vec![0u64; num_levels];
+                    let mut level_candidates_sums = vec![0u64; num_levels];
+                    let mut total_nav_nanos = 0u64;
+                    let mut total_qq_nanos = 0u64;
+                    let mut total_dq_nanos = 0u64;
+                    let mut total_sort_nanos = 0u64;
+                    let mut total_rr_nanos = 0u64;
                     for qr in &results {
-                        total_r10 += qr.r10;
                         total_r100 += qr.r100;
                         total_nanos += qr.nanos;
                         total_scanned += qr.scanned;
+                        total_nav_nanos += qr.timings.navigate_nanos;
+                        total_qq_nanos += qr.timings.quantize_nanos;
+                        total_dq_nanos += qr.timings.distance_nanos;
+                        total_sort_nanos += qr.timings.sort_dedup_nanos;
+                        total_rr_nanos += qr.timings.rerank_nanos;
                         for i in 0..num_levels {
                             level_r100_sums[i] += qr.level_r100[i];
                             level_beam_sums[i] += qr.level_beam[i];
+                            level_candidates_sums[i] += qr.level_candidates[i];
                         }
                     }
 
                     let n = num_queries as f64;
-                    let avg_r10 = total_r10 / n;
                     let avg_r100 = total_r100 / n;
                     let avg_lat = total_nanos / num_queries as u64;
                     let avg_scanned = total_scanned / num_queries;
 
                     let mut row = format!(
-                        "  | {:>6.2} | {:>5}x | {:>5}x | {:>7.2}% | {:>10} |",
+                        "  | {:>6.2} | {:>5}x | {:>5}x |",
                         tau,
                         rr_c,
                         rr_v,
-                        avg_r10 * 100.0,
-                        format_latency(avg_lat),
                     );
+                    let dim = dimension;
+                    let mut total_mb = 0.0f64;
+
                     for lvl in 0..num_levels {
                         let avg_beam = level_beam_sums[lvl] / num_queries as u64;
+                        let avg_candidates = level_candidates_sums[lvl] / num_queries as u64;
                         let avg_lr = level_r100_sums[lvl] / n * 100.0;
-                        let total_at_level = level_counts.get(lvl + 1).copied().unwrap_or(0);
+                        let level_bytes = if nav_mode == NavigationMode::Fp {
+                            (avg_candidates as f64 * dim as f64) * 4.0
+                        } else {
+                            let mut level_sum = (avg_candidates as f64 * dim as f64) / 8.0;
+                            if rr_c > 1 {
+                                level_sum += ((avg_candidates.min(avg_beam * rr_c as u64) as f64) * dim as f64) * 4.0;
+                            }
+                            level_sum
+                        };
+                        let level_mb = level_bytes / (1024.0 * 1024.0);
+                        total_mb += level_mb;
                         row.push_str(&format!(
-                            " {:>12} | {:>7.2}% |",
-                            format!("{}/{}", format_count(avg_beam as usize), format_count(total_at_level)),
+                            " {:>width$} | {:>7.2}% | {:>7} |",
+                            format!("{}/{}", format_count(avg_beam as usize), format_count(avg_candidates as usize)),
                             avg_lr,
+                            format_mb(level_mb),
+                            width = beam_col_width,
                         ));
                     }
+
+                    let scan_bytes = avg_scanned as f64 * dim as f64 / 8.0
+                        + (k * rr_v) as f64 * dim as f64 * 4.0;
+                    let scan_mb = scan_bytes / (1024.0 * 1024.0);
+                    total_mb += scan_mb;
+
+                    let avg_lat_secs = avg_lat as f64 / 1_000_000_000.0;
+                    let mb_per_sec = if avg_lat_secs > 0.0 { total_mb / avg_lat_secs } else { 0.0 };
+
+                    let nq = num_queries as u64;
+                    let avg_nav = total_nav_nanos / nq;
+                    let avg_qq = total_qq_nanos / nq;
+                    let avg_dq = total_dq_nanos / nq;
+                    let avg_sort = total_sort_nanos / nq;
+                    let avg_rr = total_rr_nanos / nq;
+                    let pct = |v: u64| if avg_lat > 0 { v as f64 / avg_lat as f64 * 100.0 } else { 0.0 };
+
                     row.push_str(&format!(
-                        " {:>15} | {:>7.2}% |",
+                        " {:>15} | {:>7} | {:>7} | {:>7} | {:>7.2}% | {:>10} | {:>15} | {:>15} | {:>15} | {:>15} | {:>15} |",
                         format_count(avg_scanned),
+                        format_mb(scan_mb),
+                        format_mb(total_mb),
+                        format_mb(mb_per_sec),
                         avg_r100 * 100.0,
+                        format_latency(avg_lat),
+                        format!("{} ({:.0}%)", format_latency(avg_nav), pct(avg_nav)),
+                        format!("{} ({:.0}%)", format_latency(avg_qq), pct(avg_qq)),
+                        format!("{} ({:.0}%)", format_latency(avg_dq), pct(avg_dq)),
+                        format!("{} ({:.0}%)", format_latency(avg_sort), pct(avg_sort)),
+                        format!("{} ({:.0}%)", format_latency(avg_rr), pct(avg_rr)),
                     ));
                     println!("{}", row);
                 }
@@ -695,12 +807,24 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("register.missing_node - register_in_leaf target was gone (split by balance cascade),");
         println!("                     fell back to reassign");
         println!();
-        println!("--- Recall ---");
-        println!("R@100      - fraction of true top-100 neighbors found");
-        println!("leaves     - avg number of leaf nodes visited per query");
-        println!("scanned    - avg unique vectors whose f32 distances were computed per query");
-        println!("Lk bm      - avg effective beam width (nodes kept) at tree level k");
-        println!("Lk R@100   - fraction of true top-100 reachable at tree level k");
+        println!("--- Recall Table ---");
+        println!("tau             - dynamic beam tau threshold (controls beam width)");
+        println!("rr_c            - centroid rerank factor (1x = no rerank)");
+        println!("rr_v            - vector rerank factor (1x = no rerank)");
+        println!("Lk beam (N)     - effective_beam / candidates_considered at level k (N = total nodes at level)");
+        println!("Lk R@100        - fraction of true top-100 reachable after level k");
+        println!("Lk MB           - avg data loaded per query at level k");
+        println!("scanned_vectors - avg unique vectors scored per query across all leaves");
+        println!("scan MB         - data loaded for vector scoring (quantized codes + rerank f32 vectors)");
+        println!("tot MB          - total data loaded per query (all levels + scan)");
+        println!("MB/s            - data throughput (tot MB / avg lat)");
+        println!("R@100           - fraction of true top-100 neighbors in final results");
+        println!("avg lat         - average end-to-end search latency per query");
+        println!("lat_nav         - time in navigate() (tree traversal to find leaves)");
+        println!("lat_quant       - time building QuantizedQuery per leaf (residual, norms)");
+        println!("lat_dist        - time scoring vectors against quantized query (includes version checks)");
+        println!("lat_sort        - time deduplicating + sorting all scored vectors");
+        println!("lat_rerank      - time reranking top candidates with f32 embeddings (0 when rr_v=1)");
     }
 
     Ok(())

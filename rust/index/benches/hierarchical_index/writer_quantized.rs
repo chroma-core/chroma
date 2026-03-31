@@ -15,6 +15,29 @@ pub type NodeId = u32;
 
 const MAX_BALANCE_DEPTH: u32 = 4;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum NavigationMode {
+    Fp,
+    OneBit,
+    FourBit,
+}
+
+impl std::fmt::Display for NavigationMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NavigationMode::Fp => write!(f, "fp"),
+            NavigationMode::OneBit => write!(f, "1bit"),
+            NavigationMode::FourBit => write!(f, "4bit"),
+        }
+    }
+}
+
+impl std::fmt::Debug for NavigationMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self, f)
+    }
+}
+
 #[derive(Clone)]
 pub struct HierarchicalSpannConfig {
     pub branching_factor: usize,
@@ -33,8 +56,9 @@ pub struct HierarchicalSpannConfig {
     pub write_rng_epsilon: f32,
     pub write_rng_factor: f32,
     pub reassign_neighbor_count: usize,
-    /// If true, navigate uses f32 centroid distances instead of quantized.
-    pub fp_navigation: bool,
+    pub navigation: NavigationMode,
+    /// If true, NPA uses full precision f32 distances; if false, NPA uses quantized distances.
+    pub fp_npa: bool,
 }
 
 impl Default for HierarchicalSpannConfig {
@@ -43,7 +67,7 @@ impl Default for HierarchicalSpannConfig {
             branching_factor: 100,
             split_threshold: 2048,
             merge_threshold: 512,
-            write_beam_tau: 1.0,
+            write_beam_tau: 0.5,
             write_beam_min: 10,
             write_beam_max: 50000,
             beam_tau: 1.0,
@@ -53,7 +77,8 @@ impl Default for HierarchicalSpannConfig {
             write_rng_epsilon: 4.0,
             write_rng_factor: 2.0,
             reassign_neighbor_count: 32,
-            fp_navigation: false,
+            navigation: NavigationMode::FourBit,
+            fp_npa: true,
         }
     }
 }
@@ -166,11 +191,22 @@ pub struct WriterStats {
     split_npa_neighbor_reassigns: AtomicU64,
     /// Total vectors evaluated by apply_npa_to_neighbors (across all splits)
     split_npa_neighbor_evaluated: AtomicU64,
+    /// Total vectors in groups passed to apply_npa_to_cluster
+    split_npa_self_total: AtomicU64,
+    /// Vectors that passed version+dedup checks in apply_npa_to_cluster
+    split_npa_self_evaluated: AtomicU64,
+    /// Vectors reassigned by apply_npa_to_cluster (new_dist > old_dist)
+    split_npa_self_reassigns: AtomicU64,
     reassign_navigate_nanos: AtomicU64,
     reassign_register_nanos: AtomicU64,
     reassign_balance_nanos: AtomicU64,
     navigate_dist_nanos: AtomicU64,
+    navigate_dist_quantize_nanos: AtomicU64,
+    navigate_dist_distance_nanos: AtomicU64,
     navigate_sort_nanos: AtomicU64,
+    navigate_rerank_nanos: AtomicU64,
+    navigate_levels: AtomicU64,
+    navigate_dist_count: AtomicU64,
 }
 
 impl Default for WriterStats {
@@ -208,11 +244,19 @@ impl Default for WriterStats {
             split_depth_sum: AtomicU64::new(0),
             split_npa_neighbor_reassigns: AtomicU64::new(0),
             split_npa_neighbor_evaluated: AtomicU64::new(0),
+            split_npa_self_total: AtomicU64::new(0),
+            split_npa_self_evaluated: AtomicU64::new(0),
+            split_npa_self_reassigns: AtomicU64::new(0),
             reassign_navigate_nanos: AtomicU64::new(0),
             reassign_register_nanos: AtomicU64::new(0),
             reassign_balance_nanos: AtomicU64::new(0),
             navigate_dist_nanos: AtomicU64::new(0),
+            navigate_dist_quantize_nanos: AtomicU64::new(0),
+            navigate_dist_distance_nanos: AtomicU64::new(0),
             navigate_sort_nanos: AtomicU64::new(0),
+            navigate_rerank_nanos: AtomicU64::new(0),
+            navigate_levels: AtomicU64::new(0),
+            navigate_dist_count: AtomicU64::new(0),
         }
     }
 }
@@ -239,12 +283,17 @@ pub struct WriterStatsSnapshot {
     pub split_depth_sum: u64,
     pub split_npa_neighbor_reassigns: u64,
     pub split_npa_neighbor_evaluated: u64,
+    pub split_npa_self_total: u64,
+    pub split_npa_self_evaluated: u64,
+    pub split_npa_self_reassigns: u64,
     // Sub-step breakdowns: [navigate, register, balance]
     pub reassign_substeps: [u64; 3],
     // Sub-step breakdowns: [lock_wait, quantize]
     pub register_substeps: [u64; 2],
-    // Sub-step breakdowns: [dist, sort]
-    pub navigate_substeps: [u64; 2],
+    // Sub-step breakdowns: [dist, sort, rerank, dist_quantize, dist_distance]
+    pub navigate_substeps: [u64; 5],
+    pub navigate_levels: u64,
+    pub navigate_dist_count: u64,
 }
 
 impl WriterStats {
@@ -289,6 +338,9 @@ impl WriterStats {
             split_depth_sum: self.split_depth_sum.load(Ordering::Relaxed),
             split_npa_neighbor_reassigns: self.split_npa_neighbor_reassigns.load(Ordering::Relaxed),
             split_npa_neighbor_evaluated: self.split_npa_neighbor_evaluated.load(Ordering::Relaxed),
+            split_npa_self_total: self.split_npa_self_total.load(Ordering::Relaxed),
+            split_npa_self_evaluated: self.split_npa_self_evaluated.load(Ordering::Relaxed),
+            split_npa_self_reassigns: self.split_npa_self_reassigns.load(Ordering::Relaxed),
             reassign_substeps: [
                 self.reassign_navigate_nanos.load(Ordering::Relaxed),
                 self.reassign_register_nanos.load(Ordering::Relaxed),
@@ -301,7 +353,12 @@ impl WriterStats {
             navigate_substeps: [
                 self.navigate_dist_nanos.load(Ordering::Relaxed),
                 self.navigate_sort_nanos.load(Ordering::Relaxed),
+                self.navigate_rerank_nanos.load(Ordering::Relaxed),
+                self.navigate_dist_quantize_nanos.load(Ordering::Relaxed),
+                self.navigate_dist_distance_nanos.load(Ordering::Relaxed),
             ],
+            navigate_levels: self.navigate_levels.load(Ordering::Relaxed),
+            navigate_dist_count: self.navigate_dist_count.load(Ordering::Relaxed),
         }
     }
 
@@ -325,11 +382,28 @@ impl WriterStats {
             split_substeps: std::array::from_fn(|i| {
                 cur.split_substeps[i].saturating_sub(prev.split_substeps[i])
             }),
-            split_npa_neighbors_visited: cur.split_npa_neighbors_visited.saturating_sub(prev.split_npa_neighbors_visited),
-            split_npa_neighbors_active: cur.split_npa_neighbors_active.saturating_sub(prev.split_npa_neighbors_active),
+            split_npa_neighbors_visited: cur
+                .split_npa_neighbors_visited
+                .saturating_sub(prev.split_npa_neighbors_visited),
+            split_npa_neighbors_active: cur
+                .split_npa_neighbors_active
+                .saturating_sub(prev.split_npa_neighbors_active),
             split_depth_sum: cur.split_depth_sum.saturating_sub(prev.split_depth_sum),
-            split_npa_neighbor_reassigns: cur.split_npa_neighbor_reassigns.saturating_sub(prev.split_npa_neighbor_reassigns),
-            split_npa_neighbor_evaluated: cur.split_npa_neighbor_evaluated.saturating_sub(prev.split_npa_neighbor_evaluated),
+            split_npa_neighbor_reassigns: cur
+                .split_npa_neighbor_reassigns
+                .saturating_sub(prev.split_npa_neighbor_reassigns),
+            split_npa_neighbor_evaluated: cur
+                .split_npa_neighbor_evaluated
+                .saturating_sub(prev.split_npa_neighbor_evaluated),
+            split_npa_self_total: cur
+                .split_npa_self_total
+                .saturating_sub(prev.split_npa_self_total),
+            split_npa_self_evaluated: cur
+                .split_npa_self_evaluated
+                .saturating_sub(prev.split_npa_self_evaluated),
+            split_npa_self_reassigns: cur
+                .split_npa_self_reassigns
+                .saturating_sub(prev.split_npa_self_reassigns),
             reassign_substeps: std::array::from_fn(|i| {
                 cur.reassign_substeps[i].saturating_sub(prev.reassign_substeps[i])
             }),
@@ -339,6 +413,10 @@ impl WriterStats {
             navigate_substeps: std::array::from_fn(|i| {
                 cur.navigate_substeps[i].saturating_sub(prev.navigate_substeps[i])
             }),
+            navigate_levels: cur.navigate_levels.saturating_sub(prev.navigate_levels),
+            navigate_dist_count: cur
+                .navigate_dist_count
+                .saturating_sub(prev.navigate_dist_count),
         }
     }
 }
@@ -539,7 +617,7 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
 
     let register_sub_names = ["lock_wait", "quantize"];
 
-    let navigate_sub_names = ["dist", "sort"];
+    let navigate_sub_names = ["dist", "sort", "rerank", "dist_quantize", "dist_distance"];
 
     write_substep_table(&mut out, "add()", &add_sub_names, snapshots, 0, &|s| {
         &s.add_substeps
@@ -552,6 +630,32 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
         1,
         &|s| &s.navigate_substeps,
     );
+    {
+        writeln!(out, "\n--- navigate() Stats ---").unwrap();
+        writeln!(out, "| CP | avg_levels | avg_dists |").unwrap();
+        writeln!(out, "|----|------------|-----------|").unwrap();
+        for (i, snap) in snapshots.iter().enumerate() {
+            let n = snap.calls[1];
+            let avg_levels = if n > 0 {
+                snap.navigate_levels as f64 / n as f64
+            } else {
+                0.0
+            };
+            let avg_dists = if n > 0 {
+                snap.navigate_dist_count as f64 / n as f64
+            } else {
+                0.0
+            };
+            writeln!(
+                out,
+                "| {:>2} | {:>10.1} | {:>9.1} |",
+                i + 1,
+                avg_levels,
+                avg_dists
+            )
+            .unwrap();
+        }
+    }
     write_substep_table(
         &mut out,
         "register_in_leaf()",
@@ -566,25 +670,99 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
     // NPA neighbor stats (appended to split breakdown)
     {
         writeln!(out, "\n--- split() NPA Neighbor Stats ---").unwrap();
-        writeln!(out, "| CP | avg_depth |   neighbors |     active |  active% | eval/neigh | reassign/neigh | reassign% |").unwrap();
-        writeln!(out, "|----|----------|-------------|------------|----------|------------|----------------|-----------|").unwrap();
+        writeln!(out, "| CP | avg_depth |   neighbors |     active |  active% | eval/neigh | reassign/neigh | reassign% | reassigns/split |").unwrap();
+        writeln!(out, "|----|----------|-------------|------------|----------|------------|----------------|-----------|-----------------|").unwrap();
         for (i, snap) in snapshots.iter().enumerate() {
             let n_splits = snap.calls[3];
             let visited = snap.split_npa_neighbors_visited;
             let active = snap.split_npa_neighbors_active;
             let evaluated = snap.split_npa_neighbor_evaluated;
             let reassigned = snap.split_npa_neighbor_reassigns;
-            let avg_visited = if n_splits > 0 { visited as f64 / n_splits as f64 } else { 0.0 };
-            let avg_active = if n_splits > 0 { active as f64 / n_splits as f64 } else { 0.0 };
-            let active_pct = if visited > 0 { active as f64 / visited as f64 * 100.0 } else { 0.0 };
-            let avg_depth = if n_splits > 0 { snap.split_depth_sum as f64 / n_splits as f64 } else { 0.0 };
-            let eval_per_neigh = if visited > 0 { evaluated as f64 / visited as f64 } else { 0.0 };
-            let reassign_per_neigh = if visited > 0 { reassigned as f64 / visited as f64 } else { 0.0 };
-            let reassign_pct = if evaluated > 0 { reassigned as f64 / evaluated as f64 * 100.0 } else { 0.0 };
+            let avg_visited = if n_splits > 0 {
+                visited as f64 / n_splits as f64
+            } else {
+                0.0
+            };
+            let avg_active = if n_splits > 0 {
+                active as f64 / n_splits as f64
+            } else {
+                0.0
+            };
+            let active_pct = if visited > 0 {
+                active as f64 / visited as f64 * 100.0
+            } else {
+                0.0
+            };
+            let avg_depth = if n_splits > 0 {
+                snap.split_depth_sum as f64 / n_splits as f64
+            } else {
+                0.0
+            };
+            let eval_per_neigh = if visited > 0 {
+                evaluated as f64 / visited as f64
+            } else {
+                0.0
+            };
+            let reassign_per_neigh = if visited > 0 {
+                reassigned as f64 / visited as f64
+            } else {
+                0.0
+            };
+            let reassign_pct = if evaluated > 0 {
+                reassigned as f64 / evaluated as f64 * 100.0
+            } else {
+                0.0
+            };
+            let avg_reassigned = if n_splits > 0 {
+                reassigned as f64 / n_splits as f64
+            } else {
+                0.0
+            };
             writeln!(
                 out,
-                "| {:>2} | {:>8.2} | {:>5.1}/split | {:>4.1}/split | {:>6.1}% | {:>10.1} | {:>14.1} | {:>7.1}% |",
-                i + 1, avg_depth, avg_visited, avg_active, active_pct, eval_per_neigh, reassign_per_neigh, reassign_pct,
+                "| {:>2} | {:>8.2} | {:>5.1}/split | {:>4.1}/split | {:>6.1}% | {:>10.1} | {:>14.1} | {:>7.1}% | {:>15.1} |",
+                i + 1, avg_depth, avg_visited, avg_active, active_pct, eval_per_neigh, reassign_per_neigh, reassign_pct, avg_reassigned,
+            ).unwrap();
+        }
+    }
+    {
+        writeln!(out, "\n--- split() NPA Self Stats ---").unwrap();
+        writeln!(out, "| CP | vectors/split | evaluated/split |  eval% | reassigned/split | reassign% |").unwrap();
+        writeln!(out, "|----|---------------|-----------------|--------|------------------|-----------|").unwrap();
+        for (i, snap) in snapshots.iter().enumerate() {
+            let n_splits = snap.calls[3];
+            let total = snap.split_npa_self_total;
+            let evaluated = snap.split_npa_self_evaluated;
+            let reassigned = snap.split_npa_self_reassigns;
+            let avg_total = if n_splits > 0 {
+                total as f64 / n_splits as f64
+            } else {
+                0.0
+            };
+            let avg_evaluated = if n_splits > 0 {
+                evaluated as f64 / n_splits as f64
+            } else {
+                0.0
+            };
+            let eval_pct = if total > 0 {
+                evaluated as f64 / total as f64 * 100.0
+            } else {
+                0.0
+            };
+            let avg_reassigned = if n_splits > 0 {
+                reassigned as f64 / n_splits as f64
+            } else {
+                0.0
+            };
+            let reassign_pct = if evaluated > 0 {
+                reassigned as f64 / evaluated as f64 * 100.0
+            } else {
+                0.0
+            };
+            writeln!(
+                out,
+                "| {:>2} | {:>13.1} | {:>15.1} | {:>5.1}% | {:>16.1} | {:>7.1}% |",
+                i + 1, avg_total, avg_evaluated, eval_pct, avg_reassigned, reassign_pct,
             ).unwrap();
         }
     }
@@ -615,8 +793,7 @@ pub struct LevelRecall {
 ///
 /// Stores data vectors as 1-bit RaBitQ codes in leaf nodes (posting lists).
 /// Node centroids are also stored as 1-bit codes (residuals vs parent centroid).
-/// Navigation uses quantized centroid distances by default, with optional f32
-/// fallback (fp_navigation). Search scores data vectors with quantized codes
+/// Navigation mode is configurable: fp (f32), 1bit (code-to-code), or 4bit (QuantizedQuery). Search scores data vectors with quantized codes
 /// and optionally reranks with f32 embeddings.
 ///
 /// Thread safety:
@@ -626,6 +803,14 @@ pub struct LevelRecall {
 /// - `embeddings`/`versions` in `DashMap` for concurrent access
 /// - `root_id`/`next_node_id` are atomic
 /// - Stats use `AtomicU64`
+pub struct SearchTimings {
+    pub navigate_nanos: u64,
+    pub quantize_nanos: u64,
+    pub distance_nanos: u64,
+    pub sort_dedup_nanos: u64,
+    pub rerank_nanos: u64,
+}
+
 pub struct HierarchicalSpannWriter {
     dim: usize,
     distance_fn: DistanceFunction,
@@ -706,11 +891,12 @@ impl HierarchicalSpannWriter {
 
         loop {
             let nav_start = Instant::now();
-            let candidates = self.navigate_f32(
+            let candidates = self.navigate(
                 embedding,
                 Some(self.config.write_beam_tau),
                 self.config.write_beam_min,
                 self.config.write_beam_max,
+                1,
             );
             let cluster_ids = self.rng_select(&candidates);
             self.stats
@@ -729,9 +915,7 @@ impl HierarchicalSpannWriter {
                 .fetch_add(reg_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
             if clusters_to_balance.is_empty() {
-                self.stats
-                    .add_missing_nodes
-                    .fetch_add(1, Ordering::Relaxed);
+                self.stats.add_missing_nodes.fetch_add(1, Ordering::Relaxed);
                 version = {
                     let mut v = self.versions.entry(id).or_insert(0);
                     *v += 1;
@@ -796,7 +980,7 @@ impl HierarchicalSpannWriter {
     // =========================================================================
 
     /// Beam search the tree using f32 centroid distances.
-    /// Used by the write path (always) and search path when fp_navigation is true.
+    /// Used by the write path (always) and search path when navigation=Fp.
     fn navigate_f32(
         &self,
         query: &[f32],
@@ -829,6 +1013,8 @@ impl HierarchicalSpannWriter {
         let mut beam: Vec<NodeId> = vec![root];
         let mut dist_nanos = 0u64;
         let mut sort_nanos = 0u64;
+        let mut levels = 0u64;
+        let mut dist_count = 0u64;
 
         loop {
             let mut child_scores: Vec<(NodeId, f32)> = Vec::new();
@@ -857,6 +1043,9 @@ impl HierarchicalSpannWriter {
             if child_scores.is_empty() {
                 break;
             }
+
+            levels += 1;
+            dist_count += child_scores.len() as u64;
 
             let sort_start = Instant::now();
             child_scores.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
@@ -890,6 +1079,12 @@ impl HierarchicalSpannWriter {
         self.stats
             .navigate_sort_nanos
             .fetch_add(sort_nanos, Ordering::Relaxed);
+        self.stats
+            .navigate_levels
+            .fetch_add(levels, Ordering::Relaxed);
+        self.stats
+            .navigate_dist_count
+            .fetch_add(dist_count, Ordering::Relaxed);
         self.stats.navigates.fetch_add(1, Ordering::Relaxed);
         self.stats
             .navigate_nanos
@@ -933,14 +1128,23 @@ impl HierarchicalSpannWriter {
         beam_max: usize,
         rerank_centroids: usize,
     ) -> Vec<(NodeId, f32)> {
+        let nav_t0 = Instant::now();
         let root = self.root_id();
         let Some(root_node) = self.nodes.get(&root) else {
+            self.stats.navigates.fetch_add(1, Ordering::Relaxed);
+            self.stats
+                .navigate_nanos
+                .fetch_add(nav_t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
             return Vec::new();
         };
 
         if matches!(root_node.value(), TreeNode::Leaf(_)) {
             let dist = self.dist(query, root_node.centroid());
             drop(root_node);
+            self.stats.navigates.fetch_add(1, Ordering::Relaxed);
+            self.stats
+                .navigate_nanos
+                .fetch_add(nav_t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
             return vec![(root, dist)];
         }
         drop(root_node);
@@ -951,10 +1155,18 @@ impl HierarchicalSpannWriter {
 
         let mut leaves: Vec<(NodeId, f32)> = Vec::new();
         let mut beam: Vec<NodeId> = vec![root];
+        let mut dist_nanos = 0u64;
+        let mut sort_nanos = 0u64;
+        let mut rerank_nanos = 0u64;
+        let mut levels = 0u64;
+        let mut dist_count = 0u64;
+        let mut dist_quantize_nanos = 0u64;
+        let mut dist_distance_nanos = 0u64;
 
         loop {
             let mut child_scores: Vec<(NodeId, f32)> = Vec::new();
 
+            let dist_start = Instant::now();
             for &node_id in &beam {
                 if let Some(node_ref) = self.nodes.get(&node_id) {
                     if let TreeNode::Internal(internal) = node_ref.value() {
@@ -963,6 +1175,7 @@ impl HierarchicalSpannWriter {
                         drop(node_ref);
 
                         let c_norm = Self::vec_norm(&parent_centroid);
+                        let qt0 = Instant::now();
                         let r_q: Vec<f32> = query
                             .iter()
                             .zip(parent_centroid.iter())
@@ -970,16 +1183,19 @@ impl HierarchicalSpannWriter {
                             .collect();
                         let c_dot_q = f32::dot(&parent_centroid, query).unwrap_or(0.0) as f32;
                         let qq = QuantizedQuery::new(&r_q, padded_bytes, c_norm, c_dot_q, q_norm);
+                        dist_quantize_nanos += qt0.elapsed().as_nanos() as u64;
 
                         for child_id in children {
                             if let Some(child) = self.nodes.get(&child_id) {
                                 let code_bytes = child.centroid_code();
+                                let dt0 = Instant::now();
                                 let dist = if code_bytes.is_empty() {
                                     self.dist(query, child.centroid())
                                 } else {
                                     Code::<1, _>::new(code_bytes)
                                         .distance_quantized_query(&self.distance_fn, &qq)
                                 };
+                                dist_distance_nanos += dt0.elapsed().as_nanos() as u64;
                                 child_scores.push((child_id, dist));
                             } else {
                                 self.stats
@@ -990,18 +1206,25 @@ impl HierarchicalSpannWriter {
                     }
                 }
             }
+            dist_nanos += dist_start.elapsed().as_nanos() as u64;
 
             if child_scores.is_empty() {
                 break;
             }
 
+            levels += 1;
+            dist_count += child_scores.len() as u64;
+
+            let sort_start = Instant::now();
             child_scores.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            sort_nanos += sort_start.elapsed().as_nanos() as u64;
 
             if rerank_factor > 1 {
                 let effective = Self::effective_beam(&child_scores, tau, beam_min, beam_max);
                 let rerank_count = (effective * rerank_factor).min(child_scores.len());
                 child_scores.truncate(rerank_count);
 
+                let rerank_start = Instant::now();
                 let mut reranked: Vec<(NodeId, f32)> = child_scores
                     .iter()
                     .map(|&(nid, _approx)| {
@@ -1016,6 +1239,7 @@ impl HierarchicalSpannWriter {
                 reranked.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
                 let final_beam = Self::effective_beam(&reranked, tau, beam_min, beam_max);
                 reranked.truncate(final_beam);
+                rerank_nanos += rerank_start.elapsed().as_nanos() as u64;
                 child_scores = reranked;
             } else {
                 let effective = Self::effective_beam(&child_scores, tau, beam_min, beam_max);
@@ -1038,11 +1262,219 @@ impl HierarchicalSpannWriter {
             beam = next_internals;
         }
 
+        let sort_start = Instant::now();
         leaves.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        sort_nanos += sort_start.elapsed().as_nanos() as u64;
+
+        self.stats
+            .navigate_dist_nanos
+            .fetch_add(dist_nanos, Ordering::Relaxed);
+        self.stats
+            .navigate_dist_quantize_nanos
+            .fetch_add(dist_quantize_nanos, Ordering::Relaxed);
+        self.stats
+            .navigate_dist_distance_nanos
+            .fetch_add(dist_distance_nanos, Ordering::Relaxed);
+        self.stats
+            .navigate_sort_nanos
+            .fetch_add(sort_nanos, Ordering::Relaxed);
+        self.stats
+            .navigate_rerank_nanos
+            .fetch_add(rerank_nanos, Ordering::Relaxed);
+        self.stats
+            .navigate_levels
+            .fetch_add(levels, Ordering::Relaxed);
+        self.stats
+            .navigate_dist_count
+            .fetch_add(dist_count, Ordering::Relaxed);
+        self.stats.navigates.fetch_add(1, Ordering::Relaxed);
+        self.stats
+            .navigate_nanos
+            .fetch_add(nav_t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
         leaves
     }
 
-    /// Dispatch to quantized or f32 navigate based on config.
+    // =========================================================================
+    // Navigate (1-bit code-to-code)
+    // =========================================================================
+
+    /// Beam search using 1-bit code-to-code distances.
+    /// Quantizes the query against each parent centroid, then uses distance_code()
+    /// to compare against children's centroid_code. Faster than QuantizedQuery but
+    /// lower precision.
+    fn navigate_1bit(
+        &self,
+        query: &[f32],
+        tau: Option<f64>,
+        beam_min: usize,
+        beam_max: usize,
+        rerank_centroids: usize,
+    ) -> Vec<(NodeId, f32)> {
+        let nav_t0 = Instant::now();
+        let root = self.root_id();
+        let Some(root_node) = self.nodes.get(&root) else {
+            self.stats.navigates.fetch_add(1, Ordering::Relaxed);
+            self.stats
+                .navigate_nanos
+                .fetch_add(nav_t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            return Vec::new();
+        };
+
+        if matches!(root_node.value(), TreeNode::Leaf(_)) {
+            let dist = self.dist(query, root_node.centroid());
+            drop(root_node);
+            self.stats.navigates.fetch_add(1, Ordering::Relaxed);
+            self.stats
+                .navigate_nanos
+                .fetch_add(nav_t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            return vec![(root, dist)];
+        }
+        drop(root_node);
+
+        let rerank_factor = rerank_centroids;
+        let dim = self.dim;
+
+        let mut leaves: Vec<(NodeId, f32)> = Vec::new();
+        let mut beam: Vec<NodeId> = vec![root];
+        let mut dist_nanos = 0u64;
+        let mut sort_nanos = 0u64;
+        let mut rerank_nanos = 0u64;
+        let mut levels = 0u64;
+        let mut dist_count = 0u64;
+        let mut dist_quantize_nanos = 0u64;
+        let mut dist_distance_nanos = 0u64;
+
+        loop {
+            let mut child_scores: Vec<(NodeId, f32)> = Vec::new();
+
+            let dist_start = Instant::now();
+            for &node_id in &beam {
+                if let Some(node_ref) = self.nodes.get(&node_id) {
+                    if let TreeNode::Internal(internal) = node_ref.value() {
+                        let parent_centroid = internal.centroid.clone();
+                        let children: Vec<NodeId> = internal.children.clone();
+                        drop(node_ref);
+
+                        let c_norm = Self::vec_norm(&parent_centroid);
+                        let qt0 = Instant::now();
+                        let query_code = Code::<1>::quantize(query, &parent_centroid);
+                        dist_quantize_nanos += qt0.elapsed().as_nanos() as u64;
+
+                        for child_id in children {
+                            if let Some(child) = self.nodes.get(&child_id) {
+                                let code_bytes = child.centroid_code();
+                                let dt0 = Instant::now();
+                                let dist = if code_bytes.is_empty() {
+                                    self.dist(query, child.centroid())
+                                } else {
+                                    let child_code = Code::<1, _>::new(code_bytes);
+                                    query_code.distance_code(
+                                        &child_code,
+                                        &self.distance_fn,
+                                        c_norm,
+                                        dim,
+                                    )
+                                };
+                                dist_distance_nanos += dt0.elapsed().as_nanos() as u64;
+                                child_scores.push((child_id, dist));
+                            } else {
+                                self.stats
+                                    .navigate_missing_nodes
+                                    .fetch_add(1, Ordering::Relaxed);
+                            }
+                        }
+                    }
+                }
+            }
+            dist_nanos += dist_start.elapsed().as_nanos() as u64;
+
+            if child_scores.is_empty() {
+                break;
+            }
+
+            levels += 1;
+            dist_count += child_scores.len() as u64;
+
+            let sort_start = Instant::now();
+            child_scores.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            sort_nanos += sort_start.elapsed().as_nanos() as u64;
+
+            if rerank_factor > 1 {
+                let effective = Self::effective_beam(&child_scores, tau, beam_min, beam_max);
+                let rerank_count = (effective * rerank_factor).min(child_scores.len());
+                child_scores.truncate(rerank_count);
+
+                let rerank_start = Instant::now();
+                let mut reranked: Vec<(NodeId, f32)> = child_scores
+                    .iter()
+                    .map(|&(nid, _approx)| {
+                        let dist = self
+                            .nodes
+                            .get(&nid)
+                            .map(|n| self.dist(query, n.centroid()))
+                            .unwrap_or(f32::MAX);
+                        (nid, dist)
+                    })
+                    .collect();
+                reranked.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+                let final_beam = Self::effective_beam(&reranked, tau, beam_min, beam_max);
+                reranked.truncate(final_beam);
+                rerank_nanos += rerank_start.elapsed().as_nanos() as u64;
+                child_scores = reranked;
+            } else {
+                let effective = Self::effective_beam(&child_scores, tau, beam_min, beam_max);
+                child_scores.truncate(effective);
+            }
+
+            let mut next_internals: Vec<NodeId> = Vec::new();
+            for &(node_id, dist) in &child_scores {
+                if let Some(node_ref) = self.nodes.get(&node_id) {
+                    match node_ref.value() {
+                        TreeNode::Leaf(_) => leaves.push((node_id, dist)),
+                        TreeNode::Internal(_) => next_internals.push(node_id),
+                    }
+                }
+            }
+
+            if next_internals.is_empty() {
+                break;
+            }
+            beam = next_internals;
+        }
+
+        let sort_start = Instant::now();
+        leaves.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        sort_nanos += sort_start.elapsed().as_nanos() as u64;
+
+        self.stats
+            .navigate_dist_nanos
+            .fetch_add(dist_nanos, Ordering::Relaxed);
+        self.stats
+            .navigate_dist_quantize_nanos
+            .fetch_add(dist_quantize_nanos, Ordering::Relaxed);
+        self.stats
+            .navigate_dist_distance_nanos
+            .fetch_add(dist_distance_nanos, Ordering::Relaxed);
+        self.stats
+            .navigate_sort_nanos
+            .fetch_add(sort_nanos, Ordering::Relaxed);
+        self.stats
+            .navigate_rerank_nanos
+            .fetch_add(rerank_nanos, Ordering::Relaxed);
+        self.stats
+            .navigate_levels
+            .fetch_add(levels, Ordering::Relaxed);
+        self.stats
+            .navigate_dist_count
+            .fetch_add(dist_count, Ordering::Relaxed);
+        self.stats.navigates.fetch_add(1, Ordering::Relaxed);
+        self.stats
+            .navigate_nanos
+            .fetch_add(nav_t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        leaves
+    }
+
+    /// Dispatch to the configured navigate implementation.
     fn navigate(
         &self,
         query: &[f32],
@@ -1051,10 +1483,14 @@ impl HierarchicalSpannWriter {
         beam_max: usize,
         rerank_centroids: usize,
     ) -> Vec<(NodeId, f32)> {
-        if self.config.fp_navigation {
-            self.navigate_f32(query, tau, beam_min, beam_max)
-        } else {
-            self.navigate_quantized(query, tau, beam_min, beam_max, rerank_centroids)
+        match self.config.navigation {
+            NavigationMode::Fp => self.navigate_f32(query, tau, beam_min, beam_max),
+            NavigationMode::OneBit => {
+                self.navigate_1bit(query, tau, beam_min, beam_max, rerank_centroids)
+            }
+            NavigationMode::FourBit => {
+                self.navigate_quantized(query, tau, beam_min, beam_max, rerank_centroids)
+            }
         }
     }
 
@@ -1086,9 +1522,11 @@ impl HierarchicalSpannWriter {
             drop(node_ref);
 
             // RNG filter
+            // Don't replicate to clusters that are close to each other.
+            // If the candidate cluster is farther away from the query than from other already selected clusters, skip it.
             let blocked = selected_centroids
                 .iter()
-                .any(|sel| self.config.write_rng_factor * self.dist(&centroid, sel) <= distance);
+                .any(|sel| distance > self.dist(&centroid, sel) * self.config.write_rng_factor);
             if blocked {
                 continue;
             }
@@ -1306,6 +1744,7 @@ impl HierarchicalSpannWriter {
 
             let npa_cluster_start = Instant::now();
             self.apply_npa_to_cluster(
+                left_id,
                 &left_group,
                 &old_centroid,
                 &left_center,
@@ -1314,6 +1753,7 @@ impl HierarchicalSpannWriter {
                 depth,
             );
             self.apply_npa_to_cluster(
+                right_id,
                 &right_group,
                 &old_centroid,
                 &right_center,
@@ -1344,18 +1784,46 @@ impl HierarchicalSpannWriter {
         }
 
         self.stats.splits.fetch_add(1, Ordering::Relaxed);
-        self.stats.split_depth_sum.fetch_add(depth as u64, Ordering::Relaxed);
+        self.stats
+            .split_depth_sum
+            .fetch_add(depth as u64, Ordering::Relaxed);
         self.stats
             .split_nanos
             .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
     }
 
     /// Nearest neighbor posting assignment (NPA) for split points:
-    /// reassign vectors that are farther from the new
-    /// centroid than the old, using quantized distance estimation.
-    /// Uses old codes (quantized against old_center) with QuantizedQuery.
+    /// reassign vectors that are farther from the new centroid than the old.
+    /// When fp_npa=true, uses full precision f32 distances.
+    /// When fp_npa=false, uses quantized distance estimation via codes.
     fn apply_npa_to_cluster(
         &self,
+        from_cluster_id: NodeId,
+        group: &[EmbeddingPoint],
+        old_center: &[f32],
+        new_center: &[f32],
+        old_code_map: &HashMap<u32, Vec<u8>>,
+        evaluated: &mut HashSet<u32>,
+        depth: u32,
+    ) {
+        if self.config.fp_npa {
+            self.apply_npa_to_cluster_f32(from_cluster_id, group, old_center, new_center, evaluated, depth);
+        } else {
+            self.apply_npa_to_cluster_quantized(
+                from_cluster_id,
+                group,
+                old_center,
+                new_center,
+                old_code_map,
+                evaluated,
+                depth,
+            );
+        }
+    }
+
+    fn apply_npa_to_cluster_quantized(
+        &self,
+        from_cluster_id: NodeId,
         group: &[EmbeddingPoint],
         old_center: &[f32],
         new_center: &[f32],
@@ -1366,13 +1834,11 @@ impl HierarchicalSpannWriter {
         let padded_bytes = self.padded_bytes();
         let c_norm = Self::vec_norm(old_center);
 
-        // old_center as query relative to old_center: r_q = 0
         let old_r_q = vec![0.0f32; old_center.len()];
         let old_c_dot_q = c_norm * c_norm;
         let old_q_norm = c_norm;
         let old_qq = QuantizedQuery::new(&old_r_q, padded_bytes, c_norm, old_c_dot_q, old_q_norm);
 
-        // new_center as query relative to old_center: r_q = new_center - old_center
         let new_r_q: Vec<f32> = new_center
             .iter()
             .zip(old_center.iter())
@@ -1382,6 +1848,8 @@ impl HierarchicalSpannWriter {
         let new_q_norm = Self::vec_norm(new_center);
         let new_qq = QuantizedQuery::new(&new_r_q, padded_bytes, c_norm, new_c_dot_q, new_q_norm);
 
+        let mut n_evaluated = 0u64;
+        let mut n_reassigned = 0u64;
         for (id, version, _) in group {
             let current_ver = self.versions.get(id).map(|r| *r).unwrap_or(0);
             if *version < current_ver {
@@ -1393,14 +1861,66 @@ impl HierarchicalSpannWriter {
             let Some(code_bytes) = old_code_map.get(id) else {
                 continue;
             };
+            n_evaluated += 1;
             let code = Code::<1, _>::new(code_bytes.as_slice());
 
             let old_dist = code.distance_quantized_query(&self.distance_fn, &old_qq);
             let new_dist = code.distance_quantized_query(&self.distance_fn, &new_qq);
             if new_dist > old_dist {
-                self.reassign(*id, depth);
+                n_reassigned += 1;
+                self.reassign(from_cluster_id, *id, depth);
             }
         }
+        self.stats
+            .split_npa_self_total
+            .fetch_add(group.len() as u64, Ordering::Relaxed);
+        self.stats
+            .split_npa_self_evaluated
+            .fetch_add(n_evaluated, Ordering::Relaxed);
+        self.stats
+            .split_npa_self_reassigns
+            .fetch_add(n_reassigned, Ordering::Relaxed);
+    }
+
+    fn apply_npa_to_cluster_f32(
+        &self,
+        from_cluster_id: NodeId,
+        group: &[EmbeddingPoint],
+        old_center: &[f32],
+        new_center: &[f32],
+        evaluated: &mut HashSet<u32>,
+        depth: u32,
+    ) {
+        let mut n_evaluated = 0u64;
+        let mut n_reassigned = 0u64;
+        for (id, version, _) in group {
+            let current_ver = self.versions.get(id).map(|r| *r).unwrap_or(0);
+            if *version < current_ver {
+                continue;
+            }
+            if !evaluated.insert(*id) {
+                continue;
+            }
+            let Some(emb) = self.embeddings.get(id) else {
+                continue;
+            };
+            n_evaluated += 1;
+            let old_dist = self.dist(emb.value(), old_center);
+            let new_dist = self.dist(emb.value(), new_center);
+            if new_dist > old_dist {
+                n_reassigned += 1;
+                self.reassign(from_cluster_id, *id, depth);
+            }
+        }
+        self.stats
+            .split_npa_self_total
+            .fetch_add(group.len() as u64, Ordering::Relaxed);
+        self.stats
+            .split_npa_self_evaluated
+            .fetch_add(n_evaluated, Ordering::Relaxed);
+        self.stats
+            .split_npa_self_reassigns
+            .fetch_add(n_reassigned, Ordering::Relaxed);
     }
 
     /// NPA for neighbor points: check vectors in nearby clusters that might now
@@ -1417,16 +1937,12 @@ impl HierarchicalSpannWriter {
         evaluated: &mut HashSet<u32>,
         depth: u32,
     ) {
-        let padded_bytes = self.padded_bytes();
-        let old_q_norm = Self::vec_norm(old_center);
-        let left_q_norm = Self::vec_norm(left_center);
-        let right_q_norm = Self::vec_norm(right_center);
-
-        let neighbors = self.navigate_f32(
+        let neighbors = self.navigate(
             old_center,
             Some(self.config.write_beam_tau),
             self.config.write_beam_min,
             self.config.write_beam_max,
+            1,
         );
 
         let mut neighbors_visited = 0u64;
@@ -1459,86 +1975,126 @@ impl HierarchicalSpannWriter {
             neighbors_visited += 1;
             let n_total = n_ids.len();
             let mut n_reassigned = 0usize;
-
-            let c_norm = Self::vec_norm(&n_centroid);
-
-            // Each center as a query residual relative to the neighbor's centroid
-            let old_r_q: Vec<f32> = old_center
-                .iter()
-                .zip(n_centroid.iter())
-                .map(|(a, b)| a - b)
-                .collect();
-            let old_c_dot_q = f32::dot(&n_centroid, old_center).unwrap_or(0.0) as f32;
-
-            let left_r_q: Vec<f32> = left_center
-                .iter()
-                .zip(n_centroid.iter())
-                .map(|(a, b)| a - b)
-                .collect();
-            let left_c_dot_q = f32::dot(&n_centroid, left_center).unwrap_or(0.0) as f32;
-
-            let right_r_q: Vec<f32> = right_center
-                .iter()
-                .zip(n_centroid.iter())
-                .map(|(a, b)| a - b)
-                .collect();
-            let right_c_dot_q = f32::dot(&n_centroid, right_center).unwrap_or(0.0) as f32;
-
-            // Neighbor centroid as query relative to itself: r_q = 0
-            let neighbor_r_q = vec![0.0f32; n_centroid.len()];
-            let neighbor_c_dot_q = c_norm * c_norm;
-            let neighbor_q_norm = c_norm;
-
-            let left_qq =
-                QuantizedQuery::new(&left_r_q, padded_bytes, c_norm, left_c_dot_q, left_q_norm);
-            let right_qq = QuantizedQuery::new(
-                &right_r_q,
-                padded_bytes,
-                c_norm,
-                right_c_dot_q,
-                right_q_norm,
-            );
-            let neighbor_qq = QuantizedQuery::new(
-                &neighbor_r_q,
-                padded_bytes,
-                c_norm,
-                neighbor_c_dot_q,
-                neighbor_q_norm,
-            );
-            let old_qq =
-                QuantizedQuery::new(&old_r_q, padded_bytes, c_norm, old_c_dot_q, old_q_norm);
-
             let mut n_evaluated = 0usize;
-            for (i, code_bytes) in n_codes.iter().enumerate() {
-                let id = n_ids[i];
-                let version = n_versions[i];
 
-                let current_ver = self.versions.get(&id).map(|r| *r).unwrap_or(0);
-                if version < current_ver {
-                    continue;
+            if !self.config.fp_npa {
+                let padded_bytes = self.padded_bytes();
+                let old_q_norm = Self::vec_norm(old_center);
+                let left_q_norm = Self::vec_norm(left_center);
+                let right_q_norm = Self::vec_norm(right_center);
+                let c_norm = Self::vec_norm(&n_centroid);
+
+                let old_r_q: Vec<f32> = old_center
+                    .iter()
+                    .zip(n_centroid.iter())
+                    .map(|(a, b)| a - b)
+                    .collect();
+                let old_c_dot_q = f32::dot(&n_centroid, old_center).unwrap_or(0.0) as f32;
+
+                let left_r_q: Vec<f32> = left_center
+                    .iter()
+                    .zip(n_centroid.iter())
+                    .map(|(a, b)| a - b)
+                    .collect();
+                let left_c_dot_q = f32::dot(&n_centroid, left_center).unwrap_or(0.0) as f32;
+
+                let right_r_q: Vec<f32> = right_center
+                    .iter()
+                    .zip(n_centroid.iter())
+                    .map(|(a, b)| a - b)
+                    .collect();
+                let right_c_dot_q = f32::dot(&n_centroid, right_center).unwrap_or(0.0) as f32;
+
+                let neighbor_r_q = vec![0.0f32; n_centroid.len()];
+                let neighbor_c_dot_q = c_norm * c_norm;
+                let neighbor_q_norm = c_norm;
+
+                let left_qq =
+                    QuantizedQuery::new(&left_r_q, padded_bytes, c_norm, left_c_dot_q, left_q_norm);
+                let right_qq = QuantizedQuery::new(
+                    &right_r_q,
+                    padded_bytes,
+                    c_norm,
+                    right_c_dot_q,
+                    right_q_norm,
+                );
+                let neighbor_qq = QuantizedQuery::new(
+                    &neighbor_r_q,
+                    padded_bytes,
+                    c_norm,
+                    neighbor_c_dot_q,
+                    neighbor_q_norm,
+                );
+                let old_qq =
+                    QuantizedQuery::new(&old_r_q, padded_bytes, c_norm, old_c_dot_q, old_q_norm);
+
+                for (i, code_bytes) in n_codes.iter().enumerate() {
+                    let id = n_ids[i];
+                    let version = n_versions[i];
+
+                    let current_ver = self.versions.get(&id).map(|r| *r).unwrap_or(0);
+                    if version < current_ver {
+                        continue;
+                    }
+                    if !evaluated.insert(id) {
+                        continue;
+                    }
+
+                    n_evaluated += 1;
+                    let code = Code::<1, _>::new(code_bytes.as_slice());
+
+                    let left_dist = code.distance_quantized_query(&self.distance_fn, &left_qq);
+                    let right_dist = code.distance_quantized_query(&self.distance_fn, &right_qq);
+                    let neighbor_dist =
+                        code.distance_quantized_query(&self.distance_fn, &neighbor_qq);
+
+                    if neighbor_dist <= left_dist && neighbor_dist <= right_dist {
+                        continue;
+                    }
+
+                    let old_dist = code.distance_quantized_query(&self.distance_fn, &old_qq);
+                    if old_dist <= left_dist && old_dist <= right_dist {
+                        continue;
+                    }
+
+                    n_reassigned += 1;
+                    self.reassign(neighbor_id, id, depth);
                 }
-                if !evaluated.insert(id) {
-                    continue;
+            } else {
+                for i in 0..n_ids.len() {
+                    let id = n_ids[i];
+                    let version = n_versions[i];
+
+                    let current_ver = self.versions.get(&id).map(|r| *r).unwrap_or(0);
+                    if version < current_ver {
+                        continue;
+                    }
+                    if !evaluated.insert(id) {
+                        continue;
+                    }
+
+                    let Some(emb) = self.embeddings.get(&id) else {
+                        continue;
+                    };
+                    n_evaluated += 1;
+                    let emb = emb.value();
+
+                    let left_dist = self.dist(emb, left_center);
+                    let right_dist = self.dist(emb, right_center);
+                    let neighbor_dist = self.dist(emb, &n_centroid);
+
+                    if neighbor_dist <= left_dist && neighbor_dist <= right_dist {
+                        continue;
+                    }
+
+                    let old_dist = self.dist(emb, old_center);
+                    if old_dist <= left_dist && old_dist <= right_dist {
+                        continue;
+                    }
+
+                    n_reassigned += 1;
+                    self.reassign(neighbor_id, id, depth);
                 }
-
-                n_evaluated += 1;
-                let code = Code::<1, _>::new(code_bytes.as_slice());
-
-                let left_dist = code.distance_quantized_query(&self.distance_fn, &left_qq);
-                let right_dist = code.distance_quantized_query(&self.distance_fn, &right_qq);
-                let neighbor_dist = code.distance_quantized_query(&self.distance_fn, &neighbor_qq);
-
-                if neighbor_dist <= left_dist && neighbor_dist <= right_dist {
-                    continue;
-                }
-
-                let old_dist = code.distance_quantized_query(&self.distance_fn, &old_qq);
-                if old_dist <= left_dist && old_dist <= right_dist {
-                    continue;
-                }
-
-                n_reassigned += 1;
-                self.reassign(id, depth);
             }
 
             total_evaluated += n_evaluated as u64;
@@ -1548,48 +2104,64 @@ impl HierarchicalSpannWriter {
             }
         }
 
-        self.stats.split_npa_neighbors_visited.fetch_add(neighbors_visited, Ordering::Relaxed);
-        self.stats.split_npa_neighbors_active.fetch_add(neighbors_active, Ordering::Relaxed);
-        self.stats.split_npa_neighbor_evaluated.fetch_add(total_evaluated, Ordering::Relaxed);
-        self.stats.split_npa_neighbor_reassigns.fetch_add(total_reassigned, Ordering::Relaxed);
+        self.stats
+            .split_npa_neighbors_visited
+            .fetch_add(neighbors_visited, Ordering::Relaxed);
+        self.stats
+            .split_npa_neighbors_active
+            .fetch_add(neighbors_active, Ordering::Relaxed);
+        self.stats
+            .split_npa_neighbor_evaluated
+            .fetch_add(total_evaluated, Ordering::Relaxed);
+        self.stats
+            .split_npa_neighbor_reassigns
+            .fetch_add(total_reassigned, Ordering::Relaxed);
     }
 
-    /// Reassign a vector to its best cluster.
-    fn reassign(&self, id: u32, depth: u32) {
-        let new_version = {
-            let mut v = self.versions.entry(id).or_insert(0);
-            *v += 1;
-            *v
-        };
+    /// Reassign a vector to its best cluster(s).
+    fn reassign(&self, from_cluster_id: NodeId, id: u32, depth: u32) {
+        let t0 = Instant::now();
+
+        let current_ver = self.versions.get(&id).map(|r| *r).unwrap_or(0);
+        if !self.is_valid(id, current_ver) {
+            return;
+        }
 
         let Some(embedding) = self.embeddings.get(&id).map(|e| e.value().clone()) else {
             return;
         };
 
-        self.reassign_inner(id, new_version, &embedding, depth);
-    }
-
-    /// Inner reassign loop that can retry without re-incrementing the version.
-    fn reassign_inner(&self, id: u32, version: u32, embedding: &[f32], depth: u32) {
-        let t0 = Instant::now();
-
         loop {
             let nav_start = Instant::now();
-            let candidates = self.navigate_f32(
-                embedding,
+            let candidates = self.navigate(
+                &embedding,
                 Some(self.config.write_beam_tau),
                 self.config.write_beam_min,
                 self.config.write_beam_max,
+                1,
             );
             let cluster_ids = self.rng_select(&candidates);
             self.stats
                 .reassign_navigate_nanos
                 .fetch_add(nav_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
+            if cluster_ids.contains(&from_cluster_id) {
+                break;
+            }
+            if !self.is_valid(id, current_ver) {
+                return;
+            }
+
+            let version = {
+                let mut v = self.versions.entry(id).or_insert(0);
+                *v += 1;
+                *v
+            };
+
             let reg_start = Instant::now();
             let mut clusters_to_balance = Vec::new();
             for &cluster_id in &cluster_ids {
-                if self.register_in_leaf(cluster_id, id, version, embedding) {
+                if self.register_in_leaf(cluster_id, id, version, &embedding) {
                     clusters_to_balance.push(cluster_id);
                 }
             }
@@ -1598,9 +2170,7 @@ impl HierarchicalSpannWriter {
                 .fetch_add(reg_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
             if clusters_to_balance.is_empty() {
-                self.stats
-                    .add_missing_nodes
-                    .fetch_add(1, Ordering::Relaxed);
+                self.stats.add_missing_nodes.fetch_add(1, Ordering::Relaxed);
                 continue;
             }
 
@@ -1621,6 +2191,13 @@ impl HierarchicalSpannWriter {
             .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
     }
 
+    /// Check if a point is valid (version matches current version).
+    fn is_valid(&self, id: u32, version: u32) -> bool {
+        self.versions
+            .get(&id)
+            .is_some_and(|global_version| *global_version == version)
+    }
+
     // =========================================================================
     // Split (internal)
     // =========================================================================
@@ -1633,10 +2210,7 @@ impl HierarchicalSpannWriter {
         let (children, parent_id, _old_centroid) = match self.nodes.remove(&node_id) {
             Some((_, TreeNode::Internal(internal))) => {
                 if internal.children.len() <= self.config.branching_factor {
-                    self.nodes.insert(
-                        node_id,
-                        TreeNode::Internal(internal),
-                    );
+                    self.nodes.insert(node_id, TreeNode::Internal(internal));
                     self.balancing.remove(&node_id);
                     return;
                 }
@@ -1741,11 +2315,12 @@ impl HierarchicalSpannWriter {
                 None => return,
             };
 
-        let candidates = self.navigate_f32(
+        let candidates = self.navigate(
             &source_centroid,
             Some(self.config.write_beam_tau),
             self.config.write_beam_min,
             self.config.write_beam_max,
+            1,
         );
         let target_id = match candidates.iter().find(|&&(nid, _)| nid != leaf_id) {
             Some(&(nid, _)) => nid,
@@ -1810,10 +2385,10 @@ impl HierarchicalSpannWriter {
                     self.stats
                         .register_missing_nodes
                         .fetch_add(1, Ordering::Relaxed);
-                    self.reassign(id, depth);
+                    self.reassign(leaf_id, id, depth);
                 }
             } else {
-                self.reassign(id, depth);
+                self.reassign(leaf_id, id, depth);
             }
         }
 
@@ -2001,46 +2576,54 @@ impl HierarchicalSpannWriter {
         beam_max: usize,
         rerank_centroids: usize,
         rerank_vectors: usize,
-    ) -> (Vec<(u32, f32)>, usize, usize) {
+    ) -> (Vec<(u32, f32)>, usize, usize, SearchTimings) {
+        let nav_t0 = Instant::now();
         let leaves = self.navigate(query, Some(tau), beam_min, beam_max, rerank_centroids);
+        let navigate_nanos = nav_t0.elapsed().as_nanos() as u64;
+
         let leaves_scanned = leaves.len();
         let padded_bytes = self.padded_bytes();
         let q_norm = Self::vec_norm(query);
         let rerank_factor = rerank_vectors;
 
         let mut results: Vec<(u32, f32)> = Vec::new();
+        let mut quantize_nanos = 0u64;
+        let mut distance_nanos = 0u64;
 
         for &(leaf_id, _) in &leaves {
-            if let Some(node_ref) = self.nodes.get(&leaf_id) {
-                if let TreeNode::Leaf(leaf) = node_ref.value() {
-                    let centroid = leaf.centroid.clone();
-                    let ids = leaf.ids.clone();
-                    let versions = leaf.versions.clone();
-                    let codes = leaf.codes.clone();
-                    drop(node_ref);
+            let Some(node_ref) = self.nodes.get(&leaf_id) else {
+                continue;
+            };
+            let TreeNode::Leaf(leaf) = node_ref.value() else {
+                continue;
+            };
 
-                    let r_q: Vec<f32> = query
-                        .iter()
-                        .zip(centroid.iter())
-                        .map(|(q, c)| q - c)
-                        .collect();
-                    let c_norm = Self::vec_norm(&centroid);
-                    let c_dot_q = f32::dot(&centroid, query).unwrap_or(0.0) as f32;
-                    let qq = QuantizedQuery::new(&r_q, padded_bytes, c_norm, c_dot_q, q_norm);
+            let qt0 = Instant::now();
+            let r_q: Vec<f32> = query
+                .iter()
+                .zip(leaf.centroid.iter())
+                .map(|(q, c)| q - c)
+                .collect();
+            let c_norm = Self::vec_norm(&leaf.centroid);
+            let c_dot_q = f32::dot(&leaf.centroid, query).unwrap_or(0.0) as f32;
+            let qq = QuantizedQuery::new(&r_q, padded_bytes, c_norm, c_dot_q, q_norm);
+            quantize_nanos += qt0.elapsed().as_nanos() as u64;
 
-                    for (i, &id) in ids.iter().enumerate() {
-                        let version = versions[i];
-                        let current_ver = self.versions.get(&id).map(|r| *r).unwrap_or(0);
-                        if version < current_ver {
-                            continue;
-                        }
-                        let dist = Code::<1, _>::new(codes[i].as_slice())
-                            .distance_quantized_query(&self.distance_fn, &qq);
-                        results.push((id, dist));
-                    }
+            let dt0 = Instant::now();
+            for (i, &id) in leaf.ids.iter().enumerate() {
+                let version = leaf.versions[i];
+                let current_ver = self.versions.get(&id).map(|r| *r).unwrap_or(0);
+                if version < current_ver {
+                    continue;
                 }
+                let dist = Code::<1, _>::new(leaf.codes[i].as_slice())
+                    .distance_quantized_query(&self.distance_fn, &qq);
+                results.push((id, dist));
             }
+            distance_nanos += dt0.elapsed().as_nanos() as u64;
         }
+
+        let sort_t0 = Instant::now();
 
         // Deduplicate (same vector in multiple leaves)
         let mut best: std::collections::HashMap<u32, f32> =
@@ -2056,10 +2639,13 @@ impl HierarchicalSpannWriter {
         let mut deduped: Vec<(u32, f32)> = best.into_iter().collect();
         deduped.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
+        let sort_dedup_nanos = sort_t0.elapsed().as_nanos() as u64;
+
         if rerank_factor > 1 {
             let rerank_count = (k * rerank_factor).min(deduped.len());
             deduped.truncate(rerank_count);
 
+            let rr_t0 = Instant::now();
             let mut reranked: Vec<(u32, f32)> = deduped
                 .into_iter()
                 .map(|(id, approx_dist)| {
@@ -2072,11 +2658,34 @@ impl HierarchicalSpannWriter {
                 })
                 .collect();
             reranked.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            let rerank_nanos = rr_t0.elapsed().as_nanos() as u64;
             reranked.truncate(k);
-            (reranked, scanned, leaves_scanned)
+            (
+                reranked,
+                scanned,
+                leaves_scanned,
+                SearchTimings {
+                    navigate_nanos,
+                    quantize_nanos,
+                    distance_nanos,
+                    sort_dedup_nanos,
+                    rerank_nanos,
+                },
+            )
         } else {
             deduped.truncate(k);
-            (deduped, scanned, leaves_scanned)
+            (
+                deduped,
+                scanned,
+                leaves_scanned,
+                SearchTimings {
+                    navigate_nanos,
+                    quantize_nanos,
+                    distance_nanos,
+                    sort_dedup_nanos,
+                    rerank_nanos: 0,
+                },
+            )
         }
     }
 
@@ -2111,10 +2720,11 @@ impl HierarchicalSpannWriter {
             }
         }
 
-        let use_quantized = !self.config.fp_navigation;
+        let nav_mode = self.config.navigation;
         let q_norm = Self::vec_norm(query);
         let padded_bytes = self.padded_bytes();
         let rerank_factor = rerank_centroids;
+        let dim = self.dim;
 
         let mut levels = Vec::new();
         let mut beam: Vec<NodeId> = vec![root];
@@ -2129,34 +2739,65 @@ impl HierarchicalSpannWriter {
                         let children: Vec<NodeId> = internal.children.clone();
                         drop(node_ref);
 
-                        if use_quantized {
-                            let c_norm = Self::vec_norm(&parent_centroid);
-                            let r_q: Vec<f32> = query
-                                .iter()
-                                .zip(parent_centroid.iter())
-                                .map(|(q, c)| q - c)
-                                .collect();
-                            let c_dot_q = f32::dot(&parent_centroid, query).unwrap_or(0.0) as f32;
-                            let qq =
-                                QuantizedQuery::new(&r_q, padded_bytes, c_norm, c_dot_q, q_norm);
-
-                            for child_id in children {
-                                if let Some(child) = self.nodes.get(&child_id) {
-                                    let code_bytes = child.centroid_code();
-                                    let dist = if code_bytes.is_empty() {
-                                        self.dist(query, child.centroid())
-                                    } else {
-                                        Code::<1, _>::new(code_bytes)
-                                            .distance_quantized_query(&self.distance_fn, &qq)
-                                    };
-                                    child_scores.push((child_id, dist));
+                        match nav_mode {
+                            NavigationMode::Fp => {
+                                for child_id in children {
+                                    if let Some(child) = self.nodes.get(&child_id) {
+                                        let dist = self.dist(query, child.centroid());
+                                        child_scores.push((child_id, dist));
+                                    }
                                 }
                             }
-                        } else {
-                            for child_id in children {
-                                if let Some(child) = self.nodes.get(&child_id) {
-                                    let dist = self.dist(query, child.centroid());
-                                    child_scores.push((child_id, dist));
+                            NavigationMode::OneBit => {
+                                let c_norm = Self::vec_norm(&parent_centroid);
+                                let query_code = Code::<1>::quantize(query, &parent_centroid);
+
+                                for child_id in children {
+                                    if let Some(child) = self.nodes.get(&child_id) {
+                                        let code_bytes = child.centroid_code();
+                                        let dist = if code_bytes.is_empty() {
+                                            self.dist(query, child.centroid())
+                                        } else {
+                                            let child_code = Code::<1, _>::new(code_bytes);
+                                            query_code.distance_code(
+                                                &child_code,
+                                                &self.distance_fn,
+                                                c_norm,
+                                                dim,
+                                            )
+                                        };
+                                        child_scores.push((child_id, dist));
+                                    }
+                                }
+                            }
+                            NavigationMode::FourBit => {
+                                let c_norm = Self::vec_norm(&parent_centroid);
+                                let r_q: Vec<f32> = query
+                                    .iter()
+                                    .zip(parent_centroid.iter())
+                                    .map(|(q, c)| q - c)
+                                    .collect();
+                                let c_dot_q =
+                                    f32::dot(&parent_centroid, query).unwrap_or(0.0) as f32;
+                                let qq = QuantizedQuery::new(
+                                    &r_q,
+                                    padded_bytes,
+                                    c_norm,
+                                    c_dot_q,
+                                    q_norm,
+                                );
+
+                                for child_id in children {
+                                    if let Some(child) = self.nodes.get(&child_id) {
+                                        let code_bytes = child.centroid_code();
+                                        let dist = if code_bytes.is_empty() {
+                                            self.dist(query, child.centroid())
+                                        } else {
+                                            Code::<1, _>::new(code_bytes)
+                                                .distance_quantized_query(&self.distance_fn, &qq)
+                                        };
+                                        child_scores.push((child_id, dist));
+                                    }
                                 }
                             }
                         }
@@ -2171,7 +2812,7 @@ impl HierarchicalSpannWriter {
             let total_candidates = child_scores.len();
             child_scores.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
-            if use_quantized && rerank_factor > 1 {
+            if nav_mode != NavigationMode::Fp && rerank_factor > 1 {
                 let effective = Self::effective_beam(&child_scores, Some(tau), beam_min, beam_max);
                 let rerank_count = (effective * rerank_factor).min(child_scores.len());
                 child_scores.truncate(rerank_count);

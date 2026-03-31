@@ -75,8 +75,19 @@ register_in_leaf could write to them, add() retries the full pipeline
 (navigate + rng_select + register + balance) recursively. The
 `add_register_fallbacks` stat tracks how often this happens.
 
-reassign() (called from NPA during split) has the same retry mechanism
-via reassign_inner(), which retries without re-incrementing the version.
+reassign() (called from NPA during split) has the same retry loop.
+
+### Differences from quantized_spann.rs
+
+reassign() takes a `from_cluster_id` parameter. After navigating and
+running rng_select, if the selected clusters already include
+from_cluster_id, the vector is already where it belongs and the
+reassign is skipped. This avoids unnecessary work and reduces cascading.
+
+quantized_spann.rs has the same from_cluster_id check but handles register
+failure differently: it spawns a new single-vector cluster as a fallback.
+The hierarchical index instead retries navigation until it finds a live
+leaf, avoiding degenerate tiny clusters that immediately trigger merges.
 
 ### Preventing duplicate balance work
 
