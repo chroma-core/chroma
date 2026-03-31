@@ -315,6 +315,21 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         model = CollectionModel.from_json(resp_json)
         return model
 
+    @trace_method("FastAPI.get_collection_by_id", OpenTelemetryGranularity.OPERATION)
+    @override
+    def get_collection_by_id(
+        self,
+        collection_id: UUID,
+    ) -> CollectionModel:
+        """Returns a collection by its ID"""
+        resp_json = self._make_request(
+            "get",
+            f"/collections/{collection_id}",
+        )
+
+        model = CollectionModel.from_json(resp_json)
+        return model
+
     @trace_method(
         "FastAPI.get_or_create_collection", OpenTelemetryGranularity.OPERATION
     )

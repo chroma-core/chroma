@@ -589,6 +589,47 @@ impl ChromaHttpClient {
         })
     }
 
+    /// Retrieves an existing collection by its ID.
+    ///
+    /// Returns a collection handle that can be used to perform operations on the collection's
+    /// data (add, query, update, delete records).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - No collection with the given ID exists
+    /// - Network communication fails
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use chroma::ChromaHttpClient;
+    /// # async fn example(client: ChromaHttpClient) -> Result<(), Box<dyn std::error::Error>> {
+    /// let collection = client.get_collection_by_id("collection-uuid-here").await?;
+    /// println!("Collection name: {}", collection.name());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_collection_by_id(
+        &self,
+        id: impl AsRef<str>,
+    ) -> Result<ChromaCollection, ChromaHttpClientError> {
+        let collection: chroma_types::Collection = self
+            .send::<(), _, chroma_types::Collection>(
+                "get_collection_by_id",
+                Method::GET,
+                format!("/api/v2/collections/{}", id.as_ref()),
+                None,
+                None::<()>,
+            )
+            .await?;
+
+        Ok(ChromaCollection {
+            client: self.clone(),
+            collection: Arc::new(collection),
+        })
+    }
+
     /// Removes a collection and all its records from the database.
     ///
     /// Permanently deletes the collection and all contained embeddings, metadata, and documents.

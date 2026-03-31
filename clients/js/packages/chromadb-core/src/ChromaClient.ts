@@ -14,6 +14,7 @@ import type {
   DeleteCollectionParams,
   GetCollectionParams,
   GetOrCreateCollectionParams,
+  IEmbeddingFunction,
   ListCollectionsParams,
   UserIdentity,
 } from "./types";
@@ -485,6 +486,63 @@ export class ChromaClient {
       name,
       this.api.options,
     );
+
+    let config: Api.CollectionConfiguration = {};
+    try {
+      config = response.configuration_json;
+    } catch {
+      warn(
+        "Server does not respond with configuration_json. Please update server",
+      );
+    }
+
+    const configObj = loadCollectionConfigurationFromJson(config);
+    if (
+      hasEmbeddingFunctionConflict(
+        embeddingFunction,
+        configObj.embedding_function,
+      )
+    ) {
+      throw new Error(
+        "Multiple embedding functions provided. Please provide only one.",
+      );
+    }
+
+    const ef = configObj.embedding_function ?? embeddingFunction;
+
+    return wrapCollection(this, {
+      id: response.id,
+      name: response.name,
+      metadata: response.metadata as CollectionMetadata | undefined,
+      embeddingFunction: ef ?? new DefaultEmbeddingFunction(),
+      configuration: config,
+    });
+  }
+
+  /**
+   * Gets a collection by its ID.
+   * @param {Object} params - The parameters for getting the collection.
+   * @param {string} params.id - The ID of the collection.
+   * @param {IEmbeddingFunction} [params.embeddingFunction] - Optional custom embedding function for the collection.
+   * @returns {Promise<Collection>} A promise that resolves to the collection.
+   * @throws {Error} If there is an issue getting the collection.
+   *
+   * @example
+   * ```typescript
+   * const collection = await client.getCollectionById({
+   *   id: "collection-uuid-here"
+   * });
+   * ```
+   */
+  async getCollectionById({
+    id,
+    embeddingFunction,
+  }: {
+    id: string;
+    embeddingFunction?: IEmbeddingFunction;
+  }): Promise<Collection> {
+    await this.init();
+    const response = await this.api.getCollectionByCrn(id, this.api.options);
 
     let config: Api.CollectionConfiguration = {};
     try {

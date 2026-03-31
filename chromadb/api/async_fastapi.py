@@ -353,6 +353,24 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         return model
 
     @trace_method(
+        "AsyncFastAPI.get_collection_by_id", OpenTelemetryGranularity.OPERATION
+    )
+    @override
+    async def get_collection_by_id(
+        self,
+        collection_id: UUID,
+    ) -> CollectionModel:
+        """Returns a collection by its ID"""
+        resp_json = await self._make_request(
+            "get",
+            f"/collections/{collection_id}",
+        )
+
+        model = CollectionModel.from_json(resp_json)
+
+        return model
+
+    @trace_method(
         "AsyncFastAPI.get_or_create_collection", OpenTelemetryGranularity.OPERATION
     )
     @override

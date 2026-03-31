@@ -441,6 +441,16 @@ export class ChromaClient {
   }
 
   /**
+   * Retrieves an existing collection by its ID.
+   * @param id - The ID of the collection to retrieve
+   * @returns Promise resolving to the Collection instance
+   * @throws Error if the collection does not exist
+   */
+  public async getCollectionById(id: string): Promise<Collection> {
+    return this.getCollectionByCrn(id);
+  }
+
+  /**
    * Retrieves multiple collections by name.
    * @param items - Array of collection names or objects with name and optional embedding function (should match the ones used to create the collections)
    * @returns Promise resolving to an array of Collection instances
