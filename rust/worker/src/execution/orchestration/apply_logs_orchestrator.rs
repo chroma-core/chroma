@@ -364,7 +364,7 @@ impl ApplyLogsOrchestrator {
             }
         };
         let collection = collection_info.collection.clone();
-        let collection_logical_size_bytes = if self.context.is_rebuild {
+        let collection_logical_size_bytes = if self.context.is_full_rebuild() {
             match u64::try_from(self.collection_logical_size_delta_bytes) {
                 Ok(size_bytes) => size_bytes,
                 _ => {

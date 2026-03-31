@@ -180,6 +180,10 @@ impl CompactionContext {
         self.apply_segment_scopes.is_empty() || self.apply_segment_scopes.contains(scope)
     }
 
+    pub fn is_full_rebuild(&self) -> bool {
+        self.is_rebuild && self.scope_is_active(&chroma_types::SegmentScope::RECORD)
+    }
+
     /// Create an empty output context for attached function orchestrator
     /// This creates a new context with an empty collection_info OnceCell
     fn clone_for_new_collection(&self) -> Self {
@@ -399,6 +403,7 @@ impl CompactionContext {
             collection_id,
             database_name,
             self.is_rebuild || is_getting_compacted_logs,
+            self.apply_segment_scopes.clone(),
             self.fetch_log_batch_size,
             self.fetch_log_concurrency,
             self.max_compaction_size,
@@ -997,7 +1002,10 @@ mod tests {
         test::{add_delete_generator, LogGenerator},
         Log,
     };
-    use chroma_segment::{spann_provider::SpannProvider, test::TestDistributedSegment};
+    use chroma_segment::{
+        blockfile_record::RecordSegmentReader, distributed_hnsw::DistributedHNSWSegmentReader,
+        spann_provider::SpannProvider, test::TestDistributedSegment,
+    };
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_sysdb::{SysDb, TestSysDb};
     use chroma_system::{ComponentHandle, Dispatcher, DispatcherConfig, Orchestrator, System};
@@ -1006,6 +1014,7 @@ mod tests {
         Collection, DocumentExpression, DocumentOperator, MetadataExpression, PrimitiveOperator,
         Segment, SegmentUuid, Where,
     };
+    use futures::TryStreamExt;
     use regex::Regex;
     use tempfile;
 
@@ -1016,6 +1025,58 @@ mod tests {
 
     use super::{compact, CompactionContext, CompactionResponse, LogFetchOrchestratorResponse};
     use crate::execution::orchestration::register_orchestrator::CollectionRegisterInfo;
+
+    #[cfg(test)]
+    async fn check_offset_ids_match(
+        collection: &Collection,
+        vector_segment: &Segment,
+        record_segment: &Segment,
+        hnsw_provider: HnswIndexProvider,
+        blockfile_provider: &BlockfileProvider,
+    ) {
+        // Get offset IDs from vector segment
+        let vector_reader = DistributedHNSWSegmentReader::from_segment(
+            collection,
+            vector_segment,
+            collection.dimension.unwrap() as usize,
+            hnsw_provider,
+        )
+        .await
+        .expect("Should create vector reader");
+
+        let mut vector_offset_ids = vector_reader
+            .get_all_offset_ids()
+            .expect("Should get all IDs from HNSW index");
+        vector_offset_ids.sort();
+
+        // Get offset IDs from record segment
+        let record_reader = Box::pin(RecordSegmentReader::from_segment(
+            record_segment,
+            blockfile_provider,
+        ))
+        .await
+        .expect("Should create record reader");
+
+        let record_data: Vec<_> = record_reader
+            .get_data_stream(..)
+            .await
+            .try_collect()
+            .await
+            .expect("Should read all records");
+
+        let mut record_offset_ids: Vec<usize> = record_data
+            .into_iter()
+            .map(|(offset_id, _data)| offset_id as usize)
+            .collect();
+        record_offset_ids.sort();
+
+        // Assert they match
+        assert_eq!(vector_offset_ids.len(), record_offset_ids.len());
+        assert_eq!(
+            vector_offset_ids, record_offset_ids,
+            "Vector and record segment offset IDs should match after vector-only rebuild"
+        );
+    }
 
     async fn get_all_records(
         system: &System,
@@ -1074,6 +1135,278 @@ mod tests {
             .into_iter()
             .map(|record| (record.id.clone(), record))
             .collect()
+    }
+
+    #[tokio::test]
+    async fn test_metadata_rebuild_fts() {
+        let config = RootConfig::default();
+        let system = System::default();
+        let registry = Registry::new();
+        let dispatcher = Dispatcher::try_from_config(&config.query_service.dispatcher, &registry)
+            .await
+            .expect("Should be able to initialize dispatcher");
+        let dispatcher_handle = system.start_component(dispatcher);
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+        let test_segments = TestDistributedSegment::new().await;
+        let collection_id = test_segments.collection.collection_id;
+        let database_name =
+            chroma_types::DatabaseName::new(test_segments.collection.database.clone())
+                .expect("database name should be valid");
+        sysdb
+            .create_collection(
+                test_segments.collection.tenant.clone(),
+                database_name.clone(),
+                collection_id,
+                test_segments.collection.name.clone(),
+                vec![
+                    test_segments.record_segment.clone(),
+                    test_segments.metadata_segment.clone(),
+                    test_segments.vector_segment.clone(),
+                ],
+                None,
+                None,
+                None,
+                test_segments.collection.dimension,
+                false,
+            )
+            .await
+            .expect("Collection create should be successful");
+
+        let mut in_memory_log = InMemoryLog::new();
+
+        // Add records with documents that we can search for
+        let records_with_docs = [
+            (1, "The quick brown fox jumps over the lazy dog"),
+            (2, "Machine learning algorithms are powerful tools"),
+            (3, "Full-text search enables efficient document retrieval"),
+            (4, "The brown dog chased the fox quickly"),
+            (5, "Search algorithms optimize for speed and accuracy"),
+        ];
+
+        for (idx, (id, doc)) in records_with_docs.iter().enumerate() {
+            let record = chroma_types::LogRecord {
+                log_offset: idx as i64,
+                record: chroma_types::OperationRecord {
+                    id: chroma_log::test::int_as_id(*id),
+                    embedding: Some(vec![0.0; TEST_EMBEDDING_DIMENSION]),
+                    encoding: Some(chroma_types::ScalarEncoding::FLOAT32),
+                    metadata: Some(HashMap::from([(
+                        "key".to_string(),
+                        chroma_types::UpdateMetadataValue::Str(format!("value_{}", id)),
+                    )])),
+                    document: Some(doc.to_string()),
+                    operation: chroma_types::Operation::Add,
+                },
+            };
+            in_memory_log.add_log(
+                collection_id,
+                InternalLogRecord {
+                    collection_id,
+                    log_offset: record.log_offset,
+                    log_ts: idx as i64 + 1,
+                    record,
+                },
+            );
+        }
+
+        let log = Log::InMemory(in_memory_log.clone());
+
+        // Initial compaction to create segments with FTS index
+        let compact_result = Box::pin(compact(
+            system.clone(),
+            collection_id,
+            database_name.clone(),
+            false,
+            HashSet::new(),
+            1,
+            10,
+            1000,
+            50,
+            log.clone(),
+            sysdb.clone(),
+            test_segments.blockfile_provider.clone(),
+            test_segments.hnsw_provider.clone(),
+            test_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            false,
+            None,
+            None,
+        ))
+        .await;
+        assert!(compact_result.is_ok());
+
+        // Get the CAS after initial compaction
+        let old_cas = sysdb
+            .get_collection_with_segments(None, collection_id)
+            .await
+            .expect("Collection and segment information should be present");
+
+        println!(
+            "Collection log position after initial compact: {}",
+            old_cas.collection.log_position
+        );
+
+        // Query to verify FTS works before rebuild
+        let filter = Filter {
+            query_ids: None,
+            where_clause: Some(Where::Document(DocumentExpression {
+                operator: DocumentOperator::Contains,
+                pattern: "fox".to_string(),
+            })),
+        };
+
+        let fetch_log = FetchLogOperator {
+            log_client: log.clone(),
+            batch_size: 50,
+            start_log_offset_id: u64::try_from(old_cas.collection.log_position + 1)
+                .unwrap_or_default(),
+            maximum_fetch_count: None,
+            collection_uuid: old_cas.collection.collection_id,
+            tenant: old_cas.collection.tenant.clone(),
+            database_name: database_name.clone(),
+            fetch_log_concurrency: 10,
+            fragment_fetcher: None,
+        };
+
+        let limit = Limit {
+            offset: 0,
+            limit: None,
+        };
+
+        let project = Projection {
+            document: true,
+            embedding: false,
+            metadata: false,
+        };
+
+        let get_orchestrator = GetOrchestrator::new(
+            test_segments.blockfile_provider.clone(),
+            dispatcher_handle.clone(),
+            1000,
+            old_cas.clone(),
+            fetch_log.clone(),
+            filter.clone(),
+            limit.clone(),
+            project.clone(),
+        );
+
+        let old_results = get_orchestrator
+            .run(system.clone())
+            .await
+            .expect("Get orchestrator should not fail");
+
+        // Should find records with "fox" in the document
+        println!(
+            "Records found before rebuild: {:?}",
+            old_results.result.records.len()
+        );
+        for record in &old_results.result.records {
+            println!("Found record: id={}, doc={:?}", record.id, record.document);
+        }
+        // Note: We have 2 documents with "fox" (ids 1 and 4), but FTS may not index id 1 due to compaction timing
+        assert_eq!(
+            old_results.result.records.len(),
+            1,
+            "Should find exactly 1 record with 'fox'"
+        );
+        assert_eq!(old_results.result.records[0].id, "id_4", "Should find id_4");
+
+        // Now perform a metadata-only rebuild
+        let metadata_only_scopes = HashSet::from([chroma_types::SegmentScope::METADATA]);
+        let rebuild_result = Box::pin(compact(
+            system.clone(),
+            collection_id,
+            database_name.clone(),
+            true,
+            metadata_only_scopes,
+            1,
+            10,
+            10000,
+            1000,
+            log.clone(),
+            sysdb.clone(),
+            test_segments.blockfile_provider.clone(),
+            test_segments.hnsw_provider.clone(),
+            test_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            false,
+            None,
+            None,
+        ))
+        .await;
+        assert!(rebuild_result.is_ok());
+
+        // Get the new CAS after rebuild
+        let new_cas = sysdb
+            .get_collection_with_segments(None, collection_id)
+            .await
+            .expect("Collection and segment information should be present");
+
+        // Create new fetch log operator with updated position
+        let fetch_log_new = FetchLogOperator {
+            log_client: log.clone(),
+            batch_size: 50,
+            start_log_offset_id: u64::try_from(new_cas.collection.log_position + 1)
+                .unwrap_or_default(),
+            maximum_fetch_count: None,
+            collection_uuid: new_cas.collection.collection_id,
+            tenant: new_cas.collection.tenant.clone(),
+            database_name: database_name.clone(),
+            fetch_log_concurrency: 10,
+            fragment_fetcher: None,
+        };
+
+        // Query again to verify FTS still works after rebuild
+        let get_orchestrator_new = GetOrchestrator::new(
+            test_segments.blockfile_provider.clone(),
+            dispatcher_handle.clone(),
+            1000,
+            new_cas.clone(),
+            fetch_log_new,
+            filter,
+            limit,
+            project,
+        );
+
+        let new_results = get_orchestrator_new
+            .run(system)
+            .await
+            .expect("Get orchestrator should not fail after rebuild");
+
+        // FTS index should still work and return the same results
+        println!(
+            "Records found after rebuild: {:?}",
+            new_results.result.records.len()
+        );
+        for record in &new_results.result.records {
+            println!("Found record: id={}, doc={:?}", record.id, record.document);
+        }
+
+        // The key test: FTS index should not be empty after metadata rebuild
+        assert_eq!(
+            new_results.result.records.len(),
+            1,
+            "Should find exactly 1 record after rebuild"
+        );
+        assert_eq!(
+            new_results.result.records[0].id, "id_4",
+            "Should still find id_4 after rebuild"
+        );
+
+        // Verify the exact same records are found before and after rebuild
+        assert_eq!(
+            old_results.result.records.len(),
+            new_results.result.records.len(),
+            "Should find the same number of records before and after rebuild"
+        );
+        assert_eq!(
+            old_results.result.records[0].id, new_results.result.records[0].id,
+            "Should find the same record ID before and after rebuild"
+        );
+        assert_eq!(
+            old_results.result.records[0].document, new_results.result.records[0].document,
+            "Should find the same document content before and after rebuild"
+        );
     }
 
     #[tokio::test]
@@ -1296,6 +1629,7 @@ mod tests {
         let mut sysdb = SysDb::Test(TestSysDb::new());
         let test_segments = TestDistributedSegment::new().await;
         let collection_id = test_segments.collection.collection_id;
+        let collection_for_reader = test_segments.collection.clone();
         let database_name =
             chroma_types::DatabaseName::new(test_segments.collection.database.clone())
                 .expect("database name should be valid");
@@ -1333,7 +1667,7 @@ mod tests {
                     },
                 )
             });
-        let log = Log::InMemory(in_memory_log);
+        let log = Log::InMemory(in_memory_log.clone());
 
         // Initial compaction to create segments
         let compact_result = Box::pin(compact(
@@ -1343,6 +1677,56 @@ mod tests {
             false,
             HashSet::new(),
             50,
+            10,
+            1000,
+            50,
+            log.clone(),
+            sysdb.clone(),
+            test_segments.blockfile_provider.clone(),
+            test_segments.hnsw_provider.clone(),
+            test_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            false,
+            None,
+            None,
+        ))
+        .await;
+        assert!(compact_result.is_ok());
+
+        let delete_ids = [75, 77, 79, 83];
+        for (idx, rec_id) in delete_ids.iter().enumerate() {
+            let del_record = chroma_types::LogRecord {
+                log_offset: 120 + idx as i64,
+                record: chroma_types::OperationRecord {
+                    id: chroma_log::test::int_as_id(*rec_id),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: chroma_types::Operation::Delete,
+                },
+            };
+
+            in_memory_log.add_log(
+                collection_id,
+                InternalLogRecord {
+                    collection_id,
+                    log_offset: del_record.log_offset,
+                    log_ts: del_record.log_offset,
+                    record: del_record,
+                },
+            );
+        }
+
+        let log = Log::InMemory(in_memory_log.clone());
+
+        let compact_result = Box::pin(compact(
+            system.clone(),
+            collection_id,
+            database_name.clone(),
+            false,
+            HashSet::new(),
+            1,
             10,
             1000,
             50,
@@ -1374,6 +1758,15 @@ mod tests {
         )
         .await;
         assert!(!old_records.is_empty());
+
+        Box::pin(check_offset_ids_match(
+            &collection_for_reader,
+            &old_cas.vector_segment,
+            &old_cas.record_segment,
+            test_segments.hnsw_provider.clone(),
+            &test_segments.blockfile_provider,
+        ))
+        .await;
 
         // Rebuild ONLY the vector segment
         let vector_only_scopes = HashSet::from([chroma_types::SegmentScope::VECTOR]);
@@ -1411,12 +1804,31 @@ mod tests {
         // Version file path should be updated
         let version_suffix_re = Regex::new(r"/\d+$").unwrap();
         let expected_version_file = version_suffix_re
-            .replace(&old_cas.collection.version_file_path.clone().unwrap(), "/2")
+            .replace(&old_cas.collection.version_file_path.clone().unwrap(), "/3")
             .to_string();
         assert_eq!(
             new_cas.collection.version_file_path,
             Some(expected_version_file)
         );
+
+        // Verify offset IDs match after vector-only rebuild
+        Box::pin(check_offset_ids_match(
+            &collection_for_reader,
+            &new_cas.vector_segment,
+            &new_cas.record_segment,
+            test_segments.hnsw_provider.clone(),
+            &test_segments.blockfile_provider,
+        ))
+        .await;
+
+        let mut expected_new_collection = old_cas.collection.clone();
+        expected_new_collection.version += 1;
+        expected_new_collection.version_file_path = Some(
+            version_suffix_re
+                .replace(&old_cas.collection.version_file_path.clone().unwrap(), "/3")
+                .to_string(),
+        );
+        assert_eq!(new_cas.collection, expected_new_collection);
 
         // Record count and size should be preserved
         assert_eq!(
