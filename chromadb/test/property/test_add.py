@@ -19,6 +19,8 @@ import chromadb.test.property.invariants as invariants
 from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
 from chromadb.utils.batch_utils import create_batches
 
+MIN_RECORDS_BETWEEN_COMPACTION_WAITS = 10
+
 
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
 
@@ -147,6 +149,10 @@ def _test_add(
     initial_version = cast(int, coll.get_model()["version"])
 
     normalized_record_set = invariants.wrap_all(record_set)
+    should_wait_for_compaction = not NOT_CLUSTER_ONLY and should_compact
+    current_version = initial_version
+    records_since_compaction_wait = 0
+    has_waited_for_compaction = False
 
     # TODO: The type of add() is incorrect as it does not allow for metadatas
     # like [{"a": 1}, None, {"a": 3}]
@@ -158,15 +164,26 @@ def _test_add(
         documents=cast(List[str], record_set["documents"]),
     ):
         coll.add(*batch)
-    # Only wait for compaction if the size of the collection is
-    # some minimal size
+        if should_wait_for_compaction:
+            records_since_compaction_wait += len(batch[0])
+            if records_since_compaction_wait >= MIN_RECORDS_BETWEEN_COMPACTION_WAITS:
+                current_version = wait_for_version_increase(
+                    client, collection.name, current_version
+                )
+                records_since_compaction_wait = 0
+                has_waited_for_compaction = True
+
+    # test_add_miniscule still needs one forced wait, but only if we have not
+    # already waited after at least the minimum compaction-sized write.
     if (
         not NOT_CLUSTER_ONLY
-        and should_compact
-        and (len(normalized_record_set["ids"]) > 10 or always_compact)
+        and always_compact
+        and not has_waited_for_compaction
+        and len(normalized_record_set["ids"]) > 0
     ):
-        # Wait for the model to be updated
-        wait_for_version_increase(client, collection.name, initial_version)
+        current_version = wait_for_version_increase(
+            client, collection.name, current_version
+        )
 
     invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
     n_results = max(1, (len(normalized_record_set["ids"]) // 10))
