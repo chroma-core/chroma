@@ -143,20 +143,26 @@ impl<
             reopen_protection,
             cmek,
         };
-        match this.ensure_open().await {
-            Ok(_) => {}
-            Err(Error::UninitializedLog) => {
-                match Self::initialize(&this.new_manifest_publisher, &this.writer).await {
-                    Ok(_) | Err(Error::AlreadyInitialized) => {}
-                    Err(err) => return Err(err),
-                };
-                this.ensure_open().await?;
-            }
-            Err(err) => {
-                return Err(err);
+        let mut last_err = None;
+        for _ in 0..3 {
+            match this.ensure_open().await {
+                Ok(_) => return Ok(this),
+                Err(Error::UninitializedLog) => {
+                    last_err = Some(Error::UninitializedLog);
+                    match Self::initialize(&this.new_manifest_publisher, &this.writer).await {
+                        Ok(_) | Err(Error::AlreadyInitialized) => {}
+                        Err(err) => return Err(err),
+                    };
+                }
+                Err(Error::LogContentionRetry) => {
+                    last_err = Some(Error::LogContentionRetry);
+                }
+                Err(err) => {
+                    return Err(err);
+                }
             }
         }
-        Ok(this)
+        Err(last_err.unwrap_or(Error::LogContentionRetry))
     }
 
     /// Given a contiguous subset of data from some other location (preferably another log),
@@ -1145,11 +1151,14 @@ pub fn construct_parquet(
 mod tests {
     use super::*;
 
+    use std::collections::VecDeque;
+
     use arrow::array::Array;
     use bytes::Bytes;
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
     use crate::interfaces::checksum_parquet;
+    use crate::{Snapshot, SnapshotPointer};
 
     const TEST_EPOCH_MICROS: u64 = 1234567890123456;
 
@@ -1538,6 +1547,329 @@ mod tests {
         assert_eq!(
             setsum_from_writer, setsum_from_reader,
             "writer and reader setsums should match for absolute-offset files"
+        );
+    }
+
+    struct TestFragmentFactory;
+
+    struct TestFragmentPublisher;
+
+    struct TestFragmentConsumer;
+
+    #[async_trait::async_trait]
+    impl crate::FragmentManagerFactory for TestFragmentFactory {
+        type FragmentPointer = (FragmentSeqNo, LogPosition);
+        type Publisher = TestFragmentPublisher;
+        type Consumer = TestFragmentConsumer;
+
+        async fn make_publisher(&self) -> Result<Self::Publisher, Error> {
+            Ok(TestFragmentPublisher)
+        }
+
+        async fn make_consumer(&self) -> Result<Self::Consumer, Error> {
+            Ok(TestFragmentConsumer)
+        }
+
+        async fn preferred_storage(&self) -> chroma_storage::Storage {
+            unreachable!("preferred_storage is not used in this test")
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::FragmentPublisher for TestFragmentPublisher {
+        type FragmentPointer = (FragmentSeqNo, LogPosition);
+
+        async fn push_work(
+            &self,
+            _messages: Vec<Vec<u8>>,
+            _tx: tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
+            _span: Span,
+        ) {
+            unreachable!("push_work is not used in this test")
+        }
+
+        async fn take_work(
+            &self,
+            _manifest_manager: &(dyn crate::ManifestPublisher<Self::FragmentPointer> + Sync),
+        ) -> Result<
+            Option<(
+                Self::FragmentPointer,
+                Vec<(
+                    Vec<Vec<u8>>,
+                    tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
+                    Span,
+                )>,
+            )>,
+            Error,
+        > {
+            unreachable!("take_work is not used in this test")
+        }
+
+        async fn finish_write(&self) {
+            unreachable!("finish_write is not used in this test")
+        }
+
+        async fn wait_for_writable(&self) {
+            unreachable!("wait_for_writable is not used in this test")
+        }
+
+        fn until_next_time(&self) -> Duration {
+            unreachable!("until_next_time is not used in this test")
+        }
+
+        async fn upload_parquet(
+            &self,
+            _pointer: &Self::FragmentPointer,
+            _messages: Vec<Vec<u8>>,
+            _cmek: Option<Cmek>,
+            _epoch_micros: u64,
+        ) -> Result<crate::interfaces::UploadResult, Error> {
+            unreachable!("upload_parquet is not used in this test")
+        }
+
+        async fn read_json_file(
+            &self,
+            _path: &str,
+        ) -> Result<(Arc<Vec<u8>>, Option<chroma_storage::ETag>), Error> {
+            unreachable!("read_json_file is not used in this test")
+        }
+
+        async fn preferred_storage(&self) -> chroma_storage::Storage {
+            unreachable!("preferred_storage is not used in this test")
+        }
+
+        async fn preferred_prefix(&self) -> String {
+            unreachable!("preferred_prefix is not used in this test")
+        }
+
+        async fn storages(&self) -> Vec<crate::StorageWrapper> {
+            unreachable!("storages is not used in this test")
+        }
+
+        fn shutdown_prepare(&self) {}
+
+        fn shutdown_finish(&self) {}
+
+        async fn write_garbage(
+            &self,
+            _options: &crate::ThrottleOptions,
+            _existing: Option<&chroma_storage::ETag>,
+            _garbage: &Garbage,
+        ) -> Result<Option<chroma_storage::ETag>, Error> {
+            unreachable!("write_garbage is not used in this test")
+        }
+
+        async fn reset_garbage(
+            &self,
+            _options: &crate::ThrottleOptions,
+            _e_tag: &chroma_storage::ETag,
+        ) -> Result<(), Error> {
+            unreachable!("reset_garbage is not used in this test")
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::FragmentConsumer for TestFragmentConsumer {
+        async fn read_bytes(&self, _path: &str) -> Result<Arc<Vec<u8>>, Error> {
+            unreachable!("read_bytes is not used in this test")
+        }
+
+        async fn parse_parquet(
+            &self,
+            _parquet: &[u8],
+            _starting_log_position: LogPosition,
+        ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
+            unreachable!("parse_parquet is not used in this test")
+        }
+
+        async fn parse_parquet_fast(
+            &self,
+            _parquet: &[u8],
+            _starting_log_position: LogPosition,
+        ) -> Result<(Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
+            unreachable!("parse_parquet_fast is not used in this test")
+        }
+
+        async fn read_fragment(
+            &self,
+            _path: &str,
+            _fragment_first_log_position: LogPosition,
+        ) -> Result<Option<Fragment>, Error> {
+            unreachable!("read_fragment is not used in this test")
+        }
+    }
+
+    struct TestManifestFactory {
+        recover_results: Arc<Mutex<VecDeque<Result<(), Error>>>>,
+        init_calls: Arc<Mutex<usize>>,
+    }
+
+    impl TestManifestFactory {
+        fn new(recover_results: Vec<Result<(), Error>>) -> Self {
+            Self {
+                recover_results: Arc::new(Mutex::new(recover_results.into())),
+                init_calls: Arc::new(Mutex::new(0)),
+            }
+        }
+    }
+
+    struct TestManifestPublisher {
+        recover_results: Arc<Mutex<VecDeque<Result<(), Error>>>>,
+    }
+
+    struct TestManifestConsumer;
+
+    #[async_trait::async_trait]
+    impl crate::ManifestManagerFactory for TestManifestFactory {
+        type FragmentPointer = (FragmentSeqNo, LogPosition);
+        type Publisher = TestManifestPublisher;
+        type Consumer = TestManifestConsumer;
+
+        async fn init_manifest(&self, _manifest: &Manifest) -> Result<(), Error> {
+            *self.init_calls.lock().unwrap() += 1;
+            Ok(())
+        }
+
+        async fn open_publisher(&self) -> Result<Self::Publisher, Error> {
+            Ok(TestManifestPublisher {
+                recover_results: Arc::clone(&self.recover_results),
+            })
+        }
+
+        async fn make_consumer(&self) -> Result<Self::Consumer, Error> {
+            Ok(TestManifestConsumer)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::ManifestPublisher<(FragmentSeqNo, LogPosition)> for TestManifestPublisher {
+        async fn recover(&mut self) -> Result<(), Error> {
+            self.recover_results
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or(Ok(()))
+        }
+
+        async fn manifest_and_witness(&self) -> Result<ManifestAndWitness, Error> {
+            unreachable!("manifest_and_witness is not used in this test")
+        }
+
+        fn assign_timestamp(&self, _record_count: usize) -> Option<(FragmentSeqNo, LogPosition)> {
+            unreachable!("assign_timestamp is not used in this test")
+        }
+
+        async fn publish_fragment(
+            &self,
+            _pointer: &(FragmentSeqNo, LogPosition),
+            _path: &str,
+            _messages_len: u64,
+            _num_bytes: u64,
+            _setsum: Setsum,
+            _successful_regions: &[String],
+        ) -> Result<LogPosition, Error> {
+            unreachable!("publish_fragment is not used in this test")
+        }
+
+        async fn garbage_applies_cleanly(&self, _garbage: &Garbage) -> Result<bool, Error> {
+            unreachable!("garbage_applies_cleanly is not used in this test")
+        }
+
+        async fn apply_garbage(&self, _garbage: Garbage) -> Result<(), Error> {
+            unreachable!("apply_garbage is not used in this test")
+        }
+
+        async fn compute_garbage(
+            &self,
+            _options: &GarbageCollectionOptions,
+            _first_to_keep: LogPosition,
+        ) -> Result<Option<Garbage>, Error> {
+            unreachable!("compute_garbage is not used in this test")
+        }
+
+        async fn snapshot_load(
+            &self,
+            _pointer: &SnapshotPointer,
+        ) -> Result<Option<Snapshot>, Error> {
+            unreachable!("snapshot_load is not used in this test")
+        }
+
+        async fn snapshot_install(&self, _snapshot: &Snapshot) -> Result<SnapshotPointer, Error> {
+            unreachable!("snapshot_install is not used in this test")
+        }
+
+        async fn manifest_head(&self, _witness: &crate::ManifestWitness) -> Result<bool, Error> {
+            unreachable!("manifest_head is not used in this test")
+        }
+
+        async fn manifest_load(&self) -> Result<Option<(Manifest, crate::ManifestWitness)>, Error> {
+            unreachable!("manifest_load is not used in this test")
+        }
+
+        fn shutdown(&self) {}
+
+        async fn destroy(&self) -> Result<(), Error> {
+            unreachable!("destroy is not used in this test")
+        }
+
+        async fn load_intrinsic_cursor(&self) -> Result<Option<LogPosition>, Error> {
+            unreachable!("load_intrinsic_cursor is not used in this test")
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::ManifestConsumer<(FragmentSeqNo, LogPosition)> for TestManifestConsumer {
+        async fn snapshot_load(
+            &self,
+            _pointer: &SnapshotPointer,
+        ) -> Result<Option<Snapshot>, Error> {
+            unreachable!("snapshot_load is not used in this test")
+        }
+
+        async fn manifest_head(&self, _witness: &crate::ManifestWitness) -> Result<bool, Error> {
+            unreachable!("manifest_head is not used in this test")
+        }
+
+        async fn manifest_load(&self) -> Result<Option<(Manifest, crate::ManifestWitness)>, Error> {
+            unreachable!("manifest_load is not used in this test")
+        }
+
+        async fn update_intrinsic_cursor(
+            &self,
+            _position: LogPosition,
+            _epoch_us: u64,
+            _writer: &str,
+            _allow_rollback: bool,
+        ) -> Result<Option<crate::CursorWitness>, Error> {
+            unreachable!("update_intrinsic_cursor is not used in this test")
+        }
+
+        async fn load_intrinsic_cursor(&self) -> Result<Option<LogPosition>, Error> {
+            unreachable!("load_intrinsic_cursor is not used in this test")
+        }
+    }
+
+    #[tokio::test]
+    async fn open_or_initialize_returns_last_retryable_error() {
+        let manifest_factory = TestManifestFactory::new(vec![
+            Err(Error::UninitializedLog),
+            Err(Error::UninitializedLog),
+            Err(Error::UninitializedLog),
+        ]);
+
+        let err = LogWriter::open_or_initialize(
+            LogWriterOptions::default(),
+            "test-writer",
+            TestFragmentFactory,
+            manifest_factory,
+            None,
+        )
+        .await
+        .expect_err("open_or_initialize should return the last retryable error");
+
+        assert!(
+            matches!(err, Error::UninitializedLog),
+            "expected UninitializedLog, got {err:?}"
         );
     }
 }
