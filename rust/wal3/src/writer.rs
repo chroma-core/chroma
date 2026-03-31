@@ -143,20 +143,22 @@ impl<
             reopen_protection,
             cmek,
         };
-        match this.ensure_open().await {
-            Ok(_) => {}
-            Err(Error::UninitializedLog) => {
-                match Self::initialize(&this.new_manifest_publisher, &this.writer).await {
-                    Ok(_) | Err(Error::AlreadyInitialized) => {}
-                    Err(err) => return Err(err),
-                };
-                this.ensure_open().await?;
-            }
-            Err(err) => {
-                return Err(err);
+        for _ in 0..3 {
+            match this.ensure_open().await {
+                Ok(_) => return Ok(this),
+                Err(Error::UninitializedLog) => {
+                    match Self::initialize(&this.new_manifest_publisher, &this.writer).await {
+                        Ok(_) | Err(Error::AlreadyInitialized) => {}
+                        Err(err) => return Err(err),
+                    };
+                }
+                Err(Error::LogContentionRetry) => continue,
+                Err(err) => {
+                    return Err(err);
+                }
             }
         }
-        Ok(this)
+        Err(Error::LogContentionRetry)
     }
 
     /// Given a contiguous subset of data from some other location (preferably another log),
