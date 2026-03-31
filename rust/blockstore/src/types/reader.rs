@@ -1,5 +1,6 @@
 use super::{BlockfileError, Key, Value};
 use crate::arrow::blockfile::ArrowBlockfileReader;
+use crate::arrow::prefix_view::PrefixView;
 use crate::arrow::types::{ArrowReadableKey, ArrowReadableValue};
 use crate::key::{InvalidKeyConversion, KeyWrapper};
 use crate::memory::reader_writer::MemoryBlockfileReader;
@@ -47,6 +48,24 @@ impl<
         match self {
             BlockfileReader::ArrowBlockfileReader(reader) => reader.contains(prefix, key).await,
             BlockfileReader::MemoryBlockfileReader(reader) => Ok(reader.contains(prefix, key)),
+        }
+    }
+
+    pub async fn get_gte(
+        &'referred_data self,
+        prefix: &str,
+        min_key: K,
+    ) -> Result<Option<(K, V)>, Box<dyn ChromaError>> {
+        match self {
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                reader.get_gte(prefix, min_key).await
+            }
+            BlockfileReader::MemoryBlockfileReader(reader) => {
+                Ok(reader
+                    .get_range_iter(prefix..=prefix, min_key..)?
+                    .map(|(_, k, v)| (k, v))
+                    .next())
+            }
         }
     }
 
@@ -143,6 +162,20 @@ impl<
             BlockfileReader::MemoryBlockfileReader(_) => (),
             BlockfileReader::ArrowBlockfileReader(reader) => {
                 reader.load_blocks_for_keys(keys).await
+            }
+        }
+    }
+
+    pub async fn open_prefix_view(
+        &'referred_data self,
+        prefix: &str,
+    ) -> Result<PrefixView<'referred_data>, Box<dyn ChromaError>> {
+        match self {
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                reader.open_prefix_view(prefix).await
+            }
+            BlockfileReader::MemoryBlockfileReader(_) => {
+                Err(Box::new(BlockfileError::BlockNotFound) as Box<dyn ChromaError>)
             }
         }
     }

@@ -25,13 +25,14 @@ impl ChromaError for SparseReaderError {
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct CursorHead {
     offset: u32,
     body_index: u32,
 }
 
 struct CursorBody<B, D> {
+    encoded_dimension_id: String,
     block_iterator: B,
     block_next_offset: u32,
     block_upper_bound: f32,
@@ -162,12 +163,15 @@ impl<'me> SparseReader<'me> {
         .await;
 
         let dimension_count = collected_query.len();
-        let all_dimension_max = self.get_dimension_max().await?;
 
         let mut heads = Vec::with_capacity(dimension_count);
         let mut bodies = Vec::with_capacity(dimension_count);
         for (dimension_id, encoded_dimension_id, query) in &collected_query {
-            let Some(dimension_max) = all_dimension_max.get(dimension_id) else {
+            let Some(dimension_max) = self
+                .max_reader
+                .get(DIMENSION_PREFIX, *dimension_id)
+                .await?
+            else {
                 continue;
             };
 
@@ -187,8 +191,9 @@ impl<'me> SparseReader<'me> {
             let (block_next_offset, block_max) = block_iterator
                 .by_ref()
                 .find(|&(block_next_offset, _)| offset < block_next_offset)
-                .unwrap_or((offset + 1, *dimension_max));
+                .unwrap_or((offset + 1, dimension_max));
             let body = CursorBody {
+                encoded_dimension_id: encoded_dimension_id.clone(),
                 block_iterator,
                 block_next_offset,
                 block_upper_bound: query * block_max,
@@ -208,6 +213,8 @@ impl<'me> SparseReader<'me> {
         };
         let mut threshold = f32::MIN;
         let mut top_scores = BinaryHeap::with_capacity(k as usize);
+        #[cfg(feature = "wand_opt")]
+        let mut merge_buf = Vec::with_capacity(heads.len());
 
         loop {
             let mut accumulated_dimension_upper_bound = 0.0;
@@ -286,6 +293,7 @@ impl<'me> SparseReader<'me> {
             {
                 let head = &mut heads[head_index];
                 let body = &mut bodies[head.body_index as usize];
+
                 let Some((offset, value)) = body
                     .dimension_iterator
                     .by_ref()
@@ -313,6 +321,31 @@ impl<'me> SparseReader<'me> {
                 head_index += 1;
             }
 
+            #[cfg(feature = "wand_opt")]
+            if head_index > 0 {
+                heads[..head_index].sort_unstable();
+                let needs_merge = head_index < heads.len()
+                    && heads[head_index - 1] > heads[head_index];
+                if needs_merge {
+                    merge_buf.clear();
+                    let mut i = 0;
+                    let mut j = head_index;
+                    while i < head_index && j < heads.len() {
+                        if heads[i] <= heads[j] {
+                            merge_buf.push(heads[i]);
+                            i += 1;
+                        } else {
+                            merge_buf.push(heads[j]);
+                            j += 1;
+                        }
+                    }
+                    merge_buf.extend_from_slice(&heads[i..head_index]);
+                    merge_buf.extend_from_slice(&heads[j..]);
+                    std::mem::swap(&mut heads, &mut merge_buf);
+                }
+            }
+
+            #[cfg(not(feature = "wand_opt"))]
             heads.sort_unstable();
         }
 

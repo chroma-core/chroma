@@ -1,4 +1,5 @@
 use super::migrations::{apply_migrations_to_blockfile, MigrationError};
+use super::prefix_view::{PrefixSegment, PrefixView};
 use super::provider::{GetError, RootManager};
 use super::root::{RootReader, RootWriter, Version};
 use super::{block::delta::UnorderedBlockDelta, provider::BlockManager};
@@ -577,6 +578,52 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         }
     }
 
+    /// Find the first (key, value) where key >= min_key within the given prefix.
+    /// Uses the sparse index to find the right block — O(log n) in the sparse
+    /// index + O(log m) binary search within the block. Only fetches the 1-2
+    /// blocks actually needed (not the entire posting list).
+    pub(crate) async fn get_gte(
+        &'me self,
+        prefix: &str,
+        min_key: K,
+    ) -> Result<Option<(K, V)>, Box<dyn ChromaError>> {
+        let search_key = CompositeKey::new(prefix.to_string(), min_key.clone());
+        let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
+
+        match self
+            .get_block(target_block_id, StorageRequestPriority::P0)
+            .await
+        {
+            Ok(Some(block)) => {
+                if let Some(result) = block.get_gte::<K, V>(prefix, min_key.clone()) {
+                    return Ok(Some(result));
+                }
+            }
+            Ok(None) => {
+                return Err(
+                    Box::new(ArrowBlockfileError::BlockNotFound) as Box<dyn ChromaError>
+                )
+            }
+            Err(e) => return Err(Box::new(e) as Box<dyn ChromaError>),
+        }
+
+        if let Some(next_block_id) = self.root.sparse_index.get_next_block_id(&search_key) {
+            match self
+                .get_block(next_block_id, StorageRequestPriority::P0)
+                .await
+            {
+                Ok(Some(block)) => {
+                    if let Some(result) = block.get_gte::<K, V>(prefix, min_key) {
+                        return Ok(Some(result));
+                    }
+                }
+                Ok(None) | Err(_) => {}
+            }
+        }
+
+        Ok(None)
+    }
+
     /// Get all key-value pairs for a specific prefix
     /// Optimized for retrieving all entries under a single prefix
     pub(crate) async fn get_prefix(
@@ -611,6 +658,41 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let block_iters = try_join_all(block_futures).await?;
 
         Ok(block_iters.into_iter().flatten())
+    }
+
+    /// Resolve all Arrow blocks for a prefix into a `PrefixView`.
+    /// This performs the sparse-index lookup and block loading once; subsequent
+    /// lookups via `PrefixView::get()` / `get_raw_binary()` are cheap.
+    pub(crate) async fn open_prefix_view(
+        &'me self,
+        prefix: &str,
+    ) -> Result<PrefixView<'me>, Box<dyn ChromaError>> {
+        let block_ids = self.root.sparse_index.get_block_ids_range(prefix..=prefix);
+
+        if block_ids.is_empty() {
+            return Ok(PrefixView::new(vec![]));
+        }
+
+        self.load_blocks(&block_ids).await;
+
+        let mut segments = Vec::with_capacity(block_ids.len());
+        for block_id in block_ids {
+            match self
+                .get_block(block_id, StorageRequestPriority::P0)
+                .await
+            {
+                Ok(Some(block)) => {
+                    let (offset, length) = block.prefix_range::<K>(prefix);
+                    if length > 0 {
+                        segments.push(PrefixSegment { block, offset, length });
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => return Err(Box::new(e)),
+            }
+        }
+
+        Ok(PrefixView::new(segments))
     }
 
     // Returns all Arrow records in the specified range.

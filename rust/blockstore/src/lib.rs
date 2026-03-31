@@ -17,6 +17,7 @@ pub use types::*;
 
 // Re-export RootManager for external use
 pub use arrow::provider::RootManager;
+pub use arrow::prefix_view::PrefixView;
 
 pub fn test_arrow_blockfile_provider(max_block_size_bytes: usize) -> (TempDir, BlockfileProvider) {
     let (temp_dir, storage) = test_storage();

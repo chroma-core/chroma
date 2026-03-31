@@ -6,6 +6,7 @@ edition = "2021"
 [features]
 default = []
 usearch = ["dep:usearch"]
+wand_opt = []
 
 [lib]
 path = "src/lib.rs"
