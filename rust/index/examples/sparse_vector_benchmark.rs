@@ -752,7 +752,7 @@ fn verify_and_compute_recall(
     reference: &[SearchResult],
     results: &[SearchResult],
 ) -> anyhow::Result<f64> {
-    println!("\n🔍 Verifying WAND results and computing recall...");
+    println!("\n🔍 Verifying results and computing recall...");
 
     if reference.is_empty() {
         return Ok(if results.is_empty() { 1.0 } else { 0.0 });
@@ -1167,6 +1167,13 @@ async fn main() -> anyhow::Result<()> {
                 ms_results.iter().map(|r| r.search_time_ms).sum::<f64>() / ms_results.len() as f64;
             let speedup = avg_brute / avg_ms;
 
+            let recall = verify_and_compute_recall(
+                &documents,
+                &queries,
+                &brute_force_results,
+                &ms_results,
+            )?;
+
             println!("\n📨 BENCHMARK RESULTS (BlockMaxMaxScore)");
             println!("{}", "=".repeat(60));
             println!("🎯 Performance Comparison:");
@@ -1174,6 +1181,9 @@ async fn main() -> anyhow::Result<()> {
             println!("  {}", "-".repeat(42));
             println!("  Brute Force         {avg_brute:<12.2} 1.00x");
             println!("  BlockMaxMaxScore    {avg_ms:<12.2} {speedup:.2}x");
+            println!();
+            println!("🔍 Quality Metrics:");
+            println!("  Recall@{}: {:.2}%", args.top_k, recall * 100.0);
             println!();
             println!("📊 Dataset Statistics:");
             println!("  Documents processed: {}", documents.len());

@@ -1,4 +1,4 @@
-use std::{collections::{BinaryHeap, HashMap}, sync::Arc};
+use std::{collections::BinaryHeap, sync::Arc};
 
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
@@ -660,41 +660,89 @@ impl<'me> BlockSparseReader<'me> {
         let mut essential_idx = 0usize;
         let full_mask = SignedRoaringBitmap::full();
 
-        // Per-window accumulator: doc_id → partial score
-        let mut accum: HashMap<u32, f32> = HashMap::with_capacity(1024);
+        // Flat candidate buffer, reused across windows
+        let mut candidates: Vec<(u32, f32)> = Vec::with_capacity(2048);
         let mut window_start = 0u32;
+        // Adaptive window sizing: grow when windows are empty
+        let mut min_window_span = 0u32;
 
         loop {
             // Window end = min of essential terms' current block max_offsets
-            // (only for terms that still have entries)
-            let window_end = terms[essential_idx..]
+            let natural_end = terms[essential_idx..]
                 .iter()
                 .filter(|t| t.cursor.current().is_some())
                 .filter_map(|t| t.cursor.current_block_end())
                 .min();
 
-            let Some(window_end) = window_end else {
+            let Some(natural_end) = natural_end else {
                 break;
             };
 
-            accum.clear();
+            let window_end = if min_window_span > 0 {
+                natural_end.max(window_start.saturating_add(min_window_span))
+            } else {
+                natural_end
+            };
 
-            // ── Phase 1: essential terms populate accumulator ──
+            candidates.clear();
+
+            // ── Phase 1: drain essential terms into sorted candidate vec ──
             for term in terms[essential_idx..].iter_mut() {
                 while let Some((doc, val)) = term.cursor.current() {
                     if doc > window_end {
                         break;
                     }
                     if passes_mask(doc, &mask) {
-                        *accum.entry(doc).or_insert(0.0) += term.query_weight * val;
+                        candidates.push((doc, term.query_weight * val));
                     }
                     term.cursor.next();
                 }
             }
 
-            // ── Phase 2: non-essential terms merge-join with accumulator ──
-            if !accum.is_empty() {
-                for i in 0..essential_idx {
+            if candidates.is_empty() {
+                min_window_span = min_window_span
+                    .saturating_mul(2)
+                    .max(256)
+                    .min(8192);
+                window_start = window_end.saturating_add(1);
+                continue;
+            }
+            min_window_span = 0;
+
+            // Sort by doc_id, then merge-deduplicate summing scores
+            candidates.sort_unstable_by_key(|&(doc, _)| doc);
+            let mut write = 0;
+            for read in 1..candidates.len() {
+                if candidates[read].0 == candidates[write].0 {
+                    candidates[write].1 += candidates[read].1;
+                } else {
+                    write += 1;
+                    candidates[write] = candidates[read];
+                }
+            }
+            candidates.truncate(write + 1);
+
+            // ── Phase 2: non-essential terms merge-join with candidates ──
+            if essential_idx > 0 && !candidates.is_empty() {
+                // Running suffix sum: starts as sum of ALL non-essential upper
+                // bounds, decremented after each term is processed.
+                let mut remaining_budget: f32 = (0..essential_idx)
+                    .map(|j| {
+                        terms[j].query_weight
+                            * terms[j].cursor.block_upper_bound(window_start)
+                    })
+                    .sum();
+
+                // Process non-essential terms in reverse order (highest max_score first)
+                for i in (0..essential_idx).rev() {
+                    if heap.len() >= k_usize {
+                        let cutoff = threshold - remaining_budget;
+                        candidates.retain(|&(_, score)| score > cutoff);
+                    }
+                    if candidates.is_empty() {
+                        break;
+                    }
+
                     if terms[i].cursor.block_upper_bound(window_start) == 0.0 {
                         continue;
                     }
@@ -708,20 +756,36 @@ impl<'me> BlockSparseReader<'me> {
                         terms[i].cursor.advance(window_start, &full_mask);
                     }
 
-                    while let Some((doc, val)) = terms[i].cursor.current() {
+                    // Merge-join: two-pointer scan over sorted candidates
+                    // and sorted cursor entries
+                    let weight = terms[i].query_weight;
+                    let mut ci = 0;
+                    while ci < candidates.len() {
+                        let Some((doc, val)) = terms[i].cursor.current() else {
+                            break;
+                        };
                         if doc > window_end {
                             break;
                         }
-                        if let Some(score) = accum.get_mut(&doc) {
-                            *score += terms[i].query_weight * val;
+                        let cand_doc = candidates[ci].0;
+                        if doc < cand_doc {
+                            terms[i].cursor.next();
+                        } else if doc > cand_doc {
+                            ci += 1;
+                        } else {
+                            candidates[ci].1 += weight * val;
+                            terms[i].cursor.next();
+                            ci += 1;
                         }
-                        terms[i].cursor.next();
                     }
+
+                    remaining_budget -= terms[i].query_weight
+                        * terms[i].cursor.block_upper_bound(window_start);
                 }
             }
 
-            // ── Phase 3: extract candidates from accumulator ──
-            for (&doc, &score) in &accum {
+            // ── Phase 3: extract candidates into heap ──
+            for &(doc, score) in &candidates {
                 if score > threshold || heap.len() < k_usize {
                     heap.push(Score {
                         score,
