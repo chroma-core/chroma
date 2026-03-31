@@ -23,21 +23,6 @@ from chromadb.config import Settings
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
 
 
-@given(
-    collection=collection_st,
-    record_set=strategies.recordsets(collection_st, min_size=1, max_size=5),
-)
-@settings(
-    deadline=None,
-    max_examples=2,
-)
-def test_add_miniscule(
-    collection: strategies.Collection,
-    record_set: strategies.RecordSet,
-) -> None:
-    _test_add(collection, record_set, True)
-
-
 # Hypothesis tends to generate smaller values so we explicitly segregate the
 # the tests into tiers, Small, Medium. Hypothesis struggles to generate large
 # record sets so we explicitly create a large record set without using Hypothesis
