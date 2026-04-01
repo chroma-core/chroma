@@ -359,6 +359,16 @@ impl SparseIndexReader {
         get_target_block(search_key, forward).id
     }
 
+    /// Get the block id that follows the block containing `search_key`.
+    pub(super) fn get_next_block_id(&self, search_key: &CompositeKey) -> Option<Uuid> {
+        let forward = &self.data.forward;
+        let delim = SparseIndexDelimiter::Key(search_key.clone());
+        forward
+            .range((Bound::Excluded(delim), Bound::Unbounded))
+            .next()
+            .map(|(_, v)| v.id)
+    }
+
     /// Get all the block ids that contain keys in the given input search keys
     pub(super) fn get_all_target_block_ids(&self, mut search_keys: Vec<CompositeKey>) -> Vec<Uuid> {
         // Sort so that we can search in one iteration.

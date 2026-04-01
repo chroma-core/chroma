@@ -1,5 +1,6 @@
 pub(crate) mod block;
 pub(crate) mod blockfile;
+pub mod prefix_view;
 #[cfg(test)]
 mod concurrency_test;
 pub mod config;

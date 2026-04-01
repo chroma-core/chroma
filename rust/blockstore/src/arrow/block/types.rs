@@ -288,6 +288,19 @@ impl Block {
         ===== Block Queries =====
     */
 
+    /// Returns the (offset, length) of rows matching a prefix within this block.
+    pub(crate) fn prefix_range<'me, K: ArrowReadableKey<'me>>(
+        &'me self,
+        prefix: &str,
+    ) -> (usize, usize) {
+        let offset = self.find_smallest_index_of_prefix::<K>(prefix);
+        if offset >= self.len() {
+            return (0, 0);
+        }
+        let cap = self.find_smallest_index_of_next_prefix::<K>(prefix);
+        (offset, cap - offset)
+    }
+
     /// Get all key-value pairs for a specific prefix in the block
     /// Returns an iterator of (key, value) pairs for better performance when collecting all values
     pub fn get_prefix<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
@@ -310,6 +323,38 @@ impl Block {
 
         // Zip and collect
         keys.into_iter().zip(values)
+    }
+
+    /// Find the first (key, value) where key >= min_key within the given prefix.
+    pub fn get_gte<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+        &'me self,
+        prefix: &str,
+        min_key: K,
+    ) -> Option<(K, V)> {
+        let target_idx = match self.binary_search_by::<K, _>(|(p, k)| {
+            p.cmp(prefix).then_with(|| {
+                k.partial_cmp(&min_key)
+                    .expect("Array values should be comparable.")
+            })
+        }) {
+            Ok(idx) => idx,
+            Err(idx) => idx,
+        };
+        if target_idx >= self.len() {
+            return None;
+        }
+        let prefix_array = self
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        if prefix_array.value(target_idx) != prefix {
+            return None;
+        }
+        let key = K::get(self.data.column(1), target_idx);
+        let value = V::get(self.data.column(2), target_idx);
+        Some((key, value))
     }
 
     /// Get the value for a given key in the block

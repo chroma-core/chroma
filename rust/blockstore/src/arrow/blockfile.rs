@@ -1,4 +1,5 @@
 use super::migrations::{apply_migrations_to_blockfile, MigrationError};
+use super::prefix_view::{PrefixSegment, PrefixView};
 use super::provider::{GetError, RootManager};
 use super::root::{RootReader, RootWriter, Version};
 use super::{block::delta::UnorderedBlockDelta, provider::BlockManager};
@@ -32,7 +33,7 @@ pub struct ArrowUnorderedBlockfileWriter {
     block_manager: BlockManager,
     root_manager: RootManager,
     block_deltas: Arc<Mutex<HashMap<Uuid, UnorderedBlockDelta>>>,
-    root: RootWriter,
+    pub(crate) root: RootWriter,
     id: Uuid,
     deltas_mutex: Arc<AysncPartitionedMutex<Uuid>>,
     cmek: Option<Cmek>,
@@ -451,7 +452,7 @@ pub struct ArrowBlockfileReader<
     V: ArrowReadableValue<'me>,
 > {
     block_manager: BlockManager,
-    pub(super) root: RootReader,
+    pub(crate) root: RootReader,
     loaded_blocks: Arc<RwLock<HashMap<Uuid, Box<Block>>>>,
     marker: std::marker::PhantomData<(K, V, &'me ())>,
 }
@@ -557,6 +558,67 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         self.load_blocks(&target_block_ids).await;
     }
 
+    /// Sync, cache-only block lookup. Returns a stable reference to a block
+    /// that was previously loaded via `get_block`, `load_blocks`, or
+    /// `load_blocks_for_keys`. Returns `None` if the block is not cached.
+    ///
+    /// Safety: same as `get_block` — `Box<Block>` entries in `loaded_blocks`
+    /// are heap-allocated, insert-only, and never mutated or removed.
+    pub(crate) fn get_cached_block(&self, block_id: Uuid) -> Option<&Block> {
+        self.loaded_blocks
+            .read()
+            .get(&block_id)
+            .map(|b| unsafe { transmute::<&Block, &Block>(&**b) })
+    }
+
+    /// Zero-copy extraction of raw binary bytes for a single `(prefix, key)`
+    /// from an already-cached Arrow block. Returns `None` if the block is
+    /// not cached or the key is not found.
+    ///
+    /// This is the sync building block for lazy PostingCursor: after
+    /// `load_blocks_for_keys` has warmed the cache, this extracts `&[u8]`
+    /// slices without any async I/O or copies.
+    pub(crate) fn get_raw_binary_from_cache(&'me self, prefix: &str, key: K) -> Option<&'me [u8]> {
+        let search_key = CompositeKey::new(prefix.to_string(), key.clone());
+        let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
+        let block = self.get_cached_block(target_block_id)?;
+        let (offset, length) = block.prefix_range::<K>(prefix);
+        if length == 0 {
+            return None;
+        }
+        let key_col = block.data.column(1);
+        let mut lo = offset;
+        let mut hi = offset + length;
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            let mid_key = K::get(key_col, mid);
+            match mid_key.partial_cmp(&key) {
+                Some(std::cmp::Ordering::Less) => lo = mid + 1,
+                Some(std::cmp::Ordering::Greater) => hi = mid,
+                Some(std::cmp::Ordering::Equal) => {
+                    let arr = block
+                        .data
+                        .column(2)
+                        .as_any()
+                        .downcast_ref::<arrow::array::BinaryArray>()
+                        .expect("value column should be BinaryArray for get_raw_binary_from_cache");
+                    return Some(arr.value(mid));
+                }
+                None => lo = mid + 1,
+            }
+        }
+        None
+    }
+
+    /// Return the number of physical Arrow blocks that overlap the given
+    /// prefix. Used to decide between eager and lazy cursor opening.
+    pub(crate) fn count_blocks_for_prefix(&self, prefix: &str) -> usize {
+        self.root
+            .sparse_index
+            .get_block_ids_range(prefix..=prefix)
+            .len()
+    }
+
     pub(crate) async fn get(
         &'me self,
         prefix: &str,
@@ -575,6 +637,52 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             }
             Err(e) => Err(Box::new(e)),
         }
+    }
+
+    /// Find the first (key, value) where key >= min_key within the given prefix.
+    /// Uses the sparse index to find the right block — O(log n) in the sparse
+    /// index + O(log m) binary search within the block. Only fetches the 1-2
+    /// blocks actually needed (not the entire posting list).
+    pub(crate) async fn get_gte(
+        &'me self,
+        prefix: &str,
+        min_key: K,
+    ) -> Result<Option<(K, V)>, Box<dyn ChromaError>> {
+        let search_key = CompositeKey::new(prefix.to_string(), min_key.clone());
+        let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
+
+        match self
+            .get_block(target_block_id, StorageRequestPriority::P0)
+            .await
+        {
+            Ok(Some(block)) => {
+                if let Some(result) = block.get_gte::<K, V>(prefix, min_key.clone()) {
+                    return Ok(Some(result));
+                }
+            }
+            Ok(None) => {
+                return Err(
+                    Box::new(ArrowBlockfileError::BlockNotFound) as Box<dyn ChromaError>
+                )
+            }
+            Err(e) => return Err(Box::new(e) as Box<dyn ChromaError>),
+        }
+
+        if let Some(next_block_id) = self.root.sparse_index.get_next_block_id(&search_key) {
+            match self
+                .get_block(next_block_id, StorageRequestPriority::P0)
+                .await
+            {
+                Ok(Some(block)) => {
+                    if let Some(result) = block.get_gte::<K, V>(prefix, min_key) {
+                        return Ok(Some(result));
+                    }
+                }
+                Ok(None) | Err(_) => {}
+            }
+        }
+
+        Ok(None)
     }
 
     /// Get all key-value pairs for a specific prefix
@@ -611,6 +719,41 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let block_iters = try_join_all(block_futures).await?;
 
         Ok(block_iters.into_iter().flatten())
+    }
+
+    /// Resolve all Arrow blocks for a prefix into a `PrefixView`.
+    /// This performs the sparse-index lookup and block loading once; subsequent
+    /// lookups via `PrefixView::get()` / `get_raw_binary()` are cheap.
+    pub(crate) async fn open_prefix_view(
+        &'me self,
+        prefix: &str,
+    ) -> Result<PrefixView<'me>, Box<dyn ChromaError>> {
+        let block_ids = self.root.sparse_index.get_block_ids_range(prefix..=prefix);
+
+        if block_ids.is_empty() {
+            return Ok(PrefixView::new(vec![]));
+        }
+
+        self.load_blocks(&block_ids).await;
+
+        let mut segments = Vec::with_capacity(block_ids.len());
+        for block_id in block_ids {
+            match self
+                .get_block(block_id, StorageRequestPriority::P0)
+                .await
+            {
+                Ok(Some(block)) => {
+                    let (offset, length) = block.prefix_range::<K>(prefix);
+                    if length > 0 {
+                        segments.push(PrefixSegment { block, offset, length });
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => return Err(Box::new(e)),
+            }
+        }
+
+        Ok(PrefixView::new(segments))
     }
 
     // Returns all Arrow records in the specified range.

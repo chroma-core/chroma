@@ -43,7 +43,7 @@ struct Inner {
 pub struct ArrowOrderedBlockfileWriter {
     block_manager: BlockManager,
     root_manager: RootManager,
-    root: RootWriter,
+    pub(crate) root: RootWriter,
     inner: Arc<Mutex<Inner>>,
     id: Uuid,
     cmek: Option<Cmek>,

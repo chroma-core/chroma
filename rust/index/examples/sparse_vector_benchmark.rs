@@ -53,10 +53,15 @@
 //! - `-f, --filter-percentage`: Randomly exclude a percentage of documents (0-100) to test filtering
 
 use chroma_benchmark::datasets::wikipedia_splade::{SparseDocument, SparseQuery, WikipediaSplade};
+#[allow(unused_imports)]
+use sprs;
 use chroma_blockstore::arrow::provider::BlockfileReaderOptions;
 use chroma_blockstore::test_arrow_blockfile_provider;
 use chroma_blockstore::{provider::BlockfileProvider, BlockfileWriterOptions};
 use chroma_index::sparse::{
+    maxscore::{
+        BlockSparseReader, BlockSparseWriter, SparsePostingBlock, SPARSE_POSTING_BLOCK_SIZE_BYTES,
+    },
     reader::{Score, SparseReader},
     writer::SparseWriter,
 };
@@ -109,6 +114,78 @@ struct Args {
     /// Filter percentage: randomly exclude this percentage of documents (0-100)
     #[arg(short = 'f', long, default_value_t = 0)]
     filter_percentage: u32,
+
+    /// Use BlockMaxMaxScore instead of WAND
+    #[arg(long)]
+    block_maxscore: bool,
+
+    /// Max query terms: truncate each query to at most this many non-zero entries
+    #[arg(long)]
+    max_terms: Option<usize>,
+
+    /// Sweep query terms: run both algorithms at 5,10,15,...,max_terms and print a table
+    #[arg(long)]
+    sweep_terms: bool,
+
+    /// Batch size for commit/flush during indexing (default: 65536)
+    #[arg(long, default_value_t = 65536)]
+    batch_size: usize,
+
+    /// Posting block size for BlockMaxMaxScore index (entries per block)
+    #[arg(long, default_value_t = 1024)]
+    ms_block_size: u32,
+}
+
+fn dir_size_bytes(path: &std::path::Path) -> u64 {
+    let mut total = 0u64;
+    if let Ok(entries) = std::fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let meta = entry.metadata().unwrap();
+            if meta.is_dir() {
+                total += dir_size_bytes(&entry.path());
+            } else {
+                total += meta.len();
+            }
+        }
+    }
+    total
+}
+
+fn human_bytes(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.2} MB", bytes as f64 / (1024.0 * 1024.0))
+    }
+}
+
+fn truncate_queries(queries: &[SparseQuery], max_terms: usize) -> Vec<SparseQuery> {
+    queries
+        .iter()
+        .map(|q| {
+            let nnz = q.sparse_vector.nnz();
+            if nnz <= max_terms {
+                return q.clone();
+            }
+            let mut pairs: Vec<(usize, f32)> = q
+                .sparse_vector
+                .iter()
+                .map(|(idx, &val)| (idx, val))
+                .collect();
+            pairs.sort_by(|a, b| b.1.total_cmp(&a.1));
+            pairs.truncate(max_terms);
+            pairs.sort_by_key(|(idx, _)| *idx);
+            let (indices, values): (Vec<usize>, Vec<f32>) = pairs.into_iter().unzip();
+            let sv = sprs::CsVec::new(q.sparse_vector.dim(), indices, values);
+            SparseQuery {
+                query_id: q.query_id.clone(),
+                text: q.text.clone(),
+                sparse_vector: sv,
+            }
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -184,6 +261,7 @@ async fn build_sparse_index(
     documents: &[SparseDocument],
     block_size: u32,
     sort_by_url: bool,
+    batch_size_override: usize,
 ) -> anyhow::Result<(TempDir, BlockfileProvider, Uuid, Uuid)> {
     println!("🏗️ Building sparse index...");
     let start = Instant::now();
@@ -197,8 +275,7 @@ async fn build_sparse_index(
 
     let (temp_dir, provider) = test_arrow_blockfile_provider(8 * 1024 * 1024);
 
-    // Process documents in batches with write-commit-flush loop
-    let batch_size = 65536;
+    let batch_size = batch_size_override;
     let num_chunks = sorted_documents.len().div_ceil(batch_size);
 
     let pb = ProgressBar::new(sorted_documents.len() as u64);
@@ -332,10 +409,12 @@ async fn build_sparse_index(
     pb.finish_with_message("✅ Index built");
 
     let elapsed = start.elapsed();
+    let storage_bytes = dir_size_bytes(temp_dir.path());
     println!("⏱️ Index build time: {:.2} s", elapsed.as_secs_f64());
     println!("  Documents indexed: {}", sorted_documents.len());
     println!("  Chunks processed: {num_chunks}");
     println!("  Documents per chunk: {batch_size}");
+    println!("  Storage size: {} ({storage_bytes} bytes)", human_bytes(storage_bytes));
 
     Ok((
         temp_dir,
@@ -454,13 +533,249 @@ async fn search_with_wand(
     Ok(results)
 }
 
+// ── BlockMaxMaxScore index build + search ───────────────────────────
+
+const BLOCK_MAXSCORE_PREFIX: &str = "block_maxscore";
+
+async fn build_block_maxscore_index(
+    documents: &[SparseDocument],
+    sort_by_url: bool,
+    batch_size_override: usize,
+    ms_block_size: u32,
+) -> anyhow::Result<(TempDir, BlockfileProvider, Uuid)> {
+    println!("🏗️ Building BlockMaxMaxScore index...");
+    let start = Instant::now();
+
+    let mut sorted_documents = documents.to_vec();
+    if sort_by_url {
+        println!("🔗 Sorting documents by URL for better cache locality...");
+        sorted_documents.sort_by(|a, b| a.url.cmp(&b.url));
+    }
+
+    let (temp_dir, provider) = test_arrow_blockfile_provider(8 * 1024 * 1024);
+
+    let batch_size = batch_size_override;
+    let num_chunks = sorted_documents.len().div_ceil(batch_size);
+
+    let pb = ProgressBar::new(sorted_documents.len() as u64);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template(
+                "{spinner:.green} {msg} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} docs ({eta})",
+            )
+            .unwrap()
+            .progress_chars("█▉▊▋▌▍▎▏  "),
+    );
+    pb.set_message("Building BlockMaxMaxScore index");
+
+    let mut posting_writer_id = None;
+
+    for (chunk_idx, chunk) in sorted_documents.chunks(batch_size).enumerate() {
+        let mut posting_options = BlockfileWriterOptions::new(BLOCK_MAXSCORE_PREFIX.to_string())
+            .ordered_mutations()
+            .max_block_size_bytes(SPARSE_POSTING_BLOCK_SIZE_BYTES);
+        if let Some(id) = posting_writer_id {
+            posting_options = posting_options.fork(id);
+        }
+
+        let posting_writer = provider
+            .write::<u32, SparsePostingBlock>(posting_options)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to create posting writer: {:?}", e))?;
+
+        let old_reader = if let Some(id) = posting_writer_id {
+            let posting_reader = provider
+                .read::<u32, SparsePostingBlock>(BlockfileReaderOptions::new(
+                    id,
+                    BLOCK_MAXSCORE_PREFIX.to_string(),
+                ))
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to create posting reader: {:?}", e))?;
+            Some(BlockSparseReader::new(posting_reader))
+        } else {
+            None
+        };
+
+        let writer = BlockSparseWriter::new(posting_writer.clone(), old_reader)
+            .with_block_size(ms_block_size);
+
+        let num_partitions = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
+        let partition_size = chunk.len().div_ceil(num_partitions);
+        let handles = chunk
+            .chunks(partition_size)
+            .enumerate()
+            .map(|(part_idx, partition)| {
+                let base_offset = (chunk_idx * batch_size + part_idx * partition_size) as u32;
+                let w = writer.clone();
+                let pb = pb.clone();
+                let docs: Vec<_> = partition
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, doc)| {
+                        let pairs: Vec<(u32, f32)> = doc
+                            .sparse_vector
+                            .indices()
+                            .iter()
+                            .zip(doc.sparse_vector.data().iter())
+                            .map(|(idx, val)| (*idx as u32, *val))
+                            .collect();
+                        (base_offset + idx as u32, pairs)
+                    })
+                    .collect();
+                tokio::spawn(async move {
+                    for (offset, pairs) in docs {
+                        w.set(offset, pairs).await;
+                        pb.inc(1);
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        let flusher = writer
+            .commit()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to commit: {:?}", e))?;
+
+        let size_before_flush = dir_size_bytes(temp_dir.path());
+        flusher
+            .flush()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to flush: {:?}", e))?;
+        let size_after_flush = dir_size_bytes(temp_dir.path());
+
+        posting_writer_id = Some(posting_writer.id());
+
+        provider
+            .clear()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to clear cache: {:?}", e))?;
+
+        // Report the delta of the last flush as the true index size,
+        // since forks write a complete new copy of all blocks.
+        if chunk_idx == num_chunks - 1 {
+            let storage_bytes = size_after_flush - size_before_flush;
+            println!("⏱️ Index build time: {:.2} s", start.elapsed().as_secs_f64());
+            println!("  Documents indexed: {}", sorted_documents.len());
+            println!("  Chunks processed: {num_chunks}");
+            println!(
+                "  Storage size: {} ({storage_bytes} bytes)",
+                human_bytes(storage_bytes)
+            );
+        }
+    }
+
+    pb.finish_with_message("✅ BlockMaxMaxScore index built");
+
+    Ok((
+        temp_dir,
+        provider,
+        posting_writer_id.expect("Should have created at least one writer"),
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn search_with_block_maxscore(
+    provider: &BlockfileProvider,
+    posting_reader_id: Uuid,
+    queries: &[SparseQuery],
+    top_k: usize,
+    mask: SignedRoaringBitmap,
+    iterations: usize,
+    show_progress: bool,
+) -> anyhow::Result<Vec<SearchResult>> {
+    if show_progress {
+        println!("\n⚡ Searching with BlockMaxMaxScore...");
+    }
+
+    let posting_reader = provider
+        .read::<u32, SparsePostingBlock>(BlockfileReaderOptions::new(
+            posting_reader_id,
+            BLOCK_MAXSCORE_PREFIX.to_string(),
+        ))
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to open posting reader: {:?}", e))?;
+
+    let reader = BlockSparseReader::new(posting_reader);
+    let mut results = Vec::new();
+
+    let pb = if show_progress {
+        let pb = ProgressBar::new((queries.len() * iterations) as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template(
+                    "{spinner:.green} {msg} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})",
+                )
+                .unwrap()
+                .progress_chars("█▉▊▋▌▍▎▏  "),
+        );
+        pb.set_message(if iterations > 1 {
+            format!("MaxScore search ({iterations} iterations)")
+        } else {
+            "MaxScore search".to_string()
+        });
+        Some(pb)
+    } else {
+        None
+    };
+
+    for query in queries {
+        let mut total_time_ms = 0.0;
+        let mut last_scores = Vec::new();
+        let mut last_offsets = Vec::new();
+
+        for _ in 0..iterations {
+            let start = Instant::now();
+
+            let query_vec: Vec<(u32, f32)> = query
+                .sparse_vector
+                .indices()
+                .iter()
+                .zip(query.sparse_vector.data().iter())
+                .map(|(idx, val)| (*idx as u32, *val))
+                .collect();
+
+            let scores = reader
+                .query(query_vec, top_k as u32, mask.clone())
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to run MaxScore search: {:?}", e))?;
+
+            let elapsed = start.elapsed();
+            total_time_ms += elapsed.as_secs_f64() * 1000.0;
+
+            last_offsets = scores.iter().map(|s| s.offset).collect();
+            last_scores = scores.iter().map(|s| s.score).collect();
+
+            if let Some(ref pb) = pb {
+                pb.inc(1);
+            }
+        }
+
+        results.push(SearchResult {
+            query_id: query.query_id.clone(),
+            top_k_offsets: last_offsets,
+            scores: last_scores,
+            search_time_ms: total_time_ms / iterations as f64,
+        });
+    }
+
+    if let Some(pb) = pb {
+        pb.finish_with_message("✅ MaxScore search complete");
+    }
+    Ok(results)
+}
+
 fn verify_and_compute_recall(
     documents: &[SparseDocument],
     queries: &[SparseQuery],
     reference: &[SearchResult],
     results: &[SearchResult],
 ) -> anyhow::Result<f64> {
-    println!("\n🔍 Verifying WAND results and computing recall...");
+    println!("\n🔍 Verifying results and computing recall...");
 
     if reference.is_empty() {
         return Ok(if results.is_empty() { 1.0 } else { 0.0 });
@@ -652,12 +967,40 @@ async fn main() -> anyhow::Result<()> {
     let dataset = WikipediaSplade::init().await?;
 
     println!("📄 Loading documents...");
-    let documents: Vec<_> = dataset
+    let raw_documents: Vec<_> = dataset
         .documents()
         .await?
-        .take(args.num_documents)
         .try_collect()
         .await?;
+
+    let documents: Vec<_> = if args.num_documents <= raw_documents.len() {
+        raw_documents[..args.num_documents].to_vec()
+    } else {
+        let base_len = raw_documents.len();
+        let repeats = args.num_documents.div_ceil(base_len);
+        println!(
+            "  Dataset has {base_len} docs, recycling {repeats}x to reach {}",
+            args.num_documents
+        );
+        let mut expanded = Vec::with_capacity(args.num_documents);
+        for cycle in 0..repeats {
+            let offset = (cycle * base_len) as u32;
+            for doc in &raw_documents {
+                if expanded.len() >= args.num_documents {
+                    break;
+                }
+                let mut cloned = doc.clone();
+                cloned.doc_id = format!("{}_{cycle}", cloned.doc_id);
+                // Shift sparse vector indices are dimension IDs (stay the same),
+                // but the doc offset in the index is expanded.len(), handled by
+                // the benchmark loop, so we just need unique doc_ids.
+                let _ = offset; // doc offset assigned by indexing loop
+                expanded.push(cloned);
+            }
+        }
+        expanded.truncate(args.num_documents);
+        expanded
+    };
 
     println!("✅ Loaded {} documents", documents.len());
 
@@ -666,10 +1009,28 @@ async fn main() -> anyhow::Result<()> {
     // Load queries from the dataset (uses already downloaded test split)
     let wiki_queries = dataset.queries().await?;
 
-    // Convert to SparseQuery and limit to requested number
-    let queries: Vec<_> = wiki_queries.into_iter().take(args.num_queries).collect();
+    let base_queries: Vec<_> = wiki_queries.into_iter().take(args.num_queries).collect();
 
-    println!("✅ Loaded {} queries", queries.len());
+    // Query term statistics
+    let term_counts: Vec<usize> = base_queries.iter().map(|q| q.sparse_vector.nnz()).collect();
+    let min_terms = *term_counts.iter().min().unwrap_or(&0);
+    let max_terms_in_data = *term_counts.iter().max().unwrap_or(&0);
+    let avg_terms = term_counts.iter().sum::<usize>() as f64 / term_counts.len().max(1) as f64;
+    let median_terms = {
+        let mut sorted = term_counts.clone();
+        sorted.sort();
+        sorted[sorted.len() / 2]
+    };
+
+    println!("✅ Loaded {} queries", base_queries.len());
+    println!("  Query term stats: min={min_terms}, median={median_terms}, avg={avg_terms:.1}, max={max_terms_in_data}");
+
+    let queries = if let Some(mt) = args.max_terms {
+        println!("  Truncating queries to max {mt} terms");
+        truncate_queries(&base_queries, mt)
+    } else {
+        base_queries.clone()
+    };
 
     // Print rest of configuration
     println!("  Top-k: {}", args.top_k);
@@ -681,26 +1042,6 @@ async fn main() -> anyhow::Result<()> {
             args.filter_percentage
         );
     }
-    println!(
-        "  Mode: {}",
-        if args.wand_only {
-            "WAND only (profiling)"
-        } else {
-            "Full benchmark"
-        }
-    );
-    if args.iterations > 1 {
-        println!("  Iterations per query: {}", args.iterations);
-    }
-    println!();
-
-    // Build sparse index
-    let (temp_dir, provider, max_reader_id, offset_value_reader_id) = Box::pin(build_sparse_index(
-        &documents,
-        args.block_size,
-        args.sort_by_url,
-    ))
-    .await?;
 
     // Create mask based on filter percentage
     let mask = if args.filter_percentage > 0 {
@@ -721,152 +1062,337 @@ async fn main() -> anyhow::Result<()> {
         SignedRoaringBitmap::full()
     };
 
-    if args.wand_only {
-        // WAND-only mode for profiling
-        println!("\n🎯 Running WAND-only mode (no brute force comparison)");
-        if args.iterations > 1 {
+    // ── Sweep mode ──────────────────────────────────────────────────
+    if args.sweep_terms {
+        let term_limits = [5, 10, 15, 20, 25, 30, 35, 40];
+
+        // Build both indices once
+        let (wand_dir, wand_provider, max_id, ov_id) = Box::pin(build_sparse_index(
+            &documents,
+            args.block_size,
+            args.sort_by_url,
+            args.batch_size,
+        ))
+        .await?;
+
+        let (ms_dir, ms_provider, ms_id) = Box::pin(build_block_maxscore_index(
+            &documents,
+            args.sort_by_url,
+            args.batch_size,
+            args.ms_block_size,
+        ))
+        .await?;
+
+        println!("\n📊 Sweep: query terms vs latency");
+        println!("{:<12} {:<14} {:<14} {:<10}", "MaxTerms", "WAND (ms)", "MaxScore (ms)", "Speedup");
+        println!("{}", "-".repeat(52));
+
+        for &mt in &term_limits {
+            let tq = truncate_queries(&base_queries, mt);
+            let actual_avg_terms =
+                tq.iter().map(|q| q.sparse_vector.nnz()).sum::<usize>() as f64 / tq.len() as f64;
+
+            let wand_results = search_with_wand(
+                &wand_provider,
+                max_id,
+                ov_id,
+                &tq,
+                args.top_k,
+                mask.clone(),
+                1,
+                false,
+            )
+            .await?;
+            let avg_wand =
+                wand_results.iter().map(|r| r.search_time_ms).sum::<f64>() / wand_results.len() as f64;
+
+            let ms_results = search_with_block_maxscore(
+                &ms_provider,
+                ms_id,
+                &tq,
+                args.top_k,
+                mask.clone(),
+                1,
+                false,
+            )
+            .await?;
+            let avg_ms =
+                ms_results.iter().map(|r| r.search_time_ms).sum::<f64>() / ms_results.len() as f64;
+
+            let speedup = avg_wand / avg_ms;
             println!(
-                "Running {} iterations per query for profiling...",
-                args.iterations
+                "{:<12} {:<14.2} {:<14.2} {:<10.2}x",
+                format!("{mt} ({actual_avg_terms:.0})"),
+                avg_wand,
+                avg_ms,
+                speedup,
             );
         }
 
-        let start_total = Instant::now();
-        let wand_results = search_with_wand(
-            &provider,
-            max_reader_id,
-            offset_value_reader_id,
-            &queries,
-            args.top_k,
-            mask,
-            args.iterations,
-            false, // no progress bar in wand-only mode
-        )
-        .await?;
-        let total_time = start_total.elapsed().as_secs_f64() * 1000.0;
-
-        // Calculate metrics
-        let avg_wand_time =
-            wand_results.iter().map(|r| r.search_time_ms).sum::<f64>() / wand_results.len() as f64;
-
-        let total_iterations = queries.len() * args.iterations;
-
-        // Print results
-        println!("\n📨 WAND-ONLY RESULTS");
-        println!("{}", "=".repeat(60));
-        println!("🎯 Performance:");
-        println!("  Total time: {total_time:.2} ms");
-        println!("  Total iterations: {total_iterations}");
-        println!("  Avg time per query: {avg_wand_time:.2} ms");
-        println!("  Queries per second: {:.2}", 1000.0 / avg_wand_time);
-
-        println!();
-        println!("📊 Statistics:");
-        println!("  Documents indexed: {}", documents.len());
-        println!("  Queries processed: {}", queries.len());
-        println!("  Iterations per query: {}", args.iterations);
-
-        println!("\n🔥 Ready for flamegraph profiling!");
-        println!("Tip: Use with cargo flamegraph --freq 99 for lower overhead");
-    } else {
-        // Full benchmark mode with brute force comparison
-        println!("\n🐌 Running brute force search (ground truth)...");
-        let pb_brute = ProgressBar::new(queries.len() as u64);
-        pb_brute.set_style(
-            ProgressStyle::default_bar()
-                .template(
-                    "{spinner:.green} {msg} [{elapsed_precise}] [{bar:40.yellow/blue}] {pos}/{len} ({eta})",
-                )
-                .unwrap()
-                .progress_chars("█▉▊▋▌▍▎▏  "),
-        );
-        pb_brute.set_message("Brute force search");
-
-        let start = Instant::now();
-        let mut brute_force_results = Vec::new();
-        let mut total_non_trivial = 0;
-
-        for (i, query) in queries.iter().enumerate() {
-            let (result, non_trivial_count) =
-                brute_force_search(&documents, query, args.top_k, &mask);
-            total_non_trivial += non_trivial_count;
-            brute_force_results.push(result);
-            pb_brute.set_position((i + 1) as u64);
-        }
-
-        pb_brute.finish_with_message("✅ Brute force complete");
-        let brute_force_time = start.elapsed().as_secs_f64() * 1000.0;
-
-        // Calculate non-trivial document statistics
-        let avg_non_trivial = total_non_trivial as f64 / queries.len() as f64;
-        let avg_percentage = (avg_non_trivial / documents.len() as f64) * 100.0;
-
-        println!("Brute force total time: {brute_force_time:.2} ms");
-        println!(
-            "Average documents with non-zero similarity: {:.1}/{} ({:.1}%)",
-            avg_non_trivial,
-            documents.len(),
-            avg_percentage
-        );
-
-        // Run WAND search
-        let wand_results = search_with_wand(
-            &provider,
-            max_reader_id,
-            offset_value_reader_id,
-            &queries,
-            args.top_k,
-            mask.clone(),
-            args.iterations,
-            true, // show progress in full benchmark mode
-        )
-        .await?;
-
-        // Verify WAND results and compute recall
-        let recall =
-            verify_and_compute_recall(&documents, &queries, &brute_force_results, &wand_results)?;
-
-        let avg_brute_force_time = brute_force_results
-            .iter()
-            .map(|r| r.search_time_ms)
-            .sum::<f64>()
-            / brute_force_results.len() as f64;
-
-        let avg_wand_time =
-            wand_results.iter().map(|r| r.search_time_ms).sum::<f64>() / wand_results.len() as f64;
-
-        let speedup = avg_brute_force_time / avg_wand_time;
-
-        // Print results
-        println!("\n📨 BENCHMARK RESULTS");
-        println!("{}", "=".repeat(60));
-        println!("🎯 Performance Comparison:");
-        println!("  Method              Time (ms)    Speedup");
-        println!("  {}", "-".repeat(42));
-        println!("  Brute Force         {avg_brute_force_time:<12.2} 1.00x");
-        println!("  Block-Max WAND      {avg_wand_time:<12.2} {speedup:.2}x");
-        if args.iterations > 1 {
-            println!("  (WAND averaged over {} iterations)", args.iterations);
-        }
-        println!();
-        println!("🔍 Quality Metrics:");
-        println!("  Recall@{}: {:.2}%", args.top_k, recall * 100.0);
-        println!();
-        println!("📊 Dataset Statistics:");
-        println!("  Documents processed: {}", documents.len());
-        println!("  Queries processed: {}", queries.len());
-        println!("  Avg non-zero docs per query: {avg_non_trivial:.1} ({avg_percentage:.1}%)");
-
-        println!("\n🎉 Benchmark completed successfully!");
-        println!("Total queries processed: {}", queries.len());
-        if args.sort_by_url {
-            println!("Documents were sorted by URL for better cache locality");
-        }
+        drop(wand_provider);
+        drop(wand_dir);
+        drop(ms_provider);
+        drop(ms_dir);
+        return Ok(());
     }
 
-    // Clean up
-    drop(provider);
-    drop(temp_dir);
+    let algo_name = if args.block_maxscore {
+        "BlockMaxMaxScore"
+    } else {
+        "Block-Max WAND"
+    };
+    println!(
+        "  Mode: {}",
+        if args.wand_only {
+            format!("{algo_name} only (profiling)")
+        } else {
+            "Full benchmark".to_string()
+        }
+    );
+    println!("  Algorithm: {algo_name}");
+    if args.iterations > 1 {
+        println!("  Iterations per query: {}", args.iterations);
+    }
+    println!();
+
+    if args.block_maxscore {
+        // ── BlockMaxMaxScore path ───────────────────────────────────
+        let (temp_dir, provider, posting_id) = Box::pin(build_block_maxscore_index(
+            &documents,
+            args.sort_by_url,
+            args.batch_size,
+            args.ms_block_size,
+        ))
+        .await?;
+
+        if args.wand_only {
+            println!("\n🎯 Running MaxScore-only mode (no brute force comparison)");
+
+            let start_total = Instant::now();
+            let ms_results = search_with_block_maxscore(
+                &provider,
+                posting_id,
+                &queries,
+                args.top_k,
+                mask,
+                args.iterations,
+                false,
+            )
+            .await?;
+            let total_time = start_total.elapsed().as_secs_f64() * 1000.0;
+
+            let avg_ms_time =
+                ms_results.iter().map(|r| r.search_time_ms).sum::<f64>() / ms_results.len() as f64;
+            let total_iterations = queries.len() * args.iterations;
+
+            println!("\n📨 MAXSCORE-ONLY RESULTS");
+            println!("{}", "=".repeat(60));
+            println!("🎯 Performance:");
+            println!("  Total time: {total_time:.2} ms");
+            println!("  Total iterations: {total_iterations}");
+            println!("  Avg time per query: {avg_ms_time:.2} ms");
+            println!("  Queries per second: {:.2}", 1000.0 / avg_ms_time);
+        } else {
+            let (brute_force_results, brute_force_time, avg_non_trivial) =
+                run_brute_force(&documents, &queries, args.top_k, &mask);
+
+            let avg_percentage = (avg_non_trivial / documents.len() as f64) * 100.0;
+            println!("Brute force total time: {brute_force_time:.2} ms");
+            println!(
+                "Average documents with non-zero similarity: {:.1}/{} ({:.1}%)",
+                avg_non_trivial, documents.len(), avg_percentage
+            );
+
+            let ms_results = search_with_block_maxscore(
+                &provider,
+                posting_id,
+                &queries,
+                args.top_k,
+                mask.clone(),
+                args.iterations,
+                true,
+            )
+            .await?;
+
+            let avg_brute = brute_force_results
+                .iter()
+                .map(|r| r.search_time_ms)
+                .sum::<f64>()
+                / brute_force_results.len() as f64;
+            let avg_ms =
+                ms_results.iter().map(|r| r.search_time_ms).sum::<f64>() / ms_results.len() as f64;
+            let speedup = avg_brute / avg_ms;
+
+            let recall = verify_and_compute_recall(
+                &documents,
+                &queries,
+                &brute_force_results,
+                &ms_results,
+            )?;
+
+            println!("\n📨 BENCHMARK RESULTS (BlockMaxMaxScore)");
+            println!("{}", "=".repeat(60));
+            println!("🎯 Performance Comparison:");
+            println!("  Method              Time (ms)    Speedup");
+            println!("  {}", "-".repeat(42));
+            println!("  Brute Force         {avg_brute:<12.2} 1.00x");
+            println!("  BlockMaxMaxScore    {avg_ms:<12.2} {speedup:.2}x");
+            println!();
+            println!("🔍 Quality Metrics:");
+            println!("  Recall@{}: {:.2}%", args.top_k, recall * 100.0);
+            println!();
+            println!("📊 Dataset Statistics:");
+            println!("  Documents processed: {}", documents.len());
+            println!("  Queries processed: {}", queries.len());
+            println!("  Avg non-zero docs per query: {avg_non_trivial:.1} ({avg_percentage:.1}%)");
+            println!("\n🎉 Benchmark completed successfully!");
+        }
+
+        drop(provider);
+        drop(temp_dir);
+    } else {
+        // ── Original WAND path ──────────────────────────────────────
+        let (temp_dir, provider, max_reader_id, offset_value_reader_id) =
+            Box::pin(build_sparse_index(
+                &documents,
+                args.block_size,
+                args.sort_by_url,
+                args.batch_size,
+            ))
+            .await?;
+
+        if args.wand_only {
+            println!("\n🎯 Running WAND-only mode (no brute force comparison)");
+            if args.iterations > 1 {
+                println!(
+                    "Running {} iterations per query for profiling...",
+                    args.iterations
+                );
+            }
+
+            let start_total = Instant::now();
+            let wand_results = search_with_wand(
+                &provider,
+                max_reader_id,
+                offset_value_reader_id,
+                &queries,
+                args.top_k,
+                mask,
+                args.iterations,
+                false,
+            )
+            .await?;
+            let total_time = start_total.elapsed().as_secs_f64() * 1000.0;
+
+            let avg_wand_time = wand_results.iter().map(|r| r.search_time_ms).sum::<f64>()
+                / wand_results.len() as f64;
+            let total_iterations = queries.len() * args.iterations;
+
+            println!("\n📨 WAND-ONLY RESULTS");
+            println!("{}", "=".repeat(60));
+            println!("🎯 Performance:");
+            println!("  Total time: {total_time:.2} ms");
+            println!("  Total iterations: {total_iterations}");
+            println!("  Avg time per query: {avg_wand_time:.2} ms");
+            println!("  Queries per second: {:.2}", 1000.0 / avg_wand_time);
+        } else {
+            let (brute_force_results, brute_force_time, avg_non_trivial) =
+                run_brute_force(&documents, &queries, args.top_k, &mask);
+
+            let avg_percentage = (avg_non_trivial / documents.len() as f64) * 100.0;
+            println!("Brute force total time: {brute_force_time:.2} ms");
+            println!(
+                "Average documents with non-zero similarity: {:.1}/{} ({:.1}%)",
+                avg_non_trivial, documents.len(), avg_percentage
+            );
+
+            let wand_results = search_with_wand(
+                &provider,
+                max_reader_id,
+                offset_value_reader_id,
+                &queries,
+                args.top_k,
+                mask.clone(),
+                args.iterations,
+                true,
+            )
+            .await?;
+
+            let recall = verify_and_compute_recall(
+                &documents,
+                &queries,
+                &brute_force_results,
+                &wand_results,
+            )?;
+
+            let avg_brute = brute_force_results
+                .iter()
+                .map(|r| r.search_time_ms)
+                .sum::<f64>()
+                / brute_force_results.len() as f64;
+            let avg_wand = wand_results.iter().map(|r| r.search_time_ms).sum::<f64>()
+                / wand_results.len() as f64;
+            let speedup = avg_brute / avg_wand;
+
+            println!("\n📨 BENCHMARK RESULTS");
+            println!("{}", "=".repeat(60));
+            println!("🎯 Performance Comparison:");
+            println!("  Method              Time (ms)    Speedup");
+            println!("  {}", "-".repeat(42));
+            println!("  Brute Force         {avg_brute:<12.2} 1.00x");
+            println!("  Block-Max WAND      {avg_wand:<12.2} {speedup:.2}x");
+            println!();
+            println!("🔍 Quality Metrics:");
+            println!("  Recall@{}: {:.2}%", args.top_k, recall * 100.0);
+            println!();
+            println!("📊 Dataset Statistics:");
+            println!("  Documents processed: {}", documents.len());
+            println!("  Queries processed: {}", queries.len());
+            println!(
+                "  Avg non-zero docs per query: {avg_non_trivial:.1} ({avg_percentage:.1}%)"
+            );
+            println!("\n🎉 Benchmark completed successfully!");
+        }
+
+        drop(provider);
+        drop(temp_dir);
+    }
 
     Ok(())
+}
+
+fn run_brute_force(
+    documents: &[SparseDocument],
+    queries: &[SparseQuery],
+    top_k: usize,
+    mask: &SignedRoaringBitmap,
+) -> (Vec<SearchResult>, f64, f64) {
+    println!("\n🐌 Running brute force search (ground truth)...");
+    let pb_brute = ProgressBar::new(queries.len() as u64);
+    pb_brute.set_style(
+        ProgressStyle::default_bar()
+            .template(
+                "{spinner:.green} {msg} [{elapsed_precise}] [{bar:40.yellow/blue}] {pos}/{len} ({eta})",
+            )
+            .unwrap()
+            .progress_chars("█▉▊▋▌▍▎▏  "),
+    );
+    pb_brute.set_message("Brute force search");
+
+    let start = Instant::now();
+    let mut results = Vec::new();
+    let mut total_non_trivial = 0;
+
+    for (i, query) in queries.iter().enumerate() {
+        let (result, non_trivial_count) = brute_force_search(documents, query, top_k, mask);
+        total_non_trivial += non_trivial_count;
+        results.push(result);
+        pb_brute.set_position((i + 1) as u64);
+    }
+
+    pb_brute.finish_with_message("✅ Brute force complete");
+    let brute_force_time = start.elapsed().as_secs_f64() * 1000.0;
+    let avg_non_trivial = total_non_trivial as f64 / queries.len() as f64;
+
+    (results, brute_force_time, avg_non_trivial)
 }

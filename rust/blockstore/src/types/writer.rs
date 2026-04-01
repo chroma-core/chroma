@@ -104,4 +104,17 @@ impl BlockfileWriter {
             BlockfileWriter::ArrowOrderedBlockfileWriter(writer) => writer.id(),
         }
     }
+
+    /// Store per-dimension max_weight metadata in the root, written on commit.
+    pub fn set_dim_max_weights(&mut self, weights: Vec<(String, f32)>) {
+        match self {
+            BlockfileWriter::ArrowUnorderedBlockfileWriter(writer) => {
+                writer.root.dim_max_weights = Some(weights);
+            }
+            BlockfileWriter::ArrowOrderedBlockfileWriter(writer) => {
+                writer.root.dim_max_weights = Some(weights);
+            }
+            BlockfileWriter::MemoryBlockfileWriter(_) => {}
+        }
+    }
 }

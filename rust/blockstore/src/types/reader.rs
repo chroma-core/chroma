@@ -1,5 +1,6 @@
 use super::{BlockfileError, Key, Value};
 use crate::arrow::blockfile::ArrowBlockfileReader;
+use crate::arrow::prefix_view::PrefixView;
 use crate::arrow::types::{ArrowReadableKey, ArrowReadableValue};
 use crate::key::{InvalidKeyConversion, KeyWrapper};
 use crate::memory::reader_writer::MemoryBlockfileReader;
@@ -47,6 +48,24 @@ impl<
         match self {
             BlockfileReader::ArrowBlockfileReader(reader) => reader.contains(prefix, key).await,
             BlockfileReader::MemoryBlockfileReader(reader) => Ok(reader.contains(prefix, key)),
+        }
+    }
+
+    pub async fn get_gte(
+        &'referred_data self,
+        prefix: &str,
+        min_key: K,
+    ) -> Result<Option<(K, V)>, Box<dyn ChromaError>> {
+        match self {
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                reader.get_gte(prefix, min_key).await
+            }
+            BlockfileReader::MemoryBlockfileReader(reader) => {
+                Ok(reader
+                    .get_range_iter(prefix..=prefix, min_key..)?
+                    .map(|(_, k, v)| (k, v))
+                    .next())
+            }
         }
     }
 
@@ -147,6 +166,20 @@ impl<
         }
     }
 
+    pub async fn open_prefix_view(
+        &'referred_data self,
+        prefix: &str,
+    ) -> Result<PrefixView<'referred_data>, Box<dyn ChromaError>> {
+        match self {
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                reader.open_prefix_view(prefix).await
+            }
+            BlockfileReader::MemoryBlockfileReader(_) => {
+                Err(Box::new(BlockfileError::BlockNotFound) as Box<dyn ChromaError>)
+            }
+        }
+    }
+
     pub async fn load_blocks_for_prefixes<'prefix>(
         &self,
         prefixes: impl IntoIterator<Item = &'prefix str>,
@@ -156,6 +189,38 @@ impl<
             BlockfileReader::ArrowBlockfileReader(reader) => {
                 reader.load_blocks_for_prefixes(prefixes).await
             }
+        }
+    }
+
+    pub fn get_raw_binary_from_cache(
+        &'referred_data self,
+        prefix: &str,
+        key: K,
+    ) -> Option<&'referred_data [u8]> {
+        match self {
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                reader.get_raw_binary_from_cache(prefix, key)
+            }
+            BlockfileReader::MemoryBlockfileReader(_) => None,
+        }
+    }
+
+    pub fn count_blocks_for_prefix(&self, prefix: &str) -> usize {
+        match self {
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                reader.count_blocks_for_prefix(prefix)
+            }
+            BlockfileReader::MemoryBlockfileReader(_) => 1,
+        }
+    }
+
+    /// Return the per-dimension max_weight map from the root, if present.
+    pub fn dim_max_weights(&self) -> Option<&std::collections::HashMap<String, f32>> {
+        match self {
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                reader.root.dim_max_weights.as_ref()
+            }
+            BlockfileReader::MemoryBlockfileReader(_) => None,
         }
     }
 

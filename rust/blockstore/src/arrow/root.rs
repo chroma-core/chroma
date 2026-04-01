@@ -80,6 +80,9 @@ pub struct RootWriter {
     pub(super) version: Version,
     pub(super) prefix_path: String,
     pub(super) max_block_size_bytes: usize,
+    /// Per-dimension maximum weight, keyed by encoded dimension prefix.
+    /// Written to root metadata for zero-GET dimension pruning.
+    pub(crate) dim_max_weights: Option<Vec<(String, f32)>>,
 }
 
 impl RootWriter {
@@ -96,6 +99,7 @@ impl RootWriter {
             id,
             prefix_path,
             max_block_size_bytes,
+            dim_max_weights: None,
         }
     }
 
@@ -204,6 +208,13 @@ impl RootWriter {
             );
         }
 
+        if let Some(ref dim_max) = self.dim_max_weights {
+            metadata.insert(
+                "dim_max_weights".to_string(),
+                encode_dim_max_weights(dim_max),
+            );
+        }
+
         let schema = Arc::new(Schema::new_with_metadata(schema_fields, metadata));
 
         let record_batch = match RecordBatch::try_new(schema, data_arrays) {
@@ -251,6 +262,9 @@ pub struct RootReader {
     pub(super) version: Version,
     pub(super) prefix_path: String,
     pub(super) max_block_size_bytes: usize,
+    /// Per-dimension maximum weight, keyed by encoded dimension prefix.
+    /// Populated from root metadata for zero-GET dimension pruning.
+    pub(crate) dim_max_weights: Option<HashMap<String, f32>>,
 }
 
 impl chroma_cache::Weighted for RootReader {
@@ -402,6 +416,12 @@ impl RootReader {
             }
         }
 
+        let dim_max_weights = record_batch
+            .schema_ref()
+            .metadata
+            .get("dim_max_weights")
+            .and_then(|s| decode_dim_max_weights(s));
+
         let sparse_index_reader = SparseIndexReader::new(forward);
         Ok(Self {
             version,
@@ -409,6 +429,7 @@ impl RootReader {
             id,
             prefix_path: prefix_path.to_string(),
             max_block_size_bytes,
+            dim_max_weights,
         })
     }
 
@@ -420,6 +441,7 @@ impl RootReader {
             id: new_id,
             prefix_path: self.prefix_path.clone(),
             max_block_size_bytes: self.max_block_size_bytes,
+            dim_max_weights: None,
         }
     }
 
@@ -498,6 +520,50 @@ impl RootReader {
 
         Ok(ids)
     }
+}
+
+/// Compact binary encoding of per-dimension max_weight, serialized as hex.
+/// Wire format: [u32 LE count] [for each: u8 prefix_len, prefix bytes, f32 LE weight]
+fn encode_dim_max_weights(entries: &[(String, f32)]) -> String {
+    let mut buf = Vec::with_capacity(4 + entries.len() * 16);
+    buf.extend_from_slice(&(entries.len() as u32).to_le_bytes());
+    for (prefix, weight) in entries {
+        let pb = prefix.as_bytes();
+        buf.push(pb.len() as u8);
+        buf.extend_from_slice(pb);
+        buf.extend_from_slice(&weight.to_le_bytes());
+    }
+    buf.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+fn decode_dim_max_weights(encoded: &str) -> Option<HashMap<String, f32>> {
+    let buf: Option<Vec<u8>> = (0..encoded.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(encoded.get(i..i + 2)?, 16).ok())
+        .collect();
+    let buf = buf?;
+    if buf.len() < 4 {
+        return None;
+    }
+    let count = u32::from_le_bytes(buf[0..4].try_into().ok()?) as usize;
+    let mut map = HashMap::with_capacity(count);
+    let mut pos = 4;
+    for _ in 0..count {
+        if pos >= buf.len() {
+            return None;
+        }
+        let plen = buf[pos] as usize;
+        pos += 1;
+        if pos + plen + 4 > buf.len() {
+            return None;
+        }
+        let prefix = std::str::from_utf8(&buf[pos..pos + plen]).ok()?.to_string();
+        pos += plen;
+        let weight = f32::from_le_bytes(buf[pos..pos + 4].try_into().ok()?);
+        pos += 4;
+        map.insert(prefix, weight);
+    }
+    Some(map)
 }
 
 #[cfg(test)]
