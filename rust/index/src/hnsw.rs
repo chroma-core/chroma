@@ -153,6 +153,10 @@ impl HnswIndex {
         match hnsw_config {
             None => Err(WrappedHnswInitError::NoConfigProvided.boxed()),
             Some(config) => {
+                let quantization_bits: i32 = std::env::var("CHROMA_QUANTIZATION_BITS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0);
                 let index = hnswlib::HnswIndex::init(hnswlib::HnswIndexInitConfig {
                     distance_function: map_distance_function(
                         index_config.distance_function.clone(),
@@ -164,6 +168,7 @@ impl HnswIndex {
                     ef_search: config.ef_search,
                     random_seed: config.random_seed,
                     persist_path: config.persist_path.as_ref().map(|s| s.as_str().into()),
+                    quantization_bits,
                 })
                 .map_err(|e| WrappedHnswInitError::Other(e).boxed())?;
                 Ok(HnswIndex {
