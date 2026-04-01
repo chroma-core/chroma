@@ -45,6 +45,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
+      packages: write
     env:
       AWS_REGION: us-east-1
     if: ${{ needs.detect-version-change.outputs.version_changed == 'true' || github.event_name == 'workflow_dispatch' }}
@@ -62,8 +63,12 @@ jobs:
         uses: azure/setup-helm@v4
       - name: Package Helm chart
         run: helm package k8s/distributed-chroma
-      - name: Publish Helm chart
+      - name: Publish Helm chart to ECR
         run: helm push distributed-chroma-${{ needs.detect-version-change.outputs.version }}.tgz oci://${{ vars.AWS_ECR_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/charts
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: Publish Helm chart to GHCR
+        run: helm push distributed-chroma-${{ needs.detect-version-change.outputs.version }}.tgz oci://ghcr.io/chroma-core/helm-charts
 
   notify-slack-on-failure:
     name: Notify Slack on Helm Chart Release Failure
