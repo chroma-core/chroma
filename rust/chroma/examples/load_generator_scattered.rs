@@ -442,6 +442,7 @@ fn build_search_payload(query: Vec<f32>, limit: u32) -> SearchPayload {
         .select([Key::Score])
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_read_backend_workers<SelFactory>(
     handles: &mut Vec<JoinHandle<ReadWorkerSummary>>,
     endpoint_label: &str,
@@ -683,6 +684,7 @@ where
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_search_worker<F, OnSuccess, OnFailure>(
     collections: Arc<[ChromaCollection]>,
     collection_semaphores: Arc<[Arc<Semaphore>]>,

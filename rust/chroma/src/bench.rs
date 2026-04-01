@@ -1055,6 +1055,7 @@ where
     attempts
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_dry_run_backend_workers<SelFactory>(
     handles: &mut Vec<tokio::task::JoinHandle<u64>>,
     collection_names: Arc<[String]>,
