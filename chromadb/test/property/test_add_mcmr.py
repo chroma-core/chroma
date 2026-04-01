@@ -19,6 +19,8 @@ from chromadb.utils.batch_utils import create_batches
 from chromadb.api.client import AdminClient
 from chromadb.config import Settings
 
+MIN_RECORDS_BETWEEN_COMPACTION_WAITS = 10
+
 
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
 
@@ -155,6 +157,10 @@ def _test_add(
     initial_version2 = cast(int, coll2.get_model()["version"])
 
     normalized_record_set = invariants.wrap_all(record_set)
+    should_wait_for_compaction = not NOT_CLUSTER_ONLY and should_compact
+    current_version1 = initial_version1
+    current_version2 = initial_version2
+    records_since_compaction_wait = 0
 
     # TODO: The type of add() is incorrect as it does not allow for metadatas
     # like [{"a": 1}, None, {"a": 3}]
@@ -172,17 +178,16 @@ def _test_add(
             coll1.add(*batch)
         else:
             coll2.add(*batch)
-
-    # Only wait for compaction if the size of the collection is
-    # some minimal size
-    if (
-        not NOT_CLUSTER_ONLY
-        and should_compact
-        and (len(normalized_record_set["ids"]) > 10)
-    ):
-        # Wait for the model to be updated in each region
-        wait_for_version_increase(client1, collection.name, initial_version1)
-        wait_for_version_increase(client2, collection.name, initial_version2)
+        if should_wait_for_compaction:
+            records_since_compaction_wait += len(batch[0])
+            if records_since_compaction_wait >= MIN_RECORDS_BETWEEN_COMPACTION_WAITS:
+                current_version1 = wait_for_version_increase(
+                    client1, collection.name, current_version1
+                )
+                current_version2 = wait_for_version_increase(
+                    client2, collection.name, current_version2
+                )
+                records_since_compaction_wait = 0
 
     # Verify invariants on both collections to ensure cross-region replication works.
     # Data is written via both coll1 and coll2, so checking both verifies that data
