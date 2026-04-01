@@ -2,8 +2,8 @@ use std::{collections::BinaryHeap, sync::Arc};
 
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
-pub use chroma_types::SparsePostingBlock;
 use chroma_types::SignedRoaringBitmap;
+pub use chroma_types::SparsePostingBlock;
 use dashmap::DashMap;
 use thiserror::Error;
 use uuid::Uuid;
@@ -430,9 +430,7 @@ impl<'view> PostingCursor<'view> {
             if idx >= raw_blocks.len() || raw_blocks[idx].is_some() {
                 continue;
             }
-            if let Some(bytes) =
-                reader.get_raw_binary_from_cache(encoded_dim, idx as u32)
-            {
+            if let Some(bytes) = reader.get_raw_binary_from_cache(encoded_dim, idx as u32) {
                 raw_blocks[idx] = Some(bytes);
                 loaded += 1;
             }
@@ -502,11 +500,7 @@ impl<'view> PostingCursor<'view> {
             CursorSource::View { raw_blocks } => {
                 let raw = raw_blocks[idx];
                 let hdr = SparsePostingBlock::peek_header(raw);
-                SparsePostingBlock::decompress_offsets_into(
-                    raw,
-                    &hdr,
-                    &mut self.lookup_offset_buf,
-                );
+                SparsePostingBlock::decompress_offsets_into(raw, &hdr, &mut self.lookup_offset_buf);
                 self.lookup_buf_block_idx = idx;
                 true
             }
@@ -515,11 +509,7 @@ impl<'view> PostingCursor<'view> {
                     return false;
                 };
                 let hdr = SparsePostingBlock::peek_header(raw);
-                SparsePostingBlock::decompress_offsets_into(
-                    raw,
-                    &hdr,
-                    &mut self.lookup_offset_buf,
-                );
+                SparsePostingBlock::decompress_offsets_into(raw, &hdr, &mut self.lookup_offset_buf);
                 self.lookup_buf_block_idx = idx;
                 true
             }
@@ -541,8 +531,11 @@ impl<'view> PostingCursor<'view> {
         }
     }
 
-    pub fn current(&self) -> Option<(u32, f32)> {
+    pub fn current(&mut self) -> Option<(u32, f32)> {
         if self.block_idx >= self.block_count {
+            return None;
+        }
+        if !self.ensure_forward_block(self.block_idx) {
             return None;
         }
         let offsets = self.forward_offsets();
@@ -554,11 +547,7 @@ impl<'view> PostingCursor<'view> {
         }
     }
 
-    pub fn advance(
-        &mut self,
-        target: u32,
-        mask: &SignedRoaringBitmap,
-    ) -> Option<(u32, f32)> {
+    pub fn advance(&mut self, target: u32, mask: &SignedRoaringBitmap) -> Option<(u32, f32)> {
         while self.block_idx < self.block_count {
             if self.dir_max_offsets[self.block_idx] < target {
                 self.block_idx += 1;
@@ -573,9 +562,10 @@ impl<'view> PostingCursor<'view> {
             }
 
             let (offsets, values) = match &self.source {
-                CursorSource::Eager { blocks } => {
-                    (blocks[self.block_idx].offsets(), blocks[self.block_idx].values())
-                }
+                CursorSource::Eager { blocks } => (
+                    blocks[self.block_idx].offsets(),
+                    blocks[self.block_idx].values(),
+                ),
                 CursorSource::View { .. } | CursorSource::Lazy { .. } => {
                     (&self.offset_buf[..], &self.value_buf[..])
                 }
@@ -743,7 +733,9 @@ impl<'view> PostingCursor<'view> {
                     let hdr = SparsePostingBlock::peek_header(raw);
                     if self.drain_buf_block_idx != self.block_idx {
                         SparsePostingBlock::decompress_offsets_into(
-                            raw, &hdr, &mut self.offset_buf,
+                            raw,
+                            &hdr,
+                            &mut self.offset_buf,
                         );
                         self.drain_buf_block_idx = self.block_idx;
                         self.buf_block_idx = usize::MAX;
@@ -776,7 +768,9 @@ impl<'view> PostingCursor<'view> {
                     let hdr = SparsePostingBlock::peek_header(raw);
                     if self.drain_buf_block_idx != self.block_idx {
                         SparsePostingBlock::decompress_offsets_into(
-                            raw, &hdr, &mut self.offset_buf,
+                            raw,
+                            &hdr,
+                            &mut self.offset_buf,
                         );
                         self.drain_buf_block_idx = self.block_idx;
                         self.buf_block_idx = usize::MAX;
@@ -860,9 +854,10 @@ impl<'view> PostingCursor<'view> {
             }
 
             let (offsets, values) = match &self.source {
-                CursorSource::Eager { blocks } => {
-                    (blocks[self.block_idx].offsets(), blocks[self.block_idx].values())
-                }
+                CursorSource::Eager { blocks } => (
+                    blocks[self.block_idx].offsets(),
+                    blocks[self.block_idx].values(),
+                ),
                 CursorSource::View { .. } | CursorSource::Lazy { .. } => {
                     (&self.offset_buf[..], &self.value_buf[..])
                 }
@@ -931,11 +926,8 @@ impl<'me> BlockSparseReader<'me> {
         &self,
         encoded_dim: &str,
     ) -> Result<Vec<SparsePostingBlock>, BlockSparseError> {
-        let blocks: Vec<(u32, SparsePostingBlock)> = self
-            .posting_reader
-            .get_prefix(encoded_dim)
-            .await?
-            .collect();
+        let blocks: Vec<(u32, SparsePostingBlock)> =
+            self.posting_reader.get_prefix(encoded_dim).await?.collect();
         Ok(blocks
             .into_iter()
             .filter(|(key, _)| *key != DIRECTORY_KEY)
@@ -946,11 +938,8 @@ impl<'me> BlockSparseReader<'me> {
     pub async fn get_all_dimension_ids(&self) -> Result<Vec<u32>, BlockSparseError> {
         use crate::sparse::types::decode_u32;
 
-        let all: Vec<(&str, u32, SparsePostingBlock)> = self
-            .posting_reader
-            .get_range(.., ..)
-            .await?
-            .collect();
+        let all: Vec<(&str, u32, SparsePostingBlock)> =
+            self.posting_reader.get_range(.., ..).await?.collect();
 
         let mut dims: Vec<u32> = all
             .iter()
@@ -1081,8 +1070,7 @@ impl<'me> BlockSparseReader<'me> {
                 self.posting_reader.load_data_for_keys(keys_to_load).await;
                 for t in terms[essential_idx..].iter_mut() {
                     let dim = t.encoded_dim.clone();
-                    t.cursor
-                        .populate_all_from_cache(&self.posting_reader, &dim);
+                    t.cursor.populate_all_from_cache(&self.posting_reader, &dim);
                 }
             }
         }
@@ -1186,8 +1174,7 @@ impl<'me> BlockSparseReader<'me> {
             if essential_idx > 0 {
                 let mut remaining_budget: f32 = (0..essential_idx)
                     .map(|j| {
-                        terms[j].query_weight
-                            * terms[j].cursor.block_upper_bound(window_start)
+                        terms[j].query_weight * terms[j].cursor.block_upper_bound(window_start)
                     })
                     .sum();
 
@@ -1231,10 +1218,7 @@ impl<'me> BlockSparseReader<'me> {
             for (ci, &doc) in cand_docs.iter().enumerate() {
                 let score = cand_scores[ci];
                 if score > threshold || heap.len() < k_usize {
-                    heap.push(Score {
-                        score,
-                        offset: doc,
-                    });
+                    heap.push(Score { score, offset: doc });
                     if heap.len() > k_usize {
                         heap.pop();
                     }
@@ -1270,11 +1254,7 @@ impl<'me> BlockSparseReader<'me> {
         }
 
         let mut results: Vec<Score> = heap.into_vec();
-        results.sort_by(|a, b| {
-            b.score
-                .total_cmp(&a.score)
-                .then(a.offset.cmp(&b.offset))
-        });
+        results.sort_by(|a, b| b.score.total_cmp(&a.score).then(a.offset.cmp(&b.offset)));
         Ok(results)
     }
 }
@@ -1301,11 +1281,7 @@ fn prefix_sum(terms: &[TermState<'_>]) -> Vec<f32> {
 /// Remove candidates whose score <= cutoff.  Both parallel arrays are
 /// compacted in-place.  Uses SIMD comparison on contiguous `cand_scores`
 /// for branch-free 4-/8-wide filtering.
-fn filter_competitive(
-    cand_docs: &mut Vec<u32>,
-    cand_scores: &mut Vec<f32>,
-    cutoff: f32,
-) {
+fn filter_competitive(cand_docs: &mut Vec<u32>, cand_scores: &mut Vec<f32>, cutoff: f32) {
     debug_assert_eq!(cand_docs.len(), cand_scores.len());
 
     #[cfg(target_arch = "x86_64")]
@@ -1326,11 +1302,7 @@ fn filter_competitive(
     filter_competitive_scalar(cand_docs, cand_scores, cutoff);
 }
 
-fn filter_competitive_scalar(
-    cand_docs: &mut Vec<u32>,
-    cand_scores: &mut Vec<f32>,
-    cutoff: f32,
-) {
+fn filter_competitive_scalar(cand_docs: &mut Vec<u32>, cand_scores: &mut Vec<f32>, cutoff: f32) {
     let n = cand_docs.len();
     let mut write = 0;
     for i in 0..n {
@@ -1368,7 +1340,8 @@ unsafe fn filter_competitive_sse2(
         for bit in 0..4u32 {
             if mask & (1 << bit) != 0 {
                 *cand_docs.get_unchecked_mut(write) = *cand_docs.get_unchecked(base + bit as usize);
-                *cand_scores.get_unchecked_mut(write) = *cand_scores.get_unchecked(base + bit as usize);
+                *cand_scores.get_unchecked_mut(write) =
+                    *cand_scores.get_unchecked(base + bit as usize);
                 write += 1;
             }
         }
