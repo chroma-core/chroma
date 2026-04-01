@@ -14,12 +14,14 @@ use chroma_config::helpers::{deserialize_duration_from_seconds, serialize_durati
 use chroma_config::spanner::{SpannerChannelConfig, SpannerConfig, SpannerSessionPoolConfig};
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
+use chroma_faults::FaultRegistry;
 use chroma_log::config::GrpcLogConfig;
 use chroma_storage::config::StorageConfig;
 use chroma_storage::Storage;
 use chroma_tracing::OtelFilter;
 use chroma_tracing::OtelFilterLevel;
 use chroma_types::chroma_proto::{
+    fault_injection_service_server::FaultInjectionServiceServer,
     garbage_collect_phase2_request::LogToCollect, log_service_server::LogService,
     purge_from_cache_request::EntryToEvict, CollectionInfo, GarbageCollectPhase2Request,
     GarbageCollectPhase2Response, GetAllCollectionInfoToCompactRequest,
@@ -1091,6 +1093,7 @@ pub struct LogServer {
     config: LogServerConfig,
     open_logs: Arc<StateHashTable<LogKey, LogStub>>,
     dirty_log: Option<Arc<dyn LogWriterTrait>>,
+    faults: Arc<FaultRegistry>,
     rolling_up_s3: tokio::sync::Mutex<()>,
     rolling_up_repl: tokio::sync::Mutex<()>,
     backpressure: Mutex<Arc<HashSet<CollectionUuid>>>,
@@ -3141,6 +3144,9 @@ impl LogServerWrapper {
             .max_concurrent_streams(Some(max_concurrent_streams))
             .layer(chroma_tracing::GrpcServerTraceLayer)
             .add_service(health_service)
+            .add_service(FaultInjectionServiceServer::from_arc(
+                wrapper.log_server.faults.clone(),
+            ))
             .add_service(
                 chroma_types::chroma_proto::log_service_server::LogServiceServer::new(wrapper)
                     .max_decoding_message_size(max_decoding_message_size)
@@ -3612,11 +3618,14 @@ impl Configurable<LogServerConfig> for LogServer {
         let backpressure = Mutex::new(Arc::new(HashSet::default()));
         let need_to_compact_s3 = Mutex::new(HashMap::default());
         let need_to_compact_repl = Mutex::new(HashMap::default());
+        let faults = Arc::new(FaultRegistry::new());
+        registry.register(Arc::clone(&faults));
         Ok(Self {
             config: config.clone(),
             open_logs: Arc::new(StateHashTable::default()),
             storages,
             dirty_log,
+            faults,
             rolling_up_s3,
             rolling_up_repl,
             backpressure,
@@ -3679,7 +3688,9 @@ mod tests {
     use crate::state_hash_table::Value;
 
     use chroma_config::spanner::SpannerEmulatorConfig;
+    use chroma_faults::FaultRegistry;
     use chroma_storage::s3_client_for_test_with_new_bucket;
+    use chroma_types::chroma_proto::fault_injection_service_server::FaultInjectionServiceServer;
     use chroma_types::Topology;
     use chroma_types::{are_update_metadatas_close_to_equal, Operation, OperationRecord};
     use google_cloud_gax::conn::Environment;
@@ -3689,6 +3700,7 @@ mod tests {
     use opentelemetry::global::meter;
     use proptest::prelude::*;
     use tokio::{runtime::Runtime, sync::mpsc::unbounded_channel, time::sleep};
+    use tonic::transport::Server;
     use tonic::{Code, IntoRequest};
     use wal3::{
         FragmentPointer, FragmentSeqNo, FragmentUuid, GarbageCollector,
@@ -4928,6 +4940,7 @@ mod tests {
             LogServer {
                 storages: storages.into(),
                 dirty_log,
+                faults: Arc::new(FaultRegistry::new()),
                 metrics: Metrics::new(meter("test-rust-log-service")),
                 config,
                 open_logs: Default::default(),
@@ -5026,6 +5039,7 @@ mod tests {
             LogServer {
                 storages,
                 dirty_log,
+                faults: Arc::new(FaultRegistry::new()),
                 metrics: Metrics::new(meter("test-rust-log-service")),
                 config,
                 open_logs: Default::default(),
@@ -5891,6 +5905,7 @@ mod tests {
             open_logs: Arc::new(StateHashTable::default()),
             storages: Arc::new(storages),
             dirty_log,
+            faults: Arc::new(FaultRegistry::new()),
             rolling_up_s3: tokio::sync::Mutex::new(()),
             rolling_up_repl: tokio::sync::Mutex::new(()),
             backpressure: Mutex::new(Arc::new(HashSet::default())),
@@ -6043,6 +6058,7 @@ mod tests {
             open_logs: Arc::new(StateHashTable::default()),
             storages: Arc::new(storages),
             dirty_log,
+            faults: Arc::new(FaultRegistry::new()),
             rolling_up_s3: tokio::sync::Mutex::new(()),
             rolling_up_repl: tokio::sync::Mutex::new(()),
             backpressure: Mutex::new(Arc::new(HashSet::default())),
@@ -6328,5 +6344,12 @@ mod tests {
         BACKOFF_REASON_MD_KEY
             .parse::<tonic::metadata::MetadataKey<tonic::metadata::Ascii>>()
             .expect("BACKOFF_REASON_MD_KEY must be a valid ASCII metadata key");
+    }
+
+    #[test]
+    fn fault_injection_service_can_be_added_to_server_builder() {
+        let _server = Server::builder().add_service(FaultInjectionServiceServer::from_arc(
+            Arc::new(FaultRegistry::new()),
+        ));
     }
 }
