@@ -9,6 +9,7 @@ use chroma_distance::DistanceFunction;
 use chroma_index::quantization::{Code, QuantizedQuery};
 use chroma_index::spann::utils::{self, EmbeddingPoint};
 use dashmap::{DashMap, DashSet};
+use parking_lot::ReentrantMutex;
 use simsimd::SpatialSimilarity;
 
 pub type NodeId = u32;
@@ -56,9 +57,12 @@ pub struct HierarchicalSpannConfig {
     pub write_rng_epsilon: f32,
     pub write_rng_factor: f32,
     pub reassign_neighbor_count: usize,
-    pub navigation: NavigationMode,
+    pub write_navigation: NavigationMode,
+    pub read_navigation: NavigationMode,
     /// If true, NPA uses full precision f32 distances; if false, NPA uses quantized distances.
     pub fp_npa: bool,
+    /// If true, add() skips inline balance; caller must invoke balance_index() explicitly.
+    pub deferred_balance: bool,
 }
 
 impl Default for HierarchicalSpannConfig {
@@ -77,8 +81,10 @@ impl Default for HierarchicalSpannConfig {
             write_rng_epsilon: 4.0,
             write_rng_factor: 2.0,
             reassign_neighbor_count: 32,
-            navigation: NavigationMode::FourBit,
+            write_navigation: NavigationMode::Fp,
+            read_navigation: NavigationMode::OneBit,
             fp_npa: true,
+            deferred_balance: false,
         }
     }
 }
@@ -818,6 +824,10 @@ pub struct HierarchicalSpannWriter {
 
     nodes: DashMap<NodeId, TreeNode>,
     balancing: DashSet<NodeId>,
+    /// Serializes tree structure modifications (replace_child, remove_child_locked,
+    /// create_root_above, split_internal) to prevent races when concurrent splits
+    /// modify the same parent. Reentrant because these functions are mutually recursive.
+    tree_lock: ReentrantMutex<()>,
     root_id: AtomicU32,
     next_node_id: AtomicU32,
 
@@ -848,6 +858,7 @@ impl HierarchicalSpannWriter {
             config,
             nodes,
             balancing: DashSet::new(),
+            tree_lock: ReentrantMutex::new(()),
             root_id: AtomicU32::new(0),
             next_node_id: AtomicU32::new(1),
             embeddings: DashMap::new(),
@@ -897,6 +908,7 @@ impl HierarchicalSpannWriter {
                 self.config.write_beam_min,
                 self.config.write_beam_max,
                 1,
+                self.config.write_navigation,
             );
             let cluster_ids = self.rng_select(&candidates);
             self.stats
@@ -924,13 +936,15 @@ impl HierarchicalSpannWriter {
                 continue;
             }
 
-            let balance_start = Instant::now();
-            for cluster_id in clusters_to_balance {
-                self.balance(cluster_id, 0);
+            if !self.config.deferred_balance {
+                let balance_start = Instant::now();
+                for cluster_id in clusters_to_balance {
+                    self.balance(cluster_id, 0);
+                }
+                self.stats
+                    .add_balance_nanos
+                    .fetch_add(balance_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
             }
-            self.stats
-                .add_balance_nanos
-                .fetch_add(balance_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
             break;
         }
@@ -1482,8 +1496,9 @@ impl HierarchicalSpannWriter {
         beam_min: usize,
         beam_max: usize,
         rerank_centroids: usize,
+        mode: NavigationMode,
     ) -> Vec<(NodeId, f32)> {
-        match self.config.navigation {
+        match mode {
             NavigationMode::Fp => self.navigate_f32(query, tau, beam_min, beam_max),
             NavigationMode::OneBit => {
                 self.navigate_1bit(query, tau, beam_min, beam_max, rerank_centroids)
@@ -1578,6 +1593,178 @@ impl HierarchicalSpannWriter {
             }
 
             self.balancing.remove(&cluster_id);
+        }
+    }
+
+    /// Balance all leaves that exceed split_threshold or fall below merge_threshold.
+    /// Repeats until no more work is needed (convergence).
+    pub fn balance_index(&self) {
+        loop {
+            let leaf_ids: Vec<NodeId> = self
+                .nodes
+                .iter()
+                .filter_map(|entry| match entry.value() {
+                    TreeNode::Leaf(leaf) => {
+                        let len = leaf.ids.len();
+                        if len > self.config.split_threshold
+                            || (len > 0 && len < self.config.merge_threshold)
+                        {
+                            Some(*entry.key())
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                })
+                .collect();
+
+            if leaf_ids.is_empty() {
+                break;
+            }
+
+            for leaf_id in leaf_ids {
+                self.balance(leaf_id, 0);
+            }
+        }
+    }
+
+    /// Collect all descendant leaf NodeIds under a given subtree root.
+    fn collect_leaves_under(&self, node_id: NodeId) -> Vec<NodeId> {
+        let mut leaves = Vec::new();
+        let mut stack = vec![node_id];
+        while let Some(nid) = stack.pop() {
+            match self.nodes.get(&nid) {
+                Some(node_ref) => match node_ref.value() {
+                    TreeNode::Leaf(_) => leaves.push(nid),
+                    TreeNode::Internal(internal) => {
+                        stack.extend(internal.children.iter().copied());
+                    }
+                },
+                None => {}
+            }
+        }
+        leaves
+    }
+
+    /// Count leaves needing balance under a subtree root.
+    fn count_work_under(&self, node_id: NodeId) -> usize {
+        let mut count = 0;
+        let mut stack = vec![node_id];
+        while let Some(nid) = stack.pop() {
+            match self.nodes.get(&nid) {
+                Some(node_ref) => match node_ref.value() {
+                    TreeNode::Leaf(leaf) => {
+                        let len = leaf.ids.len();
+                        if len > self.config.split_threshold
+                            || (len > 0 && len < self.config.merge_threshold)
+                        {
+                            count += 1;
+                        }
+                    }
+                    TreeNode::Internal(internal) => {
+                        stack.extend(internal.children.iter().copied());
+                    }
+                },
+                None => {}
+            }
+        }
+        count
+    }
+
+    /// Find subtree roots at the tree level that gives us >= num_threads partitions.
+    /// Returns (subtree_root_id, estimated_work) pairs.
+    fn find_partition_roots(&self, num_threads: usize) -> Vec<(NodeId, usize)> {
+        let root = self.root_id();
+        let mut frontier = vec![root];
+
+        loop {
+            if frontier.len() >= num_threads {
+                break;
+            }
+            let mut next_frontier = Vec::new();
+            let mut all_leaves = true;
+            for &nid in &frontier {
+                match self.nodes.get(&nid) {
+                    Some(node_ref) => match node_ref.value() {
+                        TreeNode::Internal(internal) => {
+                            all_leaves = false;
+                            next_frontier.extend(internal.children.iter().copied());
+                        }
+                        TreeNode::Leaf(_) => {
+                            next_frontier.push(nid);
+                        }
+                    },
+                    None => {}
+                }
+            }
+            if all_leaves || next_frontier.len() <= frontier.len() {
+                break;
+            }
+            frontier = next_frontier;
+        }
+
+        frontier
+            .into_iter()
+            .map(|nid| {
+                let work = self.count_work_under(nid);
+                (nid, work)
+            })
+            .collect()
+    }
+
+    /// Parallel version of balance_index. Partitions the tree into subtrees and
+    /// distributes them across threads, weighted by estimated work.
+    pub fn balance_index_parallel(&self, num_threads: usize) {
+        if num_threads <= 1 {
+            return self.balance_index();
+        }
+
+        loop {
+            let has_work = self.nodes.iter().any(|entry| match entry.value() {
+                TreeNode::Leaf(leaf) => {
+                    let len = leaf.ids.len();
+                    len > self.config.split_threshold
+                        || (len > 0 && len < self.config.merge_threshold)
+                }
+                _ => false,
+            });
+            if !has_work {
+                break;
+            }
+
+            let mut partitions = self.find_partition_roots(num_threads);
+            partitions.sort_by(|a, b| b.1.cmp(&a.1));
+
+            // Greedy assignment: assign each subtree to the thread with least work.
+            let mut thread_work: Vec<usize> = vec![0; num_threads];
+            let mut thread_subtrees: Vec<Vec<NodeId>> = vec![Vec::new(); num_threads];
+
+            for (nid, work) in &partitions {
+                let min_thread = thread_work
+                    .iter()
+                    .enumerate()
+                    .min_by_key(|(_, w)| **w)
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                thread_subtrees[min_thread].push(*nid);
+                thread_work[min_thread] += work.max(&1);
+            }
+
+            std::thread::scope(|s| {
+                for subtrees in &thread_subtrees {
+                    if subtrees.is_empty() {
+                        continue;
+                    }
+                    s.spawn(move || {
+                        for &subtree_root in subtrees {
+                            let leaves = self.collect_leaves_under(subtree_root);
+                            for leaf_id in leaves {
+                                self.balance(leaf_id, 0);
+                            }
+                        }
+                    });
+                }
+            });
         }
     }
 
@@ -1943,6 +2130,7 @@ impl HierarchicalSpannWriter {
             self.config.write_beam_min,
             self.config.write_beam_max,
             1,
+            self.config.write_navigation,
         );
 
         let mut neighbors_visited = 0u64;
@@ -2139,6 +2327,7 @@ impl HierarchicalSpannWriter {
                 self.config.write_beam_min,
                 self.config.write_beam_max,
                 1,
+                self.config.write_navigation,
             );
             let cluster_ids = self.rng_select(&candidates);
             self.stats
@@ -2321,6 +2510,7 @@ impl HierarchicalSpannWriter {
             self.config.write_beam_min,
             self.config.write_beam_max,
             1,
+            self.config.write_navigation,
         );
         let target_id = match candidates.iter().find(|&&(nid, _)| nid != leaf_id) {
             Some(&(nid, _)) => nid,
@@ -2399,12 +2589,101 @@ impl HierarchicalSpannWriter {
     // Tree structure helpers
     // =========================================================================
 
+    /// When a parent node has been removed by a concurrent split_internal,
+    /// navigate from root to find the correct internal node and insert orphans.
+    fn adopt_orphans(&self, orphan_ids: &[NodeId]) {
+        for &orphan_id in orphan_ids {
+            let centroid = match self.nodes.get(&orphan_id) {
+                Some(node_ref) => node_ref.centroid().to_vec(),
+                None => continue,
+            };
+            let is_leaf = matches!(
+                self.nodes.get(&orphan_id).map(|n| matches!(n.value(), TreeNode::Leaf(_))),
+                Some(true)
+            );
+
+            // Navigate from root to find the internal node at the right depth.
+            let mut current = self.root_id();
+            loop {
+                match self.nodes.get(&current) {
+                    Some(node_ref) => match node_ref.value() {
+                        TreeNode::Internal(internal) => {
+                            let children = internal.children.clone();
+                            drop(node_ref);
+
+                            // Check if this level's children match the orphan type.
+                            // If orphan is a leaf, we want an internal node whose children are leaves.
+                            // If orphan is internal, we want one level higher.
+                            let child_is_leaf = children.iter().any(|&c| {
+                                self.nodes
+                                    .get(&c)
+                                    .map_or(false, |n| matches!(n.value(), TreeNode::Leaf(_)))
+                            });
+
+                            if (is_leaf && child_is_leaf) || (is_leaf && children.is_empty()) {
+                                // Insert orphan here
+                                if let Some(mut node_ref) = self.nodes.get_mut(&current) {
+                                    if let TreeNode::Internal(parent) = node_ref.value_mut() {
+                                        if !parent.children.contains(&orphan_id) {
+                                            parent.children.push(orphan_id);
+                                        }
+                                    }
+                                }
+                                if let Some(mut node_ref) = self.nodes.get_mut(&orphan_id) {
+                                    node_ref.set_parent_id(Some(current));
+                                }
+                                break;
+                            }
+                            if !is_leaf && !child_is_leaf {
+                                if let Some(mut node_ref) = self.nodes.get_mut(&current) {
+                                    if let TreeNode::Internal(parent) = node_ref.value_mut() {
+                                        if !parent.children.contains(&orphan_id) {
+                                            parent.children.push(orphan_id);
+                                        }
+                                    }
+                                }
+                                if let Some(mut node_ref) = self.nodes.get_mut(&orphan_id) {
+                                    node_ref.set_parent_id(Some(current));
+                                }
+                                break;
+                            }
+
+                            // Go deeper: pick closest child
+                            let closest = children
+                                .iter()
+                                .filter_map(|&c| {
+                                    self.nodes
+                                        .get(&c)
+                                        .map(|n| (c, self.dist(&centroid, n.centroid())))
+                                })
+                                .min_by(|a, b| {
+                                    a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
+                                })
+                                .map(|(c, _)| c);
+
+                            match closest {
+                                Some(c) => current = c,
+                                None => break,
+                            }
+                        }
+                        TreeNode::Leaf(_) => {
+                            // Root is a leaf; create a new root above both.
+                            self.create_root_above(&[current, orphan_id]);
+                            break;
+                        }
+                    },
+                    None => break,
+                }
+            }
+        }
+    }
+
     fn replace_child(&self, parent_id: NodeId, old_child: NodeId, new_children: &[NodeId]) {
+        let _guard = self.tree_lock.lock();
         let children_clone = {
             let Some(mut node_ref) = self.nodes.get_mut(&parent_id) else {
-                // parent is gone, new children are orphaned
-                // TODO insert them into the tree where appropriate
-                println!("ERROR: parent is gone, new children are orphaned");
+                // eprintln!("WARN: replace_child: parent {} gone, adopting orphans", parent_id);
+                self.adopt_orphans(new_children);
                 return;
             };
             let TreeNode::Internal(parent) = node_ref.value_mut() else {
@@ -2442,6 +2721,7 @@ impl HierarchicalSpannWriter {
     }
 
     fn remove_child_locked(&self, parent_id: NodeId, child_id: NodeId) {
+        let _guard = self.tree_lock.lock();
         let (children_clone, grandparent_id) = {
             let Some(mut node_ref) = self.nodes.get_mut(&parent_id) else {
                 return;
@@ -2490,6 +2770,7 @@ impl HierarchicalSpannWriter {
     }
 
     fn create_root_above(&self, children: &[NodeId]) {
+        let _guard = self.tree_lock.lock();
         let root_id = self.alloc_node_id();
         let centroid = self.compute_centroid_of(children);
 
@@ -2578,7 +2859,7 @@ impl HierarchicalSpannWriter {
         rerank_vectors: usize,
     ) -> (Vec<(u32, f32)>, usize, usize, SearchTimings) {
         let nav_t0 = Instant::now();
-        let leaves = self.navigate(query, Some(tau), beam_min, beam_max, rerank_centroids);
+        let leaves = self.navigate(query, Some(tau), beam_min, beam_max, rerank_centroids, self.config.read_navigation);
         let navigate_nanos = nav_t0.elapsed().as_nanos() as u64;
 
         let leaves_scanned = leaves.len();
@@ -2609,6 +2890,10 @@ impl HierarchicalSpannWriter {
             let qq = QuantizedQuery::new(&r_q, padded_bytes, c_norm, c_dot_q, q_norm);
             quantize_nanos += qt0.elapsed().as_nanos() as u64;
 
+            // ~347ns/vec empirical (78ms / 224.5K vecs).
+            // Breakdown: DashMap version lookup possibly ~200-300ns (random access, L3/DRAM),
+            //            distance_quantized_query ~25ns, Code::new ~0ns (newtype wrap).
+            // DashMap lookup dominates due to cache misses on random id lookups.
             let dt0 = Instant::now();
             for (i, &id) in leaf.ids.iter().enumerate() {
                 let version = leaf.versions[i];
@@ -2720,7 +3005,7 @@ impl HierarchicalSpannWriter {
             }
         }
 
-        let nav_mode = self.config.navigation;
+        let nav_mode = self.config.read_navigation;
         let q_norm = Self::vec_norm(query);
         let padded_bytes = self.padded_bytes();
         let rerank_factor = rerank_centroids;

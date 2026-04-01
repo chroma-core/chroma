@@ -108,9 +108,13 @@ struct Args {
     #[arg(long, default_value = "1")]
     threads: usize,
 
-    /// Navigation mode: fp (f32), 1bit (code-to-code), 4bit (QuantizedQuery)
-    #[arg(long, default_value = "4bit")]
-    navigation: String,
+    /// Write-path navigation mode: fp (f32), 1bit (code-to-code), 4bit (QuantizedQuery)
+    #[arg(long, default_value = "fp")]
+    write_navigation: String,
+
+    /// Read-path navigation mode: fp (f32), 1bit (code-to-code), 4bit (QuantizedQuery)
+    #[arg(long, default_value = "1bit")]
+    read_navigation: String,
 
     /// Use full precision f32 distances for NPA instead of quantized
     #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
@@ -127,6 +131,14 @@ struct Args {
     /// Vector rerank factors to sweep during recall
     #[arg(long, default_value = "1,4,16", value_delimiter = ',')]
     recall_rerank_vectors: Vec<usize>,
+
+    /// Defer splits/merges until an explicit balance_index() call after each checkpoint
+    #[arg(long)]
+    deferred_balance: bool,
+
+    /// Run deferred balancing in parallel across subtrees
+    #[arg(long)]
+    parallel_balancing: bool,
 
     /// Print legend explaining all table columns
     #[arg(long)]
@@ -323,12 +335,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .map(|s| s.trim().parse().expect("invalid tau value"))
         .collect();
 
-    let nav_mode = match args.navigation.as_str() {
+    let parse_nav = |s: &str, flag: &str| match s {
         "fp" => NavigationMode::Fp,
         "1bit" => NavigationMode::OneBit,
         "4bit" => NavigationMode::FourBit,
-        other => panic!("invalid --navigation value '{}': must be fp, 1bit, or 4bit", other),
+        other => panic!("invalid {} value '{}': must be fp, 1bit, or 4bit", flag, other),
     };
+    let write_nav = parse_nav(&args.write_navigation, "--write-navigation");
+    let read_nav = parse_nav(&args.read_navigation, "--read-navigation");
 
     let config = HierarchicalSpannConfig {
         branching_factor: args.branching_factor,
@@ -344,8 +358,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         write_rng_epsilon: args.write_rng_epsilon,
         write_rng_factor: args.write_rng_factor,
         reassign_neighbor_count: 32,
-        navigation: nav_mode,
+        write_navigation: write_nav,
+        read_navigation: read_nav,
         fp_npa: args.fp_npa,
+        deferred_balance: args.deferred_balance,
     };
 
     println!("=== 1-Bit Quantized Hierarchical SPANN Writer Benchmark ===");
@@ -379,8 +395,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         config.write_beam_tau, config.write_beam_min, config.write_beam_max,
     );
     println!(
-        "  Quantization: 1-bit | Nav: {:?} | NPA: {}",
-        nav_mode,
+        "  Quantization: 1-bit | Write nav: {:?} | Read nav: {:?} | NPA: {}",
+        write_nav,
+        read_nav,
         if args.fp_npa { "f32" } else { "1-bit" },
     );
     println!("  Threads: {}", args.threads);
@@ -437,28 +454,65 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         );
 
         let num_threads = args.threads;
-        if num_threads <= 1 {
-            for (id, embedding) in &batch_vectors {
-                writer.add(*id, embedding);
-                progress.inc(1);
+        let early_balance_size = 100_000usize;
+        let needs_early_balance = args.deferred_balance
+            && batch_size > early_balance_size
+            && total_vectors < 1_000_000;
+
+        let sub_batches: Vec<&[(u32, Arc<[f32]>)]> = if needs_early_balance {
+            let mut subs = Vec::new();
+            let mut remaining = &batch_vectors[..];
+            let mut running_total = total_vectors;
+            while !remaining.is_empty() && running_total < 1_000_000 {
+                let take = early_balance_size.min(remaining.len()).min(1_000_000 - running_total);
+                subs.push(&remaining[..take]);
+                remaining = &remaining[take..];
+                running_total += take;
             }
+            if !remaining.is_empty() {
+                subs.push(remaining);
+            }
+            subs
         } else {
-            let chunk_size = (batch_vectors.len() + num_threads - 1) / num_threads;
-            let writer_ref = &writer;
-            let progress_ref = &progress;
-            std::thread::scope(|s| {
-                for chunk in batch_vectors.chunks(chunk_size) {
-                    s.spawn(move || {
-                        for (id, embedding) in chunk {
-                            writer_ref.add(*id, embedding);
-                            progress_ref.inc(1);
-                        }
-                    });
+            vec![&batch_vectors[..]]
+        };
+
+        let mut balance_time = Duration::ZERO;
+
+        for sub_batch in &sub_batches {
+            if num_threads <= 1 {
+                for (id, embedding) in *sub_batch {
+                    writer.add(*id, embedding);
+                    progress.inc(1);
                 }
-            });
+            } else {
+                let chunk_size = (sub_batch.len() + num_threads - 1) / num_threads;
+                let writer_ref = &writer;
+                let progress_ref = &progress;
+                std::thread::scope(|s| {
+                    for chunk in sub_batch.chunks(chunk_size) {
+                        s.spawn(move || {
+                            for (id, embedding) in chunk {
+                                writer_ref.add(*id, embedding);
+                                progress_ref.inc(1);
+                            }
+                        });
+                    }
+                });
+            }
+
+            if args.deferred_balance {
+                let balance_start = Instant::now();
+                if args.parallel_balancing {
+                    writer.balance_index_parallel(args.threads);
+                } else {
+                    writer.balance_index();
+                }
+                balance_time += balance_start.elapsed();
+            }
         }
         progress.finish_and_clear();
-        let index_time = index_start.elapsed();
+        let index_time = index_start.elapsed() - balance_time;
 
         total_vectors += actual_count;
         all_indexed_vectors.extend(batch_vectors.iter().cloned());
@@ -470,17 +524,28 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             checkpoint_idx + 1,
             format_count(total_vectors),
         );
-        println!(
-            "  Indexed {} vec in {} ({:.0} vec/s) | load {}",
-            format_count(actual_count),
-            format_duration(index_time),
-            throughput,
-            format_duration(load_time),
-        );
+        if args.deferred_balance {
+            println!(
+                "  Indexed {} vec in {} ({:.0} vec/s) | balance {} | load {}",
+                format_count(actual_count),
+                format_duration(index_time),
+                throughput,
+                format_duration(balance_time),
+                format_duration(load_time),
+            );
+        } else {
+            println!(
+                "  Indexed {} vec in {} ({:.0} vec/s) | load {}",
+                format_count(actual_count),
+                format_duration(index_time),
+                throughput,
+                format_duration(load_time),
+            );
+        }
 
 
         let mut delta = writer.stats.snapshot_delta(&prev_snapshot);
-        delta.wall_nanos = index_time.as_nanos() as u64;
+        delta.wall_nanos = (index_time + balance_time).as_nanos() as u64;
         prev_snapshot = writer.stats.snapshot();
         all_snapshots.push(delta);
     }
@@ -510,8 +575,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         args.recall_rerank_centroids, args.recall_rerank_vectors,
     );
     println!(
-        "  Nav: {:?} | Brute-force GT: {}",
-        nav_mode,
+        "  Read nav: {:?} | Brute-force GT: {}",
+        read_nav,
         args.brute_force_gt,
     );
 
@@ -605,9 +670,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             ));
         }
         header.push_str(&format!(
-            " {:>15} | {:>7} | {:>7} | {:>7} | {:>8} | {:>10} | {:>15} | {:>15} | {:>15} | {:>15} | {:>15} |",
+            " {:>15} | {:>7} | {:>7} | {:>7} | {:>8} | {:>10} | {:>15} | {:>15} | {:>15} | {:>15} | {:>15} | {:>14} |",
             "scanned_vectors", "scan MB", "tot MB", "MB/s", "R@100", "avg lat",
-            "lat_nav", "lat_quant", "lat_dist", "lat_sort", "lat_rerank",
+            "lat_nav", "lat_quant", "lat_dist", "lat_sort", "lat_rerank", "lat_dist / vec",
         ));
 
         let mut separator = format!(
@@ -618,8 +683,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             separator.push_str(&format!("{:-^w$}|{:-^10}|{:-^9}|", "", "", "", w = beam_col_width + 2));
         }
         separator.push_str(&format!(
-            "{:-^17}|{:-^9}|{:-^9}|{:-^9}|{:-^10}|{:-^12}|{:-^17}|{:-^17}|{:-^17}|{:-^17}|{:-^17}|",
-            "", "", "", "", "", "", "", "", "", "", "",
+            "{:-^17}|{:-^9}|{:-^9}|{:-^9}|{:-^10}|{:-^12}|{:-^17}|{:-^17}|{:-^17}|{:-^17}|{:-^17}|{:-^16}|",
+            "", "", "", "", "", "", "", "", "", "", "", "",
         ));
 
         println!(
@@ -635,7 +700,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let recall_start = Instant::now();
 
         let recall_pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(args.threads)
+            .num_threads(32)
             .build()
             .expect("failed to build rayon pool");
 
@@ -727,7 +792,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         let avg_beam = level_beam_sums[lvl] / num_queries as u64;
                         let avg_candidates = level_candidates_sums[lvl] / num_queries as u64;
                         let avg_lr = level_r100_sums[lvl] / n * 100.0;
-                        let level_bytes = if nav_mode == NavigationMode::Fp {
+                        let level_bytes = if read_nav == NavigationMode::Fp {
                             (avg_candidates as f64 * dim as f64) * 4.0
                         } else {
                             let mut level_sum = (avg_candidates as f64 * dim as f64) / 8.0;
@@ -763,8 +828,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     let avg_rr = total_rr_nanos / nq;
                     let pct = |v: u64| if avg_lat > 0 { v as f64 / avg_lat as f64 * 100.0 } else { 0.0 };
 
+                    let dist_per_vec_ns = if avg_scanned > 0 {
+                        avg_dq as f64 / avg_scanned as f64
+                    } else {
+                        0.0
+                    };
+
                     row.push_str(&format!(
-                        " {:>15} | {:>7} | {:>7} | {:>7} | {:>7.2}% | {:>10} | {:>15} | {:>15} | {:>15} | {:>15} | {:>15} |",
+                        " {:>15} | {:>7} | {:>7} | {:>7} | {:>7.2}% | {:>10} | {:>15} | {:>15} | {:>15} | {:>15} | {:>15} | {:>14} |",
                         format_count(avg_scanned),
                         format_mb(scan_mb),
                         format_mb(total_mb),
@@ -776,6 +847,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         format!("{} ({:.0}%)", format_latency(avg_dq), pct(avg_dq)),
                         format!("{} ({:.0}%)", format_latency(avg_sort), pct(avg_sort)),
                         format!("{} ({:.0}%)", format_latency(avg_rr), pct(avg_rr)),
+                        format!("{:.1}ns", dist_per_vec_ns),
                     ));
                     println!("{}", row);
                 }
