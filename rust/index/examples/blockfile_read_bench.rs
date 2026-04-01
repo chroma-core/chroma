@@ -22,6 +22,7 @@ use chroma_blockstore::test_arrow_blockfile_provider;
 use chroma_blockstore::{provider::BlockfileProvider, BlockfileWriterOptions};
 use chroma_index::sparse::maxscore::{
     BlockSparseReader, BlockSparseWriter, PostingCursor, SparsePostingBlock,
+    SPARSE_POSTING_BLOCK_SIZE_BYTES,
 };
 use chroma_types::SignedRoaringBitmap;
 use clap::Parser;
@@ -71,8 +72,9 @@ async fn build_index(
     let mut posting_writer_id = None;
 
     for (chunk_idx, chunk) in documents.chunks(batch_size).enumerate() {
-        let mut posting_options =
-            BlockfileWriterOptions::new(BLOCK_MAXSCORE_PREFIX.to_string()).ordered_mutations();
+        let mut posting_options = BlockfileWriterOptions::new(BLOCK_MAXSCORE_PREFIX.to_string())
+            .ordered_mutations()
+            .max_block_size_bytes(SPARSE_POSTING_BLOCK_SIZE_BYTES);
         if let Some(id) = posting_writer_id {
             posting_options = posting_options.fork(id);
         }

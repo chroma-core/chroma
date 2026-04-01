@@ -33,7 +33,7 @@ pub struct ArrowUnorderedBlockfileWriter {
     block_manager: BlockManager,
     root_manager: RootManager,
     block_deltas: Arc<Mutex<HashMap<Uuid, UnorderedBlockDelta>>>,
-    root: RootWriter,
+    pub(crate) root: RootWriter,
     id: Uuid,
     deltas_mutex: Arc<AysncPartitionedMutex<Uuid>>,
     cmek: Option<Cmek>,
@@ -452,7 +452,7 @@ pub struct ArrowBlockfileReader<
     V: ArrowReadableValue<'me>,
 > {
     block_manager: BlockManager,
-    pub(super) root: RootReader,
+    pub(crate) root: RootReader,
     loaded_blocks: Arc<RwLock<HashMap<Uuid, Box<Block>>>>,
     marker: std::marker::PhantomData<(K, V, &'me ())>,
 }
@@ -556,6 +556,67 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             .sparse_index
             .get_block_ids_for_prefixes(prefix_vec);
         self.load_blocks(&target_block_ids).await;
+    }
+
+    /// Sync, cache-only block lookup. Returns a stable reference to a block
+    /// that was previously loaded via `get_block`, `load_blocks`, or
+    /// `load_blocks_for_keys`. Returns `None` if the block is not cached.
+    ///
+    /// Safety: same as `get_block` — `Box<Block>` entries in `loaded_blocks`
+    /// are heap-allocated, insert-only, and never mutated or removed.
+    pub(crate) fn get_cached_block(&self, block_id: Uuid) -> Option<&Block> {
+        self.loaded_blocks
+            .read()
+            .get(&block_id)
+            .map(|b| unsafe { transmute::<&Block, &Block>(&**b) })
+    }
+
+    /// Zero-copy extraction of raw binary bytes for a single `(prefix, key)`
+    /// from an already-cached Arrow block. Returns `None` if the block is
+    /// not cached or the key is not found.
+    ///
+    /// This is the sync building block for lazy PostingCursor: after
+    /// `load_blocks_for_keys` has warmed the cache, this extracts `&[u8]`
+    /// slices without any async I/O or copies.
+    pub(crate) fn get_raw_binary_from_cache(&'me self, prefix: &str, key: K) -> Option<&'me [u8]> {
+        let search_key = CompositeKey::new(prefix.to_string(), key.clone());
+        let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
+        let block = self.get_cached_block(target_block_id)?;
+        let (offset, length) = block.prefix_range::<K>(prefix);
+        if length == 0 {
+            return None;
+        }
+        let key_col = block.data.column(1);
+        let mut lo = offset;
+        let mut hi = offset + length;
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            let mid_key = K::get(key_col, mid);
+            match mid_key.partial_cmp(&key) {
+                Some(std::cmp::Ordering::Less) => lo = mid + 1,
+                Some(std::cmp::Ordering::Greater) => hi = mid,
+                Some(std::cmp::Ordering::Equal) => {
+                    let arr = block
+                        .data
+                        .column(2)
+                        .as_any()
+                        .downcast_ref::<arrow::array::BinaryArray>()
+                        .expect("value column should be BinaryArray for get_raw_binary_from_cache");
+                    return Some(arr.value(mid));
+                }
+                None => lo = mid + 1,
+            }
+        }
+        None
+    }
+
+    /// Return the number of physical Arrow blocks that overlap the given
+    /// prefix. Used to decide between eager and lazy cursor opening.
+    pub(crate) fn count_blocks_for_prefix(&self, prefix: &str) -> usize {
+        self.root
+            .sparse_index
+            .get_block_ids_range(prefix..=prefix)
+            .len()
     }
 
     pub(crate) async fn get(

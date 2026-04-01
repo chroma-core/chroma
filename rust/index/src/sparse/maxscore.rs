@@ -13,6 +13,10 @@ use crate::sparse::types::encode_u32;
 const DEFAULT_BLOCK_SIZE: u32 = 256;
 const DIRECTORY_KEY: u32 = u32::MAX;
 
+/// Recommended Arrow block size for the sparse posting blockfile.
+/// 1 MB gives a good trade-off between S3 GET count and bandwidth waste.
+pub const SPARSE_POSTING_BLOCK_SIZE_BYTES: usize = 1024 * 1024;
+
 #[derive(Debug, Error)]
 pub enum BlockSparseError {
     #[error(transparent)]
@@ -112,7 +116,7 @@ impl<'me> BlockSparseWriter<'me> {
         }
     }
 
-    pub async fn commit(self) -> Result<BlockSparseFlusher, BlockSparseError> {
+    pub async fn commit(mut self) -> Result<BlockSparseFlusher, BlockSparseError> {
         let mut all_dim_ids: Vec<u32> = self.delta.iter().map(|e| *e.key()).collect();
 
         if let Some(ref reader) = self.old_reader {
@@ -129,6 +133,8 @@ impl<'me> BlockSparseWriter<'me> {
             .map(|id| (encode_u32(id), id))
             .collect();
         encoded_dims.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+        let mut dim_max_entries: Vec<(String, f32)> = Vec::with_capacity(encoded_dims.len());
 
         for (encoded_dim, dimension_id) in &encoded_dims {
             let delta_updates = self.delta.remove(dimension_id);
@@ -202,11 +208,16 @@ impl<'me> BlockSparseWriter<'me> {
             }
 
             // Write block directory at DIRECTORY_KEY — always last per prefix
+            let dim_max = dir_max_weights.iter().copied().fold(0.0f32, f32::max);
+            dim_max_entries.push((encoded_dim.clone(), dim_max));
+
             let directory = SparsePostingBlock::from_directory(&dir_max_offsets, &dir_max_weights);
             self.posting_writer
                 .set(encoded_dim, DIRECTORY_KEY, directory)
                 .await?;
         }
+
+        self.posting_writer.set_dim_max_weights(dim_max_entries);
 
         let flusher = self
             .posting_writer
@@ -225,6 +236,9 @@ enum CursorSource<'view> {
     View {
         raw_blocks: Vec<&'view [u8]>,
     },
+    Lazy {
+        raw_blocks: Vec<Option<&'view [u8]>>,
+    },
     Eager {
         blocks: Vec<SparsePostingBlock>,
     },
@@ -233,7 +247,7 @@ enum CursorSource<'view> {
 pub struct PostingCursor<'view> {
     source: CursorSource<'view>,
     dir_max_offsets: Vec<u32>,
-    dir_max_weights: Vec<f32>,
+    pub(crate) dir_max_weights: Vec<f32>,
     dim_max: f32,
     block_count: usize,
     // Forward scan state
@@ -324,6 +338,111 @@ impl<'view> PostingCursor<'view> {
         }
     }
 
+    /// Create a lazy cursor that only loads the directory block up-front.
+    /// Posting data blocks start as `None` and are populated later via
+    /// `populate_from_cache`.
+    pub async fn open_lazy(
+        reader: &'view BlockfileReader<'view, u32, SparsePostingBlock>,
+        encoded_dim: String,
+    ) -> Result<Option<Self>, BlockSparseError> {
+        let dir_raw: Option<SparsePostingBlock> = reader
+            .get(&encoded_dim, DIRECTORY_KEY)
+            .await
+            .map_err(BlockSparseError::Blockfile)?;
+
+        let Some(dir_block) = dir_raw.filter(|b| b.is_directory()) else {
+            return Ok(None);
+        };
+
+        let (dir_max_offsets, dir_max_weights) = dir_block.directory_entries();
+        let block_count = dir_max_offsets.len();
+        if block_count == 0 {
+            return Ok(None);
+        }
+        let dim_max = dir_block.max_weight;
+
+        let raw_blocks = vec![None; block_count];
+
+        Ok(Some(PostingCursor {
+            source: CursorSource::Lazy { raw_blocks },
+            dir_max_offsets,
+            dir_max_weights,
+            dim_max,
+            block_count,
+            block_idx: 0,
+            pos: 0,
+            offset_buf: Vec::new(),
+            value_buf: Vec::new(),
+            buf_block_idx: usize::MAX,
+            lookup_offset_buf: Vec::new(),
+            lookup_buf_block_idx: usize::MAX,
+        }))
+    }
+
+    /// Whether this is a lazy cursor with potentially unloaded blocks.
+    pub fn is_lazy(&self) -> bool {
+        matches!(self.source, CursorSource::Lazy { .. })
+    }
+
+    /// Check whether a specific posting block has been loaded.
+    pub fn is_block_loaded(&self, idx: usize) -> bool {
+        match &self.source {
+            CursorSource::Lazy { raw_blocks } => {
+                idx < raw_blocks.len() && raw_blocks[idx].is_some()
+            }
+            _ => true,
+        }
+    }
+
+    /// Return all block keys (0..block_count) for this dimension's posting
+    /// list. Used by the I/O pipeline to schedule fetches.
+    pub fn all_block_keys(&self) -> Vec<u32> {
+        (0..self.block_count as u32).collect()
+    }
+
+    /// Populate lazy blocks from the reader's cache. For each block index
+    /// in `block_indices`, attempts a synchronous cache lookup and fills
+    /// the `Option` slot. Returns the number of blocks successfully loaded.
+    pub fn populate_from_cache(
+        &mut self,
+        reader: &'view BlockfileReader<'view, u32, SparsePostingBlock>,
+        encoded_dim: &str,
+        block_indices: &[usize],
+    ) -> usize {
+        let CursorSource::Lazy { raw_blocks } = &mut self.source else {
+            return 0;
+        };
+        let mut loaded = 0;
+        for &idx in block_indices {
+            if idx >= raw_blocks.len() || raw_blocks[idx].is_some() {
+                continue;
+            }
+            if let Some(bytes) =
+                reader.get_raw_binary_from_cache(encoded_dim, idx as u32)
+            {
+                raw_blocks[idx] = Some(bytes);
+                loaded += 1;
+            }
+        }
+        loaded
+    }
+
+    /// Populate all unloaded blocks from the reader's cache. Returns the
+    /// number of blocks successfully loaded.
+    pub fn populate_all_from_cache(
+        &mut self,
+        reader: &'view BlockfileReader<'view, u32, SparsePostingBlock>,
+        encoded_dim: &str,
+    ) -> usize {
+        let indices: Vec<usize> = (0..self.block_count).collect();
+        self.populate_from_cache(reader, encoded_dim, &indices)
+    }
+
+    /// Number of posting data blocks in this dimension.
+    pub fn block_count(&self) -> usize {
+        self.block_count
+    }
+
     /// Ensure `offset_buf` / `value_buf` contain the decompressed data for
     /// block `idx`.  Returns `false` if the block could not be loaded.
     fn ensure_forward_block(&mut self, idx: usize) -> bool {
@@ -333,6 +452,16 @@ impl<'view> PostingCursor<'view> {
         match &self.source {
             CursorSource::View { raw_blocks } => {
                 let raw = raw_blocks[idx];
+                let hdr = SparsePostingBlock::peek_header(raw);
+                SparsePostingBlock::decompress_offsets_into(raw, &hdr, &mut self.offset_buf);
+                SparsePostingBlock::decompress_values_into(raw, &hdr, &mut self.value_buf);
+                self.buf_block_idx = idx;
+                true
+            }
+            CursorSource::Lazy { raw_blocks } => {
+                let Some(raw) = raw_blocks[idx] else {
+                    return false;
+                };
                 let hdr = SparsePostingBlock::peek_header(raw);
                 SparsePostingBlock::decompress_offsets_into(raw, &hdr, &mut self.offset_buf);
                 SparsePostingBlock::decompress_values_into(raw, &hdr, &mut self.value_buf);
@@ -362,6 +491,19 @@ impl<'view> PostingCursor<'view> {
                 self.lookup_buf_block_idx = idx;
                 true
             }
+            CursorSource::Lazy { raw_blocks } => {
+                let Some(raw) = raw_blocks[idx] else {
+                    return false;
+                };
+                let hdr = SparsePostingBlock::peek_header(raw);
+                SparsePostingBlock::decompress_offsets_into(
+                    raw,
+                    &hdr,
+                    &mut self.lookup_offset_buf,
+                );
+                self.lookup_buf_block_idx = idx;
+                true
+            }
             CursorSource::Eager { .. } => true,
         }
     }
@@ -369,14 +511,14 @@ impl<'view> PostingCursor<'view> {
     fn forward_offsets(&self) -> &[u32] {
         match &self.source {
             CursorSource::Eager { blocks } => blocks[self.block_idx].offsets(),
-            CursorSource::View { .. } => &self.offset_buf,
+            CursorSource::View { .. } | CursorSource::Lazy { .. } => &self.offset_buf,
         }
     }
 
     fn forward_values(&self) -> &[f32] {
         match &self.source {
             CursorSource::Eager { blocks } => blocks[self.block_idx].values(),
-            CursorSource::View { .. } => &self.value_buf,
+            CursorSource::View { .. } | CursorSource::Lazy { .. } => &self.value_buf,
         }
     }
 
@@ -415,7 +557,9 @@ impl<'view> PostingCursor<'view> {
                 CursorSource::Eager { blocks } => {
                     (blocks[self.block_idx].offsets(), blocks[self.block_idx].values())
                 }
-                CursorSource::View { .. } => (&self.offset_buf[..], &self.value_buf[..]),
+                CursorSource::View { .. } | CursorSource::Lazy { .. } => {
+                    (&self.offset_buf[..], &self.value_buf[..])
+                }
             };
 
             if self.pos == 0 || offsets.get(self.pos).is_none_or(|&o| o < target) {
@@ -473,18 +617,21 @@ impl<'view> PostingCursor<'view> {
             };
         }
 
-        // View path: decompress offsets only, read single value on hit
-        self.ensure_lookup_offsets(bi);
+        // View/Lazy path: decompress offsets only, read single value on hit
+        if !self.ensure_lookup_offsets(bi) {
+            return None;
+        }
         let offsets = &self.lookup_offset_buf;
         if offsets.is_empty() || doc_id < offsets[0] {
             return None;
         }
         match offsets.binary_search(&doc_id) {
             Ok(idx) => {
-                let CursorSource::View { raw_blocks } = &self.source else {
-                    unreachable!()
+                let raw = match &self.source {
+                    CursorSource::View { raw_blocks } => raw_blocks[bi],
+                    CursorSource::Lazy { raw_blocks } => raw_blocks[bi]?,
+                    CursorSource::Eager { .. } => unreachable!(),
                 };
-                let raw = raw_blocks[bi];
                 let hdr = SparsePostingBlock::peek_header(raw);
                 Some(SparsePostingBlock::read_value_at(raw, &hdr, idx))
             }
@@ -525,7 +672,7 @@ impl<'view> PostingCursor<'view> {
         self.pos += 1;
         let len = match &self.source {
             CursorSource::Eager { blocks } => blocks[self.block_idx].len(),
-            CursorSource::View { .. } => self.offset_buf.len(),
+            CursorSource::View { .. } | CursorSource::Lazy { .. } => self.offset_buf.len(),
         };
         if self.pos >= len {
             self.block_idx += 1;
@@ -565,6 +712,11 @@ impl<'me> BlockSparseReader<'me> {
         self.posting_reader.id()
     }
 
+    /// Return the per-dimension max_weight map from the root, if present.
+    pub fn dim_max_weights(&self) -> Option<&std::collections::HashMap<String, f32>> {
+        self.posting_reader.dim_max_weights()
+    }
+
     /// Load all posting blocks for a dimension (excluding directory).
     /// Used by the writer's commit path to read old entries.
     pub async fn get_posting_blocks(
@@ -601,11 +753,20 @@ impl<'me> BlockSparseReader<'me> {
         Ok(dims)
     }
 
-    /// BlockMaxMaxScore query algorithm.
+    /// BlockMaxMaxScore query algorithm with 3-batch I/O pipeline.
     ///
-    /// `PostingCursor::open()` is async (builds the PrefixView), but
-    /// `advance()` and `get_value()` are fully synchronous — the inner
-    /// loop does zero async I/O.
+    /// 1. **Batch 1**: Fetch directory blocks for all query dimensions
+    ///    (builds lazy cursors cheaply). Small dimensions (<= 2 Arrow
+    ///    blocks) use the eager path instead.
+    /// 2. Sort terms, partition essential / non-essential. Load ALL
+    ///    blocks for essential terms. Run initial windows to stabilize
+    ///    the threshold.
+    /// 3. **Batch 2**: With the real threshold, prune non-essential
+    ///    blocks and load only those that survive. Resume the sync loop.
+    ///
+    /// The sync inner loop is completely unchanged — all MaxScore
+    /// hot-loop optimizations (flat buffers, budget pruning, adaptive
+    /// windows, zero-copy decompress) operate on cached data.
     pub async fn query(
         &'me self,
         query_vector: impl IntoIterator<Item = (u32, f32)>,
@@ -617,32 +778,69 @@ impl<'me> BlockSparseReader<'me> {
         }
 
         let collected: Vec<(u32, f32)> = query_vector.into_iter().collect();
+        let encoded_dims: Vec<String> = collected.iter().map(|(d, _)| encode_u32(*d)).collect();
 
-        // Pre-warm the blockfile cache for all prefix blocks.
-        let prefixes: Vec<String> = collected
+        // ── Phase 0: dim_max root pruning (zero I/O) ─────────────
+        // If the root contains per-dimension max_weight, skip
+        // dimensions that can't contribute to any result.
+        let root_dim_max = self.posting_reader.dim_max_weights();
+        let surviving: Vec<(usize, f32)> = collected
             .iter()
-            .map(|(dim, _)| encode_u32(*dim))
+            .enumerate()
+            .filter(|(idx, &(_, _qw))| {
+                root_dim_max
+                    .and_then(|m| m.get(&encoded_dims[*idx]))
+                    .map_or(true, |&dmax| dmax > 0.0)
+            })
+            .map(|(idx, &(_, qw))| (idx, qw))
             .collect();
-        self.posting_reader
-            .load_blocks_for_prefixes(prefixes.iter().map(|s| s.as_str()))
-            .await;
 
-        // Build cursors — open() is async (builds PrefixView), the rest is sync.
+        // ── Batch 1: directory blocks for surviving dimensions ────
+        let dir_keys: Vec<(String, u32)> = surviving
+            .iter()
+            .map(|(idx, _)| (encoded_dims[*idx].clone(), DIRECTORY_KEY))
+            .collect();
+        self.posting_reader.load_data_for_keys(dir_keys).await;
+
+        // Build cursors. Small dimensions (<= 2 Arrow blocks) use the
+        // eager PrefixView path; large dimensions use lazy cursors.
         let mut terms: Vec<TermState<'me>> = Vec::new();
-        for (dim_id, query_weight) in collected {
-            let encoded = encode_u32(dim_id);
-            let Some(mut cursor) =
-                PostingCursor::open(&self.posting_reader, encoded).await?
-            else {
-                continue;
-            };
-            cursor.advance(0, &mask);
-            let max_score = query_weight * cursor.dimension_max();
-            terms.push(TermState {
-                cursor,
-                query_weight,
-                max_score,
-            });
+        for &(idx, query_weight) in &surviving {
+            let encoded = &encoded_dims[idx];
+            let block_count = self.posting_reader.count_blocks_for_prefix(encoded);
+
+            if block_count <= 2 {
+                // Eagerly load small dimensions -- no benefit from lazy.
+                self.posting_reader
+                    .load_blocks_for_prefixes(std::iter::once(encoded.as_str()))
+                    .await;
+                let Some(mut cursor) =
+                    PostingCursor::open(&self.posting_reader, encoded.clone()).await?
+                else {
+                    continue;
+                };
+                cursor.advance(0, &mask);
+                let max_score = query_weight * cursor.dimension_max();
+                terms.push(TermState {
+                    cursor,
+                    query_weight,
+                    max_score,
+                    encoded_dim: encoded.clone(),
+                });
+            } else {
+                let Some(cursor) =
+                    PostingCursor::open_lazy(&self.posting_reader, encoded.clone()).await?
+                else {
+                    continue;
+                };
+                let max_score = query_weight * cursor.dimension_max();
+                terms.push(TermState {
+                    cursor,
+                    query_weight,
+                    max_score,
+                    encoded_dim: encoded.clone(),
+                });
+            }
         }
 
         if terms.is_empty() {
@@ -651,7 +849,6 @@ impl<'me> BlockSparseReader<'me> {
 
         // Sort terms by max_score ascending (lowest first → non-essential)
         terms.sort_by(|a, b| a.max_score.total_cmp(&b.max_score));
-
         let upper_bounds = prefix_sum(&terms);
 
         let k_usize = k as usize;
@@ -660,11 +857,42 @@ impl<'me> BlockSparseReader<'me> {
         let mut essential_idx = 0usize;
         let full_mask = SignedRoaringBitmap::full();
 
+        // ── Batch 2: all blocks for essential terms ──────────────
+        // At threshold=MIN all terms are essential. Load their posting
+        // blocks so the first windows can run without blocking.
+        {
+            let mut keys_to_load: Vec<(String, u32)> = Vec::new();
+            for t in terms[essential_idx..].iter() {
+                if t.cursor.is_lazy() {
+                    for bk in t.cursor.all_block_keys() {
+                        keys_to_load.push((t.encoded_dim.clone(), bk));
+                    }
+                }
+            }
+            if !keys_to_load.is_empty() {
+                self.posting_reader.load_data_for_keys(keys_to_load).await;
+                for t in terms[essential_idx..].iter_mut() {
+                    let dim = t.encoded_dim.clone();
+                    t.cursor
+                        .populate_all_from_cache(&self.posting_reader, &dim);
+                }
+            }
+        }
+
+        // Advance all essential cursors to position 0 (applies mask).
+        for t in terms[essential_idx..].iter_mut() {
+            if t.cursor.is_lazy() {
+                t.cursor.advance(0, &mask);
+            }
+        }
+
         // Flat candidate buffer, reused across windows
         let mut candidates: Vec<(u32, f32)> = Vec::with_capacity(2048);
         let mut window_start = 0u32;
-        // Adaptive window sizing: grow when windows are empty
         let mut min_window_span = 0u32;
+
+        // Track whether we've done the non-essential prefetch (Batch 3).
+        let mut non_essential_loaded = false;
 
         loop {
             // Window end = min of essential terms' current block max_offsets
@@ -686,7 +914,7 @@ impl<'me> BlockSparseReader<'me> {
 
             candidates.clear();
 
-            // ── Phase 1: drain essential terms into sorted candidate vec ──
+            // ── Window Phase 1: drain essential terms into candidate vec ──
             for term in terms[essential_idx..].iter_mut() {
                 while let Some((doc, val)) = term.cursor.current() {
                     if doc > window_end {
@@ -722,10 +950,43 @@ impl<'me> BlockSparseReader<'me> {
             }
             candidates.truncate(write + 1);
 
-            // ── Phase 2: non-essential terms merge-join with candidates ──
+            // ── Batch 3: lazy-load non-essential blocks (once) ────
+            // After the threshold stabilizes from essential-term windows,
+            // load only the non-essential blocks whose max_weight can
+            // exceed threshold minus the budget from other terms.
+            if essential_idx > 0 && !non_essential_loaded {
+                non_essential_loaded = true;
+                let mut ne_keys: Vec<(String, u32)> = Vec::new();
+                for i in 0..essential_idx {
+                    if !terms[i].cursor.is_lazy() {
+                        continue;
+                    }
+                    let w = terms[i].query_weight;
+                    for bi in 0..terms[i].cursor.block_count() {
+                        if terms[i].cursor.is_block_loaded(bi) {
+                            continue;
+                        }
+                        let block_max = terms[i].cursor.dir_max_weights[bi];
+                        if w * block_max > threshold {
+                            ne_keys.push((terms[i].encoded_dim.clone(), bi as u32));
+                        }
+                    }
+                }
+                if !ne_keys.is_empty() {
+                    self.posting_reader.load_data_for_keys(ne_keys).await;
+                    for i in 0..essential_idx {
+                        if terms[i].cursor.is_lazy() {
+                            let dim = terms[i].encoded_dim.clone();
+                            terms[i]
+                                .cursor
+                                .populate_all_from_cache(&self.posting_reader, &dim);
+                        }
+                    }
+                }
+            }
+
+            // ── Window Phase 2: non-essential merge-join ──────────
             if essential_idx > 0 && !candidates.is_empty() {
-                // Running suffix sum: starts as sum of ALL non-essential upper
-                // bounds, decremented after each term is processed.
                 let mut remaining_budget: f32 = (0..essential_idx)
                     .map(|j| {
                         terms[j].query_weight
@@ -733,7 +994,6 @@ impl<'me> BlockSparseReader<'me> {
                     })
                     .sum();
 
-                // Process non-essential terms in reverse order (highest max_score first)
                 for i in (0..essential_idx).rev() {
                     if heap.len() >= k_usize {
                         let cutoff = threshold - remaining_budget;
@@ -747,7 +1007,6 @@ impl<'me> BlockSparseReader<'me> {
                         continue;
                     }
 
-                    // Position cursor at window_start (block-level skip)
                     if terms[i]
                         .cursor
                         .current()
@@ -756,8 +1015,6 @@ impl<'me> BlockSparseReader<'me> {
                         terms[i].cursor.advance(window_start, &full_mask);
                     }
 
-                    // Merge-join: two-pointer scan over sorted candidates
-                    // and sorted cursor entries
                     let weight = terms[i].query_weight;
                     let mut ci = 0;
                     while ci < candidates.len() {
@@ -784,7 +1041,7 @@ impl<'me> BlockSparseReader<'me> {
                 }
             }
 
-            // ── Phase 3: extract candidates into heap ──
+            // ── Window Phase 3: extract candidates into heap ──────
             for &(doc, score) in &candidates {
                 if score > threshold || heap.len() < k_usize {
                     heap.push(Score {
@@ -825,6 +1082,7 @@ struct TermState<'me> {
     cursor: PostingCursor<'me>,
     query_weight: f32,
     max_score: f32,
+    encoded_dim: String,
 }
 
 fn prefix_sum(terms: &[TermState<'_>]) -> Vec<f32> {

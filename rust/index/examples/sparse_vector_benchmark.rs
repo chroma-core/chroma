@@ -59,7 +59,9 @@ use chroma_blockstore::arrow::provider::BlockfileReaderOptions;
 use chroma_blockstore::test_arrow_blockfile_provider;
 use chroma_blockstore::{provider::BlockfileProvider, BlockfileWriterOptions};
 use chroma_index::sparse::{
-    maxscore::{BlockSparseReader, BlockSparseWriter, SparsePostingBlock},
+    maxscore::{
+        BlockSparseReader, BlockSparseWriter, SparsePostingBlock, SPARSE_POSTING_BLOCK_SIZE_BYTES,
+    },
     reader::{Score, SparseReader},
     writer::SparseWriter,
 };
@@ -559,8 +561,9 @@ async fn build_block_maxscore_index(
     let mut posting_writer_id = None;
 
     for (chunk_idx, chunk) in sorted_documents.chunks(batch_size).enumerate() {
-        let mut posting_options =
-            BlockfileWriterOptions::new(BLOCK_MAXSCORE_PREFIX.to_string()).ordered_mutations();
+        let mut posting_options = BlockfileWriterOptions::new(BLOCK_MAXSCORE_PREFIX.to_string())
+            .ordered_mutations()
+            .max_block_size_bytes(SPARSE_POSTING_BLOCK_SIZE_BYTES);
         if let Some(id) = posting_writer_id {
             posting_options = posting_options.fork(id);
         }
@@ -626,10 +629,13 @@ async fn build_block_maxscore_index(
             .commit()
             .await
             .map_err(|e| anyhow::anyhow!("Failed to commit: {:?}", e))?;
+
+        let size_before_flush = dir_size_bytes(temp_dir.path());
         flusher
             .flush()
             .await
             .map_err(|e| anyhow::anyhow!("Failed to flush: {:?}", e))?;
+        let size_after_flush = dir_size_bytes(temp_dir.path());
 
         posting_writer_id = Some(posting_writer.id());
 
@@ -637,16 +643,22 @@ async fn build_block_maxscore_index(
             .clear()
             .await
             .map_err(|e| anyhow::anyhow!("Failed to clear cache: {:?}", e))?;
+
+        // Report the delta of the last flush as the true index size,
+        // since forks write a complete new copy of all blocks.
+        if chunk_idx == num_chunks - 1 {
+            let storage_bytes = size_after_flush - size_before_flush;
+            println!("⏱️ Index build time: {:.2} s", start.elapsed().as_secs_f64());
+            println!("  Documents indexed: {}", sorted_documents.len());
+            println!("  Chunks processed: {num_chunks}");
+            println!(
+                "  Storage size: {} ({storage_bytes} bytes)",
+                human_bytes(storage_bytes)
+            );
+        }
     }
 
     pb.finish_with_message("✅ BlockMaxMaxScore index built");
-
-    let elapsed = start.elapsed();
-    let storage_bytes = dir_size_bytes(temp_dir.path());
-    println!("⏱️ Index build time: {:.2} s", elapsed.as_secs_f64());
-    println!("  Documents indexed: {}", sorted_documents.len());
-    println!("  Chunks processed: {num_chunks}");
-    println!("  Storage size: {} ({storage_bytes} bytes)", human_bytes(storage_bytes));
 
     Ok((
         temp_dir,
@@ -944,12 +956,40 @@ async fn main() -> anyhow::Result<()> {
     let dataset = WikipediaSplade::init().await?;
 
     println!("📄 Loading documents...");
-    let documents: Vec<_> = dataset
+    let raw_documents: Vec<_> = dataset
         .documents()
         .await?
-        .take(args.num_documents)
         .try_collect()
         .await?;
+
+    let documents: Vec<_> = if args.num_documents <= raw_documents.len() {
+        raw_documents[..args.num_documents].to_vec()
+    } else {
+        let base_len = raw_documents.len();
+        let repeats = args.num_documents.div_ceil(base_len);
+        println!(
+            "  Dataset has {base_len} docs, recycling {repeats}x to reach {}",
+            args.num_documents
+        );
+        let mut expanded = Vec::with_capacity(args.num_documents);
+        for cycle in 0..repeats {
+            let offset = (cycle * base_len) as u32;
+            for doc in &raw_documents {
+                if expanded.len() >= args.num_documents {
+                    break;
+                }
+                let mut cloned = doc.clone();
+                cloned.doc_id = format!("{}_{cycle}", cloned.doc_id);
+                // Shift sparse vector indices are dimension IDs (stay the same),
+                // but the doc offset in the index is expanded.len(), handled by
+                // the benchmark loop, so we just need unique doc_ids.
+                let _ = offset; // doc offset assigned by indexing loop
+                expanded.push(cloned);
+            }
+        }
+        expanded.truncate(args.num_documents);
+        expanded
+    };
 
     println!("✅ Loaded {} documents", documents.len());
 

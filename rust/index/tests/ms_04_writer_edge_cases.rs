@@ -1,16 +1,20 @@
 mod common;
 
 use chroma_blockstore::{test_arrow_blockfile_provider, BlockfileWriterOptions};
-use chroma_index::sparse::maxscore::{BlockSparseWriter, SparsePostingBlock};
+use chroma_index::sparse::maxscore::{
+    BlockSparseWriter, SparsePostingBlock, SPARSE_POSTING_BLOCK_SIZE_BYTES,
+};
 use common::{build_index, commit_writer, fork_writer, get_all_entries};
 
 #[tokio::test]
 async fn test_ms_04_empty_commit() {
-    let (temp_dir, provider) = test_arrow_blockfile_provider(8 * 1024 * 1024);
+    let (temp_dir, provider) = test_arrow_blockfile_provider(SPARSE_POSTING_BLOCK_SIZE_BYTES);
 
     let posting_writer = provider
         .write::<u32, SparsePostingBlock>(
-            BlockfileWriterOptions::new("".to_string()).ordered_mutations(),
+            BlockfileWriterOptions::new("".to_string())
+                .ordered_mutations()
+                .max_block_size_bytes(SPARSE_POSTING_BLOCK_SIZE_BYTES),
         )
         .await
         .unwrap();
@@ -24,11 +28,13 @@ async fn test_ms_04_empty_commit() {
 
 #[tokio::test]
 async fn test_ms_04_set_then_delete() {
-    let (temp_dir, provider) = test_arrow_blockfile_provider(8 * 1024 * 1024);
+    let (temp_dir, provider) = test_arrow_blockfile_provider(SPARSE_POSTING_BLOCK_SIZE_BYTES);
 
     let posting_writer = provider
         .write::<u32, SparsePostingBlock>(
-            BlockfileWriterOptions::new("".to_string()).ordered_mutations(),
+            BlockfileWriterOptions::new("".to_string())
+                .ordered_mutations()
+                .max_block_size_bytes(SPARSE_POSTING_BLOCK_SIZE_BYTES),
         )
         .await
         .unwrap();
@@ -58,11 +64,13 @@ async fn test_ms_04_set_then_delete() {
 
 #[tokio::test]
 async fn test_ms_04_delete_nonexistent() {
-    let (temp_dir, provider) = test_arrow_blockfile_provider(8 * 1024 * 1024);
+    let (temp_dir, provider) = test_arrow_blockfile_provider(SPARSE_POSTING_BLOCK_SIZE_BYTES);
 
     let posting_writer = provider
         .write::<u32, SparsePostingBlock>(
-            BlockfileWriterOptions::new("".to_string()).ordered_mutations(),
+            BlockfileWriterOptions::new("".to_string())
+                .ordered_mutations()
+                .max_block_size_bytes(SPARSE_POSTING_BLOCK_SIZE_BYTES),
         )
         .await
         .unwrap();
@@ -98,11 +106,13 @@ async fn test_ms_04_overwrite_same_commit() {
 
 #[tokio::test]
 async fn test_ms_04_parallel_writes() {
-    let (temp_dir, provider) = test_arrow_blockfile_provider(8 * 1024 * 1024);
+    let (temp_dir, provider) = test_arrow_blockfile_provider(SPARSE_POSTING_BLOCK_SIZE_BYTES);
 
     let posting_writer = provider
         .write::<u32, SparsePostingBlock>(
-            BlockfileWriterOptions::new("".to_string()).ordered_mutations(),
+            BlockfileWriterOptions::new("".to_string())
+                .ordered_mutations()
+                .max_block_size_bytes(SPARSE_POSTING_BLOCK_SIZE_BYTES),
         )
         .await
         .unwrap();

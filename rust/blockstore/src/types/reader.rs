@@ -192,6 +192,38 @@ impl<
         }
     }
 
+    pub fn get_raw_binary_from_cache(
+        &'referred_data self,
+        prefix: &str,
+        key: K,
+    ) -> Option<&'referred_data [u8]> {
+        match self {
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                reader.get_raw_binary_from_cache(prefix, key)
+            }
+            BlockfileReader::MemoryBlockfileReader(_) => None,
+        }
+    }
+
+    pub fn count_blocks_for_prefix(&self, prefix: &str) -> usize {
+        match self {
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                reader.count_blocks_for_prefix(prefix)
+            }
+            BlockfileReader::MemoryBlockfileReader(_) => 1,
+        }
+    }
+
+    /// Return the per-dimension max_weight map from the root, if present.
+    pub fn dim_max_weights(&self) -> Option<&std::collections::HashMap<String, f32>> {
+        match self {
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                reader.root.dim_max_weights.as_ref()
+            }
+            BlockfileReader::MemoryBlockfileReader(_) => None,
+        }
+    }
+
     pub async fn rank(
         &'referred_data self,
         prefix: &'referred_data str,

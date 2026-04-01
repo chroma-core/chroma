@@ -75,12 +75,16 @@ impl SparsePostingBlock {
             .collect();
 
         let packer = BitPacker4x::new();
-        let max_delta = if n > 1 { max_offset - min_offset } else { 0 };
-        let bits_per_delta = if max_delta == 0 {
-            0
-        } else {
-            packer.num_bits(&[max_delta; BITPACK_GROUP_SIZE])
-        };
+        let relative: Vec<u32> = offsets.iter().map(|&o| o - min_offset).collect();
+        let full_groups = n / BITPACK_GROUP_SIZE;
+        let mut max_bits = 0u8;
+        for g in 0..full_groups {
+            let start = g * BITPACK_GROUP_SIZE;
+            let initial = if g == 0 { 0 } else { relative[start - 1] };
+            let group = &relative[start..start + BITPACK_GROUP_SIZE];
+            max_bits = max_bits.max(packer.num_bits_sorted(initial, group));
+        }
+        let bits_per_delta = max_bits;
 
         SparsePostingBlock {
             min_offset,
@@ -146,13 +150,15 @@ impl SparsePostingBlock {
         let packed_group_bytes = BITPACK_GROUP_SIZE * (bits_per_delta as usize) / 8;
 
         let mut pos = 0;
-        let mut deltas = Vec::with_capacity(num_entries);
+        let mut relative = Vec::with_capacity(num_entries);
+        let mut initial = 0u32;
 
         for _ in 0..full_groups {
             let end = pos + packed_group_bytes;
             let mut group = vec![0u32; BITPACK_GROUP_SIZE];
-            packer.decompress(&raw_body[pos..end], &mut group, bits_per_delta);
-            deltas.extend_from_slice(&group);
+            packer.decompress_sorted(initial, &raw_body[pos..end], &mut group, bits_per_delta);
+            initial = group[BITPACK_GROUP_SIZE - 1];
+            relative.extend_from_slice(&group);
             pos = end;
         }
 
@@ -163,11 +169,11 @@ impl SparsePostingBlock {
                 raw_body[pos + 2],
                 raw_body[pos + 3],
             ]);
-            deltas.push(d);
+            relative.push(d);
             pos += 4;
         }
 
-        let offsets: Vec<u32> = deltas.iter().map(|&d| d + min_offset).collect();
+        let offsets: Vec<u32> = relative.iter().map(|&d| d + min_offset).collect();
         let quantized_weights: Vec<u8> = raw_body[pos..pos + num_entries].to_vec();
         let inv_scale = max_weight / 255.0;
         let values: Vec<f32> = quantized_weights
@@ -202,7 +208,7 @@ impl SparsePostingBlock {
         let n = data.offsets.len();
         let packer = BitPacker4x::new();
 
-        let deltas: Vec<u32> = data.offsets.iter().map(|&o| o - self.min_offset).collect();
+        let relative: Vec<u32> = data.offsets.iter().map(|&o| o - self.min_offset).collect();
 
         let full_groups = n / BITPACK_GROUP_SIZE;
         let remainder = n % BITPACK_GROUP_SIZE;
@@ -220,14 +226,15 @@ impl SparsePostingBlock {
 
         for g in 0..full_groups {
             let start = g * BITPACK_GROUP_SIZE;
-            let group = &deltas[start..start + BITPACK_GROUP_SIZE];
+            let initial = if g == 0 { 0 } else { relative[start - 1] };
+            let group = &relative[start..start + BITPACK_GROUP_SIZE];
             let mut packed = vec![0u8; packed_group_bytes];
-            packer.compress(group, &mut packed, self.bits_per_delta);
+            packer.compress_sorted(initial, group, &mut packed, self.bits_per_delta);
             buf.extend_from_slice(&packed);
         }
 
         let rem_start = full_groups * BITPACK_GROUP_SIZE;
-        for &d in &deltas[rem_start..] {
+        for &d in &relative[rem_start..] {
             buf.extend_from_slice(&d.to_le_bytes());
         }
 
@@ -300,10 +307,12 @@ impl SparsePostingBlock {
 
         let mut pos = 0;
         let mut group = [0u32; BITPACK_GROUP_SIZE];
+        let mut initial = 0u32;
 
         for _ in 0..full_groups {
             let end = pos + packed_group_bytes;
-            packer.decompress(&raw_body[pos..end], &mut group, hdr.bits_per_delta);
+            packer.decompress_sorted(initial, &raw_body[pos..end], &mut group, hdr.bits_per_delta);
+            initial = group[BITPACK_GROUP_SIZE - 1];
             for &d in &group {
                 buf.push(d + hdr.min_offset);
             }

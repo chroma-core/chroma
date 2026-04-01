@@ -6,7 +6,7 @@ use chroma_blockstore::{
 };
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_index::sparse::maxscore::{
-    BlockSparseReader, BlockSparseWriter, SparsePostingBlock,
+    BlockSparseReader, BlockSparseWriter, SparsePostingBlock, SPARSE_POSTING_BLOCK_SIZE_BYTES,
 };
 use chroma_index::sparse::types::encode_u32;
 
@@ -34,11 +34,13 @@ pub fn sequential_entries(start: u32, step: u32, count: usize, weight: f32) -> V
 pub async fn build_index(
     vectors: Vec<(u32, Vec<(u32, f32)>)>,
 ) -> (tempfile::TempDir, BlockfileProvider, BlockSparseReader<'static>) {
-    let (temp_dir, provider) = test_arrow_blockfile_provider(8 * 1024 * 1024);
+    let (temp_dir, provider) = test_arrow_blockfile_provider(SPARSE_POSTING_BLOCK_SIZE_BYTES);
 
     let posting_writer = provider
         .write::<u32, SparsePostingBlock>(
-            BlockfileWriterOptions::new("".to_string()).ordered_mutations(),
+            BlockfileWriterOptions::new("".to_string())
+                .ordered_mutations()
+                .max_block_size_bytes(SPARSE_POSTING_BLOCK_SIZE_BYTES),
         )
         .await
         .unwrap();
@@ -73,6 +75,7 @@ pub async fn fork_writer<'a>(
         .write::<u32, SparsePostingBlock>(
             BlockfileWriterOptions::new("".to_string())
                 .ordered_mutations()
+                .max_block_size_bytes(SPARSE_POSTING_BLOCK_SIZE_BYTES)
                 .fork(reader.posting_id()),
         )
         .await
