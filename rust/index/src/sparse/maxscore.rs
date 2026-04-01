@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::sparse::types::encode_u32;
 
-const DEFAULT_BLOCK_SIZE: u32 = 256;
+const DEFAULT_BLOCK_SIZE: u32 = 1024;
 const DIRECTORY_KEY: u32 = u32::MAX;
 
 /// Recommended Arrow block size for the sparse posting blockfile.
@@ -96,6 +96,11 @@ impl<'me> BlockSparseWriter<'me> {
             posting_writer,
             old_reader,
         }
+    }
+
+    pub fn with_block_size(mut self, block_size: u32) -> Self {
+        self.block_size = block_size;
+        self
     }
 
     pub async fn set(&self, offset: u32, sparse_vector: impl IntoIterator<Item = (u32, f32)>) {
@@ -687,6 +692,200 @@ impl<'view> PostingCursor<'view> {
     pub fn current_block_end(&self) -> Option<u32> {
         self.dir_max_offsets.get(self.block_idx).copied()
     }
+
+    /// Batch-drain all entries in [window_start, window_end] into a flat
+    /// accumulator array.  Each doc's score is accumulated as
+    /// `accum[(doc - window_start)] += query_weight * value`.
+    ///
+    /// `doc_set` collects the first occurrence of each doc_id (used to
+    /// enumerate non-zero slots afterwards without scanning the whole array).
+    ///
+    /// The cursor is left positioned at the first entry > window_end (or
+    /// exhausted).  This is the hot path — no per-entry function calls,
+    /// no enum dispatch inside the inner loop.
+    pub fn drain_essential(
+        &mut self,
+        window_start: u32,
+        window_end: u32,
+        query_weight: f32,
+        accum: &mut [f32],
+        doc_set: &mut Vec<u32>,
+        mask: &SignedRoaringBitmap,
+    ) {
+        while self.block_idx < self.block_count {
+            if self.dir_max_offsets[self.block_idx] < window_start {
+                self.block_idx += 1;
+                self.pos = 0;
+                continue;
+            }
+
+            match &self.source {
+                // Fused path for View/Lazy: decompress offsets only, read
+                // u8 weights directly from raw bytes.  Saves writing+reading
+                // value_buf and one f32 multiply per entry (the dequant
+                // scale and query_weight are fused into a single `factor`).
+                CursorSource::View { raw_blocks } => {
+                    let raw = raw_blocks[self.block_idx];
+                    let hdr = SparsePostingBlock::peek_header(raw);
+                    if self.buf_block_idx != self.block_idx {
+                        SparsePostingBlock::decompress_offsets_into(
+                            raw, &hdr, &mut self.offset_buf,
+                        );
+                        self.buf_block_idx = self.block_idx;
+                    }
+                    let weights = SparsePostingBlock::raw_weights(raw, &hdr);
+                    let factor = query_weight * hdr.max_weight / 255.0;
+
+                    if self.pos == 0 && self.offset_buf[0] < window_start {
+                        self.pos = self.offset_buf.partition_point(|&o| o < window_start);
+                    }
+                    while self.pos < self.offset_buf.len() {
+                        let doc = self.offset_buf[self.pos];
+                        if doc > window_end {
+                            return;
+                        }
+                        if passes_mask(doc, mask) {
+                            let idx = (doc - window_start) as usize;
+                            if accum[idx] == 0.0 {
+                                doc_set.push(doc);
+                            }
+                            accum[idx] += weights[self.pos] as f32 * factor;
+                        }
+                        self.pos += 1;
+                    }
+                }
+                CursorSource::Lazy { raw_blocks } => {
+                    let Some(raw) = raw_blocks[self.block_idx] else {
+                        self.block_idx += 1;
+                        self.pos = 0;
+                        continue;
+                    };
+                    let hdr = SparsePostingBlock::peek_header(raw);
+                    if self.buf_block_idx != self.block_idx {
+                        SparsePostingBlock::decompress_offsets_into(
+                            raw, &hdr, &mut self.offset_buf,
+                        );
+                        self.buf_block_idx = self.block_idx;
+                    }
+                    let weights = SparsePostingBlock::raw_weights(raw, &hdr);
+                    let factor = query_weight * hdr.max_weight / 255.0;
+
+                    if self.pos == 0 && self.offset_buf[0] < window_start {
+                        self.pos = self.offset_buf.partition_point(|&o| o < window_start);
+                    }
+                    while self.pos < self.offset_buf.len() {
+                        let doc = self.offset_buf[self.pos];
+                        if doc > window_end {
+                            return;
+                        }
+                        if passes_mask(doc, mask) {
+                            let idx = (doc - window_start) as usize;
+                            if accum[idx] == 0.0 {
+                                doc_set.push(doc);
+                            }
+                            accum[idx] += weights[self.pos] as f32 * factor;
+                        }
+                        self.pos += 1;
+                    }
+                }
+                CursorSource::Eager { blocks } => {
+                    let offsets = blocks[self.block_idx].offsets();
+                    let qw = blocks[self.block_idx].quantized_weights();
+                    let factor = query_weight * blocks[self.block_idx].max_weight / 255.0;
+
+                    if self.pos == 0 && offsets[0] < window_start {
+                        self.pos = offsets.partition_point(|&o| o < window_start);
+                    }
+                    while self.pos < offsets.len() {
+                        let doc = offsets[self.pos];
+                        if doc > window_end {
+                            return;
+                        }
+                        if passes_mask(doc, mask) {
+                            let idx = (doc - window_start) as usize;
+                            if accum[idx] == 0.0 {
+                                doc_set.push(doc);
+                            }
+                            accum[idx] += qw[self.pos] as f32 * factor;
+                        }
+                        self.pos += 1;
+                    }
+                }
+            }
+
+            self.block_idx += 1;
+            self.pos = 0;
+        }
+    }
+
+    /// Merge-join this (non-essential) cursor against a sorted candidate
+    /// set, accumulating matched scores into the flat accumulator.
+    pub fn score_candidates(
+        &mut self,
+        window_start: u32,
+        window_end: u32,
+        query_weight: f32,
+        accum: &mut [f32],
+        candidates: &[u32],
+    ) {
+        if candidates.is_empty() {
+            return;
+        }
+
+        let mut ci = 0;
+
+        while self.block_idx < self.block_count && ci < candidates.len() {
+            if self.dir_max_offsets[self.block_idx] < window_start
+                || self.dir_max_offsets[self.block_idx] < candidates[ci]
+            {
+                self.block_idx += 1;
+                self.pos = 0;
+                continue;
+            }
+
+            if !self.ensure_forward_block(self.block_idx) {
+                self.block_idx += 1;
+                self.pos = 0;
+                continue;
+            }
+
+            let (offsets, values) = match &self.source {
+                CursorSource::Eager { blocks } => {
+                    (blocks[self.block_idx].offsets(), blocks[self.block_idx].values())
+                }
+                CursorSource::View { .. } | CursorSource::Lazy { .. } => {
+                    (&self.offset_buf[..], &self.value_buf[..])
+                }
+            };
+
+            if self.pos == 0 && offsets[0] < window_start {
+                self.pos = offsets.partition_point(|&o| o < window_start);
+            }
+
+            while self.pos < offsets.len() && ci < candidates.len() {
+                let doc = offsets[self.pos];
+                if doc > window_end {
+                    return;
+                }
+                let cand = candidates[ci];
+                if doc < cand {
+                    self.pos += 1;
+                } else if doc > cand {
+                    ci += 1;
+                } else {
+                    let idx = (doc - window_start) as usize;
+                    accum[idx] += query_weight * values[self.pos];
+                    self.pos += 1;
+                    ci += 1;
+                }
+            }
+
+            if self.pos >= offsets.len() {
+                self.block_idx += 1;
+                self.pos = 0;
+            }
+        }
+    }
 }
 
 fn passes_mask(offset: u32, mask: &SignedRoaringBitmap) -> bool {
@@ -879,81 +1078,55 @@ impl<'me> BlockSparseReader<'me> {
             }
         }
 
-        // Advance all essential cursors to position 0 (applies mask).
-        for t in terms[essential_idx..].iter_mut() {
-            if t.cursor.is_lazy() {
-                t.cursor.advance(0, &mask);
-            }
-        }
-
-        // Flat candidate buffer, reused across windows
-        let mut candidates: Vec<(u32, f32)> = Vec::with_capacity(2048);
-        let mut window_start = 0u32;
-        let mut min_window_span = 0u32;
-
         // Track whether we've done the non-essential prefetch (Batch 3).
         let mut non_essential_loaded = false;
 
-        loop {
-            // Window end = min of essential terms' current block max_offsets
-            let natural_end = terms[essential_idx..]
-                .iter()
-                .filter(|t| t.cursor.current().is_some())
-                .filter_map(|t| t.cursor.current_block_end())
-                .min();
+        // ── Wide-window accumulator approach ──────────────────────
+        // Instead of narrow block-boundary windows with sort+merge,
+        // use wide 64K-doc windows with a flat f32 accumulator.
+        // Each essential term drains in batch (cache-friendly), then
+        // non-essential terms merge-join against the sorted doc set.
+        const WINDOW_WIDTH: u32 = 65536;
+        let mut accum = vec![0.0f32; WINDOW_WIDTH as usize];
+        let mut doc_set: Vec<u32> = Vec::with_capacity(WINDOW_WIDTH as usize);
+        let mut all_touched: Vec<u32> = Vec::with_capacity(WINDOW_WIDTH as usize);
 
-            let Some(natural_end) = natural_end else {
-                break;
-            };
+        let max_doc_id = terms
+            .iter()
+            .filter_map(|t| t.cursor.dir_max_offsets.last().copied())
+            .max()
+            .unwrap_or(0);
 
-            let window_end = if min_window_span > 0 {
-                natural_end.max(window_start.saturating_add(min_window_span))
-            } else {
-                natural_end
-            };
+        let mut window_start = 0u32;
 
-            candidates.clear();
+        while window_start <= max_doc_id {
+            let window_end = (window_start + WINDOW_WIDTH - 1).min(max_doc_id);
 
-            // ── Window Phase 1: drain essential terms into candidate vec ──
+            doc_set.clear();
+            all_touched.clear();
+
+            // ── Phase 1: batch-drain essential terms into accumulator ──
             for term in terms[essential_idx..].iter_mut() {
-                while let Some((doc, val)) = term.cursor.current() {
-                    if doc > window_end {
-                        break;
-                    }
-                    if passes_mask(doc, &mask) {
-                        candidates.push((doc, term.query_weight * val));
-                    }
-                    term.cursor.next();
-                }
+                term.cursor.drain_essential(
+                    window_start,
+                    window_end,
+                    term.query_weight,
+                    &mut accum,
+                    &mut doc_set,
+                    &mask,
+                );
             }
+            all_touched.extend_from_slice(&doc_set);
 
-            if candidates.is_empty() {
-                min_window_span = min_window_span
-                    .saturating_mul(2)
-                    .max(256)
-                    .min(8192);
-                window_start = window_end.saturating_add(1);
+            if doc_set.is_empty() {
+                window_start = window_end.wrapping_add(1);
+                if window_start == 0 {
+                    break;
+                }
                 continue;
             }
-            min_window_span = 0;
-
-            // Sort by doc_id, then merge-deduplicate summing scores
-            candidates.sort_unstable_by_key(|&(doc, _)| doc);
-            let mut write = 0;
-            for read in 1..candidates.len() {
-                if candidates[read].0 == candidates[write].0 {
-                    candidates[write].1 += candidates[read].1;
-                } else {
-                    write += 1;
-                    candidates[write] = candidates[read];
-                }
-            }
-            candidates.truncate(write + 1);
 
             // ── Batch 3: lazy-load non-essential blocks (once) ────
-            // After the threshold stabilizes from essential-term windows,
-            // load only the non-essential blocks whose max_weight can
-            // exceed threshold minus the budget from other terms.
             if essential_idx > 0 && !non_essential_loaded {
                 non_essential_loaded = true;
                 let mut ne_keys: Vec<(String, u32)> = Vec::new();
@@ -985,8 +1158,10 @@ impl<'me> BlockSparseReader<'me> {
                 }
             }
 
-            // ── Window Phase 2: non-essential merge-join ──────────
-            if essential_idx > 0 && !candidates.is_empty() {
+            // ── Phase 2: non-essential merge-join ──────────────────
+            if essential_idx > 0 {
+                doc_set.sort_unstable();
+
                 let mut remaining_budget: f32 = (0..essential_idx)
                     .map(|j| {
                         terms[j].query_weight
@@ -995,15 +1170,20 @@ impl<'me> BlockSparseReader<'me> {
                     .sum();
 
                 for i in (0..essential_idx).rev() {
-                    if heap.len() >= k_usize {
+                    if heap.len() >= k_usize && remaining_budget > 0.0 {
                         let cutoff = threshold - remaining_budget;
-                        candidates.retain(|&(_, score)| score > cutoff);
+                        doc_set.retain(|&doc| {
+                            accum[(doc - window_start) as usize] > cutoff
+                        });
                     }
-                    if candidates.is_empty() {
+                    if doc_set.is_empty() {
                         break;
                     }
 
-                    if terms[i].cursor.block_upper_bound(window_start) == 0.0 {
+                    let qw = terms[i].query_weight;
+                    let bub = terms[i].cursor.block_upper_bound(window_start);
+                    if bub == 0.0 {
+                        remaining_budget -= qw * bub;
                         continue;
                     }
 
@@ -1015,34 +1195,23 @@ impl<'me> BlockSparseReader<'me> {
                         terms[i].cursor.advance(window_start, &full_mask);
                     }
 
-                    let weight = terms[i].query_weight;
-                    let mut ci = 0;
-                    while ci < candidates.len() {
-                        let Some((doc, val)) = terms[i].cursor.current() else {
-                            break;
-                        };
-                        if doc > window_end {
-                            break;
-                        }
-                        let cand_doc = candidates[ci].0;
-                        if doc < cand_doc {
-                            terms[i].cursor.next();
-                        } else if doc > cand_doc {
-                            ci += 1;
-                        } else {
-                            candidates[ci].1 += weight * val;
-                            terms[i].cursor.next();
-                            ci += 1;
-                        }
-                    }
+                    terms[i].cursor.score_candidates(
+                        window_start,
+                        window_end,
+                        qw,
+                        &mut accum,
+                        &doc_set,
+                    );
 
-                    remaining_budget -= terms[i].query_weight
-                        * terms[i].cursor.block_upper_bound(window_start);
+                    remaining_budget -= qw * bub;
                 }
             }
 
-            // ── Window Phase 3: extract candidates into heap ──────
-            for &(doc, score) in &candidates {
+            // ── Phase 3: extract to heap and reset accumulator ─────
+            for &doc in &doc_set {
+                let idx = (doc - window_start) as usize;
+                let score = accum[idx];
+                accum[idx] = 0.0;
                 if score > threshold || heap.len() < k_usize {
                     heap.push(Score {
                         score,
@@ -1057,7 +1226,13 @@ impl<'me> BlockSparseReader<'me> {
                 }
             }
 
-            // Re-partition essential vs non-essential based on new threshold
+            // Zero only the slots we actually wrote to (all_touched
+            // captures every doc before budget pruning shrinks doc_set).
+            for &doc in &all_touched {
+                accum[(doc - window_start) as usize] = 0.0;
+            }
+
+            // Re-partition essential vs non-essential
             while essential_idx < terms.len() {
                 if upper_bounds[essential_idx] >= threshold {
                     break;
@@ -1065,7 +1240,10 @@ impl<'me> BlockSparseReader<'me> {
                 essential_idx += 1;
             }
 
-            window_start = window_end.saturating_add(1);
+            window_start = window_end.wrapping_add(1);
+            if window_start == 0 {
+                break;
+            }
         }
 
         let mut results: Vec<Score> = heap.into_vec();

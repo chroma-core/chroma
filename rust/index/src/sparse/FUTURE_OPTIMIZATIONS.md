@@ -3,41 +3,24 @@
 Observations from reviewing SereneDB's MaxScore WAND implementation (PR #337).
 These are ordered by expected impact. Revisit after blockfile read path investigation.
 
-## 1. Replace HashMap with flat candidate buffers
+## 1. Replace HashMap with flat candidate buffers — ✅ DONE
 
-**Impact: High** — eliminates per-entry hash overhead in the hot loop.
+Uses a flat `Vec<f32>` accumulator indexed by `(doc_id - window_start)` with 64K-wide
+windows.  `drain_essential()` writes directly into the accumulator with O(1) access.
+A separate `doc_set: Vec<u32>` tracks non-zero slots for enumeration.  No HashMap,
+no sorting, no merge-dedup.
 
-- **Single-essential path** (most common after threshold stabilizes): drain the one
-  essential iterator into a flat `Vec<(u32, f32)>`, then merge-join non-essentials
-  against this sorted buffer. No HashMap, no hashing.
-- **Multi-essential path**: use a fixed-size bitmask + flat score array
-  (e.g. `[u64; 64]` mask + `[f32; 4096]` scores) to merge essential terms in a
-  window, then drain the bitmask into a candidate buffer for non-essential processing.
+## 2. Budget-based candidate pruning between non-essential terms — ✅ DONE
 
-SereneDB uses `FixedBuffer<doc_id_t, 4096>` and `FixedBuffer<score_t, 4096>` for
-candidates, and `uint64_t _mask[64]` + `score_t _scores[4096]` for the multi-essential
-bitmask window.
+`remaining_budget` is computed from non-essential block upper bounds.  Before each
+non-essential term, `doc_set.retain(|doc| accum[doc] > threshold - remaining_budget)`
+prunes candidates whose accumulated score + remaining budget can't beat threshold.
 
-## 2. Budget-based candidate pruning between non-essential terms
+## 3. Adaptive window sizing — SUPERSEDED
 
-**Impact: High** — progressively shrinks the candidate set so later non-essential
-terms do less work.
-
-Before each non-essential term processes candidates, compute
-`remaining_budget = sum of max_scores of all subsequent non-essential terms`.
-Filter out candidates whose `current_score + remaining_budget <= threshold`.
-This can be vectorized (AVX2/NEON `vcmp` + movemask).
-
-SereneDB's `FilterCompetitiveHits` does exactly this with `_mm256_cmp_ps`.
-
-## 3. Adaptive window sizing
-
-**Impact: Medium** — avoids processing many tiny near-empty windows in sparse regions.
-
-Track the number of candidates found across recent windows. When candidates are sparse,
-grow the minimum window size (up to some max like 4096 docs). Reset when candidates
-become dense again. SereneDB doubles `_min_window_size` each time candidates are below
-a threshold, capped at `kWindow`.
+The old narrow-window approach (window_end = min block boundary) needed adaptive sizing
+to avoid many tiny empty windows.  With 64K-wide windows, even sparse doc-ID regions
+are covered in a single iteration.  At 9M docs, there are only ~137 windows total.
 
 ## 4. Sort non-essential terms by score/cost ratio
 
@@ -58,13 +41,10 @@ term, compact the candidate buffer — remove candidates that don't appear in th
 term's posting list. This tightens the candidate set more aggressively than just
 adding scores.
 
-## 6. Skip score decoding for stale blocks
+## 6. Skip score decoding for stale blocks — ✅ DONE
 
-**Impact: Low** — saves a small amount of work during skip-list traversal.
-
-When advancing a non-essential cursor into a window, tell the skip reader to skip
-decoding block-level scores for blocks whose max_offset is behind `window_start`.
-SereneDB's `SetSkipWandBelow(window_max)` does this.
+`drain_essential()` and `score_candidates()` skip blocks where
+`dir_max_offsets[block_idx] < window_start` without decompressing them.
 
 ## 7. Root/non-Root specialization (compile-time)
 
@@ -75,7 +55,32 @@ threshold-aware seek logic (the outer loop handles pruning). A `Root=false` vari
 of the cursor could strip out score comparisons during seek/advance. SereneDB uses
 a template bool parameter for this.
 
-## 8. Deferred skip reader initialization
+## 8. Deferred skip reader initialization — ✅ DONE
 
-**Impact: Low** — avoids paying skip reader setup cost for terms that MaxScore
-ends up skipping entirely. Only initialize the skip reader on first actual seek.
+Lazy cursors (`open_lazy`) only load the directory block; data blocks are loaded
+on demand.  The 3-batch I/O pipeline defers non-essential block loading until
+the threshold stabilizes.
+
+## 9. SIMD-accelerated budget pruning
+
+**Impact: Medium** — vectorize the `doc_set.retain` cutoff comparison using
+NEON/AVX2 `vcmp` + movemask, as SereneDB does with `FilterCompetitiveHits`.
+Currently this is scalar.
+
+## 10. Fused dequant+scoring in drain_essential — ✅ DONE
+
+`drain_essential()` now reads u8 quantized weights directly from raw bytes,
+fusing the dequantization scale and query_weight into a single `factor`.
+This eliminates `decompress_values_into` (no `value_buf` write+read) and
+saves one f32 multiply per entry.  Works for View, Lazy, and Eager paths.
+
+## 11. Block-max pruning for non-essential `score_candidates` — NOT NEEDED
+
+`score_candidates()` has a `min_block_score` parameter that can skip blocks
+before decompression.  However, the Batch 3 lazy I/O pipeline already
+prunes non-essential blocks at the I/O level (blocks below threshold are
+never loaded → `ensure_forward_block` returns false).  The only gap is
+blocks that were loaded but became irrelevant as the threshold increased
+during later windows.  Currently passing `min_block_score = 0.0`, which
+has no real effect.  To make this useful, would need per-block
+`min_block_score = threshold - max_candidate_score - remaining_budget`.

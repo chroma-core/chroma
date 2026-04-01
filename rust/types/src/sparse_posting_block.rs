@@ -54,7 +54,7 @@ impl SparsePostingBlock {
     /// Build a block from sorted (offset, value) pairs.
     pub fn from_sorted_entries(entries: &[(u32, f32)]) -> Self {
         assert!(!entries.is_empty(), "block must have at least one entry");
-        assert!(entries.len() <= 512, "block must have at most 512 entries");
+        assert!(entries.len() <= 4096, "block must have at most 4096 entries");
 
         let n = entries.len();
         let min_offset = entries[0].0;
@@ -298,6 +298,7 @@ impl SparsePostingBlock {
         let n = hdr.num_entries as usize;
         buf.clear();
         buf.reserve(n);
+        unsafe { buf.set_len(n) };
 
         let raw_body = &bytes[16..];
         let packer = BitPacker4x::new();
@@ -306,16 +307,19 @@ impl SparsePostingBlock {
         let packed_group_bytes = BITPACK_GROUP_SIZE * (hdr.bits_per_delta as usize) / 8;
 
         let mut pos = 0;
-        let mut group = [0u32; BITPACK_GROUP_SIZE];
+        let mut write = 0;
         let mut initial = 0u32;
 
         for _ in 0..full_groups {
             let end = pos + packed_group_bytes;
-            packer.decompress_sorted(initial, &raw_body[pos..end], &mut group, hdr.bits_per_delta);
+            let group = &mut buf[write..write + BITPACK_GROUP_SIZE];
+            packer.decompress_sorted(initial, &raw_body[pos..end], group, hdr.bits_per_delta);
             initial = group[BITPACK_GROUP_SIZE - 1];
-            for &d in &group {
-                buf.push(d + hdr.min_offset);
+            let min = hdr.min_offset;
+            for v in group.iter_mut() {
+                *v += min;
             }
+            write += BITPACK_GROUP_SIZE;
             pos = end;
         }
 
@@ -326,9 +330,21 @@ impl SparsePostingBlock {
                 raw_body[pos + 2],
                 raw_body[pos + 3],
             ]);
-            buf.push(d + hdr.min_offset);
+            buf[write] = d + hdr.min_offset;
+            write += 1;
             pos += 4;
         }
+    }
+
+    /// Return a slice of the raw u8 quantized weights from serialized bytes.
+    /// Zero-copy — just a pointer into `bytes`.
+    pub fn raw_weights<'a>(bytes: &'a [u8], hdr: &PostingBlockHeader) -> &'a [u8] {
+        let n = hdr.num_entries as usize;
+        let full_groups = n / BITPACK_GROUP_SIZE;
+        let remainder = n % BITPACK_GROUP_SIZE;
+        let packed_group_bytes = BITPACK_GROUP_SIZE * (hdr.bits_per_delta as usize) / 8;
+        let qw_start = 16 + full_groups * packed_group_bytes + remainder * 4;
+        &bytes[qw_start..qw_start + n]
     }
 
     /// Read and dequantize a single value at `index` from raw bytes.
@@ -346,6 +362,7 @@ impl SparsePostingBlock {
 
     /// Decompress (dequantize) values from raw bytes into a caller-provided
     /// buffer. Reuses `buf` across calls to avoid per-block allocation.
+    /// Uses SIMD on aarch64 (NEON) and x86_64 (SSE2) when available.
     pub fn decompress_values_into(bytes: &[u8], hdr: &PostingBlockHeader, buf: &mut Vec<f32>) {
         let n = hdr.num_entries as usize;
         buf.clear();
@@ -358,11 +375,13 @@ impl SparsePostingBlock {
 
         let qw_start = full_groups * packed_group_bytes + remainder * 4;
         let inv_scale = hdr.max_weight / 255.0;
+        let weights = &raw_body[qw_start..qw_start + n];
 
-        for i in 0..n {
-            let q = raw_body[qw_start + i];
-            buf.push(q as f32 * inv_scale);
+        // Pre-set length so SIMD can write directly without per-element push
+        unsafe {
+            buf.set_len(n);
         }
+        dequantize_u8_to_f32(weights, inv_scale, buf);
     }
 
     // ── Block directory support ──────────────────────────────────────
@@ -442,6 +461,103 @@ impl SparsePostingBlock {
         }
     }
 }
+
+// ── Dequantize u8 weights → f32 values (used by decompress_values_into) ──
+
+fn dequantize_u8_to_f32(weights: &[u8], inv_scale: f32, out: &mut [f32]) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        dequantize_neon(weights, inv_scale, out);
+        return;
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("sse2") {
+            unsafe { dequantize_sse2(weights, inv_scale, out) };
+            return;
+        }
+    }
+    #[allow(unreachable_code)]
+    dequantize_scalar(weights, inv_scale, out);
+}
+
+fn dequantize_scalar(weights: &[u8], inv_scale: f32, out: &mut [f32]) {
+    for (o, &w) in out.iter_mut().zip(weights.iter()) {
+        *o = w as f32 * inv_scale;
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+fn dequantize_neon(weights: &[u8], inv_scale: f32, out: &mut [f32]) {
+    use std::arch::aarch64::*;
+
+    let n = weights.len();
+    let chunks = n / 16;
+
+    unsafe {
+        let vscale = vdupq_n_f32(inv_scale);
+
+        for c in 0..chunks {
+            let base = c * 16;
+            let u8x16 = vld1q_u8(weights.as_ptr().add(base));
+
+            let lo8 = vget_low_u8(u8x16);
+            let hi8 = vget_high_u8(u8x16);
+
+            let lo16 = vmovl_u8(lo8);
+            let hi16 = vmovl_u8(hi8);
+
+            let mut process = |u16vals: uint16x8_t, offset: usize| {
+                let lo32 = vmovl_u16(vget_low_u16(u16vals));
+                let hi32 = vmovl_u16(vget_high_u16(u16vals));
+
+                let flo = vmulq_f32(vcvtq_f32_u32(lo32), vscale);
+                let fhi = vmulq_f32(vcvtq_f32_u32(hi32), vscale);
+
+                vst1q_f32(out.as_mut_ptr().add(base + offset), flo);
+                vst1q_f32(out.as_mut_ptr().add(base + offset + 4), fhi);
+            };
+
+            process(lo16, 0);
+            process(hi16, 8);
+        }
+    }
+
+    let rem_start = chunks * 16;
+    dequantize_scalar(&weights[rem_start..], inv_scale, &mut out[rem_start..]);
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+unsafe fn dequantize_sse2(weights: &[u8], inv_scale: f32, out: &mut [f32]) {
+    use std::arch::x86_64::*;
+
+    let n = weights.len();
+    let chunks = n / 8;
+
+    let vscale = _mm_set1_ps(inv_scale);
+    let zero = _mm_setzero_si128();
+
+    for c in 0..chunks {
+        let base = c * 8;
+        // Load 8 bytes, zero-extend to 8×i16, then to 2×4×i32, convert to f32
+        let raw = _mm_loadl_epi64(weights.as_ptr().add(base) as *const __m128i);
+        let u16vals = _mm_unpacklo_epi8(raw, zero);
+        let lo32 = _mm_unpacklo_epi16(u16vals, zero);
+        let hi32 = _mm_unpackhi_epi16(u16vals, zero);
+
+        let flo = _mm_mul_ps(_mm_cvtepi32_ps(lo32), vscale);
+        let fhi = _mm_mul_ps(_mm_cvtepi32_ps(hi32), vscale);
+
+        _mm_storeu_ps(out.as_mut_ptr().add(base), flo);
+        _mm_storeu_ps(out.as_mut_ptr().add(base + 4), fhi);
+    }
+
+    let rem_start = chunks * 8;
+    dequantize_scalar(&weights[rem_start..], inv_scale, &mut out[rem_start..]);
+}
+
+// ── SIMD scoring (used by score_block_into) ──────────────────────────
 
 fn score_block_scalar(weights: &[u8], factor: f32, scores: &mut [f32]) {
     for (s, &w) in scores.iter_mut().zip(weights.iter()) {

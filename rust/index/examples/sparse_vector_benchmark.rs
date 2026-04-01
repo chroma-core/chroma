@@ -130,6 +130,10 @@ struct Args {
     /// Batch size for commit/flush during indexing (default: 65536)
     #[arg(long, default_value_t = 65536)]
     batch_size: usize,
+
+    /// Posting block size for BlockMaxMaxScore index (entries per block)
+    #[arg(long, default_value_t = 1024)]
+    ms_block_size: u32,
 }
 
 fn dir_size_bytes(path: &std::path::Path) -> u64 {
@@ -537,6 +541,7 @@ async fn build_block_maxscore_index(
     documents: &[SparseDocument],
     sort_by_url: bool,
     batch_size_override: usize,
+    ms_block_size: u32,
 ) -> anyhow::Result<(TempDir, BlockfileProvider, Uuid)> {
     println!("🏗️ Building BlockMaxMaxScore index...");
     let start = Instant::now();
@@ -591,7 +596,8 @@ async fn build_block_maxscore_index(
             None
         };
 
-        let writer = BlockSparseWriter::new(posting_writer.clone(), old_reader);
+        let writer = BlockSparseWriter::new(posting_writer.clone(), old_reader)
+            .with_block_size(ms_block_size);
 
         let num_partitions = std::thread::available_parallelism()
             .map(|n| n.get())
@@ -1073,6 +1079,7 @@ async fn main() -> anyhow::Result<()> {
             &documents,
             args.sort_by_url,
             args.batch_size,
+            args.ms_block_size,
         ))
         .await?;
 
@@ -1154,6 +1161,7 @@ async fn main() -> anyhow::Result<()> {
             &documents,
             args.sort_by_url,
             args.batch_size,
+            args.ms_block_size,
         ))
         .await?;
 

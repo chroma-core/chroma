@@ -2,6 +2,8 @@ mod common;
 
 use common::{build_index, count_blocks, get_all_entries};
 
+const BLOCK_SIZE: usize = 1024;
+
 #[tokio::test]
 async fn test_ms_02_single_document() {
     let vectors = vec![(0u32, vec![(1u32, 0.5f32), (2, 0.8)])];
@@ -43,7 +45,7 @@ async fn test_ms_02_1000_documents() {
         // Blocks should be properly sized
         let blocks = count_blocks(&reader, dim).await;
         if !entries.is_empty() {
-            let expected_blocks = (entries.len() + 255) / 256;
+            let expected_blocks = entries.len().div_ceil(BLOCK_SIZE);
             assert_eq!(blocks, expected_blocks);
         }
     }
@@ -51,35 +53,38 @@ async fn test_ms_02_1000_documents() {
 
 #[tokio::test]
 async fn test_ms_02_block_boundary_exact() {
-    // 256 docs all sharing dim 0 → exactly 1 block
+    let bs = BLOCK_SIZE as u32;
+
+    // Exactly BLOCK_SIZE docs all sharing dim 0 → exactly 1 block
     let vectors: Vec<(u32, Vec<(u32, f32)>)> =
-        (0..256).map(|i| (i, vec![(0u32, 0.5)])).collect();
+        (0..bs).map(|i| (i, vec![(0u32, 0.5)])).collect();
     let (_dir, _provider, reader) = build_index(vectors).await;
     assert_eq!(count_blocks(&reader, 0).await, 1);
 
-    // 257 docs → 2 blocks (256 + 1)
+    // BLOCK_SIZE + 1 docs → 2 blocks
     let vectors: Vec<(u32, Vec<(u32, f32)>)> =
-        (0..257).map(|i| (i, vec![(0u32, 0.5)])).collect();
+        (0..bs + 1).map(|i| (i, vec![(0u32, 0.5)])).collect();
     let (_dir2, _provider2, reader2) = build_index(vectors).await;
     assert_eq!(count_blocks(&reader2, 0).await, 2);
 }
 
 #[tokio::test]
 async fn test_ms_02_large_dimension() {
+    let n = 10_000usize;
     let vectors: Vec<(u32, Vec<(u32, f32)>)> =
-        (0..10_000).map(|i| (i, vec![(0u32, 0.3)])).collect();
+        (0..n as u32).map(|i| (i, vec![(0u32, 0.3)])).collect();
     let (_dir, _provider, reader) = build_index(vectors).await;
 
     let blocks = count_blocks(&reader, 0).await;
-    assert_eq!(blocks, 40); // ceil(10000/256) = 40
+    assert_eq!(blocks, n.div_ceil(BLOCK_SIZE));
 
     let entries = get_all_entries(&reader, 0).await;
-    assert_eq!(entries.len(), 10_000);
+    assert_eq!(entries.len(), n);
 
-    // Last block should have 10000 % 256 = 16 entries
     let last_block = reader
         .get_posting_blocks(&chroma_index::sparse::types::encode_u32(0))
         .await
         .unwrap();
-    assert_eq!(last_block.last().unwrap().offsets().len(), 10000 % 256);
+    let expected_last = if n % BLOCK_SIZE == 0 { BLOCK_SIZE } else { n % BLOCK_SIZE };
+    assert_eq!(last_block.last().unwrap().offsets().len(), expected_last);
 }

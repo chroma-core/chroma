@@ -2,6 +2,8 @@ mod common;
 
 use common::{build_index, commit_writer, count_blocks, fork_writer, get_all_entries};
 
+const BLOCK_SIZE: usize = 1024;
+
 #[tokio::test]
 async fn test_ms_03_upsert() {
     let vectors: Vec<(u32, Vec<(u32, f32)>)> =
@@ -89,7 +91,7 @@ async fn test_ms_03_stale_block_cleanup() {
     let vectors: Vec<(u32, Vec<(u32, f32)>)> =
         (0..1000).map(|i| (i, vec![(0u32, 0.5)])).collect();
     let (_dir, provider, reader) = build_index(vectors).await;
-    assert_eq!(count_blocks(&reader, 0).await, 4); // ceil(1000/256)
+    assert_eq!(count_blocks(&reader, 0).await, 1000usize.div_ceil(BLOCK_SIZE));
 
     let writer = fork_writer(&provider, &reader).await;
     for i in 0..800u32 {
@@ -116,7 +118,7 @@ async fn test_ms_03_dimension_grows() {
     let reader2 = commit_writer(&provider, writer).await;
 
     assert_eq!(get_all_entries(&reader2, 0).await.len(), 300);
-    assert_eq!(count_blocks(&reader2, 0).await, 2); // 256 + 44
+    assert_eq!(count_blocks(&reader2, 0).await, 300usize.div_ceil(BLOCK_SIZE));
 }
 
 #[tokio::test]
