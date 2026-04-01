@@ -258,6 +258,7 @@ jobs:
           pre-commit run --all-files flake8
           pre-commit run --all-files prettier
           pre-commit run --all-files check-yaml
+          pre-commit run --all-files mypy
         continue-on-error: true
       - name: Cargo fmt check
         shell: bash
