@@ -262,6 +262,11 @@ pub struct PostingCursor<'view> {
     offset_buf: Vec<u32>,
     value_buf: Vec<f32>,
     buf_block_idx: usize,
+    // Separate tracking for drain_essential's offset-only decompress.
+    // drain_essential reads raw u8 weights directly (fused path) and
+    // only decompresses offsets — buf_block_idx must NOT be set in
+    // that case or ensure_forward_block will skip value decompression.
+    drain_buf_block_idx: usize,
     // Point lookup buffer -- offsets only (View mode)
     lookup_offset_buf: Vec<u32>,
     lookup_buf_block_idx: usize,
@@ -315,6 +320,7 @@ impl<'view> PostingCursor<'view> {
             offset_buf: Vec::new(),
             value_buf: Vec::new(),
             buf_block_idx: usize::MAX,
+            drain_buf_block_idx: usize::MAX,
             lookup_offset_buf: Vec::new(),
             lookup_buf_block_idx: usize::MAX,
         }))
@@ -338,6 +344,7 @@ impl<'view> PostingCursor<'view> {
             offset_buf: Vec::new(),
             value_buf: Vec::new(),
             buf_block_idx: usize::MAX,
+            drain_buf_block_idx: usize::MAX,
             lookup_offset_buf: Vec::new(),
             lookup_buf_block_idx: usize::MAX,
         }
@@ -379,6 +386,7 @@ impl<'view> PostingCursor<'view> {
             offset_buf: Vec::new(),
             value_buf: Vec::new(),
             buf_block_idx: usize::MAX,
+            drain_buf_block_idx: usize::MAX,
             lookup_offset_buf: Vec::new(),
             lookup_buf_block_idx: usize::MAX,
         }))
@@ -458,9 +466,12 @@ impl<'view> PostingCursor<'view> {
             CursorSource::View { raw_blocks } => {
                 let raw = raw_blocks[idx];
                 let hdr = SparsePostingBlock::peek_header(raw);
-                SparsePostingBlock::decompress_offsets_into(raw, &hdr, &mut self.offset_buf);
+                if self.drain_buf_block_idx != idx {
+                    SparsePostingBlock::decompress_offsets_into(raw, &hdr, &mut self.offset_buf);
+                }
                 SparsePostingBlock::decompress_values_into(raw, &hdr, &mut self.value_buf);
                 self.buf_block_idx = idx;
+                self.drain_buf_block_idx = idx;
                 true
             }
             CursorSource::Lazy { raw_blocks } => {
@@ -468,9 +479,12 @@ impl<'view> PostingCursor<'view> {
                     return false;
                 };
                 let hdr = SparsePostingBlock::peek_header(raw);
-                SparsePostingBlock::decompress_offsets_into(raw, &hdr, &mut self.offset_buf);
+                if self.drain_buf_block_idx != idx {
+                    SparsePostingBlock::decompress_offsets_into(raw, &hdr, &mut self.offset_buf);
+                }
                 SparsePostingBlock::decompress_values_into(raw, &hdr, &mut self.value_buf);
                 self.buf_block_idx = idx;
+                self.drain_buf_block_idx = idx;
                 true
             }
             CursorSource::Eager { .. } => true,
@@ -709,7 +723,7 @@ impl<'view> PostingCursor<'view> {
         window_end: u32,
         query_weight: f32,
         accum: &mut [f32],
-        doc_set: &mut Vec<u32>,
+        bitmap: &mut [u64],
         mask: &SignedRoaringBitmap,
     ) {
         while self.block_idx < self.block_count {
@@ -727,11 +741,12 @@ impl<'view> PostingCursor<'view> {
                 CursorSource::View { raw_blocks } => {
                     let raw = raw_blocks[self.block_idx];
                     let hdr = SparsePostingBlock::peek_header(raw);
-                    if self.buf_block_idx != self.block_idx {
+                    if self.drain_buf_block_idx != self.block_idx {
                         SparsePostingBlock::decompress_offsets_into(
                             raw, &hdr, &mut self.offset_buf,
                         );
-                        self.buf_block_idx = self.block_idx;
+                        self.drain_buf_block_idx = self.block_idx;
+                        self.buf_block_idx = usize::MAX;
                     }
                     let weights = SparsePostingBlock::raw_weights(raw, &hdr);
                     let factor = query_weight * hdr.max_weight / 255.0;
@@ -746,9 +761,7 @@ impl<'view> PostingCursor<'view> {
                         }
                         if passes_mask(doc, mask) {
                             let idx = (doc - window_start) as usize;
-                            if accum[idx] == 0.0 {
-                                doc_set.push(doc);
-                            }
+                            bitmap[idx >> 6] |= 1u64 << (idx & 63);
                             accum[idx] += weights[self.pos] as f32 * factor;
                         }
                         self.pos += 1;
@@ -761,11 +774,12 @@ impl<'view> PostingCursor<'view> {
                         continue;
                     };
                     let hdr = SparsePostingBlock::peek_header(raw);
-                    if self.buf_block_idx != self.block_idx {
+                    if self.drain_buf_block_idx != self.block_idx {
                         SparsePostingBlock::decompress_offsets_into(
                             raw, &hdr, &mut self.offset_buf,
                         );
-                        self.buf_block_idx = self.block_idx;
+                        self.drain_buf_block_idx = self.block_idx;
+                        self.buf_block_idx = usize::MAX;
                     }
                     let weights = SparsePostingBlock::raw_weights(raw, &hdr);
                     let factor = query_weight * hdr.max_weight / 255.0;
@@ -780,9 +794,7 @@ impl<'view> PostingCursor<'view> {
                         }
                         if passes_mask(doc, mask) {
                             let idx = (doc - window_start) as usize;
-                            if accum[idx] == 0.0 {
-                                doc_set.push(doc);
-                            }
+                            bitmap[idx >> 6] |= 1u64 << (idx & 63);
                             accum[idx] += weights[self.pos] as f32 * factor;
                         }
                         self.pos += 1;
@@ -803,9 +815,7 @@ impl<'view> PostingCursor<'view> {
                         }
                         if passes_mask(doc, mask) {
                             let idx = (doc - window_start) as usize;
-                            if accum[idx] == 0.0 {
-                                doc_set.push(doc);
-                            }
+                            bitmap[idx >> 6] |= 1u64 << (idx & 63);
                             accum[idx] += qw[self.pos] as f32 * factor;
                         }
                         self.pos += 1;
@@ -818,25 +828,25 @@ impl<'view> PostingCursor<'view> {
         }
     }
 
-    /// Merge-join this (non-essential) cursor against a sorted candidate
-    /// set, accumulating matched scores into the flat accumulator.
+    /// Merge-join this (non-essential) cursor against sorted candidates,
+    /// accumulating matched scores directly into contiguous `cand_scores`.
     pub fn score_candidates(
         &mut self,
         window_start: u32,
         window_end: u32,
         query_weight: f32,
-        accum: &mut [f32],
-        candidates: &[u32],
+        cand_docs: &[u32],
+        cand_scores: &mut [f32],
     ) {
-        if candidates.is_empty() {
+        if cand_docs.is_empty() {
             return;
         }
 
         let mut ci = 0;
 
-        while self.block_idx < self.block_count && ci < candidates.len() {
+        while self.block_idx < self.block_count && ci < cand_docs.len() {
             if self.dir_max_offsets[self.block_idx] < window_start
-                || self.dir_max_offsets[self.block_idx] < candidates[ci]
+                || self.dir_max_offsets[self.block_idx] < cand_docs[ci]
             {
                 self.block_idx += 1;
                 self.pos = 0;
@@ -862,19 +872,18 @@ impl<'view> PostingCursor<'view> {
                 self.pos = offsets.partition_point(|&o| o < window_start);
             }
 
-            while self.pos < offsets.len() && ci < candidates.len() {
+            while self.pos < offsets.len() && ci < cand_docs.len() {
                 let doc = offsets[self.pos];
                 if doc > window_end {
                     return;
                 }
-                let cand = candidates[ci];
+                let cand = cand_docs[ci];
                 if doc < cand {
                     self.pos += 1;
                 } else if doc > cand {
                     ci += 1;
                 } else {
-                    let idx = (doc - window_start) as usize;
-                    accum[idx] += query_weight * values[self.pos];
+                    cand_scores[ci] += query_weight * values[self.pos];
                     self.pos += 1;
                     ci += 1;
                 }
@@ -1081,15 +1090,19 @@ impl<'me> BlockSparseReader<'me> {
         // Track whether we've done the non-essential prefetch (Batch 3).
         let mut non_essential_loaded = false;
 
-        // ── Wide-window accumulator approach ──────────────────────
-        // Instead of narrow block-boundary windows with sort+merge,
-        // use wide 64K-doc windows with a flat f32 accumulator.
-        // Each essential term drains in batch (cache-friendly), then
-        // non-essential terms merge-join against the sorted doc set.
-        const WINDOW_WIDTH: u32 = 65536;
+        // ── L1-resident window accumulator ──────────────────────────
+        // 4K window → 16KB accum fits entirely in L1 cache.
+        // Essential terms scatter into accum; a u64 bitmap tracks
+        // touched slots (branchless, 512 bytes).  After drain we scan
+        // the bitmap to produce sorted cand_docs + contiguous
+        // cand_scores, enabling SIMD budget pruning between
+        // non-essential terms.
+        const WINDOW_WIDTH: u32 = 4096;
+        const BITMAP_WORDS: usize = (WINDOW_WIDTH as usize + 63) / 64;
         let mut accum = vec![0.0f32; WINDOW_WIDTH as usize];
-        let mut doc_set: Vec<u32> = Vec::with_capacity(WINDOW_WIDTH as usize);
-        let mut all_touched: Vec<u32> = Vec::with_capacity(WINDOW_WIDTH as usize);
+        let mut bitmap = [0u64; BITMAP_WORDS];
+        let mut cand_docs: Vec<u32> = Vec::with_capacity(WINDOW_WIDTH as usize);
+        let mut cand_scores: Vec<f32> = Vec::with_capacity(WINDOW_WIDTH as usize);
 
         let max_doc_id = terms
             .iter()
@@ -1102,9 +1115,6 @@ impl<'me> BlockSparseReader<'me> {
         while window_start <= max_doc_id {
             let window_end = (window_start + WINDOW_WIDTH - 1).min(max_doc_id);
 
-            doc_set.clear();
-            all_touched.clear();
-
             // ── Phase 1: batch-drain essential terms into accumulator ──
             for term in terms[essential_idx..].iter_mut() {
                 term.cursor.drain_essential(
@@ -1112,13 +1122,27 @@ impl<'me> BlockSparseReader<'me> {
                     window_end,
                     term.query_weight,
                     &mut accum,
-                    &mut doc_set,
+                    &mut bitmap,
                     &mask,
                 );
             }
-            all_touched.extend_from_slice(&doc_set);
 
-            if doc_set.is_empty() {
+            // Scan bitmap → sorted cand_docs + contiguous cand_scores.
+            // The bitmap scan produces sorted order naturally (no sort needed).
+            cand_docs.clear();
+            cand_scores.clear();
+            for word_idx in 0..BITMAP_WORDS {
+                let mut bits = bitmap[word_idx];
+                while bits != 0 {
+                    let bit = bits.trailing_zeros() as usize;
+                    let idx = word_idx * 64 + bit;
+                    cand_docs.push(window_start + idx as u32);
+                    cand_scores.push(accum[idx]);
+                    bits &= bits.wrapping_sub(1);
+                }
+            }
+
+            if cand_docs.is_empty() {
                 window_start = window_end.wrapping_add(1);
                 if window_start == 0 {
                     break;
@@ -1158,10 +1182,8 @@ impl<'me> BlockSparseReader<'me> {
                 }
             }
 
-            // ── Phase 2: non-essential merge-join ──────────────────
+            // ── Phase 2: non-essential merge-join with SIMD pruning ──
             if essential_idx > 0 {
-                doc_set.sort_unstable();
-
                 let mut remaining_budget: f32 = (0..essential_idx)
                     .map(|j| {
                         terms[j].query_weight
@@ -1172,11 +1194,9 @@ impl<'me> BlockSparseReader<'me> {
                 for i in (0..essential_idx).rev() {
                     if heap.len() >= k_usize && remaining_budget > 0.0 {
                         let cutoff = threshold - remaining_budget;
-                        doc_set.retain(|&doc| {
-                            accum[(doc - window_start) as usize] > cutoff
-                        });
+                        filter_competitive(&mut cand_docs, &mut cand_scores, cutoff);
                     }
-                    if doc_set.is_empty() {
+                    if cand_docs.is_empty() {
                         break;
                     }
 
@@ -1199,8 +1219,8 @@ impl<'me> BlockSparseReader<'me> {
                         window_start,
                         window_end,
                         qw,
-                        &mut accum,
-                        &doc_set,
+                        &cand_docs,
+                        &mut cand_scores,
                     );
 
                     remaining_budget -= qw * bub;
@@ -1208,10 +1228,8 @@ impl<'me> BlockSparseReader<'me> {
             }
 
             // ── Phase 3: extract to heap and reset accumulator ─────
-            for &doc in &doc_set {
-                let idx = (doc - window_start) as usize;
-                let score = accum[idx];
-                accum[idx] = 0.0;
+            for (ci, &doc) in cand_docs.iter().enumerate() {
+                let score = cand_scores[ci];
                 if score > threshold || heap.len() < k_usize {
                     heap.push(Score {
                         score,
@@ -1226,10 +1244,15 @@ impl<'me> BlockSparseReader<'me> {
                 }
             }
 
-            // Zero only the slots we actually wrote to (all_touched
-            // captures every doc before budget pruning shrinks doc_set).
-            for &doc in &all_touched {
-                accum[(doc - window_start) as usize] = 0.0;
+            // Zero accum slots + clear bitmap using the bitmap itself.
+            for word_idx in 0..BITMAP_WORDS {
+                let mut bits = bitmap[word_idx];
+                while bits != 0 {
+                    let bit = bits.trailing_zeros() as usize;
+                    accum[word_idx * 64 + bit] = 0.0;
+                    bits &= bits.wrapping_sub(1);
+                }
+                bitmap[word_idx] = 0;
             }
 
             // Re-partition essential vs non-essential
@@ -1271,4 +1294,152 @@ fn prefix_sum(terms: &[TermState<'_>]) -> Vec<f32> {
         sums.push(acc);
     }
     sums
+}
+
+// ── SIMD-accelerated budget pruning (SereneDB FilterCompetitiveHits) ──
+
+/// Remove candidates whose score <= cutoff.  Both parallel arrays are
+/// compacted in-place.  Uses SIMD comparison on contiguous `cand_scores`
+/// for branch-free 4-/8-wide filtering.
+fn filter_competitive(
+    cand_docs: &mut Vec<u32>,
+    cand_scores: &mut Vec<f32>,
+    cutoff: f32,
+) {
+    debug_assert_eq!(cand_docs.len(), cand_scores.len());
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("sse2") {
+            unsafe { filter_competitive_sse2(cand_docs, cand_scores, cutoff) };
+            return;
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe { filter_competitive_neon(cand_docs, cand_scores, cutoff) };
+        return;
+    }
+
+    #[allow(unreachable_code)]
+    filter_competitive_scalar(cand_docs, cand_scores, cutoff);
+}
+
+fn filter_competitive_scalar(
+    cand_docs: &mut Vec<u32>,
+    cand_scores: &mut Vec<f32>,
+    cutoff: f32,
+) {
+    let n = cand_docs.len();
+    let mut write = 0;
+    for i in 0..n {
+        if cand_scores[i] > cutoff {
+            cand_docs[write] = cand_docs[i];
+            cand_scores[write] = cand_scores[i];
+            write += 1;
+        }
+    }
+    cand_docs.truncate(write);
+    cand_scores.truncate(write);
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+unsafe fn filter_competitive_sse2(
+    cand_docs: &mut Vec<u32>,
+    cand_scores: &mut Vec<f32>,
+    cutoff: f32,
+) {
+    use std::arch::x86_64::*;
+
+    let n = cand_docs.len();
+    let chunks = n / 4;
+    let mut write = 0;
+
+    let vcutoff = _mm_set1_ps(cutoff);
+
+    for c in 0..chunks {
+        let base = c * 4;
+        let vs = _mm_loadu_ps(cand_scores.as_ptr().add(base));
+        let cmp = _mm_cmpgt_ps(vs, vcutoff);
+        let mask = _mm_movemask_ps(cmp) as u32;
+
+        for bit in 0..4u32 {
+            if mask & (1 << bit) != 0 {
+                *cand_docs.get_unchecked_mut(write) = *cand_docs.get_unchecked(base + bit as usize);
+                *cand_scores.get_unchecked_mut(write) = *cand_scores.get_unchecked(base + bit as usize);
+                write += 1;
+            }
+        }
+    }
+
+    for i in (chunks * 4)..n {
+        if *cand_scores.get_unchecked(i) > cutoff {
+            *cand_docs.get_unchecked_mut(write) = *cand_docs.get_unchecked(i);
+            *cand_scores.get_unchecked_mut(write) = *cand_scores.get_unchecked(i);
+            write += 1;
+        }
+    }
+
+    cand_docs.truncate(write);
+    cand_scores.truncate(write);
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn filter_competitive_neon(
+    cand_docs: &mut Vec<u32>,
+    cand_scores: &mut Vec<f32>,
+    cutoff: f32,
+) {
+    use std::arch::aarch64::*;
+
+    let n = cand_docs.len();
+    let chunks = n / 4;
+    let mut write = 0;
+
+    let vcutoff = vdupq_n_f32(cutoff);
+
+    for c in 0..chunks {
+        let base = c * 4;
+        let vs = vld1q_f32(cand_scores.as_ptr().add(base));
+        let cmp = vcgtq_f32(vs, vcutoff);
+
+        let m0 = vgetq_lane_u32(cmp, 0);
+        let m1 = vgetq_lane_u32(cmp, 1);
+        let m2 = vgetq_lane_u32(cmp, 2);
+        let m3 = vgetq_lane_u32(cmp, 3);
+
+        if m0 != 0 {
+            *cand_docs.get_unchecked_mut(write) = *cand_docs.get_unchecked(base);
+            *cand_scores.get_unchecked_mut(write) = *cand_scores.get_unchecked(base);
+            write += 1;
+        }
+        if m1 != 0 {
+            *cand_docs.get_unchecked_mut(write) = *cand_docs.get_unchecked(base + 1);
+            *cand_scores.get_unchecked_mut(write) = *cand_scores.get_unchecked(base + 1);
+            write += 1;
+        }
+        if m2 != 0 {
+            *cand_docs.get_unchecked_mut(write) = *cand_docs.get_unchecked(base + 2);
+            *cand_scores.get_unchecked_mut(write) = *cand_scores.get_unchecked(base + 2);
+            write += 1;
+        }
+        if m3 != 0 {
+            *cand_docs.get_unchecked_mut(write) = *cand_docs.get_unchecked(base + 3);
+            *cand_scores.get_unchecked_mut(write) = *cand_scores.get_unchecked(base + 3);
+            write += 1;
+        }
+    }
+
+    for i in (chunks * 4)..n {
+        if *cand_scores.get_unchecked(i) > cutoff {
+            *cand_docs.get_unchecked_mut(write) = *cand_docs.get_unchecked(i);
+            *cand_scores.get_unchecked_mut(write) = *cand_scores.get_unchecked(i);
+            write += 1;
+        }
+    }
+
+    cand_docs.truncate(write);
+    cand_scores.truncate(write);
 }
