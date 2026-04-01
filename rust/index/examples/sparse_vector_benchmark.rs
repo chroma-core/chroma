@@ -126,6 +126,10 @@ struct Args {
     /// Sweep query terms: run both algorithms at 5,10,15,...,max_terms and print a table
     #[arg(long)]
     sweep_terms: bool,
+
+    /// Batch size for commit/flush during indexing (default: 65536)
+    #[arg(long, default_value_t = 65536)]
+    batch_size: usize,
 }
 
 fn dir_size_bytes(path: &std::path::Path) -> u64 {
@@ -253,6 +257,7 @@ async fn build_sparse_index(
     documents: &[SparseDocument],
     block_size: u32,
     sort_by_url: bool,
+    batch_size_override: usize,
 ) -> anyhow::Result<(TempDir, BlockfileProvider, Uuid, Uuid)> {
     println!("🏗️ Building sparse index...");
     let start = Instant::now();
@@ -266,8 +271,7 @@ async fn build_sparse_index(
 
     let (temp_dir, provider) = test_arrow_blockfile_provider(8 * 1024 * 1024);
 
-    // Process documents in batches with write-commit-flush loop
-    let batch_size = 65536;
+    let batch_size = batch_size_override;
     let num_chunks = sorted_documents.len().div_ceil(batch_size);
 
     let pb = ProgressBar::new(sorted_documents.len() as u64);
@@ -532,6 +536,7 @@ const BLOCK_MAXSCORE_PREFIX: &str = "block_maxscore";
 async fn build_block_maxscore_index(
     documents: &[SparseDocument],
     sort_by_url: bool,
+    batch_size_override: usize,
 ) -> anyhow::Result<(TempDir, BlockfileProvider, Uuid)> {
     println!("🏗️ Building BlockMaxMaxScore index...");
     let start = Instant::now();
@@ -544,7 +549,7 @@ async fn build_block_maxscore_index(
 
     let (temp_dir, provider) = test_arrow_blockfile_provider(8 * 1024 * 1024);
 
-    let batch_size = 65536;
+    let batch_size = batch_size_override;
     let num_chunks = sorted_documents.len().div_ceil(batch_size);
 
     let pb = ProgressBar::new(sorted_documents.len() as u64);
@@ -1060,12 +1065,14 @@ async fn main() -> anyhow::Result<()> {
             &documents,
             args.block_size,
             args.sort_by_url,
+            args.batch_size,
         ))
         .await?;
 
         let (ms_dir, ms_provider, ms_id) = Box::pin(build_block_maxscore_index(
             &documents,
             args.sort_by_url,
+            args.batch_size,
         ))
         .await?;
 
@@ -1146,6 +1153,7 @@ async fn main() -> anyhow::Result<()> {
         let (temp_dir, provider, posting_id) = Box::pin(build_block_maxscore_index(
             &documents,
             args.sort_by_url,
+            args.batch_size,
         ))
         .await?;
 
@@ -1241,6 +1249,7 @@ async fn main() -> anyhow::Result<()> {
                 &documents,
                 args.block_size,
                 args.sort_by_url,
+                args.batch_size,
             ))
             .await?;
 
