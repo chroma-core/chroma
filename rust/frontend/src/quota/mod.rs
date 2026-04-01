@@ -1,3 +1,5 @@
+pub mod http;
+
 use std::{
     collections::HashMap,
     fmt,

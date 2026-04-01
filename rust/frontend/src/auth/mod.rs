@@ -8,9 +8,11 @@ use axum::http::StatusCode;
 
 use chroma_api_types::GetUserIdentityResponse;
 use chroma_types::Collection;
-use serde::Serialize;
+pub mod http;
 
-#[derive(Clone, Copy, Debug, Serialize)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthzAction {
     Reset,
@@ -78,7 +80,7 @@ impl Display for AuthzAction {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AuthzResource {
     pub tenant: Option<String>,
     pub database: Option<String>,

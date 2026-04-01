@@ -51,9 +51,9 @@ utoipa-axum = { version = "0.2.0", features = ["debug"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
 strum = "0.27.1"
 strum_macros = "0.27.1"
+reqwest = { workspace = true }
 
 [dev-dependencies]
-reqwest = { workspace = true }
 proptest = { workspace = true }
 proptest-state-machine = { workspace = true }
 chroma-types = { workspace = true, features = ["testing"] }
