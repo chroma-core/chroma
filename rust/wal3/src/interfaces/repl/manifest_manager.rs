@@ -3229,7 +3229,7 @@ mod tests {
 
     // Test that get_dirty_logs includes a log whose spread exactly matches the threshold.
     #[tokio::test]
-    async fn test_k8s_mcmr_integration_get_dirty_logs_includes_equal_threshold() {
+    async fn test_k8s_mcmr_integration_get_dirty_logs_includes_exact_threshold() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -3241,7 +3241,6 @@ mod tests {
             .expect("init failed");
 
         let manager = ManifestManager::new(Arc::new(client.clone()), "dummy".to_string(), log_id);
-
         let pointer = FragmentUuid::generate();
         manager
             .publish_fragment(
@@ -3259,10 +3258,9 @@ mod tests {
             .await
             .expect("get_dirty_logs failed");
 
-        let found = dirty_logs.iter().any(|(id, _, _, _)| *id == log_id);
         assert!(
-            found,
-            "get_dirty_logs should include logs whose uncompacted spread exactly matches the threshold, log_id={}, dirty_logs={:?}",
+            dirty_logs.iter().any(|(id, _, _, _)| *id == log_id),
+            "get_dirty_logs should include logs at the exact threshold, log_id={}, dirty_logs={:?}",
             log_id,
             dirty_logs
         );
