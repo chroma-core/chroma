@@ -960,10 +960,6 @@ impl<'me> BlockSparseReader<'me> {
     ///    the threshold.
     /// 3. **Batch 2**: With the real threshold, prune non-essential
     ///    blocks and load only those that survive. Resume the sync loop.
-    ///
-    /// The sync inner loop is completely unchanged — all MaxScore
-    /// hot-loop optimizations (flat buffers, budget pruning, adaptive
-    /// windows, zero-copy decompress) operate on cached data.
     pub async fn query(
         &'me self,
         query_vector: impl IntoIterator<Item = (u32, f32)>,
