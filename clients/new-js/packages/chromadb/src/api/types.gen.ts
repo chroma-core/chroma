@@ -230,6 +230,7 @@ export type EmbeddingsPayload = Array<Array<number>> | Array<string>;
 
 export type ErrorResponse = {
     error: string;
+    indexing_status?: IndexStatusResponse | null;
     message: string;
 };
 

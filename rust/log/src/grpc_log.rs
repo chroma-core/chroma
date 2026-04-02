@@ -33,10 +33,22 @@ use crate::GarbageCollectError;
 
 /// The gRPC metadata key carrying the backoff reason.
 const BACKOFF_REASON_MD_KEY: &str = "backoff-reason";
+/// The gRPC metadata key carrying the current enumeration offset.
+const ENUMERATION_OFFSET_MD_KEY: &str = "enumeration-offset";
 
 /// Extract the `backoff-reason` value from a `tonic::Status` metadata map.
 fn backoff_reason_from_status(status: &tonic::Status) -> Option<&str> {
     status.metadata().get(BACKOFF_REASON_MD_KEY)?.to_str().ok()
+}
+
+fn enumeration_offset_from_status(status: &tonic::Status) -> Option<u64> {
+    status
+        .metadata()
+        .get(ENUMERATION_OFFSET_MD_KEY)?
+        .to_str()
+        .ok()?
+        .parse()
+        .ok()
 }
 
 fn is_retryable_transport_status(status: &tonic::Status) -> bool {
@@ -118,9 +130,9 @@ pub struct ScoutLogFragmentsResponse {
 #[derive(Error, Debug)]
 pub enum GrpcPushLogsError {
     #[error("Please backoff exponentially and retry")]
-    Backoff,
+    Backoff { enumeration_offset: Option<u64> },
     #[error("Please backoff exponentially and retry: log needs compaction")]
-    BackoffCompaction,
+    BackoffCompaction { enumeration_offset: Option<u64> },
     #[error("The log is sealed.  No writes can happen.")]
     Sealed,
     #[error("Failed to push logs: {0}")]
@@ -134,8 +146,8 @@ pub enum GrpcPushLogsError {
 impl ChromaError for GrpcPushLogsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            GrpcPushLogsError::Backoff => ErrorCodes::ResourceExhausted,
-            GrpcPushLogsError::BackoffCompaction => ErrorCodes::ResourceExhausted,
+            GrpcPushLogsError::Backoff { .. } => ErrorCodes::ResourceExhausted,
+            GrpcPushLogsError::BackoffCompaction { .. } => ErrorCodes::ResourceExhausted,
             GrpcPushLogsError::FailedToPushLogs(status) => {
                 if is_retryable_transport_status(status) {
                     ErrorCodes::Unavailable
@@ -497,11 +509,15 @@ impl GrpcLog {
             .map_err(|err| match backoff_reason_from_status(&err) {
                 Some("compaction") => {
                     tracing::event!(Level::INFO, name = "backoff", reason = "compaction", error =? err);
-                    GrpcPushLogsError::BackoffCompaction
+                    GrpcPushLogsError::BackoffCompaction {
+                        enumeration_offset: enumeration_offset_from_status(&err),
+                    }
                 }
                 Some(reason) => {
                     tracing::event!(Level::INFO, name = "backoff", reason, error =? err);
-                    GrpcPushLogsError::Backoff
+                    GrpcPushLogsError::Backoff {
+                        enumeration_offset: enumeration_offset_from_status(&err),
+                    }
                 }
                 None => err.into(),
             })?;
