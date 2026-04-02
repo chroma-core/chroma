@@ -61,6 +61,12 @@ impl ManifestManager {
         intrinsic_cursor.unwrap_or(initial_offset.unwrap_or(LogPosition::from_offset(0)))
     }
 
+    fn partial_scan_query_limit(max_files: u64) -> Option<i64> {
+        max_files
+            .checked_add(1)
+            .and_then(|limit| i64::try_from(limit).ok())
+    }
+
     pub async fn init(
         regions: Vec<String>,
         spanner: &Client,
@@ -511,6 +517,9 @@ impl ManifestManager {
                 max_files
             )));
         }
+        let Some(fetch_max_files) = Self::partial_scan_query_limit(max_files) else {
+            return Ok(None);
+        };
         let mut stmt0 = Statement::new(
             "
             SELECT intrinsic_cursor, initial_offset
@@ -560,14 +569,14 @@ impl ManifestManager {
                 AND fragments.position_limit > @from_offset
                 AND fragments.position_start < @upper_bound
             ORDER BY fragments.position_limit ASC
-            LIMIT @max_files
+            LIMIT @fetch_max_files
             ",
             Self::FRAGMENTS_BY_POSITION_LIMIT_INDEX,
         ));
         stmt.add_param("log_id", &self.log_id.to_string());
         stmt.add_param("from_offset", &from_offset);
         stmt.add_param("upper_bound", &upper_bound);
-        stmt.add_param("max_files", &(max_files as i64));
+        stmt.add_param("fetch_max_files", &fetch_max_files);
         let mut query = tx.query(stmt).await?;
         let mut fragments = vec![];
         while let Some(row) = query.next().await? {
@@ -1666,6 +1675,19 @@ mod tests {
             Some(Duration::from_secs(13))
         );
         assert_eq!(channel_config.keep_alive_while_idle, Some(false));
+    }
+
+    #[test]
+    fn partial_scan_query_limit_overfetches_one_row() {
+        assert_eq!(Some(3), ManifestManager::partial_scan_query_limit(2));
+        assert_eq!(
+            Some(i64::MAX),
+            ManifestManager::partial_scan_query_limit((i64::MAX - 1) as u64)
+        );
+        assert_eq!(
+            None,
+            ManifestManager::partial_scan_query_limit(i64::MAX as u64)
+        );
     }
 
     fn make_setsum(seed: u8) -> Setsum {
