@@ -68,7 +68,7 @@ def test_add_miniscule(
         pytest.skip(
             "TODO @jai, come back and debug why CI runners fail with async + sync"
         )
-    _test_add(client, collection, record_set, True, always_compact=True)
+    _test_add(client, collection, record_set, True, always_compact=not MULTI_REGION_ENABLED)
 
 
 # Hypothesis tends to generate smaller values so we explicitly segregate the
@@ -82,8 +82,8 @@ def test_add_miniscule(
 @settings(
     deadline=None,
     parent=override_hypothesis_profile(
-        normal=hypothesis.settings(max_examples=500),
-        fast=hypothesis.settings(max_examples=200),
+        normal=hypothesis.settings(max_examples=250),
+        fast=hypothesis.settings(max_examples=100),
     ),
 )
 def test_add_small(

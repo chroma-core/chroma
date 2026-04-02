@@ -655,7 +655,7 @@ impl ManifestManager {
                 ON manifests.log_id = manifest_regions.log_id
             WHERE manifest_regions.region = @region
                 AND (
-                    manifests.enumeration_offset - COALESCE(manifest_regions.intrinsic_cursor, manifest_regions.initial_offset, 0) > @record_count_threshold
+                    manifests.enumeration_offset - COALESCE(manifest_regions.intrinsic_cursor, manifest_regions.initial_offset, 0) >= @record_count_threshold
                     OR (
                         manifests.enumeration_offset > COALESCE(manifest_regions.intrinsic_cursor, manifest_regions.initial_offset, 0)
                         AND UNIX_MICROS(CURRENT_TIMESTAMP()) - UNIX_MICROS(COALESCE(manifests.updated_at, TIMESTAMP_SECONDS(0))) >= @timeout_us
@@ -3224,6 +3224,47 @@ mod tests {
             "test_k8s_mcmr_integration_get_dirty_logs_returns_uncompacted: found log_id={} in {} dirty logs",
             log_id,
             dirty_logs.len()
+        );
+    }
+
+    // Test that get_dirty_logs includes a log whose spread exactly matches the threshold.
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_get_dirty_logs_includes_equal_threshold() {
+        let Some(client) = setup_spanner_client().await else {
+            panic!("Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let log_id = Uuid::new_v4();
+        let manifest = make_empty_manifest();
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
+            .await
+            .expect("init failed");
+
+        let manager = ManifestManager::new(Arc::new(client.clone()), "dummy".to_string(), log_id);
+
+        let pointer = FragmentUuid::generate();
+        manager
+            .publish_fragment(
+                &pointer,
+                "path/frag.parquet",
+                10,
+                100,
+                make_setsum(1),
+                &["dummy".to_string()],
+            )
+            .await
+            .expect("publish failed");
+
+        let dirty_logs = ManifestManager::get_dirty_logs(&client, "dummy", 10, u64::MAX)
+            .await
+            .expect("get_dirty_logs failed");
+
+        let found = dirty_logs.iter().any(|(id, _, _, _)| *id == log_id);
+        assert!(
+            found,
+            "get_dirty_logs should include logs whose uncompacted spread exactly matches the threshold, log_id={}, dirty_logs={:?}",
+            log_id,
+            dirty_logs
         );
     }
 
