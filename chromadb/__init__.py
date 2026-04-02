@@ -57,6 +57,7 @@ from chromadb.execution.expression.operator import (
 )
 from pathlib import Path
 import os
+from importlib.metadata import PackageNotFoundError, version as metadata_version
 
 # Re-export types from chromadb.types
 __all__ = [
@@ -108,7 +109,17 @@ logger = logging.getLogger(__name__)
 
 __settings = Settings()
 
-__version__ = "1.5.5"
+_STATIC_VERSION = "1.5.5"
+
+
+def _resolve_version() -> str:
+    try:
+        return metadata_version("chromadb")
+    except PackageNotFoundError:
+        return _STATIC_VERSION
+
+
+__version__ = _resolve_version()
 
 
 # Workaround to deal with Colab's old sqlite3 version
