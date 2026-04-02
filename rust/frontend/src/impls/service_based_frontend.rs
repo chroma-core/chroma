@@ -197,6 +197,31 @@ impl ServiceBasedFrontend {
             .collection)
     }
 
+    fn build_indexing_status(num_indexed_ops: u64, total_ops: u64) -> IndexStatusResponse {
+        let num_unindexed_ops = total_ops.saturating_sub(num_indexed_ops);
+        let op_indexing_progress = if total_ops == 0 {
+            1.0
+        } else {
+            num_indexed_ops as f32 / total_ops as f32
+        };
+
+        IndexStatusResponse {
+            op_indexing_progress,
+            num_unindexed_ops,
+            num_indexed_ops,
+            total_ops,
+        }
+    }
+
+    fn indexing_status_for_push_logs_error(
+        collection: &Collection,
+        error: &PushLogsError,
+    ) -> Option<IndexStatusResponse> {
+        let num_indexed_ops = u64::try_from(collection.log_position).ok()?;
+        let total_ops = error.enumeration_offset()?;
+        Some(Self::build_indexing_status(num_indexed_ops, total_ops))
+    }
+
     async fn set_collection_dimension(
         &mut self,
         database_name: DatabaseName,
@@ -934,7 +959,7 @@ impl ServiceBasedFrontend {
         };
         let res = add_to_retry
             .retry(self.retries_builder)
-            .when(|e| matches!(e, PushLogsError::Backoff))
+            .when(|e| matches!(e, PushLogsError::Backoff { .. }))
             .notify(|_, _| {
                 let retried = retries.fetch_add(1, Ordering::Relaxed);
                 if retried > 0 {
@@ -971,7 +996,14 @@ impl ServiceBasedFrontend {
                 Ok(AddCollectionRecordsResponse {})
             }
             Err(e) => match e {
-                PushLogsError::Backoff => Err(AddCollectionRecordsError::Backoff),
+                PushLogsError::Backoff { .. } => Err(AddCollectionRecordsError::Backoff {
+                    indexing_status: Self::indexing_status_for_push_logs_error(&collection, &e),
+                }),
+                PushLogsError::BackoffCompaction { .. } => {
+                    Err(AddCollectionRecordsError::BackoffCompaction {
+                        indexing_status: Self::indexing_status_for_push_logs_error(&collection, &e),
+                    })
+                }
                 other => Err(AddCollectionRecordsError::Other(Box::new(other) as _)),
             },
         }
@@ -1038,7 +1070,7 @@ impl ServiceBasedFrontend {
         };
         let res = add_to_retry
             .retry(self.retries_builder)
-            .when(|e| matches!(e, PushLogsError::Backoff))
+            .when(|e| matches!(e, PushLogsError::Backoff { .. }))
             .notify(|_, _| {
                 let retried = retries.fetch_add(1, Ordering::Relaxed);
                 if retried > 0 {
@@ -1075,7 +1107,14 @@ impl ServiceBasedFrontend {
                 Ok(UpdateCollectionRecordsResponse {})
             }
             Err(e) => match e {
-                PushLogsError::Backoff => Err(UpdateCollectionRecordsError::Backoff),
+                PushLogsError::Backoff { .. } => Err(UpdateCollectionRecordsError::Backoff {
+                    indexing_status: Self::indexing_status_for_push_logs_error(&collection, &e),
+                }),
+                PushLogsError::BackoffCompaction { .. } => {
+                    Err(UpdateCollectionRecordsError::BackoffCompaction {
+                        indexing_status: Self::indexing_status_for_push_logs_error(&collection, &e),
+                    })
+                }
                 other => Err(UpdateCollectionRecordsError::Other(Box::new(other) as _)),
             },
         }
@@ -1144,7 +1183,7 @@ impl ServiceBasedFrontend {
         };
         let res = add_to_retry
             .retry(self.retries_builder)
-            .when(|e| matches!(e, PushLogsError::Backoff))
+            .when(|e| matches!(e, PushLogsError::Backoff { .. }))
             .notify(|_, _| {
                 let retried = retries.fetch_add(1, Ordering::Relaxed);
                 if retried > 0 {
@@ -1181,7 +1220,14 @@ impl ServiceBasedFrontend {
                 Ok(UpsertCollectionRecordsResponse {})
             }
             Err(e) => match e {
-                PushLogsError::Backoff => Err(UpsertCollectionRecordsError::Backoff),
+                PushLogsError::Backoff { .. } => Err(UpsertCollectionRecordsError::Backoff {
+                    indexing_status: Self::indexing_status_for_push_logs_error(&collection, &e),
+                }),
+                PushLogsError::BackoffCompaction { .. } => {
+                    Err(UpsertCollectionRecordsError::BackoffCompaction {
+                        indexing_status: Self::indexing_status_for_push_logs_error(&collection, &e),
+                    })
+                }
                 other => Err(UpsertCollectionRecordsError::Other(Box::new(other) as _)),
             },
         }
@@ -1322,11 +1368,13 @@ impl ServiceBasedFrontend {
 
             let log_size_bytes = records.iter().map(OperationRecord::size_bytes).sum();
 
-            let cmek = self
+            let collection = self
                 .get_cached_collection(database_name_typed.clone(), collection_id)
                 .await
-                .map_err(|err| DeleteCollectionRecordsError::Internal(err.boxed()))?
+                .map_err(|err| DeleteCollectionRecordsError::Internal(err.boxed()))?;
+            let cmek = collection
                 .schema
+                .as_ref()
                 .and_then(|schema| schema.cmek.clone());
             self.retryable_push_logs(
                 &tenant_id,
@@ -1337,7 +1385,17 @@ impl ServiceBasedFrontend {
             )
             .await
             .map_err(|err| match err {
-                PushLogsError::Backoff => DeleteCollectionRecordsError::Backoff,
+                PushLogsError::Backoff { .. } => DeleteCollectionRecordsError::Backoff {
+                    indexing_status: Self::indexing_status_for_push_logs_error(&collection, &err),
+                },
+                PushLogsError::BackoffCompaction { .. } => {
+                    DeleteCollectionRecordsError::BackoffCompaction {
+                        indexing_status: Self::indexing_status_for_push_logs_error(
+                            &collection,
+                            &err,
+                        ),
+                    }
+                }
                 other => DeleteCollectionRecordsError::Internal(Box::new(other)),
             })?;
 
@@ -1406,7 +1464,7 @@ impl ServiceBasedFrontend {
         let res = Box::pin(
             delete_to_retry
                 .retry(self.collections_with_segments_provider.get_retry_backoff())
-                .when(|e| matches!(e, DeleteCollectionRecordsError::Backoff))
+                .when(|e| matches!(e, DeleteCollectionRecordsError::Backoff { .. }))
                 .notify(|_, _| {
                     let retried = retries.fetch_add(1, Ordering::Relaxed);
                     if retried > 0 {
@@ -1569,25 +1627,15 @@ impl ServiceBasedFrontend {
             .await?
             .saturating_sub(1);
 
-        let total_ops = enumeration_offset;
-        let num_unindexed_ops = total_ops.saturating_sub(num_indexed_ops);
-        let op_indexing_progress = if total_ops == 0 {
-            1.0
-        } else {
-            num_indexed_ops as f32 / total_ops as f32
-        };
-
         chroma_metering::with_current(|context| {
             context.latest_collection_logical_size_bytes(0);
             context.finish_request(Instant::now());
         });
 
-        Ok(IndexStatusResponse {
-            op_indexing_progress,
-            num_unindexed_ops,
+        Ok(Self::build_indexing_status(
             num_indexed_ops,
-            total_ops,
-        })
+            enumeration_offset,
+        ))
     }
 
     async fn retryable_get(

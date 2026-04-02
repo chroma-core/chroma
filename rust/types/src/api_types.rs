@@ -1341,7 +1341,15 @@ pub enum AddCollectionRecordsError {
     #[error("Failed to get collection: {0}")]
     Collection(#[from] GetCollectionError),
     #[error("Backoff and retry")]
-    Backoff,
+    Backoff {
+        indexing_status: Option<IndexStatusResponse>,
+    },
+    #[error(
+        "log needs compaction before accepting more writes; please backoff exponentially and retry"
+    )]
+    BackoffCompaction {
+        indexing_status: Option<IndexStatusResponse>,
+    },
     #[error("Invalid database name")]
     InvalidDatabaseName,
     #[error(transparent)]
@@ -1352,7 +1360,8 @@ impl ChromaError for AddCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             AddCollectionRecordsError::Collection(err) => err.code(),
-            AddCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
+            AddCollectionRecordsError::Backoff { .. } => ErrorCodes::ResourceExhausted,
+            AddCollectionRecordsError::BackoffCompaction { .. } => ErrorCodes::ResourceExhausted,
             AddCollectionRecordsError::InvalidDatabaseName => ErrorCodes::InvalidArgument,
             AddCollectionRecordsError::Other(err) => err.code(),
         }
@@ -1436,7 +1445,15 @@ pub struct UpdateCollectionRecordsResponse {}
 #[derive(Error, Debug)]
 pub enum UpdateCollectionRecordsError {
     #[error("Backoff and retry")]
-    Backoff,
+    Backoff {
+        indexing_status: Option<IndexStatusResponse>,
+    },
+    #[error(
+        "log needs compaction before accepting more writes; please backoff exponentially and retry"
+    )]
+    BackoffCompaction {
+        indexing_status: Option<IndexStatusResponse>,
+    },
     #[error("Invalid database name")]
     InvalidDatabaseName,
     #[error(transparent)]
@@ -1446,7 +1463,8 @@ pub enum UpdateCollectionRecordsError {
 impl ChromaError for UpdateCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            UpdateCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
+            UpdateCollectionRecordsError::Backoff { .. } => ErrorCodes::ResourceExhausted,
+            UpdateCollectionRecordsError::BackoffCompaction { .. } => ErrorCodes::ResourceExhausted,
             UpdateCollectionRecordsError::InvalidDatabaseName => ErrorCodes::InvalidArgument,
             UpdateCollectionRecordsError::Other(err) => err.code(),
         }
@@ -1532,7 +1550,15 @@ pub struct UpsertCollectionRecordsResponse {}
 #[derive(Error, Debug)]
 pub enum UpsertCollectionRecordsError {
     #[error("Backoff and retry")]
-    Backoff,
+    Backoff {
+        indexing_status: Option<IndexStatusResponse>,
+    },
+    #[error(
+        "log needs compaction before accepting more writes; please backoff exponentially and retry"
+    )]
+    BackoffCompaction {
+        indexing_status: Option<IndexStatusResponse>,
+    },
     #[error("Invalid database name")]
     InvalidDatabaseName,
     #[error(transparent)]
@@ -1542,7 +1568,8 @@ pub enum UpsertCollectionRecordsError {
 impl ChromaError for UpsertCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            UpsertCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
+            UpsertCollectionRecordsError::Backoff { .. } => ErrorCodes::ResourceExhausted,
+            UpsertCollectionRecordsError::BackoffCompaction { .. } => ErrorCodes::ResourceExhausted,
             UpsertCollectionRecordsError::InvalidDatabaseName => ErrorCodes::InvalidArgument,
             UpsertCollectionRecordsError::Other(err) => err.code(),
         }
@@ -1641,7 +1668,15 @@ pub enum DeleteCollectionRecordsError {
     #[error("Failed to resolve records for deletion: {0}")]
     Get(#[from] ExecutorError),
     #[error("Backoff and retry")]
-    Backoff,
+    Backoff {
+        indexing_status: Option<IndexStatusResponse>,
+    },
+    #[error(
+        "log needs compaction before accepting more writes; please backoff exponentially and retry"
+    )]
+    BackoffCompaction {
+        indexing_status: Option<IndexStatusResponse>,
+    },
     #[error("Invalid database name")]
     InvalidDatabaseName,
     #[error(transparent)]
@@ -1652,7 +1687,8 @@ impl ChromaError for DeleteCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             DeleteCollectionRecordsError::Get(err) => err.code(),
-            DeleteCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
+            DeleteCollectionRecordsError::Backoff { .. } => ErrorCodes::ResourceExhausted,
+            DeleteCollectionRecordsError::BackoffCompaction { .. } => ErrorCodes::ResourceExhausted,
             DeleteCollectionRecordsError::InvalidDatabaseName => ErrorCodes::InvalidArgument,
             DeleteCollectionRecordsError::Internal(err) => err.code(),
         }
