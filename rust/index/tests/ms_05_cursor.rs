@@ -117,8 +117,7 @@ fn test_ms_05_get_value_present() {
 
     let v = cursor.get_value(5);
     assert!(v.is_some());
-    let tol = 0.9 / 255.0 + 1e-6;
-    assert!((v.unwrap() - 0.6).abs() <= tol);
+    assert!((v.unwrap() - 0.6).abs() <= 1e-3);
 }
 
 #[test]
@@ -136,8 +135,7 @@ fn test_ms_05_get_value_cross_block() {
 
     let v = cursor.get_value(300);
     assert!(v.is_some());
-    let tol = 0.7 / 255.0 + 1e-6;
-    assert!((v.unwrap() - 0.7).abs() <= tol);
+    assert!((v.unwrap() - 0.7).abs() <= 1e-3);
 
     let v0 = cursor.get_value(0);
     assert!(v0.is_some());
@@ -152,8 +150,7 @@ fn test_ms_05_get_value_beyond_end() {
 #[test]
 fn test_ms_05_dimension_max() {
     let cursor = make_cursor(&[(0, 10, 0.5), (10, 10, 0.9), (20, 10, 0.3)]);
-    let tol = 0.9 / 255.0 + 1e-6;
-    assert!((cursor.dimension_max() - 0.9).abs() <= tol);
+    assert!((cursor.dimension_max() - 0.9).abs() <= 1e-3);
 }
 
 #[test]
@@ -161,9 +158,8 @@ fn test_ms_05_current_block_max() {
     let mut cursor = make_cursor(&[(0, 256, 0.5), (256, 256, 0.7)]);
     let mask = full_mask();
 
-    let tol = 0.7 / 255.0 + 1e-6;
-    assert!((cursor.current_block_max() - 0.5).abs() <= tol);
+    assert!((cursor.current_block_max() - 0.5).abs() <= 1e-3);
 
     cursor.advance(256, &mask);
-    assert!((cursor.current_block_max() - 0.7).abs() <= tol);
+    assert!((cursor.current_block_max() - 0.7).abs() <= 1e-3);
 }

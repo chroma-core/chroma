@@ -18,14 +18,7 @@ async fn test_ms_03_upsert() {
     assert_eq!(entries.len(), 100);
 
     let doc50 = entries.iter().find(|(off, _)| *off == 50).unwrap();
-    let tol = reader2
-        .get_posting_blocks(&chroma_index::sparse::types::encode_u32(0))
-        .await
-        .unwrap()[0]
-        .max_weight
-        / 255.0
-        + 1e-6;
-    assert!((doc50.1 - 0.9).abs() <= tol);
+    assert!((doc50.1 - 0.9).abs() <= 1e-3);
 }
 
 #[tokio::test]

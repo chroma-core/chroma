@@ -53,6 +53,7 @@ chroma-config = { workspace = true }
 chroma-storage = { workspace = true }
 chroma-tracing = { workspace = true }
 chroma-distance = { workspace = true }
+half = "2.7.1"
 
 [dev-dependencies]
 indicatif = { workspace = true }

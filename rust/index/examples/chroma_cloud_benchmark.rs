@@ -21,7 +21,8 @@ use chroma_blockstore::arrow::provider::BlockfileReaderOptions;
 use chroma_blockstore::test_arrow_blockfile_provider;
 use chroma_blockstore::{provider::BlockfileProvider, BlockfileWriterOptions};
 use chroma_index::sparse::maxscore::{
-    BlockSparseReader, BlockSparseWriter, SparsePostingBlock, SPARSE_POSTING_BLOCK_SIZE_BYTES,
+    rescore_and_select, BlockSparseReader, BlockSparseWriter, SparsePostingBlock, SparseRescorer,
+    SPARSE_POSTING_BLOCK_SIZE_BYTES,
 };
 use chroma_types::operator::Key;
 use chroma_types::plan::SearchPayload;
@@ -29,6 +30,7 @@ use chroma_types::{MetadataValue, SignedRoaringBitmap};
 use clap::Parser;
 use futures::stream::{self, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use uuid::Uuid;
@@ -96,6 +98,17 @@ struct Args {
     #[arg(long)]
     maxscore_only: bool,
 
+    /// Diagnose recall: run each query at k and 10×k, distinguish
+    /// pruning bugs from quantization noise.
+    #[arg(long)]
+    diagnose: bool,
+
+    /// Oversample factor for two-phase re-scoring. MaxScore returns
+    /// k * oversample candidates, then exact re-scoring selects top-k.
+    /// 0 = disabled (use raw MaxScore scores). Default 3.
+    #[arg(long, default_value_t = 3)]
+    oversample: u32,
+
     /// Iterations per query (for profiling)
     #[arg(short = 'i', long, default_value_t = 1)]
     iterations: usize,
@@ -115,6 +128,62 @@ impl Args {
 struct SparseDoc {
     indices: Vec<u32>,
     values: Vec<f32>,
+}
+
+// ── In-memory forward index for exact re-scoring ───────────────────
+
+struct ForwardIndex {
+    docs: HashMap<u32, Vec<(u32, f32)>>,
+}
+
+impl ForwardIndex {
+    fn build(documents: &[SparseDoc]) -> Self {
+        let mut docs = HashMap::with_capacity(documents.len());
+        for (i, doc) in documents.iter().enumerate() {
+            let mut pairs: Vec<(u32, f32)> = doc
+                .indices
+                .iter()
+                .zip(doc.values.iter())
+                .map(|(&d, &v)| (d, v))
+                .collect();
+            pairs.sort_unstable_by_key(|&(d, _)| d);
+            docs.insert(i as u32, pairs);
+        }
+        ForwardIndex { docs }
+    }
+
+    fn dot_product(&self, doc_id: u32, query: &[(u32, f32)]) -> f32 {
+        let Some(doc) = self.docs.get(&doc_id) else {
+            return 0.0;
+        };
+        let mut score = 0.0f32;
+        let mut di = 0;
+        let mut qi = 0;
+        while di < doc.len() && qi < query.len() {
+            let dd = doc[di].0;
+            let qd = query[qi].0;
+            if dd < qd {
+                di += 1;
+            } else if dd > qd {
+                qi += 1;
+            } else {
+                score += doc[di].1 * query[qi].1;
+                di += 1;
+                qi += 1;
+            }
+        }
+        score
+    }
+}
+
+#[async_trait::async_trait]
+impl SparseRescorer for ForwardIndex {
+    async fn rescore_batch(&self, doc_ids: &[u32], query: &[(u32, f32)]) -> Vec<f32> {
+        doc_ids
+            .iter()
+            .map(|&id| self.dot_product(id, query))
+            .collect()
+    }
 }
 
 // ── Fetch documents from Chroma Cloud ──────────────────────────────
@@ -295,6 +364,8 @@ async fn search(
     posting_id: Uuid,
     query: &[(u32, f32)],
     k: u32,
+    oversample: u32,
+    rescorer: Option<&dyn SparseRescorer>,
 ) -> anyhow::Result<(Vec<(u32, f32)>, f64)> {
     let posting_reader = provider
         .read::<u32, SparsePostingBlock>(BlockfileReaderOptions::new(
@@ -305,12 +376,26 @@ async fn search(
         .map_err(|e| anyhow::anyhow!("Reader: {e}"))?;
     let reader = BlockSparseReader::new(posting_reader);
 
+    let fetch_k = if rescorer.is_some() && oversample > 1 {
+        k * oversample
+    } else {
+        k
+    };
+
     let mask = SignedRoaringBitmap::full();
     let start = Instant::now();
-    let results = reader
-        .query(query.to_vec(), k, mask)
+    let candidates = reader
+        .query(query.to_vec(), fetch_k, mask)
         .await
         .map_err(|e| anyhow::anyhow!("Query: {e}"))?;
+
+    let results = if let Some(rescorer) = rescorer {
+        rescore_and_select(candidates, k as usize, query, rescorer).await
+    } else {
+        let mut r = candidates;
+        r.truncate(k as usize);
+        r
+    };
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
 
     let pairs: Vec<(u32, f32)> = results.iter().map(|s| (s.offset, s.score)).collect();
@@ -464,19 +549,32 @@ async fn main() -> anyhow::Result<()> {
         storage_bytes as f64 / (1024.0 * 1024.0)
     );
 
+    // Build in-memory forward index for exact re-scoring
+    let fwd_index = if args.oversample > 1 && !args.maxscore_only {
+        println!("\n📇 Building in-memory forward index for re-scoring (oversample={}x)...", args.oversample);
+        let start = Instant::now();
+        let fi = ForwardIndex::build(&documents);
+        println!("  Built in {:.2}s", start.elapsed().as_secs_f64());
+        Some(fi)
+    } else {
+        None
+    };
+    let rescorer: Option<&dyn SparseRescorer> = fwd_index.as_ref().map(|fi| fi as &dyn SparseRescorer);
+    let oversample = args.oversample;
+
     // Benchmark
     if args.maxscore_only {
-        println!("\n🎯 MaxScore-only mode (no brute force)");
+        println!("\n🎯 MaxScore-only mode (no brute force, no re-scoring)");
 
         for q in queries.iter().take(5) {
-            let _ = search(&provider, posting_id, q, args.top_k as u32).await?;
+            let _ = search(&provider, posting_id, q, args.top_k as u32, 1, None).await?;
         }
 
         let start_total = Instant::now();
         let mut total_ms = 0.0f64;
         for q in &queries {
             for _ in 0..args.iterations {
-                let (_, elapsed) = search(&provider, posting_id, q, args.top_k as u32).await?;
+                let (_, elapsed) = search(&provider, posting_id, q, args.top_k as u32, 1, None).await?;
                 total_ms += elapsed;
             }
         }
@@ -498,8 +596,111 @@ async fn main() -> anyhow::Result<()> {
             "  Throughput: {:.0} qps",
             total_searches as f64 / (wall_time / 1000.0)
         );
+    } else if args.diagnose {
+        // ── Diagnostic mode ────────────────────────────────────────
+        let k = args.top_k;
+        let big_k = (k * 10).min(1000) as u32;
+
+        println!("\n🩺 Diagnosis mode: k={k}, big_k={big_k}, oversample={oversample}x");
+        println!("  For each query: brute-force top-{k} vs index top-{k} and top-{big_k}");
+        if rescorer.is_some() {
+            println!("  Re-scoring enabled via in-memory forward index");
+        }
+
+        let mut total_recall_k = 0.0f32;
+        let mut total_recall_big = 0.0f32;
+        let mut pruning_misses = 0usize;
+        let mut quant_misses = 0usize;
+        let mut total_misses = 0usize;
+
+        let pb = ProgressBar::new(queries.len() as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("  Diagnosing [{bar:40}] {pos}/{len}")
+                .unwrap(),
+        );
+
+        for (qi, q) in queries.iter().enumerate() {
+            let expected = brute_force_topk(&documents, q, k);
+            let (results_k, _) = search(&provider, posting_id, q, k as u32, oversample, rescorer).await?;
+            let (results_big, _) = search(&provider, posting_id, q, big_k, oversample, rescorer).await?;
+
+            let expected_ids: std::collections::HashSet<u32> =
+                expected.iter().map(|(id, _)| *id).collect();
+            let result_k_ids: std::collections::HashSet<u32> =
+                results_k.iter().map(|(id, _)| *id).collect();
+            let result_big_ids: std::collections::HashSet<u32> =
+                results_big.iter().map(|(id, _)| *id).collect();
+
+            let recall_k = recall(&results_k, &expected);
+            let recall_big = if expected.is_empty() {
+                1.0
+            } else {
+                expected_ids.intersection(&result_big_ids).count() as f32
+                    / expected.len() as f32
+            };
+
+            total_recall_k += recall_k;
+            total_recall_big += recall_big;
+
+            let missing_from_k: Vec<u32> = expected_ids
+                .difference(&result_k_ids)
+                .copied()
+                .collect();
+
+            for &doc_id in &missing_from_k {
+                total_misses += 1;
+                if result_big_ids.contains(&doc_id) {
+                    quant_misses += 1;
+                } else {
+                    pruning_misses += 1;
+                    if pruning_misses <= 10 {
+                        let bf_score = expected.iter().find(|(id, _)| *id == doc_id)
+                            .map(|(_, s)| *s).unwrap_or(0.0);
+                        let idx_min = results_k.last().map(|(_, s)| *s).unwrap_or(0.0);
+                        println!(
+                            "  ⚠️ Q{qi} doc {doc_id}: bf_score={bf_score:.6}, \
+                             idx_min_score={idx_min:.6}, NOT in top-{big_k} → pruning bug"
+                        );
+                    }
+                }
+            }
+            pb.inc(1);
+        }
+        pb.finish_and_clear();
+
+        let n = queries.len() as f32;
+        println!("\n🩺 DIAGNOSIS RESULTS");
+        println!("{}", "=".repeat(60));
+        println!("  Oversample:        {oversample}x");
+        println!("  Re-scoring:        {}", if rescorer.is_some() { "enabled" } else { "disabled" });
+        println!("  Recall@{k}:       {:.2}%", total_recall_k / n * 100.0);
+        println!("  Recall@{big_k} → @{k}: {:.2}%", total_recall_big / n * 100.0);
+        println!();
+        println!("  Total missing docs:           {total_misses}");
+        println!(
+            "  Due to quantization noise:    {quant_misses} (in top-{big_k} but not top-{k})"
+        );
+        println!(
+            "  Due to pruning (bug):         {pruning_misses} (not even in top-{big_k})"
+        );
+        if pruning_misses > 0 {
+            println!(
+                "\n  ❌ {pruning_misses} docs were pruned that shouldn't have been."
+            );
+            println!("     This indicates a bug in the MaxScore pruning logic.");
+        } else if total_misses == 0 {
+            println!("\n  ✅ Perfect recall — no missing docs.");
+        } else {
+            println!(
+                "\n  ✅ All missing docs are ranking noise (in top-{big_k} but not top-{k})."
+            );
+        }
     } else {
         println!("\n🎯 Benchmark with brute force comparison...");
+        if rescorer.is_some() {
+            println!("  Re-scoring enabled (oversample={oversample}x)");
+        }
 
         let mut total_recall = 0.0f32;
         let mut total_bf_ms = 0.0f64;
@@ -517,7 +718,7 @@ async fn main() -> anyhow::Result<()> {
             let expected = brute_force_topk(&documents, q, args.top_k);
             total_bf_ms += bf_start.elapsed().as_secs_f64() * 1000.0;
 
-            let (results, elapsed) = search(&provider, posting_id, q, args.top_k as u32).await?;
+            let (results, elapsed) = search(&provider, posting_id, q, args.top_k as u32, oversample, rescorer).await?;
             total_ms_ms += elapsed;
             total_recall += recall(&results, &expected);
             pb.inc(1);
@@ -533,6 +734,7 @@ async fn main() -> anyhow::Result<()> {
         println!("\n📨 BENCHMARK RESULTS");
         println!("{}", "=".repeat(60));
         println!("🎯 Performance:");
+        println!("  Oversample:         {oversample}x{}", if rescorer.is_some() { " (re-scoring enabled)" } else { "" });
         println!("  Method              Time (ms)    Speedup");
         println!("  ------------------------------------------");
         println!("  Brute Force         {avg_bf:<12.2} 1.00x");

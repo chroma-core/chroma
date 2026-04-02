@@ -3,8 +3,8 @@ mod common;
 use chroma_index::sparse::maxscore::SparsePostingBlock;
 use common::{assert_approx, make_block, sequential_entries};
 
-fn quantization_tolerance(max_weight: f32) -> f32 {
-    max_weight / 255.0 + 1e-6
+fn f16_tolerance(_max_weight: f32) -> f32 {
+    1e-3
 }
 
 fn assert_roundtrip_offsets_exact(entries: &[(u32, f32)]) {
@@ -19,7 +19,7 @@ fn assert_roundtrip_offsets_exact(entries: &[(u32, f32)]) {
 
 fn assert_roundtrip_values_bounded(entries: &[(u32, f32)]) {
     let block = make_block(entries);
-    let tol = quantization_tolerance(block.max_weight);
+    let tol = f16_tolerance(block.max_weight);
     let bytes = block.serialize();
     let restored = SparsePostingBlock::deserialize(&bytes);
     for (i, (&orig, &restored_v)) in block.values().iter().zip(restored.values().iter()).enumerate() {
@@ -101,7 +101,7 @@ fn test_ms_00_uniform_weights() {
     let block = make_block(&entries);
     let bytes = block.serialize();
     let restored = SparsePostingBlock::deserialize(&bytes);
-    let tol = quantization_tolerance(block.max_weight);
+    let tol = f16_tolerance(block.max_weight);
     for &v in restored.values() {
         assert_approx(v, 0.5, tol);
     }
@@ -114,7 +114,7 @@ fn test_ms_00_tiny_weights() {
     let bytes = block.serialize();
     let restored = SparsePostingBlock::deserialize(&bytes);
     assert_eq!(restored.offsets(), block.offsets());
-    let tol = quantization_tolerance(block.max_weight);
+    let tol = f16_tolerance(block.max_weight);
     assert_approx(restored.values()[1], 1.0, tol);
     assert!(restored.values()[0] < 0.01);
 }
@@ -130,7 +130,7 @@ fn test_ms_00_quantization_precision() {
         .collect();
 
     let block = make_block(&entries);
-    let tol = quantization_tolerance(block.max_weight);
+    let tol = f16_tolerance(block.max_weight);
     let bytes = block.serialize();
     let restored = SparsePostingBlock::deserialize(&bytes);
 
@@ -161,17 +161,16 @@ fn test_ms_00_serialized_size() {
     let bytes = block.serialize();
 
     let n = 256usize;
-    // Verify the size matches the formula using the actual bits_per_delta from the header
     let full_groups = n / 128;
     let remainder = n % 128;
-    let packed_group_bytes = 128 * (bytes[2] as usize) / 8; // bits_per_delta from the serialized header
-    let expected = 16 + full_groups * packed_group_bytes + remainder * 4 + n;
+    let packed_group_bytes = 128 * (bytes[2] as usize) / 8;
+    let expected = 16 + full_groups * packed_group_bytes + remainder * 4 + n * 2;
     assert_eq!(
         bytes.len(),
         expected,
-        "serialized size must match formula: header(16) + packed({}) + remainder({}) + weights({})",
+        "serialized size must match formula: header(16) + packed({}) + remainder({}) + f16_weights({})",
         full_groups * packed_group_bytes,
         remainder * 4,
-        n
+        n * 2
     );
 }

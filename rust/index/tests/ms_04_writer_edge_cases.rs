@@ -94,14 +94,7 @@ async fn test_ms_04_overwrite_same_commit() {
 
     let entries = get_all_entries(&reader2, 0).await;
     assert_eq!(entries.len(), 1);
-    let tol = reader2
-        .get_posting_blocks(&chroma_index::sparse::types::encode_u32(0))
-        .await
-        .unwrap()[0]
-        .max_weight
-        / 255.0
-        + 1e-6;
-    assert!((entries[0].1 - 2.0).abs() <= tol);
+    assert!((entries[0].1 - 2.0).abs() <= 1e-3);
 }
 
 #[tokio::test]

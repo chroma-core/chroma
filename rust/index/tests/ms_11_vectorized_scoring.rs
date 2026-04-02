@@ -9,14 +9,11 @@ fn test_ms_11_vectorized_matches_scalar() {
     let block = SparsePostingBlock::from_sorted_entries(&entries);
     let query_weight = 1.5f32;
 
-    // Scalar scoring
     let mut scalar_scores = vec![0.0f32; 256];
-    let factor = query_weight * block.max_weight / 255.0;
-    for (i, &w) in block.quantized_weights().iter().enumerate() {
-        scalar_scores[i] += w as f32 * factor;
+    for (i, &v) in block.values().iter().enumerate() {
+        scalar_scores[i] += v * query_weight;
     }
 
-    // Vectorized scoring
     let mut vec_scores = vec![0.0f32; 256];
     block.score_block_into(query_weight, &mut vec_scores);
 
@@ -37,7 +34,6 @@ fn test_ms_11_full_query_vectorized() {
 
     let mut rng = StdRng::seed_from_u64(555);
 
-    // Build multiple blocks with different weights
     let blocks: Vec<SparsePostingBlock> = (0..5)
         .map(|b| {
             let entries: Vec<(u32, f32)> = (0..256)
@@ -51,9 +47,8 @@ fn test_ms_11_full_query_vectorized() {
 
     for block in &blocks {
         let mut scalar_scores = vec![0.0f32; block.offsets().len()];
-        let factor = query_weight * block.max_weight / 255.0;
-        for (i, &w) in block.quantized_weights().iter().enumerate() {
-            scalar_scores[i] += w as f32 * factor;
+        for (i, &v) in block.values().iter().enumerate() {
+            scalar_scores[i] += v * query_weight;
         }
 
         let mut vec_scores = vec![0.0f32; block.offsets().len()];
@@ -80,9 +75,8 @@ fn test_ms_11_partial_block() {
     let mut vec_scores = vec![0.0f32; 100];
     block.score_block_into(query_weight, &mut vec_scores);
 
-    let factor = query_weight * block.max_weight / 255.0;
-    for (i, &w) in block.quantized_weights().iter().enumerate() {
-        let expected = w as f32 * factor;
+    for (i, &v) in block.values().iter().enumerate() {
+        let expected = v * query_weight;
         assert!(
             (vec_scores[i] - expected).abs() < 1e-5,
             "entry {i}: expected {expected}, got {}",
@@ -93,17 +87,12 @@ fn test_ms_11_partial_block() {
 
 #[test]
 fn test_ms_11_zero_weights() {
-    // All weights 0 → quantized to 0
     let entries: Vec<(u32, f32)> = (0..256).map(|i| (i, 0.0001)).collect();
     let block = SparsePostingBlock::from_sorted_entries(&entries);
 
-    // With such small weights and max_weight = 0.0001, quantized = round(0.0001/0.0001*255) = 255
-    // Actually all same weight, so all quantize to 255. Let me use genuinely zero-ish values:
-    // Can't have actual zero (min_positive). Let me just verify vectorized works with uniform values.
     let mut vec_scores = vec![0.0f32; 256];
     block.score_block_into(1.0, &mut vec_scores);
 
-    // All scores should be approximately equal since all weights are the same
     for w in vec_scores.windows(2) {
         assert!((w[0] - w[1]).abs() < 1e-5);
     }
@@ -114,16 +103,13 @@ fn test_ms_11_max_weights() {
     let entries: Vec<(u32, f32)> = (0..256).map(|i| (i, 1.0)).collect();
     let block = SparsePostingBlock::from_sorted_entries(&entries);
 
-    assert!(block.quantized_weights().iter().all(|&w| w == 255));
-
     let mut vec_scores = vec![0.0f32; 256];
     block.score_block_into(1.0, &mut vec_scores);
 
-    let expected = 1.0 * block.max_weight / 255.0 * 255.0;
     for (i, &s) in vec_scores.iter().enumerate() {
         assert!(
-            (s - expected).abs() < 1e-5,
-            "entry {i}: expected {expected}, got {s}"
+            (s - 1.0).abs() < 1e-3,
+            "entry {i}: expected ~1.0, got {s}"
         );
     }
 }
@@ -137,7 +123,6 @@ fn test_ms_11_accumulation() {
     block.score_block_into(1.0, &mut scores);
     block.score_block_into(2.0, &mut scores);
 
-    // Should be 3x the single-weight result
     let mut single_scores = vec![0.0f32; 256];
     block.score_block_into(3.0, &mut single_scores);
 

@@ -48,8 +48,8 @@ async fn write_and_read_blocks(
     (temp_dir, reader)
 }
 
-fn quantization_tolerance(max_weight: f32) -> f32 {
-    max_weight / 255.0 + 1e-6
+fn f16_tolerance(_max_weight: f32) -> f32 {
+    1e-3
 }
 
 #[tokio::test]
@@ -66,7 +66,7 @@ async fn test_ms_01_single_block() {
     assert_eq!(result.max_offset, block.max_offset);
     assert_eq!(result.max_weight, block.max_weight);
 
-    let tol = quantization_tolerance(block.max_weight);
+    let tol = f16_tolerance(block.max_weight);
     for (&orig, &restored) in block.values().iter().zip(result.values().iter()) {
         assert!(
             (restored - orig).abs() <= tol,
@@ -111,7 +111,7 @@ async fn test_ms_01_multiple_prefixes() {
         let result = reader.get(prefix, 0u32).await.unwrap().unwrap();
         assert_eq!(result.offsets().len(), 10);
         let expected_weight = d as f32 * 0.1 + 0.1;
-        let tol = quantization_tolerance(result.max_weight);
+        let tol = f16_tolerance(result.max_weight);
         for &v in result.values() {
             assert!(
                 (v - expected_weight).abs() <= tol,

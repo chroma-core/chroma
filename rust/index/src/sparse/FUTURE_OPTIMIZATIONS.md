@@ -23,13 +23,25 @@ The old narrow-window approach (window_end = min block boundary) needed adaptive
 to avoid many tiny empty windows.  With 4K-wide L1-resident windows, even sparse
 doc-ID regions are covered efficiently.  At 9M docs, there are ~2200 windows total.
 
-## 4. Sort non-essential terms by score/cost ratio
+## 4. Per-window re-partitioning (SereneDB UpdateWindowScores) — ✅ DONE
+
+At the start of each window, compute each term's window-local upper bound via
+`window_upper_bound(window_start, window_end)` (max block-level weight across
+all blocks overlapping the window).  Re-sort terms by this window-local score
+and re-partition essential vs non-essential.  This gives a much tighter budget
+than the global `dim_max`-based partition: terms with no postings in the current
+window get window_score=0 and are naturally classified non-essential (skipped),
+while terms that are globally weak but locally strong in this window can become
+essential.  Also fixes a cursor seek bug when terms transition from non-essential
+back to essential across windows.
+
+## 4b. Sort non-essential terms by score/cost ratio
 
 **Impact: Medium** — better pruning order means more candidates eliminated early.
 
-Currently we sort non-essential terms by `max_score` ascending. Sorting by
-`max_score / posting_list_length` (score-to-cost ratio) instead means we process
-high-impact short lists first, maximizing the chance of early candidate elimination.
+Sorting non-essential terms by `window_score / posting_count_in_window` (score-to-cost
+ratio) instead of just `window_score` means we process high-impact short lists first,
+maximizing the chance of early candidate elimination.
 
 ## 5. "Required" non-essential compaction
 
@@ -72,12 +84,27 @@ arrays (contiguous layout), making the comparison fully vectorized.  Non-essenti
 
 ## 10. Fused dequant+scoring in drain_essential — ✅ DONE
 
-`drain_essential()` now reads u8 quantized weights directly from raw bytes,
-fusing the dequantization scale and query_weight into a single `factor`.
-This eliminates `decompress_values_into` (no `value_buf` write+read) and
-saves one f32 multiply per entry.  Works for View, Lazy, and Eager paths.
+`drain_essential()` now reads f16 weights directly from raw bytes and
+multiplies by `query_weight`.  Works for View, Lazy, and Eager paths.
 
-## 11. Block-max pruning for non-essential `score_candidates` — NOT NEEDED
+## 11. Two-phase re-scoring (BMP/SEISMIC pattern) — ✅ DONE
+
+`SparseRescorer` trait + `rescore_and_select()` function. MaxScore generates an
+oversampled candidate set (k * oversample_factor), then the caller re-scores
+from an exact f32 source. The benchmark uses an in-memory forward index.
+
+## 13. f16 weight quantization — ✅ DONE
+
+Replaced u8 quantization (255 levels per block) with IEEE f16 (half-precision
+float, 10-bit mantissa ≈ 0.1% relative error). This eliminates per-block
+`max_weight / 255` scaling entirely — weights are stored and scored directly.
+
+Storage impact: 2 bytes/weight vs 1 byte/weight → ~27% total entry size
+increase (offsets + headers are unchanged). Precision improvement is dramatic:
+f16 tracks the original f32 values to ~3 decimal digits vs u8's ~2.4 digits,
+virtually eliminating quantization-induced recall loss.
+
+## 12. Block-max pruning for non-essential `score_candidates` — NOT NEEDED
 
 `score_candidates()` has a `min_block_score` parameter that can skip blocks
 before decompression.  However, the Batch 3 lazy I/O pipeline already

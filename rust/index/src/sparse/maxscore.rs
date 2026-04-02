@@ -1,14 +1,63 @@
 use std::{collections::BinaryHeap, sync::Arc};
 
+use async_trait::async_trait;
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::SignedRoaringBitmap;
+use half::f16;
 pub use chroma_types::SparsePostingBlock;
 use dashmap::DashMap;
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::sparse::types::encode_u32;
+
+// ── Two-phase re-scoring ────────────────────────────────────────────
+
+/// Batch-oriented rescorer for two-phase retrieval. MaxScore generates
+/// an oversampled candidate set with approximate (quantized) scores;
+/// the rescorer computes exact scores so the caller can pick the true
+/// top-k.
+#[async_trait]
+pub trait SparseRescorer: Send + Sync {
+    /// Compute exact dot-product scores for each doc in `doc_ids`
+    /// against `query`. Returns scores in the same order as `doc_ids`.
+    async fn rescore_batch(&self, doc_ids: &[u32], query: &[(u32, f32)]) -> Vec<f32>;
+}
+
+/// Take an oversampled candidate set from MaxScore, re-score each
+/// candidate via the rescorer, and return the final top-k by exact
+/// score.
+pub async fn rescore_and_select(
+    candidates: Vec<Score>,
+    k: usize,
+    query: &[(u32, f32)],
+    rescorer: &dyn SparseRescorer,
+) -> Vec<Score> {
+    if candidates.is_empty() || k == 0 {
+        return vec![];
+    }
+
+    let doc_ids: Vec<u32> = candidates.iter().map(|s| s.offset).collect();
+    let exact_scores = rescorer.rescore_batch(&doc_ids, query).await;
+
+    let mut heap: BinaryHeap<Score> = BinaryHeap::with_capacity(k);
+    for (i, &score) in exact_scores.iter().enumerate() {
+        if heap.len() < k || score > heap.peek().map(|s| s.score).unwrap_or(f32::MIN) {
+            heap.push(Score {
+                score,
+                offset: doc_ids[i],
+            });
+            if heap.len() > k {
+                heap.pop();
+            }
+        }
+    }
+
+    let mut results: Vec<Score> = heap.into_vec();
+    results.sort_by(|a, b| b.score.total_cmp(&a.score).then(a.offset.cmp(&b.offset)));
+    results
+}
 
 const DEFAULT_BLOCK_SIZE: u32 = 1024;
 const DIRECTORY_KEY: u32 = u32::MAX;
@@ -659,16 +708,20 @@ impl<'view> PostingCursor<'view> {
         self.dim_max
     }
 
-    /// Return the block-level upper bound weight for a given doc_id.
-    /// Finds the first block whose max_offset >= doc_id and returns
-    /// that block's max_weight. O(log B) where B is number of blocks.
-    pub fn block_upper_bound(&self, doc_id: u32) -> f32 {
-        let bi = self.dir_max_offsets.partition_point(|&max| max < doc_id);
-        if bi >= self.block_count {
-            0.0
-        } else {
-            self.dir_max_weights[bi]
+    /// Return the MAX block-level weight across all blocks overlapping
+    /// [window_start, window_end].  A single 4K window can span multiple
+    /// posting blocks; using only the first block's weight underestimates
+    /// the budget and causes over-pruning.
+    pub fn window_upper_bound(&self, window_start: u32, window_end: u32) -> f32 {
+        let bi_start = self.dir_max_offsets.partition_point(|&max| max < window_start);
+        let mut max_w = 0.0f32;
+        for bi in bi_start..self.block_count {
+            max_w = max_w.max(self.dir_max_weights[bi]);
+            if self.dir_max_offsets[bi] >= window_end {
+                break;
+            }
         }
+        max_w
     }
 
     /// O(1) sequential advance to the next entry. Handles block transitions.
@@ -740,10 +793,13 @@ impl<'view> PostingCursor<'view> {
                         self.drain_buf_block_idx = self.block_idx;
                         self.buf_block_idx = usize::MAX;
                     }
-                    let weights = SparsePostingBlock::raw_weights(raw, &hdr);
-                    let factor = query_weight * hdr.max_weight / 255.0;
+                    let weight_bytes = SparsePostingBlock::raw_weight_bytes(raw, &hdr);
 
-                    if self.pos == 0 && self.offset_buf[0] < window_start {
+                    if self
+                        .offset_buf
+                        .get(self.pos)
+                        .is_some_and(|&o| o < window_start)
+                    {
                         self.pos = self.offset_buf.partition_point(|&o| o < window_start);
                     }
                     while self.pos < self.offset_buf.len() {
@@ -754,7 +810,9 @@ impl<'view> PostingCursor<'view> {
                         if passes_mask(doc, mask) {
                             let idx = (doc - window_start) as usize;
                             bitmap[idx >> 6] |= 1u64 << (idx & 63);
-                            accum[idx] += weights[self.pos] as f32 * factor;
+                            let bp = self.pos * 2;
+                            let w = f16::from_le_bytes([weight_bytes[bp], weight_bytes[bp + 1]]).to_f32();
+                            accum[idx] += w * query_weight;
                         }
                         self.pos += 1;
                     }
@@ -775,10 +833,13 @@ impl<'view> PostingCursor<'view> {
                         self.drain_buf_block_idx = self.block_idx;
                         self.buf_block_idx = usize::MAX;
                     }
-                    let weights = SparsePostingBlock::raw_weights(raw, &hdr);
-                    let factor = query_weight * hdr.max_weight / 255.0;
+                    let weight_bytes = SparsePostingBlock::raw_weight_bytes(raw, &hdr);
 
-                    if self.pos == 0 && self.offset_buf[0] < window_start {
+                    if self
+                        .offset_buf
+                        .get(self.pos)
+                        .is_some_and(|&o| o < window_start)
+                    {
                         self.pos = self.offset_buf.partition_point(|&o| o < window_start);
                     }
                     while self.pos < self.offset_buf.len() {
@@ -789,17 +850,18 @@ impl<'view> PostingCursor<'view> {
                         if passes_mask(doc, mask) {
                             let idx = (doc - window_start) as usize;
                             bitmap[idx >> 6] |= 1u64 << (idx & 63);
-                            accum[idx] += weights[self.pos] as f32 * factor;
+                            let bp = self.pos * 2;
+                            let w = f16::from_le_bytes([weight_bytes[bp], weight_bytes[bp + 1]]).to_f32();
+                            accum[idx] += w * query_weight;
                         }
                         self.pos += 1;
                     }
                 }
                 CursorSource::Eager { blocks } => {
                     let offsets = blocks[self.block_idx].offsets();
-                    let qw = blocks[self.block_idx].quantized_weights();
-                    let factor = query_weight * blocks[self.block_idx].max_weight / 255.0;
+                    let vals = blocks[self.block_idx].values();
 
-                    if self.pos == 0 && offsets[0] < window_start {
+                    if offsets.get(self.pos).is_some_and(|&o| o < window_start) {
                         self.pos = offsets.partition_point(|&o| o < window_start);
                     }
                     while self.pos < offsets.len() {
@@ -810,7 +872,7 @@ impl<'view> PostingCursor<'view> {
                         if passes_mask(doc, mask) {
                             let idx = (doc - window_start) as usize;
                             bitmap[idx >> 6] |= 1u64 << (idx & 63);
-                            accum[idx] += qw[self.pos] as f32 * factor;
+                            accum[idx] += vals[self.pos] * query_weight;
                         }
                         self.pos += 1;
                     }
@@ -1018,6 +1080,7 @@ impl<'me> BlockSparseReader<'me> {
                     cursor,
                     query_weight,
                     max_score,
+                    window_score: max_score,
                     encoded_dim: encoded.clone(),
                 });
             } else {
@@ -1031,6 +1094,7 @@ impl<'me> BlockSparseReader<'me> {
                     cursor,
                     query_weight,
                     max_score,
+                    window_score: max_score,
                     encoded_dim: encoded.clone(),
                 });
             }
@@ -1040,9 +1104,9 @@ impl<'me> BlockSparseReader<'me> {
             return Ok(vec![]);
         }
 
-        // Sort terms by max_score ascending (lowest first → non-essential)
+        // Initial sort by global max_score ascending (lowest first).
+        // Re-sorted per-window using window-local block scores.
         terms.sort_by(|a, b| a.max_score.total_cmp(&b.max_score));
-        let upper_bounds = prefix_sum(&terms);
 
         let k_usize = k as usize;
         let mut threshold = f32::MIN;
@@ -1099,6 +1163,27 @@ impl<'me> BlockSparseReader<'me> {
         while window_start <= max_doc_id {
             let window_end = (window_start + WINDOW_WIDTH - 1).min(max_doc_id);
 
+            // ── Per-window re-partition (à la SereneDB UpdateWindowScores) ──
+            // Compute each term's window-local upper bound, re-sort by it,
+            // and find the new essential/non-essential split for this window.
+            for t in terms.iter_mut() {
+                t.window_score =
+                    t.query_weight * t.cursor.window_upper_bound(window_start, window_end);
+            }
+            terms.sort_unstable_by(|a, b| a.window_score.total_cmp(&b.window_score));
+
+            essential_idx = terms.len();
+            {
+                let mut prefix = 0.0f32;
+                for (i, t) in terms.iter().enumerate() {
+                    prefix += t.window_score;
+                    if prefix >= threshold {
+                        essential_idx = i;
+                        break;
+                    }
+                }
+            }
+
             // ── Phase 1: batch-drain essential terms into accumulator ──
             for term in terms[essential_idx..].iter_mut() {
                 term.cursor.drain_essential(
@@ -1112,7 +1197,6 @@ impl<'me> BlockSparseReader<'me> {
             }
 
             // Scan bitmap → sorted cand_docs + contiguous cand_scores.
-            // The bitmap scan produces sorted order naturally (no sort needed).
             cand_docs.clear();
             cand_scores.clear();
             for word_idx in 0..BITMAP_WORDS {
@@ -1135,31 +1219,28 @@ impl<'me> BlockSparseReader<'me> {
             }
 
             // ── Batch 3: lazy-load non-essential blocks (once) ────
-            if essential_idx > 0 && !non_essential_loaded {
+            if !non_essential_loaded && essential_idx > 0 {
                 non_essential_loaded = true;
                 let mut ne_keys: Vec<(String, u32)> = Vec::new();
-                for i in 0..essential_idx {
-                    if !terms[i].cursor.is_lazy() {
+                for t in terms.iter() {
+                    if !t.cursor.is_lazy() {
                         continue;
                     }
-                    let w = terms[i].query_weight;
-                    for bi in 0..terms[i].cursor.block_count() {
-                        if terms[i].cursor.is_block_loaded(bi) {
+                    for bi in 0..t.cursor.block_count() {
+                        if t.cursor.is_block_loaded(bi) {
                             continue;
                         }
-                        let block_max = terms[i].cursor.dir_max_weights[bi];
-                        if w * block_max > threshold {
-                            ne_keys.push((terms[i].encoded_dim.clone(), bi as u32));
+                        if t.query_weight * t.cursor.dir_max_weights[bi] > threshold {
+                            ne_keys.push((t.encoded_dim.clone(), bi as u32));
                         }
                     }
                 }
                 if !ne_keys.is_empty() {
                     self.posting_reader.load_data_for_keys(ne_keys).await;
-                    for i in 0..essential_idx {
-                        if terms[i].cursor.is_lazy() {
-                            let dim = terms[i].encoded_dim.clone();
-                            terms[i]
-                                .cursor
+                    for t in terms.iter_mut() {
+                        if t.cursor.is_lazy() {
+                            let dim = t.encoded_dim.clone();
+                            t.cursor
                                 .populate_all_from_cache(&self.posting_reader, &dim);
                         }
                     }
@@ -1167,12 +1248,10 @@ impl<'me> BlockSparseReader<'me> {
             }
 
             // ── Phase 2: non-essential merge-join with SIMD pruning ──
+            // Budget uses the precomputed window_scores from the re-partition.
             if essential_idx > 0 {
-                let mut remaining_budget: f32 = (0..essential_idx)
-                    .map(|j| {
-                        terms[j].query_weight * terms[j].cursor.block_upper_bound(window_start)
-                    })
-                    .sum();
+                let mut remaining_budget: f32 =
+                    terms[..essential_idx].iter().map(|t| t.window_score).sum();
 
                 for i in (0..essential_idx).rev() {
                     if heap.len() >= k_usize && remaining_budget > 0.0 {
@@ -1183,13 +1262,11 @@ impl<'me> BlockSparseReader<'me> {
                         break;
                     }
 
-                    let qw = terms[i].query_weight;
-                    let bub = terms[i].cursor.block_upper_bound(window_start);
-                    if bub == 0.0 {
-                        remaining_budget -= qw * bub;
+                    if terms[i].window_score == 0.0 {
                         continue;
                     }
 
+                    let qw = terms[i].query_weight;
                     if terms[i]
                         .cursor
                         .current()
@@ -1206,7 +1283,7 @@ impl<'me> BlockSparseReader<'me> {
                         &mut cand_scores,
                     );
 
-                    remaining_budget -= qw * bub;
+                    remaining_budget -= terms[i].window_score;
                 }
             }
 
@@ -1235,14 +1312,6 @@ impl<'me> BlockSparseReader<'me> {
                 bitmap[word_idx] = 0;
             }
 
-            // Re-partition essential vs non-essential
-            while essential_idx < terms.len() {
-                if upper_bounds[essential_idx] >= threshold {
-                    break;
-                }
-                essential_idx += 1;
-            }
-
             window_start = window_end.wrapping_add(1);
             if window_start == 0 {
                 break;
@@ -1259,17 +1328,9 @@ struct TermState<'me> {
     cursor: PostingCursor<'me>,
     query_weight: f32,
     max_score: f32,
+    /// Window-local max score, updated each window via window_upper_bound.
+    window_score: f32,
     encoded_dim: String,
-}
-
-fn prefix_sum(terms: &[TermState<'_>]) -> Vec<f32> {
-    let mut sums = Vec::with_capacity(terms.len());
-    let mut acc = 0.0f32;
-    for t in terms {
-        acc += t.max_score;
-        sums.push(acc);
-    }
-    sums
 }
 
 // ── SIMD-accelerated budget pruning (SereneDB FilterCompetitiveHits) ──
