@@ -46,7 +46,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         try:
             import openai
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The openai python package is not installed. Please install it with `pip install openai`"
             )
 
@@ -64,7 +64,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
 
         self.api_key = api_key or os.getenv(self.api_key_env_var)
         if not self.api_key:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"The {self.api_key_env_var} environment variable is not set."
             )
 
@@ -92,11 +92,11 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         # For Azure OpenAI
         if self.api_type == "azure":
             if self.api_version is None:
-                raise ValueError("api_version must be specified for Azure OpenAI")
+                raise InvalidArgumentError("api_version must be specified for Azure OpenAI")
             if self.deployment_id is None:
-                raise ValueError("deployment_id must be specified for Azure OpenAI")
+                raise InvalidArgumentError("deployment_id must be specified for Azure OpenAI")
             if self.api_base is None:
-                raise ValueError("api_base must be specified for Azure OpenAI")
+                raise InvalidArgumentError("api_base must be specified for Azure OpenAI")
 
             from openai import AzureOpenAI
 
@@ -192,9 +192,10 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
         if "model_name" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The model name cannot be changed after the embedding function has been initialized."
             )
+from chromadb.errors import InvalidArgumentError
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:

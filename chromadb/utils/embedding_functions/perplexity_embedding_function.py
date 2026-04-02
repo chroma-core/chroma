@@ -38,7 +38,7 @@ class PerplexityEmbeddingFunction(EmbeddingFunction[Documents]):
         try:
             import perplexity
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The perplexityai python package is not installed. Please install it with `pip install perplexityai`"
             )
 
@@ -56,7 +56,7 @@ class PerplexityEmbeddingFunction(EmbeddingFunction[Documents]):
 
         self.api_key = api_key or os.getenv(self.api_key_env_var)
         if not self.api_key:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"The {self.api_key_env_var} environment variable is not set."
             )
 
@@ -118,9 +118,10 @@ class PerplexityEmbeddingFunction(EmbeddingFunction[Documents]):
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
         if "model_name" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The model name cannot be changed after the embedding function has been initialized."
             )
+from chromadb.errors import InvalidArgumentError
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:

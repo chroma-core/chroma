@@ -203,7 +203,7 @@ def register_embedding_function(ef_class=None):  # type: ignore
             name = cls.name()
             known_embedding_functions[name] = cls
         except Exception as e:
-            raise ValueError(f"Failed to register embedding function: {e}")
+            raise InvalidArgumentError(f"Failed to register embedding function: {e}")
         return cls  # Return the class unchanged
 
     # If called with a class, register it immediately
@@ -229,7 +229,7 @@ def register_sparse_embedding_function(ef_class=None):  # type: ignore
             name = cls.name()
             sparse_known_embedding_functions[name] = cls
         except Exception as e:
-            raise ValueError(f"Failed to register sparse embedding function: {e}")
+            raise InvalidArgumentError(f"Failed to register sparse embedding function: {e}")
         return cls  # Return the class unchanged
 
     if ef_class is not None:
@@ -249,16 +249,16 @@ def config_to_embedding_function(config: Dict[str, Any]) -> EmbeddingFunction:  
         The embedding function.
     """
     if "name" not in config:
-        raise ValueError("Config must contain a 'name' field.")
+        raise InvalidArgumentError("Config must contain a 'name' field.")
 
     name = config["name"]
     if name not in known_embedding_functions:
-        raise ValueError(f"Unsupported embedding function: {name}")
+        raise InvalidArgumentError(f"Unsupported embedding function: {name}")
 
     ef_config = config.get("config", {})
 
     if known_embedding_functions[name] is None:
-        raise ValueError(f"Unsupported embedding function: {name}")
+        raise InvalidArgumentError(f"Unsupported embedding function: {name}")
 
     return known_embedding_functions[name].build_from_config(ef_config)
 
@@ -304,4 +304,5 @@ __all__ = [
     "register_embedding_function",
     "config_to_embedding_function",
     "known_embedding_functions",
+from chromadb.errors import InvalidArgumentError
 ]

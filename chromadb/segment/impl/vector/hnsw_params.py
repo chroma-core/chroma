@@ -38,9 +38,9 @@ class Params:
         # Validate it
         for param, value in metadata.items():
             if param not in validators:
-                raise ValueError(f"Unknown HNSW parameter: {param}")
+                raise InvalidArgumentError(f"Unknown HNSW parameter: {param}")
             if not validators[param](value):
-                raise ValueError(f"Invalid value for HNSW parameter: {param} = {value}")
+                raise InvalidArgumentError(f"Invalid value for HNSW parameter: {param} = {value}")
 
 
 class HnswParams(Params):
@@ -60,6 +60,7 @@ class HnswParams(Params):
         self.num_threads = int(
             metadata.get("hnsw:num_threads", multiprocessing.cpu_count())
         )
+from chromadb.errors import InvalidArgumentError
         self.resize_factor = float(metadata.get("hnsw:resize_factor", 1.2))
 
     @staticmethod

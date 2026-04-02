@@ -52,7 +52,7 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
 
         self.api_key = api_key or os.getenv(self.api_key_env_var)
         if not self.api_key:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"The {self.api_key_env_var} environment variable is not set."
             )
 
@@ -61,7 +61,7 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
         try:
             self._PILImage = importlib.import_module("PIL.Image")
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The PIL python package is not installed. Please install it with `pip install pillow`"
             )
 
@@ -148,6 +148,7 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
+from chromadb.errors import InvalidArgumentError
         # API URL can be changed, so no validation needed
         pass
 

@@ -54,7 +54,7 @@ class Bm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
         try:
             from fastembed.sparse.bm25 import Bm25
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The fastembed python package is not installed. Please install it with `pip install fastembed`"
             )
 
@@ -70,7 +70,7 @@ class Bm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
         self.specific_model_path = specific_model_path
         for key, value in kwargs.items():
             if not isinstance(value, (str, int, float, bool, list, dict, tuple)):
-                raise ValueError(f"Keyword argument {key} is not a primitive type")
+                raise InvalidArgumentError(f"Keyword argument {key} is not a primitive type")
         self.kwargs = kwargs
         bm25_kwargs = {
             "model_name": "Qdrant/bm25",
@@ -103,7 +103,7 @@ class Bm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
         try:
             from fastembed.sparse.bm25 import Bm25
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The fastembed python package is not installed. Please install it with `pip install fastembed`"
             )
         model = cast(Bm25, self._model)
@@ -116,7 +116,7 @@ class Bm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
                 list(input),
             )
         else:
-            raise ValueError(f"Invalid task: {self.task}")
+            raise InvalidArgumentError(f"Invalid task: {self.task}")
 
         sparse_vectors: SparseVectors = []
 
@@ -133,7 +133,7 @@ class Bm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
         try:
             from fastembed.sparse.bm25 import Bm25
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The fastembed python package is not installed. Please install it with `pip install fastembed`"
             )
         model = cast(Bm25, self._model)
@@ -148,7 +148,7 @@ class Bm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
                     list(input),
                 )
             else:
-                raise ValueError(f"Invalid task: {task}")
+                raise InvalidArgumentError(f"Invalid task: {task}")
 
             sparse_vectors: SparseVectors = []
 
@@ -216,6 +216,7 @@ class Bm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
+from chromadb.errors import InvalidArgumentError
         # Users should be able to change the path if needed, so we should not validate that.
         # e.g. moving file path from /v1/my-model.bin to /v2/my-model.bin
         return
