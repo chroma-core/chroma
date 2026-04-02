@@ -5,7 +5,8 @@ use chroma_log::Log;
 use chroma_segment::types::HydratedMaterializedLogRecord;
 use chroma_segment::{
     blockfile_record::{
-        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
+        RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
+        RecordSegmentReaderShardOptions,
     },
     bloom_filter::BloomFilterManager,
 };
@@ -40,7 +41,7 @@ pub trait AttachedFunctionExecutor: Send + Sync + std::fmt::Debug {
     async fn execute(
         &self,
         input_records: Chunk<HydratedMaterializedLogRecord<'_, '_>>,
-        output_reader: Option<&RecordSegmentReader<'_>>,
+        output_reader: Option<&RecordSegmentReaderShard<'_>>,
     ) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>>;
 }
 
@@ -52,7 +53,7 @@ pub struct CountAttachedFunction;
 impl CountAttachedFunction {
     /// Reads the existing count from the output reader.
     /// Returns 0 if no existing count is found.
-    async fn get_existing_count(output_reader: Option<&RecordSegmentReader<'_>>) -> i64 {
+    async fn get_existing_count(output_reader: Option<&RecordSegmentReaderShard<'_>>) -> i64 {
         let Some(reader) = output_reader else {
             return 0;
         };
@@ -61,7 +62,7 @@ impl CountAttachedFunction {
         let offset_id = match reader
             .get_offset_id_for_user_id(
                 COUNT_FUNCTION_OUTPUT_ID,
-                &RecordSegmentReaderOptions::default(),
+                &RecordSegmentReaderShardOptions::default(),
             )
             .await
         {
@@ -92,7 +93,7 @@ impl AttachedFunctionExecutor for CountAttachedFunction {
     async fn execute(
         &self,
         input_records: Chunk<HydratedMaterializedLogRecord<'_, '_>>,
-        output_reader: Option<&RecordSegmentReader<'_>>,
+        output_reader: Option<&RecordSegmentReaderShard<'_>>,
     ) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>> {
         let records_count = input_records.len() as i64;
 
@@ -190,7 +191,7 @@ pub struct ExecuteAttachedFunctionInput {
     /// The tenant ID
     pub tenant_id: String,
     /// The input collection's record segment to read existing data
-    pub input_record_segment: Option<RecordSegmentReader<'static>>,
+    pub input_record_segment: Option<RecordSegmentReaderShard<'static>>,
     /// The output collection ID where results are written
     pub output_collection_id: CollectionUuid,
     /// The current completion offset
@@ -219,7 +220,7 @@ pub enum ExecuteAttachedFunctionError {
     #[error("Failed to read from segment: {0}")]
     SegmentRead(#[from] Box<dyn ChromaError>),
     #[error("Failed to create record segment reader: {0}")]
-    RecordReader(#[from] RecordSegmentReaderCreationError),
+    RecordReader(#[from] RecordSegmentReaderShardCreationError),
     #[error("Invalid collection UUID: {0}")]
     InvalidUuid(String),
     #[error("Log offset arithmetic overflow: base_offset={0}, record_index={1}")]
@@ -271,7 +272,7 @@ impl Operator<ExecuteAttachedFunctionInput, ExecuteAttachedFunctionOutput>
             // For rebuild and backfill, we don't read any existing data in output collection
             None
         } else {
-            match Box::pin(RecordSegmentReader::from_segment(
+            match Box::pin(RecordSegmentReaderShard::from_segment(
                 &input.output_record_segment,
                 &input.blockfile_provider,
                 input.bloom_filter_manager.clone(),
@@ -279,7 +280,12 @@ impl Operator<ExecuteAttachedFunctionInput, ExecuteAttachedFunctionOutput>
             .await
             {
                 Ok(reader) => Some(reader),
-                Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+                Err(e)
+                    if matches!(
+                        *e,
+                        RecordSegmentReaderShardCreationError::UninitializedSegment
+                    ) =>
+                {
                     // Output collection has no data yet - this is the first run
                     tracing::info!("[ExecuteAttachedFunction]: Output segment uninitialized - first attached function run");
                     None

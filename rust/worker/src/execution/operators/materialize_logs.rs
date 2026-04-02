@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_segment::blockfile_record::{
-    RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
+    RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
+    RecordSegmentReaderShardOptions,
 };
 use chroma_segment::types::{materialize_logs, LogMaterializerError, MaterializeLogsResult};
 use chroma_system::Operator;
@@ -14,7 +15,7 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum MaterializeLogOperatorError {
     #[error("Could not create record segment reader: {0}")]
-    RecordSegmentReaderCreationFailed(#[from] RecordSegmentReaderCreationError),
+    RecordSegmentReaderShardCreationFailed(#[from] RecordSegmentReaderShardCreationError),
     #[error("Log materialization failed: {0}")]
     LogMaterializationFailed(#[from] LogMaterializerError),
 }
@@ -22,7 +23,7 @@ pub enum MaterializeLogOperatorError {
 impl ChromaError for MaterializeLogOperatorError {
     fn code(&self) -> chroma_error::ErrorCodes {
         match self {
-            MaterializeLogOperatorError::RecordSegmentReaderCreationFailed(e) => e.code(),
+            MaterializeLogOperatorError::RecordSegmentReaderShardCreationFailed(e) => e.code(),
             MaterializeLogOperatorError::LogMaterializationFailed(e) => e.code(),
         }
     }
@@ -40,17 +41,17 @@ impl MaterializeLogOperator {
 #[derive(Debug)]
 pub struct MaterializeLogInput {
     logs: Chunk<LogRecord>,
-    record_reader: Option<RecordSegmentReader<'static>>,
+    record_reader: Option<RecordSegmentReaderShard<'static>>,
     offset_id: Arc<AtomicU32>,
-    plan: RecordSegmentReaderOptions,
+    plan: RecordSegmentReaderShardOptions,
 }
 
 impl MaterializeLogInput {
     pub fn new(
         logs: Chunk<LogRecord>,
-        record_reader: Option<RecordSegmentReader<'static>>,
+        record_reader: Option<RecordSegmentReaderShard<'static>>,
         offset_id: Arc<AtomicU32>,
-        plan: RecordSegmentReaderOptions,
+        plan: RecordSegmentReaderShardOptions,
     ) -> Self {
         MaterializeLogInput {
             logs,

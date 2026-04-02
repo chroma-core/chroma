@@ -1,7 +1,7 @@
 use crate::types::ChromaSegmentFlusher;
 
 use super::blockfile_record::ApplyMaterializedLogError;
-use super::blockfile_record::RecordSegmentReader;
+use super::blockfile_record::RecordSegmentReaderShard;
 use super::types::MaterializeLogsResult;
 use chroma_blockstore::arrow::provider::BlockfileReaderOptions;
 use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError, ReadKey, ReadValue};
@@ -41,7 +41,7 @@ use tracing::Instrument;
 use tracing::Span;
 
 #[derive(Clone)]
-pub struct MetadataSegmentWriter<'me> {
+pub struct MetadataSegmentWriterShard<'me> {
     pub(crate) full_text_index_writer: Option<FullTextIndexWriter>,
     pub(crate) string_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) bool_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
@@ -51,9 +51,9 @@ pub struct MetadataSegmentWriter<'me> {
     pub id: SegmentUuid,
 }
 
-impl Debug for MetadataSegmentWriter<'_> {
+impl Debug for MetadataSegmentWriterShard<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "MetadataSegmentWriter")
+        write!(f, "MetadataSegmentWriterShard")
     }
 }
 
@@ -108,14 +108,14 @@ impl ChromaError for MetadataSegmentError {
     }
 }
 
-impl<'me> MetadataSegmentWriter<'me> {
+impl<'me> MetadataSegmentWriterShard<'me> {
     pub async fn from_segment(
         tenant: &str,
         database_id: &DatabaseUuid,
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
         cmek: Option<Cmek>,
-    ) -> Result<MetadataSegmentWriter<'me>, MetadataSegmentError> {
+    ) -> Result<MetadataSegmentWriterShard<'me>, MetadataSegmentError> {
         if segment.r#type != SegmentType::BlockfileMetadata {
             return Err(MetadataSegmentError::InvalidSegmentType);
         }
@@ -472,7 +472,7 @@ impl<'me> MetadataSegmentWriter<'me> {
             ))
         };
 
-        Ok(MetadataSegmentWriter {
+        Ok(MetadataSegmentWriterShard {
             full_text_index_writer: Some(full_text_index_writer),
             string_metadata_index_writer: Some(string_metadata_index_writer),
             bool_metadata_index_writer: Some(bool_metadata_index_writer),
@@ -761,7 +761,7 @@ impl<'me> MetadataSegmentWriter<'me> {
 
     async fn apply_fts_logs(
         &self,
-        record_segment_reader: &Option<RecordSegmentReader<'_>>,
+        record_segment_reader: &Option<RecordSegmentReaderShard<'_>>,
         materialized: &MaterializeLogsResult,
         schema: &Option<Schema>,
     ) -> Result<(), ApplyMaterializedLogError> {
@@ -825,7 +825,7 @@ impl<'me> MetadataSegmentWriter<'me> {
 
     pub async fn apply_materialized_log_chunk(
         &self,
-        record_segment_reader: &Option<RecordSegmentReader<'_>>,
+        record_segment_reader: &Option<RecordSegmentReaderShard<'_>>,
         materialized: &MaterializeLogsResult,
         schema: Option<Schema>,
     ) -> Result<Option<Schema>, ApplyMaterializedLogError> {
@@ -1300,7 +1300,7 @@ impl MetadataSegmentFlusher {
     }
 }
 
-pub struct MetadataSegmentReader<'me> {
+pub struct MetadataSegmentReaderShard<'me> {
     pub full_text_index_reader: Option<FullTextIndexReader<'me>>,
     pub string_metadata_index_reader: Option<MetadataIndexReader<'me>>,
     pub bool_metadata_index_reader: Option<MetadataIndexReader<'me>>,
@@ -1309,7 +1309,7 @@ pub struct MetadataSegmentReader<'me> {
     pub sparse_index_reader: Option<SparseReader<'me>>,
 }
 
-impl MetadataSegmentReader<'_> {
+impl MetadataSegmentReaderShard<'_> {
     async fn load_index_reader<'new, K: ReadKey<'new>, V: ReadValue<'new>>(
         segment: &Segment,
         file_path_string: &str,
@@ -1417,7 +1417,7 @@ impl MetadataSegmentReader<'_> {
                 None
             };
 
-        Ok(MetadataSegmentReader {
+        Ok(MetadataSegmentReaderShard {
             full_text_index_reader,
             string_metadata_index_reader,
             bool_metadata_index_reader,
@@ -1432,10 +1432,10 @@ impl MetadataSegmentReader<'_> {
 mod test {
 
     use crate::{
-        blockfile_metadata::{MetadataSegmentReader, MetadataSegmentWriter},
+        blockfile_metadata::{MetadataSegmentReaderShard, MetadataSegmentWriterShard},
         blockfile_record::{
-            RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
-            RecordSegmentWriter,
+            RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
+            RecordSegmentReaderShardOptions, RecordSegmentWriterShard,
         },
         test::TestDistributedSegment,
         types::materialize_logs,
@@ -1514,7 +1514,7 @@ mod test {
             file_path: HashMap::new(),
         };
         {
-            let segment_writer = RecordSegmentWriter::from_segment(
+            let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &record_segment,
@@ -1524,7 +1524,7 @@ mod test {
             )
             .await
             .expect("Error creating segment writer");
-            let mut metadata_writer = MetadataSegmentWriter::from_segment(
+            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment,
@@ -1567,8 +1567,8 @@ mod test {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
-                RecordSegmentReader::from_segment(&record_segment, &blockfile_provider, None),
+            let record_segment_reader: Option<RecordSegmentReaderShard> = match Box::pin(
+                RecordSegmentReaderShard::from_segment(&record_segment, &blockfile_provider, None),
             )
             .await
             {
@@ -1577,17 +1577,17 @@ mod test {
                     match *e {
                         // Uninitialized segment is fine and means that the record
                         // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => None,
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                        RecordSegmentReaderShardCreationError::UninitializedSegment => None,
+                        RecordSegmentReaderShardCreationError::BlockfileOpenError(_) => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                        RecordSegmentReaderShardCreationError::InvalidNumberOfFiles => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                        RecordSegmentReaderShardCreationError::DataRecordNotFound(_) => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                        RecordSegmentReaderShardCreationError::UserRecordNotFound(_) => {
                             panic!("Error creating record segment reader");
                         }
                         _ => {
@@ -1600,7 +1600,7 @@ mod test {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderOptions::default(),
+                &RecordSegmentReaderShardOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -1655,14 +1655,14 @@ mod test {
         ];
 
         let data: Chunk<LogRecord> = Chunk::new(data.into());
-        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
+        let record_segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment,
             &blockfile_provider,
             None,
         ))
         .await
         .expect("Reader should be initialized by now");
-        let segment_writer = RecordSegmentWriter::from_segment(
+        let segment_writer = RecordSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &record_segment,
@@ -1672,7 +1672,7 @@ mod test {
         )
         .await
         .expect("Error creating segment writer");
-        let mut metadata_writer = MetadataSegmentWriter::from_segment(
+        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &metadata_segment,
@@ -1686,7 +1686,7 @@ mod test {
             &some_reader,
             data,
             None,
-            &RecordSegmentReaderOptions::default(),
+            &RecordSegmentReaderShardOptions::default(),
         )
         .await
         .expect("Log materialization failed");
@@ -1715,7 +1715,7 @@ mod test {
             .await
             .expect("Flush metadata segment writer failed");
         // No data should be present.
-        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
+        let record_segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment,
             &blockfile_provider,
             None,
@@ -1755,14 +1755,14 @@ mod test {
         ];
 
         let data: Chunk<LogRecord> = Chunk::new(data.into());
-        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
+        let record_segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment,
             &blockfile_provider,
             None,
         ))
         .await
         .expect("Reader should be initialized by now");
-        let segment_writer = RecordSegmentWriter::from_segment(
+        let segment_writer = RecordSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &record_segment,
@@ -1772,7 +1772,7 @@ mod test {
         )
         .await
         .expect("Error creating segment writer");
-        let mut metadata_writer = MetadataSegmentWriter::from_segment(
+        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &metadata_segment,
@@ -1786,7 +1786,7 @@ mod test {
             &some_reader,
             data,
             None,
-            &RecordSegmentReaderOptions::default(),
+            &RecordSegmentReaderShardOptions::default(),
         )
         .await
         .expect("Log materialization failed");
@@ -1817,7 +1817,7 @@ mod test {
             .await
             .expect("Flush metadata segment writer failed");
         // No data should be present.
-        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
+        let record_segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment,
             &blockfile_provider,
             None,
@@ -1868,7 +1868,7 @@ mod test {
             file_path: HashMap::new(),
         };
         {
-            let segment_writer = RecordSegmentWriter::from_segment(
+            let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &record_segment,
@@ -1878,7 +1878,7 @@ mod test {
             )
             .await
             .expect("Error creating segment writer");
-            let mut metadata_writer = MetadataSegmentWriter::from_segment(
+            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment,
@@ -1917,8 +1917,8 @@ mod test {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
-                RecordSegmentReader::from_segment(&record_segment, &blockfile_provider, None),
+            let record_segment_reader: Option<RecordSegmentReaderShard> = match Box::pin(
+                RecordSegmentReaderShard::from_segment(&record_segment, &blockfile_provider, None),
             )
             .await
             {
@@ -1927,17 +1927,17 @@ mod test {
                     match *e {
                         // Uninitialized segment is fine and means that the record
                         // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => None,
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                        RecordSegmentReaderShardCreationError::UninitializedSegment => None,
+                        RecordSegmentReaderShardCreationError::BlockfileOpenError(_) => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                        RecordSegmentReaderShardCreationError::InvalidNumberOfFiles => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                        RecordSegmentReaderShardCreationError::DataRecordNotFound(_) => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                        RecordSegmentReaderShardCreationError::UserRecordNotFound(_) => {
                             panic!("Error creating record segment reader");
                         }
                         _ => {
@@ -1950,7 +1950,7 @@ mod test {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderOptions::default(),
+                &RecordSegmentReaderShardOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -2012,14 +2012,14 @@ mod test {
         ];
 
         let data: Chunk<LogRecord> = Chunk::new(data.into());
-        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
+        let record_segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment,
             &blockfile_provider,
             None,
         ))
         .await
         .expect("Reader should be initialized by now");
-        let segment_writer = RecordSegmentWriter::from_segment(
+        let segment_writer = RecordSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &record_segment,
@@ -2029,7 +2029,7 @@ mod test {
         )
         .await
         .expect("Error creating segment writer");
-        let mut metadata_writer = MetadataSegmentWriter::from_segment(
+        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &metadata_segment,
@@ -2043,7 +2043,7 @@ mod test {
             &some_reader,
             data,
             None,
-            &RecordSegmentReaderOptions::default(),
+            &RecordSegmentReaderShardOptions::default(),
         )
         .await
         .expect("Log materialization failed");
@@ -2072,7 +2072,7 @@ mod test {
             .await
             .expect("Flush metadata segment writer failed");
         // Search by f32 metadata value first.
-        let metadata_segment_reader = Box::pin(MetadataSegmentReader::from_segment(
+        let metadata_segment_reader = Box::pin(MetadataSegmentReaderShard::from_segment(
             &metadata_segment,
             &blockfile_provider,
         ))
@@ -2097,7 +2097,7 @@ mod test {
         assert_eq!(res.len(), 1);
         assert_eq!(res.min(), Some(1));
         // Record segment should also have the updated values.
-        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
+        let record_segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment,
             &blockfile_provider,
             None,
@@ -2158,7 +2158,7 @@ mod test {
             file_path: HashMap::new(),
         };
         {
-            let segment_writer = RecordSegmentWriter::from_segment(
+            let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &record_segment,
@@ -2168,7 +2168,7 @@ mod test {
             )
             .await
             .expect("Error creating segment writer");
-            let mut metadata_writer = MetadataSegmentWriter::from_segment(
+            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment,
@@ -2198,8 +2198,8 @@ mod test {
                 },
             }];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
-                RecordSegmentReader::from_segment(&record_segment, &blockfile_provider, None),
+            let record_segment_reader: Option<RecordSegmentReaderShard> = match Box::pin(
+                RecordSegmentReaderShard::from_segment(&record_segment, &blockfile_provider, None),
             )
             .await
             {
@@ -2208,17 +2208,17 @@ mod test {
                     match *e {
                         // Uninitialized segment is fine and means that the record
                         // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => None,
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                        RecordSegmentReaderShardCreationError::UninitializedSegment => None,
+                        RecordSegmentReaderShardCreationError::BlockfileOpenError(_) => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                        RecordSegmentReaderShardCreationError::InvalidNumberOfFiles => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                        RecordSegmentReaderShardCreationError::DataRecordNotFound(_) => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                        RecordSegmentReaderShardCreationError::UserRecordNotFound(_) => {
                             panic!("Error creating record segment reader");
                         }
                         _ => {
@@ -2231,7 +2231,7 @@ mod test {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderOptions::default(),
+                &RecordSegmentReaderShardOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -2275,14 +2275,14 @@ mod test {
         }];
 
         let data: Chunk<LogRecord> = Chunk::new(data.into());
-        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
+        let record_segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment,
             &blockfile_provider,
             None,
         ))
         .await
         .expect("Reader should be initialized by now");
-        let segment_writer = RecordSegmentWriter::from_segment(
+        let segment_writer = RecordSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &record_segment,
@@ -2292,7 +2292,7 @@ mod test {
         )
         .await
         .expect("Error creating segment writer");
-        let mut metadata_writer = MetadataSegmentWriter::from_segment(
+        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &metadata_segment,
@@ -2306,7 +2306,7 @@ mod test {
             &some_reader,
             data,
             None,
-            &RecordSegmentReaderOptions::default(),
+            &RecordSegmentReaderShardOptions::default(),
         )
         .await
         .expect("Log materialization failed");
@@ -2335,7 +2335,7 @@ mod test {
             .await
             .expect("Flush metadata segment writer failed");
         // Only one key should be present.
-        let metadata_segment_reader = Box::pin(MetadataSegmentReader::from_segment(
+        let metadata_segment_reader = Box::pin(MetadataSegmentReaderShard::from_segment(
             &metadata_segment,
             &blockfile_provider,
         ))
@@ -2359,7 +2359,7 @@ mod test {
         assert_eq!(res.len(), 1);
         assert_eq!(res.min(), Some(1));
         // Record segment should also have the updated values.
-        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
+        let record_segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment,
             &blockfile_provider,
             None,
@@ -2417,7 +2417,7 @@ mod test {
             file_path: HashMap::new(),
         };
         {
-            let segment_writer = RecordSegmentWriter::from_segment(
+            let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &record_segment,
@@ -2427,7 +2427,7 @@ mod test {
             )
             .await
             .expect("Error creating segment writer");
-            let mut metadata_writer = MetadataSegmentWriter::from_segment(
+            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment,
@@ -2448,8 +2448,8 @@ mod test {
                 },
             }];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
-                RecordSegmentReader::from_segment(&record_segment, &blockfile_provider, None),
+            let record_segment_reader: Option<RecordSegmentReaderShard> = match Box::pin(
+                RecordSegmentReaderShard::from_segment(&record_segment, &blockfile_provider, None),
             )
             .await
             {
@@ -2458,17 +2458,17 @@ mod test {
                     match *e {
                         // Uninitialized segment is fine and means that the record
                         // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => None,
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                        RecordSegmentReaderShardCreationError::UninitializedSegment => None,
+                        RecordSegmentReaderShardCreationError::BlockfileOpenError(_) => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                        RecordSegmentReaderShardCreationError::InvalidNumberOfFiles => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                        RecordSegmentReaderShardCreationError::DataRecordNotFound(_) => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                        RecordSegmentReaderShardCreationError::UserRecordNotFound(_) => {
                             panic!("Error creating record segment reader");
                         }
                         _ => {
@@ -2481,7 +2481,7 @@ mod test {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderOptions::default(),
+                &RecordSegmentReaderShardOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -2523,14 +2523,14 @@ mod test {
         }];
 
         let data: Chunk<LogRecord> = Chunk::new(data.into());
-        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
+        let record_segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment,
             &blockfile_provider,
             None,
         ))
         .await
         .expect("Reader should be initialized by now");
-        let segment_writer = RecordSegmentWriter::from_segment(
+        let segment_writer = RecordSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &record_segment,
@@ -2540,7 +2540,7 @@ mod test {
         )
         .await
         .expect("Error creating segment writer");
-        let mut metadata_writer = MetadataSegmentWriter::from_segment(
+        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &metadata_segment,
@@ -2554,7 +2554,7 @@ mod test {
             &some_reader,
             data,
             None,
-            &RecordSegmentReaderOptions::default(),
+            &RecordSegmentReaderShardOptions::default(),
         )
         .await
         .expect("Log materialization failed");
@@ -2583,7 +2583,7 @@ mod test {
             .await
             .expect("Flush metadata segment writer failed");
         // FTS for hello should return empty.
-        let metadata_segment_reader = Box::pin(MetadataSegmentReader::from_segment(
+        let metadata_segment_reader = Box::pin(MetadataSegmentReaderShard::from_segment(
             &metadata_segment,
             &blockfile_provider,
         ))
@@ -2608,7 +2608,7 @@ mod test {
         assert_eq!(res.len(), 1);
         assert_eq!(res.min(), Some(1));
         // Record segment should also have the updated values.
-        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
+        let record_segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment,
             &blockfile_provider,
             None,
@@ -2664,7 +2664,7 @@ mod test {
             file_path: HashMap::new(),
         };
         {
-            let segment_writer = RecordSegmentWriter::from_segment(
+            let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &record_segment,
@@ -2674,7 +2674,7 @@ mod test {
             )
             .await
             .expect("Error creating segment writer");
-            let mut metadata_writer = MetadataSegmentWriter::from_segment(
+            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment,
@@ -2708,8 +2708,8 @@ mod test {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
-                RecordSegmentReader::from_segment(&record_segment, &blockfile_provider, None),
+            let record_segment_reader: Option<RecordSegmentReaderShard> = match Box::pin(
+                RecordSegmentReaderShard::from_segment(&record_segment, &blockfile_provider, None),
             )
             .await
             {
@@ -2718,17 +2718,17 @@ mod test {
                     match *e {
                         // Uninitialized segment is fine and means that the record
                         // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => None,
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                        RecordSegmentReaderShardCreationError::UninitializedSegment => None,
+                        RecordSegmentReaderShardCreationError::BlockfileOpenError(_) => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                        RecordSegmentReaderShardCreationError::InvalidNumberOfFiles => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                        RecordSegmentReaderShardCreationError::DataRecordNotFound(_) => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                        RecordSegmentReaderShardCreationError::UserRecordNotFound(_) => {
                             panic!("Error creating record segment reader");
                         }
                         _ => {
@@ -2741,7 +2741,7 @@ mod test {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderOptions::default(),
+                &RecordSegmentReaderShardOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -2795,7 +2795,7 @@ mod test {
                 .starts_with(&prefix));
         }
         // FTS for hello should return 1 document
-        let metadata_segment_reader = Box::pin(MetadataSegmentReader::from_segment(
+        let metadata_segment_reader = Box::pin(MetadataSegmentReaderShard::from_segment(
             &metadata_segment,
             &blockfile_provider,
         ))
@@ -2821,7 +2821,7 @@ mod test {
         assert_eq!(res.len(), 1);
         assert_eq!(res.min(), Some(2));
         // Record segment should also have the updated values.
-        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
+        let record_segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment,
             &blockfile_provider,
             None,
@@ -2872,7 +2872,7 @@ mod test {
             .collect::<Vec<_>>();
         let mut segments = TestDistributedSegment::new_with_dimension(2).await;
         Box::pin(segments.compact_log(Chunk::new(logs.into()), 0)).await;
-        let metadata_segment_reader = Box::pin(MetadataSegmentReader::from_segment(
+        let metadata_segment_reader = Box::pin(MetadataSegmentReaderShard::from_segment(
             &segments.metadata_segment,
             &segments.blockfile_provider,
         ))
@@ -2960,7 +2960,7 @@ mod test {
 
         // Create segments and add records with sparse vectors
         {
-            let segment_writer = RecordSegmentWriter::from_segment(
+            let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &record_segment,
@@ -2971,7 +2971,7 @@ mod test {
             .await
             .expect("Error creating segment writer");
 
-            let metadata_writer = MetadataSegmentWriter::from_segment(
+            let metadata_writer = MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment,
@@ -3014,14 +3014,14 @@ mod test {
             }];
 
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
-                RecordSegmentReader::from_segment(&record_segment, &blockfile_provider, None),
+            let record_segment_reader: Option<RecordSegmentReaderShard> = match Box::pin(
+                RecordSegmentReaderShard::from_segment(&record_segment, &blockfile_provider, None),
             )
             .await
             {
                 Ok(reader) => Some(reader),
                 Err(e) => match *e {
-                    RecordSegmentReaderCreationError::UninitializedSegment => None,
+                    RecordSegmentReaderShardCreationError::UninitializedSegment => None,
                     _ => panic!("Error creating record segment reader"),
                 },
             };
@@ -3030,7 +3030,7 @@ mod test {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderOptions::default(),
+                &RecordSegmentReaderShardOptions::default(),
             )
             .await
             .expect("Error materializing logs");
@@ -3072,7 +3072,7 @@ mod test {
 
         // Verify we can read the segment back
         {
-            let metadata_segment_reader = Box::pin(MetadataSegmentReader::from_segment(
+            let metadata_segment_reader = Box::pin(MetadataSegmentReaderShard::from_segment(
                 &metadata_segment,
                 &blockfile_provider,
             ))
@@ -3125,7 +3125,7 @@ mod test {
 
         // First flush: create initial blockfiles
         {
-            let metadata_writer = MetadataSegmentWriter::from_segment(
+            let metadata_writer = MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment,
@@ -3174,7 +3174,7 @@ mod test {
         // Second flush: recreate sparse index files
         // The bug fix ensures they use the existing prefix, not a new one
         {
-            let metadata_writer = MetadataSegmentWriter::from_segment(
+            let metadata_writer = MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment,
@@ -3227,7 +3227,7 @@ mod test {
 
         // Verify we can read from the segment with recreated sparse indices
         {
-            let metadata_reader = Box::pin(MetadataSegmentReader::from_segment(
+            let metadata_reader = Box::pin(MetadataSegmentReaderShard::from_segment(
                 &metadata_segment,
                 &blockfile_provider,
             ))
@@ -3254,7 +3254,7 @@ mod test {
         // Third flush: recreate all index files
         // The bug fix ensures they use the existing prefix, not a new one
         {
-            let metadata_writer = MetadataSegmentWriter::from_segment(
+            let metadata_writer = MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment,
@@ -3299,7 +3299,7 @@ mod test {
 
         // Verify we can read from the segment with recreated sparse indices
         {
-            let metadata_reader = Box::pin(MetadataSegmentReader::from_segment(
+            let metadata_reader = Box::pin(MetadataSegmentReaderShard::from_segment(
                 &metadata_segment,
                 &blockfile_provider,
             ))
@@ -3357,7 +3357,7 @@ mod test {
         assert!(!fts_disabled_schema.is_fts_enabled());
 
         {
-            let segment_writer = RecordSegmentWriter::from_segment(
+            let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &record_segment,
@@ -3367,7 +3367,7 @@ mod test {
             )
             .await
             .expect("Error creating segment writer");
-            let mut metadata_writer = MetadataSegmentWriter::from_segment(
+            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment,
@@ -3407,14 +3407,14 @@ mod test {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
-                RecordSegmentReader::from_segment(&record_segment, &blockfile_provider, None),
+            let record_segment_reader: Option<RecordSegmentReaderShard> = match Box::pin(
+                RecordSegmentReaderShard::from_segment(&record_segment, &blockfile_provider, None),
             )
             .await
             {
                 Ok(reader) => Some(reader),
                 Err(e) => match *e {
-                    RecordSegmentReaderCreationError::UninitializedSegment => None,
+                    RecordSegmentReaderShardCreationError::UninitializedSegment => None,
                     _ => panic!("Error creating record segment reader"),
                 },
             };
@@ -3423,7 +3423,7 @@ mod test {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderOptions::default(),
+                &RecordSegmentReaderShardOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -3461,7 +3461,7 @@ mod test {
         }
 
         // Verify: FTS search should return NO results (indexing was skipped)
-        let metadata_segment_reader = Box::pin(MetadataSegmentReader::from_segment(
+        let metadata_segment_reader = Box::pin(MetadataSegmentReaderShard::from_segment(
             &metadata_segment,
             &blockfile_provider,
         ))
@@ -3504,7 +3504,7 @@ mod test {
         );
 
         // Verify: documents are still stored in record segment
-        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
+        let record_segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment,
             &blockfile_provider,
             None,
@@ -3560,7 +3560,7 @@ mod test {
         };
 
         {
-            let segment_writer = RecordSegmentWriter::from_segment(
+            let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &record_segment,
@@ -3570,7 +3570,7 @@ mod test {
             )
             .await
             .expect("Error creating segment writer");
-            let mut metadata_writer = MetadataSegmentWriter::from_segment(
+            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment,
@@ -3605,14 +3605,14 @@ mod test {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
-                RecordSegmentReader::from_segment(&record_segment, &blockfile_provider, None),
+            let record_segment_reader: Option<RecordSegmentReaderShard> = match Box::pin(
+                RecordSegmentReaderShard::from_segment(&record_segment, &blockfile_provider, None),
             )
             .await
             {
                 Ok(reader) => Some(reader),
                 Err(e) => match *e {
-                    RecordSegmentReaderCreationError::UninitializedSegment => None,
+                    RecordSegmentReaderShardCreationError::UninitializedSegment => None,
                     _ => panic!("Error creating record segment reader"),
                 },
             };
@@ -3621,7 +3621,7 @@ mod test {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderOptions::default(),
+                &RecordSegmentReaderShardOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -3655,7 +3655,7 @@ mod test {
         }
 
         // Verify: FTS search SHOULD return results (FTS enabled by default)
-        let metadata_segment_reader = Box::pin(MetadataSegmentReader::from_segment(
+        let metadata_segment_reader = Box::pin(MetadataSegmentReaderShard::from_segment(
             &metadata_segment,
             &blockfile_provider,
         ))

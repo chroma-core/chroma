@@ -3,7 +3,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_segment::{
     bloom_filter::BloomFilterManager,
-    distributed_spann::{SpannSegmentReader, SpannSegmentReaderError},
+    distributed_spann::{SpannSegmentReaderShard, SpannSegmentReaderShardError},
     spann_provider::SpannProvider,
 };
 use chroma_system::{
@@ -71,7 +71,7 @@ pub struct SpannKnnOrchestrator {
 
     // Result channel
     result_channel: Option<Sender<Result<Vec<RecordMeasure>, KnnError>>>,
-    spann_reader: Option<SpannSegmentReader<'static>>,
+    spann_reader: Option<SpannSegmentReaderShard<'static>>,
 }
 
 impl SpannKnnOrchestrator {
@@ -172,7 +172,7 @@ impl Orchestrator for SpannKnnOrchestrator {
             self.context.task_cancellation_token.clone(),
         );
         tasks.push((knn_log_task, Some(Span::current())));
-        let reader_res = Box::pin(SpannSegmentReader::from_segment(
+        let reader_res = Box::pin(SpannSegmentReaderShard::from_segment(
             &self.collection_and_segments.collection,
             &self.collection_and_segments.vector_segment,
             &self.blockfile_provider,
@@ -204,14 +204,17 @@ impl Orchestrator for SpannKnnOrchestrator {
             }
             Err(e) => match e {
                 // Segment uninited means no compaction yet.
-                SpannSegmentReaderError::UninitializedSegment => {
+                SpannSegmentReaderShardError::UninitializedSegment => {
                     // If the segment is uninitialized, we can skip the head search.
                     self.spann_reader = None;
                     self.heads_searched = true;
                 }
                 _ => {
                     let _: Option<()> = self
-                        .ok_or_terminate(Err(KnnError::SpannSegmentReaderCreationError(e)), ctx)
+                        .ok_or_terminate(
+                            Err(KnnError::SpannSegmentReaderShardCreationError(e)),
+                            ctx,
+                        )
                         .await;
                 }
             },

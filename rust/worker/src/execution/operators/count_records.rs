@@ -3,7 +3,8 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
     blockfile_record::{
-        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
+        RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
+        RecordSegmentReaderShardOptions,
     },
     bloom_filter::BloomFilterManager,
 };
@@ -53,16 +54,16 @@ pub(crate) struct CountRecordsOutput {
 #[derive(Error, Debug)]
 pub(crate) enum CountRecordsError {
     #[error("Error creating record segment reader")]
-    RecordSegmentCreateError(#[from] RecordSegmentReaderCreationError),
+    RecordSegmentCreateError(#[from] RecordSegmentReaderShardCreationError),
     #[error("Error reading record segment")]
-    RecordSegmentReadError(#[from] Box<dyn ChromaError>),
+    RecordSegmentReaderShardror(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for CountRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             CountRecordsError::RecordSegmentCreateError(e) => e.code(),
-            CountRecordsError::RecordSegmentReadError(e) => e.code(),
+            CountRecordsError::RecordSegmentReaderShardror(e) => e.code(),
         }
     }
 }
@@ -79,7 +80,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
         &self,
         input: &CountRecordsInput,
     ) -> Result<CountRecordsOutput, CountRecordsError> {
-        let segment_reader = Box::pin(RecordSegmentReader::from_segment(
+        let segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &input.record_segment_definition,
             &input.blockfile_provider,
             input.bloom_filter_manager.clone(),
@@ -89,7 +90,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
             Ok(r) => r,
             Err(e) => {
                 match *e {
-                    RecordSegmentReaderCreationError::UninitializedSegment => {
+                    RecordSegmentReaderShardCreationError::UninitializedSegment => {
                         tracing::info!("[CountQueryOrchestrator] Record segment is uninitialized; using {} records from log", input.log_records.len());
                         // This means there no compaction has occured.
                         // So we can just traverse the log records
@@ -111,16 +112,16 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
                             count: seen_id_set.len(),
                         });
                     }
-                    RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                    RecordSegmentReaderShardCreationError::BlockfileOpenError(_) => {
                         return Err(CountRecordsError::RecordSegmentCreateError(*e));
                     }
-                    RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                    RecordSegmentReaderShardCreationError::InvalidNumberOfFiles => {
                         return Err(CountRecordsError::RecordSegmentCreateError(*e));
                     }
-                    RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                    RecordSegmentReaderShardCreationError::DataRecordNotFound(_) => {
                         return Err(CountRecordsError::RecordSegmentCreateError(*e));
                     }
-                    RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                    RecordSegmentReaderShardCreationError::UserRecordNotFound(_) => {
                         return Err(CountRecordsError::RecordSegmentCreateError(*e));
                     }
                     _ => {
@@ -135,7 +136,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
         // in both deleted and not deleted state).
         let mut deleted_and_non_deleted_present_in_segment: HashSet<String> = HashSet::new();
         let mut res_count: i32 = 0;
-        let options = RecordSegmentReaderOptions {
+        let options = RecordSegmentReaderShardOptions {
             use_bloom_filter: input
                 .bloom_filter_manager
                 .as_ref()
@@ -160,7 +161,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
                 }
                 Err(e) => {
                     tracing::error!("Error reading record segment: {:?}", e);
-                    return Err(CountRecordsError::RecordSegmentReadError(e));
+                    return Err(CountRecordsError::RecordSegmentReaderShardror(e));
                 }
             }
         }
@@ -208,7 +209,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
             }
             Err(e) => {
                 tracing::error!("Error reading record segment: {:?}", e);
-                return Err(CountRecordsError::RecordSegmentReadError(e));
+                return Err(CountRecordsError::RecordSegmentReaderShardror(e));
             }
         };
         Ok(CountRecordsOutput {
@@ -223,8 +224,8 @@ mod tests {
     use chroma_blockstore::provider::BlockfileProvider;
     use chroma_segment::{
         blockfile_record::{
-            RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
-            RecordSegmentWriter,
+            RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
+            RecordSegmentReaderShardOptions, RecordSegmentWriterShard,
         },
         types::materialize_logs,
     };
@@ -250,7 +251,7 @@ mod tests {
         let tenant = String::from("test_tenant");
         let database_id = DatabaseUuid::new();
         {
-            let segment_writer = RecordSegmentWriter::from_segment(
+            let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &record_segment,
@@ -296,8 +297,8 @@ mod tests {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
-                RecordSegmentReader::from_segment(&record_segment, &in_memory_provider, None),
+            let record_segment_reader: Option<RecordSegmentReaderShard> = match Box::pin(
+                RecordSegmentReaderShard::from_segment(&record_segment, &in_memory_provider, None),
             )
             .await
             {
@@ -306,19 +307,19 @@ mod tests {
                     match *e {
                         // Uninitialized segment is fine and means that the record
                         // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => None,
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                        RecordSegmentReaderShardCreationError::UninitializedSegment => None,
+                        RecordSegmentReaderShardCreationError::BlockfileOpenError(_) => {
                             panic!("Error creating record segment reader. Blockfile open error.");
                         }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                        RecordSegmentReaderShardCreationError::InvalidNumberOfFiles => {
                             panic!(
                                 "Error creating record segment reader. Invalid number of files."
                             );
                         }
-                        RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                        RecordSegmentReaderShardCreationError::DataRecordNotFound(_) => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                        RecordSegmentReaderShardCreationError::UserRecordNotFound(_) => {
                             panic!("Error creating record segment reader");
                         }
                         _ => {
@@ -331,7 +332,7 @@ mod tests {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderOptions::default(),
+                &RecordSegmentReaderShardOptions::default(),
             )
             .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await

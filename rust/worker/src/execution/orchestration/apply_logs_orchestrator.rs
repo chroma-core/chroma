@@ -5,11 +5,11 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
     blockfile_metadata::MetadataSegmentError,
     blockfile_record::{
-        ApplyMaterializedLogError, RecordSegmentReaderCreationError,
-        RecordSegmentWriterCreationError,
+        ApplyMaterializedLogError, RecordSegmentReaderShardCreationError,
+        RecordSegmentWriterShardCreationError,
     },
     distributed_hnsw::DistributedHNSWSegmentFromSegmentError,
-    distributed_spann::SpannSegmentWriterError,
+    distributed_spann::SpannSegmentWriterShardError,
     types::{ChromaSegmentFlusher, ChromaSegmentWriter, MaterializeLogsResult},
 };
 use chroma_system::{
@@ -88,13 +88,13 @@ pub enum ApplyLogsOrchestratorError {
     #[error("Panic during compaction: {0}")]
     Panic(#[from] PanicError),
     #[error("Error creating record segment reader: {0}")]
-    RecordSegmentReader(#[from] RecordSegmentReaderCreationError),
+    RecordSegmentReaderShard(#[from] RecordSegmentReaderShardCreationError),
     #[error("Error creating record segment writer: {0}")]
-    RecordSegmentWriter(#[from] RecordSegmentWriterCreationError),
+    RecordSegmentWriterShard(#[from] RecordSegmentWriterShardCreationError),
     #[error("Error receiving final result: {0}")]
     Result(#[from] RecvError),
     #[error("Error creating spann writer: {0}")]
-    SpannSegment(#[from] SpannSegmentWriterError),
+    SpannSegment(#[from] SpannSegmentWriterShardError),
     #[error("Could not count current segment: {0}")]
     CountError(Box<dyn chroma_error::ChromaError>),
 }
@@ -119,8 +119,8 @@ impl ChromaError for ApplyLogsOrchestratorError {
             Self::InvariantViolation(_) => true,
             Self::MetadataSegment(e) => e.should_trace_error(),
             Self::Panic(e) => e.should_trace_error(),
-            Self::RecordSegmentReader(e) => e.should_trace_error(),
-            Self::RecordSegmentWriter(e) => e.should_trace_error(),
+            Self::RecordSegmentReaderShard(e) => e.should_trace_error(),
+            Self::RecordSegmentWriterShard(e) => e.should_trace_error(),
             Self::Result(_) => true,
             Self::SpannSegment(e) => e.should_trace_error(),
             Self::CountError(e) => e.should_trace_error(),
@@ -536,7 +536,7 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
             None => return,
         };
 
-        if message.segment_type == "MetadataSegmentWriter" {
+        if message.segment_type == "MetadataSegmentWriterShard" {
             if let Some(update) = message.schema_update {
                 let collection_info = match self.context.get_collection_info_mut() {
                     Ok(info) => info,

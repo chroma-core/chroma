@@ -6,7 +6,8 @@ use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::ChromaError;
 use chroma_segment::{
     blockfile_record::{
-        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
+        RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
+        RecordSegmentReaderShardOptions,
     },
     bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},
@@ -37,7 +38,7 @@ pub enum KnnLogError {
     #[error("Error materializing log: {0}")]
     LogMaterializer(#[from] LogMaterializerError),
     #[error("Error creating record segment reader: {0}")]
-    RecordReader(#[from] RecordSegmentReaderCreationError),
+    RecordReader(#[from] RecordSegmentReaderShardCreationError),
 }
 
 impl ChromaError for KnnLogError {
@@ -55,7 +56,7 @@ impl Operator<KnnLogInput, KnnOutput> for Knn {
     type Error = KnnLogError;
 
     async fn run(&self, input: &KnnLogInput) -> Result<KnnOutput, KnnLogError> {
-        let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
+        let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
             input.bloom_filter_manager.clone(),
@@ -63,13 +64,18 @@ impl Operator<KnnLogInput, KnnOutput> for Knn {
         .await
         {
             Ok(reader) => Ok(Some(reader)),
-            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+            Err(e)
+                if matches!(
+                    *e,
+                    RecordSegmentReaderShardCreationError::UninitializedSegment
+                ) =>
+            {
                 Ok(None)
             }
             Err(e) => Err(*e),
         }?;
 
-        let plan = RecordSegmentReaderOptions {
+        let plan = RecordSegmentReaderShardOptions {
             use_bloom_filter: input
                 .bloom_filter_manager
                 .as_ref()

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chroma_segment::{
-    bloom_filter::BloomFilterManager, quantized_spann::QuantizedSpannSegmentReader,
+    bloom_filter::BloomFilterManager, quantized_spann::QuantizedSpannSegmentReaderShard,
     spann_provider::SpannProvider,
 };
 use chroma_system::{
@@ -47,7 +47,7 @@ pub struct QuantizedSpannKnnOrchestrator {
     knn: Knn,
     knn_filter_output: KnnFilterOutput,
     queue: usize,
-    reader: Option<QuantizedSpannSegmentReader>,
+    reader: Option<QuantizedSpannSegmentReaderShard>,
     rotated_query: Option<Arc<[f32]>>,
     spann_provider: SpannProvider,
 

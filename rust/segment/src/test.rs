@@ -1,7 +1,7 @@
-use crate::{blockfile_record::RecordSegmentReaderOptions, spann_provider::SpannProvider};
+use crate::{blockfile_record::RecordSegmentReaderShardOptions, spann_provider::SpannProvider};
 
 use super::{
-    blockfile_metadata::MetadataSegmentWriter, blockfile_record::RecordSegmentWriter,
+    blockfile_metadata::MetadataSegmentWriterShard, blockfile_record::RecordSegmentWriterShard,
     bloom_filter::BloomFilterManager, distributed_hnsw::DistributedHNSWSegmentWriter,
     types::materialize_logs,
 };
@@ -107,12 +107,12 @@ impl TestDistributedSegment {
             &None,
             logs,
             Some(AtomicU32::new(next_offset as u32).into()),
-            &RecordSegmentReaderOptions::default(),
+            &RecordSegmentReaderShardOptions::default(),
         )
         .await
         .expect("Should be able to materialize log.");
 
-        let mut metadata_writer = MetadataSegmentWriter::from_segment(
+        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
             &self.collection.tenant,
             &self.collection.database_id,
             &self.metadata_segment,
@@ -138,7 +138,7 @@ impl TestDistributedSegment {
         .await
         .expect("Should be able to flush metadata.");
 
-        let record_writer = Box::pin(RecordSegmentWriter::from_segment(
+        let record_writer = Box::pin(RecordSegmentWriterShard::from_segment(
             &self.collection.tenant,
             &self.collection.database_id,
             &self.record_segment,

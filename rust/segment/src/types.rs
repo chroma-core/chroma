@@ -11,14 +11,14 @@ use thiserror::Error;
 use tracing::{Instrument, Span};
 use uuid::Uuid;
 
-use crate::distributed_spann::{SpannSegmentFlusher, SpannSegmentWriter};
+use crate::distributed_spann::{SpannSegmentFlusher, SpannSegmentWriterShard};
 #[cfg(feature = "usearch")]
-use crate::quantized_spann::{QuantizedSpannSegmentFlusher, QuantizedSpannSegmentWriter};
+use crate::quantized_spann::{QuantizedSpannSegmentFlusher, QuantizedSpannSegmentWriterShard};
 
-use super::blockfile_metadata::{MetadataSegmentFlusher, MetadataSegmentWriter};
+use super::blockfile_metadata::{MetadataSegmentFlusher, MetadataSegmentWriterShard};
 use super::blockfile_record::{
-    ApplyMaterializedLogError, RecordSegmentFlusher, RecordSegmentReader,
-    RecordSegmentReaderOptions, RecordSegmentWriter,
+    ApplyMaterializedLogError, RecordSegmentFlusher, RecordSegmentReaderShard,
+    RecordSegmentReaderShardOptions, RecordSegmentWriterShard,
 };
 use super::distributed_hnsw::DistributedHNSWSegmentWriter;
 
@@ -110,7 +110,7 @@ pub enum LogMaterializerError {
     #[error("Log index {0} out of bounds when resolving user ID")]
     LogIndexOutOfBounds(usize),
     #[error("Record segment reader required but not available")]
-    RecordSegmentReaderRequired,
+    RecordSegmentReaderShardRequired,
     #[error("Unsupported operation for rebuild: {0:?}")]
     UnsupportedOperationForRebuild(Operation),
 }
@@ -122,7 +122,7 @@ impl ChromaError for LogMaterializerError {
             LogMaterializerError::EmbeddingMaterialization => ErrorCodes::Internal,
             LogMaterializerError::RecordSegment(e) => e.code(),
             LogMaterializerError::LogIndexOutOfBounds(_) => ErrorCodes::Internal,
-            LogMaterializerError::RecordSegmentReaderRequired => ErrorCodes::Internal,
+            LogMaterializerError::RecordSegmentReaderShardRequired => ErrorCodes::Internal,
             LogMaterializerError::UnsupportedOperationForRebuild(_) => ErrorCodes::Internal,
         }
     }
@@ -277,7 +277,7 @@ impl<'log_data> BorrowedMaterializedLogRecord<'log_data> {
     /// Otherwise, it falls back to the lightweight id_to_user_id blockfile lookup.
     pub async fn get_user_id(
         &self,
-        record_segment_reader: Option<&RecordSegmentReader<'_>>,
+        record_segment_reader: Option<&RecordSegmentReaderShard<'_>>,
     ) -> Result<String, LogMaterializerError> {
         if let Some(id) = self.materialized_log_record.user_id_at_log_index {
             return Ok(self
@@ -294,7 +294,7 @@ impl<'log_data> BorrowedMaterializedLogRecord<'log_data> {
                 .get_user_id_for_offset_id(self.materialized_log_record.offset_id)
                 .await?
                 .to_string()),
-            None => Err(LogMaterializerError::RecordSegmentReaderRequired),
+            None => Err(LogMaterializerError::RecordSegmentReaderShardRequired),
         }
     }
 
@@ -302,7 +302,7 @@ impl<'log_data> BorrowedMaterializedLogRecord<'log_data> {
     /// The record segment reader passed here **must be over the same set of blockfiles** as the reader that was originally passed to `materialize_logs()`. If the two readers are different, the behavior is undefined.
     pub async fn hydrate<'segment_data>(
         &self,
-        record_segment_reader: Option<&'segment_data RecordSegmentReader<'segment_data>>,
+        record_segment_reader: Option<&'segment_data RecordSegmentReaderShard<'segment_data>>,
     ) -> Result<HydratedMaterializedLogRecord<'log_data, 'segment_data>, LogMaterializerError> {
         let segment_data_record = match self.materialized_log_record.offset_id_exists_in_segment {
             true => match record_segment_reader {
@@ -616,10 +616,10 @@ static TOTAL_LOGS_POST_MATERIALIZED: std::sync::LazyLock<opentelemetry::metrics:
 /// - `next_offset_id` must be provided if the log was partitioned and `materialize_logs()` is called for each partition: if it is not provided, generated offset IDs will conflict between partitions. When it is not provided, it is initialized from the max offset ID in the record segment.
 /// - `plan` controls optimizations like bloom filter pre-filtering during lookups.
 pub async fn materialize_logs(
-    record_segment_reader: &Option<RecordSegmentReader<'_>>,
+    record_segment_reader: &Option<RecordSegmentReaderShard<'_>>,
     logs: Chunk<LogRecord>,
     next_offset_id: Option<Arc<AtomicU32>>,
-    plan: &RecordSegmentReaderOptions,
+    plan: &RecordSegmentReaderShardOptions,
 ) -> Result<MaterializeLogsResult, LogMaterializerError> {
     // Trace the total_len since len() iterates over the entire chunk
     // and we don't want to do that just to trace the length.
@@ -1009,48 +1009,48 @@ pub async fn materialize_logs_for_rebuild(
 
 #[derive(Clone, Debug)]
 #[allow(clippy::large_enum_variant)]
-pub enum VectorSegmentWriter {
+pub enum VectorSegmentWriterShard {
     Hnsw(Box<DistributedHNSWSegmentWriter>),
     #[cfg(feature = "usearch")]
-    QuantizedSpann(QuantizedSpannSegmentWriter),
-    Spann(SpannSegmentWriter),
+    QuantizedSpann(QuantizedSpannSegmentWriterShard),
+    Spann(SpannSegmentWriterShard),
 }
 
-impl VectorSegmentWriter {
+impl VectorSegmentWriterShard {
     pub fn get_id(&self) -> SegmentUuid {
         match self {
-            VectorSegmentWriter::Hnsw(writer) => writer.id,
+            VectorSegmentWriterShard::Hnsw(writer) => writer.id,
             #[cfg(feature = "usearch")]
-            VectorSegmentWriter::QuantizedSpann(writer) => writer.id,
-            VectorSegmentWriter::Spann(writer) => writer.id,
+            VectorSegmentWriterShard::QuantizedSpann(writer) => writer.id,
+            VectorSegmentWriterShard::Spann(writer) => writer.id,
         }
     }
 
     pub fn get_name(&self) -> &'static str {
         match self {
-            VectorSegmentWriter::Hnsw(_) => "DistributedHNSWSegmentWriter",
+            VectorSegmentWriterShard::Hnsw(_) => "DistributedHNSWSegmentWriter",
             #[cfg(feature = "usearch")]
-            VectorSegmentWriter::QuantizedSpann(_) => "QuantizedSpannSegmentWriter",
-            VectorSegmentWriter::Spann(_) => "SpannSegmentWriter",
+            VectorSegmentWriterShard::QuantizedSpann(_) => "QuantizedSpannSegmentWriterShard",
+            VectorSegmentWriterShard::Spann(_) => "SpannSegmentWriterShard",
         }
     }
 
     pub async fn apply_materialized_log_chunk(
         &self,
-        record_segment_reader: &Option<RecordSegmentReader<'_>>,
+        record_segment_reader: &Option<RecordSegmentReaderShard<'_>>,
         materialized: &MaterializeLogsResult,
     ) -> Result<(), ApplyMaterializedLogError> {
         match self {
-            VectorSegmentWriter::Hnsw(writer) => {
+            VectorSegmentWriterShard::Hnsw(writer) => {
                 writer
                     .apply_materialized_log_chunk(record_segment_reader, materialized)
                     .await
             }
             #[cfg(feature = "usearch")]
-            VectorSegmentWriter::QuantizedSpann(writer) => {
+            VectorSegmentWriterShard::QuantizedSpann(writer) => {
                 writer.apply_materialized_log_chunk(materialized).await
             }
-            VectorSegmentWriter::Spann(writer) => {
+            VectorSegmentWriterShard::Spann(writer) => {
                 writer
                     .apply_materialized_log_chunk(record_segment_reader, materialized)
                     .await
@@ -1060,25 +1060,25 @@ impl VectorSegmentWriter {
 
     pub async fn finish(&mut self) -> Result<(), Box<dyn ChromaError>> {
         match self {
-            VectorSegmentWriter::Hnsw(_) => Ok(()),
+            VectorSegmentWriterShard::Hnsw(_) => Ok(()),
             #[cfg(feature = "usearch")]
-            VectorSegmentWriter::QuantizedSpann(writer) => writer.finish().await,
-            VectorSegmentWriter::Spann(writer) => writer.garbage_collect().await,
+            VectorSegmentWriterShard::QuantizedSpann(writer) => writer.finish().await,
+            VectorSegmentWriterShard::Spann(writer) => writer.garbage_collect().await,
         }
     }
 
     pub async fn commit(self) -> Result<ChromaSegmentFlusher, Box<dyn ChromaError>> {
         match self {
-            VectorSegmentWriter::Hnsw(writer) => writer.commit().await.map(|w| {
+            VectorSegmentWriterShard::Hnsw(writer) => writer.commit().await.map(|w| {
                 ChromaSegmentFlusher::VectorSegment(VectorSegmentFlusher::Hnsw(Box::new(w)))
             }),
             #[cfg(feature = "usearch")]
-            VectorSegmentWriter::QuantizedSpann(writer) => {
+            VectorSegmentWriterShard::QuantizedSpann(writer) => {
                 Box::pin(writer.commit()).await.map(|f| {
                     ChromaSegmentFlusher::VectorSegment(VectorSegmentFlusher::QuantizedSpann(f))
                 })
             }
-            VectorSegmentWriter::Spann(writer) => Box::pin(writer.commit())
+            VectorSegmentWriterShard::Spann(writer) => Box::pin(writer.commit())
                 .await
                 .map(|w| ChromaSegmentFlusher::VectorSegment(VectorSegmentFlusher::Spann(w))),
         }
@@ -1088,9 +1088,9 @@ impl VectorSegmentWriter {
 #[derive(Clone, Debug)]
 #[allow(clippy::large_enum_variant)]
 pub enum ChromaSegmentWriter<'bf> {
-    RecordSegment(RecordSegmentWriter),
-    MetadataSegment(MetadataSegmentWriter<'bf>),
-    VectorSegment(VectorSegmentWriter),
+    RecordSegment(RecordSegmentWriterShard),
+    MetadataSegment(MetadataSegmentWriterShard<'bf>),
+    VectorSegment(VectorSegmentWriterShard),
 }
 
 impl ChromaSegmentWriter<'_> {
@@ -1104,15 +1104,15 @@ impl ChromaSegmentWriter<'_> {
 
     pub fn get_name(&self) -> &'static str {
         match self {
-            ChromaSegmentWriter::RecordSegment(_) => "RecordSegmentWriter",
-            ChromaSegmentWriter::MetadataSegment(_) => "MetadataSegmentWriter",
+            ChromaSegmentWriter::RecordSegment(_) => "RecordSegmentWriterShard",
+            ChromaSegmentWriter::MetadataSegment(_) => "MetadataSegmentWriterShard",
             ChromaSegmentWriter::VectorSegment(writer) => writer.get_name(),
         }
     }
 
     pub async fn apply_materialized_log_chunk(
         &self,
-        record_segment_reader: &Option<RecordSegmentReader<'_>>,
+        record_segment_reader: &Option<RecordSegmentReaderShard<'_>>,
         materialized: &MaterializeLogsResult,
         schema: Option<Schema>,
     ) -> Result<Option<Schema>, ApplyMaterializedLogError> {
@@ -1223,8 +1223,8 @@ impl ChromaSegmentFlusher {
 mod tests {
     use super::*;
     use crate::{
-        blockfile_metadata::{MetadataSegmentReader, MetadataSegmentWriter},
-        blockfile_record::{RecordSegmentReaderCreationError, RecordSegmentWriter},
+        blockfile_metadata::{MetadataSegmentReaderShard, MetadataSegmentWriterShard},
+        blockfile_record::{RecordSegmentReaderShardCreationError, RecordSegmentWriterShard},
     };
     use chroma_blockstore::{
         arrow::{
@@ -1274,7 +1274,7 @@ mod tests {
             file_path: HashMap::new(),
         };
         {
-            let segment_writer = RecordSegmentWriter::from_segment(
+            let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &record_segment,
@@ -1284,7 +1284,7 @@ mod tests {
             )
             .await
             .expect("Error creating segment writer");
-            let mut metadata_writer = MetadataSegmentWriter::from_segment(
+            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment,
@@ -1314,8 +1314,8 @@ mod tests {
                 },
             }];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
-                RecordSegmentReader::from_segment(&record_segment, &blockfile_provider, None),
+            let record_segment_reader: Option<RecordSegmentReaderShard> = match Box::pin(
+                RecordSegmentReaderShard::from_segment(&record_segment, &blockfile_provider, None),
             )
             .await
             {
@@ -1324,17 +1324,17 @@ mod tests {
                     match *e {
                         // Uninitialized segment is fine and means that the record
                         // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => None,
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                        RecordSegmentReaderShardCreationError::UninitializedSegment => None,
+                        RecordSegmentReaderShardCreationError::BlockfileOpenError(_) => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                        RecordSegmentReaderShardCreationError::InvalidNumberOfFiles => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                        RecordSegmentReaderShardCreationError::DataRecordNotFound(_) => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                        RecordSegmentReaderShardCreationError::UserRecordNotFound(_) => {
                             panic!("Error creating record segment reader");
                         }
                         _ => {
@@ -1347,7 +1347,7 @@ mod tests {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderOptions::default(),
+                &RecordSegmentReaderShardOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -1406,7 +1406,7 @@ mod tests {
             },
         ];
         let data: Chunk<LogRecord> = Chunk::new(data.into());
-        let reader = Box::pin(RecordSegmentReader::from_segment(
+        let reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment,
             &blockfile_provider,
             None,
@@ -1418,7 +1418,7 @@ mod tests {
             &some_reader,
             data,
             None,
-            &RecordSegmentReaderOptions::default(),
+            &RecordSegmentReaderShardOptions::default(),
         )
         .await
         .expect("Error materializing logs");
@@ -1445,7 +1445,7 @@ mod tests {
             emb_1.get_operation()
         );
         // Now write this, read again and validate.
-        let segment_writer = RecordSegmentWriter::from_segment(
+        let segment_writer = RecordSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &record_segment,
@@ -1455,7 +1455,7 @@ mod tests {
         )
         .await
         .expect("Error creating segment writer");
-        let mut metadata_writer = MetadataSegmentWriter::from_segment(
+        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &metadata_segment,
@@ -1489,7 +1489,7 @@ mod tests {
             .await
             .expect("Flush metadata segment writer failed");
         // Read.
-        let segment_reader = Box::pin(RecordSegmentReader::from_segment(
+        let segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment,
             &blockfile_provider,
             None,
@@ -1508,7 +1508,7 @@ mod tests {
         assert_eq!(record.1.embedding, &[7.0, 8.0, 9.0]);
         assert_eq!(record.1.metadata, Some(res_metadata));
         // Search by metadata filter.
-        let metadata_segment_reader = Box::pin(MetadataSegmentReader::from_segment(
+        let metadata_segment_reader = Box::pin(MetadataSegmentReaderShard::from_segment(
             &metadata_segment,
             &blockfile_provider,
         ))
@@ -1594,7 +1594,7 @@ mod tests {
             file_path: HashMap::new(),
         };
         {
-            let segment_writer = RecordSegmentWriter::from_segment(
+            let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &record_segment,
@@ -1604,7 +1604,7 @@ mod tests {
             )
             .await
             .expect("Error creating segment writer");
-            let mut metadata_writer = MetadataSegmentWriter::from_segment(
+            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment,
@@ -1634,8 +1634,8 @@ mod tests {
                 },
             }];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
-                RecordSegmentReader::from_segment(&record_segment, &blockfile_provider, None),
+            let record_segment_reader: Option<RecordSegmentReaderShard> = match Box::pin(
+                RecordSegmentReaderShard::from_segment(&record_segment, &blockfile_provider, None),
             )
             .await
             {
@@ -1644,17 +1644,17 @@ mod tests {
                     match *e {
                         // Uninitialized segment is fine and means that the record
                         // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => None,
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                        RecordSegmentReaderShardCreationError::UninitializedSegment => None,
+                        RecordSegmentReaderShardCreationError::BlockfileOpenError(_) => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                        RecordSegmentReaderShardCreationError::InvalidNumberOfFiles => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                        RecordSegmentReaderShardCreationError::DataRecordNotFound(_) => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                        RecordSegmentReaderShardCreationError::UserRecordNotFound(_) => {
                             panic!("Error creating record segment reader");
                         }
                         _ => {
@@ -1667,7 +1667,7 @@ mod tests {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderOptions::default(),
+                &RecordSegmentReaderShardOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -1713,7 +1713,7 @@ mod tests {
             },
         }];
         let data: Chunk<LogRecord> = Chunk::new(data.into());
-        let reader = Box::pin(RecordSegmentReader::from_segment(
+        let reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment,
             &blockfile_provider,
             None,
@@ -1725,7 +1725,7 @@ mod tests {
             &some_reader,
             data,
             None,
-            &RecordSegmentReaderOptions::default(),
+            &RecordSegmentReaderShardOptions::default(),
         )
         .await
         .expect("Error materializing logs");
@@ -1756,7 +1756,7 @@ mod tests {
             emb_1.get_operation()
         );
         // Now write this, read again and validate.
-        let segment_writer = RecordSegmentWriter::from_segment(
+        let segment_writer = RecordSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &record_segment,
@@ -1766,7 +1766,7 @@ mod tests {
         )
         .await
         .expect("Error creating segment writer");
-        let mut metadata_writer = MetadataSegmentWriter::from_segment(
+        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &metadata_segment,
@@ -1800,7 +1800,7 @@ mod tests {
             .await
             .expect("Flush metadata segment writer failed");
         // Read.
-        let segment_reader = Box::pin(RecordSegmentReader::from_segment(
+        let segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment,
             &blockfile_provider,
             None,
@@ -1819,7 +1819,7 @@ mod tests {
         assert_eq!(record.1.embedding, &[7.0, 8.0, 9.0]);
         assert_eq!(record.1.metadata, Some(res_metadata));
         // Search by metadata filter.
-        let metadata_segment_reader = Box::pin(MetadataSegmentReader::from_segment(
+        let metadata_segment_reader = Box::pin(MetadataSegmentReaderShard::from_segment(
             &metadata_segment,
             &blockfile_provider,
         ))
@@ -1906,7 +1906,7 @@ mod tests {
             file_path: HashMap::new(),
         };
         {
-            let segment_writer = RecordSegmentWriter::from_segment(
+            let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &record_segment,
@@ -1916,7 +1916,7 @@ mod tests {
             )
             .await
             .expect("Error creating segment writer");
-            let mut metadata_writer = MetadataSegmentWriter::from_segment(
+            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment,
@@ -1946,8 +1946,8 @@ mod tests {
                 },
             }];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
-                RecordSegmentReader::from_segment(&record_segment, &blockfile_provider, None),
+            let record_segment_reader: Option<RecordSegmentReaderShard> = match Box::pin(
+                RecordSegmentReaderShard::from_segment(&record_segment, &blockfile_provider, None),
             )
             .await
             {
@@ -1956,17 +1956,17 @@ mod tests {
                     match *e {
                         // Uninitialized segment is fine and means that the record
                         // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => None,
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                        RecordSegmentReaderShardCreationError::UninitializedSegment => None,
+                        RecordSegmentReaderShardCreationError::BlockfileOpenError(_) => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                        RecordSegmentReaderShardCreationError::InvalidNumberOfFiles => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                        RecordSegmentReaderShardCreationError::DataRecordNotFound(_) => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                        RecordSegmentReaderShardCreationError::UserRecordNotFound(_) => {
                             panic!("Error creating record segment reader");
                         }
                         _ => {
@@ -1979,7 +1979,7 @@ mod tests {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderOptions::default(),
+                &RecordSegmentReaderShardOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -2049,7 +2049,7 @@ mod tests {
             },
         ];
         let data: Chunk<LogRecord> = Chunk::new(data.into());
-        let reader = Box::pin(RecordSegmentReader::from_segment(
+        let reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment,
             &blockfile_provider,
             None,
@@ -2061,7 +2061,7 @@ mod tests {
             &some_reader,
             data,
             None,
-            &RecordSegmentReaderOptions::default(),
+            &RecordSegmentReaderShardOptions::default(),
         )
         .await
         .expect("Error materializing logs");
@@ -2088,7 +2088,7 @@ mod tests {
             emb_1.get_operation()
         );
         // Now write this, read again and validate.
-        let segment_writer = RecordSegmentWriter::from_segment(
+        let segment_writer = RecordSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &record_segment,
@@ -2098,7 +2098,7 @@ mod tests {
         )
         .await
         .expect("Error creating segment writer");
-        let mut metadata_writer = MetadataSegmentWriter::from_segment(
+        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &metadata_segment,
@@ -2132,7 +2132,7 @@ mod tests {
             .await
             .expect("Flush metadata segment writer failed");
         // Read.
-        let segment_reader = Box::pin(RecordSegmentReader::from_segment(
+        let segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment,
             &blockfile_provider,
             None,
@@ -2151,7 +2151,7 @@ mod tests {
         assert_eq!(record.1.embedding, &[7.0, 8.0, 9.0]);
         assert_eq!(record.1.metadata, Some(res_metadata));
         // Search by metadata filter.
-        let metadata_segment_reader = Box::pin(MetadataSegmentReader::from_segment(
+        let metadata_segment_reader = Box::pin(MetadataSegmentReaderShard::from_segment(
             &metadata_segment,
             &blockfile_provider,
         ))
@@ -2228,7 +2228,7 @@ mod tests {
         let tenant = String::from("test_tenant");
         let database_id = DatabaseUuid::new();
         {
-            let segment_writer = RecordSegmentWriter::from_segment(
+            let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &record_segment,
@@ -2272,8 +2272,8 @@ mod tests {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
-                RecordSegmentReader::from_segment(&record_segment, &blockfile_provider, None),
+            let record_segment_reader: Option<RecordSegmentReaderShard> = match Box::pin(
+                RecordSegmentReaderShard::from_segment(&record_segment, &blockfile_provider, None),
             )
             .await
             {
@@ -2282,17 +2282,17 @@ mod tests {
                     match *e {
                         // Uninitialized segment is fine and means that the record
                         // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => None,
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                        RecordSegmentReaderShardCreationError::UninitializedSegment => None,
+                        RecordSegmentReaderShardCreationError::BlockfileOpenError(_) => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                        RecordSegmentReaderShardCreationError::InvalidNumberOfFiles => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                        RecordSegmentReaderShardCreationError::DataRecordNotFound(_) => {
                             panic!("Error creating record segment reader");
                         }
-                        RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                        RecordSegmentReaderShardCreationError::UserRecordNotFound(_) => {
                             panic!("Error creating record segment reader");
                         }
                         _ => {
@@ -2305,7 +2305,7 @@ mod tests {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderOptions::default(),
+                &RecordSegmentReaderShardOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -2365,7 +2365,7 @@ mod tests {
             },
         ];
         let data: Chunk<LogRecord> = Chunk::new(data.into());
-        let reader = Box::pin(RecordSegmentReader::from_segment(
+        let reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment,
             &blockfile_provider,
             None,
@@ -2377,7 +2377,7 @@ mod tests {
             &some_reader,
             data,
             None,
-            &RecordSegmentReaderOptions::default(),
+            &RecordSegmentReaderShardOptions::default(),
         )
         .await
         .expect("Error materializing logs");
@@ -2486,7 +2486,7 @@ mod tests {
         assert_eq!(1, id2_found);
         assert_eq!(1, id3_found);
         // Now write this, read again and validate.
-        let segment_writer = RecordSegmentWriter::from_segment(
+        let segment_writer = RecordSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &record_segment,
@@ -2507,7 +2507,7 @@ mod tests {
             .await
             .expect("Flush segment writer failed");
         // Read.
-        let segment_reader = Box::pin(RecordSegmentReader::from_segment(
+        let segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment,
             &blockfile_provider,
             None,

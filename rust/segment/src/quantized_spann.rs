@@ -56,22 +56,22 @@ impl ChromaError for QuantizedSpannSegmentError {
 }
 
 #[derive(Clone)]
-pub struct QuantizedSpannSegmentWriter {
+pub struct QuantizedSpannSegmentWriterShard {
     blockfile_provider: BlockfileProvider,
     pub id: SegmentUuid,
     index: QuantizedSpannIndexWriter<USearchIndex>,
     usearch_provider: USearchIndexProvider,
 }
 
-impl Debug for QuantizedSpannSegmentWriter {
+impl Debug for QuantizedSpannSegmentWriterShard {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("QuantizedSpannSegmentWriter")
+        f.debug_struct("QuantizedSpannSegmentWriterShard")
             .field("id", &self.id)
             .finish()
     }
 }
 
-impl QuantizedSpannSegmentWriter {
+impl QuantizedSpannSegmentWriterShard {
     pub async fn from_segment(
         cluster_block_size: usize,
         collection: &Collection,
@@ -337,7 +337,7 @@ impl QuantizedSpannSegmentFlusher {
 }
 
 #[derive(Clone)]
-pub struct QuantizedSpannSegmentReader {
+pub struct QuantizedSpannSegmentReaderShard {
     // Centroid index (for navigate)
     quantized_centroid: USearchIndex,
 
@@ -351,13 +351,13 @@ pub struct QuantizedSpannSegmentReader {
     versions_reader: BlockfileReader<'static, u32, u32>,
 }
 
-impl Debug for QuantizedSpannSegmentReader {
+impl Debug for QuantizedSpannSegmentReaderShard {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("QuantizedSpannSegmentReader").finish()
+        f.debug_struct("QuantizedSpannSegmentReaderShard").finish()
     }
 }
 
-impl QuantizedSpannSegmentReader {
+impl QuantizedSpannSegmentReaderShard {
     pub async fn from_segment(
         collection: &Collection,
         vector_segment: &Segment,
@@ -658,8 +658,8 @@ mod test {
     };
     use rand::{Rng, SeedableRng};
 
-    use super::{QuantizedSpannSegmentReader, QuantizedSpannSegmentWriter};
-    use crate::blockfile_record::RecordSegmentReaderOptions;
+    use super::{QuantizedSpannSegmentReaderShard, QuantizedSpannSegmentWriterShard};
+    use crate::blockfile_record::RecordSegmentReaderShardOptions;
     use crate::types::materialize_logs;
 
     const CLUSTER_BLOCK_SIZE: usize = 2 * 1024 * 1024;
@@ -839,7 +839,7 @@ mod test {
             let blockfile_provider = test_blockfile_provider(storage.clone());
             let usearch_provider = test_usearch_provider(storage.clone());
 
-            let mut writer = QuantizedSpannSegmentWriter::from_segment(
+            let mut writer = QuantizedSpannSegmentWriterShard::from_segment(
                 CLUSTER_BLOCK_SIZE,
                 &collection,
                 &vector_segment,
@@ -857,7 +857,7 @@ mod test {
                 &None,
                 chunked,
                 Some(next_offset_id.clone()),
-                &RecordSegmentReaderOptions::default(),
+                &RecordSegmentReaderShardOptions::default(),
             )
             .await
             .unwrap_or_else(|e| panic!("cycle {cycle}: materialize failed: {e}"));
@@ -910,7 +910,7 @@ mod test {
         let blockfile_provider = test_blockfile_provider(storage.clone());
         let usearch_provider = test_usearch_provider(storage.clone());
 
-        QuantizedSpannSegmentWriter::from_segment(
+        QuantizedSpannSegmentWriterShard::from_segment(
             CLUSTER_BLOCK_SIZE,
             &collection,
             &vector_segment,
@@ -925,7 +925,7 @@ mod test {
         let blockfile_provider = test_blockfile_provider(storage.clone());
         let usearch_provider = test_usearch_provider(storage.clone());
 
-        let reader = QuantizedSpannSegmentReader::from_segment(
+        let reader = QuantizedSpannSegmentReaderShard::from_segment(
             &collection,
             &vector_segment,
             &blockfile_provider,

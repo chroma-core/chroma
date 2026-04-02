@@ -11,10 +11,10 @@ use chroma_index::{
 };
 use chroma_types::{Cmek, Collection, Segment};
 
-use crate::distributed_spann::{SpannSegmentWriter, SpannSegmentWriterError};
+use crate::distributed_spann::{SpannSegmentWriterShard, SpannSegmentWriterShardError};
 #[cfg(feature = "usearch")]
 use crate::quantized_spann::{
-    QuantizedSpannSegmentError, QuantizedSpannSegmentReader, QuantizedSpannSegmentWriter,
+    QuantizedSpannSegmentError, QuantizedSpannSegmentReaderShard, QuantizedSpannSegmentWriterShard,
 };
 
 #[derive(Clone)]
@@ -107,8 +107,8 @@ impl SpannProvider {
         segment: &Segment,
         dimensionality: usize,
         cmek: Option<Cmek>,
-    ) -> Result<SpannSegmentWriter, SpannSegmentWriterError> {
-        SpannSegmentWriter::from_segment(
+    ) -> Result<SpannSegmentWriterShard, SpannSegmentWriterShardError> {
+        SpannSegmentWriterShard::from_segment(
             collection,
             segment,
             &self.blockfile_provider,
@@ -127,8 +127,8 @@ impl SpannProvider {
         &self,
         collection: &Collection,
         vector_segment: &Segment,
-    ) -> Result<QuantizedSpannSegmentReader, QuantizedSpannSegmentError> {
-        QuantizedSpannSegmentReader::from_segment(
+    ) -> Result<QuantizedSpannSegmentReaderShard, QuantizedSpannSegmentError> {
+        QuantizedSpannSegmentReaderShard::from_segment(
             collection,
             vector_segment,
             &self.blockfile_provider,
@@ -143,8 +143,8 @@ impl SpannProvider {
         collection: &Collection,
         vector_segment: &Segment,
         record_segment: &Segment,
-    ) -> Result<QuantizedSpannSegmentWriter, QuantizedSpannSegmentError> {
-        QuantizedSpannSegmentWriter::from_segment(
+    ) -> Result<QuantizedSpannSegmentWriterShard, QuantizedSpannSegmentError> {
+        QuantizedSpannSegmentWriterShard::from_segment(
             self.pl_block_size,
             collection,
             vector_segment,

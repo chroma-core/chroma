@@ -1,7 +1,7 @@
 use crate::execution::operators::materialize_logs::MaterializeLogOutput;
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_segment::blockfile_record::RecordSegmentReader;
+use chroma_segment::blockfile_record::RecordSegmentReaderShard;
 use chroma_system::Operator;
 use chroma_types::{Chunk, LogRecord, Operation, OperationRecord};
 use futures::StreamExt;
@@ -35,7 +35,7 @@ impl SourceRecordSegmentV2Operator {
 
 #[derive(Clone, Debug)]
 pub struct SourceRecordSegmentV2Input {
-    pub record_segment_reader: Option<RecordSegmentReader<'static>>,
+    pub record_segment_reader: Option<RecordSegmentReaderShard<'static>>,
 }
 
 #[derive(Debug, Clone)]
@@ -163,12 +163,12 @@ mod tests {
     use chroma_segment::test::TestDistributedSegment;
     use chroma_types::MaterializedLogOperation;
 
-    async fn setup_test_reader(num_records: usize) -> RecordSegmentReader<'static> {
+    async fn setup_test_reader(num_records: usize) -> RecordSegmentReaderShard<'static> {
         let mut test_segment = TestDistributedSegment::new().await;
         test_segment
             .populate_with_generator(num_records, upsert_generator)
             .await;
-        Box::pin(RecordSegmentReader::from_segment(
+        Box::pin(RecordSegmentReaderShard::from_segment(
             &test_segment.record_segment,
             &test_segment.blockfile_provider,
             None,
