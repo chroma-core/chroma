@@ -551,7 +551,10 @@ async fn main() -> anyhow::Result<()> {
 
     // Build in-memory forward index for exact re-scoring
     let fwd_index = if args.oversample > 1 && !args.maxscore_only {
-        println!("\n📇 Building in-memory forward index for re-scoring (oversample={}x)...", args.oversample);
+        println!(
+            "\n📇 Building in-memory forward index for re-scoring (oversample={}x)...",
+            args.oversample
+        );
         let start = Instant::now();
         let fi = ForwardIndex::build(&documents);
         println!("  Built in {:.2}s", start.elapsed().as_secs_f64());
@@ -559,7 +562,8 @@ async fn main() -> anyhow::Result<()> {
     } else {
         None
     };
-    let rescorer: Option<&dyn SparseRescorer> = fwd_index.as_ref().map(|fi| fi as &dyn SparseRescorer);
+    let rescorer: Option<&dyn SparseRescorer> =
+        fwd_index.as_ref().map(|fi| fi as &dyn SparseRescorer);
     let oversample = args.oversample;
 
     // Benchmark
@@ -574,7 +578,8 @@ async fn main() -> anyhow::Result<()> {
         let mut total_ms = 0.0f64;
         for q in &queries {
             for _ in 0..args.iterations {
-                let (_, elapsed) = search(&provider, posting_id, q, args.top_k as u32, 1, None).await?;
+                let (_, elapsed) =
+                    search(&provider, posting_id, q, args.top_k as u32, 1, None).await?;
                 total_ms += elapsed;
             }
         }
@@ -622,8 +627,10 @@ async fn main() -> anyhow::Result<()> {
 
         for (qi, q) in queries.iter().enumerate() {
             let expected = brute_force_topk(&documents, q, k);
-            let (results_k, _) = search(&provider, posting_id, q, k as u32, oversample, rescorer).await?;
-            let (results_big, _) = search(&provider, posting_id, q, big_k, oversample, rescorer).await?;
+            let (results_k, _) =
+                search(&provider, posting_id, q, k as u32, oversample, rescorer).await?;
+            let (results_big, _) =
+                search(&provider, posting_id, q, big_k, oversample, rescorer).await?;
 
             let expected_ids: std::collections::HashSet<u32> =
                 expected.iter().map(|(id, _)| *id).collect();
@@ -636,17 +643,14 @@ async fn main() -> anyhow::Result<()> {
             let recall_big = if expected.is_empty() {
                 1.0
             } else {
-                expected_ids.intersection(&result_big_ids).count() as f32
-                    / expected.len() as f32
+                expected_ids.intersection(&result_big_ids).count() as f32 / expected.len() as f32
             };
 
             total_recall_k += recall_k;
             total_recall_big += recall_big;
 
-            let missing_from_k: Vec<u32> = expected_ids
-                .difference(&result_k_ids)
-                .copied()
-                .collect();
+            let missing_from_k: Vec<u32> =
+                expected_ids.difference(&result_k_ids).copied().collect();
 
             for &doc_id in &missing_from_k {
                 total_misses += 1;
@@ -655,8 +659,11 @@ async fn main() -> anyhow::Result<()> {
                 } else {
                     pruning_misses += 1;
                     if pruning_misses <= 10 {
-                        let bf_score = expected.iter().find(|(id, _)| *id == doc_id)
-                            .map(|(_, s)| *s).unwrap_or(0.0);
+                        let bf_score = expected
+                            .iter()
+                            .find(|(id, _)| *id == doc_id)
+                            .map(|(_, s)| *s)
+                            .unwrap_or(0.0);
                         let idx_min = results_k.last().map(|(_, s)| *s).unwrap_or(0.0);
                         println!(
                             "  ⚠️ Q{qi} doc {doc_id}: bf_score={bf_score:.6}, \
@@ -673,28 +680,30 @@ async fn main() -> anyhow::Result<()> {
         println!("\n🩺 DIAGNOSIS RESULTS");
         println!("{}", "=".repeat(60));
         println!("  Oversample:        {oversample}x");
-        println!("  Re-scoring:        {}", if rescorer.is_some() { "enabled" } else { "disabled" });
+        println!(
+            "  Re-scoring:        {}",
+            if rescorer.is_some() {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        );
         println!("  Recall@{k}:       {:.2}%", total_recall_k / n * 100.0);
-        println!("  Recall@{big_k} → @{k}: {:.2}%", total_recall_big / n * 100.0);
+        println!(
+            "  Recall@{big_k} → @{k}: {:.2}%",
+            total_recall_big / n * 100.0
+        );
         println!();
         println!("  Total missing docs:           {total_misses}");
-        println!(
-            "  Due to quantization noise:    {quant_misses} (in top-{big_k} but not top-{k})"
-        );
-        println!(
-            "  Due to pruning (bug):         {pruning_misses} (not even in top-{big_k})"
-        );
+        println!("  Due to quantization noise:    {quant_misses} (in top-{big_k} but not top-{k})");
+        println!("  Due to pruning (bug):         {pruning_misses} (not even in top-{big_k})");
         if pruning_misses > 0 {
-            println!(
-                "\n  ❌ {pruning_misses} docs were pruned that shouldn't have been."
-            );
+            println!("\n  ❌ {pruning_misses} docs were pruned that shouldn't have been.");
             println!("     This indicates a bug in the MaxScore pruning logic.");
         } else if total_misses == 0 {
             println!("\n  ✅ Perfect recall — no missing docs.");
         } else {
-            println!(
-                "\n  ✅ All missing docs are ranking noise (in top-{big_k} but not top-{k})."
-            );
+            println!("\n  ✅ All missing docs are ranking noise (in top-{big_k} but not top-{k}).");
         }
     } else {
         println!("\n🎯 Benchmark with brute force comparison...");
@@ -718,7 +727,15 @@ async fn main() -> anyhow::Result<()> {
             let expected = brute_force_topk(&documents, q, args.top_k);
             total_bf_ms += bf_start.elapsed().as_secs_f64() * 1000.0;
 
-            let (results, elapsed) = search(&provider, posting_id, q, args.top_k as u32, oversample, rescorer).await?;
+            let (results, elapsed) = search(
+                &provider,
+                posting_id,
+                q,
+                args.top_k as u32,
+                oversample,
+                rescorer,
+            )
+            .await?;
             total_ms_ms += elapsed;
             total_recall += recall(&results, &expected);
             pb.inc(1);
@@ -734,7 +751,14 @@ async fn main() -> anyhow::Result<()> {
         println!("\n📨 BENCHMARK RESULTS");
         println!("{}", "=".repeat(60));
         println!("🎯 Performance:");
-        println!("  Oversample:         {oversample}x{}", if rescorer.is_some() { " (re-scoring enabled)" } else { "" });
+        println!(
+            "  Oversample:         {oversample}x{}",
+            if rescorer.is_some() {
+                " (re-scoring enabled)"
+            } else {
+                ""
+            }
+        );
         println!("  Method              Time (ms)    Speedup");
         println!("  ------------------------------------------");
         println!("  Brute Force         {avg_bf:<12.2} 1.00x");
