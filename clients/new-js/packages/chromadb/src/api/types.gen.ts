@@ -228,9 +228,16 @@ export type EmbeddingFunctionNewConfiguration = {
 
 export type EmbeddingsPayload = Array<Array<number>> | Array<string>;
 
+export type ErrorIndexingStatus = {
+    num_indexed_ops: number;
+    num_unindexed_ops: number;
+    op_indexing_progress: number;
+    total_ops: number;
+};
+
 export type ErrorResponse = {
     error: string;
-    indexing_status?: IndexStatusResponse | null;
+    indexing_status?: null | ErrorIndexingStatus;
     message: string;
 };
 
