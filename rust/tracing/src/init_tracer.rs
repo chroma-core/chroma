@@ -17,6 +17,12 @@ use std::sync::OnceLock;
 
 static TOKIO_METRICS_INSTRUMENTS: OnceLock<TokioMetricsInstruments> = OnceLock::new();
 
+fn install_rustls_crypto_provider() {
+    // Multiple dependencies enable different rustls backends in this workspace.
+    // Install one explicitly before any TLS client config is built.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+}
+
 #[allow(dead_code)]
 struct TokioMetricsInstruments {
     active_tasks_gauge: opentelemetry::metrics::ObservableGauge<u64>,
@@ -124,6 +130,8 @@ pub fn init_otel_layer(
     service_name: &String,
     otel_endpoint: &String,
 ) -> Box<dyn Layer<Registry> + Send + Sync> {
+    install_rustls_crypto_provider();
+
     tracing::info!(
         "Registering jaeger subscriber for {} at endpoint {}",
         service_name,

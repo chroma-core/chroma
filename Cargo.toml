@@ -78,6 +78,7 @@ usearch = "=2.23"
 faer = { version = "0.24.0", default-features = false, features = ["std", "rand"] }
 reqwest = { version = "0.13", features = ["rustls", "http2", "query"], default-features = false }
 random-port = "0.1.1"
+rustls = { version = "0.23.37", features = ["aws-lc-rs"] }
 ndarray = { version = "0.16.1", features = ["approx"] }
 humantime = { version = "2.2.0" }
 petgraph = { version = "0.8.1" }
