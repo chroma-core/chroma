@@ -74,3 +74,32 @@ def test_multithreaded_get_or_create(client: ClientAPI) -> None:
                 future.result()
             except Exception as e:
                 assert False, f"Thread raised an exception: {e}"
+
+
+def test_include_parameter_not_mutated(client: ClientAPI) -> None:
+    """Regression test for issue #5857: include parameter must not be mutated in-place."""
+    collection = client.get_or_create_collection(
+        name="test_include_mutation",
+    )
+    collection.add(
+        ids=["id1", "id2"],
+        documents=["doc one", "doc two"],
+    )
+
+    include_get: list[str] = ["documents", "metadatas"]
+    collection.get(include=include_get)
+    assert include_get == [
+        "documents",
+        "metadatas",
+    ], "get() must not mutate include parameter"
+
+    include_query: list[str] = ["documents", "metadatas"]
+    collection.query(
+        query_texts=["doc"],
+        n_results=1,
+        include=include_query,
+    )
+    assert include_query == [
+        "documents",
+        "metadatas",
+    ], "query() must not mutate include parameter"
