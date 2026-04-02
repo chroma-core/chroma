@@ -727,6 +727,18 @@ pub struct ManifestAndWitness {
     pub witness: ManifestWitness,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ManifestBounds {
+    pub oldest_timestamp: LogPosition,
+    pub next_write_timestamp: LogPosition,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ManifestBoundsAndWitness {
+    pub bounds: ManifestBounds,
+    pub witness: ManifestWitness,
+}
+
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]
