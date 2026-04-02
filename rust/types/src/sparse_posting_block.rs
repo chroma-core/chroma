@@ -435,7 +435,100 @@ impl SparsePostingBlock {
 // ── Convert f16 weight bytes → f32 values (used by decompress_values_into) ──
 
 fn convert_f16_to_f32(f16_bytes: &[u8], out: &mut [f32]) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        convert_f16_to_f32_neon(f16_bytes, out);
+        return;
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("f16c") {
+            unsafe { convert_f16_to_f32_f16c(f16_bytes, out) };
+            return;
+        }
+    }
+    #[allow(unreachable_code)]
+    convert_f16_to_f32_scalar(f16_bytes, out);
+}
+
+pub fn convert_f16_to_f32_scalar(f16_bytes: &[u8], out: &mut [f32]) {
     for (o, chunk) in out.iter_mut().zip(f16_bytes.chunks_exact(2)) {
         *o = f16::from_le_bytes([chunk[0], chunk[1]]).to_f32();
     }
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn convert_f16_to_f32_simd(f16_bytes: &[u8], out: &mut [f32]) {
+    convert_f16_to_f32_neon(f16_bytes, out);
+}
+
+#[cfg(target_arch = "x86_64")]
+pub fn convert_f16_to_f32_simd(f16_bytes: &[u8], out: &mut [f32]) {
+    if is_x86_feature_detected!("f16c") {
+        unsafe { convert_f16_to_f32_f16c(f16_bytes, out) };
+    } else {
+        convert_f16_to_f32_scalar(f16_bytes, out);
+    }
+}
+
+/// NEON f16→f32 via bit manipulation (works on Rust < 1.94 without
+/// `vcvt_f32_f16`). Handles all normal f16 values; subnormals map to
+/// a tiny positive value rather than zero, which is fine for SPLADE
+/// weights that are always positive normals.
+#[cfg(target_arch = "aarch64")]
+fn convert_f16_to_f32_neon(f16_bytes: &[u8], out: &mut [f32]) {
+    use std::arch::aarch64::*;
+
+    let n = out.len();
+    let chunks = n / 8;
+
+    unsafe {
+        let sign_mask = vdupq_n_u32(0x8000);
+        let nosign_mask = vdupq_n_u32(0x7FFF);
+        let bias = vdupq_n_u32(0x3800_0000); // (127 - 15) << 23
+
+        for c in 0..chunks {
+            let base = c * 8;
+            let byte_base = base * 2;
+
+            let h8 = vld1q_u16(f16_bytes.as_ptr().add(byte_base) as *const u16);
+            let lo = vmovl_u16(vget_low_u16(h8));
+            let hi = vmovl_u16(vget_high_u16(h8));
+
+            macro_rules! cvt {
+                ($h:expr, $off:expr) => {{
+                    let sign = vshlq_n_u32::<16>(vandq_u32($h, sign_mask));
+                    let nosign = vshlq_n_u32::<13>(vandq_u32($h, nosign_mask));
+                    let bits = vorrq_u32(sign, vaddq_u32(nosign, bias));
+                    vst1q_f32(out.as_mut_ptr().add(base + $off), vreinterpretq_f32_u32(bits));
+                }};
+            }
+            cvt!(lo, 0);
+            cvt!(hi, 4);
+        }
+    }
+
+    let rem_start = chunks * 8;
+    convert_f16_to_f32_scalar(&f16_bytes[rem_start * 2..], &mut out[rem_start..]);
+}
+
+/// x86_64 F16C: `_mm256_cvtph_ps` converts 8×f16 → 8×f32 in one instruction.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "f16c")]
+unsafe fn convert_f16_to_f32_f16c(f16_bytes: &[u8], out: &mut [f32]) {
+    use std::arch::x86_64::*;
+
+    let n = out.len();
+    let chunks = n / 8;
+
+    for c in 0..chunks {
+        let base = c * 8;
+        let byte_base = base * 2;
+        let h8 = _mm_loadu_si128(f16_bytes.as_ptr().add(byte_base) as *const __m128i);
+        let f8 = _mm256_cvtph_ps(h8);
+        _mm256_storeu_ps(out.as_mut_ptr().add(base), f8);
+    }
+
+    let rem_start = chunks * 8;
+    convert_f16_to_f32_scalar(&f16_bytes[rem_start * 2..], &mut out[rem_start..]);
 }

@@ -286,7 +286,8 @@ async fn build_index(
     provider: &BlockfileProvider,
     batch_size: usize,
     ms_block_size: u32,
-) -> anyhow::Result<(Uuid, usize)> {
+    temp_dir: &std::path::Path,
+) -> anyhow::Result<(Uuid, usize, u64)> {
     let total = documents.len();
     let pb = ProgressBar::new(total as u64);
     pb.set_style(
@@ -297,6 +298,7 @@ async fn build_index(
 
     let mut posting_id = Uuid::nil();
     let mut chunks = 0usize;
+    let mut last_flush_bytes = 0u64;
 
     for (chunk_idx, chunk) in documents.chunks(batch_size).enumerate() {
         let mut posting_options = BlockfileWriterOptions::new(BLOCK_MAXSCORE_PREFIX.to_string())
@@ -345,16 +347,20 @@ async fn build_index(
             .await
             .map_err(|e| anyhow::anyhow!("Commit: {e}"))?;
         posting_id = flusher.id();
+
+        let size_before = dir_size_bytes(temp_dir);
         flusher
             .flush()
             .await
             .map_err(|e| anyhow::anyhow!("Flush: {e}"))?;
+        last_flush_bytes = dir_size_bytes(temp_dir) - size_before;
+
         chunks += 1;
         pb.inc(chunk.len() as u64);
     }
 
     pb.finish_and_clear();
-    Ok((posting_id, chunks))
+    Ok((posting_id, chunks, last_flush_bytes))
 }
 
 // ── Search ─────────────────────────────────────────────────────────
@@ -537,15 +543,15 @@ async fn main() -> anyhow::Result<()> {
     println!("\n🏗️ Building BlockMaxMaxScore index...");
     let (temp_dir, provider) = test_arrow_blockfile_provider(SPARSE_POSTING_BLOCK_SIZE_BYTES);
     let start = Instant::now();
-    let (posting_id, chunks) =
-        build_index(&documents, &provider, args.batch_size, args.ms_block_size).await?;
+    let (posting_id, chunks, storage_bytes) =
+        build_index(&documents, &provider, args.batch_size, args.ms_block_size, temp_dir.path())
+            .await?;
     let build_time = start.elapsed().as_secs_f64();
 
-    let storage_bytes = dir_size_bytes(temp_dir.path());
     println!("⏱️  Index build: {build_time:.2}s");
     println!("  Chunks: {chunks}");
     println!(
-        "  Storage: {:.2} MB",
+        "  Storage: {:.2} MB ({storage_bytes} bytes, last-flush delta)",
         storage_bytes as f64 / (1024.0 * 1024.0)
     );
 
