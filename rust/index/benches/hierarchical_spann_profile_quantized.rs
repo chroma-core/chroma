@@ -6,6 +6,7 @@
 
 mod datasets;
 mod hierarchical_index;
+mod optimal_gt;
 
 use std::collections::{BTreeMap, HashSet};
 use std::io::Write as _;
@@ -92,6 +93,14 @@ struct Args {
     #[arg(long)]
     brute_force_gt: bool,
 
+    /// Compute a flat k-means GT baseline using the same number of clusters as leaf nodes
+    #[arg(long)]
+    compute_optimal_gt: bool,
+
+    /// Max number of queries to use for recall evaluation
+    #[arg(long, default_value = "100")]
+    num_queries: usize,
+
     /// Vector dimension (only for --dataset synthetic)
     #[arg(long, default_value = "1024")]
     dim: usize,
@@ -112,9 +121,9 @@ struct Args {
     #[arg(long, default_value = "fp")]
     write_navigation: String,
 
-    /// Read-path navigation mode: fp (f32), 1bit (code-to-code), 4bit (QuantizedQuery)
-    #[arg(long, default_value = "1bit")]
-    read_navigation: String,
+    /// Read-path navigation modes to sweep during recall: fp, 1bit, 4bit
+    #[arg(long, default_value = "1bit", value_delimiter = ',')]
+    read_navigation: Vec<String>,
 
     /// Use full precision f32 distances for NPA instead of quantized
     #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
@@ -215,6 +224,26 @@ fn gt_cache_path(dataset_name: &str, metric: &str, num_vectors: usize, num_queri
     ))
 }
 
+fn print_cluster_stats(label: &str, values: &[usize]) {
+    if values.is_empty() {
+        println!("  {}: avg=0.0, min=0, p50=0, p90=0, p99=0, max=0", label);
+        return;
+    }
+
+    let pct = |v: &[usize], p: f64| v[(p * v.len() as f64 - 1.0).max(0.0) as usize];
+    let n = values.len() as f64;
+    println!(
+        "  {}: avg={:.1}, min={}, p50={}, p90={}, p99={}, max={}",
+        label,
+        values.iter().sum::<usize>() as f64 / n,
+        values.first().unwrap_or(&0),
+        pct(values, 0.50),
+        pct(values, 0.90),
+        pct(values, 0.99),
+        values.last().unwrap_or(&0),
+    );
+}
+
 fn save_ground_truth(path: &std::path::Path, queries: &[Query]) {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();
@@ -313,6 +342,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         DatasetType::Sec => Box::new(datasets::sec::Sec::load().await?),
         DatasetType::MsMarco => Box::new(datasets::msmarco::MsMarco::load().await?),
         DatasetType::WikipediaEn => Box::new(datasets::wikipedia::Wikipedia::load().await?),
+        DatasetType::Sift => Box::new(datasets::sift::Sift::load().await?),
+        DatasetType::Deep10m => Box::new(datasets::deep::Deep10M::load().await?),
         DatasetType::Synthetic => {
             Box::new(datasets::synthetic::Synthetic::load(args.dim, args.synthetic_size)?)
         }
@@ -342,7 +373,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         other => panic!("invalid {} value '{}': must be fp, 1bit, or 4bit", flag, other),
     };
     let write_nav = parse_nav(&args.write_navigation, "--write-navigation");
-    let read_nav = parse_nav(&args.read_navigation, "--read-navigation");
+    let read_navs: Vec<NavigationMode> = args
+        .read_navigation
+        .iter()
+        .map(|s| parse_nav(s, "--read-navigation"))
+        .collect();
+    let read_nav = read_navs[0];
 
     let config = HierarchicalSpannConfig {
         branching_factor: args.branching_factor,
@@ -395,9 +431,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         config.write_beam_tau, config.write_beam_min, config.write_beam_max,
     );
     println!(
-        "  Quantization: 1-bit | Write nav: {:?} | Read nav: {:?} | NPA: {}",
+        "  Quantization: 1-bit | Write nav: {:?} | Read nav: {} | NPA: {}",
         write_nav,
-        read_nav,
+        args.read_navigation.join(","),
         if args.fp_npa { "f32" } else { "1-bit" },
     );
     println!("  Threads: {}", args.threads);
@@ -575,8 +611,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         args.recall_rerank_centroids, args.recall_rerank_vectors,
     );
     println!(
-        "  Read nav: {:?} | Brute-force GT: {}",
-        read_nav,
+        "  Read nav: {} | Brute-force GT: {}",
+        args.read_navigation.join(","),
         args.brute_force_gt,
     );
 
@@ -610,7 +646,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         effective_query_vectors.len(),
     );
 
-    let checkpoint_queries: Vec<&Query> = if !precomputed.is_empty() {
+    let mut checkpoint_queries: Vec<&Query> = if !precomputed.is_empty() {
         precomputed
     } else if let Some(loaded) = load_ground_truth(&cache_path) {
         println!("  Loaded cached ground truth from {}", cache_path.display());
@@ -636,6 +672,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     } else {
         Vec::new()
     };
+    checkpoint_queries.truncate(args.num_queries);
 
     if checkpoint_queries.is_empty() {
         println!(
@@ -657,8 +694,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let beam_col_width = beam_col_headers.iter().map(|h| h.len()).max().unwrap_or(12).max(12);
 
         let mut header = format!(
-            "  | {:>6} | {:>6} | {:>6} |",
-            "tau", "rr_c", "rr_v",
+            "  | {:>6} | {:>6} | {:>6} | {:>4} |",
+            "tau", "rr_c", "rr_v", "nav",
         );
         for lvl in 0..num_levels {
             header.push_str(&format!(
@@ -670,22 +707,88 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             ));
         }
         header.push_str(&format!(
-            " {:>15} | {:>7} | {:>7} | {:>7} | {:>8} | {:>10} | {:>15} | {:>15} | {:>15} | {:>15} | {:>15} | {:>14} |",
-            "scanned_vectors", "scan MB", "tot MB", "MB/s", "R@100", "avg lat",
+            " {:>10} | {:>15} | {:>7} | {:>7} | {:>7} | {:>8} | {:>10} | {:>15} | {:>15} | {:>15} | {:>15} | {:>15} | {:>14} |",
+            "opt R@100", "scanned_vectors", "scan MB", "tot MB", "MB/s", "R@100", "avg lat",
             "lat_nav", "lat_quant", "lat_dist", "lat_sort", "lat_rerank", "lat_dist / vec",
         ));
 
         let mut separator = format!(
-            "  |{:-^8}|{:-^8}|{:-^8}|",
-            "", "", "",
+            "  |{:-^8}|{:-^8}|{:-^8}|{:-^6}|",
+            "", "", "", "",
         );
         for _ in 1..=num_levels {
             separator.push_str(&format!("{:-^w$}|{:-^10}|{:-^9}|", "", "", "", w = beam_col_width + 2));
         }
         separator.push_str(&format!(
-            "{:-^17}|{:-^9}|{:-^9}|{:-^9}|{:-^10}|{:-^12}|{:-^17}|{:-^17}|{:-^17}|{:-^17}|{:-^17}|{:-^16}|",
-            "", "", "", "", "", "", "", "", "", "", "", "",
+            "{:-^12}|{:-^17}|{:-^9}|{:-^9}|{:-^9}|{:-^10}|{:-^12}|{:-^17}|{:-^17}|{:-^17}|{:-^17}|{:-^17}|{:-^16}|",
+            "", "", "", "", "", "", "", "", "", "", "", "", "",
         ));
+
+        let mut all_p100 = Vec::with_capacity(num_queries);
+        let mut all_p95 = Vec::with_capacity(num_queries);
+        let mut all_p90 = Vec::with_capacity(num_queries);
+        for gt in &checkpoint_queries {
+            let gt_100: HashSet<u32> = gt.neighbors.iter().take(100).copied().collect();
+            let (p100, p95, p90) = writer.gt_cluster_counts(&gt_100);
+            all_p100.push(p100);
+            all_p95.push(p95);
+            all_p90.push(p90);
+        }
+        all_p100.sort_unstable();
+        all_p95.sort_unstable();
+        all_p90.sort_unstable();
+        println!("  Index: {} vectors", format_count(writer.total_vectors()));
+        print_cluster_stats("GT clusters (p100)", &all_p100);
+        print_cluster_stats("GT clusters (p95) ", &all_p95);
+        print_cluster_stats("GT clusters (p90) ", &all_p90);
+
+        if args.compute_optimal_gt {
+            let flat_start = Instant::now();
+            let leaf_count = writer.leaf_count();
+            println!(
+                "  Computing optimal GT baseline with flat k-means (k={} leaves)...",
+                format_count(leaf_count),
+            );
+            let flat_index = optimal_gt::FlatKmeansGtIndex::build(
+                &all_indexed_vectors,
+                &checkpoint_queries,
+                dimension,
+                leaf_count,
+                distance_fn.clone(),
+            )?;
+            println!(
+                "  Flat k-means: {} | trained on {} sampled vectors | non-empty clusters: {}/{}",
+                format_duration(flat_start.elapsed()),
+                format_count(flat_index.training_sample_size()),
+                format_count(flat_index.num_non_empty_clusters()),
+                format_count(flat_index.num_clusters()),
+            );
+
+            let mut optimal_p100 = Vec::with_capacity(num_queries);
+            let mut optimal_p95 = Vec::with_capacity(num_queries);
+            let mut optimal_p90 = Vec::with_capacity(num_queries);
+            for gt in &checkpoint_queries {
+                let gt_100: HashSet<u32> = gt.neighbors.iter().take(100).copied().collect();
+                let (p100, p95, p90) = flat_index.gt_cluster_counts(&gt_100);
+                optimal_p100.push(p100);
+                optimal_p95.push(p95);
+                optimal_p90.push(p90);
+            }
+            optimal_p100.sort_unstable();
+            optimal_p95.sort_unstable();
+            optimal_p90.sort_unstable();
+            print_cluster_stats("Optimal GT clusters (p100)", &optimal_p100);
+            print_cluster_stats("Optimal GT clusters (p95) ", &optimal_p95);
+            print_cluster_stats("Optimal GT clusters (p90) ", &optimal_p90);
+        }
+
+        let beam_min = args.beam_min;
+        let beam_max = args.beam_max;
+
+        let recall_pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(32)
+            .build()
+            .expect("failed to build rayon pool");
 
         println!(
             "  Recall ({} queries, k={}, depth={}):",
@@ -694,162 +797,172 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("{}", header);
         println!("{}", separator);
 
-        let beam_min = args.beam_min;
-        let beam_max = args.beam_max;
-
         let recall_start = Instant::now();
 
-        let recall_pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(32)
-            .build()
-            .expect("failed to build rayon pool");
+        for &recall_nav in &read_navs {
+            let nav_label = match recall_nav {
+                NavigationMode::Fp => "fp",
+                NavigationMode::OneBit => "1bit",
+                NavigationMode::FourBit => "4bit",
+            };
 
-        for &tau in &tau_values {
-            for &rr_c in &args.recall_rerank_centroids {
-                for &rr_v in &args.recall_rerank_vectors {
-                    struct QueryResult {
-                        r100: f64,
-                        nanos: u64,
-                        scanned: usize,
-                        level_r100: Vec<f64>,
-                        level_beam: Vec<u64>,
-                        level_candidates: Vec<u64>,
-                        timings: SearchTimings,
-                    }
-
-                    let results: Vec<QueryResult> = recall_pool.install(|| {
-                        checkpoint_queries.par_iter().map(|gt| {
-                            let t0 = Instant::now();
-                            let (results, scanned, _leaves_scanned, timings) =
-                                writer.search(&gt.vector, k, tau, beam_min, beam_max, rr_c, rr_v);
-                            let nanos = t0.elapsed().as_nanos() as u64;
-
-                            let result_ids: Vec<u32> = results.iter().map(|(id, _)| *id).collect();
-                            let r100 = recall_at_k(&result_ids, &gt.neighbors, 100);
-
-                            let gt_100: HashSet<u32> =
-                                gt.neighbors.iter().take(100).copied().collect();
-                            let level_recall =
-                                writer.diagnose_level_recall(&gt.vector, &gt_100, tau, beam_min, beam_max, rr_c);
-
-                            let mut level_r100 = vec![0.0f64; num_levels];
-                            let mut level_beam = vec![0u64; num_levels];
-                            let mut level_candidates = vec![0u64; num_levels];
-                            for lr in &level_recall {
-                                if lr.level <= num_levels {
-                                    level_r100[lr.level - 1] = lr.reachable_100;
-                                    level_beam[lr.level - 1] = lr.beam_size as u64;
-                                    level_candidates[lr.level - 1] = lr.total_candidates as u64;
-                                }
-                            }
-
-                            QueryResult { r100, nanos, scanned, level_r100, level_beam, level_candidates, timings }
-                        }).collect()
-                    });
-
-                    let mut total_r100 = 0.0f64;
-                    let mut total_nanos = 0u64;
-                    let mut total_scanned = 0usize;
-                    let mut level_r100_sums = vec![0.0f64; num_levels];
-                    let mut level_beam_sums = vec![0u64; num_levels];
-                    let mut level_candidates_sums = vec![0u64; num_levels];
-                    let mut total_nav_nanos = 0u64;
-                    let mut total_qq_nanos = 0u64;
-                    let mut total_dq_nanos = 0u64;
-                    let mut total_sort_nanos = 0u64;
-                    let mut total_rr_nanos = 0u64;
-                    for qr in &results {
-                        total_r100 += qr.r100;
-                        total_nanos += qr.nanos;
-                        total_scanned += qr.scanned;
-                        total_nav_nanos += qr.timings.navigate_nanos;
-                        total_qq_nanos += qr.timings.quantize_nanos;
-                        total_dq_nanos += qr.timings.distance_nanos;
-                        total_sort_nanos += qr.timings.sort_dedup_nanos;
-                        total_rr_nanos += qr.timings.rerank_nanos;
-                        for i in 0..num_levels {
-                            level_r100_sums[i] += qr.level_r100[i];
-                            level_beam_sums[i] += qr.level_beam[i];
-                            level_candidates_sums[i] += qr.level_candidates[i];
+            for &tau in &tau_values {
+                for &rr_c in &args.recall_rerank_centroids {
+                    for &rr_v in &args.recall_rerank_vectors {
+                        struct QueryResult {
+                            r100: f64,
+                            nanos: u64,
+                            scanned: usize,
+                            level_r100: Vec<f64>,
+                            level_beam: Vec<u64>,
+                            level_candidates: Vec<u64>,
+                            timings: SearchTimings,
+                            optimal_r100: f64,
                         }
-                    }
 
-                    let n = num_queries as f64;
-                    let avg_r100 = total_r100 / n;
-                    let avg_lat = total_nanos / num_queries as u64;
-                    let avg_scanned = total_scanned / num_queries;
+                        let results: Vec<QueryResult> = recall_pool.install(|| {
+                            checkpoint_queries.par_iter().map(|gt| {
+                                let t0 = Instant::now();
+                                let (results, scanned, _leaves_scanned, timings) =
+                                    writer.search(&gt.vector, k, tau, beam_min, beam_max, rr_c, rr_v, recall_nav);
+                                let nanos = t0.elapsed().as_nanos() as u64;
 
-                    let mut row = format!(
-                        "  | {:>6.2} | {:>5}x | {:>5}x |",
-                        tau,
-                        rr_c,
-                        rr_v,
-                    );
-                    let dim = dimension;
-                    let mut total_mb = 0.0f64;
+                                let result_ids: Vec<u32> = results.iter().map(|(id, _)| *id).collect();
+                                let r100 = recall_at_k(&result_ids, &gt.neighbors, 100);
 
-                    for lvl in 0..num_levels {
-                        let avg_beam = level_beam_sums[lvl] / num_queries as u64;
-                        let avg_candidates = level_candidates_sums[lvl] / num_queries as u64;
-                        let avg_lr = level_r100_sums[lvl] / n * 100.0;
-                        let level_bytes = if read_nav == NavigationMode::Fp {
-                            (avg_candidates as f64 * dim as f64) * 4.0
-                        } else {
-                            let mut level_sum = (avg_candidates as f64 * dim as f64) / 8.0;
-                            if rr_c > 1 {
-                                level_sum += ((avg_candidates.min(avg_beam * rr_c as u64) as f64) * dim as f64) * 4.0;
+                                let gt_100: HashSet<u32> =
+                                    gt.neighbors.iter().take(100).copied().collect();
+                                let level_recall =
+                                    writer.diagnose_level_recall(&gt.vector, &gt_100, tau, beam_min, beam_max, rr_c, recall_nav);
+
+                                let mut level_r100 = vec![0.0f64; num_levels];
+                                let mut level_beam = vec![0u64; num_levels];
+                                let mut level_candidates = vec![0u64; num_levels];
+                                for lr in &level_recall {
+                                    if lr.level <= num_levels {
+                                        level_r100[lr.level - 1] = lr.reachable_100;
+                                        level_beam[lr.level - 1] = lr.beam_size as u64;
+                                        level_candidates[lr.level - 1] = lr.total_candidates as u64;
+                                    }
+                                }
+
+                                let last_beam = level_beam.last().copied().unwrap_or(0) as usize;
+                                let optimal_r100 = writer.optimal_leaf_recall(&gt_100, last_beam);
+
+                                QueryResult { r100, nanos, scanned, level_r100, level_beam, level_candidates, timings, optimal_r100 }
+                            }).collect()
+                        });
+
+                        let mut total_r100 = 0.0f64;
+                        let mut total_nanos = 0u64;
+                        let mut total_scanned = 0usize;
+                        let mut level_r100_sums = vec![0.0f64; num_levels];
+                        let mut level_beam_sums = vec![0u64; num_levels];
+                        let mut level_candidates_sums = vec![0u64; num_levels];
+                        let mut total_nav_nanos = 0u64;
+                        let mut total_qq_nanos = 0u64;
+                        let mut total_dq_nanos = 0u64;
+                        let mut total_sort_nanos = 0u64;
+                        let mut total_rr_nanos = 0u64;
+                        let mut total_optimal_r100 = 0.0f64;
+                        for qr in &results {
+                            total_r100 += qr.r100;
+                            total_nanos += qr.nanos;
+                            total_scanned += qr.scanned;
+                            total_nav_nanos += qr.timings.navigate_nanos;
+                            total_qq_nanos += qr.timings.quantize_nanos;
+                            total_dq_nanos += qr.timings.distance_nanos;
+                            total_sort_nanos += qr.timings.sort_dedup_nanos;
+                            total_rr_nanos += qr.timings.rerank_nanos;
+                            total_optimal_r100 += qr.optimal_r100;
+                            for i in 0..num_levels {
+                                level_r100_sums[i] += qr.level_r100[i];
+                                level_beam_sums[i] += qr.level_beam[i];
+                                level_candidates_sums[i] += qr.level_candidates[i];
                             }
-                            level_sum
+                        }
+
+                        let n = num_queries as f64;
+                        let avg_r100 = total_r100 / n;
+                        let avg_lat = total_nanos / num_queries as u64;
+                        let avg_scanned = total_scanned / num_queries;
+
+                        let mut row = format!(
+                            "  | {:>6.2} | {:>5}x | {:>5}x | {:>4} |",
+                            tau,
+                            rr_c,
+                            rr_v,
+                            nav_label,
+                        );
+                        let dim = dimension;
+                        let mut total_mb = 0.0f64;
+
+                        for lvl in 0..num_levels {
+                            let avg_beam = level_beam_sums[lvl] / num_queries as u64;
+                            let avg_candidates = level_candidates_sums[lvl] / num_queries as u64;
+                            let avg_lr = level_r100_sums[lvl] / n * 100.0;
+                            let level_bytes = if recall_nav == NavigationMode::Fp {
+                                (avg_candidates as f64 * dim as f64) * 4.0
+                            } else {
+                                let mut level_sum = (avg_candidates as f64 * dim as f64) / 8.0;
+                                if rr_c > 1 {
+                                    level_sum += ((avg_candidates.min(avg_beam * rr_c as u64) as f64) * dim as f64) * 4.0;
+                                }
+                                level_sum
+                            };
+                            let level_mb = level_bytes / (1024.0 * 1024.0);
+                            total_mb += level_mb;
+                            row.push_str(&format!(
+                                " {:>width$} | {:>7.2}% | {:>7} |",
+                                format!("{}/{}", format_count(avg_beam as usize), format_count(avg_candidates as usize)),
+                                avg_lr,
+                                format_mb(level_mb),
+                                width = beam_col_width,
+                            ));
+                        }
+
+                        let scan_bytes = avg_scanned as f64 * dim as f64 / 8.0
+                            + (k * rr_v) as f64 * dim as f64 * 4.0;
+                        let scan_mb = scan_bytes / (1024.0 * 1024.0);
+                        total_mb += scan_mb;
+
+                        let avg_lat_secs = avg_lat as f64 / 1_000_000_000.0;
+                        let mb_per_sec = if avg_lat_secs > 0.0 { total_mb / avg_lat_secs } else { 0.0 };
+
+                        let nq = num_queries as u64;
+                        let avg_nav = total_nav_nanos / nq;
+                        let avg_qq = total_qq_nanos / nq;
+                        let avg_dq = total_dq_nanos / nq;
+                        let avg_sort = total_sort_nanos / nq;
+                        let avg_rr = total_rr_nanos / nq;
+                        let pct = |v: u64| if avg_lat > 0 { v as f64 / avg_lat as f64 * 100.0 } else { 0.0 };
+
+                        let dist_per_vec_ns = if avg_scanned > 0 {
+                            avg_dq as f64 / avg_scanned as f64
+                        } else {
+                            0.0
                         };
-                        let level_mb = level_bytes / (1024.0 * 1024.0);
-                        total_mb += level_mb;
+
+                        let avg_optimal = total_optimal_r100 / n;
+
                         row.push_str(&format!(
-                            " {:>width$} | {:>7.2}% | {:>7} |",
-                            format!("{}/{}", format_count(avg_beam as usize), format_count(avg_candidates as usize)),
-                            avg_lr,
-                            format_mb(level_mb),
-                            width = beam_col_width,
+                            " {:>9.2}% | {:>15} | {:>7} | {:>7} | {:>7} | {:>7.2}% | {:>10} | {:>15} | {:>15} | {:>15} | {:>15} | {:>15} | {:>14} |",
+                            avg_optimal * 100.0,
+                            format_count(avg_scanned),
+                            format_mb(scan_mb),
+                            format_mb(total_mb),
+                            format_mb(mb_per_sec),
+                            avg_r100 * 100.0,
+                            format_latency(avg_lat),
+                            format!("{} ({:.0}%)", format_latency(avg_nav), pct(avg_nav)),
+                            format!("{} ({:.0}%)", format_latency(avg_qq), pct(avg_qq)),
+                            format!("{} ({:.0}%)", format_latency(avg_dq), pct(avg_dq)),
+                            format!("{} ({:.0}%)", format_latency(avg_sort), pct(avg_sort)),
+                            format!("{} ({:.0}%)", format_latency(avg_rr), pct(avg_rr)),
+                            format!("{:.1}ns", dist_per_vec_ns),
                         ));
+                        println!("{}", row);
                     }
-
-                    let scan_bytes = avg_scanned as f64 * dim as f64 / 8.0
-                        + (k * rr_v) as f64 * dim as f64 * 4.0;
-                    let scan_mb = scan_bytes / (1024.0 * 1024.0);
-                    total_mb += scan_mb;
-
-                    let avg_lat_secs = avg_lat as f64 / 1_000_000_000.0;
-                    let mb_per_sec = if avg_lat_secs > 0.0 { total_mb / avg_lat_secs } else { 0.0 };
-
-                    let nq = num_queries as u64;
-                    let avg_nav = total_nav_nanos / nq;
-                    let avg_qq = total_qq_nanos / nq;
-                    let avg_dq = total_dq_nanos / nq;
-                    let avg_sort = total_sort_nanos / nq;
-                    let avg_rr = total_rr_nanos / nq;
-                    let pct = |v: u64| if avg_lat > 0 { v as f64 / avg_lat as f64 * 100.0 } else { 0.0 };
-
-                    let dist_per_vec_ns = if avg_scanned > 0 {
-                        avg_dq as f64 / avg_scanned as f64
-                    } else {
-                        0.0
-                    };
-
-                    row.push_str(&format!(
-                        " {:>15} | {:>7} | {:>7} | {:>7} | {:>7.2}% | {:>10} | {:>15} | {:>15} | {:>15} | {:>15} | {:>15} | {:>14} |",
-                        format_count(avg_scanned),
-                        format_mb(scan_mb),
-                        format_mb(total_mb),
-                        format_mb(mb_per_sec),
-                        avg_r100 * 100.0,
-                        format_latency(avg_lat),
-                        format!("{} ({:.0}%)", format_latency(avg_nav), pct(avg_nav)),
-                        format!("{} ({:.0}%)", format_latency(avg_qq), pct(avg_qq)),
-                        format!("{} ({:.0}%)", format_latency(avg_dq), pct(avg_dq)),
-                        format!("{} ({:.0}%)", format_latency(avg_sort), pct(avg_sort)),
-                        format!("{} ({:.0}%)", format_latency(avg_rr), pct(avg_rr)),
-                        format!("{:.1}ns", dist_per_vec_ns),
-                    ));
-                    println!("{}", row);
                 }
             }
         }

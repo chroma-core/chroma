@@ -1,8 +1,10 @@
 pub mod arxiv;
 pub mod dbpedia;
+pub mod deep;
 pub mod ground_truth;
 pub mod msmarco;
 pub mod sec;
+pub mod sift;
 pub mod wikipedia;
 pub mod synthetic;
 
@@ -90,6 +92,8 @@ pub enum DatasetType {
     Sec,
     MsMarco,
     WikipediaEn,
+    Sift,
+    Deep10m,
     Synthetic,
 }
 

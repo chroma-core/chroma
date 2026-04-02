@@ -1,0 +1,861 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import os
+import queue
+import random
+import signal
+import threading
+import time
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence
+
+import httpx
+from huggingface_hub import HfApi, hf_hub_download
+from huggingface_hub.errors import HfHubHTTPError
+import pyarrow.parquet as pq
+from tqdm.auto import tqdm
+
+
+REPO_ID = "CohereLabs/wikipedia-2023-11-embed-multilingual-v3"
+DEFAULT_COLLECTION = "100m_quantized_spann"
+DEFAULT_TARGET_COUNT = 100_000_000
+DEFAULT_CHUNK_SIZE = 1_000_000
+DEFAULT_UPLOAD_BATCH_SIZE = 1_000
+DEFAULT_READ_BATCH_SIZE = 2_000
+DEFAULT_THREADS = 10
+DEFAULT_QUEUE_DEPTH = 40
+DEFAULT_CLOUD_HOST = "api.trychroma.com"
+DEFAULT_CLOUD_PORT = 443
+DEFAULT_HTTP_TIMEOUT_SECS = 30.0
+
+
+@dataclass
+class Cursor:
+    shard_index: int = 0
+    row_offset_in_shard: int = 0
+
+
+@dataclass
+class UploadTask:
+    chunk_index: int
+    start_id: int
+    count: int
+    ids: List[str]
+    embeddings: List[List[float]]
+
+
+class ProgressTracker:
+    def __init__(
+        self,
+        path: Path,
+        collection: str,
+        target_count: int,
+        chunk_size: int,
+        repo_id: str,
+        shards: Sequence[str],
+    ) -> None:
+        self.path = path
+        self.collection = collection
+        self.target_count = target_count
+        self.chunk_size = chunk_size
+        self.repo_id = repo_id
+        self.shards = list(shards)
+        self.lock = threading.Lock()
+        self.committed_rows = 0
+        self.cursor = Cursor()
+        self.current_chunk_index = 0
+
+    def load(self) -> None:
+        if not self.path.exists():
+            self.save()
+            return
+
+        data = json.loads(self.path.read_text())
+        if data.get("repo_id") != self.repo_id:
+            raise ValueError(
+                f"Progress file repo_id mismatch: {data.get('repo_id')} != {self.repo_id}"
+            )
+        if data.get("collection") != self.collection:
+            raise ValueError(
+                f"Progress file collection mismatch: {data.get('collection')} != {self.collection}"
+            )
+        if data.get("chunk_size") != self.chunk_size:
+            raise ValueError(
+                f"Progress file chunk_size mismatch: {data.get('chunk_size')} != {self.chunk_size}"
+            )
+        self.committed_rows = int(data.get("committed_rows", 0))
+        self.cursor = Cursor(**data.get("cursor", {}))
+        self.current_chunk_index = self.committed_rows // self.chunk_size
+
+        saved_shards = data.get("shards")
+        if saved_shards and saved_shards != self.shards:
+            logging.warning(
+                "Shard list changed since last run; continuing with latest listing."
+            )
+
+    def _payload(self) -> Dict[str, Any]:
+        return {
+            "repo_id": self.repo_id,
+            "collection": self.collection,
+            "target_count": self.target_count,
+            "chunk_size": self.chunk_size,
+            "committed_rows": self.committed_rows,
+            "cursor": asdict(self.cursor),
+            "shards": self.shards,
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+
+    def save(self) -> None:
+        tmp_path = self.path.with_suffix(f"{self.path.suffix}.tmp")
+        tmp_path.write_text(json.dumps(self._payload(), indent=2, sort_keys=True))
+        tmp_path.replace(self.path)
+
+    def commit_chunk(self, committed_rows: int, cursor: Cursor) -> None:
+        with self.lock:
+            self.committed_rows = committed_rows
+            self.cursor = Cursor(cursor.shard_index, cursor.row_offset_in_shard)
+            self.current_chunk_index = self.committed_rows // self.chunk_size
+            self.save()
+
+
+class ChunkStatus:
+    def __init__(self, chunk_index: int, target_rows: int) -> None:
+        self.chunk_index = chunk_index
+        self.target_rows = target_rows
+        self.completed_rows = 0
+        self.condition = threading.Condition()
+
+    def mark_completed(self, count: int) -> None:
+        with self.condition:
+            self.completed_rows += count
+            self.condition.notify_all()
+
+    def is_done(self) -> bool:
+        with self.condition:
+            return self.completed_rows >= self.target_rows
+
+
+class FailureState:
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.error: Optional[BaseException] = None
+
+    def set(self, error: BaseException) -> None:
+        with self.lock:
+            if self.error is None:
+                self.error = error
+
+    def get(self) -> Optional[BaseException]:
+        with self.lock:
+            return self.error
+
+
+class ProgressBars:
+    def __init__(
+        self,
+        total_vectors: int,
+        initial_vectors: int,
+        *,
+        download_desc: str,
+        upload_desc: str,
+    ) -> None:
+        self.lock = threading.Lock()
+        self.download = tqdm(
+            total=total_vectors,
+            initial=initial_vectors,
+            desc=download_desc,
+            unit="vec",
+            dynamic_ncols=True,
+        )
+        self.upload = tqdm(
+            total=total_vectors,
+            initial=initial_vectors,
+            desc=upload_desc,
+            unit="vec",
+            dynamic_ncols=True,
+        )
+
+    def advance_download(self, count: int) -> None:
+        with self.lock:
+            self.download.update(count)
+
+    def advance_upload(self, count: int) -> None:
+        with self.lock:
+            self.upload.update(count)
+
+    def set_download_status(self, status: str) -> None:
+        with self.lock:
+            self.download.set_postfix_str(status)
+
+    def set_upload_status(self, status: str) -> None:
+        with self.lock:
+            self.upload.set_postfix_str(status)
+
+    def close(self) -> None:
+        with self.lock:
+            self.download.close()
+            self.upload.close()
+
+
+class ChromaCloudCollection:
+    def __init__(
+        self,
+        api_key: str,
+        tenant: str,
+        database: str,
+        collection_name: str,
+        cloud_host: str,
+        cloud_port: int,
+        enable_ssl: bool,
+        http_timeout_secs: float,
+    ) -> None:
+        scheme = "https" if enable_ssl else "http"
+        self.base_url = f"{scheme}://{cloud_host}:{cloud_port}/api/v2"
+        self.tenant = tenant
+        self.database = database
+        self.collection_name = collection_name
+        self.http = httpx.Client(
+            headers={
+                "Content-Type": "application/json",
+                "X-Chroma-Token": api_key,
+                "User-Agent": "chroma-ingest-script/1.0",
+            },
+            timeout=httpx.Timeout(http_timeout_secs),
+        )
+        self.collection_id = self._fetch_collection_id()
+
+    def _fetch_collection_id(self) -> str:
+        for attempt in range(10):
+            try:
+                logging.info(
+                    "Looking up collection %s in tenant=%s database=%s",
+                    self.collection_name,
+                    self.tenant,
+                    self.database,
+                )
+                response = self.http.get(
+                    f"{self.base_url}/tenants/{self.tenant}/databases/{self.database}/collections/{self.collection_name}"
+                )
+                response.raise_for_status()
+                payload = response.json()
+                collection_id = payload.get("id")
+                if not collection_id:
+                    raise RuntimeError(
+                        f"Collection lookup for {self.collection_name} did not return an id."
+                    )
+                return collection_id
+            except BaseException as exc:
+                if not is_transient(exc) or attempt == 9:
+                    raise
+                logging.warning(
+                    "Retrying collection lookup for %s after error: %s",
+                    self.collection_name,
+                    exc,
+                )
+                backoff_sleep(attempt)
+        raise RuntimeError(
+            f"Failed to resolve collection id for {self.collection_name}"
+        )
+
+    def upsert(self, ids: List[str], embeddings: List[List[float]]) -> None:
+        response = self.http.post(
+            f"{self.base_url}/tenants/{self.tenant}/databases/{self.database}/collections/{self.collection_id}/upsert",
+            json={"ids": ids, "embeddings": embeddings},
+        )
+        response.raise_for_status()
+
+    def close(self) -> None:
+        self.http.close()
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Ingest 100M unique Wikipedia embeddings into Chroma Cloud."
+    )
+    parser.add_argument("--api-key", default=os.environ.get("CHROMA_API_KEY"))
+    parser.add_argument("--tenant", default=os.environ.get("CHROMA_TENANT"))
+    parser.add_argument("--database", default=os.environ.get("CHROMA_DATABASE"))
+    parser.add_argument("--collection", default=DEFAULT_COLLECTION)
+    parser.add_argument("--target-count", type=int, default=DEFAULT_TARGET_COUNT)
+    parser.add_argument("--chunk-size", type=int, default=DEFAULT_CHUNK_SIZE)
+    parser.add_argument(
+        "--upload-batch-size", type=int, default=DEFAULT_UPLOAD_BATCH_SIZE
+    )
+    parser.add_argument("--read-batch-size", type=int, default=DEFAULT_READ_BATCH_SIZE)
+    parser.add_argument("--threads", type=int, default=DEFAULT_THREADS)
+    parser.add_argument("--queue-depth", type=int, default=DEFAULT_QUEUE_DEPTH)
+    parser.add_argument("--cloud-host", default=DEFAULT_CLOUD_HOST)
+    parser.add_argument("--cloud-port", type=int, default=DEFAULT_CLOUD_PORT)
+    parser.add_argument("--disable-ssl", action="store_true")
+    parser.add_argument(
+        "--http-timeout-secs",
+        type=float,
+        default=DEFAULT_HTTP_TIMEOUT_SECS,
+        help="Per-request timeout for Chroma Cloud HTTP calls.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate dataset iteration and collection lookup without uploading.",
+    )
+    parser.add_argument(
+        "--dry-run-vectors",
+        type=int,
+        default=10_000,
+        help="Number of vectors to scan in dry-run mode.",
+    )
+    parser.add_argument(
+        "--skip-chroma-check",
+        action="store_true",
+        help="Skip Chroma Cloud collection lookup during dry-run validation.",
+    )
+    parser.add_argument(
+        "--progress-file",
+        default=str(Path("scripts") / "ingest_100m_quantized_spann.progress.json"),
+    )
+    parser.add_argument(
+        "--id-prefix",
+        default="wiki-",
+        help="Prefix for generated auto-incrementing record ids.",
+    )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+    )
+    return parser.parse_args()
+
+
+def configure_logging(level: str) -> None:
+    logging.basicConfig(
+        level=getattr(logging, level.upper()),
+        format="%(asctime)s %(levelname)s %(threadName)s %(message)s",
+    )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
+
+
+def require_args(args: argparse.Namespace) -> None:
+    missing = []
+    needs_chroma = not (args.dry_run and args.skip_chroma_check)
+    if needs_chroma and not args.api_key:
+        missing.append("api_key / CHROMA_API_KEY")
+    if needs_chroma and not args.tenant:
+        missing.append("tenant / CHROMA_TENANT")
+    if needs_chroma and not args.database:
+        missing.append("database / CHROMA_DATABASE")
+    if missing:
+        raise ValueError(f"Missing required credentials: {', '.join(missing)}")
+
+
+def list_dataset_shards(repo_id: str) -> List[str]:
+    logging.info("Listing dataset shards from %s", repo_id)
+    api = HfApi()
+    files = api.list_repo_files(repo_id=repo_id, repo_type="dataset")
+    shards = [
+        path
+        for path in files
+        if path.endswith(".parquet")
+        and path.count("/") == 1
+        and Path(path).name.split(".")[0].isdigit()
+    ]
+    shards.sort()
+    if not shards:
+        raise RuntimeError(f"No parquet shards found in dataset {repo_id}")
+    logging.info("Found %s parquet shards.", len(shards))
+    return shards
+
+
+def is_rate_limited(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    status_code = getattr(exc, "status_code", None)
+    response = getattr(exc, "response", None)
+    if status_code is None and response is not None:
+        status_code = getattr(response, "status_code", None)
+    return bool(
+        status_code == 429
+        or "429" in message
+        or "rate limit" in message
+        or "too many requests" in message
+    )
+
+
+def is_transient(exc: BaseException) -> bool:
+    if is_rate_limited(exc):
+        return True
+    if isinstance(exc, (httpx.TransportError, httpx.TimeoutException)):
+        return True
+    status_code = getattr(exc, "status_code", None)
+    response = getattr(exc, "response", None)
+    if status_code is None and response is not None:
+        status_code = getattr(response, "status_code", None)
+    return status_code in {408, 500, 502, 503, 504}
+
+
+def backoff_sleep(attempt: int, minimum: float = 1.0, maximum: float = 60.0) -> None:
+    delay = min(maximum, minimum * (2**attempt))
+    delay += random.uniform(0.0, min(1.0, delay / 4.0))
+    time.sleep(delay)
+
+
+def download_shard(repo_id: str, filename: str, max_attempts: int = 10) -> str:
+    for attempt in range(max_attempts):
+        try:
+            logging.info("Ensuring shard is available locally: %s", filename)
+            return hf_hub_download(
+                repo_id=repo_id,
+                filename=filename,
+                repo_type="dataset",
+            )
+        except HfHubHTTPError as exc:
+            if not is_transient(exc) or attempt == max_attempts - 1:
+                raise
+            logging.warning(
+                "Retrying shard download for %s after error: %s", filename, exc
+            )
+            backoff_sleep(attempt)
+
+    raise RuntimeError(f"Failed to download shard {filename}")
+
+
+def create_collection(args: argparse.Namespace) -> ChromaCloudCollection:
+    logging.info(
+        "Creating Chroma Cloud client for %s/%s/%s",
+        args.tenant,
+        args.database,
+        args.collection,
+    )
+    return ChromaCloudCollection(
+        api_key=args.api_key,
+        tenant=args.tenant,
+        database=args.database,
+        collection_name=args.collection,
+        cloud_host=args.cloud_host,
+        cloud_port=args.cloud_port,
+        enable_ssl=not args.disable_ssl,
+        http_timeout_secs=args.http_timeout_secs,
+    )
+
+
+def upload_with_backoff(
+    collection: Any, task: UploadTask, max_attempts: int = 12
+) -> None:
+    for attempt in range(max_attempts):
+        try:
+            collection.upsert(ids=task.ids, embeddings=task.embeddings)
+            return
+        except BaseException as exc:
+            if not is_transient(exc) or attempt == max_attempts - 1:
+                raise
+            logging.warning(
+                "Retrying upload for id range %s..%s after error: %s",
+                task.start_id,
+                task.start_id + task.count - 1,
+                exc,
+            )
+            backoff_sleep(attempt)
+
+
+def make_ids(prefix: str, start_id: int, count: int) -> List[str]:
+    return [f"{prefix}{value}" for value in range(start_id, start_id + count)]
+
+
+def worker_loop(
+    args: argparse.Namespace,
+    task_queue: "queue.Queue[Optional[UploadTask]]",
+    chunk_statuses: Dict[int, ChunkStatus],
+    stop_event: threading.Event,
+    failures: FailureState,
+    progress_bars: ProgressBars,
+) -> None:
+    collection = create_collection(args)
+    progress_bars.set_upload_status("starting workers")
+
+    while True:
+        task = task_queue.get()
+        try:
+            if task is None:
+                return
+            progress_bars.set_upload_status(
+                f"chunk {task.chunk_index} ids {task.start_id}-{task.start_id + task.count - 1}"
+            )
+            upload_with_backoff(collection, task)
+            chunk_statuses[task.chunk_index].mark_completed(task.count)
+            progress_bars.advance_upload(task.count)
+        except BaseException as exc:
+            failures.set(exc)
+            stop_event.set()
+            logging.exception("Worker failed")
+            return
+        finally:
+            task_queue.task_done()
+
+
+def enqueue_chunk(
+    args: argparse.Namespace,
+    shards: Sequence[str],
+    chunk_index: int,
+    chunk_start_row: int,
+    cursor: Cursor,
+    rows_needed: int,
+    task_queue: "queue.Queue[Optional[UploadTask]]",
+    stop_event: threading.Event,
+    progress_bars: ProgressBars,
+) -> Cursor:
+    rows_remaining = rows_needed
+    next_id = chunk_start_row
+    current_shard_index = cursor.shard_index
+    current_offset = cursor.row_offset_in_shard
+
+    while rows_remaining > 0:
+        if stop_event.is_set():
+            raise RuntimeError("Stopping before finishing current chunk.")
+        if current_shard_index >= len(shards):
+            raise RuntimeError(
+                "Ran out of dataset shards before reaching target count."
+            )
+
+        shard_name = shards[current_shard_index]
+        progress_bars.set_download_status(
+            f"chunk {chunk_index} shard {current_shard_index + 1}/{len(shards)} {shard_name}"
+        )
+        local_path = download_shard(REPO_ID, shard_name)
+        parquet = pq.ParquetFile(local_path)
+        rows_in_shard = parquet.metadata.num_rows
+        row_in_shard = 0
+
+        for record_batch in parquet.iter_batches(
+            columns=["emb"],
+            batch_size=args.read_batch_size,
+        ):
+            if row_in_shard >= rows_in_shard or rows_remaining == 0:
+                break
+
+            embeddings = record_batch.column(0).to_pylist()
+            batch_row_start = row_in_shard
+            batch_row_end = batch_row_start + len(embeddings)
+            row_in_shard = batch_row_end
+
+            if batch_row_end <= current_offset:
+                continue
+
+            if current_offset > batch_row_start:
+                slice_start = current_offset - batch_row_start
+                embeddings = embeddings[slice_start:]
+                batch_row_start = current_offset
+
+            offset = 0
+            while offset < len(embeddings) and rows_remaining > 0:
+                batch_count = min(
+                    args.upload_batch_size,
+                    rows_remaining,
+                    len(embeddings) - offset,
+                )
+                payload = embeddings[offset : offset + batch_count]
+                task_queue.put(
+                    UploadTask(
+                        chunk_index=chunk_index,
+                        start_id=next_id,
+                        count=batch_count,
+                        ids=make_ids(args.id_prefix, next_id, batch_count),
+                        embeddings=payload,
+                    )
+                )
+                progress_bars.advance_download(batch_count)
+                next_id += batch_count
+                rows_remaining -= batch_count
+                offset += batch_count
+                current_offset = batch_row_start + offset
+
+                if current_offset == rows_in_shard:
+                    if rows_remaining == 0:
+                        return Cursor(current_shard_index + 1, 0)
+                    current_shard_index += 1
+                    current_offset = 0
+                    break
+
+            if rows_remaining == 0:
+                return Cursor(current_shard_index, current_offset)
+
+            if current_offset == 0:
+                break
+
+        if current_offset == 0:
+            continue
+
+        if current_offset >= rows_in_shard:
+            current_shard_index += 1
+            current_offset = 0
+            continue
+
+        raise RuntimeError(
+            f"Stopped mid-shard without finishing chunk for {shard_name} at row {current_offset}."
+        )
+
+    return Cursor(current_shard_index, current_offset)
+
+
+def validate_shard_iteration(
+    args: argparse.Namespace, shards: Sequence[str], cursor: Cursor
+) -> None:
+    if cursor.shard_index >= len(shards):
+        raise RuntimeError("Progress cursor is past the end of the shard list.")
+    if cursor.row_offset_in_shard < 0:
+        raise RuntimeError("Progress cursor row offset is negative.")
+
+
+def install_signal_handlers(stop_event: threading.Event) -> None:
+    def _handler(signum: int, _frame: Any) -> None:
+        logging.warning("Received signal %s; stopping after current work.", signum)
+        stop_event.set()
+
+    signal.signal(signal.SIGINT, _handler)
+    signal.signal(signal.SIGTERM, _handler)
+
+
+def run_dry_run(
+    args: argparse.Namespace, shards: Sequence[str], cursor: Cursor
+) -> None:
+    progress_bars = ProgressBars(
+        total_vectors=args.dry_run_vectors,
+        initial_vectors=0,
+        download_desc="Dry-run scan",
+        upload_desc="Dry-run upload",
+    )
+    progress_bars.upload.close()
+    collection: Optional[ChromaCloudCollection] = None
+    if args.skip_chroma_check:
+        progress_bars.set_download_status("skipping Chroma check")
+    else:
+        progress_bars.set_download_status("checking Chroma collection")
+        collection = create_collection(args)
+    scanned = 0
+    current_shard_index = cursor.shard_index
+    current_offset = cursor.row_offset_in_shard
+    first_embedding_dim: Optional[int] = None
+    shards_visited = 0
+
+    try:
+        if collection is not None:
+            logging.info(
+                "Dry run: collection_id=%s target_scan=%s starting_cursor=%s:%s",
+                collection.collection_id,
+                args.dry_run_vectors,
+                current_shard_index,
+                current_offset,
+            )
+        else:
+            logging.info(
+                "Dry run without Chroma check: target_scan=%s starting_cursor=%s:%s",
+                args.dry_run_vectors,
+                current_shard_index,
+                current_offset,
+            )
+
+        while scanned < args.dry_run_vectors and current_shard_index < len(shards):
+            shard_name = shards[current_shard_index]
+            progress_bars.set_download_status(
+                f"shard {current_shard_index + 1}/{len(shards)} {shard_name}"
+            )
+            local_path = download_shard(REPO_ID, shard_name)
+            parquet = pq.ParquetFile(local_path)
+            row_in_shard = 0
+
+            for record_batch in parquet.iter_batches(
+                columns=["emb"],
+                batch_size=args.read_batch_size,
+            ):
+                embeddings = record_batch.column(0).to_pylist()
+                batch_row_start = row_in_shard
+                batch_row_end = batch_row_start + len(embeddings)
+                row_in_shard = batch_row_end
+
+                if batch_row_end <= current_offset:
+                    continue
+
+                if current_offset > batch_row_start:
+                    embeddings = embeddings[current_offset - batch_row_start :]
+
+                for embedding in embeddings:
+                    if embedding is None:
+                        raise RuntimeError(
+                            f"Encountered null embedding in shard {shard_name}."
+                        )
+                    if first_embedding_dim is None:
+                        first_embedding_dim = len(embedding)
+                    elif len(embedding) != first_embedding_dim:
+                        raise RuntimeError(
+                            f"Inconsistent embedding dimension in shard {shard_name}: "
+                            f"{len(embedding)} != {first_embedding_dim}"
+                        )
+                    scanned += 1
+                    progress_bars.advance_download(1)
+                    if scanned >= args.dry_run_vectors:
+                        break
+
+                if scanned >= args.dry_run_vectors:
+                    break
+
+            shards_visited += 1
+            logging.info("Dry run scanned shard %s cumulative=%s", shard_name, scanned)
+            current_shard_index += 1
+            current_offset = 0
+
+        logging.info(
+            "Dry run complete: scanned=%s dimension=%s shards_visited=%s",
+            scanned,
+            first_embedding_dim,
+            shards_visited,
+        )
+    finally:
+        progress_bars.close()
+        if collection is not None:
+            collection.close()
+
+
+def main() -> None:
+    args = parse_args()
+    configure_logging(args.log_level)
+    require_args(args)
+
+    shards = list_dataset_shards(REPO_ID)
+    progress = ProgressTracker(
+        path=Path(args.progress_file),
+        collection=args.collection,
+        target_count=args.target_count,
+        chunk_size=args.chunk_size,
+        repo_id=REPO_ID,
+        shards=shards,
+    )
+    progress.load()
+    validate_shard_iteration(args, shards, progress.cursor)
+
+    if progress.committed_rows >= args.target_count:
+        logging.info(
+            "Target already reached according to progress file: %s rows committed.",
+            progress.committed_rows,
+        )
+        return
+
+    if args.dry_run:
+        run_dry_run(args, shards, progress.cursor)
+        return
+
+    task_queue: "queue.Queue[Optional[UploadTask]]" = queue.Queue(
+        maxsize=args.queue_depth
+    )
+    stop_event = threading.Event()
+    failures = FailureState()
+    install_signal_handlers(stop_event)
+    progress_bars = ProgressBars(
+        total_vectors=args.target_count,
+        initial_vectors=progress.committed_rows,
+        download_desc="Download/read",
+        upload_desc="Upload",
+    )
+
+    chunk_statuses: Dict[int, ChunkStatus] = {}
+    workers = [
+        threading.Thread(
+            target=worker_loop,
+            name=f"uploader-{idx}",
+            args=(
+                args,
+                task_queue,
+                chunk_statuses,
+                stop_event,
+                failures,
+                progress_bars,
+            ),
+            daemon=True,
+        )
+        for idx in range(args.threads)
+    ]
+    for worker in workers:
+        worker.start()
+
+    committed_rows = progress.committed_rows
+    cursor = Cursor(progress.cursor.shard_index, progress.cursor.row_offset_in_shard)
+
+    logging.info(
+        "Starting ingest from row %s into collection %s using %s shards.",
+        committed_rows,
+        args.collection,
+        len(shards),
+    )
+
+    try:
+        while committed_rows < args.target_count and not stop_event.is_set():
+            chunk_index = committed_rows // args.chunk_size
+            rows_in_chunk = min(args.chunk_size, args.target_count - committed_rows)
+            chunk_status = ChunkStatus(
+                chunk_index=chunk_index, target_rows=rows_in_chunk
+            )
+            chunk_statuses[chunk_index] = chunk_status
+
+            logging.info(
+                "Queueing chunk %s: rows %s..%s",
+                chunk_index,
+                committed_rows,
+                committed_rows + rows_in_chunk - 1,
+            )
+            next_cursor = enqueue_chunk(
+                args=args,
+                shards=shards,
+                chunk_index=chunk_index,
+                chunk_start_row=committed_rows,
+                cursor=cursor,
+                rows_needed=rows_in_chunk,
+                task_queue=task_queue,
+                stop_event=stop_event,
+                progress_bars=progress_bars,
+            )
+            logging.info("Waiting for chunk %s uploads to finish.", chunk_index)
+            while not chunk_status.is_done():
+                failure = failures.get()
+                if failure is not None:
+                    raise failure
+                if stop_event.is_set():
+                    raise RuntimeError("Stopped before current chunk finished.")
+                time.sleep(1.0)
+            committed_rows += rows_in_chunk
+            cursor = next_cursor
+            progress.commit_chunk(committed_rows, cursor)
+            logging.info(
+                "Committed %s / %s rows. Resume cursor=%s:%s",
+                committed_rows,
+                args.target_count,
+                cursor.shard_index,
+                cursor.row_offset_in_shard,
+            )
+            del chunk_statuses[chunk_index]
+
+            failure = failures.get()
+            if failure is not None:
+                raise failure
+
+        if stop_event.is_set():
+            failure = failures.get()
+            if failure is not None:
+                raise failure
+            logging.warning("Stopped before reaching target. Progress is saved.")
+    finally:
+        stop_event.set()
+        for _ in workers:
+            task_queue.put(None)
+        task_queue.join()
+        for worker in workers:
+            worker.join(timeout=5.0)
+        progress_bars.close()
+
+    logging.info("Ingest finished at %s committed rows.", committed_rows)
+
+
+if __name__ == "__main__":
+    main()

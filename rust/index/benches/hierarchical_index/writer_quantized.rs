@@ -2857,9 +2857,10 @@ impl HierarchicalSpannWriter {
         beam_max: usize,
         rerank_centroids: usize,
         rerank_vectors: usize,
+        nav_mode: NavigationMode,
     ) -> (Vec<(u32, f32)>, usize, usize, SearchTimings) {
         let nav_t0 = Instant::now();
-        let leaves = self.navigate(query, Some(tau), beam_min, beam_max, rerank_centroids, self.config.read_navigation);
+        let leaves = self.navigate(query, Some(tau), beam_min, beam_max, rerank_centroids, nav_mode);
         let navigate_nanos = nav_t0.elapsed().as_nanos() as u64;
 
         let leaves_scanned = leaves.len();
@@ -2986,6 +2987,7 @@ impl HierarchicalSpannWriter {
         beam_min: usize,
         beam_max: usize,
         rerank_centroids: usize,
+        nav_mode: NavigationMode,
     ) -> Vec<LevelRecall> {
         let root = self.root_id();
 
@@ -3005,7 +3007,7 @@ impl HierarchicalSpannWriter {
             }
         }
 
-        let nav_mode = self.config.read_navigation;
+        let nav_mode = nav_mode;
         let q_norm = Self::vec_norm(query);
         let padded_bytes = self.padded_bytes();
         let rerank_factor = rerank_centroids;
@@ -3151,6 +3153,128 @@ impl HierarchicalSpannWriter {
         }
 
         levels
+    }
+
+    /// For a set of GT vectors, count how many distinct leaves contain at least one.
+    /// Returns (p100_clusters, p95_clusters, p90_clusters) via greedy max-coverage ordering.
+    pub fn gt_cluster_counts(&self, gt_100: &HashSet<u32>) -> (usize, usize, usize) {
+        if gt_100.is_empty() {
+            return (0, 0, 0);
+        }
+
+        let mut leaf_covers: Vec<HashSet<u32>> = Vec::new();
+        for entry in self.nodes.iter() {
+            if let TreeNode::Leaf(leaf) = entry.value() {
+                let mut covered: HashSet<u32> = HashSet::new();
+                for (i, &id) in leaf.ids.iter().enumerate() {
+                    if gt_100.contains(&id) {
+                        let version = leaf.versions[i];
+                        let current_ver = self.versions.get(&id).map(|r| *r).unwrap_or(0);
+                        if version >= current_ver {
+                            covered.insert(id);
+                        }
+                    }
+                }
+                if !covered.is_empty() {
+                    leaf_covers.push(covered);
+                }
+            }
+        }
+
+        let total = gt_100.len();
+        let p90_target = (total as f64 * 0.90).ceil() as usize;
+        let p95_target = (total as f64 * 0.95).ceil() as usize;
+
+        // Greedy max-coverage ordering to find minimum clusters for each threshold.
+        let mut uncovered: HashSet<u32> = gt_100.clone();
+        let mut covered_count = 0usize;
+        let mut picked = 0usize;
+        let mut p90 = 0usize;
+        let mut p95 = 0usize;
+        let mut used = vec![false; leaf_covers.len()];
+
+        while covered_count < total && picked < leaf_covers.len() {
+            let best_idx = leaf_covers
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !used[*i])
+                .max_by_key(|(_, covers)| covers.intersection(&uncovered).count())
+                .map(|(i, _)| i);
+            let Some(idx) = best_idx else { break };
+            used[idx] = true;
+            let newly: Vec<u32> = leaf_covers[idx].intersection(&uncovered).copied().collect();
+            if newly.is_empty() {
+                break;
+            }
+            covered_count += newly.len();
+            for id in newly {
+                uncovered.remove(&id);
+            }
+            picked += 1;
+            if p90 == 0 && covered_count >= p90_target {
+                p90 = picked;
+            }
+            if p95 == 0 && covered_count >= p95_target {
+                p95 = picked;
+            }
+        }
+
+        let p100 = leaf_covers.iter().filter(|c| !c.is_empty()).count();
+
+        (p100, p95, p90)
+    }
+
+    /// Greedy max-coverage: find the best `m` leaves that maximize recall@100.
+    pub fn optimal_leaf_recall(&self, gt_100: &HashSet<u32>, m: usize) -> f64 {
+        if m == 0 || gt_100.is_empty() {
+            return 0.0;
+        }
+
+        // For each leaf, find which GT vectors it contains.
+        let mut leaf_covers: Vec<(NodeId, HashSet<u32>)> = Vec::new();
+        for entry in self.nodes.iter() {
+            if let TreeNode::Leaf(leaf) = entry.value() {
+                let mut covered: HashSet<u32> = HashSet::new();
+                for (i, &id) in leaf.ids.iter().enumerate() {
+                    if gt_100.contains(&id) {
+                        let version = leaf.versions[i];
+                        let current_ver = self.versions.get(&id).map(|r| *r).unwrap_or(0);
+                        if version >= current_ver {
+                            covered.insert(id);
+                        }
+                    }
+                }
+                if !covered.is_empty() {
+                    leaf_covers.push((*entry.key(), covered));
+                }
+            }
+        }
+
+        // Greedy max-coverage: repeatedly pick the leaf adding the most uncovered GT vectors.
+        let mut uncovered: HashSet<u32> = gt_100.clone();
+        let mut total_covered = 0usize;
+        for _ in 0..m {
+            if uncovered.is_empty() {
+                break;
+            }
+            let best_idx = leaf_covers
+                .iter()
+                .enumerate()
+                .max_by_key(|(_, (_, covers))| covers.intersection(&uncovered).count())
+                .map(|(i, _)| i);
+            let Some(idx) = best_idx else { break };
+            let (_, covers) = &leaf_covers[idx];
+            let newly_covered: Vec<u32> = covers.intersection(&uncovered).copied().collect();
+            if newly_covered.is_empty() {
+                break;
+            }
+            total_covered += newly_covered.len();
+            for id in newly_covered {
+                uncovered.remove(&id);
+            }
+        }
+
+        total_covered as f64 / gt_100.len() as f64
     }
 
     fn collect_all_data_ids(&self, node_id: NodeId, ids: &mut HashSet<u32>) {

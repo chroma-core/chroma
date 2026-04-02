@@ -3,7 +3,7 @@
 # Download Wikipedia EN parquet shards for up to 7M vectors.
 # Each shard has ~100K vectors, so 70 shards covers ~7M.
 REPO="Cohere/wikipedia-2023-11-embed-multilingual-v3"
-NUM_SHARDS=110
+NUM_SHARDS=200
 
 export PATH="$HOME/.local/bin:$PATH"
 

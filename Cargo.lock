@@ -1807,6 +1807,7 @@ dependencies = [
  "tikv-jemallocator",
  "tokio",
  "tracing",
+ "ureq",
  "usearch",
  "uuid",
 ]
