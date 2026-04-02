@@ -618,7 +618,7 @@ impl ChromaHttpClient {
             .send::<(), _, chroma_types::Collection>(
                 "get_collection_by_id",
                 Method::GET,
-                format!("/api/v2/collections/{}", id.as_ref()),
+                format!("/api/v2/collections/by-id/{}", id.as_ref()),
                 None,
                 None::<()>,
             )

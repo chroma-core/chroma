@@ -31,7 +31,8 @@ use chroma_types::{
     DeleteCollectionRequest, DeleteCollectionResponse, DeleteDatabaseError, DeleteDatabaseRequest,
     DeleteDatabaseResponse, DetachFunctionError, DetachFunctionRequest, DetachFunctionResponse,
     ForkCollectionError, ForkCollectionRequest, ForkCollectionResponse, GetCollectionByCrnError,
-    GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionError,
+    GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionByIdError,
+    GetCollectionByIdRequest, GetCollectionByIdResponse, GetCollectionError,
     GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
     GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
     GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, Include,
@@ -468,6 +469,31 @@ impl ServiceBasedFrontend {
                 .map_err(GetCollectionByCrnError::InvalidSchema)?;
         }
         Ok(collection)
+    }
+
+    pub async fn get_collection_by_id(
+        &mut self,
+        GetCollectionByIdRequest { collection_id, .. }: GetCollectionByIdRequest,
+    ) -> Result<GetCollectionByIdResponse, GetCollectionByIdError> {
+        let mut collections = self
+            .sysdb_client
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(collection_id),
+                limit: Some(1),
+                ..Default::default()
+            })
+            .await
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        if self.enable_schema {
+            for collection in &mut collections {
+                collection
+                    .reconcile_schema_for_read()
+                    .map_err(GetCollectionByIdError::InvalidSchema)?;
+            }
+        }
+        collections
+            .pop()
+            .ok_or(GetCollectionByIdError::NotFound(collection_id))
     }
 
     pub async fn create_collection(

@@ -363,7 +363,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         """Returns a collection by its ID"""
         resp_json = await self._make_request(
             "get",
-            f"/collections/{collection_id}",
+            f"/collections/by-id/{collection_id}",
         )
 
         model = CollectionModel.from_json(resp_json)

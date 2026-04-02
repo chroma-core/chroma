@@ -441,7 +441,7 @@ class FastAPI(Server):
         )
 
         self.router.add_api_route(
-            "/api/v2/collections/{collection_id}",
+            "/api/v2/collections/by-id/{collection_id}",
             self.get_collection_by_id,
             methods=["GET"],
             response_model=None,

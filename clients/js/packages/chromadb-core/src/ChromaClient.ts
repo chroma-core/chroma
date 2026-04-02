@@ -48,6 +48,10 @@ export class ChromaClient {
   /**
    * @ignore
    */
+  private _basePath: string;
+  /**
+   * @ignore
+   */
   private authProvider: ClientAuthProvider | undefined;
   /**
    * @ignore
@@ -76,6 +80,7 @@ export class ChromaClient {
   }: ChromaClientParams = {}) {
     this.tenant = tenant;
     this.database = database;
+    this._basePath = path ?? "";
     this.authProvider = undefined;
 
     const apiConfig: Configuration = new Configuration({
@@ -542,7 +547,16 @@ export class ChromaClient {
     embeddingFunction?: IEmbeddingFunction;
   }): Promise<Collection> {
     await this.init();
-    const response = await this.api.getCollectionByCrn(id, this.api.options);
+    const url = `${this._basePath}/api/v2/collections/by-id/${encodeURIComponent(id)}`;
+    const resp = await chromaFetch(url, {
+      method: "GET",
+      ...this.api.options,
+    });
+    if (!resp.ok) {
+      const body = await resp.text();
+      throw new Error(`Failed to get collection by ID: ${resp.status} ${body}`);
+    }
+    const response = (await resp.json()) as Api.Collection;
 
     let config: Api.CollectionConfiguration = {};
     try {
