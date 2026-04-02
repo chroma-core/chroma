@@ -4,9 +4,9 @@ use async_trait::async_trait;
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::SignedRoaringBitmap;
-use half::f16;
 pub use chroma_types::SparsePostingBlock;
 use dashmap::DashMap;
+use half::f16;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -456,12 +456,6 @@ impl<'view> PostingCursor<'view> {
         }
     }
 
-    /// Return all block keys (0..block_count) for this dimension's posting
-    /// list. Used by the I/O pipeline to schedule fetches.
-    pub fn all_block_keys(&self) -> Vec<u32> {
-        (0..self.block_count as u32).collect()
-    }
-
     /// Populate lazy blocks from the reader's cache. For each block index
     /// in `block_indices`, attempts a synchronous cache lookup and fills
     /// the `Option` slot. Returns the number of blocks successfully loaded.
@@ -494,8 +488,20 @@ impl<'view> PostingCursor<'view> {
         reader: &'view BlockfileReader<'view, u32, SparsePostingBlock>,
         encoded_dim: &str,
     ) -> usize {
-        let indices: Vec<usize> = (0..self.block_count).collect();
-        self.populate_from_cache(reader, encoded_dim, &indices)
+        let CursorSource::Lazy { raw_blocks } = &mut self.source else {
+            return 0;
+        };
+        let mut loaded = 0;
+        for idx in 0..self.block_count {
+            if raw_blocks[idx].is_some() {
+                continue;
+            }
+            if let Some(bytes) = reader.get_raw_binary_from_cache(encoded_dim, idx as u32) {
+                raw_blocks[idx] = Some(bytes);
+                loaded += 1;
+            }
+        }
+        loaded
     }
 
     /// Number of posting data blocks in this dimension.
@@ -713,7 +719,9 @@ impl<'view> PostingCursor<'view> {
     /// posting blocks; using only the first block's weight underestimates
     /// the budget and causes over-pruning.
     pub fn window_upper_bound(&self, window_start: u32, window_end: u32) -> f32 {
-        let bi_start = self.dir_max_offsets.partition_point(|&max| max < window_start);
+        let bi_start = self
+            .dir_max_offsets
+            .partition_point(|&max| max < window_start);
         let mut max_w = 0.0f32;
         for bi in bi_start..self.block_count {
             max_w = max_w.max(self.dir_max_weights[bi]);
@@ -777,10 +785,6 @@ impl<'view> PostingCursor<'view> {
             }
 
             match &self.source {
-                // Fused path for View/Lazy: decompress offsets only, read
-                // u8 weights directly from raw bytes.  Saves writing+reading
-                // value_buf and one f32 multiply per entry (the dequant
-                // scale and query_weight are fused into a single `factor`).
                 CursorSource::View { raw_blocks } => {
                     let raw = raw_blocks[self.block_idx];
                     let hdr = SparsePostingBlock::peek_header(raw);
@@ -793,7 +797,7 @@ impl<'view> PostingCursor<'view> {
                         self.drain_buf_block_idx = self.block_idx;
                         self.buf_block_idx = usize::MAX;
                     }
-                    let weight_bytes = SparsePostingBlock::raw_weight_bytes(raw, &hdr);
+                    let wb = SparsePostingBlock::raw_weight_bytes(raw, &hdr);
 
                     if self
                         .offset_buf
@@ -811,7 +815,7 @@ impl<'view> PostingCursor<'view> {
                             let idx = (doc - window_start) as usize;
                             bitmap[idx >> 6] |= 1u64 << (idx & 63);
                             let bp = self.pos * 2;
-                            let w = f16::from_le_bytes([weight_bytes[bp], weight_bytes[bp + 1]]).to_f32();
+                            let w = f16::from_le_bytes([wb[bp], wb[bp + 1]]).to_f32();
                             accum[idx] += w * query_weight;
                         }
                         self.pos += 1;
@@ -833,7 +837,7 @@ impl<'view> PostingCursor<'view> {
                         self.drain_buf_block_idx = self.block_idx;
                         self.buf_block_idx = usize::MAX;
                     }
-                    let weight_bytes = SparsePostingBlock::raw_weight_bytes(raw, &hdr);
+                    let wb = SparsePostingBlock::raw_weight_bytes(raw, &hdr);
 
                     if self
                         .offset_buf
@@ -851,7 +855,7 @@ impl<'view> PostingCursor<'view> {
                             let idx = (doc - window_start) as usize;
                             bitmap[idx >> 6] |= 1u64 << (idx & 63);
                             let bp = self.pos * 2;
-                            let w = f16::from_le_bytes([weight_bytes[bp], weight_bytes[bp + 1]]).to_f32();
+                            let w = f16::from_le_bytes([wb[bp], wb[bp + 1]]).to_f32();
                             accum[idx] += w * query_weight;
                         }
                         self.pos += 1;
@@ -886,6 +890,10 @@ impl<'view> PostingCursor<'view> {
 
     /// Merge-join this (non-essential) cursor against sorted candidates,
     /// accumulating matched scores directly into contiguous `cand_scores`.
+    ///
+    /// For View/Lazy sources this is fused: only offsets are decompressed
+    /// and f16 weights are read from raw bytes at matched positions only,
+    /// avoiding the cost of bulk f16→f32 conversion for the whole block.
     pub fn score_candidates(
         &mut self,
         window_start: u32,
@@ -909,46 +917,130 @@ impl<'view> PostingCursor<'view> {
                 continue;
             }
 
-            if !self.ensure_forward_block(self.block_idx) {
-                self.block_idx += 1;
-                self.pos = 0;
-                continue;
-            }
+            match &self.source {
+                CursorSource::View { raw_blocks } => {
+                    let raw = raw_blocks[self.block_idx];
+                    let hdr = SparsePostingBlock::peek_header(raw);
+                    if self.drain_buf_block_idx != self.block_idx {
+                        SparsePostingBlock::decompress_offsets_into(
+                            raw,
+                            &hdr,
+                            &mut self.offset_buf,
+                        );
+                        self.drain_buf_block_idx = self.block_idx;
+                        self.buf_block_idx = usize::MAX;
+                    }
+                    let wb = SparsePostingBlock::raw_weight_bytes(raw, &hdr);
 
-            let (offsets, values) = match &self.source {
-                CursorSource::Eager { blocks } => (
-                    blocks[self.block_idx].offsets(),
-                    blocks[self.block_idx].values(),
-                ),
-                CursorSource::View { .. } | CursorSource::Lazy { .. } => {
-                    (&self.offset_buf[..], &self.value_buf[..])
+                    if self
+                        .offset_buf
+                        .get(self.pos)
+                        .is_some_and(|&o| o < window_start)
+                    {
+                        self.pos = self.offset_buf.partition_point(|&o| o < window_start);
+                    }
+
+                    while self.pos < self.offset_buf.len() && ci < cand_docs.len() {
+                        let doc = self.offset_buf[self.pos];
+                        if doc > window_end {
+                            return;
+                        }
+                        let cand = cand_docs[ci];
+                        if doc < cand {
+                            self.pos += 1;
+                        } else if doc > cand {
+                            ci += 1;
+                        } else {
+                            let bp = self.pos * 2;
+                            let w = f16::from_le_bytes([wb[bp], wb[bp + 1]]).to_f32();
+                            cand_scores[ci] += query_weight * w;
+                            self.pos += 1;
+                            ci += 1;
+                        }
+                    }
+                    if self.pos >= self.offset_buf.len() {
+                        self.block_idx += 1;
+                        self.pos = 0;
+                    }
                 }
-            };
+                CursorSource::Lazy { raw_blocks } => {
+                    let Some(raw) = raw_blocks[self.block_idx] else {
+                        self.block_idx += 1;
+                        self.pos = 0;
+                        continue;
+                    };
+                    let hdr = SparsePostingBlock::peek_header(raw);
+                    if self.drain_buf_block_idx != self.block_idx {
+                        SparsePostingBlock::decompress_offsets_into(
+                            raw,
+                            &hdr,
+                            &mut self.offset_buf,
+                        );
+                        self.drain_buf_block_idx = self.block_idx;
+                        self.buf_block_idx = usize::MAX;
+                    }
+                    let wb = SparsePostingBlock::raw_weight_bytes(raw, &hdr);
 
-            if self.pos == 0 && offsets[0] < window_start {
-                self.pos = offsets.partition_point(|&o| o < window_start);
-            }
+                    if self
+                        .offset_buf
+                        .get(self.pos)
+                        .is_some_and(|&o| o < window_start)
+                    {
+                        self.pos = self.offset_buf.partition_point(|&o| o < window_start);
+                    }
 
-            while self.pos < offsets.len() && ci < cand_docs.len() {
-                let doc = offsets[self.pos];
-                if doc > window_end {
-                    return;
+                    while self.pos < self.offset_buf.len() && ci < cand_docs.len() {
+                        let doc = self.offset_buf[self.pos];
+                        if doc > window_end {
+                            return;
+                        }
+                        let cand = cand_docs[ci];
+                        if doc < cand {
+                            self.pos += 1;
+                        } else if doc > cand {
+                            ci += 1;
+                        } else {
+                            let bp = self.pos * 2;
+                            let w = f16::from_le_bytes([wb[bp], wb[bp + 1]]).to_f32();
+                            cand_scores[ci] += query_weight * w;
+                            self.pos += 1;
+                            ci += 1;
+                        }
+                    }
+                    if self.pos >= self.offset_buf.len() {
+                        self.block_idx += 1;
+                        self.pos = 0;
+                    }
                 }
-                let cand = cand_docs[ci];
-                if doc < cand {
-                    self.pos += 1;
-                } else if doc > cand {
-                    ci += 1;
-                } else {
-                    cand_scores[ci] += query_weight * values[self.pos];
-                    self.pos += 1;
-                    ci += 1;
-                }
-            }
+                CursorSource::Eager { blocks } => {
+                    let offsets = blocks[self.block_idx].offsets();
+                    let values = blocks[self.block_idx].values();
 
-            if self.pos >= offsets.len() {
-                self.block_idx += 1;
-                self.pos = 0;
+                    if offsets.get(self.pos).is_some_and(|&o| o < window_start) {
+                        self.pos = offsets.partition_point(|&o| o < window_start);
+                    }
+
+                    while self.pos < offsets.len() && ci < cand_docs.len() {
+                        let doc = offsets[self.pos];
+                        if doc > window_end {
+                            return;
+                        }
+                        let cand = cand_docs[ci];
+                        if doc < cand {
+                            self.pos += 1;
+                        } else if doc > cand {
+                            ci += 1;
+                        } else {
+                            cand_scores[ci] += query_weight * values[self.pos];
+                            self.pos += 1;
+                            ci += 1;
+                        }
+                    }
+                    if self.pos >= offsets.len() {
+                        self.block_idx += 1;
+                        self.pos = 0;
+                    }
+                }
             }
         }
     }
@@ -1112,8 +1204,6 @@ impl<'me> BlockSparseReader<'me> {
         let mut threshold = f32::MIN;
         let mut heap: BinaryHeap<Score> = BinaryHeap::with_capacity(k_usize);
         let mut essential_idx = 0usize;
-        let full_mask = SignedRoaringBitmap::full();
-
         // ── Batch 2: all blocks for essential terms ──────────────
         // At threshold=MIN all terms are essential. Load their posting
         // blocks so the first windows can run without blocking.
@@ -1121,7 +1211,7 @@ impl<'me> BlockSparseReader<'me> {
             let mut keys_to_load: Vec<(String, u32)> = Vec::new();
             for t in terms[essential_idx..].iter() {
                 if t.cursor.is_lazy() {
-                    for bk in t.cursor.all_block_keys() {
+                    for bk in 0..t.cursor.block_count() as u32 {
                         keys_to_load.push((t.encoded_dim.clone(), bk));
                     }
                 }
@@ -1240,8 +1330,7 @@ impl<'me> BlockSparseReader<'me> {
                     for t in terms.iter_mut() {
                         if t.cursor.is_lazy() {
                             let dim = t.encoded_dim.clone();
-                            t.cursor
-                                .populate_all_from_cache(&self.posting_reader, &dim);
+                            t.cursor.populate_all_from_cache(&self.posting_reader, &dim);
                         }
                     }
                 }
@@ -1267,14 +1356,6 @@ impl<'me> BlockSparseReader<'me> {
                     }
 
                     let qw = terms[i].query_weight;
-                    if terms[i]
-                        .cursor
-                        .current()
-                        .is_some_and(|(d, _)| d < window_start)
-                    {
-                        terms[i].cursor.advance(window_start, &full_mask);
-                    }
-
                     terms[i].cursor.score_candidates(
                         window_start,
                         window_end,

@@ -440,13 +440,47 @@ fn brute_force_topk(documents: &[SparseDoc], query: &[(u32, f32)], k: usize) -> 
     scores
 }
 
+/// Tie-aware recall: if the only missing documents have true (f32)
+/// scores equal to the boundary score (within tolerance), they are
+/// tie-breaking swaps, not algorithmic misses.
 fn recall(results: &[(u32, f32)], expected: &[(u32, f32)]) -> f32 {
     if expected.is_empty() {
         return 1.0;
     }
     let result_ids: std::collections::HashSet<u32> = results.iter().map(|(id, _)| *id).collect();
     let expected_ids: std::collections::HashSet<u32> = expected.iter().map(|(id, _)| *id).collect();
-    result_ids.intersection(&expected_ids).count() as f32 / expected.len() as f32
+    let found = result_ids.intersection(&expected_ids).count();
+
+    if found == expected.len() {
+        return 1.0;
+    }
+
+    let tolerance = 1e-6;
+    let ref_min_score = expected.last().map(|(_, s)| *s).unwrap_or(0.0);
+    let res_min_score = results.last().map(|(_, s)| *s).unwrap_or(0.0);
+
+    let missing: Vec<u32> = expected_ids.difference(&result_ids).copied().collect();
+    let extras: Vec<u32> = result_ids.difference(&expected_ids).copied().collect();
+
+    let all_missing_at_boundary = !missing.is_empty()
+        && missing.iter().all(|id| {
+            expected
+                .iter()
+                .find(|(eid, _)| *eid == *id)
+                .map_or(false, |(_, s)| (s - ref_min_score).abs() <= tolerance)
+        });
+    let all_extras_at_boundary = extras.iter().all(|id| {
+        results
+            .iter()
+            .find(|(rid, _)| *rid == *id)
+            .map_or(false, |(_, s)| (s - res_min_score).abs() <= tolerance)
+    });
+
+    if all_missing_at_boundary && all_extras_at_boundary {
+        1.0
+    } else {
+        found as f32 / expected.len() as f32
+    }
 }
 
 fn dir_size_bytes(path: &std::path::Path) -> u64 {
@@ -543,9 +577,14 @@ async fn main() -> anyhow::Result<()> {
     println!("\n🏗️ Building BlockMaxMaxScore index...");
     let (temp_dir, provider) = test_arrow_blockfile_provider(SPARSE_POSTING_BLOCK_SIZE_BYTES);
     let start = Instant::now();
-    let (posting_id, chunks, storage_bytes) =
-        build_index(&documents, &provider, args.batch_size, args.ms_block_size, temp_dir.path())
-            .await?;
+    let (posting_id, chunks, storage_bytes) = build_index(
+        &documents,
+        &provider,
+        args.batch_size,
+        args.ms_block_size,
+        temp_dir.path(),
+    )
+    .await?;
     let build_time = start.elapsed().as_secs_f64();
 
     println!("⏱️  Index build: {build_time:.2}s");
@@ -720,6 +759,7 @@ async fn main() -> anyhow::Result<()> {
         let mut total_recall = 0.0f32;
         let mut total_bf_ms = 0.0f64;
         let mut total_ms_ms = 0.0f64;
+        let mut score_gaps: Vec<f32> = Vec::new();
 
         let pb = ProgressBar::new(queries.len() as u64);
         pb.set_style(
@@ -732,6 +772,15 @@ async fn main() -> anyhow::Result<()> {
             let bf_start = Instant::now();
             let expected = brute_force_topk(&documents, q, args.top_k);
             total_bf_ms += bf_start.elapsed().as_secs_f64() * 1000.0;
+
+            // Measure the score gap at the top-k boundary
+            if expected.len() == args.top_k {
+                let all = brute_force_topk(&documents, q, args.top_k + 1);
+                if all.len() > args.top_k {
+                    let gap = expected.last().unwrap().1 - all.last().unwrap().1;
+                    score_gaps.push(gap);
+                }
+            }
 
             let (results, elapsed) = search(
                 &provider,
@@ -771,6 +820,19 @@ async fn main() -> anyhow::Result<()> {
         println!("  BlockMaxMaxScore    {avg_ms:<12.2} {speedup:.2}x");
         println!();
         println!("🔍 Recall@{}: {:.2}%", args.top_k, avg_recall * 100.0);
+        if !score_gaps.is_empty() {
+            score_gaps.sort_by(|a, b| a.total_cmp(b));
+            let median = score_gaps[score_gaps.len() / 2];
+            let min = score_gaps[0];
+            let p10 = score_gaps[score_gaps.len() / 10];
+            println!("  Score gap at k-boundary: min={min:.6}, p10={p10:.6}, median={median:.6}");
+            let tight = score_gaps.iter().filter(|&&g| g < 0.01).count();
+            println!(
+                "  Queries with gap < 0.01 (f16 danger zone): {tight}/{} ({:.0}%)",
+                score_gaps.len(),
+                tight as f64 / score_gaps.len() as f64 * 100.0
+            );
+        }
         println!();
         println!("📊 Dataset:");
         println!("  Documents: {num_docs}");
