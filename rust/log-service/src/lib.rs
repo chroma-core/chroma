@@ -4901,9 +4901,7 @@ mod tests {
             let config = LogServerConfig {
                 writer: writer_options,
                 repl: repl_options,
-                // Use zero threshold in integration tests to surface small repl-dirty changes
-                // immediately. The default threshold (100) hides small writes.
-                record_count_threshold: 0,
+                record_count_threshold: 1,
                 ..Default::default()
             };
 
