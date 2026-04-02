@@ -12,9 +12,10 @@ use chroma_storage::{
 use chroma_types::Cmek;
 
 use crate::{
-    CursorWitness, Error, Fragment, FragmentIdentifier, FragmentSeqNo, FragmentUuid, Garbage,
-    GarbageCollectionOptions, LogPosition, Manifest, ManifestAndWitness, Snapshot, SnapshotPointer,
-    StorageWrapper, ThrottleOptions,
+    reader::Limits, CursorWitness, Error, Fragment, FragmentIdentifier, FragmentSeqNo,
+    FragmentUuid, Garbage, GarbageCollectionOptions, LogPosition, Manifest, ManifestAndWitness,
+    ManifestBounds, ManifestBoundsAndWitness, Snapshot, SnapshotPointer, StorageWrapper,
+    ThrottleOptions,
 };
 
 pub mod batch_manager;
@@ -373,6 +374,27 @@ pub trait ManifestConsumer<FP: FragmentPointer>: Send + Sync + 'static {
     /// Manifest storers and accessors
     async fn manifest_head(&self, witness: &ManifestWitness) -> Result<bool, Error>;
     async fn manifest_load(&self) -> Result<Option<(Manifest, ManifestWitness)>, Error>;
+    async fn manifest_bounds_and_witness(&self) -> Result<Option<ManifestBoundsAndWitness>, Error> {
+        Ok(self
+            .manifest_load()
+            .await?
+            .map(|(manifest, witness)| ManifestBoundsAndWitness {
+                bounds: ManifestBounds {
+                    oldest_timestamp: manifest.oldest_timestamp(),
+                    next_write_timestamp: manifest.next_write_timestamp(),
+                },
+                witness,
+            }))
+    }
+
+    async fn scan_partial(
+        &self,
+        from: LogPosition,
+        limits: Limits,
+    ) -> Result<Option<Vec<Fragment>>, Error> {
+        let _ = (from, limits);
+        Ok(None)
+    }
 
     /// Update the intrinsic cursor using an init-or-swap pattern.
     ///
