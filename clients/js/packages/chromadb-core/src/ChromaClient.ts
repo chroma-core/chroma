@@ -549,8 +549,8 @@ export class ChromaClient {
     await this.init();
     const url = `${this._basePath}/api/v2/tenants/${encodeURIComponent(this.tenant)}/databases/${encodeURIComponent(this.database)}/collections/by-id/${encodeURIComponent(id)}`;
     const resp = await chromaFetch(url, {
-      method: "GET",
       ...this.api.options,
+      method: "GET",
     });
     if (!resp.ok) {
       const body = await resp.text();
