@@ -536,7 +536,7 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
             None => return,
         };
 
-        if message.segment_type == "MetadataSegmentWriterShard" {
+        if message.segment_type == "MetadataSegmentWriter" {
             if let Some(update) = message.schema_update {
                 let collection_info = match self.context.get_collection_info_mut() {
                     Ok(info) => info,
