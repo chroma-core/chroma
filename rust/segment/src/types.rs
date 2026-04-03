@@ -16,7 +16,10 @@ use crate::distributed_spann::{SpannSegmentFlusherShard, SpannSegmentWriterShard
 #[cfg(feature = "usearch")]
 use crate::quantized_spann::{QuantizedSpannSegmentFlusherShard, QuantizedSpannSegmentWriterShard};
 
-use super::blockfile_metadata::{MetadataSegmentFlusherShard, MetadataSegmentWriterShard};
+use super::blockfile_metadata::{
+    MetadataSegmentFlusher, MetadataSegmentFlusherShard, MetadataSegmentWriter,
+    MetadataSegmentWriterShard,
+};
 use super::blockfile_record::{
     ApplyMaterializedLogError, RecordSegmentFlusherShard, RecordSegmentReaderOptions,
     RecordSegmentReaderShard, RecordSegmentWriterShard,
@@ -1088,7 +1091,6 @@ impl VectorSegmentWriterShard {
     }
 }
 
-type MetadataSegmentWriter<'a> = MetadataSegmentWriterShard<'a>;
 type VectorSegmentWriter = VectorSegmentWriterShard;
 
 #[derive(Clone, Debug)]
@@ -1169,7 +1171,6 @@ pub enum VectorSegmentFlusherShard {
     Spann(SpannSegmentFlusherShard),
 }
 
-type MetadataSegmentFlusher = MetadataSegmentFlusherShard;
 type VectorSegmentFlusher = VectorSegmentFlusherShard;
 
 #[derive(Debug)]
