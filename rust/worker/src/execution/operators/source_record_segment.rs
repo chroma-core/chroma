@@ -98,7 +98,7 @@ mod tests {
         blockfile_record::RecordSegmentReaderShard, test::TestDistributedSegment,
     };
     use chroma_system::Operator;
-    use chroma_types::Operation;
+    use chroma_types::{Operation, SegmentShard};
 
     use crate::execution::operators::source_record_segment::SourceRecordSegmentOperator;
 
@@ -111,8 +111,9 @@ mod tests {
         test_segment
             .populate_with_generator(100, upsert_generator)
             .await;
+        let record_segment_shard = SegmentShard::from((&test_segment.record_segment, 0));
         let reader = Box::pin(RecordSegmentReaderShard::from_segment(
-            &test_segment.record_segment,
+            &record_segment_shard,
             &test_segment.blockfile_provider,
             None,
         ))

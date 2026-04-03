@@ -1178,7 +1178,7 @@ mod tests {
 
     use chroma_blockstore::BlockfileWriter;
     use chroma_log::test::{int_as_id, upsert_generator, LogGenerator};
-    use chroma_types::{Chunk, USER_ID_BLOOM_FILTER};
+    use chroma_types::{Chunk, SegmentShard, USER_ID_BLOOM_FILTER};
     use shuttle::{future, thread};
 
     use crate::{
@@ -1195,11 +1195,12 @@ mod tests {
             .build()
             .expect("Runtime creation should not fail");
         let test_segment = runtime.block_on(async { TestDistributedSegment::new().await });
+        let record_segment_shard = SegmentShard::from((&test_segment.record_segment, 0));
         let record_segment_writer = runtime
             .block_on(RecordSegmentWriterShard::from_segment(
                 &test_segment.collection.tenant,
                 &test_segment.collection.database_id,
-                &test_segment.record_segment,
+                &record_segment_shard,
                 &test_segment.blockfile_provider,
                 None,
                 None,
@@ -1314,10 +1315,11 @@ mod tests {
         let logs = upsert_generator.generate_chunk(1..=num_records);
         Box::pin(test_segment.compact_log(logs, 1)).await;
 
+        let record_segment_shard = SegmentShard::from((&test_segment.record_segment, 0));
         let writer = RecordSegmentWriterShard::from_segment(
             &test_segment.collection.tenant,
             &test_segment.collection.database_id,
-            &test_segment.record_segment,
+            &record_segment_shard,
             &test_segment.blockfile_provider,
             None,
             test_segment.bloom_filter_manager.clone(),
@@ -1362,10 +1364,11 @@ mod tests {
             .file_path
             .contains_key(USER_ID_BLOOM_FILTER),);
 
+        let record_segment_shard = SegmentShard::from((&test_segment.record_segment, 0));
         let writer = RecordSegmentWriterShard::from_segment(
             &test_segment.collection.tenant,
             &test_segment.collection.database_id,
-            &test_segment.record_segment,
+            &record_segment_shard,
             &test_segment.blockfile_provider,
             None,
             test_segment.bloom_filter_manager.clone(),
@@ -1402,8 +1405,9 @@ mod tests {
 
         // Second compaction: delete 2 records, materializing with a reader so
         // the deletes resolve to DeleteExisting.
+        let record_segment_shard = SegmentShard::from((&test_segment.record_segment, 0));
         let reader = Box::pin(super::RecordSegmentReaderShard::from_segment(
-            &test_segment.record_segment,
+            &record_segment_shard,
             &test_segment.blockfile_provider,
             None,
         ))
@@ -1437,18 +1441,20 @@ mod tests {
         .expect("Should materialize delete logs");
 
         // Need a second reader for hydration during apply.
+        let record_segment_shard = SegmentShard::from((&test_segment.record_segment, 0));
         let reader_for_apply = Box::pin(super::RecordSegmentReaderShard::from_segment(
-            &test_segment.record_segment,
+            &record_segment_shard,
             &test_segment.blockfile_provider,
             None,
         ))
         .await
         .expect("Should be able to create reader for apply");
 
+        let record_segment_shard = SegmentShard::from((&test_segment.record_segment, 0));
         let writer = RecordSegmentWriterShard::from_segment(
             &test_segment.collection.tenant,
             &test_segment.collection.database_id,
-            &test_segment.record_segment,
+            &record_segment_shard,
             &test_segment.blockfile_provider,
             None,
             test_segment.bloom_filter_manager.clone(),

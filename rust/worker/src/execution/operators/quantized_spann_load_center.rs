@@ -5,7 +5,7 @@ use chroma_segment::{
     spann_provider::SpannProvider,
 };
 use chroma_system::{Operator, OperatorType};
-use chroma_types::{Collection, Segment};
+use chroma_types::{Collection, Segment, SegmentShard};
 use thiserror::Error;
 
 #[derive(Debug)]
@@ -42,9 +42,10 @@ impl Operator<(), QuantizedSpannLoadCenterOutput> for QuantizedSpannLoadCenterOp
         &self,
         _input: &(),
     ) -> Result<QuantizedSpannLoadCenterOutput, QuantizedSpannLoadCenterError> {
+        let vector_segment_shard = SegmentShard::from((&self.vector_segment, 0));
         let reader = self
             .spann_provider
-            .read_quantized_usearch(&self.collection, &self.vector_segment)
+            .read_quantized_usearch(&self.collection, &vector_segment_shard)
             .await?;
         Ok(QuantizedSpannLoadCenterOutput { reader })
     }

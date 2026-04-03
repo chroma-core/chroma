@@ -677,12 +677,13 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
             None => return,
         };
 
+        let metadata_segment_shard = SegmentShard::from((&message.metadata_segment, 0));
         let metadata_writer = match self
             .ok_or_terminate(
                 MetadataSegmentWriterShard::from_segment(
                     &collection.tenant,
                     &collection.database_id,
-                    &message.metadata_segment,
+                    &metadata_segment_shard,
                     &self.output_context.blockfile_provider,
                     cmek.clone(),
                 )
@@ -696,39 +697,47 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
         };
 
         let (hnsw_index_uuid, vector_writer) = match message.vector_segment.r#type {
-            SegmentType::QuantizedSpann => match self
-                .ok_or_terminate(
-                    self.output_context
-                        .spann_provider
-                        .write_quantized_usearch(
-                            collection,
-                            &message.vector_segment,
-                            &message.record_segment,
-                        )
-                        .await,
-                    ctx,
-                )
-                .await
-            {
-                Some(writer) => (None, VectorSegmentWriterShard::QuantizedSpann(writer)),
-                None => return,
-            },
-            SegmentType::Spann => match self
-                .ok_or_terminate(
-                    self.output_context
-                        .spann_provider
-                        .write(collection, &message.vector_segment, dimension, cmek)
-                        .await,
-                    ctx,
-                )
-                .await
-            {
-                Some(writer) => (
-                    Some(writer.hnsw_index_uuid()),
-                    VectorSegmentWriterShard::Spann(writer),
-                ),
-                None => return,
-            },
+            SegmentType::QuantizedSpann => {
+                let vector_segment_shard = SegmentShard::from((&message.vector_segment, 0));
+                let record_segment_shard_for_qspann =
+                    SegmentShard::from((&message.record_segment, 0));
+                match self
+                    .ok_or_terminate(
+                        self.output_context
+                            .spann_provider
+                            .write_quantized_usearch(
+                                collection,
+                                &vector_segment_shard,
+                                &record_segment_shard_for_qspann,
+                            )
+                            .await,
+                        ctx,
+                    )
+                    .await
+                {
+                    Some(writer) => (None, VectorSegmentWriterShard::QuantizedSpann(writer)),
+                    None => return,
+                }
+            }
+            SegmentType::Spann => {
+                let vector_segment_shard = SegmentShard::from((&message.vector_segment, 0));
+                match self
+                    .ok_or_terminate(
+                        self.output_context
+                            .spann_provider
+                            .write(collection, &vector_segment_shard, dimension, cmek)
+                            .await,
+                        ctx,
+                    )
+                    .await
+                {
+                    Some(writer) => (
+                        Some(writer.hnsw_index_uuid()),
+                        VectorSegmentWriterShard::Spann(writer),
+                    ),
+                    None => return,
+                }
+            }
             _ => match self
                 .ok_or_terminate(
                     DistributedHNSWSegmentWriter::from_segment(

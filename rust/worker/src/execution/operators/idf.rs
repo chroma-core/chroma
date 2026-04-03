@@ -112,9 +112,10 @@ impl Operator<IdfInput, IdfOutput> for Idf {
             }
         };
 
+        let metadata_segment_shard = SegmentShard::from((&input.metadata_segment, 0));
         let metadata_segment_reader_fut = async {
             Box::pin(MetadataSegmentReaderShard::from_segment(
-                &input.metadata_segment,
+                &metadata_segment_shard,
                 &input.blockfile_provider,
             ))
             .await

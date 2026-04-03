@@ -112,10 +112,11 @@ impl TestDistributedSegment {
         .await
         .expect("Should be able to materialize log.");
 
+        let metadata_segment_shard = SegmentShard::from((&self.metadata_segment, 0));
         let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
             &self.collection.tenant,
             &self.collection.database_id,
-            &self.metadata_segment,
+            &metadata_segment_shard,
             &self.blockfile_provider,
             None,
         )

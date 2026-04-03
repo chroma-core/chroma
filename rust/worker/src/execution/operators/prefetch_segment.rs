@@ -119,7 +119,8 @@ mod tests {
     };
     use chroma_segment::types::materialize_logs;
     use chroma_types::{
-        Chunk, CollectionUuid, DatabaseUuid, LogRecord, Operation, OperationRecord, SegmentUuid,
+        Chunk, CollectionUuid, DatabaseUuid, LogRecord, Operation, OperationRecord, SegmentShard,
+        SegmentUuid,
     };
     use std::collections::HashMap;
     use std::str::FromStr;
@@ -139,10 +140,11 @@ mod tests {
             file_path: HashMap::new(),
         };
         {
+            let record_segment_shard = SegmentShard::from((&record_segment, 0));
             let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
-                &record_segment,
+                &record_segment_shard,
                 &blockfile_provider,
                 None,
                 None,

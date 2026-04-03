@@ -23,7 +23,7 @@ use chroma_types::HNSW_PATH;
 use chroma_types::MAX_HEAD_ID_BF_PATH;
 use chroma_types::POSTING_LIST_PATH;
 use chroma_types::VERSION_MAP_PATH;
-use chroma_types::{MaterializedLogOperation, Segment, SegmentScope, SegmentType};
+use chroma_types::{MaterializedLogOperation, Segment, SegmentScope, SegmentShard, SegmentType};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::Formatter;
@@ -101,7 +101,7 @@ impl SpannSegmentWriterShard {
     #[allow(clippy::too_many_arguments)]
     pub async fn from_segment(
         collection: &Collection,
-        segment: &Segment,
+        segment: &SegmentShard,
         blockfile_provider: &BlockfileProvider,
         hnsw_provider: &HnswIndexProvider,
         dimensionality: usize,
@@ -126,47 +126,31 @@ impl SpannSegmentWriterShard {
             .ok_or(SpannSegmentWriterShardError::MissingSpannConfiguration)?;
 
         let (hnsw_id, segment_prefix_hnsw) = match segment.file_path.get(HNSW_PATH) {
-            Some(hnsw_path) => match hnsw_path.first() {
-                Some(index_path) => {
-                    let (prefix, index_uuid) = Segment::extract_prefix_and_id(index_path)
-                        .map_err(SpannSegmentWriterShardError::IndexIdParsingError)?;
-                    (Some(IndexUuid(index_uuid)), Some(prefix.to_string()))
-                }
-                None => {
-                    return Err(SpannSegmentWriterShardError::HnswInvalidFilePath);
-                }
-            },
+            Some(index_path) => {
+                let (prefix, index_uuid) = Segment::extract_prefix_and_id(index_path)
+                    .map_err(SpannSegmentWriterShardError::IndexIdParsingError)?;
+                (Some(IndexUuid(index_uuid)), Some(prefix.to_string()))
+            }
             None => (None, None),
         };
         let (versions_map_id, segment_prefix_vf) = match segment.file_path.get(VERSION_MAP_PATH) {
-            Some(version_map_paths) => match version_map_paths.first() {
-                Some(version_map_path) => {
-                    let (prefix, version_map_uuid) =
-                        Segment::extract_prefix_and_id(version_map_path)
-                            .map_err(SpannSegmentWriterShardError::IndexIdParsingError)?;
-                    (Some(version_map_uuid), Some(prefix.to_string()))
-                }
-                None => {
-                    return Err(SpannSegmentWriterShardError::VersionMapInvalidFilePath);
-                }
-            },
+            Some(version_map_path) => {
+                let (prefix, version_map_uuid) =
+                    Segment::extract_prefix_and_id(version_map_path)
+                        .map_err(SpannSegmentWriterShardError::IndexIdParsingError)?;
+                (Some(version_map_uuid), Some(prefix.to_string()))
+            }
             None => (None, None),
         };
         if segment_prefix_vf != segment_prefix_hnsw {
             return Err(SpannSegmentWriterShardError::InvalidPrefixPath);
         }
         let (posting_list_id, segment_prefix_pl) = match segment.file_path.get(POSTING_LIST_PATH) {
-            Some(posting_list_paths) => match posting_list_paths.first() {
-                Some(posting_list_path) => {
-                    let (prefix, posting_list_uuid) =
-                        Segment::extract_prefix_and_id(posting_list_path)
-                            .map_err(SpannSegmentWriterShardError::IndexIdParsingError)?;
-                    (Some(posting_list_uuid), Some(prefix.to_string()))
-                }
-                None => {
-                    return Err(SpannSegmentWriterShardError::PostingListInvalidFilePath);
-                }
-            },
+            Some(posting_list_path) => {
+                let (prefix, posting_list_uuid) = Segment::extract_prefix_and_id(posting_list_path)
+                    .map_err(SpannSegmentWriterShardError::IndexIdParsingError)?;
+                (Some(posting_list_uuid), Some(prefix.to_string()))
+            }
             None => (None, None),
         };
         if segment_prefix_pl != segment_prefix_hnsw {
@@ -175,17 +159,12 @@ impl SpannSegmentWriterShard {
 
         let (max_head_id_bf_id, segment_prefix_max_head) =
             match segment.file_path.get(MAX_HEAD_ID_BF_PATH) {
-                Some(max_head_id_bf_paths) => match max_head_id_bf_paths.first() {
-                    Some(max_head_id_bf_path) => {
-                        let (prefix, max_head_id_bf_uuid) =
-                            Segment::extract_prefix_and_id(max_head_id_bf_path)
-                                .map_err(SpannSegmentWriterShardError::IndexIdParsingError)?;
-                        (Some(max_head_id_bf_uuid), Some(prefix.to_string()))
-                    }
-                    None => {
-                        return Err(SpannSegmentWriterShardError::MaxHeadIdInvalidFilePath);
-                    }
-                },
+                Some(max_head_id_bf_path) => {
+                    let (prefix, max_head_id_bf_uuid) =
+                        Segment::extract_prefix_and_id(max_head_id_bf_path)
+                            .map_err(SpannSegmentWriterShardError::IndexIdParsingError)?;
+                    (Some(max_head_id_bf_uuid), Some(prefix.to_string()))
+                }
                 None => (None, None),
             };
         if segment_prefix_max_head != segment_prefix_hnsw {
@@ -473,7 +452,7 @@ pub struct SpannSegmentReaderShard<'me> {
 impl<'me> SpannSegmentReaderShard<'me> {
     pub async fn from_segment(
         collection: &Collection,
-        segment: &Segment,
+        segment: &SegmentShard,
         blockfile_provider: &BlockfileProvider,
         hnsw_provider: &HnswIndexProvider,
         dimensionality: usize,
@@ -493,47 +472,31 @@ impl<'me> SpannSegmentReaderShard<'me> {
             .ok_or_else(|| SpannSegmentReaderShardError::MissingSpannConfiguration)?;
 
         let (hnsw_id, segment_prefix_hnsw) = match segment.file_path.get(HNSW_PATH) {
-            Some(hnsw_path) => match hnsw_path.first() {
-                Some(index_path) => {
-                    let (prefix, index_uuid) = Segment::extract_prefix_and_id(index_path)
-                        .map_err(SpannSegmentReaderShardError::IndexIdParsingError)?;
-                    (Some(IndexUuid(index_uuid)), Some(prefix.to_string()))
-                }
-                None => {
-                    return Err(SpannSegmentReaderShardError::HnswInvalidFilePath);
-                }
-            },
+            Some(index_path) => {
+                let (prefix, index_uuid) = Segment::extract_prefix_and_id(index_path)
+                    .map_err(SpannSegmentReaderShardError::IndexIdParsingError)?;
+                (Some(IndexUuid(index_uuid)), Some(prefix.to_string()))
+            }
             None => (None, None),
         };
         let (versions_map_id, segment_prefix_vf) = match segment.file_path.get(VERSION_MAP_PATH) {
-            Some(version_map_paths) => match version_map_paths.first() {
-                Some(version_map_path) => {
-                    let (prefix, version_map_uuid) =
-                        Segment::extract_prefix_and_id(version_map_path)
-                            .map_err(SpannSegmentReaderShardError::IndexIdParsingError)?;
-                    (Some(version_map_uuid), Some(prefix.to_string()))
-                }
-                None => {
-                    return Err(SpannSegmentReaderShardError::VersionMapInvalidFilePath);
-                }
-            },
+            Some(version_map_path) => {
+                let (prefix, version_map_uuid) =
+                    Segment::extract_prefix_and_id(version_map_path)
+                        .map_err(SpannSegmentReaderShardError::IndexIdParsingError)?;
+                (Some(version_map_uuid), Some(prefix.to_string()))
+            }
             None => (None, None),
         };
         if segment_prefix_vf != segment_prefix_hnsw {
             return Err(SpannSegmentReaderShardError::InvalidPrefixPath);
         }
         let (posting_list_id, segment_prefix_pl) = match segment.file_path.get(POSTING_LIST_PATH) {
-            Some(posting_list_paths) => match posting_list_paths.first() {
-                Some(posting_list_path) => {
-                    let (prefix, posting_list_uuid) =
-                        Segment::extract_prefix_and_id(posting_list_path)
-                            .map_err(SpannSegmentReaderShardError::IndexIdParsingError)?;
-                    (Some(posting_list_uuid), Some(prefix.to_string()))
-                }
-                None => {
-                    return Err(SpannSegmentReaderShardError::PostingListInvalidFilePath);
-                }
-            },
+            Some(posting_list_path) => {
+                let (prefix, posting_list_uuid) = Segment::extract_prefix_and_id(posting_list_path)
+                    .map_err(SpannSegmentReaderShardError::IndexIdParsingError)?;
+                (Some(posting_list_uuid), Some(prefix.to_string()))
+            }
             None => (None, None),
         };
         if segment_prefix_pl != segment_prefix_hnsw {
@@ -634,8 +597,8 @@ mod test {
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
         Chunk, Collection, CollectionUuid, DatabaseUuid, InternalCollectionConfiguration,
-        InternalSpannConfiguration, LogRecord, Operation, OperationRecord, Schema, SegmentUuid,
-        SpannPostingList,
+        InternalSpannConfiguration, LogRecord, Operation, OperationRecord, Schema, SegmentShard,
+        SegmentUuid, SpannPostingList,
     };
 
     use crate::{
@@ -709,10 +672,11 @@ mod test {
                 .expect("Error converting config to schema for test collection"),
         );
 
+        let spann_segment_shard = SegmentShard::from((&spann_segment, 0));
         let pl_block_size = 5 * 1024 * 1024;
         let spann_writer = SpannSegmentWriterShard::from_segment(
             &collection,
-            &spann_segment,
+            &spann_segment_shard,
             &blockfile_provider,
             &hnsw_provider,
             3,
@@ -813,10 +777,11 @@ mod test {
         )
         .await
         .expect("Error converting config to gc context");
+        let spann_segment_shard = SegmentShard::from((&spann_segment, 0));
         let pl_block_size = 5 * 1024 * 1024;
         let spann_writer = SpannSegmentWriterShard::from_segment(
             &collection,
-            &spann_segment,
+            &spann_segment_shard,
             &blockfile_provider,
             &hnsw_provider,
             3,
@@ -954,10 +919,11 @@ mod test {
                 .expect("Error converting config to schema for test collection"),
         );
 
+        let spann_segment_shard = SegmentShard::from((&spann_segment, 0));
         let pl_block_size = 5 * 1024 * 1024;
         let spann_writer = SpannSegmentWriterShard::from_segment(
             &collection,
-            &spann_segment,
+            &spann_segment_shard,
             &blockfile_provider,
             &hnsw_provider,
             3,
@@ -1037,9 +1003,10 @@ mod test {
             16,
             false,
         );
+        let spann_segment_shard = SegmentShard::from((&spann_segment, 0));
         let spann_reader = SpannSegmentReaderShard::from_segment(
             &collection,
-            &spann_segment,
+            &spann_segment_shard,
             &blockfile_provider,
             &hnsw_provider,
             3,
@@ -1148,10 +1115,11 @@ mod test {
         )
         .await
         .expect("Error converting config to gc context");
+        let spann_segment_shard = SegmentShard::from((&spann_segment, 0));
         let pl_block_size = 5 * 1024 * 1024;
         let spann_writer = SpannSegmentWriterShard::from_segment(
             &collection,
-            &spann_segment,
+            &spann_segment_shard,
             &blockfile_provider,
             &hnsw_provider,
             3,
@@ -1259,10 +1227,11 @@ mod test {
                 .expect("Error converting config to schema for test collection"),
         );
 
+        let spann_segment_shard = SegmentShard::from((&spann_segment, 0));
         let pl_block_size = 5 * 1024 * 1024;
         let spann_writer = SpannSegmentWriterShard::from_segment(
             &collection,
-            &spann_segment,
+            &spann_segment_shard,
             &blockfile_provider,
             &hnsw_provider,
             3,

@@ -231,7 +231,8 @@ mod tests {
     };
     use chroma_system::Operator;
     use chroma_types::{
-        Chunk, CollectionUuid, DatabaseUuid, LogRecord, Operation, OperationRecord, SegmentUuid,
+        Chunk, CollectionUuid, DatabaseUuid, LogRecord, Operation, OperationRecord, SegmentShard,
+        SegmentUuid,
     };
     use std::{collections::HashMap, str::FromStr};
     use tracing::{Instrument, Span};
@@ -251,10 +252,11 @@ mod tests {
         let tenant = String::from("test_tenant");
         let database_id = DatabaseUuid::new();
         {
+            let record_segment_shard = SegmentShard::from((&record_segment, 0));
             let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
-                &record_segment,
+                &record_segment_shard,
                 &in_memory_provider,
                 None,
                 None,
@@ -298,7 +300,11 @@ mod tests {
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
             let record_segment_reader: Option<RecordSegmentReaderShard> = match Box::pin(
-                RecordSegmentReaderShard::from_segment(&record_segment, &in_memory_provider, None),
+                RecordSegmentReaderShard::from_segment(
+                    &record_segment_shard,
+                    &in_memory_provider,
+                    None,
+                ),
             )
             .await
             {
