@@ -500,6 +500,7 @@ impl S3Storage {
             // ByteStream and do a one-shot PutObject.
             let buf = collect_stream(stream, total_size_bytes).await?;
             if buf.len() != total_size_bytes {
+                self.metrics.s3_put_error_count.add(1, &[]);
                 return Err(StorageError::Message {
                     message: format!(
                         "Stream yielded {} bytes, expected {}",
