@@ -100,8 +100,13 @@ __all__ = [
     "IntInvertedIndexConfig",
     "FloatInvertedIndexConfig",
     "BoolInvertedIndexConfig",
+    # Read Level
+    "ReadLevel",
+    # Sync Client
+    "SyncClient",
 ]
 
+from chromadb.sync_client import SyncClient
 from chromadb.types import CloudClientArg
 
 logger = logging.getLogger(__name__)
