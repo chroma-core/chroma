@@ -540,6 +540,8 @@ impl InMemoryFrontend {
                         vector_segment: collection.vector_segment.clone(),
                         record_segment: collection.record_segment.clone(),
                     },
+                    shard_index: 0,
+                    num_shards: 1,
                 },
                 read_level: request.read_level,
             })
@@ -591,6 +593,8 @@ impl InMemoryFrontend {
                         vector_segment: collection.vector_segment.clone(),
                         record_segment: collection.record_segment.clone(),
                     },
+                    shard_index: 0,
+                    num_shards: 1,
                 },
                 filter,
                 limit: Limit { offset, limit },
@@ -664,6 +668,8 @@ impl InMemoryFrontend {
                             vector_segment: collection.vector_segment.clone(),
                             record_segment: collection.record_segment.clone(),
                         },
+                        shard_index: 0,
+                        num_shards: 1,
                     },
                     filter,
                     knn: KnnBatch {

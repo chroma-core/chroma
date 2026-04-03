@@ -11,6 +11,10 @@ message ScanOperator {
     Segment knn = 5;
     Segment metadata = 6;
     Segment record = 7;
+    // Which shard this worker is responsible for querying.
+    uint32 shard_index = 8;
+    // Total number of shards for the collection. 0 is treated as 1 (unsharded).
+    uint32 num_shards = 9;
 }
 
 message FilterOperator {
