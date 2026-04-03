@@ -95,8 +95,8 @@ pub enum ExecutionState {
 #[derive(Clone, Debug)]
 pub struct CompactWriters {
     pub(crate) record_reader: Option<RecordSegmentReaderShard<'static>>,
-    pub(crate) metadata_writer: MetadataSegmentWriterShard<'static>,
-    pub(crate) record_writer: RecordSegmentWriterShard,
+    pub(crate) metadata_writer: MetadataSegmentWriter<'static>,
+    pub(crate) record_writer: RecordSegmentWriter,
     pub(crate) vector_writer: VectorSegmentWriterShard,
 }
 
