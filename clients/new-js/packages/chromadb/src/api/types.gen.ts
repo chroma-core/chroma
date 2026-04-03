@@ -1307,6 +1307,52 @@ export type CreateCollectionResponses = {
 
 export type CreateCollectionResponse = CreateCollectionResponses[keyof CreateCollectionResponses];
 
+export type GetCollectionByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Tenant ID
+         */
+        tenant: string;
+        /**
+         * Database name
+         */
+        database: string;
+        /**
+         * Collection UUID
+         */
+        collection_id: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases/{database}/collections/by-id/{collection_id}';
+};
+
+export type GetCollectionByIdErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Collection not found
+     */
+    404: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type GetCollectionByIdError = GetCollectionByIdErrors[keyof GetCollectionByIdErrors];
+
+export type GetCollectionByIdResponses = {
+    /**
+     * Collection found
+     */
+    200: Collection;
+};
+
+export type GetCollectionByIdResponse = GetCollectionByIdResponses[keyof GetCollectionByIdResponses];
+
 export type DeleteCollectionData = {
     body?: never;
     path: {
