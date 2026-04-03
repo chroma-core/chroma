@@ -12,26 +12,27 @@ import threading
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import httpx
-from huggingface_hub import HfApi, hf_hub_download
-from huggingface_hub.errors import HfHubHTTPError
 import pyarrow.parquet as pq
 from tqdm.auto import tqdm
 
-
-REPO_ID = "CohereLabs/wikipedia-2023-11-embed-multilingual-v3"
+from wikipedia_cohere_dataset import REPO_ID, ensure_shard_cached, list_dataset_shards
 DEFAULT_COLLECTION = "100m_quantized_spann"
 DEFAULT_TARGET_COUNT = 100_000_000
 DEFAULT_CHUNK_SIZE = 1_000_000
-DEFAULT_UPLOAD_BATCH_SIZE = 1_000
+DEFAULT_UPLOAD_BATCH_SIZE = 300
 DEFAULT_READ_BATCH_SIZE = 2_000
 DEFAULT_THREADS = 10
 DEFAULT_QUEUE_DEPTH = 40
 DEFAULT_CLOUD_HOST = "api.trychroma.com"
 DEFAULT_CLOUD_PORT = 443
 DEFAULT_HTTP_TIMEOUT_SECS = 30.0
+DEFAULT_PROGRESS_SAVE_INTERVAL_VECTORS = 10_000
+
+# Progress file lives next to this script so cwd and repo layout do not matter.
+_SCRIPT_DIR = Path(__file__).resolve().parent
 
 
 @dataclass
@@ -47,6 +48,133 @@ class UploadTask:
     count: int
     ids: List[str]
     embeddings: List[List[float]]
+
+
+def _merge_intervals(
+    intervals: List[Tuple[int, int]],
+) -> List[Tuple[int, int]]:
+    if not intervals:
+        return []
+    intervals = sorted(intervals)
+    merged: List[List[int]] = [[intervals[0][0], intervals[0][1]]]
+    for start, end in intervals[1:]:
+        if start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return [(a, b) for a, b in merged]
+
+
+def _contiguous_prefix_end(intervals: Sequence[Tuple[int, int]]) -> int:
+    """Largest W such that [0, W) is covered by merged intervals."""
+    merged = _merge_intervals(list(intervals))
+    w = 0
+    for start, end in merged:
+        if start > w:
+            break
+        w = max(w, end)
+    return w
+
+
+def cursor_for_global_row(global_row: int, row_counts: Sequence[int]) -> Cursor:
+    """Map global row index (0-based along sorted shards) to shard cursor."""
+    cum = 0
+    for i, n in enumerate(row_counts):
+        n = int(n)
+        if global_row < cum + n:
+            return Cursor(i, global_row - cum)
+        cum += n
+    raise RuntimeError(
+        f"global_row {global_row} is past total dataset rows ({cum})"
+    )
+
+
+class ShardRowCounter:
+    """Lazy per-shard row counts for mapping global row index -> (shard, offset).
+
+    Avoids scanning all 2707 shards at startup: extends the prefix only as far as the
+    current watermark needs. A full cache file (from a prior run or pre-download) loads
+    instantly.
+    """
+
+    def __init__(self, shards: Sequence[str], repo_id: str, cache_path: Path) -> None:
+        self.shards = list(shards)
+        self.repo_id = repo_id
+        self.cache_path = cache_path
+        self._counts: List[int] = []
+        self._lock = threading.Lock()
+
+    def load_cache(self) -> None:
+        if not self.cache_path.exists():
+            return
+        try:
+            data = json.loads(self.cache_path.read_text())
+            if data.get("repo_id") != self.repo_id or data.get("shards") != self.shards:
+                return
+            self._counts = [int(x) for x in data["row_counts"]]
+            if len(self._counts) > len(self.shards):
+                self._counts = []
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+            self._counts = []
+
+    def ensure_through_global_row(self, global_row: int) -> None:
+        """Ensure we know enough shard sizes that global row index ``global_row`` is covered."""
+        with self._lock:
+            while sum(self._counts) <= global_row and len(self._counts) < len(
+                self.shards
+            ):
+                idx = len(self._counts)
+                path = ensure_shard_cached(self.repo_id, self.shards[idx])
+                n = int(pq.ParquetFile(path).metadata.num_rows)
+                self._counts.append(n)
+                self._persist_unlocked()
+            total = sum(self._counts)
+            if global_row >= total and len(self._counts) >= len(self.shards):
+                raise RuntimeError(
+                    f"global_row {global_row} is past total dataset rows ({total})"
+                )
+
+    @property
+    def counts(self) -> List[int]:
+        return self._counts
+
+    def _persist_unlocked(self) -> None:
+        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "repo_id": self.repo_id,
+            "shards": self.shards,
+            "row_counts": self._counts,
+            "complete": len(self._counts) == len(self.shards),
+        }
+        self.cache_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+
+
+def open_shard_row_counter(
+    shards: Sequence[str],
+    repo_id: str,
+    cache_path: Path,
+) -> ShardRowCounter:
+    counter = ShardRowCounter(shards, repo_id, cache_path)
+    counter.load_cache()
+    if counter.counts and len(counter.counts) == len(shards):
+        logging.info(
+            "Loaded full shard row-count cache (%s shards) from %s",
+            len(shards),
+            cache_path,
+        )
+    elif counter.counts:
+        logging.info(
+            "Loaded partial shard row-count cache (%s / %s shards); will extend lazily.",
+            len(counter.counts),
+            len(shards),
+        )
+    else:
+        logging.info(
+            "No shard row-count cache; will fetch parquet metadata lazily as ingest "
+            "progresses (cache: %s).",
+            cache_path,
+        )
+    return counter
 
 
 class ProgressTracker:
@@ -69,6 +197,13 @@ class ProgressTracker:
         self.committed_rows = 0
         self.cursor = Cursor()
         self.current_chunk_index = 0
+        self._row_counter: Optional[ShardRowCounter] = None
+        self._intervals: List[Tuple[int, int]] = []
+        self._last_saved_watermark = 0
+        self._last_save_time = 0.0
+
+    def set_row_counter(self, counter: ShardRowCounter) -> None:
+        self._row_counter = counter
 
     def load(self) -> None:
         if not self.path.exists():
@@ -91,6 +226,12 @@ class ProgressTracker:
         self.committed_rows = int(data.get("committed_rows", 0))
         self.cursor = Cursor(**data.get("cursor", {}))
         self.current_chunk_index = self.committed_rows // self.chunk_size
+        # Rows [0, committed_rows) are treated as already on the server.
+        self._intervals = (
+            [(0, self.committed_rows)] if self.committed_rows > 0 else []
+        )
+        self._last_saved_watermark = self.committed_rows
+        self._last_save_time = time.time()
 
         saved_shards = data.get("shards")
         if saved_shards and saved_shards != self.shards:
@@ -115,12 +256,60 @@ class ProgressTracker:
         tmp_path.write_text(json.dumps(self._payload(), indent=2, sort_keys=True))
         tmp_path.replace(self.path)
 
-    def commit_chunk(self, committed_rows: int, cursor: Cursor) -> None:
+    def _save_unlocked(self) -> None:
+        self.save()
+
+    def report_upload_done(
+        self,
+        start_id: int,
+        count: int,
+        *,
+        debounce_vectors: int,
+        flush_time_secs: float,
+    ) -> None:
+        """Record a successful upsert; advance contiguous watermark and maybe persist."""
+        end = start_id + count
         with self.lock:
-            self.committed_rows = committed_rows
-            self.cursor = Cursor(cursor.shard_index, cursor.row_offset_in_shard)
-            self.current_chunk_index = self.committed_rows // self.chunk_size
-            self.save()
+            self._intervals.append((start_id, end))
+            self._intervals = _merge_intervals(self._intervals)
+            w = _contiguous_prefix_end(self._intervals)
+            self.committed_rows = w
+            self.current_chunk_index = w // self.chunk_size
+
+        if self._row_counter is not None:
+            self._row_counter.ensure_through_global_row(w)
+
+        with self.lock:
+            w2 = self.committed_rows
+            if self._row_counter is not None:
+                self._row_counter.ensure_through_global_row(w2)
+                self.cursor = cursor_for_global_row(w2, self._row_counter.counts)
+            now = time.time()
+            should_save = (
+                w2 - self._last_saved_watermark >= debounce_vectors
+                or now - self._last_save_time >= flush_time_secs
+            )
+            if should_save:
+                self._save_unlocked()
+                self._last_saved_watermark = w2
+                self._last_save_time = now
+
+    def force_save(self) -> None:
+        """Write progress to disk immediately (e.g. chunk boundary or shutdown)."""
+        with self.lock:
+            self._save_unlocked()
+            self._last_saved_watermark = self.committed_rows
+            self._last_save_time = time.time()
+
+    def recompute_cursor_from_watermark(self) -> None:
+        """Align cursor with committed_rows (call after set_row_counter)."""
+        if self._row_counter is None:
+            return
+        with self.lock:
+            self._row_counter.ensure_through_global_row(self.committed_rows)
+            self.cursor = cursor_for_global_row(
+                self.committed_rows, self._row_counter.counts
+            )
 
 
 class ChunkStatus:
@@ -267,6 +456,17 @@ class ChromaCloudCollection:
             f"{self.base_url}/tenants/{self.tenant}/databases/{self.database}/collections/{self.collection_id}/upsert",
             json={"ids": ids, "embeddings": embeddings},
         )
+        if response.is_error:
+            detail = response.text
+            if len(detail) > 8000:
+                detail = detail[:8000] + "..."
+            logging.error(
+                "Chroma upsert failed: HTTP %s for %s records (first id=%s): %s",
+                response.status_code,
+                len(ids),
+                ids[0] if ids else "(none)",
+                detail,
+            )
         response.raise_for_status()
 
     def close(self) -> None:
@@ -316,7 +516,22 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--progress-file",
-        default=str(Path("scripts") / "ingest_100m_quantized_spann.progress.json"),
+        default=str(_SCRIPT_DIR / "ingest_100m_quantized_spann.progress.json"),
+    )
+    parser.add_argument(
+        "--progress-save-interval-vectors",
+        type=int,
+        default=DEFAULT_PROGRESS_SAVE_INTERVAL_VECTORS,
+        help=(
+            "Persist after the contiguous upload watermark advances by at least this many "
+            "rows (capped duplicate work on restart; default 10000)."
+        ),
+    )
+    parser.add_argument(
+        "--progress-flush-time-secs",
+        type=float,
+        default=120.0,
+        help="Also persist progress at least this often even if the interval is not reached.",
     )
     parser.add_argument(
         "--id-prefix",
@@ -354,24 +569,6 @@ def require_args(args: argparse.Namespace) -> None:
         raise ValueError(f"Missing required credentials: {', '.join(missing)}")
 
 
-def list_dataset_shards(repo_id: str) -> List[str]:
-    logging.info("Listing dataset shards from %s", repo_id)
-    api = HfApi()
-    files = api.list_repo_files(repo_id=repo_id, repo_type="dataset")
-    shards = [
-        path
-        for path in files
-        if path.endswith(".parquet")
-        and path.count("/") == 1
-        and Path(path).name.split(".")[0].isdigit()
-    ]
-    shards.sort()
-    if not shards:
-        raise RuntimeError(f"No parquet shards found in dataset {repo_id}")
-    logging.info("Found %s parquet shards.", len(shards))
-    return shards
-
-
 def is_rate_limited(exc: BaseException) -> bool:
     message = str(exc).lower()
     status_code = getattr(exc, "status_code", None)
@@ -402,26 +599,6 @@ def backoff_sleep(attempt: int, minimum: float = 1.0, maximum: float = 60.0) -> 
     delay = min(maximum, minimum * (2**attempt))
     delay += random.uniform(0.0, min(1.0, delay / 4.0))
     time.sleep(delay)
-
-
-def download_shard(repo_id: str, filename: str, max_attempts: int = 10) -> str:
-    for attempt in range(max_attempts):
-        try:
-            logging.info("Ensuring shard is available locally: %s", filename)
-            return hf_hub_download(
-                repo_id=repo_id,
-                filename=filename,
-                repo_type="dataset",
-            )
-        except HfHubHTTPError as exc:
-            if not is_transient(exc) or attempt == max_attempts - 1:
-                raise
-            logging.warning(
-                "Retrying shard download for %s after error: %s", filename, exc
-            )
-            backoff_sleep(attempt)
-
-    raise RuntimeError(f"Failed to download shard {filename}")
 
 
 def create_collection(args: argparse.Namespace) -> ChromaCloudCollection:
@@ -473,6 +650,7 @@ def worker_loop(
     stop_event: threading.Event,
     failures: FailureState,
     progress_bars: ProgressBars,
+    progress: "ProgressTracker",
 ) -> None:
     collection = create_collection(args)
     progress_bars.set_upload_status("starting workers")
@@ -486,6 +664,12 @@ def worker_loop(
                 f"chunk {task.chunk_index} ids {task.start_id}-{task.start_id + task.count - 1}"
             )
             upload_with_backoff(collection, task)
+            progress.report_upload_done(
+                task.start_id,
+                task.count,
+                debounce_vectors=args.progress_save_interval_vectors,
+                flush_time_secs=args.progress_flush_time_secs,
+            )
             chunk_statuses[task.chunk_index].mark_completed(task.count)
             progress_bars.advance_upload(task.count)
         except BaseException as exc:
@@ -525,7 +709,7 @@ def enqueue_chunk(
         progress_bars.set_download_status(
             f"chunk {chunk_index} shard {current_shard_index + 1}/{len(shards)} {shard_name}"
         )
-        local_path = download_shard(REPO_ID, shard_name)
+        local_path = ensure_shard_cached(REPO_ID, shard_name)
         parquet = pq.ParquetFile(local_path)
         rows_in_shard = parquet.metadata.num_rows
         row_in_shard = 0
@@ -663,7 +847,7 @@ def run_dry_run(
             progress_bars.set_download_status(
                 f"shard {current_shard_index + 1}/{len(shards)} {shard_name}"
             )
-            local_path = download_shard(REPO_ID, shard_name)
+            local_path = ensure_shard_cached(REPO_ID, shard_name)
             parquet = pq.ParquetFile(local_path)
             row_in_shard = 0
 
@@ -734,6 +918,13 @@ def main() -> None:
         shards=shards,
     )
     progress.load()
+    shard_row_cache = Path(args.progress_file).with_suffix(".shard_row_counts.json")
+    if not args.dry_run:
+        progress.set_row_counter(
+            open_shard_row_counter(shards, REPO_ID, shard_row_cache)
+        )
+        progress.recompute_cursor_from_watermark()
+
     validate_shard_iteration(args, shards, progress.cursor)
 
     if progress.committed_rows >= args.target_count:
@@ -772,6 +963,7 @@ def main() -> None:
                 stop_event,
                 failures,
                 progress_bars,
+                progress,
             ),
             daemon=True,
         )
@@ -780,32 +972,40 @@ def main() -> None:
     for worker in workers:
         worker.start()
 
-    committed_rows = progress.committed_rows
     cursor = Cursor(progress.cursor.shard_index, progress.cursor.row_offset_in_shard)
 
     logging.info(
         "Starting ingest from row %s into collection %s using %s shards.",
-        committed_rows,
+        progress.committed_rows,
         args.collection,
         len(shards),
     )
 
     try:
-        while committed_rows < args.target_count and not stop_event.is_set():
+        while True:
+            committed_rows = progress.committed_rows
+            if committed_rows >= args.target_count or stop_event.is_set():
+                break
+            chunk_base = (committed_rows // args.chunk_size) * args.chunk_size
+            offset_in_chunk = committed_rows - chunk_base
+            space_in_chunk = args.chunk_size - offset_in_chunk
+            rows_in_chunk = min(
+                space_in_chunk, args.target_count - committed_rows
+            )
             chunk_index = committed_rows // args.chunk_size
-            rows_in_chunk = min(args.chunk_size, args.target_count - committed_rows)
             chunk_status = ChunkStatus(
                 chunk_index=chunk_index, target_rows=rows_in_chunk
             )
             chunk_statuses[chunk_index] = chunk_status
 
             logging.info(
-                "Queueing chunk %s: rows %s..%s",
+                "Queueing chunk %s: rows %s..%s (%s rows in this segment)",
                 chunk_index,
                 committed_rows,
                 committed_rows + rows_in_chunk - 1,
+                rows_in_chunk,
             )
-            next_cursor = enqueue_chunk(
+            enqueue_chunk(
                 args=args,
                 shards=shards,
                 chunk_index=chunk_index,
@@ -824,15 +1024,17 @@ def main() -> None:
                 if stop_event.is_set():
                     raise RuntimeError("Stopped before current chunk finished.")
                 time.sleep(1.0)
-            committed_rows += rows_in_chunk
-            cursor = next_cursor
-            progress.commit_chunk(committed_rows, cursor)
+            committed_rows = progress.committed_rows
+            cursor = Cursor(
+                progress.cursor.shard_index, progress.cursor.row_offset_in_shard
+            )
+            progress.force_save()
             logging.info(
-                "Committed %s / %s rows. Resume cursor=%s:%s",
+                "Finished segment; progress saved. %s / %s rows. cursor=%s:%s",
                 committed_rows,
                 args.target_count,
-                cursor.shard_index,
-                cursor.row_offset_in_shard,
+                progress.cursor.shard_index,
+                progress.cursor.row_offset_in_shard,
             )
             del chunk_statuses[chunk_index]
 
@@ -844,17 +1046,21 @@ def main() -> None:
             failure = failures.get()
             if failure is not None:
                 raise failure
-            logging.warning("Stopped before reaching target. Progress is saved.")
+            logging.warning("Stopped before reaching target.")
     finally:
         stop_event.set()
+        progress.force_save()
         for _ in workers:
             task_queue.put(None)
         task_queue.join()
         for worker in workers:
             worker.join(timeout=5.0)
+        progress.force_save()
         progress_bars.close()
 
-    logging.info("Ingest finished at %s committed rows.", committed_rows)
+    logging.info(
+        "Ingest finished at %s committed rows.", progress.committed_rows
+    )
 
 
 if __name__ == "__main__":
