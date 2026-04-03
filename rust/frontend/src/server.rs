@@ -83,14 +83,26 @@ pub struct ForkCountResponse {
 async fn graceful_shutdown(system: System) {
     #[cfg(unix)]
     {
-        match signal(SignalKind::terminate()) {
-            Ok(mut sigterm) => {
-                sigterm.recv().await;
-                tracing::info!("Received SIGTERM, shutting down service");
-            }
+        let mut sigterm = match signal(SignalKind::terminate()) {
+            Ok(s) => s,
             Err(err) => {
                 tracing::error!("Failed to create SIGTERM handler: {err}");
                 return;
+            }
+        };
+        let mut sigint = match signal(SignalKind::interrupt()) {
+            Ok(s) => s,
+            Err(err) => {
+                tracing::error!("Failed to create SIGINT handler: {err}");
+                return;
+            }
+        };
+        tokio::select! {
+            _ = sigterm.recv() => {
+                tracing::info!("Received SIGTERM, shutting down service");
+            }
+            _ = sigint.recv() => {
+                tracing::info!("Received SIGINT, shutting down service");
             }
         }
     }

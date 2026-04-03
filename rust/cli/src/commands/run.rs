@@ -131,12 +131,7 @@ pub fn run(args: RunArgs) -> Result<(), CliError> {
 
     let runtime = tokio::runtime::Runtime::new().map_err(|_| RunError::ServerStartFailed)?;
     runtime.block_on(async {
-        tokio::select! {
-            _ = frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), &config, true) => {},
-            _ = tokio::signal::ctrl_c() => {
-                println!("\nShutting down Chroma server...");
-            },
-        }
+        frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), &config, true).await;
     });
     Ok(())
 }
