@@ -576,8 +576,9 @@ impl S3Storage {
             // Fill the part buffer from the stream.
             let mut part_buf = Vec::with_capacity(expected_part_size);
             if !leftover.is_empty() {
-                part_buf.extend_from_slice(&leftover);
-                leftover = Bytes::new();
+                let take = leftover.len().min(expected_part_size);
+                part_buf.extend_from_slice(&leftover[..take]);
+                leftover = leftover.slice(take..);
             }
             while part_buf.len() < expected_part_size {
                 match stream.next().await {
@@ -672,6 +673,24 @@ impl S3Storage {
                     return Err(e);
                 }
             }
+        }
+
+        if !leftover.is_empty() {
+            let _ = self
+                .client
+                .abort_multipart_upload()
+                .bucket(&self.bucket)
+                .key(key)
+                .upload_id(&upload_id)
+                .send()
+                .await;
+            self.metrics.s3_put_error_count.add(1, &[]);
+            return Err(StorageError::Message {
+                message: format!(
+                    "Stream yielded more bytes than declared total_size_bytes={}",
+                    total_size_bytes
+                ),
+            });
         }
 
         let result = self
