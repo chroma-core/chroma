@@ -55,14 +55,14 @@ pub(crate) enum CountRecordsError {
     #[error("Error creating record segment reader")]
     RecordSegmentCreateError(#[from] RecordSegmentReaderShardCreationError),
     #[error("Error reading record segment")]
-    RecordSegmentReaderShardror(#[from] Box<dyn ChromaError>),
+    RecordSegmentReadError(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for CountRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             CountRecordsError::RecordSegmentCreateError(e) => e.code(),
-            CountRecordsError::RecordSegmentReaderShardror(e) => e.code(),
+            CountRecordsError::RecordSegmentReadError(e) => e.code(),
         }
     }
 }
@@ -160,7 +160,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
                 }
                 Err(e) => {
                     tracing::error!("Error reading record segment: {:?}", e);
-                    return Err(CountRecordsError::RecordSegmentReaderShardror(e));
+                    return Err(CountRecordsError::RecordSegmentReadError(e));
                 }
             }
         }
@@ -208,7 +208,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
             }
             Err(e) => {
                 tracing::error!("Error reading record segment: {:?}", e);
-                return Err(CountRecordsError::RecordSegmentReaderShardror(e));
+                return Err(CountRecordsError::RecordSegmentReadError(e));
             }
         };
         Ok(CountRecordsOutput {
