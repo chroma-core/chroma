@@ -5,8 +5,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
 use chroma_segment::{
     blockfile_record::{
-        RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
-        RecordSegmentReaderShardOptions,
+        RecordSegmentReaderOptions, RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
     },
     bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},
@@ -87,7 +86,7 @@ impl Operator<SparseLogKnnInput, SparseLogKnnOutput> for SparseLogKnn {
             Err(e) => Err(*e),
         }?;
 
-        let plan = RecordSegmentReaderShardOptions {
+        let plan = RecordSegmentReaderOptions {
             use_bloom_filter: input
                 .bloom_filter_manager
                 .as_ref()

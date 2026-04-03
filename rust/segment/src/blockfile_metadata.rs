@@ -1128,7 +1128,7 @@ impl<'me> MetadataSegmentWriterShard<'me> {
         Ok(())
     }
 
-    pub async fn commit(self) -> Result<MetadataSegmentFlusher, Box<dyn ChromaError>> {
+    pub async fn commit(self) -> Result<MetadataSegmentFlusherShard, Box<dyn ChromaError>> {
         let full_text_flusher = match self.full_text_index_writer {
             Some(flusher) => match flusher.commit().await {
                 Ok(flusher) => flusher,
@@ -1177,7 +1177,7 @@ impl<'me> MetadataSegmentWriterShard<'me> {
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
 
-        Ok(MetadataSegmentFlusher {
+        Ok(MetadataSegmentFlusherShard {
             id: self.id,
             full_text_index_flusher: full_text_flusher,
             string_metadata_index_flusher: string_metadata_flusher,
@@ -1189,7 +1189,7 @@ impl<'me> MetadataSegmentWriterShard<'me> {
     }
 }
 
-pub struct MetadataSegmentFlusher {
+pub struct MetadataSegmentFlusherShard {
     pub id: SegmentUuid,
     pub(crate) full_text_index_flusher: FullTextIndexFlusher,
     pub(crate) string_metadata_index_flusher: MetadataIndexFlusher,
@@ -1199,15 +1199,15 @@ pub struct MetadataSegmentFlusher {
     pub(crate) sparse_index_flusher: SparseFlusher,
 }
 
-impl Debug for MetadataSegmentFlusher {
+impl Debug for MetadataSegmentFlusherShard {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("MetadataSegmentFlusher")
+        f.debug_struct("MetadataSegmentFlusherShard")
             .field("id", &self.id)
             .finish()
     }
 }
 
-impl MetadataSegmentFlusher {
+impl MetadataSegmentFlusherShard {
     pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let prefix_path = self.full_text_index_flusher.prefix_path().to_string();
         let full_text_pls_id = self.full_text_index_flusher.pls_id();
@@ -1434,8 +1434,8 @@ mod test {
     use crate::{
         blockfile_metadata::{MetadataSegmentReaderShard, MetadataSegmentWriterShard},
         blockfile_record::{
-            RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
-            RecordSegmentReaderShardOptions, RecordSegmentWriterShard,
+            RecordSegmentReaderOptions, RecordSegmentReaderShard,
+            RecordSegmentReaderShardCreationError, RecordSegmentWriterShard,
         },
         test::TestDistributedSegment,
         types::materialize_logs,
@@ -1600,7 +1600,7 @@ mod test {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderShardOptions::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -1686,7 +1686,7 @@ mod test {
             &some_reader,
             data,
             None,
-            &RecordSegmentReaderShardOptions::default(),
+            &RecordSegmentReaderOptions::default(),
         )
         .await
         .expect("Log materialization failed");
@@ -1786,7 +1786,7 @@ mod test {
             &some_reader,
             data,
             None,
-            &RecordSegmentReaderShardOptions::default(),
+            &RecordSegmentReaderOptions::default(),
         )
         .await
         .expect("Log materialization failed");
@@ -1950,7 +1950,7 @@ mod test {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderShardOptions::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -2043,7 +2043,7 @@ mod test {
             &some_reader,
             data,
             None,
-            &RecordSegmentReaderShardOptions::default(),
+            &RecordSegmentReaderOptions::default(),
         )
         .await
         .expect("Log materialization failed");
@@ -2231,7 +2231,7 @@ mod test {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderShardOptions::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -2306,7 +2306,7 @@ mod test {
             &some_reader,
             data,
             None,
-            &RecordSegmentReaderShardOptions::default(),
+            &RecordSegmentReaderOptions::default(),
         )
         .await
         .expect("Log materialization failed");
@@ -2481,7 +2481,7 @@ mod test {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderShardOptions::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -2554,7 +2554,7 @@ mod test {
             &some_reader,
             data,
             None,
-            &RecordSegmentReaderShardOptions::default(),
+            &RecordSegmentReaderOptions::default(),
         )
         .await
         .expect("Log materialization failed");
@@ -2741,7 +2741,7 @@ mod test {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderShardOptions::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -3030,7 +3030,7 @@ mod test {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderShardOptions::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .await
             .expect("Error materializing logs");
@@ -3423,7 +3423,7 @@ mod test {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderShardOptions::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -3621,7 +3621,7 @@ mod test {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderShardOptions::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .await
             .expect("Log materialization failed");

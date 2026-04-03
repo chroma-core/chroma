@@ -8,7 +8,7 @@ use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentReaderShard},
     blockfile_record::{
         RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
-        RecordSegmentReaderShardOptions,
+        RecordSegmentReaderOptions,
     },
     bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},
@@ -124,7 +124,7 @@ impl Operator<IdfInput, IdfOutput> for Idf {
             tokio::try_join!(record_segment_reader_fut, metadata_segment_reader_fut)?;
         n += count;
 
-        let plan = RecordSegmentReaderShardOptions {
+        let plan = RecordSegmentReaderOptions {
             use_bloom_filter: input
                 .bloom_filter_manager
                 .as_ref()

@@ -4,7 +4,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
     blockfile_record::{
         RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
-        RecordSegmentReaderShardOptions,
+        RecordSegmentReaderOptions,
     },
     bloom_filter::BloomFilterManager,
 };
@@ -136,7 +136,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
         // in both deleted and not deleted state).
         let mut deleted_and_non_deleted_present_in_segment: HashSet<String> = HashSet::new();
         let mut res_count: i32 = 0;
-        let options = RecordSegmentReaderShardOptions {
+        let options = RecordSegmentReaderOptions {
             use_bloom_filter: input
                 .bloom_filter_manager
                 .as_ref()
@@ -225,7 +225,7 @@ mod tests {
     use chroma_segment::{
         blockfile_record::{
             RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
-            RecordSegmentReaderShardOptions, RecordSegmentWriterShard,
+            RecordSegmentReaderOptions, RecordSegmentWriterShard,
         },
         types::materialize_logs,
     };
@@ -332,7 +332,7 @@ mod tests {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderShardOptions::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await

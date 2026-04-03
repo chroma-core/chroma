@@ -6,7 +6,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
     blockfile_record::{
         RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
-        RecordSegmentReaderShardOptions,
+        RecordSegmentReaderOptions,
     },
     bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},
@@ -211,7 +211,7 @@ impl Operator<LimitInput, LimitOutput> for Limit {
         }?;
 
         // Materialize the filtered offset ids from the materialized log
-        let plan = RecordSegmentReaderShardOptions {
+        let plan = RecordSegmentReaderOptions {
             use_bloom_filter: input
                 .bloom_filter_manager
                 .as_ref()

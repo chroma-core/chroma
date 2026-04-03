@@ -262,34 +262,34 @@ impl QuantizedSpannSegmentWriterShard {
             .map_err(|e| Box::new(QuantizedSpannSegmentError::from(e)) as Box<dyn ChromaError>)
     }
 
-    pub async fn commit(self) -> Result<QuantizedSpannSegmentFlusher, Box<dyn ChromaError>> {
+    pub async fn commit(self) -> Result<QuantizedSpannSegmentFlusherShard, Box<dyn ChromaError>> {
         let flusher = Box::pin(
             self.index
                 .commit(&self.blockfile_provider, &self.usearch_provider),
         )
         .await
         .map_err(|e| Box::new(QuantizedSpannSegmentError::from(e)) as Box<dyn ChromaError>)?;
-        Ok(QuantizedSpannSegmentFlusher {
+        Ok(QuantizedSpannSegmentFlusherShard {
             flusher,
             id: self.id,
         })
     }
 }
 
-pub struct QuantizedSpannSegmentFlusher {
+pub struct QuantizedSpannSegmentFlusherShard {
     flusher: QuantizedSpannFlusher,
     pub id: SegmentUuid,
 }
 
-impl Debug for QuantizedSpannSegmentFlusher {
+impl Debug for QuantizedSpannSegmentFlusherShard {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("QuantizedSpannSegmentFlusher")
+        f.debug_struct("QuantizedSpannSegmentFlusherShard")
             .field("id", &self.id)
             .finish()
     }
 }
 
-impl QuantizedSpannSegmentFlusher {
+impl QuantizedSpannSegmentFlusherShard {
     pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let ids = Box::pin(self.flusher.flush())
             .await
@@ -659,7 +659,7 @@ mod test {
     use rand::{Rng, SeedableRng};
 
     use super::{QuantizedSpannSegmentReaderShard, QuantizedSpannSegmentWriterShard};
-    use crate::blockfile_record::RecordSegmentReaderShardOptions;
+    use crate::blockfile_record::RecordSegmentReaderOptions;
     use crate::types::materialize_logs;
 
     const CLUSTER_BLOCK_SIZE: usize = 2 * 1024 * 1024;
@@ -857,7 +857,7 @@ mod test {
                 &None,
                 chunked,
                 Some(next_offset_id.clone()),
-                &RecordSegmentReaderShardOptions::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .await
             .unwrap_or_else(|e| panic!("cycle {cycle}: materialize failed: {e}"));

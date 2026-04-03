@@ -328,7 +328,7 @@ impl SpannSegmentWriterShard {
         }
     }
 
-    pub async fn commit(self) -> Result<SpannSegmentFlusher, Box<dyn ChromaError>> {
+    pub async fn commit(self) -> Result<SpannSegmentFlusherShard, Box<dyn ChromaError>> {
         tracing::info!("Committing spann segment writer {}", self.id);
         let index_flusher = Box::pin(self.index.commit()).await.map_err(|e| {
             tracing::error!("Error committing spann index writer {:?}", e);
@@ -336,7 +336,7 @@ impl SpannSegmentWriterShard {
         });
         match index_flusher {
             Err(e) => Err(Box::new(e)),
-            Ok(index_flusher) => Ok(SpannSegmentFlusher {
+            Ok(index_flusher) => Ok(SpannSegmentFlusherShard {
                 id: self.id,
                 collection_version: self.collection_version,
                 index_flusher,
@@ -349,19 +349,19 @@ impl SpannSegmentWriterShard {
     }
 }
 
-pub struct SpannSegmentFlusher {
+pub struct SpannSegmentFlusherShard {
     pub id: SegmentUuid,
     collection_version: i32,
     index_flusher: SpannIndexFlusher,
 }
 
-impl Debug for SpannSegmentFlusher {
+impl Debug for SpannSegmentFlusherShard {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SpannSegmentFlusher").finish()
+        f.debug_struct("SpannSegmentFlusherShard").finish()
     }
 }
 
-impl SpannSegmentFlusher {
+impl SpannSegmentFlusherShard {
     pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         tracing::info!(
             segment_id = %self.id,
@@ -639,7 +639,7 @@ mod test {
     };
 
     use crate::{
-        blockfile_record::RecordSegmentReaderShardOptions,
+        blockfile_record::RecordSegmentReaderOptions,
         distributed_spann::{SpannSegmentReaderShard, SpannSegmentWriterShard},
         types::materialize_logs,
     };
@@ -753,7 +753,7 @@ mod test {
             &None,
             chunked_log,
             None,
-            &RecordSegmentReaderShardOptions::default(),
+            &RecordSegmentReaderOptions::default(),
         )
         .await
         .expect("Error materializing logs");
@@ -998,7 +998,7 @@ mod test {
             &None,
             chunked_log,
             None,
-            &RecordSegmentReaderShardOptions::default(),
+            &RecordSegmentReaderOptions::default(),
         )
         .await
         .expect("Error materializing logs");
@@ -1192,7 +1192,7 @@ mod test {
             &None,
             chunked_log,
             None,
-            &RecordSegmentReaderShardOptions::default(),
+            &RecordSegmentReaderOptions::default(),
         )
         .await
         .expect("Error materializing logs");

@@ -620,7 +620,7 @@ impl RecordSegmentWriterShard {
         Ok(())
     }
 
-    pub async fn commit(mut self) -> Result<RecordSegmentFlusher, Box<dyn ChromaError>> {
+    pub async fn commit(mut self) -> Result<RecordSegmentFlusherShard, Box<dyn ChromaError>> {
         // Commit all the blockfiles
         let flusher_user_id_to_id = self
             .user_id_to_id
@@ -692,7 +692,7 @@ impl RecordSegmentWriterShard {
         };
 
         // Return a flusher that can be used to flush the blockfiles
-        Ok(RecordSegmentFlusher {
+        Ok(RecordSegmentFlusherShard {
             id: self.id,
             user_id_to_id_flusher: flusher_user_id_to_id,
             id_to_user_id_flusher: flusher_id_to_user_id,
@@ -753,7 +753,7 @@ impl ChromaError for ApplyMaterializedLogError {
     }
 }
 
-pub struct RecordSegmentFlusher {
+pub struct RecordSegmentFlusherShard {
     pub id: SegmentUuid,
     user_id_to_id_flusher: BlockfileFlusher,
     id_to_user_id_flusher: BlockfileFlusher,
@@ -763,13 +763,13 @@ pub struct RecordSegmentFlusher {
     serialized_bloom_filter: Option<BloomFilterFlusher>,
 }
 
-impl Debug for RecordSegmentFlusher {
+impl Debug for RecordSegmentFlusherShard {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RecordSegmentFlusher").finish()
+        f.debug_struct("RecordSegmentFlusherShard").finish()
     }
 }
 
-impl RecordSegmentFlusher {
+impl RecordSegmentFlusherShard {
     pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let prefix_path = self.user_id_to_id_flusher.prefix_path().to_string();
         let user_id_to_id_bf_id = self.user_id_to_id_flusher.id();
@@ -866,7 +866,7 @@ impl RecordSegmentFlusher {
 /// Controls how the record segment reader handles bloom-filter-based
 /// pre-filtering during lookups.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct RecordSegmentReaderShardOptions {
+pub struct RecordSegmentReaderOptions {
     pub use_bloom_filter: bool,
 }
 
@@ -1071,7 +1071,7 @@ impl RecordSegmentReaderShard<'_> {
     pub async fn get_offset_id_for_user_id(
         &self,
         user_id: &str,
-        plan: &RecordSegmentReaderShardOptions,
+        plan: &RecordSegmentReaderOptions,
     ) -> Result<Option<u32>, Box<dyn ChromaError>> {
         self.load_bloom_filter(plan.use_bloom_filter).await;
         if let Some(Some(bf)) = self.bloom_filter.get() {
@@ -1092,7 +1092,7 @@ impl RecordSegmentReaderShard<'_> {
     pub async fn data_exists_for_user_id(
         &self,
         user_id: &str,
-        plan: &RecordSegmentReaderShardOptions,
+        plan: &RecordSegmentReaderOptions,
     ) -> Result<bool, Box<dyn ChromaError>> {
         self.load_bloom_filter(plan.use_bloom_filter).await;
         if let Some(Some(bf)) = self.bloom_filter.get() {
@@ -1178,7 +1178,7 @@ impl RecordSegmentReaderShard<'_> {
     pub async fn load_user_id_to_id(
         &self,
         keys: impl Iterator<Item = &str>,
-        plan: &RecordSegmentReaderShardOptions,
+        plan: &RecordSegmentReaderOptions,
     ) {
         self.load_bloom_filter(plan.use_bloom_filter).await;
 
@@ -1287,7 +1287,7 @@ mod tests {
                                 &None,
                                 log_chunk,
                                 Some(curr_offset_id),
-                                &super::RecordSegmentReaderShardOptions::default(),
+                                &super::RecordSegmentReaderOptions::default(),
                             ))
                             .expect("Should be able to materialize log");
                             future::block_on(
@@ -1484,7 +1484,7 @@ mod tests {
             &Some(reader),
             delete_chunk.clone(),
             Some(AtomicU32::new(11).into()),
-            &super::RecordSegmentReaderShardOptions::default(),
+            &super::RecordSegmentReaderOptions::default(),
         )
         .await
         .expect("Should materialize delete logs");

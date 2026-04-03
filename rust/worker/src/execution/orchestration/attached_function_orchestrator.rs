@@ -9,7 +9,7 @@ use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentWriterShard},
     blockfile_record::{
         RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
-        RecordSegmentReaderShardOptions, RecordSegmentWriterShard,
+        RecordSegmentReaderOptions, RecordSegmentWriterShard,
         RecordSegmentWriterShardCreationError,
     },
     distributed_hnsw::{DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentWriter},
@@ -404,7 +404,7 @@ impl AttachedFunctionOrchestrator {
         }
 
         let total_log_count: usize = partitions.iter().map(|p| p.len()).sum();
-        let plan = RecordSegmentReaderShardOptions {
+        let plan = RecordSegmentReaderOptions {
             use_bloom_filter: self
                 .output_context
                 .bloom_filter_manager

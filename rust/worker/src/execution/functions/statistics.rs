@@ -500,7 +500,7 @@ mod tests {
     use std::collections::HashMap;
 
     use chroma_segment::{
-        blockfile_record::{RecordSegmentReaderShard, RecordSegmentReaderShardOptions},
+        blockfile_record::{RecordSegmentReaderShard, RecordSegmentReaderOptions},
         test::TestDistributedSegment,
         types::{materialize_logs, MaterializeLogsResult},
     };
@@ -727,7 +727,7 @@ mod tests {
             &None,
             logs,
             None,
-            &RecordSegmentReaderShardOptions::default(),
+            &RecordSegmentReaderOptions::default(),
         )
         .await
         .expect("materialization should succeed");
@@ -844,7 +844,7 @@ mod tests {
             &None,
             logs,
             None,
-            &RecordSegmentReaderShardOptions::default(),
+            &RecordSegmentReaderOptions::default(),
         )
         .await
         .expect("materialization should succeed");
@@ -907,7 +907,7 @@ mod tests {
             &None,
             logs,
             None,
-            &RecordSegmentReaderShardOptions::default(),
+            &RecordSegmentReaderOptions::default(),
         )
         .await
         .expect("materialization should succeed");
@@ -960,7 +960,7 @@ mod tests {
             &None,
             logs,
             None,
-            &RecordSegmentReaderShardOptions::default(),
+            &RecordSegmentReaderOptions::default(),
         )
         .await
         .expect("materialization should succeed");
@@ -994,7 +994,7 @@ mod tests {
             &None,
             logs,
             None,
-            &RecordSegmentReaderShardOptions::default(),
+            &RecordSegmentReaderOptions::default(),
         )
         .await
         .expect("materialization should succeed");
@@ -1065,7 +1065,7 @@ mod tests {
             &Some(input_record_reader.clone()),
             logs,
             None,
-            &RecordSegmentReaderShardOptions::default(),
+            &RecordSegmentReaderOptions::default(),
         )
         .await
         .expect("materialization should succeed");
@@ -1124,7 +1124,7 @@ mod tests {
             &None,
             empty_logs,
             None,
-            &RecordSegmentReaderShardOptions::default(),
+            &RecordSegmentReaderOptions::default(),
         )
         .await
         .expect("materialization should succeed");
@@ -1199,7 +1199,7 @@ mod tests {
             &Some(input_record_reader.clone()),
             logs,
             None,
-            &RecordSegmentReaderShardOptions::default(),
+            &RecordSegmentReaderOptions::default(),
         )
         .await
         .expect("materialization should succeed");

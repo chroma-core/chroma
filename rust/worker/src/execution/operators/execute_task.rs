@@ -5,8 +5,7 @@ use chroma_log::Log;
 use chroma_segment::types::HydratedMaterializedLogRecord;
 use chroma_segment::{
     blockfile_record::{
-        RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
-        RecordSegmentReaderShardOptions,
+        RecordSegmentReaderOptions, RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
     },
     bloom_filter::BloomFilterManager,
 };
@@ -62,7 +61,7 @@ impl CountAttachedFunction {
         let offset_id = match reader
             .get_offset_id_for_user_id(
                 COUNT_FUNCTION_OUTPUT_ID,
-                &RecordSegmentReaderShardOptions::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .await
         {

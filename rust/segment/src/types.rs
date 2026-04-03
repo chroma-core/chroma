@@ -11,14 +11,14 @@ use thiserror::Error;
 use tracing::{Instrument, Span};
 use uuid::Uuid;
 
-use crate::distributed_spann::{SpannSegmentFlusher, SpannSegmentWriterShard};
+use crate::distributed_spann::{SpannSegmentFlusherShard, SpannSegmentWriterShard};
 #[cfg(feature = "usearch")]
-use crate::quantized_spann::{QuantizedSpannSegmentFlusher, QuantizedSpannSegmentWriterShard};
+use crate::quantized_spann::{QuantizedSpannSegmentFlusherShard, QuantizedSpannSegmentWriterShard};
 
-use super::blockfile_metadata::{MetadataSegmentFlusher, MetadataSegmentWriterShard};
+use super::blockfile_metadata::{MetadataSegmentFlusherShard, MetadataSegmentWriterShard};
 use super::blockfile_record::{
-    ApplyMaterializedLogError, RecordSegmentFlusher, RecordSegmentReaderShard,
-    RecordSegmentReaderShardOptions, RecordSegmentWriterShard,
+    ApplyMaterializedLogError, RecordSegmentFlusherShard, RecordSegmentReaderOptions,
+    RecordSegmentReaderShard, RecordSegmentWriterShard,
 };
 use super::distributed_hnsw::DistributedHNSWSegmentWriter;
 
@@ -619,7 +619,7 @@ pub async fn materialize_logs(
     record_segment_reader: &Option<RecordSegmentReaderShard<'_>>,
     logs: Chunk<LogRecord>,
     next_offset_id: Option<Arc<AtomicU32>>,
-    plan: &RecordSegmentReaderShardOptions,
+    plan: &RecordSegmentReaderOptions,
 ) -> Result<MaterializeLogsResult, LogMaterializerError> {
     // Trace the total_len since len() iterates over the entire chunk
     // and we don't want to do that just to trace the length.
@@ -1070,27 +1070,33 @@ impl VectorSegmentWriterShard {
     pub async fn commit(self) -> Result<ChromaSegmentFlusher, Box<dyn ChromaError>> {
         match self {
             VectorSegmentWriterShard::Hnsw(writer) => writer.commit().await.map(|w| {
-                ChromaSegmentFlusher::VectorSegment(VectorSegmentFlusher::Hnsw(Box::new(w)))
+                ChromaSegmentFlusher::VectorSegment(VectorSegmentFlusherShard::Hnsw(Box::new(w)))
             }),
             #[cfg(feature = "usearch")]
             VectorSegmentWriterShard::QuantizedSpann(writer) => {
                 Box::pin(writer.commit()).await.map(|f| {
-                    ChromaSegmentFlusher::VectorSegment(VectorSegmentFlusher::QuantizedSpann(f))
+                    ChromaSegmentFlusher::VectorSegment(VectorSegmentFlusherShard::QuantizedSpann(
+                        f,
+                    ))
                 })
             }
             VectorSegmentWriterShard::Spann(writer) => Box::pin(writer.commit())
                 .await
-                .map(|w| ChromaSegmentFlusher::VectorSegment(VectorSegmentFlusher::Spann(w))),
+                .map(|w| ChromaSegmentFlusher::VectorSegment(VectorSegmentFlusherShard::Spann(w))),
         }
     }
 }
 
+type RecordSegmentWriter = RecordSegmentWriterShard;
+type MetadataSegmentWriter<'a> = MetadataSegmentWriterShard<'a>;
+type VectorSegmentWriter = VectorSegmentWriterShard;
+
 #[derive(Clone, Debug)]
 #[allow(clippy::large_enum_variant)]
 pub enum ChromaSegmentWriter<'bf> {
-    RecordSegment(RecordSegmentWriterShard),
-    MetadataSegment(MetadataSegmentWriterShard<'bf>),
-    VectorSegment(VectorSegmentWriterShard),
+    RecordSegment(RecordSegmentWriter),
+    MetadataSegment(MetadataSegmentWriter<'bf>),
+    VectorSegment(VectorSegmentWriter),
 }
 
 impl ChromaSegmentWriter<'_> {
@@ -1156,12 +1162,16 @@ impl ChromaSegmentWriter<'_> {
 
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
-pub enum VectorSegmentFlusher {
+pub enum VectorSegmentFlusherShard {
     Hnsw(Box<DistributedHNSWSegmentWriter>),
     #[cfg(feature = "usearch")]
-    QuantizedSpann(QuantizedSpannSegmentFlusher),
-    Spann(SpannSegmentFlusher),
+    QuantizedSpann(QuantizedSpannSegmentFlusherShard),
+    Spann(SpannSegmentFlusherShard),
 }
+
+type RecordSegmentFlusher = RecordSegmentFlusherShard;
+type MetadataSegmentFlusher = MetadataSegmentFlusherShard;
+type VectorSegmentFlusher = VectorSegmentFlusherShard;
 
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
@@ -1184,10 +1194,10 @@ impl ChromaSegmentFlusher {
             ChromaSegmentFlusher::RecordSegment(flusher) => flusher.id,
             ChromaSegmentFlusher::MetadataSegment(flusher) => flusher.id,
             ChromaSegmentFlusher::VectorSegment(flusher) => match flusher {
-                VectorSegmentFlusher::Hnsw(writer) => writer.id,
+                VectorSegmentFlusherShard::Hnsw(writer) => writer.id,
                 #[cfg(feature = "usearch")]
-                VectorSegmentFlusher::QuantizedSpann(flusher) => flusher.id,
-                VectorSegmentFlusher::Spann(writer) => writer.id,
+                VectorSegmentFlusherShard::QuantizedSpann(flusher) => flusher.id,
+                VectorSegmentFlusherShard::Spann(writer) => writer.id,
             },
         }
     }
@@ -1197,10 +1207,10 @@ impl ChromaSegmentFlusher {
             ChromaSegmentFlusher::RecordSegment(_) => "RecordSegmentFlusher",
             ChromaSegmentFlusher::MetadataSegment(_) => "MetadataSegmentFlusher",
             ChromaSegmentFlusher::VectorSegment(flusher) => match flusher {
-                VectorSegmentFlusher::Hnsw(_) => "DistributedHNSWSegmentFlusher",
+                VectorSegmentFlusherShard::Hnsw(_) => "DistributedHNSWSegmentFlusher",
                 #[cfg(feature = "usearch")]
-                VectorSegmentFlusher::QuantizedSpann(_) => "QuantizedSpannSegmentFlusher",
-                VectorSegmentFlusher::Spann(_) => "SpannSegmentFlusher",
+                VectorSegmentFlusherShard::QuantizedSpann(_) => "QuantizedSpannSegmentFlusher",
+                VectorSegmentFlusherShard::Spann(_) => "SpannSegmentFlusher",
             },
         }
     }
@@ -1210,10 +1220,12 @@ impl ChromaSegmentFlusher {
             ChromaSegmentFlusher::RecordSegment(flusher) => Box::pin(flusher.flush()).await,
             ChromaSegmentFlusher::MetadataSegment(flusher) => Box::pin(flusher.flush()).await,
             ChromaSegmentFlusher::VectorSegment(flusher) => match flusher {
-                VectorSegmentFlusher::Hnsw(flusher) => flusher.flush().await,
+                VectorSegmentFlusherShard::Hnsw(flusher) => flusher.flush().await,
                 #[cfg(feature = "usearch")]
-                VectorSegmentFlusher::QuantizedSpann(flusher) => Box::pin(flusher.flush()).await,
-                VectorSegmentFlusher::Spann(flusher) => Box::pin(flusher.flush()).await,
+                VectorSegmentFlusherShard::QuantizedSpann(flusher) => {
+                    Box::pin(flusher.flush()).await
+                }
+                VectorSegmentFlusherShard::Spann(flusher) => Box::pin(flusher.flush()).await,
             },
         }
     }
@@ -1347,7 +1359,7 @@ mod tests {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderShardOptions::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -1418,7 +1430,7 @@ mod tests {
             &some_reader,
             data,
             None,
-            &RecordSegmentReaderShardOptions::default(),
+            &RecordSegmentReaderOptions::default(),
         )
         .await
         .expect("Error materializing logs");
@@ -1667,7 +1679,7 @@ mod tests {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderShardOptions::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -1725,7 +1737,7 @@ mod tests {
             &some_reader,
             data,
             None,
-            &RecordSegmentReaderShardOptions::default(),
+            &RecordSegmentReaderOptions::default(),
         )
         .await
         .expect("Error materializing logs");
@@ -1979,7 +1991,7 @@ mod tests {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderShardOptions::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -2061,7 +2073,7 @@ mod tests {
             &some_reader,
             data,
             None,
-            &RecordSegmentReaderShardOptions::default(),
+            &RecordSegmentReaderOptions::default(),
         )
         .await
         .expect("Error materializing logs");
@@ -2305,7 +2317,7 @@ mod tests {
                 &record_segment_reader,
                 data,
                 None,
-                &RecordSegmentReaderShardOptions::default(),
+                &RecordSegmentReaderOptions::default(),
             )
             .await
             .expect("Log materialization failed");
@@ -2377,7 +2389,7 @@ mod tests {
             &some_reader,
             data,
             None,
-            &RecordSegmentReaderShardOptions::default(),
+            &RecordSegmentReaderOptions::default(),
         )
         .await
         .expect("Error materializing logs");
