@@ -124,6 +124,30 @@ pub struct Segment {
 }
 
 impl Segment {
+    pub fn get_shards(&self) -> Vec<SegmentShard> {
+        // If there are no file paths, return empty vector
+        if self.file_path.is_empty() {
+            return Vec::new();
+        }
+
+        // All paths should have the same number of shards
+        let num_shards = self
+            .file_path
+            .values()
+            .next()
+            .map(|paths| paths.len())
+            .unwrap_or(0);
+
+        // Create a SegmentShard for each shard index
+        let mut shards = Vec::new();
+        for shard_index in 0..num_shards {
+            if let Ok(shard) = SegmentShard::try_from((self, shard_index as u32)) {
+                shards.push(shard);
+            }
+        }
+        shards
+    }
+
     pub fn prefetch_supported(&self) -> bool {
         matches!(
             self.r#type,
