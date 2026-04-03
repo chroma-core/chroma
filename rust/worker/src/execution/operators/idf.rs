@@ -7,8 +7,7 @@ use chroma_index::sparse::{reader::SparseReaderError, types::encode_u32};
 use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentReaderShard},
     blockfile_record::{
-        RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
-        RecordSegmentReaderOptions,
+        RecordSegmentReaderOptions, RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
     },
     bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},

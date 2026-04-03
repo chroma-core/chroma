@@ -8,8 +8,8 @@ use chroma_log::Log;
 use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentWriterShard},
     blockfile_record::{
-        RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
-        RecordSegmentReaderOptions, RecordSegmentWriterShard,
+        RecordSegmentReaderOptions, RecordSegmentReaderShard,
+        RecordSegmentReaderShardCreationError, RecordSegmentWriterShard,
         RecordSegmentWriterShardCreationError,
     },
     bloom_filter::BloomFilterManager,

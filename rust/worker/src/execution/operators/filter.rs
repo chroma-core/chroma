@@ -10,8 +10,7 @@ use chroma_index::metadata::types::MetadataIndexError;
 use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentReaderShard},
     blockfile_record::{
-        RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
-        RecordSegmentReaderOptions,
+        RecordSegmentReaderOptions, RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
     },
     bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError, MaterializeLogsResult},
@@ -784,8 +783,8 @@ mod tests {
     use chroma_segment::{
         blockfile_metadata::{MetadataSegmentReaderShard, MetadataSegmentWriterShard},
         blockfile_record::{
-            RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
-            RecordSegmentReaderOptions, RecordSegmentWriterShard,
+            RecordSegmentReaderOptions, RecordSegmentReaderShard,
+            RecordSegmentReaderShardCreationError, RecordSegmentWriterShard,
         },
         test::TestDistributedSegment,
         types::materialize_logs,

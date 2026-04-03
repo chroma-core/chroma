@@ -3,8 +3,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
     blockfile_record::{
-        RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
-        RecordSegmentReaderOptions,
+        RecordSegmentReaderOptions, RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
     },
     bloom_filter::BloomFilterManager,
 };
@@ -224,8 +223,8 @@ mod tests {
     use chroma_blockstore::provider::BlockfileProvider;
     use chroma_segment::{
         blockfile_record::{
-            RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
-            RecordSegmentReaderOptions, RecordSegmentWriterShard,
+            RecordSegmentReaderOptions, RecordSegmentReaderShard,
+            RecordSegmentReaderShardCreationError, RecordSegmentWriterShard,
         },
         types::materialize_logs,
     };

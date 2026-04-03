@@ -1110,8 +1110,8 @@ impl ChromaSegmentWriter<'_> {
 
     pub fn get_name(&self) -> &'static str {
         match self {
-            ChromaSegmentWriter::RecordSegment(_) => "RecordSegmentWriterShard",
-            ChromaSegmentWriter::MetadataSegment(_) => "MetadataSegmentWriterShard",
+            ChromaSegmentWriter::RecordSegment(_) => "RecordSegmentWriter",
+            ChromaSegmentWriter::MetadataSegment(_) => "MetadataSegmentWriter",
             ChromaSegmentWriter::VectorSegment(writer) => writer.get_name(),
         }
     }

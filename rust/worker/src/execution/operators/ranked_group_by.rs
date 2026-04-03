@@ -13,8 +13,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
     blockfile_record::{
-        RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
-        RecordSegmentReaderOptions,
+        RecordSegmentReaderOptions, RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
     },
     bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},

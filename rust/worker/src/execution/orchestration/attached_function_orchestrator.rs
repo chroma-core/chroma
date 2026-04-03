@@ -8,8 +8,8 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentWriterShard},
     blockfile_record::{
-        RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
-        RecordSegmentReaderOptions, RecordSegmentWriterShard,
+        RecordSegmentReaderOptions, RecordSegmentReaderShard,
+        RecordSegmentReaderShardCreationError, RecordSegmentWriterShard,
         RecordSegmentWriterShardCreationError,
     },
     distributed_hnsw::{DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentWriter},
