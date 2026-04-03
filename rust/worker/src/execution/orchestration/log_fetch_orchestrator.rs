@@ -6,17 +6,17 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_log::Log;
 use chroma_segment::{
-    blockfile_metadata::{MetadataSegmentError, MetadataSegmentWriter, MetadataSegmentWriterShard},
+    blockfile_metadata::{MetadataSegmentError, MetadataSegmentWriter},
     blockfile_record::{
         RecordSegmentReaderOptions, RecordSegmentReaderShard,
-        RecordSegmentReaderShardCreationError, RecordSegmentWriter, RecordSegmentWriterShard,
-        RecordSegmentWriterShardCreationError,
+        RecordSegmentReaderShardCreationError, RecordSegmentWriter,
+        RecordSegmentWriterCreationError,
     },
     bloom_filter::BloomFilterManager,
-    distributed_hnsw::{DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentWriter},
+    distributed_hnsw::DistributedHNSWSegmentFromSegmentError,
     distributed_spann::SpannSegmentWriterShardError,
     spann_provider::SpannProvider,
-    types::VectorSegmentWriterShard,
+    types::VectorSegmentWriter,
 };
 use chroma_sysdb::sysdb::SysDb;
 use chroma_system::{
@@ -25,7 +25,7 @@ use chroma_system::{
 };
 use chroma_types::{
     Chunk, CollectionUuid, JobId, LogRecord, SegmentFlushInfo, SegmentScope, SegmentShard,
-    SegmentShardError, SegmentType,
+    SegmentShardError,
 };
 use opentelemetry::trace::TraceContextExt;
 use thiserror::Error;
@@ -110,6 +110,10 @@ pub enum LogFetchOrchestratorError {
     SourceRecordSegmentV2(#[from] SourceRecordSegmentV2Error),
     #[error("Could not count current segment: {0}")]
     CountError(Box<dyn chroma_error::ChromaError>),
+    #[error("Error creating metadata segment writer: {0}")]
+    MetadataSegmentWriter(#[from] chroma_segment::blockfile_metadata::MetadataSegmentWriterError),
+    #[error("Error creating vector segment writer: {0}")]
+    VectorSegmentWriter(#[from] chroma_segment::types::VectorSegmentWriterError),
 }
 
 impl ChromaError for LogFetchOrchestratorError {
@@ -141,12 +145,14 @@ impl ChromaError for LogFetchOrchestratorError {
                 Self::QuantizedSpannSegment(e) => e.should_trace_error(),
                 Self::SegmentShard(e) => e.should_trace_error(),
                 Self::RecordSegmentReaderShard(e) => e.should_trace_error(),
-                Self::RecordSegmentWriterShard(e) => e.should_trace_error(),
+                Self::RecordSegmentWriter(e) => e.should_trace_error(),
                 Self::RecvError(_) => true,
                 Self::SpannSegment(e) => e.should_trace_error(),
                 Self::SourceRecordSegment(e) => e.should_trace_error(),
                 Self::SourceRecordSegmentV2(e) => e.should_trace_error(),
                 Self::CountError(e) => e.should_trace_error(),
+                Self::MetadataSegmentWriter(e) => e.should_trace_error(),
+                Self::VectorSegmentWriter(e) => e.should_trace_error(),
             }
         }
     }
@@ -624,13 +630,6 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
 
         let cmek = collection.schema.as_ref().and_then(|s| s.cmek.clone());
 
-        let record_segment_shard = match self
-            .ok_or_terminate(SegmentShard::try_from((&record_segment, 0)), ctx)
-            .await
-        {
-            Some(shard) => shard,
-            None => return,
-        };
         let record_writer = match self
             .ok_or_terminate(
                 RecordSegmentWriter::from_segment(
@@ -667,89 +666,25 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             Some(writer) => writer,
             None => return,
         };
-        let (hnsw_index_uuid, vector_writer, is_vector_segment_spann) = match vector_segment.r#type
-        {
-            SegmentType::QuantizedSpann => {
-                let vector_segment_shard = match self
-                    .ok_or_terminate(SegmentShard::try_from((&vector_segment, 0)), ctx)
-                    .await
-                {
-                    Some(shard) => shard,
-                    None => return,
-                };
-                let record_segment_shard_for_qspann = match self
-                    .ok_or_terminate(SegmentShard::try_from((&record_segment, 0)), ctx)
-                    .await
-                {
-                    Some(shard) => shard,
-                    None => return,
-                };
-                match self
-                    .ok_or_terminate(
-                        self.context
-                            .spann_provider
-                            .write_quantized_usearch(
-                                &collection,
-                                &vector_segment_shard,
-                                &record_segment_shard_for_qspann,
-                            )
-                            .await,
-                        ctx,
-                    )
-                    .await
-                {
-                    Some(writer) => (None, VectorSegmentWriterShard::QuantizedSpann(writer), true),
-                    None => return,
-                }
-            }
-            SegmentType::Spann => {
-                let vector_segment_shard = match self
-                    .ok_or_terminate(SegmentShard::try_from((&vector_segment, 0)), ctx)
-                    .await
-                {
-                    Some(shard) => shard,
-                    None => return,
-                };
-                match self
-                    .ok_or_terminate(
-                        self.context
-                            .spann_provider
-                            .write(&collection, &vector_segment_shard, dimension, cmek)
-                            .await,
-                        ctx,
-                    )
-                    .await
-                {
-                    Some(writer) => (
-                        Some(writer.hnsw_index_uuid()),
-                        VectorSegmentWriterShard::Spann(writer),
-                        true,
-                    ),
-                    None => return,
-                }
-            }
-            _ => match self
-                .ok_or_terminate(
-                    DistributedHNSWSegmentWriter::from_segment(
-                        &collection,
-                        &vector_segment,
-                        dimension,
-                        self.context.hnsw_provider.clone(),
-                        cmek,
-                    )
-                    .await
-                    .map_err(|err| *err),
-                    ctx,
+
+        let vector_writer = match self
+            .ok_or_terminate(
+                VectorSegmentWriter::from_segment(
+                    &collection,
+                    &vector_segment,
+                    &record_segment,
+                    dimension,
+                    &self.context.hnsw_provider,
+                    &self.context.spann_provider,
+                    cmek.clone(),
                 )
-                .await
-            {
-                Some(writer) => (
-                    Some(writer.index_uuid()),
-                    VectorSegmentWriterShard::Hnsw(writer),
-                    false,
-                ),
-                None => return,
-            },
+                .await,
+                ctx,
+            )
+            .await
+        {
+            Some(writer) => writer,
+            None => return,
         };
 
         let writers = CompactWriters {
@@ -769,14 +704,16 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         };
 
         collection_info.writers = Some(writers.clone());
-        collection_info.hnsw_index_uuid = hnsw_index_uuid;
+
+        // Will deprecate disk hnsw
+        collection_info.hnsw_index_uuid = None;
 
         // Prefetch segments
         let prefetch_segments = match self.context.is_rebuild {
             true => vec![output.record_segment],
             false => {
                 let mut segments = vec![output.metadata_segment, output.record_segment];
-                if is_vector_segment_spann {
+                if vector_segment.r#type == chroma_types::SegmentType::Spann {
                     segments.push(output.vector_segment);
                 }
                 segments

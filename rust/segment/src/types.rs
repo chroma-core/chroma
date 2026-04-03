@@ -9,6 +9,7 @@ use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{Instrument, Span};
+
 use uuid::Uuid;
 
 use crate::blockfile_record::{RecordSegmentFlusher, RecordSegmentWriter};
@@ -16,18 +17,11 @@ use crate::distributed_spann::{SpannSegmentFlusherShard, SpannSegmentWriterShard
 #[cfg(feature = "usearch")]
 use crate::quantized_spann::{QuantizedSpannSegmentFlusherShard, QuantizedSpannSegmentWriterShard};
 use crate::spann_provider::SpannProvider;
-use chroma_blockstore::provider::BlockfileProvider;
 use chroma_index::hnsw_provider::HnswIndexProvider;
-#[cfg(feature = "usearch")]
-use chroma_index::usearch::USearchIndexProvider;
 
-use super::blockfile_metadata::{
-    MetadataSegmentFlusher, MetadataSegmentFlusherShard, MetadataSegmentWriter,
-    MetadataSegmentWriterShard,
-};
+use super::blockfile_metadata::{MetadataSegmentFlusher, MetadataSegmentWriter};
 use super::blockfile_record::{
-    ApplyMaterializedLogError, RecordSegmentFlusherShard, RecordSegmentReaderOptions,
-    RecordSegmentReaderShard, RecordSegmentWriterShard,
+    ApplyMaterializedLogError, RecordSegmentReaderOptions, RecordSegmentReaderShard,
 };
 use super::distributed_hnsw::DistributedHNSWSegmentWriter;
 
@@ -1085,31 +1079,45 @@ impl VectorSegmentWriterShard {
             #[cfg(feature = "usearch")]
             VectorSegmentWriterShard::QuantizedSpann(writer) => Box::pin(writer.commit())
                 .await
-                .map(|f| VectorSegmentFlusherShard::QuantizedSpann(f)),
+                .map(VectorSegmentFlusherShard::QuantizedSpann),
             VectorSegmentWriterShard::Spann(writer) => Box::pin(writer.commit())
                 .await
-                .map(|w| VectorSegmentFlusherShard::Spann(w)),
+                .map(VectorSegmentFlusherShard::Spann),
         }
     }
 }
 
 #[derive(Error, Debug)]
-#[error("Vector segment writer error")]
-pub struct VectorSegmentWriterError {
-    message: String,
-}
-
-impl VectorSegmentWriterError {
-    fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-        }
-    }
+pub enum VectorSegmentWriterError {
+    #[error("Failed to get segment shards: {0}")]
+    GetShards(#[from] chroma_types::SegmentShardError),
+    #[error("Mismatched shard count: vector segments has {vector_shards} shards, record segments has {record_shards} shards")]
+    MismatchedShardCount {
+        vector_shards: usize,
+        record_shards: usize,
+    },
+    #[error("Failed to create HNSW writer: {0}")]
+    CreateHnswWriter(Box<dyn ChromaError>),
+    #[cfg(feature = "usearch")]
+    #[error("Failed to create QuantizedSpann writer: {0}")]
+    CreateQuantizedSpannWriter(crate::quantized_spann::QuantizedSpannSegmentError),
+    #[error("Failed to create Spann writer: {0}")]
+    CreateSpannWriter(crate::distributed_spann::SpannSegmentWriterShardError),
+    #[error("Unsupported vector segment type: {0:?}")]
+    UnsupportedSegmentType(chroma_types::SegmentType),
 }
 
 impl ChromaError for VectorSegmentWriterError {
     fn code(&self) -> ErrorCodes {
-        ErrorCodes::Internal
+        match self {
+            Self::GetShards(e) => e.code(),
+            Self::MismatchedShardCount { .. } => ErrorCodes::Internal,
+            Self::CreateHnswWriter(e) => e.code(),
+            #[cfg(feature = "usearch")]
+            Self::CreateQuantizedSpannWriter(e) => e.code(),
+            Self::CreateSpannWriter(e) => e.code(),
+            Self::UnsupportedSegmentType(_) => ErrorCodes::Internal,
+        }
     }
 }
 
@@ -1122,75 +1130,65 @@ pub struct VectorSegmentWriter {
 impl VectorSegmentWriter {
     pub async fn from_segment(
         collection: &chroma_types::Collection,
-        segment: &chroma_types::Segment,
+        vector_segment: &chroma_types::Segment,
+        record_segment: &chroma_types::Segment,
         dimension: usize,
-        blockfile_provider: &BlockfileProvider,
         hnsw_provider: &HnswIndexProvider,
         spann_provider: &SpannProvider,
-        #[cfg(feature = "usearch")] usearch_provider: &USearchIndexProvider,
         cmek: Option<chroma_types::Cmek>,
     ) -> Result<Self, VectorSegmentWriterError> {
-        let segment_shards = segment.get_shards();
+        let segment_shards = vector_segment.get_shards()?;
+        let record_segment_shards = record_segment.get_shards()?;
+
+        // Check that we have matching shard counts
+        if segment_shards.len() != record_segment_shards.len() {
+            return Err(VectorSegmentWriterError::MismatchedShardCount {
+                vector_shards: segment_shards.len(),
+                record_shards: record_segment_shards.len(),
+            });
+        }
 
         let mut writer_shards = Vec::new();
 
-        for (shard_index, segment_shard) in segment_shards.iter().enumerate() {
-            let writer_shard = match segment.r#type {
+        // record_segment_shard is only used when usearch feature is enabled
+        #[allow(unused_variables)]
+        for (segment_shard, record_segment_shard) in
+            segment_shards.iter().zip(record_segment_shards.iter())
+        {
+            let writer_shard = match vector_segment.r#type {
                 chroma_types::SegmentType::HnswDistributed => {
                     let writer = DistributedHNSWSegmentWriter::from_segment(
                         collection,
-                        segment,
+                        vector_segment,
                         dimension,
                         hnsw_provider.clone(),
                         cmek.clone(),
                     )
                     .await
                     .map_err(|e| {
-                        VectorSegmentWriterError::new(format!(
-                            "Failed to create HNSW writer: {}",
-                            e
-                        ))
+                        VectorSegmentWriterError::CreateHnswWriter(e as Box<dyn ChromaError>)
                     })?;
                     VectorSegmentWriterShard::Hnsw(writer)
                 }
                 #[cfg(feature = "usearch")]
                 chroma_types::SegmentType::QuantizedSpann => {
-                    // Need to get record segment shard for QuantizedSpann
-                    // WRONG
-                    let record_segment_shard = segment_shards.get(0).ok_or_else(|| {
-                        VectorSegmentWriterError::new(
-                            "No record segment shard found for QuantizedSpann",
-                        )
-                    })?;
-
                     let writer = spann_provider
                         .write_quantized_usearch(collection, segment_shard, record_segment_shard)
                         .await
-                        .map_err(|e| {
-                            VectorSegmentWriterError::new(format!(
-                                "Failed to create QuantizedSpann writer: {}",
-                                e
-                            ))
-                        })?;
+                        .map_err(VectorSegmentWriterError::CreateQuantizedSpannWriter)?;
                     VectorSegmentWriterShard::QuantizedSpann(writer)
                 }
                 chroma_types::SegmentType::Spann => {
                     let writer: SpannSegmentWriterShard = spann_provider
                         .write(collection, segment_shard, dimension, cmek.clone())
                         .await
-                        .map_err(|e| {
-                            VectorSegmentWriterError::new(format!(
-                                "Failed to create Spann writer: {}",
-                                e
-                            ))
-                        })?;
+                        .map_err(VectorSegmentWriterError::CreateSpannWriter)?;
                     VectorSegmentWriterShard::Spann(writer)
                 }
                 _ => {
-                    return Err(VectorSegmentWriterError::new(format!(
-                        "Unsupported vector segment type: {:?}",
-                        segment.r#type
-                    )));
+                    return Err(VectorSegmentWriterError::UnsupportedSegmentType(
+                        vector_segment.r#type,
+                    ));
                 }
             };
 
@@ -1199,7 +1197,7 @@ impl VectorSegmentWriter {
 
         Ok(Self {
             shards: writer_shards,
-            id: segment.id,
+            id: vector_segment.id,
         })
     }
 

@@ -42,6 +42,12 @@ impl chroma_error::ChromaError for RecordSegmentWriterError {
 #[error(transparent)]
 pub struct RecordSegmentWriterCreationError(#[from] RecordSegmentWriterShardCreationError);
 
+impl chroma_error::ChromaError for RecordSegmentWriterCreationError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        self.0.code()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct RecordSegmentWriter {
     shards: Vec<RecordSegmentWriterShard>,
@@ -57,7 +63,9 @@ impl RecordSegmentWriter {
         cmek: Option<Cmek>,
         bloom_filter_manager: Option<BloomFilterManager>,
     ) -> Result<Self, RecordSegmentWriterCreationError> {
-        let segment_shards = segment.get_shards();
+        let segment_shards = segment
+            .get_shards()
+            .map_err(RecordSegmentWriterShardCreationError::SegmentShard)?;
 
         // Create futures for all shards
         let futures: Vec<_> = segment_shards
@@ -103,7 +111,7 @@ impl RecordSegmentWriter {
         let futures = self
             .shards
             .into_iter()
-            .map(|shard| async move { shard.commit().await });
+            .map(|shard| Box::pin(shard.commit()));
 
         let flusher_shards = futures::future::try_join_all(futures).await?;
 
@@ -159,6 +167,8 @@ pub enum RecordSegmentWriterShardCreationError {
     BloomFilterError(#[from] BloomFilterError),
     #[error("Record segment reader error: {0}")]
     RecordSegmentReaderShardError(#[from] RecordSegmentReaderShardCreationError),
+    #[error("Segment shard error: {0}")]
+    SegmentShard(#[from] chroma_types::SegmentShardError),
     #[error("Bloom filter rebuild error: {0}")]
     BloomFilterRebuildError(Box<dyn ChromaError>),
 }
@@ -806,7 +816,7 @@ impl RecordSegmentFlusher {
         let mut all_file_paths = HashMap::new();
 
         for shard in self.shards {
-            let shard_paths = shard.flush().await?;
+            let shard_paths = Box::pin(shard.flush()).await?;
             for (key, mut paths) in shard_paths {
                 all_file_paths
                     .entry(key)
@@ -816,6 +826,11 @@ impl RecordSegmentFlusher {
         }
 
         Ok(all_file_paths)
+    }
+
+    pub fn count(&self) -> u64 {
+        // Sum counts from all shards
+        self.shards.iter().map(|shard| shard.count()).sum()
     }
 }
 
