@@ -473,12 +473,19 @@ impl ServiceBasedFrontend {
 
     pub async fn get_collection_by_id(
         &mut self,
-        GetCollectionByIdRequest { collection_id, .. }: GetCollectionByIdRequest,
+        GetCollectionByIdRequest {
+            collection_id,
+            tenant_id,
+            database_name,
+            ..
+        }: GetCollectionByIdRequest,
     ) -> Result<GetCollectionByIdResponse, GetCollectionByIdError> {
         let mut collections = self
             .sysdb_client
             .get_collections(GetCollectionsOptions {
                 collection_id: Some(collection_id),
+                tenant: Some(tenant_id),
+                database_or_topology: Some(DatabaseOrTopology::Database(database_name)),
                 limit: Some(1),
                 ..Default::default()
             })

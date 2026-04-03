@@ -347,8 +347,16 @@ impl Bindings {
         Ok(collection)
     }
 
-    fn get_collection_by_id(&self, collection_id: String) -> ChromaPyResult<Collection> {
-        let request = GetCollectionByIdRequest::try_new(collection_id)?;
+    #[pyo3(signature = (collection_id, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string()))]
+    fn get_collection_by_id(
+        &self,
+        collection_id: String,
+        tenant: String,
+        database: String,
+    ) -> ChromaPyResult<Collection> {
+        let database_name =
+            DatabaseName::new(database.clone()).ok_or(InvalidDatabaseNameError(database))?;
+        let request = GetCollectionByIdRequest::try_new(collection_id, tenant, database_name)?;
         let mut frontend = self.frontend.clone();
         let collection = self
             .runtime

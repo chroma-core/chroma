@@ -343,8 +343,12 @@ class SegmentAPI(ServerAPI):
     def get_collection_by_id(
         self,
         collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
-        existing = self._sysdb.get_collections(id=collection_id)
+        existing = self._sysdb.get_collections(
+            id=collection_id, tenant=tenant, database=database
+        )
 
         if existing:
             return existing[0]

@@ -441,7 +441,7 @@ class FastAPI(Server):
         )
 
         self.router.add_api_route(
-            "/api/v2/collections/by-id/{collection_id}",
+            "/api/v2/tenants/{tenant}/databases/{database_name}/collections/by-id/{collection_id}",
             self.get_collection_by_id,
             methods=["GET"],
             response_model=None,
@@ -894,26 +894,31 @@ class FastAPI(Server):
     async def get_collection_by_id(
         self,
         request: Request,
+        tenant: str,
+        database_name: str,
         collection_id: str,
     ) -> CollectionModel:
+        # NOTE(rescrv, iron will auth):  Implemented.
+        await self.auth_request(
+            request.headers,
+            AuthzAction.GET_COLLECTION,
+            tenant,
+            database_name,
+            collection_id,
+        )
+
+        add_attributes_to_current_span({"tenant": tenant})
+
         api_collection_model = cast(
             CollectionModel,
             await to_thread.run_sync(
                 self._api.get_collection_by_id,
                 _uuid(collection_id),
+                tenant,
+                database_name,
                 limiter=self._capacity_limiter,
             ),
         )
-
-        # NOTE(rescrv, iron will auth):  Implemented.
-        await self.auth_request(
-            request.headers,
-            AuthzAction.GET_COLLECTION,
-            api_collection_model.tenant,
-            api_collection_model.database,
-            str(api_collection_model.id),
-        )
-
         return api_collection_model
 
     @trace_method("FastAPI.update_collection", OpenTelemetryGranularity.OPERATION)

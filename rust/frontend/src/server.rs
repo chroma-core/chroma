@@ -271,7 +271,7 @@ impl FrontendServer {
             .route("/api/v2/auth/identity", get(get_user_identity))
             .route("/api/v2/collections/{crn}", get(get_collection_by_crn))
             .route(
-                "/api/v2/collections/by-id/{collection_id}",
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/by-id/{collection_id}",
                 get(get_collection_by_id),
             )
             .route("/api/v2/tenants", post(create_tenant))
@@ -1479,9 +1479,9 @@ async fn get_collection_by_crn(
 /// Returns a collection by its UUID.
 #[utoipa::path(
     get,
-    path = "/api/v2/collections/by-id/{collection_id}",
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/by-id/{collection_id}",
     summary = "Get collection by ID",
-    description = "Returns a collection by its UUID.",
+    description = "Returns a collection by its UUID within a specific tenant and database.",
     tag = "Collection",
     security(
         ("ApiKeyAuth" = [])
@@ -1493,6 +1493,8 @@ async fn get_collection_by_crn(
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
+        ("tenant" = String, Path, description = "Tenant ID"),
+        ("database" = String, Path, description = "Database name"),
         ("collection_id" = String, Path, description = "Collection UUID")
     ),
     extensions(
@@ -1512,28 +1514,32 @@ async fn get_collection_by_crn(
 )]
 async fn get_collection_by_id(
     headers: HeaderMap,
-    Path(collection_id): Path<String>,
+    Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<Collection>, ServerError> {
     server.metrics.get_collection_by_id.add(1, &[]);
-    tracing::info!(name: "get_collection_by_id", collection_id = %collection_id);
+    tracing::info!(name: "get_collection_by_id", tenant = %tenant, database = %database, collection_id = %collection_id);
 
-    // First fetch the collection to get tenant/database context
-    let request = GetCollectionByIdRequest::try_new(collection_id)?;
-    let collection = server.frontend.get_collection_by_id(request).await?;
-
-    // Then authorize with the collection's tenant/database
+    // First authorize with the provided tenant/database
     server
         .authenticate_and_authorize(
             &headers,
             AuthzAction::GetCollection,
             AuthzResource {
-                tenant: Some(collection.tenant.clone()),
-                database: Some(collection.database.clone()),
-                collection: Some(collection.id.to_string()),
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
+                collection: Some(collection_id.clone()),
             },
         )
         .await?;
+
+    let database_name = DatabaseName::new(&database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
+
+    // Fetch collection by ID, scoped to tenant/database
+    let request = GetCollectionByIdRequest::try_new(collection_id, tenant, database_name)?;
+    let collection = server.frontend.get_collection_by_id(request).await?;
 
     Ok(Json(collection))
 }

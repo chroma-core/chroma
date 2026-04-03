@@ -919,10 +919,16 @@ impl ChromaError for GetCollectionByCrnError {
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetCollectionByIdRequest {
     pub collection_id: CollectionUuid,
+    pub tenant_id: String,
+    pub database_name: DatabaseName,
 }
 
 impl GetCollectionByIdRequest {
-    pub fn try_new(collection_id: String) -> Result<Self, ChromaValidationError> {
+    pub fn try_new(
+        collection_id: String,
+        tenant_id: String,
+        database_name: DatabaseName,
+    ) -> Result<Self, ChromaValidationError> {
         let collection_id: CollectionUuid = collection_id
             .parse()
             .map_err(|_| {
@@ -930,7 +936,11 @@ impl GetCollectionByIdRequest {
                 err.message = Some("Invalid collection ID format, expected UUID".into());
                 ChromaValidationError::from(("collection_id", err))
             })?;
-        Ok(Self { collection_id })
+        Ok(Self {
+            collection_id,
+            tenant_id,
+            database_name,
+        })
     }
 }
 

@@ -447,9 +447,10 @@ export class ChromaClient {
    * @throws Error if the collection does not exist
    */
   public async getCollectionById(id: string): Promise<Collection> {
+    const { tenant, database } = await this._path();
     const { data } = await this.apiClient.get({
-      url: "/api/v2/collections/by-id/{collection_id}",
-      path: { collection_id: id },
+      url: "/api/v2/tenants/{tenant}/databases/{database}/collections/by-id/{collection_id}",
+      path: { tenant, database, collection_id: id },
     });
     const schema = await Schema.deserializeFromJSON(data.schema ?? null, this);
     const schemaEmbeddingFunction = resolveSchemaEmbeddingFunction(schema);

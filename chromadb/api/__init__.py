@@ -692,11 +692,15 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     def get_collection_by_id(
         self,
         collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
         """Get a collection by its ID.
 
         Args:
             collection_id: The UUID of the collection to retrieve.
+            tenant: The tenant to search within.
+            database: The database to search within.
 
         Returns:
             CollectionModel: The collection with the given ID.

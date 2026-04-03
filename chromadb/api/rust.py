@@ -285,8 +285,10 @@ class RustBindingsAPI(ServerAPI):
     def get_collection_by_id(
         self,
         collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
-        collection = self.bindings.get_collection_by_id(str(collection_id))
+        collection = self.bindings.get_collection_by_id(str(collection_id), tenant, database)
         return CollectionModel(
             id=collection.id,
             name=collection.name,

@@ -320,11 +320,13 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     def get_collection_by_id(
         self,
         collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
         """Returns a collection by its ID"""
         resp_json = self._make_request(
             "get",
-            f"/collections/by-id/{collection_id}",
+            f"/tenants/{tenant}/databases/{database}/collections/by-id/{collection_id}",
         )
 
         model = CollectionModel.from_json(resp_json)

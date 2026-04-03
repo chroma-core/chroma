@@ -268,6 +268,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         """
         model = await self._server.get_collection_by_id(
             collection_id=id,
+            tenant=self.tenant,
+            database=self.database,
         )
         persisted_ef_config = model.configuration_json.get("embedding_function")
 
