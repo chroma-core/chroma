@@ -594,6 +594,7 @@ impl S3Storage {
                             .upload_id(&upload_id)
                             .send()
                             .await;
+                        self.metrics.s3_put_error_count.add(1, &[]);
                         return Err(e);
                     }
                     None => {
@@ -606,6 +607,7 @@ impl S3Storage {
                                 .upload_id(&upload_id)
                                 .send()
                                 .await;
+                            self.metrics.s3_put_error_count.add(1, &[]);
                             return Err(StorageError::Message {
                                 message: format!(
                                     "Stream ended early at part {}/{}, expected {} bytes total",
@@ -659,6 +661,7 @@ impl S3Storage {
                         .upload_id(&upload_id)
                         .send()
                         .await;
+                    self.metrics.s3_put_error_count.add(1, &[]);
                     return Err(e);
                 }
             }

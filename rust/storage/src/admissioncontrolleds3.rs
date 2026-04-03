@@ -1215,6 +1215,11 @@ impl AdmissionControlledS3Storage {
         self.put_bytes(key, bytes.into(), options).await
     }
 
+    /// NOTE: This implementation collects the entire stream into memory
+    /// before delegating to `put_bytes`, so the bounded-memory streaming
+    /// benefit of `S3Storage::put_stream` is **not** achieved here.
+    /// Callers that need true streaming with bounded memory should use
+    /// `S3Storage::put_stream` directly.
     pub async fn put_stream<S>(
         &self,
         key: &str,
