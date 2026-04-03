@@ -599,7 +599,7 @@ impl S3Storage {
                         return Err(e);
                     }
                     None => {
-                        if part_buf.is_empty() && part_index < part_count - 1 {
+                        if part_index < part_count - 1 && part_buf.len() < expected_part_size {
                             let _ = self
                                 .client
                                 .abort_multipart_upload()
