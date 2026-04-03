@@ -25,6 +25,7 @@ axum = { workspace = true, optional = true }
 tower-http = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 tokio = { workspace = true }
+rustls = { workspace = true }
 
 chroma-system = { workspace = true }
 
