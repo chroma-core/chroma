@@ -30,7 +30,9 @@ use chroma_types::SPARSE_MAX;
 use chroma_types::SPARSE_OFFSET_VALUE;
 use chroma_types::STRING_METADATA;
 use chroma_types::U32_METADATA;
-use chroma_types::{MaterializedLogOperation, MetadataValue, Segment, SegmentShard, SegmentUuid};
+use chroma_types::{
+    MaterializedLogOperation, MetadataValue, Segment, SegmentShard, SegmentShardError, SegmentUuid,
+};
 use core::panic;
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
@@ -81,7 +83,15 @@ impl<'me> MetadataSegmentWriter<'me> {
         blockfile_provider: &BlockfileProvider,
         cmek: Option<Cmek>,
     ) -> Result<Self, MetadataSegmentWriterError> {
-        let segment_shards = segment.get_shards();
+        let segment_shards = segment
+            .get_shards()
+            .map_err(MetadataSegmentError::SegmentShard)?;
+
+        if segment_shards.is_empty() {
+            return Err(MetadataSegmentWriterError(
+                MetadataSegmentError::SegmentShard(SegmentShardError::EmptyShards),
+            ));
+        }
 
         // Create futures for all shards
         let futures: Vec<_> = segment_shards
@@ -136,7 +146,7 @@ impl<'me> MetadataSegmentWriter<'me> {
         let futures = self
             .shards
             .into_iter()
-            .map(|shard| async move { shard.commit().await });
+            .map(|shard| Box::pin(shard.commit()));
 
         let flusher_shards = futures::future::try_join_all(futures).await?;
 
@@ -165,6 +175,10 @@ pub enum MetadataSegmentError {
     #[error("Missing file {0}")]
     MissingFile(String),
     #[error("Count not parse UUID {0}")]
+    UUID(String),
+    #[error("Segment shard error: {0}")]
+    SegmentShard(#[from] chroma_types::SegmentShardError),
+    #[error("UUID parse error: {0}")]
     UuidParseError(String),
     #[error("No writer found")]
     NoWriter,
@@ -174,7 +188,7 @@ pub enum MetadataSegmentError {
     BlockfileWriteError,
     #[error("Limit and offset are not currently supported")]
     LimitOffsetNotSupported,
-    #[error("Could not query metadata index {0}")]
+    #[error("Metadata index error: {0}")]
     MetadataIndexQueryError(#[from] MetadataIndexError),
 }
 
@@ -188,6 +202,8 @@ impl ChromaError for MetadataSegmentError {
             MetadataSegmentError::FullTextIndexFilesIntegrityError => ErrorCodes::Internal,
             MetadataSegmentError::IncorrectNumberOfFiles => ErrorCodes::Internal,
             MetadataSegmentError::MissingFile(_) => ErrorCodes::Internal,
+            MetadataSegmentError::UUID(_) => ErrorCodes::Internal,
+            MetadataSegmentError::SegmentShard(e) => e.code(),
             MetadataSegmentError::UuidParseError(_) => ErrorCodes::Internal,
             MetadataSegmentError::NoWriter => ErrorCodes::Internal,
             MetadataSegmentError::EmptyPathVector => ErrorCodes::Internal,
@@ -898,6 +914,10 @@ impl<'me> MetadataSegmentWriterShard<'me> {
         let mut count = 0u64;
         let mut schema = schema;
         let mut schema_modified = false;
+        tracing::info!(
+            "Applying metadata materialized log chunk with {} records",
+            materialized.len()
+        );
 
         self.apply_fts_logs(record_segment_reader, materialized, &schema)
             .await?;
@@ -1267,7 +1287,7 @@ impl MetadataSegmentFlusher {
         let mut all_file_paths = HashMap::new();
 
         for shard in self.shards {
-            let shard_paths = shard.flush().await?;
+            let shard_paths = Box::pin(shard.flush()).await?;
             for (key, mut paths) in shard_paths {
                 all_file_paths
                     .entry(key)

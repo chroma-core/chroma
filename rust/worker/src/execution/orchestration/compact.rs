@@ -8,11 +8,11 @@ use chroma_log::Log;
 
 use crate::execution::operators::fragment_fetch::FragmentFetcher;
 use chroma_segment::{
-    blockfile_metadata::MetadataSegmentWriterShard,
-    blockfile_record::{RecordSegmentReaderShard, RecordSegmentWriterShard},
+    blockfile_metadata::MetadataSegmentWriter,
+    blockfile_record::{RecordSegmentReaderShard, RecordSegmentWriter},
     bloom_filter::BloomFilterManager,
     spann_provider::SpannProvider,
-    types::{ChromaSegmentWriter, VectorSegmentWriterShard},
+    types::{ChromaSegmentWriter, VectorSegmentWriter},
 };
 use chroma_sysdb::SysDb;
 use chroma_system::{
@@ -97,7 +97,7 @@ pub struct CompactWriters {
     pub(crate) record_reader: Option<RecordSegmentReaderShard<'static>>,
     pub(crate) metadata_writer: MetadataSegmentWriter<'static>,
     pub(crate) record_writer: RecordSegmentWriter,
-    pub(crate) vector_writer: VectorSegmentWriterShard,
+    pub(crate) vector_writer: VectorSegmentWriter,
 }
 
 #[derive(Debug, Clone)]
