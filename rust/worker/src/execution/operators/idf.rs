@@ -14,7 +14,8 @@ use chroma_segment::{
 };
 use chroma_system::Operator;
 use chroma_types::{
-    MaterializedLogOperation, MetadataValue, Segment, SignedRoaringBitmap, SparseVector,
+    MaterializedLogOperation, MetadataValue, Segment, SegmentShard, SignedRoaringBitmap,
+    SparseVector,
 };
 use thiserror::Error;
 
@@ -87,8 +88,9 @@ impl Operator<IdfInput, IdfOutput> for Idf {
 
         // Create both segment readers in parallel since they are independent
         let record_segment_reader_fut = async {
+            let record_segment_shard = SegmentShard::from((&input.record_segment, 0));
             match Box::pin(RecordSegmentReaderShard::from_segment(
-                &input.record_segment,
+                &record_segment_shard,
                 &input.blockfile_provider,
                 input.bloom_filter_manager.clone(),
             ))

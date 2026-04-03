@@ -14,7 +14,7 @@ use chroma_segment::{
 use chroma_system::Operator;
 use chroma_types::{
     operator::{Knn, KnnOutput, RecordMeasure},
-    MaterializedLogOperation, Segment, SignedRoaringBitmap,
+    MaterializedLogOperation, Segment, SegmentShard, SignedRoaringBitmap,
 };
 use thiserror::Error;
 
@@ -55,8 +55,9 @@ impl Operator<KnnLogInput, KnnOutput> for Knn {
     type Error = KnnLogError;
 
     async fn run(&self, input: &KnnLogInput) -> Result<KnnOutput, KnnLogError> {
+        let record_segment_shard = SegmentShard::from((&input.record_segment, 0));
         let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
-            &input.record_segment,
+            &record_segment_shard,
             &input.blockfile_provider,
             input.bloom_filter_manager.clone(),
         ))

@@ -185,6 +185,48 @@ impl Segment {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct SegmentShard {
+    pub id: SegmentUuid,
+    pub r#type: SegmentType,
+    pub scope: SegmentScope,
+    pub collection: CollectionUuid,
+    pub metadata: Option<Metadata>,
+    pub file_path: HashMap<String, String>,
+}
+
+impl SegmentShard {
+    pub fn construct_prefix_path(&self, tenant: &str, database_id: &DatabaseUuid) -> String {
+        format!(
+            "tenant/{}/database/{}/collection/{}/segment/{}",
+            tenant, database_id, self.collection, self.id
+        )
+    }
+}
+
+impl From<(&Segment, u32)> for SegmentShard {
+    fn from((segment, shard_index): (&Segment, u32)) -> Self {
+        let file_path = segment
+            .file_path
+            .iter()
+            .filter_map(|(key, paths)| {
+                paths
+                    .get(shard_index as usize)
+                    .map(|path| (key.clone(), path.clone()))
+            })
+            .collect();
+
+        SegmentShard {
+            id: segment.id,
+            r#type: segment.r#type,
+            scope: segment.scope.clone(),
+            collection: segment.collection,
+            metadata: segment.metadata.clone(),
+            file_path,
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum SegmentConversionError {
     #[error("Invalid UUID")]

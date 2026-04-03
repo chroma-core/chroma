@@ -12,7 +12,8 @@ use chroma_segment::{
 };
 use chroma_system::Operator;
 use chroma_types::{
-    operator::Limit, Chunk, LogRecord, MaterializedLogOperation, Segment, SignedRoaringBitmap,
+    operator::Limit, Chunk, LogRecord, MaterializedLogOperation, Segment, SegmentShard,
+    SignedRoaringBitmap,
 };
 use futures::StreamExt;
 use roaring::RoaringBitmap;
@@ -189,8 +190,9 @@ impl Operator<LimitInput, LimitOutput> for Limit {
     type Error = LimitError;
 
     async fn run(&self, input: &LimitInput) -> Result<LimitOutput, LimitError> {
+        let record_segment_shard = SegmentShard::from((&input.record_segment, 0));
         let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
-            &input.record_segment,
+            &record_segment_shard,
             &input.blockfile_provider,
             input.bloom_filter_manager.clone(),
         ))

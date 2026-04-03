@@ -13,9 +13,9 @@ use chroma_blockstore::{
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::fulltext::types::FullTextIndexError;
 use chroma_types::{
-    Cmek, DataRecord, DatabaseUuid, MaterializedLogOperation, SchemaError, Segment, SegmentType,
-    SegmentUuid, MAX_OFFSET_ID, OFFSET_ID_TO_DATA, OFFSET_ID_TO_USER_ID, USER_ID_BLOOM_FILTER,
-    USER_ID_TO_OFFSET_ID,
+    Cmek, DataRecord, DatabaseUuid, MaterializedLogOperation, SchemaError, Segment, SegmentShard,
+    SegmentType, SegmentUuid, MAX_OFFSET_ID, OFFSET_ID_TO_DATA, OFFSET_ID_TO_USER_ID,
+    USER_ID_BLOOM_FILTER, USER_ID_TO_OFFSET_ID,
 };
 use futures::{Stream, StreamExt, TryStreamExt};
 use std::collections::HashMap;
@@ -127,12 +127,12 @@ impl RecordSegmentWriterShard {
     pub async fn from_segment(
         tenant: &str,
         database_id: &DatabaseUuid,
-        segment: &Segment,
+        segment: &SegmentShard,
         blockfile_provider: &BlockfileProvider,
         cmek: Option<Cmek>,
         bloom_filter_manager: Option<BloomFilterManager>,
     ) -> Result<Self, RecordSegmentWriterShardCreationError> {
-        tracing::debug!("Creating RecordSegmentWriterShard from Segment");
+        tracing::debug!("Creating RecordSegmentWriterShard from SegmentShard");
         if segment.r#type != SegmentType::BlockfileRecord {
             return Err(RecordSegmentWriterShardCreationError::InvalidSegmentType);
         }
@@ -200,66 +200,30 @@ impl RecordSegmentWriterShard {
             }
             4 | 5 => {
                 tracing::debug!("Found files, loading blockfiles for record segment");
-                let user_id_to_id_bf_path = match segment.file_path.get(USER_ID_TO_OFFSET_ID) {
-                    Some(user_id_to_id_bf_id) => match user_id_to_id_bf_id.first() {
-                        Some(user_id_to_id_bf_id) => user_id_to_id_bf_id,
-                        None => {
-                            return Err(RecordSegmentWriterShardCreationError::MissingFile(
-                                USER_ID_TO_OFFSET_ID.to_string(),
-                            ))
-                        }
-                    },
-                    None => {
-                        return Err(RecordSegmentWriterShardCreationError::MissingFile(
+                let user_id_to_id_bf_path =
+                    segment.file_path.get(USER_ID_TO_OFFSET_ID).ok_or_else(|| {
+                        RecordSegmentWriterShardCreationError::MissingFile(
                             USER_ID_TO_OFFSET_ID.to_string(),
-                        ))
-                    }
-                };
-                let id_to_user_id_bf_path = match segment.file_path.get(OFFSET_ID_TO_USER_ID) {
-                    Some(id_to_user_id_bf_id) => match id_to_user_id_bf_id.first() {
-                        Some(id_to_user_id_bf_id) => id_to_user_id_bf_id,
-                        None => {
-                            return Err(RecordSegmentWriterShardCreationError::MissingFile(
-                                OFFSET_ID_TO_USER_ID.to_string(),
-                            ))
-                        }
-                    },
-                    None => {
-                        return Err(RecordSegmentWriterShardCreationError::MissingFile(
+                        )
+                    })?;
+                let id_to_user_id_bf_path =
+                    segment.file_path.get(OFFSET_ID_TO_USER_ID).ok_or_else(|| {
+                        RecordSegmentWriterShardCreationError::MissingFile(
                             OFFSET_ID_TO_USER_ID.to_string(),
-                        ))
-                    }
-                };
-                let id_to_data_bf_path = match segment.file_path.get(OFFSET_ID_TO_DATA) {
-                    Some(id_to_data_bf_id) => match id_to_data_bf_id.first() {
-                        Some(id_to_data_bf_id) => id_to_data_bf_id,
-                        None => {
-                            return Err(RecordSegmentWriterShardCreationError::MissingFile(
-                                OFFSET_ID_TO_DATA.to_string(),
-                            ))
-                        }
-                    },
-                    None => {
-                        return Err(RecordSegmentWriterShardCreationError::MissingFile(
+                        )
+                    })?;
+                let id_to_data_bf_path =
+                    segment.file_path.get(OFFSET_ID_TO_DATA).ok_or_else(|| {
+                        RecordSegmentWriterShardCreationError::MissingFile(
                             OFFSET_ID_TO_DATA.to_string(),
-                        ))
-                    }
-                };
-                let max_offset_id_bf_path = match segment.file_path.get(MAX_OFFSET_ID) {
-                    Some(max_offset_id_file_id) => match max_offset_id_file_id.first() {
-                        Some(max_offset_id_file_id) => max_offset_id_file_id,
-                        None => {
-                            return Err(RecordSegmentWriterShardCreationError::MissingFile(
-                                MAX_OFFSET_ID.to_string(),
-                            ))
-                        }
-                    },
-                    None => {
-                        return Err(RecordSegmentWriterShardCreationError::MissingFile(
+                        )
+                    })?;
+                let max_offset_id_bf_path =
+                    segment.file_path.get(MAX_OFFSET_ID).ok_or_else(|| {
+                        RecordSegmentWriterShardCreationError::MissingFile(
                             MAX_OFFSET_ID.to_string(),
-                        ))
-                    }
-                };
+                        )
+                    })?;
 
                 let (user_id_to_id_bf_prefix, user_id_to_id_bf_uuid) =
                     Segment::extract_prefix_and_id(user_id_to_id_bf_path).map_err(|_| {
@@ -360,16 +324,7 @@ impl RecordSegmentWriterShard {
         let prefix_path = segment.construct_prefix_path(tenant, database_id);
         let bloom_filter = if let Some(manager) = &bloom_filter_manager {
             let forked = match segment.file_path.get(USER_ID_BLOOM_FILTER) {
-                Some(paths) => {
-                    // Unexpected state in the system, the key exists but the paths vector is empty.
-                    if paths.is_empty() {
-                        tracing::error!("Bloom filter key present but paths vector is empty");
-                        return Err(RecordSegmentWriterShardCreationError::IncorrectNumberOfFiles);
-                    }
-                    Some(manager.fork(&paths[0]).await?)
-                }
-                // No bloom filter paths found, so rebuild from scratch.
-                // This handles migrations from old segments where bloom filters were not used.
+                Some(path) => Some(manager.fork(path).await?),
                 None => None,
             };
             // Rebuild the bloom filter if it is either empty or is degraded.
@@ -405,7 +360,7 @@ impl RecordSegmentWriterShard {
     /// Return `existing` if it does not need a rebuild, otherwise build a fresh
     /// bloom filter by scanning all user IDs from the record segment.
     async fn maybe_rebuild_bloom_filter(
-        segment: &Segment,
+        segment: &SegmentShard,
         blockfile_provider: &BlockfileProvider,
         manager: &BloomFilterManager,
         existing: Option<BloomFilter<str>>,
@@ -930,34 +885,29 @@ impl ChromaError for RecordSegmentReaderShardCreationError {
 
 impl RecordSegmentReaderShard<'_> {
     async fn load_index_reader<'new, K: ReadKey<'new>, V: ReadValue<'new>>(
-        segment: &Segment,
+        segment: &SegmentShard,
         file_path_string: &str,
         blockfile_provider: &BlockfileProvider,
     ) -> Result<BlockfileReader<'new, K, V>, RecordSegmentReaderShardCreationError> {
         match segment.file_path.get(file_path_string) {
-            Some(file_paths) => match file_paths.first() {
-                Some(file_path) => {
-                    let (prefix_path, index_uuid) = Segment::extract_prefix_and_id(file_path)
-                        .map_err(|_| {
-                            RecordSegmentReaderShardCreationError::InvalidUuid(
-                                file_path.to_string(),
-                            )
-                        })?;
-                    let reader_options =
-                        BlockfileReaderOptions::new(index_uuid, prefix_path.to_string());
-                    match blockfile_provider.read::<K, V>(reader_options).await {
-                        Ok(reader) => Ok(reader),
-                        Err(e) => Err(RecordSegmentReaderShardCreationError::BlockfileOpenError(e)),
-                    }
+            Some(file_path) => {
+                let (prefix_path, index_uuid) =
+                    Segment::extract_prefix_and_id(file_path).map_err(|_| {
+                        RecordSegmentReaderShardCreationError::InvalidUuid(file_path.to_string())
+                    })?;
+                let reader_options =
+                    BlockfileReaderOptions::new(index_uuid, prefix_path.to_string());
+                match blockfile_provider.read::<K, V>(reader_options).await {
+                    Ok(reader) => Ok(reader),
+                    Err(e) => Err(RecordSegmentReaderShardCreationError::BlockfileOpenError(e)),
                 }
-                None => Err(RecordSegmentReaderShardCreationError::FilePathNotFound),
-            },
+            }
             None => Err(RecordSegmentReaderShardCreationError::FilePathNotFound),
         }
     }
 
     pub async fn from_segment(
-        segment: &Segment,
+        segment: &SegmentShard,
         blockfile_provider: &BlockfileProvider,
         bloom_filter_manager: Option<BloomFilterManager>,
     ) -> Result<Self, Box<RecordSegmentReaderShardCreationError>> {
@@ -1022,10 +972,7 @@ impl RecordSegmentReaderShard<'_> {
                 }
             };
 
-        let bloom_filter_path = segment
-            .file_path
-            .get(USER_ID_BLOOM_FILTER)
-            .and_then(|paths| paths.first().cloned());
+        let bloom_filter_path = segment.file_path.get(USER_ID_BLOOM_FILTER).cloned();
 
         Ok(RecordSegmentReaderShard {
             user_id_to_id,

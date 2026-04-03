@@ -24,7 +24,8 @@ use chroma_system::{
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    Chunk, CollectionUuid, JobId, LogRecord, SegmentFlushInfo, SegmentScope, SegmentType,
+    Chunk, CollectionUuid, JobId, LogRecord, SegmentFlushInfo, SegmentScope, SegmentShard,
+    SegmentType,
 };
 use opentelemetry::trace::TraceContextExt;
 use thiserror::Error;
@@ -457,10 +458,11 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
 
         let collection = output.collection.clone();
 
+        let record_segment_shard = SegmentShard::from((&output.record_segment, 0));
         let record_reader = match self
             .ok_or_terminate(
                 match Box::pin(RecordSegmentReaderShard::from_segment(
-                    &output.record_segment,
+                    &record_segment_shard,
                     &self.context.blockfile_provider,
                     self.context.bloom_filter_manager.clone(),
                 ))
@@ -612,12 +614,13 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
 
         let cmek = collection.schema.as_ref().and_then(|s| s.cmek.clone());
 
+        let record_segment_shard = SegmentShard::from((&record_segment, 0));
         let record_writer = match self
             .ok_or_terminate(
                 RecordSegmentWriterShard::from_segment(
                     &collection.tenant,
                     &collection.database_id,
-                    &record_segment,
+                    &record_segment_shard,
                     &self.context.blockfile_provider,
                     cmek.clone(),
                     self.context.bloom_filter_manager.clone(),

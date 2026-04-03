@@ -8,7 +8,7 @@ use chroma_segment::{
     bloom_filter::BloomFilterManager,
 };
 use chroma_system::Operator;
-use chroma_types::{Chunk, LogRecord, Operation, Segment};
+use chroma_types::{Chunk, LogRecord, Operation, Segment, SegmentShard};
 use std::collections::HashSet;
 use thiserror::Error;
 
@@ -79,8 +79,9 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
         &self,
         input: &CountRecordsInput,
     ) -> Result<CountRecordsOutput, CountRecordsError> {
+        let record_segment_shard = SegmentShard::from((&input.record_segment_definition, 0));
         let segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
-            &input.record_segment_definition,
+            &record_segment_shard,
             &input.blockfile_provider,
             input.bloom_filter_manager.clone(),
         ))

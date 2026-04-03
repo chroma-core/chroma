@@ -11,7 +11,7 @@ use chroma_segment::{
 use chroma_system::Operator;
 use chroma_types::{
     operator::{Key, RecordMeasure, SearchPayloadResult, SearchRecord, Select},
-    Segment,
+    Segment, SegmentShard,
 };
 use futures::{stream, StreamExt, TryStreamExt};
 use std::collections::{HashMap, HashSet};
@@ -73,8 +73,9 @@ impl Operator<SelectInput, SelectOutput> for Select {
             });
         }
 
+        let record_segment_shard = SegmentShard::from((&input.record_segment, 0));
         let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
-            &input.record_segment,
+            &record_segment_shard,
             &input.blockfile_provider,
             input.bloom_filter_manager.clone(),
         ))

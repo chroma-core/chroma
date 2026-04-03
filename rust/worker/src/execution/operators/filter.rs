@@ -24,8 +24,8 @@ use chroma_types::{
     },
     BooleanOperator, Chunk, CompositeExpression, ContainsOperator, DataRecord, DocumentExpression,
     DocumentOperator, LogRecord, MaterializedLogOperation, MetadataComparison, MetadataExpression,
-    MetadataSetValue, MetadataValue, PrimitiveOperator, Segment, SetOperator, SignedRoaringBitmap,
-    Where,
+    MetadataSetValue, MetadataValue, PrimitiveOperator, Segment, SegmentShard, SetOperator,
+    SignedRoaringBitmap, Where,
 };
 use futures::future::try_join_all;
 use roaring::RoaringBitmap;
@@ -617,8 +617,9 @@ impl Operator<FilterInput, FilterOutput> for Filter {
 
         // Create both segment readers in parallel since they are independent
         let record_segment_reader_fut = async {
+            let record_segment_shard = SegmentShard::from((&input.record_segment, 0));
             match Box::pin(RecordSegmentReaderShard::from_segment(
-                &input.record_segment,
+                &record_segment_shard,
                 &input.blockfile_provider,
                 input.bloom_filter_manager.clone(),
             ))

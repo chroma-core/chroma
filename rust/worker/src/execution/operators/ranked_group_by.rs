@@ -21,7 +21,7 @@ use chroma_segment::{
 use chroma_system::Operator;
 use chroma_types::{
     operator::{Aggregate, GroupBy, Key, RecordMeasure},
-    MetadataValue, Segment,
+    MetadataValue, Segment, SegmentShard,
 };
 use thiserror::Error;
 use tracing::{Instrument, Span};
@@ -118,8 +118,9 @@ impl Operator<RankedGroupByInput, RankedGroupByOutput> for GroupBy {
 
         // --- Metadata hydration ---
 
+        let record_segment_shard = SegmentShard::from((&input.record_segment, 0));
         let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
-            &input.record_segment,
+            &record_segment_shard,
             &input.blockfile_provider,
             input.bloom_filter_manager.clone(),
         ))

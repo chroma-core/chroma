@@ -22,7 +22,7 @@ use chroma_system::{
 };
 use chroma_types::{
     AttachedFunctionUuid, Chunk, CollectionAndSegments, CollectionUuid, JobId, LogRecord,
-    SegmentType,
+    SegmentShard, SegmentType,
 };
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
@@ -657,12 +657,13 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
             .as_ref()
             .and_then(|s| s.cmek.clone());
 
+        let record_segment_shard = SegmentShard::from((&message.record_segment, 0));
         let record_writer = match self
             .ok_or_terminate(
                 RecordSegmentWriterShard::from_segment(
                     &collection.tenant,
                     &collection.database_id,
-                    &message.record_segment,
+                    &record_segment_shard,
                     &self.output_context.blockfile_provider,
                     cmek.clone(),
                     self.output_context.bloom_filter_manager.clone(),
@@ -752,10 +753,11 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
         };
 
         // Create record reader for the output collection to load existing statistics
+        let record_segment_shard = SegmentShard::from((&message.record_segment, 0));
         let record_reader = match self
             .ok_or_terminate(
                 match Box::pin(RecordSegmentReaderShard::from_segment(
-                    &message.record_segment,
+                    &record_segment_shard,
                     &self.output_context.blockfile_provider,
                     self.output_context.bloom_filter_manager.clone(),
                 ))

@@ -12,8 +12,8 @@ use chroma_segment::{
 };
 use chroma_system::Operator;
 use chroma_types::{
-    operator::RecordMeasure, MaterializedLogOperation, MetadataValue, Segment, SignedRoaringBitmap,
-    SparseVector,
+    operator::RecordMeasure, MaterializedLogOperation, MetadataValue, Segment, SegmentShard,
+    SignedRoaringBitmap, SparseVector,
 };
 use sprs::CsVec;
 use thiserror::Error;
@@ -67,8 +67,9 @@ impl Operator<SparseLogKnnInput, SparseLogKnnOutput> for SparseLogKnn {
         input: &SparseLogKnnInput,
     ) -> Result<SparseLogKnnOutput, SparseLogKnnError> {
         let query_sparse_vector: CsVec<f32> = (&self.query).into();
+        let record_segment_shard = SegmentShard::from((&input.record_segment, 0));
         let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
-            &input.record_segment,
+            &record_segment_shard,
             &input.blockfile_provider,
             input.bloom_filter_manager.clone(),
         ))

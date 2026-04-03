@@ -13,7 +13,7 @@ use chroma_segment::{
 use chroma_system::Operator;
 use chroma_types::{
     operator::{Projection, ProjectionOutput, ProjectionRecord},
-    Chunk, LogRecord, Segment,
+    Chunk, LogRecord, Segment, SegmentShard,
 };
 use futures::future::try_join_all;
 use thiserror::Error;
@@ -84,8 +84,9 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
             input.offset_ids.len(),
             needs_data,
         );
+        let record_segment_shard = SegmentShard::from((&input.record_segment, 0));
         let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
-            &input.record_segment,
+            &record_segment_shard,
             &input.blockfile_provider,
             input.bloom_filter_manager.clone(),
         ))
