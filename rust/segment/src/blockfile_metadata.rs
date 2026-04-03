@@ -113,6 +113,7 @@ impl<'me> MetadataSegmentWriter<'me> {
         schema: Option<Schema>,
     ) -> Result<Option<Schema>, ApplyMaterializedLogError> {
         // Apply to all shards concurrently
+        // TODO(tanujnay112): This ONLY WORKS if we have one shard.
         let futures = self.shards.iter().map(|shard| {
             shard.apply_materialized_log_chunk(record_segment_reader, materialized, schema.clone())
         });

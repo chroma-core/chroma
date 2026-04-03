@@ -6,10 +6,10 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_log::Log;
 use chroma_segment::{
-    blockfile_metadata::{MetadataSegmentError, MetadataSegmentWriterShard},
+    blockfile_metadata::{MetadataSegmentError, MetadataSegmentWriter, MetadataSegmentWriterShard},
     blockfile_record::{
         RecordSegmentReaderOptions, RecordSegmentReaderShard,
-        RecordSegmentReaderShardCreationError, RecordSegmentWriterShard,
+        RecordSegmentReaderShardCreationError, RecordSegmentWriter, RecordSegmentWriterShard,
         RecordSegmentWriterShardCreationError,
     },
     bloom_filter::BloomFilterManager,
@@ -95,7 +95,7 @@ pub enum LogFetchOrchestratorError {
     #[error("Error creating record segment reader: {0}")]
     RecordSegmentReaderShard(#[from] RecordSegmentReaderShardCreationError),
     #[error("Error creating record segment writer: {0}")]
-    RecordSegmentWriterShard(#[from] RecordSegmentWriterShardCreationError),
+    RecordSegmentWriter(#[from] RecordSegmentWriterCreationError),
     #[error("Error receiving final result: {0}")]
     RecvError(#[from] RecvError),
     #[error("Error creating quantized spann writer: {0}")]
@@ -633,10 +633,10 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         };
         let record_writer = match self
             .ok_or_terminate(
-                RecordSegmentWriterShard::from_segment(
+                RecordSegmentWriter::from_segment(
                     &collection.tenant,
                     &collection.database_id,
-                    &record_segment_shard,
+                    &record_segment,
                     &self.context.blockfile_provider,
                     cmek.clone(),
                     self.context.bloom_filter_manager.clone(),
@@ -649,19 +649,13 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             Some(writer) => writer,
             None => return,
         };
-        let metadata_segment_shard = match self
-            .ok_or_terminate(SegmentShard::try_from((&metadata_segment, 0)), ctx)
-            .await
-        {
-            Some(shard) => shard,
-            None => return,
-        };
+
         let metadata_writer = match self
             .ok_or_terminate(
-                MetadataSegmentWriterShard::from_segment(
+                MetadataSegmentWriter::from_segment(
                     &collection.tenant,
                     &collection.database_id,
-                    &metadata_segment_shard,
+                    &metadata_segment,
                     &self.context.blockfile_provider,
                     cmek.clone(),
                 )

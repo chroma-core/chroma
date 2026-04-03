@@ -38,6 +38,10 @@ impl chroma_error::ChromaError for RecordSegmentWriterError {
     }
 }
 
+#[derive(Error, Debug)]
+#[error(transparent)]
+pub struct RecordSegmentWriterCreationError(#[from] RecordSegmentWriterShardCreationError);
+
 #[derive(Clone, Debug)]
 pub struct RecordSegmentWriter {
     shards: Vec<RecordSegmentWriterShard>,
@@ -52,7 +56,7 @@ impl RecordSegmentWriter {
         blockfile_provider: &BlockfileProvider,
         cmek: Option<Cmek>,
         bloom_filter_manager: Option<BloomFilterManager>,
-    ) -> Result<Self, RecordSegmentWriterError> {
+    ) -> Result<Self, RecordSegmentWriterCreationError> {
         let segment_shards = segment.get_shards();
 
         // Create futures for all shards
