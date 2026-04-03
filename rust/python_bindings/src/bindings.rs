@@ -18,11 +18,12 @@ use chroma_system::System;
 use chroma_types::{
     Collection, CollectionConfiguration, CollectionMetadataUpdate, CountCollectionsRequest,
     CountResponse, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, Database,
-    DatabaseName, DeleteCollectionRequest, DeleteDatabaseRequest, GetCollectionRequest,
-    GetDatabaseRequest, GetResponse, GetTenantRequest, GetTenantResponse, HeartbeatError,
-    IncludeList, InternalCollectionConfiguration, InternalUpdateCollectionConfiguration, KnnIndex,
-    ListCollectionsRequest, ListDatabasesRequest, Metadata, QueryResponse,
-    UpdateCollectionConfiguration, UpdateCollectionRequest, UpdateMetadata, WrappedSerdeJsonError,
+    DatabaseName, DeleteCollectionRequest, DeleteDatabaseRequest, GetCollectionByIdRequest,
+    GetCollectionRequest, GetDatabaseRequest, GetResponse, GetTenantRequest, GetTenantResponse,
+    HeartbeatError, IncludeList, InternalCollectionConfiguration,
+    InternalUpdateCollectionConfiguration, KnnIndex, ListCollectionsRequest, ListDatabasesRequest,
+    Metadata, QueryResponse, UpdateCollectionConfiguration, UpdateCollectionRequest, UpdateMetadata,
+    WrappedSerdeJsonError,
 };
 use pyo3::{exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, Python};
 use std::time::SystemTime;
@@ -343,6 +344,15 @@ impl Bindings {
         let collection = self
             .runtime
             .block_on(async { frontend.get_collection(request).await })?;
+        Ok(collection)
+    }
+
+    fn get_collection_by_id(&self, collection_id: String) -> ChromaPyResult<Collection> {
+        let request = GetCollectionByIdRequest::try_new(collection_id)?;
+        let mut frontend = self.frontend.clone();
+        let collection = self
+            .runtime
+            .block_on(async { frontend.get_collection_by_id(request).await })?;
         Ok(collection)
     }
 

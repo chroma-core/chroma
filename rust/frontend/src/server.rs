@@ -1517,19 +1517,24 @@ async fn get_collection_by_id(
 ) -> Result<Json<Collection>, ServerError> {
     server.metrics.get_collection_by_id.add(1, &[]);
     tracing::info!(name: "get_collection_by_id", collection_id = %collection_id);
+
+    // First fetch the collection to get tenant/database context
+    let request = GetCollectionByIdRequest::try_new(collection_id)?;
+    let collection = server.frontend.get_collection_by_id(request).await?;
+
+    // Then authorize with the collection's tenant/database
     server
         .authenticate_and_authorize(
             &headers,
-            AuthzAction::GetCollectionById,
+            AuthzAction::GetCollection,
             AuthzResource {
-                tenant: None,
-                database: None,
-                collection: Some(collection_id.clone()),
+                tenant: Some(collection.tenant.clone()),
+                database: Some(collection.database.clone()),
+                collection: Some(collection.id.to_string()),
             },
         )
         .await?;
-    let request = GetCollectionByIdRequest::try_new(collection_id)?;
-    let collection = server.frontend.get_collection_by_id(request).await?;
+
     Ok(Json(collection))
 }
 

@@ -107,6 +107,7 @@ class Bindings:
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel: ...
+    def get_collection_by_id(self, collection_id: str) -> CollectionModel: ...
     def update_collection(
         self,
         id: str,

@@ -14,7 +14,6 @@ from chromadb import (
     URIs,
 )
 from chromadb.api import ServerAPI
-from chromadb.errors import NotFoundError
 
 if TYPE_CHECKING:
     from chromadb.api.models.AttachedFunction import AttachedFunction
@@ -287,22 +286,17 @@ class RustBindingsAPI(ServerAPI):
         self,
         collection_id: UUID,
     ) -> CollectionModel:
-        # Search through all collections to find the one with the matching ID
-        # This is not efficient but the bindings don't support get_collection_by_id yet
-        collections = self.bindings.list_collections()
-        for collection in collections:
-            if collection.id == collection_id:
-                return CollectionModel(
-                    id=collection.id,
-                    name=collection.name,
-                    configuration_json=collection.configuration,
-                    serialized_schema=collection.schema,
-                    metadata=collection.metadata,
-                    dimension=collection.dimension,
-                    tenant=collection.tenant,
-                    database=collection.database,
-                )
-        raise NotFoundError(f"Collection {collection_id} does not exist.")
+        collection = self.bindings.get_collection_by_id(str(collection_id))
+        return CollectionModel(
+            id=collection.id,
+            name=collection.name,
+            configuration_json=collection.configuration,
+            serialized_schema=collection.schema,
+            metadata=collection.metadata,
+            dimension=collection.dimension,
+            tenant=collection.tenant,
+            database=collection.database,
+        )
 
     @override
     def get_or_create_collection(
