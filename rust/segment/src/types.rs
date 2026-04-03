@@ -11,6 +11,7 @@ use thiserror::Error;
 use tracing::{Instrument, Span};
 use uuid::Uuid;
 
+use crate::blockfile_record::{RecordSegmentFlusher, RecordSegmentWriter};
 use crate::distributed_spann::{SpannSegmentFlusherShard, SpannSegmentWriterShard};
 #[cfg(feature = "usearch")]
 use crate::quantized_spann::{QuantizedSpannSegmentFlusherShard, QuantizedSpannSegmentWriterShard};
@@ -1087,7 +1088,6 @@ impl VectorSegmentWriterShard {
     }
 }
 
-type RecordSegmentWriter = RecordSegmentWriterShard;
 type MetadataSegmentWriter<'a> = MetadataSegmentWriterShard<'a>;
 type VectorSegmentWriter = VectorSegmentWriterShard;
 
@@ -1169,7 +1169,6 @@ pub enum VectorSegmentFlusherShard {
     Spann(SpannSegmentFlusherShard),
 }
 
-type RecordSegmentFlusher = RecordSegmentFlusherShard;
 type MetadataSegmentFlusher = MetadataSegmentFlusherShard;
 type VectorSegmentFlusher = VectorSegmentFlusherShard;
 
