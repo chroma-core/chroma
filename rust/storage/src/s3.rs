@@ -606,26 +606,25 @@ impl S3Storage {
                         return Err(e);
                     }
                     None => {
-                        if part_buf.len() < expected_part_size {
-                            let _ = self
-                                .client
-                                .abort_multipart_upload()
-                                .bucket(&self.bucket)
-                                .key(key)
-                                .upload_id(&upload_id)
-                                .send()
-                                .await;
-                            self.metrics.s3_put_error_count.add(1, &[]);
-                            return Err(StorageError::Message {
-                                message: format!(
-                                    "Stream ended early at part {}/{}, expected {} bytes total",
-                                    part_index + 1,
-                                    part_count,
-                                    total_size_bytes
-                                ),
-                            });
-                        }
-                        break;
+                        // The while-loop condition guarantees
+                        // part_buf.len() < expected_part_size here.
+                        let _ = self
+                            .client
+                            .abort_multipart_upload()
+                            .bucket(&self.bucket)
+                            .key(key)
+                            .upload_id(&upload_id)
+                            .send()
+                            .await;
+                        self.metrics.s3_put_error_count.add(1, &[]);
+                        return Err(StorageError::Message {
+                            message: format!(
+                                "Stream ended early at part {}/{}, expected {} bytes total",
+                                part_index + 1,
+                                part_count,
+                                total_size_bytes
+                            ),
+                        });
                     }
                 }
             }
@@ -675,7 +674,7 @@ impl S3Storage {
             }
         }
 
-        if !leftover.is_empty() {
+        if !leftover.is_empty() || stream.next().await.is_some() {
             let _ = self
                 .client
                 .abort_multipart_upload()
