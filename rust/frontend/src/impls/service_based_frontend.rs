@@ -83,6 +83,7 @@ pub struct ServiceBasedFrontend {
     retries_builder: ExponentialBuilder,
     min_records_for_invocation: u64,
     tenants_with_quantization_enabled: Vec<String>,
+    enable_log_scouting: bool,
 }
 
 impl ServiceBasedFrontend {
@@ -98,6 +99,7 @@ impl ServiceBasedFrontend {
         enable_schema: bool,
         min_records_for_invocation: u64,
         tenants_with_quantization_enabled: Vec<String>,
+        enable_log_scouting: bool,
     ) -> Self {
         let meter = global::meter("chroma");
         let fork_retries_counter = meter.u64_counter("fork_retries").build();
@@ -153,6 +155,7 @@ impl ServiceBasedFrontend {
             retries_builder,
             min_records_for_invocation,
             tenants_with_quantization_enabled,
+            enable_log_scouting,
         }
     }
 
@@ -1226,6 +1229,18 @@ impl ServiceBasedFrontend {
                 .size_bytes_post_compaction;
             let fts_query_length = where_clause.fts_query_length();
             let metadata_predicate_count = where_clause.metadata_predicate_count();
+            let log_upper_bound_offset = if self.enable_log_scouting {
+                self.log_client
+                    .scout_logs(
+                        &collection_and_segments.collection.tenant,
+                        database_name_typed.clone(),
+                        collection_id,
+                        0,
+                    )
+                    .await? as i64
+            } else {
+                0
+            };
 
             let filter = Filter {
                 query_ids: ids,
@@ -1239,7 +1254,7 @@ impl ServiceBasedFrontend {
                         collection_and_segments,
                         shard_index: 0,
                         num_shards: 1,
-                        log_upper_bound_offset: 0,
+                        log_upper_bound_offset,
                     },
                     filter,
                     limit: Limit { offset: 0, limit },
@@ -1443,12 +1458,24 @@ impl ServiceBasedFrontend {
         })?;
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(Some(database_name_typed), collection_id)
+            .get_collection_with_segments(Some(database_name_typed.clone()), collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         let latest_collection_logical_size_bytes = collection_and_segments
             .collection
             .size_bytes_post_compaction;
+        let log_upper_bound_offset = if self.enable_log_scouting {
+            self.log_client
+                .scout_logs(
+                    &collection_and_segments.collection.tenant,
+                    database_name_typed,
+                    collection_id,
+                    0,
+                )
+                .await? as i64
+        } else {
+            0
+        };
         let count_result = self
             .executor
             .count(Count {
@@ -1456,7 +1483,7 @@ impl ServiceBasedFrontend {
                     collection_and_segments,
                     shard_index: 0,
                     num_shards: 1,
-                    log_upper_bound_offset: 0,
+                    log_upper_bound_offset,
                 },
                 read_level,
             })
@@ -1616,7 +1643,7 @@ impl ServiceBasedFrontend {
         })?;
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(Some(database_name_typed), collection_id)
+            .get_collection_with_segments(Some(database_name_typed.clone()), collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         if self.enable_schema {
@@ -1639,6 +1666,18 @@ impl ServiceBasedFrontend {
             .as_ref()
             .map(Where::fts_query_length)
             .unwrap_or_default();
+        let log_upper_bound_offset = if self.enable_log_scouting {
+            self.log_client
+                .scout_logs(
+                    &collection_and_segments.collection.tenant,
+                    database_name_typed,
+                    collection_id,
+                    0,
+                )
+                .await? as i64
+        } else {
+            0
+        };
         let get_result = self
             .executor
             .get(Get {
@@ -1646,7 +1685,7 @@ impl ServiceBasedFrontend {
                     collection_and_segments,
                     shard_index: 0,
                     num_shards: 1,
-                    log_upper_bound_offset: 0,
+                    log_upper_bound_offset,
                 },
                 filter: Filter {
                     query_ids: ids,
@@ -1772,7 +1811,7 @@ impl ServiceBasedFrontend {
         })?;
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(Some(database_name_typed), collection_id)
+            .get_collection_with_segments(Some(database_name_typed.clone()), collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         if self.enable_schema {
@@ -1796,6 +1835,18 @@ impl ServiceBasedFrontend {
             .map(Where::fts_query_length)
             .unwrap_or_default();
         let query_embedding_count = embeddings.len() as u64;
+        let log_upper_bound_offset = if self.enable_log_scouting {
+            self.log_client
+                .scout_logs(
+                    &collection_and_segments.collection.tenant,
+                    database_name_typed,
+                    collection_id,
+                    0,
+                )
+                .await? as i64
+        } else {
+            0
+        };
         let query_result = self
             .executor
             .knn(Knn {
@@ -1803,7 +1854,7 @@ impl ServiceBasedFrontend {
                     collection_and_segments,
                     shard_index: 0,
                     num_shards: 1,
-                    log_upper_bound_offset: 0,
+                    log_upper_bound_offset,
                 },
                 filter: Filter {
                     query_ids: ids,
@@ -1943,7 +1994,7 @@ impl ServiceBasedFrontend {
         })?;
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(Some(database_name_typed), request.collection_id)
+            .get_collection_with_segments(Some(database_name_typed.clone()), request.collection_id)
             .await
             .map_err(|err| QueryError::Other(Box::new(err) as Box<dyn ChromaError>))?;
         if self.enable_schema {
@@ -1997,13 +2048,26 @@ impl ServiceBasedFrontend {
 
         // Create a single Search plan with one scan and the payloads from the request
         // Clone the searches to use them later for aggregating select keys
+        let log_upper_bound_offset = if self.enable_log_scouting {
+            self.log_client
+                .scout_logs(
+                    &collection_and_segments.collection.tenant,
+                    database_name_typed,
+                    request.collection_id,
+                    0,
+                )
+                .await? as i64
+        } else {
+            0
+        };
+
         let searches_for_select = request.searches.clone();
         let search_plan = Search {
             scan: Scan {
                 collection_and_segments,
                 shard_index: 0,
                 num_shards: 1,
-                log_upper_bound_offset: 0,
+                log_upper_bound_offset,
             },
             payloads: request.searches,
             read_level: request.read_level,
@@ -2379,6 +2443,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             config.enable_schema,
             config.min_records_for_invocation,
             config.tenants_with_quantization_enabled.clone(),
+            config.enable_log_scouting,
         ))
     }
 }
