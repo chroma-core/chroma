@@ -1559,6 +1559,7 @@ mod tests {
     }
 
     #[tokio::test]
+    // Naming this "test_k8s_integration_" means that the Tilt stack is required. See rust/worker/README.md.
     async fn test_k8s_integration_put_stream_scenarios() {
         let part = 1024 * 1024 * 8; // 8 MB
 
