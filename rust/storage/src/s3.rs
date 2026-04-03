@@ -549,7 +549,13 @@ impl S3Storage {
         );
 
         let (part_count, size_of_last_part, upload_id) =
-            self.prepare_multipart_upload(key, total_size_bytes).await?;
+            match self.prepare_multipart_upload(key, total_size_bytes).await {
+                Ok(v) => v,
+                Err(e) => {
+                    self.metrics.s3_put_error_count.add(1, &[]);
+                    return Err(e);
+                }
+            };
 
         self.metrics
             .s3_multipart_upload_parts
@@ -599,7 +605,7 @@ impl S3Storage {
                         return Err(e);
                     }
                     None => {
-                        if part_index < part_count - 1 && part_buf.len() < expected_part_size {
+                        if part_buf.len() < expected_part_size {
                             let _ = self
                                 .client
                                 .abort_multipart_upload()
