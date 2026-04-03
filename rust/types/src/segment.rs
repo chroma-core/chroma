@@ -195,15 +195,6 @@ pub struct SegmentShard {
     pub file_path: HashMap<String, String>,
 }
 
-impl SegmentShard {
-    pub fn construct_prefix_path(&self, tenant: &str, database_id: &DatabaseUuid) -> String {
-        format!(
-            "tenant/{}/database/{}/collection/{}/segment/{}",
-            tenant, database_id, self.collection, self.id
-        )
-    }
-}
-
 #[derive(Error, Debug)]
 pub enum SegmentShardError {
     #[error("Empty path vector for key '{0}'")]
