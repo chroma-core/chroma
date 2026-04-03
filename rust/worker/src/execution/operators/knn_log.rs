@@ -14,7 +14,7 @@ use chroma_segment::{
 use chroma_system::Operator;
 use chroma_types::{
     operator::{Knn, KnnOutput, RecordMeasure},
-    MaterializedLogOperation, Segment, SegmentShard, SignedRoaringBitmap,
+    MaterializedLogOperation, Segment, SegmentShard, SegmentShardError, SignedRoaringBitmap,
 };
 use thiserror::Error;
 
@@ -38,6 +38,8 @@ pub enum KnnLogError {
     LogMaterializer(#[from] LogMaterializerError),
     #[error("Error creating record segment reader: {0}")]
     RecordReader(#[from] RecordSegmentReaderShardCreationError),
+    #[error(transparent)]
+    SegmentShard(#[from] SegmentShardError),
 }
 
 impl ChromaError for KnnLogError {
@@ -46,6 +48,7 @@ impl ChromaError for KnnLogError {
             KnnLogError::FetchLog(e) => e.code(),
             KnnLogError::LogMaterializer(e) => e.code(),
             KnnLogError::RecordReader(e) => e.code(),
+            KnnLogError::SegmentShard(e) => e.code(),
         }
     }
 }
@@ -55,7 +58,7 @@ impl Operator<KnnLogInput, KnnOutput> for Knn {
     type Error = KnnLogError;
 
     async fn run(&self, input: &KnnLogInput) -> Result<KnnOutput, KnnLogError> {
-        let record_segment_shard = SegmentShard::from((&input.record_segment, 0));
+        let record_segment_shard = SegmentShard::try_from((&input.record_segment, 0))?;
         let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment_shard,
             &input.blockfile_provider,

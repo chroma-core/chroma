@@ -1007,7 +1007,8 @@ mod tests {
         let input_chunk = Chunk::new(vec![input_record_with_obsolete_key].into());
         Box::pin(input_segment.compact_log(input_chunk, 1)).await;
 
-        let input_record_segment_shard = SegmentShard::from((&input_segment.record_segment, 0));
+        let input_record_segment_shard =
+            SegmentShard::try_from((&input_segment.record_segment, 0)).expect("valid shard index");
         let input_record_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &input_record_segment_shard,
             &input_segment.blockfile_provider,
@@ -1023,7 +1024,8 @@ mod tests {
         let existing_output_chunk = Chunk::new(vec![stale_record, fresh_record].into());
         Box::pin(output_segment.compact_log(existing_output_chunk, 1)).await;
 
-        let output_record_segment_shard = SegmentShard::from((&output_segment.record_segment, 0));
+        let output_record_segment_shard =
+            SegmentShard::try_from((&output_segment.record_segment, 0)).expect("valid shard index");
         let output_record_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &output_record_segment_shard,
             &output_segment.blockfile_provider,
@@ -1093,7 +1095,8 @@ mod tests {
         let existing_chunk = Chunk::new(vec![record].into());
         Box::pin(test_segment.compact_log(existing_chunk, 1)).await;
 
-        let record_segment_shard = SegmentShard::from((&test_segment.record_segment, 0));
+        let record_segment_shard =
+            SegmentShard::try_from((&test_segment.record_segment, 0)).expect("valid shard index");
         let record_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment_shard,
             &test_segment.blockfile_provider,
@@ -1147,7 +1150,8 @@ mod tests {
         let input_chunk = Chunk::new(vec![input_record1, input_record2].into());
         Box::pin(input_segment.compact_log(input_chunk, 1)).await;
 
-        let input_record_segment_shard = SegmentShard::from((&input_segment.record_segment, 0));
+        let input_record_segment_shard =
+            SegmentShard::try_from((&input_segment.record_segment, 0)).expect("valid shard index");
         let input_record_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &input_record_segment_shard,
             &input_segment.blockfile_provider,
@@ -1162,7 +1166,8 @@ mod tests {
         let existing_chunk = Chunk::new(vec![existing_stat].into());
         Box::pin(output_segment.compact_log(existing_chunk, 1)).await;
 
-        let output_record_segment_shard = SegmentShard::from((&output_segment.record_segment, 0));
+        let output_record_segment_shard =
+            SegmentShard::try_from((&output_segment.record_segment, 0)).expect("valid shard index");
         let output_record_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &output_record_segment_shard,
             &output_segment.blockfile_provider,
@@ -1436,7 +1441,8 @@ mod tests {
             .get_collection_with_segments(None, output_collection_id)
             .await
             .expect("Should get output collection");
-        let output_record_segment_shard = SegmentShard::from((&output_info.record_segment, 0));
+        let output_record_segment_shard =
+            SegmentShard::try_from((&output_info.record_segment, 0)).expect("valid shard index");
         let reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &output_record_segment_shard,
             &test_segments.blockfile_provider,

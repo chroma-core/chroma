@@ -672,7 +672,8 @@ mod test {
                 .expect("Error converting config to schema for test collection"),
         );
 
-        let spann_segment_shard = SegmentShard::from((&spann_segment, 0));
+        let spann_segment_shard =
+            SegmentShard::try_from((&spann_segment, 0)).expect("valid shard index");
         let pl_block_size = 5 * 1024 * 1024;
         let spann_writer = SpannSegmentWriterShard::from_segment(
             &collection,
@@ -777,7 +778,8 @@ mod test {
         )
         .await
         .expect("Error converting config to gc context");
-        let spann_segment_shard = SegmentShard::from((&spann_segment, 0));
+        let spann_segment_shard =
+            SegmentShard::try_from((&spann_segment, 0)).expect("valid shard index");
         let pl_block_size = 5 * 1024 * 1024;
         let spann_writer = SpannSegmentWriterShard::from_segment(
             &collection,
@@ -919,7 +921,8 @@ mod test {
                 .expect("Error converting config to schema for test collection"),
         );
 
-        let spann_segment_shard = SegmentShard::from((&spann_segment, 0));
+        let spann_segment_shard =
+            SegmentShard::try_from((&spann_segment, 0)).expect("valid shard index");
         let pl_block_size = 5 * 1024 * 1024;
         let spann_writer = SpannSegmentWriterShard::from_segment(
             &collection,
@@ -1003,7 +1006,8 @@ mod test {
             16,
             false,
         );
-        let spann_segment_shard = SegmentShard::from((&spann_segment, 0));
+        let spann_segment_shard =
+            SegmentShard::try_from((&spann_segment, 0)).expect("valid shard index");
         let spann_reader = SpannSegmentReaderShard::from_segment(
             &collection,
             &spann_segment_shard,
@@ -1115,7 +1119,8 @@ mod test {
         )
         .await
         .expect("Error converting config to gc context");
-        let spann_segment_shard = SegmentShard::from((&spann_segment, 0));
+        let spann_segment_shard =
+            SegmentShard::try_from((&spann_segment, 0)).expect("valid shard index");
         let pl_block_size = 5 * 1024 * 1024;
         let spann_writer = SpannSegmentWriterShard::from_segment(
             &collection,
@@ -1227,7 +1232,8 @@ mod test {
                 .expect("Error converting config to schema for test collection"),
         );
 
-        let spann_segment_shard = SegmentShard::from((&spann_segment, 0));
+        let spann_segment_shard =
+            SegmentShard::try_from((&spann_segment, 0)).expect("valid shard index");
         let pl_block_size = 5 * 1024 * 1024;
         let spann_writer = SpannSegmentWriterShard::from_segment(
             &collection,

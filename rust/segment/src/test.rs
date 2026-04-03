@@ -112,7 +112,8 @@ impl TestDistributedSegment {
         .await
         .expect("Should be able to materialize log.");
 
-        let metadata_segment_shard = SegmentShard::from((&self.metadata_segment, 0));
+        let metadata_segment_shard =
+            SegmentShard::try_from((&self.metadata_segment, 0)).expect("valid shard index");
         let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
             &self.collection.tenant,
             &self.collection.database_id,
@@ -139,7 +140,8 @@ impl TestDistributedSegment {
         .await
         .expect("Should be able to flush metadata.");
 
-        let record_segment_shard = SegmentShard::from((&self.record_segment, 0));
+        let record_segment_shard =
+            SegmentShard::try_from((&self.record_segment, 0)).expect("valid shard index");
         let record_writer = Box::pin(RecordSegmentWriterShard::from_segment(
             &self.collection.tenant,
             &self.collection.database_id,

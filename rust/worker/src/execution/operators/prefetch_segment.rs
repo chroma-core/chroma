@@ -140,7 +140,8 @@ mod tests {
             file_path: HashMap::new(),
         };
         {
-            let record_segment_shard = SegmentShard::from((&record_segment, 0));
+            let record_segment_shard =
+                SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
             let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,

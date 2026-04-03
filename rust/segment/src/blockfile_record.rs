@@ -1195,7 +1195,8 @@ mod tests {
             .build()
             .expect("Runtime creation should not fail");
         let test_segment = runtime.block_on(async { TestDistributedSegment::new().await });
-        let record_segment_shard = SegmentShard::from((&test_segment.record_segment, 0));
+        let record_segment_shard =
+            SegmentShard::try_from((&test_segment.record_segment, 0)).expect("valid shard index");
         let record_segment_writer = runtime
             .block_on(RecordSegmentWriterShard::from_segment(
                 &test_segment.collection.tenant,
@@ -1315,7 +1316,8 @@ mod tests {
         let logs = upsert_generator.generate_chunk(1..=num_records);
         Box::pin(test_segment.compact_log(logs, 1)).await;
 
-        let record_segment_shard = SegmentShard::from((&test_segment.record_segment, 0));
+        let record_segment_shard =
+            SegmentShard::try_from((&test_segment.record_segment, 0)).expect("valid shard index");
         let writer = RecordSegmentWriterShard::from_segment(
             &test_segment.collection.tenant,
             &test_segment.collection.database_id,
@@ -1364,7 +1366,8 @@ mod tests {
             .file_path
             .contains_key(USER_ID_BLOOM_FILTER),);
 
-        let record_segment_shard = SegmentShard::from((&test_segment.record_segment, 0));
+        let record_segment_shard =
+            SegmentShard::try_from((&test_segment.record_segment, 0)).expect("valid shard index");
         let writer = RecordSegmentWriterShard::from_segment(
             &test_segment.collection.tenant,
             &test_segment.collection.database_id,
@@ -1405,7 +1408,8 @@ mod tests {
 
         // Second compaction: delete 2 records, materializing with a reader so
         // the deletes resolve to DeleteExisting.
-        let record_segment_shard = SegmentShard::from((&test_segment.record_segment, 0));
+        let record_segment_shard =
+            SegmentShard::try_from((&test_segment.record_segment, 0)).expect("valid shard index");
         let reader = Box::pin(super::RecordSegmentReaderShard::from_segment(
             &record_segment_shard,
             &test_segment.blockfile_provider,
@@ -1441,7 +1445,8 @@ mod tests {
         .expect("Should materialize delete logs");
 
         // Need a second reader for hydration during apply.
-        let record_segment_shard = SegmentShard::from((&test_segment.record_segment, 0));
+        let record_segment_shard =
+            SegmentShard::try_from((&test_segment.record_segment, 0)).expect("valid shard index");
         let reader_for_apply = Box::pin(super::RecordSegmentReaderShard::from_segment(
             &record_segment_shard,
             &test_segment.blockfile_provider,
@@ -1450,7 +1455,8 @@ mod tests {
         .await
         .expect("Should be able to create reader for apply");
 
-        let record_segment_shard = SegmentShard::from((&test_segment.record_segment, 0));
+        let record_segment_shard =
+            SegmentShard::try_from((&test_segment.record_segment, 0)).expect("valid shard index");
         let writer = RecordSegmentWriterShard::from_segment(
             &test_segment.collection.tenant,
             &test_segment.collection.database_id,

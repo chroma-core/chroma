@@ -204,26 +204,56 @@ impl SegmentShard {
     }
 }
 
-impl From<(&Segment, u32)> for SegmentShard {
-    fn from((segment, shard_index): (&Segment, u32)) -> Self {
-        let file_path = segment
-            .file_path
-            .iter()
-            .filter_map(|(key, paths)| {
-                paths
-                    .get(shard_index as usize)
-                    .map(|path| (key.clone(), path.clone()))
-            })
-            .collect();
+#[derive(Error, Debug)]
+pub enum SegmentShardError {
+    #[error("Empty path vector for key '{0}'")]
+    EmptyPathVector(String),
+    #[error("Empty path string for key '{0}'")]
+    EmptyPathString(String),
+    #[error("Shard index {index} out of bounds for key '{key}' (len {len})")]
+    ShardIndexOutOfBounds { key: String, index: u32, len: usize },
+}
 
-        SegmentShard {
+impl ChromaError for SegmentShardError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
+    }
+}
+
+impl TryFrom<(&Segment, u32)> for SegmentShard {
+    type Error = SegmentShardError;
+
+    fn try_from((segment, shard_index): (&Segment, u32)) -> Result<Self, Self::Error> {
+        let mut file_path = HashMap::new();
+        for (key, paths) in &segment.file_path {
+            match paths.get(shard_index as usize) {
+                Some(path) if path.is_empty() => {
+                    return Err(SegmentShardError::EmptyPathString(key.clone()));
+                }
+                Some(path) => {
+                    file_path.insert(key.clone(), path.clone());
+                }
+                None if paths.is_empty() => {
+                    return Err(SegmentShardError::EmptyPathVector(key.clone()));
+                }
+                None => {
+                    return Err(SegmentShardError::ShardIndexOutOfBounds {
+                        key: key.clone(),
+                        index: shard_index,
+                        len: paths.len(),
+                    });
+                }
+            }
+        }
+
+        Ok(SegmentShard {
             id: segment.id,
             r#type: segment.r#type,
             scope: segment.scope.clone(),
             collection: segment.collection,
             metadata: segment.metadata.clone(),
             file_path,
-        }
+        })
     }
 }
 

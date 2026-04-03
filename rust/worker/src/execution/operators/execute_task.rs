@@ -12,7 +12,8 @@ use chroma_segment::{
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{
     Chunk, CollectionUuid, LogRecord, MaterializedLogOperation, Operation, OperationRecord,
-    Segment, SegmentShard, UpdateMetadataValue, FUNCTION_RECORD_COUNTER_ID, FUNCTION_STATISTICS_ID,
+    Segment, SegmentShard, SegmentShardError, UpdateMetadataValue, FUNCTION_RECORD_COUNTER_ID,
+    FUNCTION_STATISTICS_ID,
 };
 use std::sync::Arc;
 use thiserror::Error;
@@ -226,6 +227,8 @@ pub enum ExecuteAttachedFunctionError {
     LogOffsetOverflow(i64, usize),
     #[error("Log offset overflow: base_offset={0}, record_index={1}")]
     LogOffsetOverflowUnsignedToSigned(u64, usize),
+    #[error(transparent)]
+    SegmentShard(#[from] SegmentShardError),
 }
 
 impl ChromaError for ExecuteAttachedFunctionError {
@@ -242,6 +245,7 @@ impl ChromaError for ExecuteAttachedFunctionError {
             ExecuteAttachedFunctionError::LogOffsetOverflowUnsignedToSigned(_, _) => {
                 chroma_error::ErrorCodes::Internal
             }
+            ExecuteAttachedFunctionError::SegmentShard(e) => e.code(),
         }
     }
 }
@@ -271,7 +275,7 @@ impl Operator<ExecuteAttachedFunctionInput, ExecuteAttachedFunctionOutput>
             // For rebuild and backfill, we don't read any existing data in output collection
             None
         } else {
-            let record_segment_shard = SegmentShard::from((&input.output_record_segment, 0));
+            let record_segment_shard = SegmentShard::try_from((&input.output_record_segment, 0))?;
             match Box::pin(RecordSegmentReaderShard::from_segment(
                 &record_segment_shard,
                 &input.blockfile_provider,

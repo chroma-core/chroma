@@ -8,7 +8,7 @@ use chroma_segment::{
     bloom_filter::BloomFilterManager,
 };
 use chroma_system::Operator;
-use chroma_types::{Chunk, LogRecord, Operation, Segment, SegmentShard};
+use chroma_types::{Chunk, LogRecord, Operation, Segment, SegmentShard, SegmentShardError};
 use std::collections::HashSet;
 use thiserror::Error;
 
@@ -56,6 +56,8 @@ pub(crate) enum CountRecordsError {
     RecordSegmentCreateError(#[from] RecordSegmentReaderShardCreationError),
     #[error("Error reading record segment")]
     RecordSegmentReadError(#[from] Box<dyn ChromaError>),
+    #[error(transparent)]
+    SegmentShard(#[from] SegmentShardError),
 }
 
 impl ChromaError for CountRecordsError {
@@ -63,6 +65,7 @@ impl ChromaError for CountRecordsError {
         match self {
             CountRecordsError::RecordSegmentCreateError(e) => e.code(),
             CountRecordsError::RecordSegmentReadError(e) => e.code(),
+            CountRecordsError::SegmentShard(e) => e.code(),
         }
     }
 }
@@ -79,7 +82,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
         &self,
         input: &CountRecordsInput,
     ) -> Result<CountRecordsOutput, CountRecordsError> {
-        let record_segment_shard = SegmentShard::from((&input.record_segment_definition, 0));
+        let record_segment_shard = SegmentShard::try_from((&input.record_segment_definition, 0))?;
         let segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment_shard,
             &input.blockfile_provider,
@@ -252,7 +255,8 @@ mod tests {
         let tenant = String::from("test_tenant");
         let database_id = DatabaseUuid::new();
         {
-            let record_segment_shard = SegmentShard::from((&record_segment, 0));
+            let record_segment_shard =
+                SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
             let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,

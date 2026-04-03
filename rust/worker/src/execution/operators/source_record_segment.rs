@@ -111,7 +111,8 @@ mod tests {
         test_segment
             .populate_with_generator(100, upsert_generator)
             .await;
-        let record_segment_shard = SegmentShard::from((&test_segment.record_segment, 0));
+        let record_segment_shard =
+            SegmentShard::try_from((&test_segment.record_segment, 0)).expect("valid shard index");
         let reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment_shard,
             &test_segment.blockfile_provider,

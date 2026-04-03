@@ -11,7 +11,7 @@ use chroma_segment::{
 use chroma_system::Operator;
 use chroma_types::{
     operator::{Key, RecordMeasure, SearchPayloadResult, SearchRecord, Select},
-    Segment, SegmentShard,
+    Segment, SegmentShard, SegmentShardError,
 };
 use futures::{stream, StreamExt, TryStreamExt};
 use std::collections::{HashMap, HashSet};
@@ -45,6 +45,8 @@ pub enum SelectError {
     RecordSegmentUninitialized,
     #[error("Error reading phantom record: {0}")]
     RecordSegmentPhantomRecord(u32),
+    #[error(transparent)]
+    SegmentShard(#[from] SegmentShardError),
 }
 
 impl ChromaError for SelectError {
@@ -55,6 +57,7 @@ impl ChromaError for SelectError {
             SelectError::RecordSegment(e) => e.code(),
             SelectError::RecordSegmentUninitialized => ErrorCodes::Internal,
             SelectError::RecordSegmentPhantomRecord(_) => ErrorCodes::Internal,
+            SelectError::SegmentShard(e) => e.code(),
         }
     }
 }
@@ -73,7 +76,7 @@ impl Operator<SelectInput, SelectOutput> for Select {
             });
         }
 
-        let record_segment_shard = SegmentShard::from((&input.record_segment, 0));
+        let record_segment_shard = SegmentShard::try_from((&input.record_segment, 0))?;
         let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment_shard,
             &input.blockfile_provider,

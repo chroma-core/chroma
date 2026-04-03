@@ -24,8 +24,8 @@ use chroma_types::{
     },
     BooleanOperator, Chunk, CompositeExpression, ContainsOperator, DataRecord, DocumentExpression,
     DocumentOperator, LogRecord, MaterializedLogOperation, MetadataComparison, MetadataExpression,
-    MetadataSetValue, MetadataValue, PrimitiveOperator, Segment, SegmentShard, SetOperator,
-    SignedRoaringBitmap, Where,
+    MetadataSetValue, MetadataValue, PrimitiveOperator, Segment, SegmentShard, SegmentShardError,
+    SetOperator, SignedRoaringBitmap, Where,
 };
 use futures::future::try_join_all;
 use roaring::RoaringBitmap;
@@ -76,6 +76,8 @@ pub enum FilterError {
     RecordReader(#[from] RecordSegmentReaderShardCreationError),
     #[error("Error parsing regular expression: {0}")]
     Regex(#[from] ChromaRegexError),
+    #[error(transparent)]
+    SegmentShard(#[from] SegmentShardError),
     #[error("Unsupported comparison type: {0}")]
     UnsupportedComparisonType(MetadataComparison),
 }
@@ -89,6 +91,7 @@ impl ChromaError for FilterError {
             FilterError::Record(e) => e.code(),
             FilterError::RecordReader(e) => e.code(),
             FilterError::Regex(_) => ErrorCodes::InvalidArgument,
+            FilterError::SegmentShard(e) => e.code(),
             FilterError::UnsupportedComparisonType(_) => ErrorCodes::InvalidArgument,
         }
     }
@@ -617,7 +620,7 @@ impl Operator<FilterInput, FilterOutput> for Filter {
 
         // Create both segment readers in parallel since they are independent
         let record_segment_reader_fut = async {
-            let record_segment_shard = SegmentShard::from((&input.record_segment, 0));
+            let record_segment_shard = SegmentShard::try_from((&input.record_segment, 0))?;
             match Box::pin(RecordSegmentReaderShard::from_segment(
                 &record_segment_shard,
                 &input.blockfile_provider,
@@ -641,7 +644,7 @@ impl Operator<FilterInput, FilterOutput> for Filter {
             }
         };
 
-        let metadata_segment_shard = SegmentShard::from((&input.metadata_segment, 0));
+        let metadata_segment_shard = SegmentShard::try_from((&input.metadata_segment, 0))?;
         let metadata_segment_reader_fut = async {
             Box::pin(MetadataSegmentReaderShard::from_segment(
                 &metadata_segment_shard,
@@ -1389,7 +1392,8 @@ mod tests {
             file_path: HashMap::new(),
         };
         {
-            let record_segment_shard = SegmentShard::from((&record_segment, 0));
+            let record_segment_shard =
+                SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
             let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
@@ -1400,7 +1404,8 @@ mod tests {
             )
             .await
             .expect("Error creating segment writer");
-            let metadata_segment_shard = SegmentShard::from((&metadata_segment, 0));
+            let metadata_segment_shard =
+                SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
             let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
@@ -1526,7 +1531,8 @@ mod tests {
         ];
 
         let data: Chunk<LogRecord> = Chunk::new(data.into());
-        let record_segment_shard = SegmentShard::from((&record_segment, 0));
+        let record_segment_shard =
+            SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
         let record_segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment_shard,
             &blockfile_provider,
@@ -1544,7 +1550,8 @@ mod tests {
         )
         .await
         .expect("Error creating segment writer");
-        let metadata_segment_shard = SegmentShard::from((&metadata_segment, 0));
+        let metadata_segment_shard =
+            SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
         let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
@@ -1587,7 +1594,8 @@ mod tests {
         metadata_segment.file_path = Box::pin(metadata_flusher.flush())
             .await
             .expect("Flush metadata segment writer failed");
-        let metadata_segment_shard = SegmentShard::from((&metadata_segment, 0));
+        let metadata_segment_shard =
+            SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
         let metadata_segment_reader = Box::pin(MetadataSegmentReaderShard::from_segment(
             &metadata_segment_shard,
             &blockfile_provider,
@@ -1618,7 +1626,8 @@ mod tests {
     async fn test_regex_short_circuit() {
         let (_test_segment, filter_input) = setup_filter_input().await;
 
-        let record_segment_shard = SegmentShard::from((&filter_input.record_segment, 0));
+        let record_segment_shard =
+            SegmentShard::try_from((&filter_input.record_segment, 0)).expect("valid shard index");
         let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment_shard,
             &filter_input.blockfile_provider,
@@ -1653,7 +1662,8 @@ mod tests {
                 .unwrap();
         let log_metadata_provider = MetadataProvider::Log(&metadata_log_reader);
 
-        let metadata_segment_shard = SegmentShard::from((&filter_input.metadata_segment, 0));
+        let metadata_segment_shard =
+            SegmentShard::try_from((&filter_input.metadata_segment, 0)).expect("valid shard index");
         let metadata_segement_reader = Box::pin(MetadataSegmentReaderShard::from_segment(
             &metadata_segment_shard,
             &filter_input.blockfile_provider,

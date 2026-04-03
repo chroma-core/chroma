@@ -831,8 +831,10 @@ mod test {
             let blockfile_provider = test_blockfile_provider(storage.clone());
             let usearch_provider = test_usearch_provider(storage.clone());
 
-            let vector_segment_shard = SegmentShard::from((&vector_segment, 0));
-            let record_segment_shard = SegmentShard::from((&record_segment, 0));
+            let vector_segment_shard =
+                SegmentShard::try_from((&vector_segment, 0)).expect("valid shard index");
+            let record_segment_shard =
+                SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
             let mut writer = QuantizedSpannSegmentWriterShard::from_segment(
                 CLUSTER_BLOCK_SIZE,
                 &collection,
@@ -904,8 +906,10 @@ mod test {
         let blockfile_provider = test_blockfile_provider(storage.clone());
         let usearch_provider = test_usearch_provider(storage.clone());
 
-        let vector_segment_shard = SegmentShard::from((&vector_segment, 0));
-        let record_segment_shard = SegmentShard::from((&record_segment, 0));
+        let vector_segment_shard =
+            SegmentShard::try_from((&vector_segment, 0)).expect("valid shard index");
+        let record_segment_shard =
+            SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
         QuantizedSpannSegmentWriterShard::from_segment(
             CLUSTER_BLOCK_SIZE,
             &collection,
@@ -921,7 +925,8 @@ mod test {
         let blockfile_provider = test_blockfile_provider(storage.clone());
         let usearch_provider = test_usearch_provider(storage.clone());
 
-        let vector_segment_shard = SegmentShard::from((&vector_segment, 0));
+        let vector_segment_shard =
+            SegmentShard::try_from((&vector_segment, 0)).expect("valid shard index");
         let reader = QuantizedSpannSegmentReaderShard::from_segment(
             &collection,
             &vector_segment_shard,

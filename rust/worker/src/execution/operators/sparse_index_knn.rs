@@ -5,7 +5,8 @@ use chroma_index::sparse::reader::SparseReaderError;
 use chroma_segment::blockfile_metadata::{MetadataSegmentError, MetadataSegmentReaderShard};
 use chroma_system::Operator;
 use chroma_types::{
-    operator::RecordMeasure, Segment, SegmentShard, SignedRoaringBitmap, SparseVector,
+    operator::RecordMeasure, Segment, SegmentShard, SegmentShardError, SignedRoaringBitmap,
+    SparseVector,
 };
 use thiserror::Error;
 
@@ -27,6 +28,8 @@ pub enum SparseIndexKnnError {
     MetadataReader(#[from] MetadataSegmentError),
     #[error("Error using sparse reader: {0}")]
     SparseReader(#[from] SparseReaderError),
+    #[error(transparent)]
+    SegmentShard(#[from] SegmentShardError),
 }
 
 impl ChromaError for SparseIndexKnnError {
@@ -34,6 +37,7 @@ impl ChromaError for SparseIndexKnnError {
         match self {
             SparseIndexKnnError::MetadataReader(err) => err.code(),
             SparseIndexKnnError::SparseReader(err) => err.code(),
+            SparseIndexKnnError::SegmentShard(e) => e.code(),
         }
     }
 }
@@ -53,7 +57,7 @@ impl Operator<SparseIndexKnnInput, SparseIndexKnnOutput> for SparseIndexKnn {
         &self,
         input: &SparseIndexKnnInput,
     ) -> Result<SparseIndexKnnOutput, SparseIndexKnnError> {
-        let metadata_segment_shard = SegmentShard::from((&input.metadata_segment, 0));
+        let metadata_segment_shard = SegmentShard::try_from((&input.metadata_segment, 0))?;
         let metadata_segement_reader = Box::pin(MetadataSegmentReaderShard::from_segment(
             &metadata_segment_shard,
             &input.blockfile_provider,

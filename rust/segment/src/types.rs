@@ -1286,7 +1286,8 @@ mod tests {
             file_path: HashMap::new(),
         };
         {
-            let record_segment_shard = SegmentShard::from((&record_segment, 0));
+            let record_segment_shard =
+                SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
             let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
@@ -1297,7 +1298,8 @@ mod tests {
             )
             .await
             .expect("Error creating segment writer");
-            let metadata_segment_shard = SegmentShard::from((&metadata_segment, 0));
+            let metadata_segment_shard =
+                SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
             let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
@@ -1423,7 +1425,8 @@ mod tests {
             },
         ];
         let data: Chunk<LogRecord> = Chunk::new(data.into());
-        let record_segment_shard = SegmentShard::from((&record_segment, 0));
+        let record_segment_shard =
+            SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
         let reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment_shard,
             &blockfile_provider,
@@ -1463,7 +1466,8 @@ mod tests {
             emb_1.get_operation()
         );
         // Now write this, read again and validate.
-        let record_segment_shard = SegmentShard::from((&record_segment, 0));
+        let record_segment_shard =
+            SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
         let segment_writer = RecordSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
@@ -1474,7 +1478,8 @@ mod tests {
         )
         .await
         .expect("Error creating segment writer");
-        let metadata_segment_shard = SegmentShard::from((&metadata_segment, 0));
+        let metadata_segment_shard =
+            SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
         let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
@@ -1509,7 +1514,8 @@ mod tests {
             .await
             .expect("Flush metadata segment writer failed");
         // Read.
-        let record_segment_shard = SegmentShard::from((&record_segment, 0));
+        let record_segment_shard =
+            SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
         let segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment_shard,
             &blockfile_provider,
@@ -1529,7 +1535,8 @@ mod tests {
         assert_eq!(record.1.embedding, &[7.0, 8.0, 9.0]);
         assert_eq!(record.1.metadata, Some(res_metadata));
         // Search by metadata filter.
-        let metadata_segment_shard = SegmentShard::from((&metadata_segment, 0));
+        let metadata_segment_shard =
+            SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
         let metadata_segment_reader = Box::pin(MetadataSegmentReaderShard::from_segment(
             &metadata_segment_shard,
             &blockfile_provider,
@@ -1616,7 +1623,8 @@ mod tests {
             file_path: HashMap::new(),
         };
         {
-            let record_segment_shard = SegmentShard::from((&record_segment, 0));
+            let record_segment_shard =
+                SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
             let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
@@ -1627,7 +1635,8 @@ mod tests {
             )
             .await
             .expect("Error creating segment writer");
-            let metadata_segment_shard = SegmentShard::from((&metadata_segment, 0));
+            let metadata_segment_shard =
+                SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
             let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
@@ -1740,7 +1749,8 @@ mod tests {
             },
         }];
         let data: Chunk<LogRecord> = Chunk::new(data.into());
-        let record_segment_shard = SegmentShard::from((&record_segment, 0));
+        let record_segment_shard =
+            SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
         let reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment_shard,
             &blockfile_provider,
@@ -1784,7 +1794,8 @@ mod tests {
             emb_1.get_operation()
         );
         // Now write this, read again and validate.
-        let record_segment_shard = SegmentShard::from((&record_segment, 0));
+        let record_segment_shard =
+            SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
         let segment_writer = RecordSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
@@ -1795,7 +1806,8 @@ mod tests {
         )
         .await
         .expect("Error creating segment writer");
-        let metadata_segment_shard = SegmentShard::from((&metadata_segment, 0));
+        let metadata_segment_shard =
+            SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
         let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
@@ -1830,7 +1842,8 @@ mod tests {
             .await
             .expect("Flush metadata segment writer failed");
         // Read.
-        let record_segment_shard = SegmentShard::from((&record_segment, 0));
+        let record_segment_shard =
+            SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
         let segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment_shard,
             &blockfile_provider,
@@ -1850,7 +1863,8 @@ mod tests {
         assert_eq!(record.1.embedding, &[7.0, 8.0, 9.0]);
         assert_eq!(record.1.metadata, Some(res_metadata));
         // Search by metadata filter.
-        let metadata_segment_shard = SegmentShard::from((&metadata_segment, 0));
+        let metadata_segment_shard =
+            SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
         let metadata_segment_reader = Box::pin(MetadataSegmentReaderShard::from_segment(
             &metadata_segment_shard,
             &blockfile_provider,
@@ -1938,7 +1952,8 @@ mod tests {
             file_path: HashMap::new(),
         };
         {
-            let record_segment_shard = SegmentShard::from((&record_segment, 0));
+            let record_segment_shard =
+                SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
             let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
@@ -1949,7 +1964,8 @@ mod tests {
             )
             .await
             .expect("Error creating segment writer");
-            let metadata_segment_shard = SegmentShard::from((&metadata_segment, 0));
+            let metadata_segment_shard =
+                SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
             let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
@@ -2086,7 +2102,8 @@ mod tests {
             },
         ];
         let data: Chunk<LogRecord> = Chunk::new(data.into());
-        let record_segment_shard = SegmentShard::from((&record_segment, 0));
+        let record_segment_shard =
+            SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
         let reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment_shard,
             &blockfile_provider,
@@ -2126,7 +2143,8 @@ mod tests {
             emb_1.get_operation()
         );
         // Now write this, read again and validate.
-        let record_segment_shard = SegmentShard::from((&record_segment, 0));
+        let record_segment_shard =
+            SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
         let segment_writer = RecordSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
@@ -2137,7 +2155,8 @@ mod tests {
         )
         .await
         .expect("Error creating segment writer");
-        let metadata_segment_shard = SegmentShard::from((&metadata_segment, 0));
+        let metadata_segment_shard =
+            SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
         let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
@@ -2172,7 +2191,8 @@ mod tests {
             .await
             .expect("Flush metadata segment writer failed");
         // Read.
-        let record_segment_shard = SegmentShard::from((&record_segment, 0));
+        let record_segment_shard =
+            SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
         let segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment_shard,
             &blockfile_provider,
@@ -2192,7 +2212,8 @@ mod tests {
         assert_eq!(record.1.embedding, &[7.0, 8.0, 9.0]);
         assert_eq!(record.1.metadata, Some(res_metadata));
         // Search by metadata filter.
-        let metadata_segment_shard = SegmentShard::from((&metadata_segment, 0));
+        let metadata_segment_shard =
+            SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
         let metadata_segment_reader = Box::pin(MetadataSegmentReaderShard::from_segment(
             &metadata_segment_shard,
             &blockfile_provider,
@@ -2270,7 +2291,8 @@ mod tests {
         let tenant = String::from("test_tenant");
         let database_id = DatabaseUuid::new();
         {
-            let record_segment_shard = SegmentShard::from((&record_segment, 0));
+            let record_segment_shard =
+                SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
             let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
@@ -2411,7 +2433,8 @@ mod tests {
             },
         ];
         let data: Chunk<LogRecord> = Chunk::new(data.into());
-        let record_segment_shard = SegmentShard::from((&record_segment, 0));
+        let record_segment_shard =
+            SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
         let reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment_shard,
             &blockfile_provider,
@@ -2533,7 +2556,8 @@ mod tests {
         assert_eq!(1, id2_found);
         assert_eq!(1, id3_found);
         // Now write this, read again and validate.
-        let record_segment_shard = SegmentShard::from((&record_segment, 0));
+        let record_segment_shard =
+            SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
         let segment_writer = RecordSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
@@ -2555,7 +2579,8 @@ mod tests {
             .await
             .expect("Flush segment writer failed");
         // Read.
-        let record_segment_shard = SegmentShard::from((&record_segment, 0));
+        let record_segment_shard =
+            SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
         let segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment_shard,
             &blockfile_provider,

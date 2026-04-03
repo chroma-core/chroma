@@ -14,8 +14,8 @@ use chroma_segment::{
 };
 use chroma_system::Operator;
 use chroma_types::{
-    MaterializedLogOperation, MetadataValue, Segment, SegmentShard, SignedRoaringBitmap,
-    SparseVector,
+    MaterializedLogOperation, MetadataValue, Segment, SegmentShard, SegmentShardError,
+    SignedRoaringBitmap, SparseVector,
 };
 use thiserror::Error;
 
@@ -59,6 +59,8 @@ pub enum IdfError {
     MetadataReader(#[from] MetadataSegmentError),
     #[error("Error creating record segment reader: {0}")]
     RecordReader(#[from] RecordSegmentReaderShardCreationError),
+    #[error(transparent)]
+    SegmentShard(#[from] SegmentShardError),
     #[error("Error using sparse reader: {0}")]
     SparseReader(#[from] SparseReaderError),
     #[error("Query tokens length ({tokens}) does not match query indices length ({indices})")]
@@ -72,6 +74,7 @@ impl ChromaError for IdfError {
             IdfError::LogMaterializer(err) => err.code(),
             IdfError::MetadataReader(err) => err.code(),
             IdfError::RecordReader(err) => err.code(),
+            IdfError::SegmentShard(e) => e.code(),
             IdfError::SparseReader(err) => err.code(),
             IdfError::TokenLengthMismatch { .. } => chroma_error::ErrorCodes::InvalidArgument,
         }
@@ -88,7 +91,7 @@ impl Operator<IdfInput, IdfOutput> for Idf {
 
         // Create both segment readers in parallel since they are independent
         let record_segment_reader_fut = async {
-            let record_segment_shard = SegmentShard::from((&input.record_segment, 0));
+            let record_segment_shard = SegmentShard::try_from((&input.record_segment, 0))?;
             match Box::pin(RecordSegmentReaderShard::from_segment(
                 &record_segment_shard,
                 &input.blockfile_provider,
@@ -112,7 +115,7 @@ impl Operator<IdfInput, IdfOutput> for Idf {
             }
         };
 
-        let metadata_segment_shard = SegmentShard::from((&input.metadata_segment, 0));
+        let metadata_segment_shard = SegmentShard::try_from((&input.metadata_segment, 0))?;
         let metadata_segment_reader_fut = async {
             Box::pin(MetadataSegmentReaderShard::from_segment(
                 &metadata_segment_shard,
