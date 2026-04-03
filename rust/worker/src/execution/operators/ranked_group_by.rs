@@ -21,7 +21,7 @@ use chroma_segment::{
 use chroma_system::Operator;
 use chroma_types::{
     operator::{Aggregate, GroupBy, Key, RecordMeasure},
-    MetadataValue, Segment,
+    MetadataValue, Segment, SegmentShard, SegmentShardError,
 };
 use thiserror::Error;
 use tracing::{Instrument, Span};
@@ -61,6 +61,8 @@ pub enum RankedGroupByError {
     RecordSegmentUninitialized,
     #[error("Phantom record not found: {0}")]
     PhantomRecord(u32),
+    #[error(transparent)]
+    SegmentShard(#[from] SegmentShardError),
 }
 
 impl ChromaError for RankedGroupByError {
@@ -71,6 +73,7 @@ impl ChromaError for RankedGroupByError {
             RankedGroupByError::RecordSegment(e) => e.code(),
             RankedGroupByError::RecordSegmentUninitialized => ErrorCodes::Internal,
             RankedGroupByError::PhantomRecord(_) => ErrorCodes::Internal,
+            RankedGroupByError::SegmentShard(e) => e.code(),
         }
     }
 }
@@ -118,8 +121,9 @@ impl Operator<RankedGroupByInput, RankedGroupByOutput> for GroupBy {
 
         // --- Metadata hydration ---
 
+        let record_segment_shard = SegmentShard::try_from((&input.record_segment, 0))?;
         let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
-            &input.record_segment,
+            &record_segment_shard,
             &input.blockfile_provider,
             input.bloom_filter_manager.clone(),
         ))

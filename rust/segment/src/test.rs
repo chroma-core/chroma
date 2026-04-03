@@ -23,8 +23,8 @@ use chroma_types::{
     test_segment, BooleanOperator, Chunk, Collection, CollectionAndSegments, CompositeExpression,
     ContainsOperator, DocumentExpression, DocumentOperator, KnnIndex, LogRecord, Metadata,
     MetadataComparison, MetadataExpression, MetadataSetValue, MetadataValue, Operation,
-    OperationRecord, PrimitiveOperator, Schema, Segment, SegmentScope, SegmentUuid, SetOperator,
-    UpdateMetadata, Where, CHROMA_KEY,
+    OperationRecord, PrimitiveOperator, Schema, Segment, SegmentScope, SegmentShard, SegmentUuid,
+    SetOperator, UpdateMetadata, Where, CHROMA_KEY,
 };
 use regex::Regex;
 use std::collections::BinaryHeap;
@@ -112,10 +112,12 @@ impl TestDistributedSegment {
         .await
         .expect("Should be able to materialize log.");
 
+        let metadata_segment_shard =
+            SegmentShard::try_from((&self.metadata_segment, 0)).expect("valid shard index");
         let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
             &self.collection.tenant,
             &self.collection.database_id,
-            &self.metadata_segment,
+            &metadata_segment_shard,
             &self.blockfile_provider,
             None,
         )
@@ -138,10 +140,12 @@ impl TestDistributedSegment {
         .await
         .expect("Should be able to flush metadata.");
 
+        let record_segment_shard =
+            SegmentShard::try_from((&self.record_segment, 0)).expect("valid shard index");
         let record_writer = Box::pin(RecordSegmentWriterShard::from_segment(
             &self.collection.tenant,
             &self.collection.database_id,
-            &self.record_segment,
+            &record_segment_shard,
             &self.blockfile_provider,
             None,
             self.bloom_filter_manager.clone(),

@@ -161,15 +161,17 @@ mod tests {
     use super::*;
     use chroma_log::test::{upsert_generator, LoadFromGenerator};
     use chroma_segment::test::TestDistributedSegment;
-    use chroma_types::MaterializedLogOperation;
+    use chroma_types::{MaterializedLogOperation, SegmentShard};
 
     async fn setup_test_reader(num_records: usize) -> RecordSegmentReaderShard<'static> {
         let mut test_segment = TestDistributedSegment::new().await;
         test_segment
             .populate_with_generator(num_records, upsert_generator)
             .await;
+        let record_segment_shard =
+            SegmentShard::try_from((&test_segment.record_segment, 0)).expect("valid shard index");
         Box::pin(RecordSegmentReaderShard::from_segment(
-            &test_segment.record_segment,
+            &record_segment_shard,
             &test_segment.blockfile_provider,
             None,
         ))

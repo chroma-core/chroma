@@ -9,7 +9,7 @@ use chroma_index::{
     hnsw_provider::HnswIndexProvider,
     spann::types::{GarbageCollectionContext, SpannMetrics},
 };
-use chroma_types::{Cmek, Collection, Segment};
+use chroma_types::{Cmek, Collection, SegmentShard};
 
 use crate::distributed_spann::{SpannSegmentWriterShard, SpannSegmentWriterShardError};
 #[cfg(feature = "usearch")]
@@ -104,7 +104,7 @@ impl SpannProvider {
     pub async fn write(
         &self,
         collection: &Collection,
-        segment: &Segment,
+        segment: &SegmentShard,
         dimensionality: usize,
         cmek: Option<Cmek>,
     ) -> Result<SpannSegmentWriterShard, SpannSegmentWriterShardError> {
@@ -126,7 +126,7 @@ impl SpannProvider {
     pub async fn read_quantized_usearch(
         &self,
         collection: &Collection,
-        vector_segment: &Segment,
+        vector_segment: &SegmentShard,
     ) -> Result<QuantizedSpannSegmentReaderShard, QuantizedSpannSegmentError> {
         QuantizedSpannSegmentReaderShard::from_segment(
             collection,
@@ -141,8 +141,8 @@ impl SpannProvider {
     pub async fn write_quantized_usearch(
         &self,
         collection: &Collection,
-        vector_segment: &Segment,
-        record_segment: &Segment,
+        vector_segment: &SegmentShard,
+        record_segment: &SegmentShard,
     ) -> Result<QuantizedSpannSegmentWriterShard, QuantizedSpannSegmentError> {
         QuantizedSpannSegmentWriterShard::from_segment(
             self.pl_block_size,

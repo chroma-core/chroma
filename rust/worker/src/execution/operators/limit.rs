@@ -12,7 +12,8 @@ use chroma_segment::{
 };
 use chroma_system::Operator;
 use chroma_types::{
-    operator::Limit, Chunk, LogRecord, MaterializedLogOperation, Segment, SignedRoaringBitmap,
+    operator::Limit, Chunk, LogRecord, MaterializedLogOperation, Segment, SegmentShard,
+    SegmentShardError, SignedRoaringBitmap,
 };
 use futures::StreamExt;
 use roaring::RoaringBitmap;
@@ -59,6 +60,8 @@ pub enum LimitError {
     RecordReader(#[from] RecordSegmentReaderShardCreationError),
     #[error("Error reading record segment: {0}")]
     RecordSegment(#[from] Box<dyn ChromaError>),
+    #[error(transparent)]
+    SegmentShard(#[from] SegmentShardError),
 }
 
 impl ChromaError for LimitError {
@@ -68,6 +71,7 @@ impl ChromaError for LimitError {
             LimitError::OutOfBound(_) => ErrorCodes::OutOfRange,
             LimitError::RecordReader(e) => e.code(),
             LimitError::RecordSegment(e) => e.code(),
+            LimitError::SegmentShard(e) => e.code(),
         }
     }
 }
@@ -189,8 +193,9 @@ impl Operator<LimitInput, LimitOutput> for Limit {
     type Error = LimitError;
 
     async fn run(&self, input: &LimitInput) -> Result<LimitOutput, LimitError> {
+        let record_segment_shard = SegmentShard::try_from((&input.record_segment, 0))?;
         let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
-            &input.record_segment,
+            &record_segment_shard,
             &input.blockfile_provider,
             input.bloom_filter_manager.clone(),
         ))

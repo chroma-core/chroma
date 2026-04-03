@@ -8,7 +8,7 @@ use chroma_segment::{
     bloom_filter::BloomFilterManager,
 };
 use chroma_system::Operator;
-use chroma_types::{Chunk, LogRecord, Operation, Segment};
+use chroma_types::{Chunk, LogRecord, Operation, Segment, SegmentShard, SegmentShardError};
 use std::collections::HashSet;
 use thiserror::Error;
 
@@ -56,6 +56,8 @@ pub(crate) enum CountRecordsError {
     RecordSegmentCreateError(#[from] RecordSegmentReaderShardCreationError),
     #[error("Error reading record segment")]
     RecordSegmentReadError(#[from] Box<dyn ChromaError>),
+    #[error(transparent)]
+    SegmentShard(#[from] SegmentShardError),
 }
 
 impl ChromaError for CountRecordsError {
@@ -63,6 +65,7 @@ impl ChromaError for CountRecordsError {
         match self {
             CountRecordsError::RecordSegmentCreateError(e) => e.code(),
             CountRecordsError::RecordSegmentReadError(e) => e.code(),
+            CountRecordsError::SegmentShard(e) => e.code(),
         }
     }
 }
@@ -79,8 +82,9 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
         &self,
         input: &CountRecordsInput,
     ) -> Result<CountRecordsOutput, CountRecordsError> {
+        let record_segment_shard = SegmentShard::try_from((&input.record_segment_definition, 0))?;
         let segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
-            &input.record_segment_definition,
+            &record_segment_shard,
             &input.blockfile_provider,
             input.bloom_filter_manager.clone(),
         ))
@@ -230,7 +234,8 @@ mod tests {
     };
     use chroma_system::Operator;
     use chroma_types::{
-        Chunk, CollectionUuid, DatabaseUuid, LogRecord, Operation, OperationRecord, SegmentUuid,
+        Chunk, CollectionUuid, DatabaseUuid, LogRecord, Operation, OperationRecord, SegmentShard,
+        SegmentUuid,
     };
     use std::{collections::HashMap, str::FromStr};
     use tracing::{Instrument, Span};
@@ -250,10 +255,12 @@ mod tests {
         let tenant = String::from("test_tenant");
         let database_id = DatabaseUuid::new();
         {
+            let record_segment_shard =
+                SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
             let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
-                &record_segment,
+                &record_segment_shard,
                 &in_memory_provider,
                 None,
                 None,
@@ -297,7 +304,11 @@ mod tests {
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
             let record_segment_reader: Option<RecordSegmentReaderShard> = match Box::pin(
-                RecordSegmentReaderShard::from_segment(&record_segment, &in_memory_provider, None),
+                RecordSegmentReaderShard::from_segment(
+                    &record_segment_shard,
+                    &in_memory_provider,
+                    None,
+                ),
             )
             .await
             {

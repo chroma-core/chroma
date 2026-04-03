@@ -1021,7 +1021,7 @@ mod tests {
     use chroma_types::{
         operator::{Filter, Limit, Projection, ProjectionRecord},
         Collection, DocumentExpression, DocumentOperator, MetadataExpression, PrimitiveOperator,
-        Segment, SegmentUuid, Where,
+        Segment, SegmentShard, SegmentUuid, Where,
     };
     use futures::TryStreamExt;
     use regex::Regex;
@@ -1059,8 +1059,10 @@ mod tests {
         vector_offset_ids.sort();
 
         // Get offset IDs from record segment
+        let record_segment_shard =
+            SegmentShard::try_from((record_segment, 0)).expect("valid shard index");
         let record_reader = Box::pin(RecordSegmentReaderShard::from_segment(
-            record_segment,
+            &record_segment_shard,
             blockfile_provider,
             None,
         ))
@@ -3928,8 +3930,11 @@ mod tests {
         // Verify the output collection has the correct statistics data (not doubled!)
         // If record_reader is incorrectly passed during rebuild, the statistics would
         // accumulate instead of being recomputed from scratch.
+        let output_record_segment_shard =
+            SegmentShard::try_from((&output_after_rebuild.record_segment, 0))
+                .expect("valid shard index");
         let reader = Box::pin(RecordSegmentReaderShard::from_segment(
-            &output_after_rebuild.record_segment,
+            &output_record_segment_shard,
             &test_segments.blockfile_provider,
             None,
         ))

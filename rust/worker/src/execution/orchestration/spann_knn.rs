@@ -12,7 +12,7 @@ use chroma_system::{
 };
 use chroma_types::{
     operator::{Knn, KnnOutput, Merge, RecordMeasure},
-    CollectionAndSegments,
+    CollectionAndSegments, SegmentShard,
 };
 use tokio::sync::oneshot::Sender;
 use tracing::Span;
@@ -172,9 +172,19 @@ impl Orchestrator for SpannKnnOrchestrator {
             self.context.task_cancellation_token.clone(),
         );
         tasks.push((knn_log_task, Some(Span::current())));
+        let vector_segment_shard = match self
+            .ok_or_terminate(
+                SegmentShard::try_from((&self.collection_and_segments.vector_segment, 0)),
+                ctx,
+            )
+            .await
+        {
+            Some(shard) => shard,
+            None => return tasks,
+        };
         let reader_res = Box::pin(SpannSegmentReaderShard::from_segment(
             &self.collection_and_segments.collection,
-            &self.collection_and_segments.vector_segment,
+            &vector_segment_shard,
             &self.blockfile_provider,
             &self.spann_provider.hnsw_provider,
             self.knn_filter_output.dimension,

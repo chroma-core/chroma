@@ -14,7 +14,7 @@ use chroma_system::{
 };
 use chroma_types::{
     operator::Filter, plan::ReadLevel, CollectionAndSegments, HnswParametersFromSegmentError,
-    SchemaError, SegmentType,
+    SchemaError, SegmentShardError, SegmentType,
 };
 use opentelemetry::trace::TraceContextExt;
 use thiserror::Error;
@@ -89,6 +89,8 @@ pub enum KnnError {
     Aborted,
     #[error("Invalid schema: {0}")]
     InvalidSchema(#[from] SchemaError),
+    #[error(transparent)]
+    SegmentShard(#[from] SegmentShardError),
 }
 
 impl ChromaError for KnnError {
@@ -117,6 +119,7 @@ impl ChromaError for KnnError {
             KnnError::Aborted => ErrorCodes::ResourceExhausted,
             KnnError::SpannSegmentReaderShardCreationError(e) => e.code(),
             KnnError::InvalidSchema(e) => e.code(),
+            KnnError::SegmentShard(e) => e.code(),
         }
     }
 }

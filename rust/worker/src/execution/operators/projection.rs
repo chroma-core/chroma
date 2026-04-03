@@ -13,7 +13,7 @@ use chroma_segment::{
 use chroma_system::Operator;
 use chroma_types::{
     operator::{Projection, ProjectionOutput, ProjectionRecord},
-    Chunk, LogRecord, Segment,
+    Chunk, LogRecord, Segment, SegmentShard, SegmentShardError,
 };
 use futures::future::try_join_all;
 use thiserror::Error;
@@ -54,6 +54,8 @@ pub enum ProjectionError {
     RecordSegmentUninitialized,
     #[error("Error reading phantom record: {0}")]
     RecordSegmentPhantomRecord(u32),
+    #[error(transparent)]
+    SegmentShard(#[from] SegmentShardError),
 }
 
 impl ChromaError for ProjectionError {
@@ -64,6 +66,7 @@ impl ChromaError for ProjectionError {
             ProjectionError::RecordSegment(e) => e.code(),
             ProjectionError::RecordSegmentUninitialized => ErrorCodes::Internal,
             ProjectionError::RecordSegmentPhantomRecord(_) => ErrorCodes::Internal,
+            ProjectionError::SegmentShard(e) => e.code(),
         }
     }
 }
@@ -84,8 +87,9 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
             input.offset_ids.len(),
             needs_data,
         );
+        let record_segment_shard = SegmentShard::try_from((&input.record_segment, 0))?;
         let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
-            &input.record_segment,
+            &record_segment_shard,
             &input.blockfile_provider,
             input.bloom_filter_manager.clone(),
         ))
