@@ -178,9 +178,18 @@ impl Segment {
     }
 
     pub fn construct_prefix_path(&self, tenant: &str, database_id: &DatabaseUuid) -> String {
+        Self::construct_prefix_path_impl(tenant, database_id, &self.collection, &self.id)
+    }
+
+    fn construct_prefix_path_impl(
+        tenant: &str,
+        database_id: &DatabaseUuid,
+        collection: &CollectionUuid,
+        segment_id: &SegmentUuid,
+    ) -> String {
         format!(
             "tenant/{}/database/{}/collection/{}/segment/{}",
-            tenant, database_id, self.collection, self.id
+            tenant, database_id, collection, segment_id
         )
     }
 }
@@ -193,6 +202,12 @@ pub struct SegmentShard {
     pub collection: CollectionUuid,
     pub metadata: Option<Metadata>,
     pub file_path: HashMap<String, String>,
+}
+
+impl SegmentShard {
+    pub fn construct_prefix_path(&self, tenant: &str, database_id: &DatabaseUuid) -> String {
+        Segment::construct_prefix_path_impl(tenant, database_id, &self.collection, &self.id)
+    }
 }
 
 #[derive(Error, Debug)]
