@@ -542,6 +542,7 @@ impl InMemoryFrontend {
                     },
                     shard_index: 0,
                     num_shards: 1,
+                    log_upper_bound_offset: 0,
                 },
                 read_level: request.read_level,
             })
@@ -595,6 +596,7 @@ impl InMemoryFrontend {
                     },
                     shard_index: 0,
                     num_shards: 1,
+                    log_upper_bound_offset: 0,
                 },
                 filter,
                 limit: Limit { offset, limit },
@@ -670,6 +672,7 @@ impl InMemoryFrontend {
                         },
                         shard_index: 0,
                         num_shards: 1,
+                        log_upper_bound_offset: 0,
                     },
                     filter,
                     knn: KnnBatch {

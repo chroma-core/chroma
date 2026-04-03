@@ -1239,6 +1239,7 @@ impl ServiceBasedFrontend {
                         collection_and_segments,
                         shard_index: 0,
                         num_shards: 1,
+                        log_upper_bound_offset: 0,
                     },
                     filter,
                     limit: Limit { offset: 0, limit },
@@ -1455,6 +1456,7 @@ impl ServiceBasedFrontend {
                     collection_and_segments,
                     shard_index: 0,
                     num_shards: 1,
+                    log_upper_bound_offset: 0,
                 },
                 read_level,
             })
@@ -1644,6 +1646,7 @@ impl ServiceBasedFrontend {
                     collection_and_segments,
                     shard_index: 0,
                     num_shards: 1,
+                    log_upper_bound_offset: 0,
                 },
                 filter: Filter {
                     query_ids: ids,
@@ -1800,6 +1803,7 @@ impl ServiceBasedFrontend {
                     collection_and_segments,
                     shard_index: 0,
                     num_shards: 1,
+                    log_upper_bound_offset: 0,
                 },
                 filter: Filter {
                     query_ids: ids,
@@ -1999,6 +2003,7 @@ impl ServiceBasedFrontend {
                 collection_and_segments,
                 shard_index: 0,
                 num_shards: 1,
+                log_upper_bound_offset: 0,
             },
             payloads: request.searches,
             read_level: request.read_level,

@@ -29,6 +29,9 @@ pub struct Scan {
     pub collection_and_segments: CollectionAndSegments,
     pub shard_index: u32,
     pub num_shards: u32,
+    /// Upper bound log offset scouted by the frontend.
+    /// 0 means the worker should scout independently.
+    pub log_upper_bound_offset: i64,
 }
 
 impl TryFrom<chroma_proto::ScanOperator> for Scan {
@@ -57,6 +60,7 @@ impl TryFrom<chroma_proto::ScanOperator> for Scan {
             },
             shard_index: value.shard_index,
             num_shards,
+            log_upper_bound_offset: value.log_upper_bound_offset,
         })
     }
 }
@@ -78,6 +82,7 @@ impl TryFrom<Scan> for chroma_proto::ScanOperator {
             record: Some(value.collection_and_segments.record_segment.into()),
             shard_index: value.shard_index,
             num_shards: value.num_shards,
+            log_upper_bound_offset: value.log_upper_bound_offset,
         })
     }
 }
