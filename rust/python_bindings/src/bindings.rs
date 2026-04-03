@@ -22,8 +22,8 @@ use chroma_types::{
     GetCollectionRequest, GetDatabaseRequest, GetResponse, GetTenantRequest, GetTenantResponse,
     HeartbeatError, IncludeList, InternalCollectionConfiguration,
     InternalUpdateCollectionConfiguration, KnnIndex, ListCollectionsRequest, ListDatabasesRequest,
-    Metadata, QueryResponse, UpdateCollectionConfiguration, UpdateCollectionRequest, UpdateMetadata,
-    WrappedSerdeJsonError,
+    Metadata, QueryResponse, UpdateCollectionConfiguration, UpdateCollectionRequest,
+    UpdateMetadata, WrappedSerdeJsonError,
 };
 use pyo3::{exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, Python};
 use std::time::SystemTime;

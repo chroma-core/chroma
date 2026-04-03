@@ -929,13 +929,11 @@ impl GetCollectionByIdRequest {
         tenant_id: String,
         database_name: DatabaseName,
     ) -> Result<Self, ChromaValidationError> {
-        let collection_id: CollectionUuid = collection_id
-            .parse()
-            .map_err(|_| {
-                let mut err = ValidationError::new("invalid_collection_id");
-                err.message = Some("Invalid collection ID format, expected UUID".into());
-                ChromaValidationError::from(("collection_id", err))
-            })?;
+        let collection_id: CollectionUuid = collection_id.parse().map_err(|_| {
+            let mut err = ValidationError::new("invalid_collection_id");
+            err.message = Some("Invalid collection ID format, expected UUID".into());
+            ChromaValidationError::from(("collection_id", err))
+        })?;
         Ok(Self {
             collection_id,
             tenant_id,
