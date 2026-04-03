@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
-    quantized_spann::{QuantizedSpannSegmentError, QuantizedSpannSegmentReader},
+    quantized_spann::{QuantizedSpannSegmentError, QuantizedSpannSegmentReaderShard},
     spann_provider::SpannProvider,
 };
 use chroma_system::{Operator, OperatorType};
@@ -10,7 +10,7 @@ use thiserror::Error;
 
 #[derive(Debug)]
 pub struct QuantizedSpannLoadCenterOutput {
-    pub reader: QuantizedSpannSegmentReader,
+    pub reader: QuantizedSpannSegmentReaderShard,
 }
 
 #[derive(Error, Debug)]

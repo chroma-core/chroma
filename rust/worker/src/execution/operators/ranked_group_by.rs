@@ -13,7 +13,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
     blockfile_record::{
-        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
+        RecordSegmentReaderOptions, RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
     },
     bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},
@@ -54,7 +54,7 @@ pub enum RankedGroupByError {
     #[error("Error materializing log: {0}")]
     LogMaterializer(#[from] LogMaterializerError),
     #[error("Error creating record segment reader: {0}")]
-    RecordReader(#[from] RecordSegmentReaderCreationError),
+    RecordReader(#[from] RecordSegmentReaderShardCreationError),
     #[error("Error reading record segment: {0}")]
     RecordSegment(#[from] Box<dyn ChromaError>),
     #[error("Error reading uninitialized record segment")]
@@ -118,7 +118,7 @@ impl Operator<RankedGroupByInput, RankedGroupByOutput> for GroupBy {
 
         // --- Metadata hydration ---
 
-        let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
+        let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
             input.bloom_filter_manager.clone(),
@@ -126,7 +126,14 @@ impl Operator<RankedGroupByInput, RankedGroupByOutput> for GroupBy {
         .await
         {
             Ok(reader) => Some(reader),
-            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => None,
+            Err(e)
+                if matches!(
+                    *e,
+                    RecordSegmentReaderShardCreationError::UninitializedSegment
+                ) =>
+            {
+                None
+            }
             Err(e) => return Err((*e).into()),
         };
 

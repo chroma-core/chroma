@@ -115,7 +115,7 @@ mod tests {
     use super::*;
     use chroma_blockstore::test_arrow_blockfile_provider;
     use chroma_segment::blockfile_record::{
-        RecordSegmentReader, RecordSegmentReaderOptions, RecordSegmentWriter,
+        RecordSegmentReaderOptions, RecordSegmentReaderShard, RecordSegmentWriterShard,
     };
     use chroma_segment::types::materialize_logs;
     use chroma_types::{
@@ -139,7 +139,7 @@ mod tests {
             file_path: HashMap::new(),
         };
         {
-            let segment_writer = RecordSegmentWriter::from_segment(
+            let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &record_segment,
@@ -185,7 +185,7 @@ mod tests {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> = None;
+            let record_segment_reader: Option<RecordSegmentReaderShard> = None;
 
             let mat_records = materialize_logs(
                 &record_segment_reader,

@@ -5,7 +5,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
     blockfile_record::{
-        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
+        RecordSegmentReaderOptions, RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
     },
     bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},
@@ -56,7 +56,7 @@ pub enum LimitError {
     #[error("Integer conversion out of bound: {0}")]
     OutOfBound(#[from] TryFromIntError),
     #[error("Error creating record segment reader: {0}")]
-    RecordReader(#[from] RecordSegmentReaderCreationError),
+    RecordReader(#[from] RecordSegmentReaderShardCreationError),
     #[error("Error reading record segment: {0}")]
     RecordSegment(#[from] Box<dyn ChromaError>),
 }
@@ -76,7 +76,7 @@ impl ChromaError for LimitError {
 // in the imaginarysegment where the log is compacted and the element in the mask is ignored
 struct SeekScanner<'me> {
     log_offset_ids: &'me RoaringBitmap,
-    record_segment: &'me RecordSegmentReader<'me>,
+    record_segment: &'me RecordSegmentReaderShard<'me>,
     mask: &'me RoaringBitmap,
 }
 
@@ -189,7 +189,7 @@ impl Operator<LimitInput, LimitOutput> for Limit {
     type Error = LimitError;
 
     async fn run(&self, input: &LimitInput) -> Result<LimitOutput, LimitError> {
-        let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
+        let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
             input.bloom_filter_manager.clone(),
@@ -198,7 +198,12 @@ impl Operator<LimitInput, LimitOutput> for Limit {
         .await
         {
             Ok(reader) => Ok(Some(reader)),
-            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+            Err(e)
+                if matches!(
+                    *e,
+                    RecordSegmentReaderShardCreationError::UninitializedSegment
+                ) =>
+            {
                 Ok(None)
             }
             Err(e) => Err(*e),

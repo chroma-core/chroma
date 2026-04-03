@@ -6,7 +6,7 @@ use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_segment::{
     bloom_filter::BloomFilterManager,
     distributed_hnsw::{DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader},
-    distributed_spann::SpannSegmentReaderError,
+    distributed_spann::SpannSegmentReaderShardError,
 };
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
@@ -82,7 +82,7 @@ pub enum KnnError {
     #[error("Error running Spann Head Search Operator: {0}")]
     SpannHeadSearch(#[from] SpannCentersSearchError),
     #[error("Error creating spann segment reader: {0}")]
-    SpannSegmentReaderCreationError(#[from] SpannSegmentReaderError),
+    SpannSegmentReaderShardCreationError(#[from] SpannSegmentReaderShardError),
     #[error("Invalid distance function")]
     InvalidDistanceFunction,
     #[error("Operation aborted because resources exhausted")]
@@ -115,7 +115,7 @@ impl ChromaError for KnnError {
             KnnError::SpannHeadSearch(e) => e.code(),
             KnnError::InvalidDistanceFunction => ErrorCodes::InvalidArgument,
             KnnError::Aborted => ErrorCodes::ResourceExhausted,
-            KnnError::SpannSegmentReaderCreationError(e) => e.code(),
+            KnnError::SpannSegmentReaderShardCreationError(e) => e.code(),
             KnnError::InvalidSchema(e) => e.code(),
         }
     }

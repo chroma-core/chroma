@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_segment::blockfile_record::RecordSegmentReader;
+use chroma_segment::blockfile_record::RecordSegmentReaderShard;
 use chroma_system::Operator;
 use chroma_types::{Chunk, LogRecord, OperationRecord};
 use futures::{StreamExt, TryStreamExt};
@@ -33,7 +33,7 @@ impl Default for SourceRecordSegmentOperator {
 
 #[derive(Clone, Debug)]
 pub struct SourceRecordSegmentInput {
-    pub record_segment_reader: Option<RecordSegmentReader<'static>>,
+    pub record_segment_reader: Option<RecordSegmentReaderShard<'static>>,
 }
 
 pub type SourceRecordSegmentOutput = Chunk<LogRecord>;
@@ -94,7 +94,9 @@ impl Operator<SourceRecordSegmentInput, SourceRecordSegmentOutput> for SourceRec
 #[cfg(test)]
 mod tests {
     use chroma_log::test::{int_as_id, upsert_generator, LoadFromGenerator};
-    use chroma_segment::{blockfile_record::RecordSegmentReader, test::TestDistributedSegment};
+    use chroma_segment::{
+        blockfile_record::RecordSegmentReaderShard, test::TestDistributedSegment,
+    };
     use chroma_system::Operator;
     use chroma_types::Operation;
 
@@ -109,7 +111,7 @@ mod tests {
         test_segment
             .populate_with_generator(100, upsert_generator)
             .await;
-        let reader = Box::pin(RecordSegmentReader::from_segment(
+        let reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &test_segment.record_segment,
             &test_segment.blockfile_provider,
             None,

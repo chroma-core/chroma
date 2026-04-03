@@ -8,11 +8,11 @@ use chroma_log::Log;
 
 use crate::execution::operators::fragment_fetch::FragmentFetcher;
 use chroma_segment::{
-    blockfile_metadata::MetadataSegmentWriter,
-    blockfile_record::{RecordSegmentReader, RecordSegmentWriter},
+    blockfile_metadata::MetadataSegmentWriterShard,
+    blockfile_record::{RecordSegmentReaderShard, RecordSegmentWriterShard},
     bloom_filter::BloomFilterManager,
     spann_provider::SpannProvider,
-    types::{ChromaSegmentWriter, VectorSegmentWriter},
+    types::{ChromaSegmentWriter, VectorSegmentWriterShard},
 };
 use chroma_sysdb::SysDb;
 use chroma_system::{
@@ -94,10 +94,10 @@ pub enum ExecutionState {
 
 #[derive(Clone, Debug)]
 pub struct CompactWriters {
-    pub(crate) record_reader: Option<RecordSegmentReader<'static>>,
-    pub(crate) metadata_writer: MetadataSegmentWriter<'static>,
-    pub(crate) record_writer: RecordSegmentWriter,
-    pub(crate) vector_writer: VectorSegmentWriter,
+    pub(crate) record_reader: Option<RecordSegmentReaderShard<'static>>,
+    pub(crate) metadata_writer: MetadataSegmentWriterShard<'static>,
+    pub(crate) record_writer: RecordSegmentWriterShard,
+    pub(crate) vector_writer: VectorSegmentWriterShard,
 }
 
 #[derive(Debug, Clone)]
@@ -1012,7 +1012,7 @@ mod tests {
         Log,
     };
     use chroma_segment::{
-        blockfile_record::RecordSegmentReader, distributed_hnsw::DistributedHNSWSegmentReader,
+        blockfile_record::RecordSegmentReaderShard, distributed_hnsw::DistributedHNSWSegmentReader,
         spann_provider::SpannProvider, test::TestDistributedSegment,
     };
     use chroma_storage::{local::LocalStorage, Storage};
@@ -1059,7 +1059,7 @@ mod tests {
         vector_offset_ids.sort();
 
         // Get offset IDs from record segment
-        let record_reader = Box::pin(RecordSegmentReader::from_segment(
+        let record_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             record_segment,
             blockfile_provider,
             None,
@@ -3561,7 +3561,7 @@ mod tests {
     #[tokio::test]
     async fn test_k8s_integration_rebuild_with_attached_function() {
         use chroma_log::in_memory_log::{InMemoryLog, InternalLogRecord};
-        use chroma_segment::blockfile_record::RecordSegmentReader;
+        use chroma_segment::blockfile_record::RecordSegmentReaderShard;
         use chroma_types::{CollectionUuid, Operation, OperationRecord, UpdateMetadataValue};
 
         // Setup test environment
@@ -3928,7 +3928,7 @@ mod tests {
         // Verify the output collection has the correct statistics data (not doubled!)
         // If record_reader is incorrectly passed during rebuild, the statistics would
         // accumulate instead of being recomputed from scratch.
-        let reader = Box::pin(RecordSegmentReader::from_segment(
+        let reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &output_after_rebuild.record_segment,
             &test_segments.blockfile_provider,
             None,

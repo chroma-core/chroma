@@ -6,16 +6,17 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_log::Log;
 use chroma_segment::{
-    blockfile_metadata::{MetadataSegmentError, MetadataSegmentWriter},
+    blockfile_metadata::{MetadataSegmentError, MetadataSegmentWriterShard},
     blockfile_record::{
-        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
-        RecordSegmentWriter, RecordSegmentWriterCreationError,
+        RecordSegmentReaderOptions, RecordSegmentReaderShard,
+        RecordSegmentReaderShardCreationError, RecordSegmentWriterShard,
+        RecordSegmentWriterShardCreationError,
     },
     bloom_filter::BloomFilterManager,
     distributed_hnsw::{DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentWriter},
-    distributed_spann::SpannSegmentWriterError,
+    distributed_spann::SpannSegmentWriterShardError,
     spann_provider::SpannProvider,
-    types::VectorSegmentWriter,
+    types::VectorSegmentWriterShard,
 };
 use chroma_sysdb::sysdb::SysDb;
 use chroma_system::{
@@ -91,15 +92,15 @@ pub enum LogFetchOrchestratorError {
     #[error("Error prefetching segment: {0}")]
     PrefetchSegment(#[from] PrefetchSegmentError),
     #[error("Error creating record segment reader: {0}")]
-    RecordSegmentReader(#[from] RecordSegmentReaderCreationError),
+    RecordSegmentReaderShard(#[from] RecordSegmentReaderShardCreationError),
     #[error("Error creating record segment writer: {0}")]
-    RecordSegmentWriter(#[from] RecordSegmentWriterCreationError),
+    RecordSegmentWriterShard(#[from] RecordSegmentWriterShardCreationError),
     #[error("Error receiving final result: {0}")]
     RecvError(#[from] RecvError),
     #[error("Error creating quantized spann writer: {0}")]
     QuantizedSpannSegment(#[from] chroma_segment::quantized_spann::QuantizedSpannSegmentError),
     #[error("Error creating spann writer: {0}")]
-    SpannSegment(#[from] SpannSegmentWriterError),
+    SpannSegment(#[from] SpannSegmentWriterShardError),
     #[error("Error sourcing record segment: {0}")]
     SourceRecordSegment(#[from] SourceRecordSegmentError),
     #[error("Error sourcing record segment v2: {0}")]
@@ -135,8 +136,8 @@ impl ChromaError for LogFetchOrchestratorError {
                 Self::Partition(e) => e.should_trace_error(),
                 Self::PrefetchSegment(e) => e.should_trace_error(),
                 Self::QuantizedSpannSegment(e) => e.should_trace_error(),
-                Self::RecordSegmentReader(e) => e.should_trace_error(),
-                Self::RecordSegmentWriter(e) => e.should_trace_error(),
+                Self::RecordSegmentReaderShard(e) => e.should_trace_error(),
+                Self::RecordSegmentWriterShard(e) => e.should_trace_error(),
                 Self::RecvError(_) => true,
                 Self::SpannSegment(e) => e.should_trace_error(),
                 Self::SourceRecordSegment(e) => e.should_trace_error(),
@@ -458,7 +459,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
 
         let record_reader = match self
             .ok_or_terminate(
-                match Box::pin(RecordSegmentReader::from_segment(
+                match Box::pin(RecordSegmentReaderShard::from_segment(
                     &output.record_segment,
                     &self.context.blockfile_provider,
                     self.context.bloom_filter_manager.clone(),
@@ -467,7 +468,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                 {
                     Ok(reader) => Ok(Some(reader)),
                     Err(err) => match *err {
-                        RecordSegmentReaderCreationError::UninitializedSegment => Ok(None),
+                        RecordSegmentReaderShardCreationError::UninitializedSegment => Ok(None),
                         _ => Err(*err),
                     },
                 },
@@ -613,7 +614,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
 
         let record_writer = match self
             .ok_or_terminate(
-                RecordSegmentWriter::from_segment(
+                RecordSegmentWriterShard::from_segment(
                     &collection.tenant,
                     &collection.database_id,
                     &record_segment,
@@ -631,7 +632,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         };
         let metadata_writer = match self
             .ok_or_terminate(
-                MetadataSegmentWriter::from_segment(
+                MetadataSegmentWriterShard::from_segment(
                     &collection.tenant,
                     &collection.database_id,
                     &metadata_segment,
@@ -658,7 +659,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                 )
                 .await
             {
-                Some(writer) => (None, VectorSegmentWriter::QuantizedSpann(writer), true),
+                Some(writer) => (None, VectorSegmentWriterShard::QuantizedSpann(writer), true),
                 None => return,
             },
             SegmentType::Spann => match self
@@ -673,7 +674,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             {
                 Some(writer) => (
                     Some(writer.hnsw_index_uuid()),
-                    VectorSegmentWriter::Spann(writer),
+                    VectorSegmentWriterShard::Spann(writer),
                     true,
                 ),
                 None => return,
@@ -695,7 +696,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             {
                 Some(writer) => (
                     Some(writer.index_uuid()),
-                    VectorSegmentWriter::Hnsw(writer),
+                    VectorSegmentWriterShard::Hnsw(writer),
                     false,
                 ),
                 None => return,

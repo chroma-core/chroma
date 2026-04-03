@@ -1,7 +1,7 @@
 use crate::bloom_filter::{BloomFilter, BloomFilterError, BloomFilterFlusher, BloomFilterManager};
 use crate::types::ChromaSegmentFlusher;
 
-use super::distributed_spann::SpannSegmentWriterError;
+use super::distributed_spann::SpannSegmentWriterShardError;
 use super::types::{HydratedMaterializedLogRecord, LogMaterializerError, MaterializeLogsResult};
 use chroma_blockstore::arrow::provider::BlockfileReaderOptions;
 use chroma_blockstore::provider::ReadKey;
@@ -29,7 +29,7 @@ use tracing::{Instrument, Span};
 const DEFAULT_BLOOM_FILTER_CAPACITY: u64 = 100_000;
 
 #[derive(Clone)]
-pub struct RecordSegmentWriter {
+pub struct RecordSegmentWriterShard {
     // These are Option<> so that we can take() them when we commit
     user_id_to_id: Option<BlockfileWriter>,
     id_to_user_id: Option<BlockfileWriter>,
@@ -45,16 +45,16 @@ pub struct RecordSegmentWriter {
     prefix_path: String,
 }
 
-impl Debug for RecordSegmentWriter {
+impl Debug for RecordSegmentWriterShard {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RecordSegmentWriter")
+        f.debug_struct("RecordSegmentWriterShard")
             .field("id", &self.id)
             .finish()
     }
 }
 
 #[derive(Error, Debug)]
-pub enum RecordSegmentWriterCreationError {
+pub enum RecordSegmentWriterShardCreationError {
     #[error("Invalid segment type")]
     InvalidSegmentType,
     #[error("Missing file: {0}")]
@@ -72,12 +72,12 @@ pub enum RecordSegmentWriterCreationError {
     #[error("Bloom filter error: {0}")]
     BloomFilterError(#[from] BloomFilterError),
     #[error("Record segment reader error: {0}")]
-    RecordSegmentReaderError(#[from] RecordSegmentReaderCreationError),
+    RecordSegmentReaderShardError(#[from] RecordSegmentReaderShardCreationError),
     #[error("Bloom filter rebuild error: {0}")]
     BloomFilterRebuildError(Box<dyn ChromaError>),
 }
 
-impl chroma_error::ChromaError for RecordSegmentWriterCreationError {
+impl chroma_error::ChromaError for RecordSegmentWriterShardCreationError {
     fn code(&self) -> chroma_error::ErrorCodes {
         use chroma_error::ErrorCodes;
         match self {
@@ -89,7 +89,7 @@ impl chroma_error::ChromaError for RecordSegmentWriterCreationError {
     }
 }
 
-impl RecordSegmentWriter {
+impl RecordSegmentWriterShard {
     async fn construct_and_set_data_record(
         &self,
         mat_record: &HydratedMaterializedLogRecord<'_, '_>,
@@ -131,10 +131,10 @@ impl RecordSegmentWriter {
         blockfile_provider: &BlockfileProvider,
         cmek: Option<Cmek>,
         bloom_filter_manager: Option<BloomFilterManager>,
-    ) -> Result<Self, RecordSegmentWriterCreationError> {
-        tracing::debug!("Creating RecordSegmentWriter from Segment");
+    ) -> Result<Self, RecordSegmentWriterShardCreationError> {
+        tracing::debug!("Creating RecordSegmentWriterShard from Segment");
         if segment.r#type != SegmentType::BlockfileRecord {
-            return Err(RecordSegmentWriterCreationError::InvalidSegmentType);
+            return Err(RecordSegmentWriterShardCreationError::InvalidSegmentType);
         }
         let (user_id_to_id, id_to_user_id, id_to_data, max_offset_id) = match segment
             .file_path
@@ -151,7 +151,9 @@ impl RecordSegmentWriter {
                 let user_id_to_id = match blockfile_provider.write::<&str, u32>(options).await {
                     Ok(user_id_to_id) => user_id_to_id,
                     Err(e) => {
-                        return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                        return Err(RecordSegmentWriterShardCreationError::BlockfileCreateError(
+                            e,
+                        ))
                     }
                 };
 
@@ -162,7 +164,9 @@ impl RecordSegmentWriter {
                 let id_to_user_id = match blockfile_provider.write::<u32, String>(options).await {
                     Ok(id_to_user_id) => id_to_user_id,
                     Err(e) => {
-                        return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                        return Err(RecordSegmentWriterShardCreationError::BlockfileCreateError(
+                            e,
+                        ))
                     }
                 };
 
@@ -173,7 +177,9 @@ impl RecordSegmentWriter {
                 let id_to_data = match blockfile_provider.write::<u32, &DataRecord>(options).await {
                     Ok(id_to_data) => id_to_data,
                     Err(e) => {
-                        return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                        return Err(RecordSegmentWriterShardCreationError::BlockfileCreateError(
+                            e,
+                        ))
                     }
                 };
 
@@ -184,7 +190,9 @@ impl RecordSegmentWriter {
                 let max_offset_id = match blockfile_provider.write::<&str, u32>(options).await {
                     Ok(max_offset_id) => max_offset_id,
                     Err(e) => {
-                        return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                        return Err(RecordSegmentWriterShardCreationError::BlockfileCreateError(
+                            e,
+                        ))
                     }
                 };
 
@@ -196,13 +204,13 @@ impl RecordSegmentWriter {
                     Some(user_id_to_id_bf_id) => match user_id_to_id_bf_id.first() {
                         Some(user_id_to_id_bf_id) => user_id_to_id_bf_id,
                         None => {
-                            return Err(RecordSegmentWriterCreationError::MissingFile(
+                            return Err(RecordSegmentWriterShardCreationError::MissingFile(
                                 USER_ID_TO_OFFSET_ID.to_string(),
                             ))
                         }
                     },
                     None => {
-                        return Err(RecordSegmentWriterCreationError::MissingFile(
+                        return Err(RecordSegmentWriterShardCreationError::MissingFile(
                             USER_ID_TO_OFFSET_ID.to_string(),
                         ))
                     }
@@ -211,13 +219,13 @@ impl RecordSegmentWriter {
                     Some(id_to_user_id_bf_id) => match id_to_user_id_bf_id.first() {
                         Some(id_to_user_id_bf_id) => id_to_user_id_bf_id,
                         None => {
-                            return Err(RecordSegmentWriterCreationError::MissingFile(
+                            return Err(RecordSegmentWriterShardCreationError::MissingFile(
                                 OFFSET_ID_TO_USER_ID.to_string(),
                             ))
                         }
                     },
                     None => {
-                        return Err(RecordSegmentWriterCreationError::MissingFile(
+                        return Err(RecordSegmentWriterShardCreationError::MissingFile(
                             OFFSET_ID_TO_USER_ID.to_string(),
                         ))
                     }
@@ -226,13 +234,13 @@ impl RecordSegmentWriter {
                     Some(id_to_data_bf_id) => match id_to_data_bf_id.first() {
                         Some(id_to_data_bf_id) => id_to_data_bf_id,
                         None => {
-                            return Err(RecordSegmentWriterCreationError::MissingFile(
+                            return Err(RecordSegmentWriterShardCreationError::MissingFile(
                                 OFFSET_ID_TO_DATA.to_string(),
                             ))
                         }
                     },
                     None => {
-                        return Err(RecordSegmentWriterCreationError::MissingFile(
+                        return Err(RecordSegmentWriterShardCreationError::MissingFile(
                             OFFSET_ID_TO_DATA.to_string(),
                         ))
                     }
@@ -241,13 +249,13 @@ impl RecordSegmentWriter {
                     Some(max_offset_id_file_id) => match max_offset_id_file_id.first() {
                         Some(max_offset_id_file_id) => max_offset_id_file_id,
                         None => {
-                            return Err(RecordSegmentWriterCreationError::MissingFile(
+                            return Err(RecordSegmentWriterShardCreationError::MissingFile(
                                 MAX_OFFSET_ID.to_string(),
                             ))
                         }
                     },
                     None => {
-                        return Err(RecordSegmentWriterCreationError::MissingFile(
+                        return Err(RecordSegmentWriterShardCreationError::MissingFile(
                             MAX_OFFSET_ID.to_string(),
                         ))
                     }
@@ -255,36 +263,36 @@ impl RecordSegmentWriter {
 
                 let (user_id_to_id_bf_prefix, user_id_to_id_bf_uuid) =
                     Segment::extract_prefix_and_id(user_id_to_id_bf_path).map_err(|_| {
-                        RecordSegmentWriterCreationError::InvalidUuid(
+                        RecordSegmentWriterShardCreationError::InvalidUuid(
                             user_id_to_id_bf_path.to_string(),
                         )
                     })?;
                 let (id_to_user_id_bf_prefix, id_to_user_id_bf_uuid) =
                     Segment::extract_prefix_and_id(id_to_user_id_bf_path).map_err(|_| {
-                        RecordSegmentWriterCreationError::InvalidUuid(
+                        RecordSegmentWriterShardCreationError::InvalidUuid(
                             id_to_user_id_bf_path.to_string(),
                         )
                     })?;
                 if user_id_to_id_bf_prefix != id_to_user_id_bf_prefix {
-                    return Err(RecordSegmentWriterCreationError::InvalidPrefixPath);
+                    return Err(RecordSegmentWriterShardCreationError::InvalidPrefixPath);
                 }
                 let (id_to_data_bf_prefix, id_to_data_bf_uuid) =
                     Segment::extract_prefix_and_id(id_to_data_bf_path).map_err(|_| {
-                        RecordSegmentWriterCreationError::InvalidUuid(
+                        RecordSegmentWriterShardCreationError::InvalidUuid(
                             id_to_data_bf_path.to_string(),
                         )
                     })?;
                 if user_id_to_id_bf_prefix != id_to_data_bf_prefix {
-                    return Err(RecordSegmentWriterCreationError::InvalidPrefixPath);
+                    return Err(RecordSegmentWriterShardCreationError::InvalidPrefixPath);
                 }
                 let (max_offset_id_bf_prefix, max_offset_id_bf_uuid) =
                     Segment::extract_prefix_and_id(max_offset_id_bf_path).map_err(|_| {
-                        RecordSegmentWriterCreationError::InvalidUuid(
+                        RecordSegmentWriterShardCreationError::InvalidUuid(
                             max_offset_id_bf_path.to_string(),
                         )
                     })?;
                 if user_id_to_id_bf_prefix != max_offset_id_bf_prefix {
-                    return Err(RecordSegmentWriterCreationError::InvalidPrefixPath);
+                    return Err(RecordSegmentWriterShardCreationError::InvalidPrefixPath);
                 }
 
                 let mut options = BlockfileWriterOptions::new(user_id_to_id_bf_prefix.to_string())
@@ -295,7 +303,9 @@ impl RecordSegmentWriter {
                 let user_id_to_id = match blockfile_provider.write::<&str, u32>(options).await {
                     Ok(user_id_to_id) => user_id_to_id,
                     Err(e) => {
-                        return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                        return Err(RecordSegmentWriterShardCreationError::BlockfileCreateError(
+                            e,
+                        ))
                     }
                 };
 
@@ -307,7 +317,9 @@ impl RecordSegmentWriter {
                 let id_to_user_id = match blockfile_provider.write::<u32, String>(options).await {
                     Ok(id_to_user_id) => id_to_user_id,
                     Err(e) => {
-                        return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                        return Err(RecordSegmentWriterShardCreationError::BlockfileCreateError(
+                            e,
+                        ))
                     }
                 };
 
@@ -319,7 +331,9 @@ impl RecordSegmentWriter {
                 let id_to_data = match blockfile_provider.write::<u32, &DataRecord>(options).await {
                     Ok(id_to_data) => id_to_data,
                     Err(e) => {
-                        return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                        return Err(RecordSegmentWriterShardCreationError::BlockfileCreateError(
+                            e,
+                        ))
                     }
                 };
 
@@ -331,12 +345,14 @@ impl RecordSegmentWriter {
                 let max_offset_id_bf = match blockfile_provider.write::<&str, u32>(options).await {
                     Ok(max_offset_id) => max_offset_id,
                     Err(e) => {
-                        return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                        return Err(RecordSegmentWriterShardCreationError::BlockfileCreateError(
+                            e,
+                        ))
                     }
                 };
                 (user_id_to_id, id_to_user_id, id_to_data, max_offset_id_bf)
             }
-            _ => return Err(RecordSegmentWriterCreationError::IncorrectNumberOfFiles),
+            _ => return Err(RecordSegmentWriterShardCreationError::IncorrectNumberOfFiles),
         };
 
         // Having a bloom filter provider is overkill so we only have one abstraction
@@ -348,7 +364,7 @@ impl RecordSegmentWriter {
                     // Unexpected state in the system, the key exists but the paths vector is empty.
                     if paths.is_empty() {
                         tracing::error!("Bloom filter key present but paths vector is empty");
-                        return Err(RecordSegmentWriterCreationError::IncorrectNumberOfFiles);
+                        return Err(RecordSegmentWriterShardCreationError::IncorrectNumberOfFiles);
                     }
                     Some(manager.fork(&paths[0]).await?)
                 }
@@ -370,7 +386,7 @@ impl RecordSegmentWriter {
             tracing::info!("No bloom filter manager provided, skipping bloom filter");
             None
         };
-        Ok(RecordSegmentWriter {
+        Ok(RecordSegmentWriterShard {
             user_id_to_id: Some(user_id_to_id),
             id_to_user_id: Some(id_to_user_id),
             id_to_data: Some(id_to_data),
@@ -393,7 +409,7 @@ impl RecordSegmentWriter {
         blockfile_provider: &BlockfileProvider,
         manager: &BloomFilterManager,
         existing: Option<BloomFilter<str>>,
-    ) -> Result<BloomFilter<str>, RecordSegmentWriterCreationError> {
+    ) -> Result<BloomFilter<str>, RecordSegmentWriterShardCreationError> {
         if let Some(bf) = existing {
             if !bf.needs_rebuild() {
                 tracing::info!(
@@ -406,7 +422,7 @@ impl RecordSegmentWriter {
         }
         tracing::info!("Bloom filter needs rebuild, rebuilding from reader");
 
-        let reader = match Box::pin(RecordSegmentReader::from_segment(
+        let reader = match Box::pin(RecordSegmentReaderShard::from_segment(
             segment,
             blockfile_provider,
             None,
@@ -415,20 +431,25 @@ impl RecordSegmentWriter {
         {
             Ok(reader) => reader,
             // Uninitialized segment means no records in the segment, so create an empty bloom filter.
-            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+            Err(e)
+                if matches!(
+                    *e,
+                    RecordSegmentReaderShardCreationError::UninitializedSegment
+                ) =>
+            {
                 return Ok(manager.create(DEFAULT_BLOOM_FILTER_CAPACITY));
             }
             // Other errors are propagated.
             Err(e) => {
-                return Err(RecordSegmentWriterCreationError::RecordSegmentReaderError(
-                    *e,
-                ));
+                return Err(
+                    RecordSegmentWriterShardCreationError::RecordSegmentReaderShardError(*e),
+                );
             }
         };
         let count = reader
             .count()
             .await
-            .map_err(RecordSegmentWriterCreationError::BloomFilterRebuildError)?;
+            .map_err(RecordSegmentWriterShardCreationError::BloomFilterRebuildError)?;
         let capacity = ((count * 2) as u64).max(DEFAULT_BLOOM_FILTER_CAPACITY);
         let bloom_filter = manager.create(capacity);
         let mut stream = std::pin::pin!(reader.get_user_id_stream());
@@ -436,7 +457,7 @@ impl RecordSegmentWriter {
             match result {
                 Ok(user_id) => bloom_filter.insert(user_id),
                 Err(e) => {
-                    return Err(RecordSegmentWriterCreationError::BloomFilterRebuildError(e));
+                    return Err(RecordSegmentWriterShardCreationError::BloomFilterRebuildError(e));
                 }
             }
         }
@@ -450,7 +471,7 @@ impl RecordSegmentWriter {
 
     pub async fn apply_materialized_log_chunk(
         &self,
-        record_segment_reader: &Option<RecordSegmentReader<'_>>,
+        record_segment_reader: &Option<RecordSegmentReaderShard<'_>>,
         materialized: &MaterializeLogsResult,
     ) -> Result<(), ApplyMaterializedLogError> {
         // The max new offset id introduced by materialized logs is initialized as zero
@@ -599,7 +620,7 @@ impl RecordSegmentWriter {
         Ok(())
     }
 
-    pub async fn commit(mut self) -> Result<RecordSegmentFlusher, Box<dyn ChromaError>> {
+    pub async fn commit(mut self) -> Result<RecordSegmentFlusherShard, Box<dyn ChromaError>> {
         // Commit all the blockfiles
         let flusher_user_id_to_id = self
             .user_id_to_id
@@ -671,7 +692,7 @@ impl RecordSegmentWriter {
         };
 
         // Return a flusher that can be used to flush the blockfiles
-        Ok(RecordSegmentFlusher {
+        Ok(RecordSegmentFlusherShard {
             id: self.id,
             user_id_to_id_flusher: flusher_user_id_to_id,
             id_to_user_id_flusher: flusher_id_to_user_id,
@@ -705,7 +726,7 @@ pub enum ApplyMaterializedLogError {
     #[error("Log materialization error: {0}")]
     Materialization(#[from] LogMaterializerError),
     #[error("Error applying materialized records to spann segment: {0}")]
-    SpannSegmentError(#[from] SpannSegmentWriterError),
+    SpannSegmentError(#[from] SpannSegmentWriterShardError),
     #[error("Bloom filter serialization failed during commit: {0}")]
     BloomFilterSerializationError(BloomFilterError),
     #[cfg(feature = "usearch")]
@@ -732,7 +753,7 @@ impl ChromaError for ApplyMaterializedLogError {
     }
 }
 
-pub struct RecordSegmentFlusher {
+pub struct RecordSegmentFlusherShard {
     pub id: SegmentUuid,
     user_id_to_id_flusher: BlockfileFlusher,
     id_to_user_id_flusher: BlockfileFlusher,
@@ -742,13 +763,13 @@ pub struct RecordSegmentFlusher {
     serialized_bloom_filter: Option<BloomFilterFlusher>,
 }
 
-impl Debug for RecordSegmentFlusher {
+impl Debug for RecordSegmentFlusherShard {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RecordSegmentFlusher").finish()
+        f.debug_struct("RecordSegmentFlusherShard").finish()
     }
 }
 
-impl RecordSegmentFlusher {
+impl RecordSegmentFlusherShard {
     pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let prefix_path = self.user_id_to_id_flusher.prefix_path().to_string();
         let user_id_to_id_bf_id = self.user_id_to_id_flusher.id();
@@ -850,7 +871,7 @@ pub struct RecordSegmentReaderOptions {
 }
 
 #[derive(Clone)]
-pub struct RecordSegmentReader<'me> {
+pub struct RecordSegmentReaderShard<'me> {
     user_id_to_id: BlockfileReader<'me, &'me str, u32>,
     id_to_user_id: BlockfileReader<'me, u32, &'me str>,
     id_to_data: BlockfileReader<'me, u32, DataRecord<'me>>,
@@ -860,14 +881,14 @@ pub struct RecordSegmentReader<'me> {
     bloom_filter: Arc<tokio::sync::OnceCell<Option<BloomFilter<str>>>>,
 }
 
-impl Debug for RecordSegmentReader<'_> {
+impl Debug for RecordSegmentReaderShard<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RecordSegmentReader").finish()
+        f.debug_struct("RecordSegmentReaderShard").finish()
     }
 }
 
 #[derive(Error, Debug)]
-pub enum RecordSegmentReaderCreationError {
+pub enum RecordSegmentReaderShardCreationError {
     #[error("Segment uninitialized")]
     UninitializedSegment,
     #[error("Blockfile Open Error")]
@@ -888,44 +909,50 @@ pub enum RecordSegmentReaderCreationError {
     PrefixPathsMismatch,
 }
 
-impl ChromaError for RecordSegmentReaderCreationError {
+impl ChromaError for RecordSegmentReaderShardCreationError {
     fn code(&self) -> ErrorCodes {
         match self {
-            RecordSegmentReaderCreationError::BlockfileOpenError(e) => e.code(),
-            RecordSegmentReaderCreationError::InvalidNumberOfFiles => ErrorCodes::InvalidArgument,
-            RecordSegmentReaderCreationError::UninitializedSegment => ErrorCodes::InvalidArgument,
-            RecordSegmentReaderCreationError::DataRecordNotFound(_) => ErrorCodes::Internal,
-            RecordSegmentReaderCreationError::UserRecordNotFound(_) => ErrorCodes::Internal,
-            RecordSegmentReaderCreationError::FilePathNotFound => ErrorCodes::Internal,
-            RecordSegmentReaderCreationError::InvalidUuid(_) => ErrorCodes::Internal,
-            RecordSegmentReaderCreationError::PrefixPathsMismatch => ErrorCodes::Internal,
+            RecordSegmentReaderShardCreationError::BlockfileOpenError(e) => e.code(),
+            RecordSegmentReaderShardCreationError::InvalidNumberOfFiles => {
+                ErrorCodes::InvalidArgument
+            }
+            RecordSegmentReaderShardCreationError::UninitializedSegment => {
+                ErrorCodes::InvalidArgument
+            }
+            RecordSegmentReaderShardCreationError::DataRecordNotFound(_) => ErrorCodes::Internal,
+            RecordSegmentReaderShardCreationError::UserRecordNotFound(_) => ErrorCodes::Internal,
+            RecordSegmentReaderShardCreationError::FilePathNotFound => ErrorCodes::Internal,
+            RecordSegmentReaderShardCreationError::InvalidUuid(_) => ErrorCodes::Internal,
+            RecordSegmentReaderShardCreationError::PrefixPathsMismatch => ErrorCodes::Internal,
         }
     }
 }
 
-impl RecordSegmentReader<'_> {
+impl RecordSegmentReaderShard<'_> {
     async fn load_index_reader<'new, K: ReadKey<'new>, V: ReadValue<'new>>(
         segment: &Segment,
         file_path_string: &str,
         blockfile_provider: &BlockfileProvider,
-    ) -> Result<BlockfileReader<'new, K, V>, RecordSegmentReaderCreationError> {
+    ) -> Result<BlockfileReader<'new, K, V>, RecordSegmentReaderShardCreationError> {
         match segment.file_path.get(file_path_string) {
             Some(file_paths) => match file_paths.first() {
                 Some(file_path) => {
                     let (prefix_path, index_uuid) = Segment::extract_prefix_and_id(file_path)
                         .map_err(|_| {
-                            RecordSegmentReaderCreationError::InvalidUuid(file_path.to_string())
+                            RecordSegmentReaderShardCreationError::InvalidUuid(
+                                file_path.to_string(),
+                            )
                         })?;
                     let reader_options =
                         BlockfileReaderOptions::new(index_uuid, prefix_path.to_string());
                     match blockfile_provider.read::<K, V>(reader_options).await {
                         Ok(reader) => Ok(reader),
-                        Err(e) => Err(RecordSegmentReaderCreationError::BlockfileOpenError(e)),
+                        Err(e) => Err(RecordSegmentReaderShardCreationError::BlockfileOpenError(e)),
                     }
                 }
-                None => Err(RecordSegmentReaderCreationError::FilePathNotFound),
+                None => Err(RecordSegmentReaderShardCreationError::FilePathNotFound),
             },
-            None => Err(RecordSegmentReaderCreationError::FilePathNotFound),
+            None => Err(RecordSegmentReaderShardCreationError::FilePathNotFound),
         }
     }
 
@@ -933,7 +960,7 @@ impl RecordSegmentReader<'_> {
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
         bloom_filter_manager: Option<BloomFilterManager>,
-    ) -> Result<Self, Box<RecordSegmentReaderCreationError>> {
+    ) -> Result<Self, Box<RecordSegmentReaderShardCreationError>> {
         let (user_id_to_id, id_to_user_id, id_to_data, existing_max_offset_id) =
             match segment.file_path.len() {
                 4 | 5 => {
@@ -985,12 +1012,12 @@ impl RecordSegmentReader<'_> {
                 }
                 0 => {
                     return Err(Box::new(
-                        RecordSegmentReaderCreationError::UninitializedSegment,
+                        RecordSegmentReaderShardCreationError::UninitializedSegment,
                     ));
                 }
                 _ => {
                     return Err(Box::new(
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles,
+                        RecordSegmentReaderShardCreationError::InvalidNumberOfFiles,
                     ));
                 }
             };
@@ -1000,7 +1027,7 @@ impl RecordSegmentReader<'_> {
             .get(USER_ID_BLOOM_FILTER)
             .and_then(|paths| paths.first().cloned());
 
-        Ok(RecordSegmentReader {
+        Ok(RecordSegmentReaderShard {
             user_id_to_id,
             id_to_user_id,
             id_to_data,
@@ -1174,7 +1201,7 @@ impl RecordSegmentReader<'_> {
         offset_id: u32,
     ) -> Result<&str, Box<dyn ChromaError>> {
         self.id_to_user_id.get("", offset_id).await?.ok_or_else(|| {
-            Box::new(RecordSegmentReaderCreationError::DataRecordNotFound(
+            Box::new(RecordSegmentReaderShardCreationError::DataRecordNotFound(
                 offset_id,
             )) as Box<dyn ChromaError>
         })
@@ -1211,7 +1238,7 @@ mod tests {
         blockfile_record::MAX_OFFSET_ID, test::TestDistributedSegment, types::materialize_logs,
     };
 
-    use super::RecordSegmentWriter;
+    use super::RecordSegmentWriterShard;
 
     // The same record segment writer should be able to run concurrently on different threads without conflict
     #[test]
@@ -1222,7 +1249,7 @@ mod tests {
             .expect("Runtime creation should not fail");
         let test_segment = runtime.block_on(async { TestDistributedSegment::new().await });
         let record_segment_writer = runtime
-            .block_on(RecordSegmentWriter::from_segment(
+            .block_on(RecordSegmentWriterShard::from_segment(
                 &test_segment.collection.tenant,
                 &test_segment.collection.database_id,
                 &test_segment.record_segment,
@@ -1340,7 +1367,7 @@ mod tests {
         let logs = upsert_generator.generate_chunk(1..=num_records);
         Box::pin(test_segment.compact_log(logs, 1)).await;
 
-        let writer = RecordSegmentWriter::from_segment(
+        let writer = RecordSegmentWriterShard::from_segment(
             &test_segment.collection.tenant,
             &test_segment.collection.database_id,
             &test_segment.record_segment,
@@ -1388,7 +1415,7 @@ mod tests {
             .file_path
             .contains_key(USER_ID_BLOOM_FILTER),);
 
-        let writer = RecordSegmentWriter::from_segment(
+        let writer = RecordSegmentWriterShard::from_segment(
             &test_segment.collection.tenant,
             &test_segment.collection.database_id,
             &test_segment.record_segment,
@@ -1428,7 +1455,7 @@ mod tests {
 
         // Second compaction: delete 2 records, materializing with a reader so
         // the deletes resolve to DeleteExisting.
-        let reader = Box::pin(super::RecordSegmentReader::from_segment(
+        let reader = Box::pin(super::RecordSegmentReaderShard::from_segment(
             &test_segment.record_segment,
             &test_segment.blockfile_provider,
             None,
@@ -1463,7 +1490,7 @@ mod tests {
         .expect("Should materialize delete logs");
 
         // Need a second reader for hydration during apply.
-        let reader_for_apply = Box::pin(super::RecordSegmentReader::from_segment(
+        let reader_for_apply = Box::pin(super::RecordSegmentReaderShard::from_segment(
             &test_segment.record_segment,
             &test_segment.blockfile_provider,
             None,
@@ -1471,7 +1498,7 @@ mod tests {
         .await
         .expect("Should be able to create reader for apply");
 
-        let writer = RecordSegmentWriter::from_segment(
+        let writer = RecordSegmentWriterShard::from_segment(
             &test_segment.collection.tenant,
             &test_segment.collection.database_id,
             &test_segment.record_segment,

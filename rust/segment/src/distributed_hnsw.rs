@@ -1,6 +1,6 @@
 use crate::types::ChromaSegmentFlusher;
 
-use super::blockfile_record::{ApplyMaterializedLogError, RecordSegmentReader};
+use super::blockfile_record::{ApplyMaterializedLogError, RecordSegmentReaderShard};
 use super::types::MaterializeLogsResult;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::{
@@ -200,7 +200,7 @@ impl DistributedHNSWSegmentWriter {
 
     pub async fn apply_materialized_log_chunk(
         &self,
-        record_segment_reader: &Option<RecordSegmentReader<'_>>,
+        record_segment_reader: &Option<RecordSegmentReaderShard<'_>>,
         materialized: &MaterializeLogsResult,
     ) -> Result<(), ApplyMaterializedLogError> {
         for record in materialized {

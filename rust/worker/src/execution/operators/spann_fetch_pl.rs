@@ -1,13 +1,13 @@
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::spann::types::SpannPosting;
-use chroma_segment::distributed_spann::SpannSegmentReader;
+use chroma_segment::distributed_spann::SpannSegmentReaderShard;
 use chroma_system::{Operator, OperatorType};
 use thiserror::Error;
 
 #[derive(Debug)]
 pub(crate) struct SpannFetchPlInput<'referred_data> {
-    pub(crate) reader: Option<SpannSegmentReader<'referred_data>>,
+    pub(crate) reader: Option<SpannSegmentReaderShard<'referred_data>>,
     pub(crate) head_id: u32,
 }
 
@@ -19,16 +19,16 @@ pub(crate) struct SpannFetchPlOutput {
 #[derive(Error, Debug)]
 pub enum SpannFetchPlError {
     #[error("Error creating spann segment reader")]
-    SpannSegmentReaderCreationError,
+    SpannSegmentReaderShardCreationError,
     #[error("Error querying reader")]
-    SpannSegmentReaderError,
+    SpannSegmentReaderShardError,
 }
 
 impl ChromaError for SpannFetchPlError {
     fn code(&self) -> ErrorCodes {
         match self {
-            Self::SpannSegmentReaderCreationError => ErrorCodes::Internal,
-            Self::SpannSegmentReaderError => ErrorCodes::Internal,
+            Self::SpannSegmentReaderShardCreationError => ErrorCodes::Internal,
+            Self::SpannSegmentReaderShardError => ErrorCodes::Internal,
         }
     }
 }
@@ -56,11 +56,11 @@ impl Operator<SpannFetchPlInput<'_>, SpannFetchPlOutput> for SpannFetchPlOperato
                 let posting_list = reader
                     .fetch_posting_list(input.head_id)
                     .await
-                    .map_err(|_| SpannFetchPlError::SpannSegmentReaderError)?;
+                    .map_err(|_| SpannFetchPlError::SpannSegmentReaderShardError)?;
                 Ok(SpannFetchPlOutput { posting_list })
             }
             None => {
-                return Err(SpannFetchPlError::SpannSegmentReaderCreationError);
+                return Err(SpannFetchPlError::SpannSegmentReaderShardCreationError);
             }
         }
     }

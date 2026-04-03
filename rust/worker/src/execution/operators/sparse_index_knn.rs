@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
 use chroma_index::sparse::reader::SparseReaderError;
-use chroma_segment::blockfile_metadata::{MetadataSegmentError, MetadataSegmentReader};
+use chroma_segment::blockfile_metadata::{MetadataSegmentError, MetadataSegmentReaderShard};
 use chroma_system::Operator;
 use chroma_types::{operator::RecordMeasure, Segment, SignedRoaringBitmap, SparseVector};
 use thiserror::Error;
@@ -51,7 +51,7 @@ impl Operator<SparseIndexKnnInput, SparseIndexKnnOutput> for SparseIndexKnn {
         &self,
         input: &SparseIndexKnnInput,
     ) -> Result<SparseIndexKnnOutput, SparseIndexKnnError> {
-        let metadata_segement_reader = Box::pin(MetadataSegmentReader::from_segment(
+        let metadata_segement_reader = Box::pin(MetadataSegmentReaderShard::from_segment(
             &input.metadata_segment,
             &input.blockfile_provider,
         ))

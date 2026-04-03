@@ -6,14 +6,15 @@ use std::{
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
-    blockfile_metadata::{MetadataSegmentError, MetadataSegmentWriter},
+    blockfile_metadata::{MetadataSegmentError, MetadataSegmentWriterShard},
     blockfile_record::{
-        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
-        RecordSegmentWriter, RecordSegmentWriterCreationError,
+        RecordSegmentReaderOptions, RecordSegmentReaderShard,
+        RecordSegmentReaderShardCreationError, RecordSegmentWriterShard,
+        RecordSegmentWriterShardCreationError,
     },
     distributed_hnsw::{DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentWriter},
-    distributed_spann::SpannSegmentWriterError,
-    types::VectorSegmentWriter,
+    distributed_spann::SpannSegmentWriterShardError,
+    types::VectorSegmentWriterShard,
 };
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
@@ -118,15 +119,15 @@ pub enum AttachedFunctionOrchestratorError {
     #[error("Error creating metadata writer: {0}")]
     MetadataSegment(#[from] MetadataSegmentError),
     #[error("Error creating record segment writer: {0}")]
-    RecordSegmentWriter(#[from] RecordSegmentWriterCreationError),
+    RecordSegmentWriterShard(#[from] RecordSegmentWriterShardCreationError),
     #[error("Error creating record segment reader: {0}")]
-    RecordSegmentReader(#[from] RecordSegmentReaderCreationError),
+    RecordSegmentReaderShard(#[from] RecordSegmentReaderShardCreationError),
     #[error("Error creating hnsw writer: {0}")]
     HnswSegment(#[from] DistributedHNSWSegmentFromSegmentError),
     #[error("Error creating quantized spann writer: {0}")]
     QuantizedSpannSegment(#[from] chroma_segment::quantized_spann::QuantizedSpannSegmentError),
     #[error("Error creating spann writer: {0}")]
-    SpannSegment(#[from] SpannSegmentWriterError),
+    SpannSegment(#[from] SpannSegmentWriterShardError),
 }
 
 impl ChromaError for AttachedFunctionOrchestratorError {
@@ -148,8 +149,8 @@ impl ChromaError for AttachedFunctionOrchestratorError {
             AttachedFunctionOrchestratorError::CountError(e) => e.code(),
             AttachedFunctionOrchestratorError::PanicError(e) => e.code(),
             AttachedFunctionOrchestratorError::MetadataSegment(e) => e.code(),
-            AttachedFunctionOrchestratorError::RecordSegmentWriter(e) => e.code(),
-            AttachedFunctionOrchestratorError::RecordSegmentReader(e) => e.code(),
+            AttachedFunctionOrchestratorError::RecordSegmentWriterShard(e) => e.code(),
+            AttachedFunctionOrchestratorError::RecordSegmentReaderShard(e) => e.code(),
             AttachedFunctionOrchestratorError::HnswSegment(e) => e.code(),
             AttachedFunctionOrchestratorError::QuantizedSpannSegment(e) => e.code(),
             AttachedFunctionOrchestratorError::SpannSegment(e) => e.code(),
@@ -176,8 +177,12 @@ impl ChromaError for AttachedFunctionOrchestratorError {
             AttachedFunctionOrchestratorError::CountError(e) => e.should_trace_error(),
             AttachedFunctionOrchestratorError::PanicError(e) => e.should_trace_error(),
             AttachedFunctionOrchestratorError::MetadataSegment(e) => e.should_trace_error(),
-            AttachedFunctionOrchestratorError::RecordSegmentWriter(e) => e.should_trace_error(),
-            AttachedFunctionOrchestratorError::RecordSegmentReader(e) => e.should_trace_error(),
+            AttachedFunctionOrchestratorError::RecordSegmentWriterShard(e) => {
+                e.should_trace_error()
+            }
+            AttachedFunctionOrchestratorError::RecordSegmentReaderShard(e) => {
+                e.should_trace_error()
+            }
             AttachedFunctionOrchestratorError::HnswSegment(e) => e.should_trace_error(),
             AttachedFunctionOrchestratorError::QuantizedSpannSegment(e) => e.should_trace_error(),
             AttachedFunctionOrchestratorError::SpannSegment(e) => e.should_trace_error(),
@@ -654,7 +659,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
 
         let record_writer = match self
             .ok_or_terminate(
-                RecordSegmentWriter::from_segment(
+                RecordSegmentWriterShard::from_segment(
                     &collection.tenant,
                     &collection.database_id,
                     &message.record_segment,
@@ -673,7 +678,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
 
         let metadata_writer = match self
             .ok_or_terminate(
-                MetadataSegmentWriter::from_segment(
+                MetadataSegmentWriterShard::from_segment(
                     &collection.tenant,
                     &collection.database_id,
                     &message.metadata_segment,
@@ -704,7 +709,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
                 )
                 .await
             {
-                Some(writer) => (None, VectorSegmentWriter::QuantizedSpann(writer)),
+                Some(writer) => (None, VectorSegmentWriterShard::QuantizedSpann(writer)),
                 None => return,
             },
             SegmentType::Spann => match self
@@ -719,7 +724,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
             {
                 Some(writer) => (
                     Some(writer.hnsw_index_uuid()),
-                    VectorSegmentWriter::Spann(writer),
+                    VectorSegmentWriterShard::Spann(writer),
                 ),
                 None => return,
             },
@@ -738,7 +743,10 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
                 )
                 .await
             {
-                Some(writer) => (Some(writer.index_uuid()), VectorSegmentWriter::Hnsw(writer)),
+                Some(writer) => (
+                    Some(writer.index_uuid()),
+                    VectorSegmentWriterShard::Hnsw(writer),
+                ),
                 None => return,
             },
         };
@@ -746,7 +754,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
         // Create record reader for the output collection to load existing statistics
         let record_reader = match self
             .ok_or_terminate(
-                match Box::pin(RecordSegmentReader::from_segment(
+                match Box::pin(RecordSegmentReaderShard::from_segment(
                     &message.record_segment,
                     &self.output_context.blockfile_provider,
                     self.output_context.bloom_filter_manager.clone(),
@@ -755,7 +763,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
                 {
                     Ok(reader) => Ok(Some(reader)),
                     Err(err) => match *err {
-                        RecordSegmentReaderCreationError::UninitializedSegment => Ok(None),
+                        RecordSegmentReaderShardCreationError::UninitializedSegment => Ok(None),
                         _ => Err(*err),
                     },
                 },

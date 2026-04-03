@@ -56,22 +56,22 @@ impl ChromaError for QuantizedSpannSegmentError {
 }
 
 #[derive(Clone)]
-pub struct QuantizedSpannSegmentWriter {
+pub struct QuantizedSpannSegmentWriterShard {
     blockfile_provider: BlockfileProvider,
     pub id: SegmentUuid,
     index: QuantizedSpannIndexWriter<USearchIndex>,
     usearch_provider: USearchIndexProvider,
 }
 
-impl Debug for QuantizedSpannSegmentWriter {
+impl Debug for QuantizedSpannSegmentWriterShard {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("QuantizedSpannSegmentWriter")
+        f.debug_struct("QuantizedSpannSegmentWriterShard")
             .field("id", &self.id)
             .finish()
     }
 }
 
-impl QuantizedSpannSegmentWriter {
+impl QuantizedSpannSegmentWriterShard {
     pub async fn from_segment(
         cluster_block_size: usize,
         collection: &Collection,
@@ -262,34 +262,34 @@ impl QuantizedSpannSegmentWriter {
             .map_err(|e| Box::new(QuantizedSpannSegmentError::from(e)) as Box<dyn ChromaError>)
     }
 
-    pub async fn commit(self) -> Result<QuantizedSpannSegmentFlusher, Box<dyn ChromaError>> {
+    pub async fn commit(self) -> Result<QuantizedSpannSegmentFlusherShard, Box<dyn ChromaError>> {
         let flusher = Box::pin(
             self.index
                 .commit(&self.blockfile_provider, &self.usearch_provider),
         )
         .await
         .map_err(|e| Box::new(QuantizedSpannSegmentError::from(e)) as Box<dyn ChromaError>)?;
-        Ok(QuantizedSpannSegmentFlusher {
+        Ok(QuantizedSpannSegmentFlusherShard {
             flusher,
             id: self.id,
         })
     }
 }
 
-pub struct QuantizedSpannSegmentFlusher {
+pub struct QuantizedSpannSegmentFlusherShard {
     flusher: QuantizedSpannFlusher,
     pub id: SegmentUuid,
 }
 
-impl Debug for QuantizedSpannSegmentFlusher {
+impl Debug for QuantizedSpannSegmentFlusherShard {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("QuantizedSpannSegmentFlusher")
+        f.debug_struct("QuantizedSpannSegmentFlusherShard")
             .field("id", &self.id)
             .finish()
     }
 }
 
-impl QuantizedSpannSegmentFlusher {
+impl QuantizedSpannSegmentFlusherShard {
     pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let ids = Box::pin(self.flusher.flush())
             .await
@@ -337,7 +337,7 @@ impl QuantizedSpannSegmentFlusher {
 }
 
 #[derive(Clone)]
-pub struct QuantizedSpannSegmentReader {
+pub struct QuantizedSpannSegmentReaderShard {
     // Centroid index (for navigate)
     quantized_centroid: USearchIndex,
 
@@ -351,13 +351,13 @@ pub struct QuantizedSpannSegmentReader {
     versions_reader: BlockfileReader<'static, u32, u32>,
 }
 
-impl Debug for QuantizedSpannSegmentReader {
+impl Debug for QuantizedSpannSegmentReaderShard {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("QuantizedSpannSegmentReader").finish()
+        f.debug_struct("QuantizedSpannSegmentReaderShard").finish()
     }
 }
 
-impl QuantizedSpannSegmentReader {
+impl QuantizedSpannSegmentReaderShard {
     pub async fn from_segment(
         collection: &Collection,
         vector_segment: &Segment,
@@ -658,7 +658,7 @@ mod test {
     };
     use rand::{Rng, SeedableRng};
 
-    use super::{QuantizedSpannSegmentReader, QuantizedSpannSegmentWriter};
+    use super::{QuantizedSpannSegmentReaderShard, QuantizedSpannSegmentWriterShard};
     use crate::blockfile_record::RecordSegmentReaderOptions;
     use crate::types::materialize_logs;
 
@@ -839,7 +839,7 @@ mod test {
             let blockfile_provider = test_blockfile_provider(storage.clone());
             let usearch_provider = test_usearch_provider(storage.clone());
 
-            let mut writer = QuantizedSpannSegmentWriter::from_segment(
+            let mut writer = QuantizedSpannSegmentWriterShard::from_segment(
                 CLUSTER_BLOCK_SIZE,
                 &collection,
                 &vector_segment,
@@ -910,7 +910,7 @@ mod test {
         let blockfile_provider = test_blockfile_provider(storage.clone());
         let usearch_provider = test_usearch_provider(storage.clone());
 
-        QuantizedSpannSegmentWriter::from_segment(
+        QuantizedSpannSegmentWriterShard::from_segment(
             CLUSTER_BLOCK_SIZE,
             &collection,
             &vector_segment,
@@ -925,7 +925,7 @@ mod test {
         let blockfile_provider = test_blockfile_provider(storage.clone());
         let usearch_provider = test_usearch_provider(storage.clone());
 
-        let reader = QuantizedSpannSegmentReader::from_segment(
+        let reader = QuantizedSpannSegmentReaderShard::from_segment(
             &collection,
             &vector_segment,
             &blockfile_provider,

@@ -3,7 +3,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
     blockfile_metadata::MetadataSegmentError,
     blockfile_record::{
-        ApplyMaterializedLogError, RecordSegmentReader, RecordSegmentReaderCreationError,
+        ApplyMaterializedLogError, RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
     },
     types::{ChromaSegmentWriter, LogMaterializerError, MaterializeLogsResult},
 };
@@ -17,7 +17,7 @@ pub enum ApplyLogToSegmentWriterOperatorError {
     #[error("Log materialization result is empty")]
     LogMaterializationResultEmpty,
     #[error("Preparation for log materialization failed {0}")]
-    LogMaterializationPreparationError(#[from] RecordSegmentReaderCreationError),
+    LogMaterializationPreparationError(#[from] RecordSegmentReaderShardCreationError),
     #[error("Log materialization failed {0}")]
     LogMaterializationError(#[from] LogMaterializerError),
     #[error("Materialized logs failed to apply {0}")]
@@ -60,7 +60,7 @@ impl ApplyLogToSegmentWriterOperator {
 pub struct ApplyLogToSegmentWriterInput<'bf> {
     segment_writer: ChromaSegmentWriter<'bf>,
     materialized_logs: MaterializeLogsResult,
-    record_segment_reader: Option<RecordSegmentReader<'bf>>,
+    record_segment_reader: Option<RecordSegmentReaderShard<'bf>>,
     schema: Option<Schema>,
     #[cfg(test)]
     poison_offset: Option<u32>,
@@ -70,7 +70,7 @@ impl<'bf> ApplyLogToSegmentWriterInput<'bf> {
     pub fn new(
         segment_writer: ChromaSegmentWriter<'bf>,
         materialized_logs: MaterializeLogsResult,
-        record_segment_reader: Option<RecordSegmentReader<'bf>>,
+        record_segment_reader: Option<RecordSegmentReaderShard<'bf>>,
         schema: Option<Schema>,
         #[cfg(test)] poison_offset: Option<u32>,
     ) -> Self {

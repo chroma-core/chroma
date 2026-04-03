@@ -11,7 +11,7 @@ use std::hash::{Hash, Hasher};
 
 use async_trait::async_trait;
 use chroma_error::ChromaError;
-use chroma_segment::blockfile_record::RecordSegmentReader;
+use chroma_segment::blockfile_record::RecordSegmentReaderShard;
 use chroma_segment::types::HydratedMaterializedLogRecord;
 use chroma_types::{
     Chunk, LogRecord, MaterializedLogOperation, MetadataValue, Operation, OperationRecord,
@@ -261,7 +261,7 @@ impl StatisticsFunctionExecutor {
     /// Returns a HashMap with the same structure as the counts HashMap.
     async fn load_existing_statistics(
         &self,
-        output_reader: Option<&RecordSegmentReader<'_>>,
+        output_reader: Option<&RecordSegmentReaderShard<'_>>,
     ) -> Result<
         HashMap<String, HashMap<StatisticsValue, Box<dyn StatisticsFunction>>>,
         Box<dyn ChromaError>,
@@ -352,7 +352,7 @@ impl AttachedFunctionExecutor for StatisticsFunctionExecutor {
     async fn execute(
         &self,
         input_records: Chunk<HydratedMaterializedLogRecord<'_, '_>>,
-        output_reader: Option<&RecordSegmentReader<'_>>,
+        output_reader: Option<&RecordSegmentReaderShard<'_>>,
     ) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>> {
         // Load existing statistics from output_reader if available
         let mut counts = self.load_existing_statistics(output_reader).await?;
@@ -500,7 +500,7 @@ mod tests {
     use std::collections::HashMap;
 
     use chroma_segment::{
-        blockfile_record::{RecordSegmentReader, RecordSegmentReaderOptions},
+        blockfile_record::{RecordSegmentReaderOptions, RecordSegmentReaderShard},
         test::TestDistributedSegment,
         types::{materialize_logs, MaterializeLogsResult},
     };
@@ -537,7 +537,7 @@ mod tests {
 
     async fn hydrate_records<'a>(
         materialized: &'a MaterializeLogsResult,
-        record_reader: Option<&'a RecordSegmentReader<'a>>,
+        record_reader: Option<&'a RecordSegmentReaderShard<'a>>,
     ) -> Vec<HydratedMaterializedLogRecord<'a, 'a>> {
         let mut hydrated_records = Vec::new();
         for borrowed_record in materialized.iter() {
@@ -1007,7 +1007,7 @@ mod tests {
         let input_chunk = Chunk::new(vec![input_record_with_obsolete_key].into());
         Box::pin(input_segment.compact_log(input_chunk, 1)).await;
 
-        let input_record_reader = Box::pin(RecordSegmentReader::from_segment(
+        let input_record_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &input_segment.record_segment,
             &input_segment.blockfile_provider,
             None,
@@ -1022,7 +1022,7 @@ mod tests {
         let existing_output_chunk = Chunk::new(vec![stale_record, fresh_record].into());
         Box::pin(output_segment.compact_log(existing_output_chunk, 1)).await;
 
-        let output_record_reader = Box::pin(RecordSegmentReader::from_segment(
+        let output_record_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &output_segment.record_segment,
             &output_segment.blockfile_provider,
             None,
@@ -1091,7 +1091,7 @@ mod tests {
         let existing_chunk = Chunk::new(vec![record].into());
         Box::pin(test_segment.compact_log(existing_chunk, 1)).await;
 
-        let record_reader = Box::pin(RecordSegmentReader::from_segment(
+        let record_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &test_segment.record_segment,
             &test_segment.blockfile_provider,
             None,
@@ -1144,7 +1144,7 @@ mod tests {
         let input_chunk = Chunk::new(vec![input_record1, input_record2].into());
         Box::pin(input_segment.compact_log(input_chunk, 1)).await;
 
-        let input_record_reader = Box::pin(RecordSegmentReader::from_segment(
+        let input_record_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &input_segment.record_segment,
             &input_segment.blockfile_provider,
             None,
@@ -1158,7 +1158,7 @@ mod tests {
         let existing_chunk = Chunk::new(vec![existing_stat].into());
         Box::pin(output_segment.compact_log(existing_chunk, 1)).await;
 
-        let output_record_reader = Box::pin(RecordSegmentReader::from_segment(
+        let output_record_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &output_segment.record_segment,
             &output_segment.blockfile_provider,
             None,
@@ -1431,7 +1431,7 @@ mod tests {
             .get_collection_with_segments(None, output_collection_id)
             .await
             .expect("Should get output collection");
-        let reader = Box::pin(RecordSegmentReader::from_segment(
+        let reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &output_info.record_segment,
             &test_segments.blockfile_provider,
             None,
