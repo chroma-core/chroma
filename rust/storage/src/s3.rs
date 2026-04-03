@@ -499,6 +499,15 @@ impl S3Storage {
             // Small upload: collect the whole stream into a single
             // ByteStream and do a one-shot PutObject.
             let buf = collect_stream(stream, total_size_bytes).await?;
+            if buf.len() != total_size_bytes {
+                return Err(StorageError::Message {
+                    message: format!(
+                        "Stream yielded {} bytes, expected {}",
+                        buf.len(),
+                        total_size_bytes
+                    ),
+                });
+            }
             let buf = Arc::new(buf);
             self.put_object(
                 key,
@@ -587,7 +596,27 @@ impl S3Storage {
                             .await;
                         return Err(e);
                     }
-                    None => break,
+                    None => {
+                        if part_buf.is_empty() && part_index < part_count - 1 {
+                            let _ = self
+                                .client
+                                .abort_multipart_upload()
+                                .bucket(&self.bucket)
+                                .key(key)
+                                .upload_id(&upload_id)
+                                .send()
+                                .await;
+                            return Err(StorageError::Message {
+                                message: format!(
+                                    "Stream ended early at part {}/{}, expected {} bytes total",
+                                    part_index + 1,
+                                    part_count,
+                                    total_size_bytes
+                                ),
+                            });
+                        }
+                        break;
+                    }
                 }
             }
 
@@ -610,29 +639,52 @@ impl S3Storage {
                 .await
                 .map_err(|err| StorageError::Generic {
                     source: Arc::new(err.into_service_error()),
-                })?;
+                });
 
-            upload_parts.push(
-                CompletedPart::builder()
-                    .e_tag(upload_part_res.e_tag.unwrap_or_default())
-                    .part_number(part_number)
-                    .build(),
-            );
+            match upload_part_res {
+                Ok(res) => {
+                    upload_parts.push(
+                        CompletedPart::builder()
+                            .e_tag(res.e_tag.unwrap_or_default())
+                            .part_number(part_number)
+                            .build(),
+                    );
+                }
+                Err(e) => {
+                    let _ = self
+                        .client
+                        .abort_multipart_upload()
+                        .bucket(&self.bucket)
+                        .key(key)
+                        .upload_id(&upload_id)
+                        .send()
+                        .await;
+                    return Err(e);
+                }
+            }
         }
 
         let result = self
             .finish_multipart_upload(key, &upload_id, upload_parts, options)
             .await;
 
+        if result.is_err() {
+            let _ = self
+                .client
+                .abort_multipart_upload()
+                .bucket(&self.bucket)
+                .key(key)
+                .upload_id(&upload_id)
+                .send()
+                .await;
+            self.metrics.s3_put_error_count.add(1, &[]);
+        }
+
         let duration = stopwatch.finish();
         if duration > Duration::from_secs(1) {
             self.metrics
                 .s3_put_bytes_slow
                 .record(total_size_bytes as u64, &[]);
-        }
-
-        if result.is_err() {
-            self.metrics.s3_put_error_count.add(1, &[]);
         }
 
         result
