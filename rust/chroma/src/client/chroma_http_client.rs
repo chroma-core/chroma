@@ -614,11 +614,19 @@ impl ChromaHttpClient {
         &self,
         id: impl AsRef<str>,
     ) -> Result<ChromaCollection, ChromaHttpClientError> {
+        let tenant_id = self.get_tenant_id().await?;
+        let database_name = self.get_database_name().await?;
+
         let collection: chroma_types::Collection = self
             .send::<(), _, chroma_types::Collection>(
                 "get_collection_by_id",
                 Method::GET,
-                format!("/api/v2/collections/by-id/{}", id.as_ref()),
+                format!(
+                    "/api/v2/tenants/{}/databases/{}/collections/by-id/{}",
+                    tenant_id,
+                    database_name,
+                    id.as_ref()
+                ),
                 None,
                 None::<()>,
             )
