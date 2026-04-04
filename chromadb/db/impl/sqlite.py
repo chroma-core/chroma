@@ -10,6 +10,8 @@ from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
 )
+from chromadb.telemetry.product import ProductTelemetryClient
+from chromadb.telemetry.product.events import SqliteForeignKeyViolationEvent
 import sqlite3
 from overrides import override
 import pypika
@@ -18,7 +20,7 @@ from typing_extensions import Literal
 from types import TracebackType
 import os
 from uuid import UUID
-from threading import local
+from threading import local, Thread
 from importlib_resources import files
 from importlib_resources.abc import Traversable
 
@@ -37,6 +39,8 @@ class TxWrapper(base.TxWrapper):
     @override
     def __enter__(self) -> base.Cursor:
         if len(self._tx_stack.stack) == 0:
+            # foreign_keys must be set outside a transaction to take effect
+            self._conn.execute("PRAGMA foreign_keys = ON")
             self._conn.execute("PRAGMA case_sensitive_like = ON")
             self._conn.execute("BEGIN;")
         self._tx_stack.stack.append(self)
@@ -77,6 +81,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
         ]
         self._is_persistent = self._settings.require("is_persistent")
         self._opentelemetry_client = system.require(OpenTelemetryClient)
+        self._product_telemetry_client = system.require(ProductTelemetryClient)
         if not self._is_persistent:
             # In order to allow sqlite to be shared between multiple threads, we need to use a
             # URI connection string with shared cache.
@@ -98,10 +103,18 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     @override
     def start(self) -> None:
         super().start()
+        # PRAGMA foreign_keys must be set outside a transaction to take effect.
+        # See: https://www.sqlite.org/pragma.html#pragma_foreign_keys
+        conn = self._conn_pool.connect()
+        conn.execute("PRAGMA foreign_keys = ON")
+        self._conn_pool.return_to_pool(conn)
         with self.tx() as cur:
-            cur.execute("PRAGMA foreign_keys = ON")
             cur.execute("PRAGMA case_sensitive_like = ON")
         self.initialize_migrations()
+        # Run FK integrity check in background to avoid blocking startup
+        # on large databases (PRAGMA foreign_key_check does a full table scan).
+        t = Thread(target=self._check_foreign_key_integrity, daemon=True)
+        t.start()
 
         if (
             # (don't attempt to access .config if migrations haven't been run)
@@ -111,6 +124,31 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             logger.warning(
                 "⚠️ It looks like you upgraded from a version below 0.5.6 and could benefit from vacuuming your database. Run chromadb utils vacuum --help for more information."
             )
+
+    def _check_foreign_key_integrity(self) -> None:
+        """Check for foreign key constraint violations and report via telemetry."""
+        conn = self._conn_pool.connect()
+        try:
+            conn.execute("PRAGMA foreign_keys = ON")
+            cursor = conn.execute("PRAGMA foreign_key_check")
+            violations = cursor.fetchall()
+            if violations:
+                tables = {row[0] for row in violations}
+                logger.warning(
+                    "Foreign key constraint violations detected in tables: %s "
+                    "(%d violations). This may indicate data inconsistency from "
+                    "a previous version where foreign keys were not enforced.",
+                    ", ".join(sorted(tables)),
+                    len(violations),
+                )
+                self._product_telemetry_client.capture(
+                    SqliteForeignKeyViolationEvent(
+                        num_violations=len(violations),
+                        tables_affected=",".join(sorted(tables)),
+                    )
+                )
+        finally:
+            self._conn_pool.return_to_pool(conn)
 
     @trace_method("SqliteDB.stop", OpenTelemetryGranularity.ALL)
     @override
