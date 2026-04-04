@@ -189,7 +189,8 @@
             "pages": [
               "guides/performance/general",
               "guides/performance/single-node",
-              "guides/performance/distributed"
+              "guides/performance/distributed",
+              "guides/performance/hnsw-tuning"
             ]
           }
         ]
