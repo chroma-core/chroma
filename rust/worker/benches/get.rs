@@ -29,6 +29,8 @@ fn trivial_get(
         trivial_limit(),
         trivial_projection(),
         None,
+        0,
+        1,
     )
 }
 
@@ -48,6 +50,8 @@ fn get_false_filter(
         trivial_limit(),
         trivial_projection(),
         None,
+        0,
+        1,
     )
 }
 
@@ -67,6 +71,8 @@ fn get_true_filter(
         trivial_limit(),
         trivial_projection(),
         None,
+        0,
+        1,
     )
 }
 
@@ -86,6 +92,8 @@ fn get_true_filter_limit(
         offset_limit(),
         trivial_projection(),
         None,
+        0,
+        1,
     )
 }
 
@@ -105,6 +113,8 @@ fn get_true_filter_limit_projection(
         offset_limit(),
         all_projection(),
         None,
+        0,
+        1,
     )
 }
 
