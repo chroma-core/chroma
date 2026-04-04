@@ -462,7 +462,7 @@ impl MetadataProvider<'_> {
                 if let Some(reader) = metadata_segment_reader.string_metadata_index_reader.as_ref()
                 {
                     reader
-                        .regex_scan(key, pattern)
+                        .regex_scan(key, &regex)
                         .instrument(tracing::trace_span!(
                             parent: Span::current(),
                             "Filter by metadata regex"

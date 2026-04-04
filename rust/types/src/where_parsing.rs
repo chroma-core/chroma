@@ -60,6 +60,8 @@ pub enum WhereValidationError {
     WhereClause,
     #[error("Invalid where document clause")]
     WhereDocumentClause,
+    #[error("Operator '$not_regex' is not supported on metadata fields; use '$regex' to match, or apply '$not_regex' to '#document' for document filtering")]
+    UnsupportedMetadataOperator,
 }
 
 impl ChromaError for WhereValidationError {
@@ -373,7 +375,7 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
                 }
                 // $not_regex is not supported on metadata fields
                 if operator == "$not_regex" {
-                    return Err(WhereValidationError::WhereClause);
+                    return Err(WhereValidationError::UnsupportedMetadataOperator);
                 }
                 return Ok(Where::Metadata(crate::MetadataExpression {
                     key: key.clone(),
