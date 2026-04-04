@@ -1,0 +1,60 @@
+## Reusable shared-cluster workflow for CI.
+## See docs/ci/cluster-tests.md for rollout strategy and mappings.
+name: Shared cluster tests
+
+on:
+  workflow_call:
+    inputs:
+      enabled:
+        description: 'Whether to run the shared-cluster tests in this invocation'
+        required: false
+        default: true
+        type: boolean
+      rust_enabled:
+        description: 'Enable Rust shared-cluster integration tests'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  rust-shared-cluster:
+    if: ${{ inputs.enabled && inputs.rust_enabled }}
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    name: Rust shared-cluster integration
+    # OIDC token auth for AWS
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_MIN_STACK_SIZE: 8388608
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
+
+      - name: Set up Docker
+        uses: ./.github/actions/docker
+        with:
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Start Tilt services
+        uses: ./.github/actions/tilt
+
+      - name: Build CLI
+        run: cargo build --bin chroma
+
+      - name: Run Rust k8s integration tests (shared cluster)
+        run: bin/rust-k8s-integration-partitions.sh
+
+      - name: Save service logs to artifact
+        if: always()
+        uses: ./.github/actions/export-tilt-logs
+        with:
+          artifact-name: "rust-shared-cluster-integration"
+
