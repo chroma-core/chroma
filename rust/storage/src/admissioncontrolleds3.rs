@@ -1215,6 +1215,28 @@ impl AdmissionControlledS3Storage {
         self.put_bytes(key, bytes.into(), options).await
     }
 
+    /// NOTE: This implementation collects the entire stream into memory
+    /// before delegating to `put_bytes`, so the bounded-memory streaming
+    /// benefit of `S3Storage::put_stream` is **not** achieved here.
+    /// Callers that need true streaming with bounded memory should use
+    /// `S3Storage::put_stream` directly.
+    pub async fn put_stream<S>(
+        &self,
+        key: &str,
+        _total_size_bytes: usize,
+        mut stream: S,
+        options: PutOptions,
+    ) -> Result<Option<ETag>, StorageError>
+    where
+        S: futures::Stream<Item = Result<Bytes, StorageError>> + Send + Unpin,
+    {
+        let mut buf = Vec::new();
+        while let Some(chunk) = futures::StreamExt::next(&mut stream).await {
+            buf.extend_from_slice(&chunk?);
+        }
+        self.put_bytes(key, buf.into(), options).await
+    }
+
     pub async fn put_bytes(
         &self,
         key: &str,
