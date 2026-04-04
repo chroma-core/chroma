@@ -648,8 +648,7 @@ def test_get_collection_by_id(client):
     assert retrieved.id == collection_id
     assert retrieved.metadata == {"key": "value"}
 
-    # non-existent id should raise
-    with pytest.raises(Exception):
+    with pytest.raises(NotFoundError):
         client.get_collection_by_id(uuid.uuid4())
 
 
