@@ -58,6 +58,7 @@ pub fn empty_fetch_log(collection_uuid: CollectionUuid) -> FetchLogOperator {
         database_name: chroma_types::DatabaseName::new("bench_db").unwrap(),
         fetch_log_concurrency: 10,
         fragment_fetcher: None,
+        log_upper_bound_offset: 0,
     }
 }
 
