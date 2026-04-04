@@ -483,6 +483,37 @@ class ClientAPI(BaseAPI, ABC):
         pass
 
     @abstractmethod
+    def get_collection_by_id(
+        self,
+        id: UUID,
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
+    ) -> Collection:
+        """Get a collection by its ID.
+
+        Args:
+            id: The UUID of the collection to get.
+            embedding_function: Optional function to use to embed documents.
+                                Uses the default embedding function if not provided.
+            data_loader: Optional function to use to load records (documents, images, etc.)
+
+        Returns:
+            Collection: The collection
+
+        Raises:
+            NotFoundError: If no collection with the given ID exists.
+
+        Examples:
+            ```python
+            client.get_collection_by_id(uuid.UUID("..."))
+            # collection(name="my_collection", metadata={})
+            ```
+        """
+        pass
+
+    @abstractmethod
     def get_or_create_collection(
         self,
         name: str,
@@ -655,6 +686,28 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
+        pass
+
+    @abstractmethod
+    def get_collection_by_id(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel:
+        """Get a collection by its ID.
+
+        Args:
+            collection_id: The UUID of the collection to retrieve.
+            tenant: The tenant to search within.
+            database: The database to search within.
+
+        Returns:
+            CollectionModel: The collection with the given ID.
+
+        Raises:
+            NotFoundError: If no collection with the given ID exists.
+        """
         pass
 
     @abstractmethod

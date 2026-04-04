@@ -914,6 +914,56 @@ impl ChromaError for GetCollectionByCrnError {
     }
 }
 
+#[non_exhaustive]
+#[derive(Clone, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct GetCollectionByIdRequest {
+    pub collection_id: CollectionUuid,
+    pub tenant_id: String,
+    pub database_name: DatabaseName,
+}
+
+impl GetCollectionByIdRequest {
+    pub fn try_new(
+        collection_id: String,
+        tenant_id: String,
+        database_name: DatabaseName,
+    ) -> Result<Self, ChromaValidationError> {
+        let collection_id: CollectionUuid = collection_id.parse().map_err(|_| {
+            let mut err = ValidationError::new("invalid_collection_id");
+            err.message = Some("Invalid collection ID format, expected UUID".into());
+            ChromaValidationError::from(("collection_id", err))
+        })?;
+        Ok(Self {
+            collection_id,
+            tenant_id,
+            database_name,
+        })
+    }
+}
+
+pub type GetCollectionByIdResponse = Collection;
+
+#[derive(Debug, Error)]
+pub enum GetCollectionByIdError {
+    #[error("Failed to reconcile schema: {0}")]
+    InvalidSchema(#[from] SchemaError),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+    #[error("Collection [{0}] does not exist")]
+    NotFound(CollectionUuid),
+}
+
+impl ChromaError for GetCollectionByIdError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetCollectionByIdError::InvalidSchema(e) => e.code(),
+            GetCollectionByIdError::Internal(err) => err.code(),
+            GetCollectionByIdError::NotFound(_) => ErrorCodes::NotFound,
+        }
+    }
+}
+
 #[derive(Clone, Deserialize, Serialize, Debug)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum CollectionMetadataUpdate {

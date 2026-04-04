@@ -589,6 +589,55 @@ impl ChromaHttpClient {
         })
     }
 
+    /// Retrieves an existing collection by its ID.
+    ///
+    /// Returns a collection handle that can be used to perform operations on the collection's
+    /// data (add, query, update, delete records).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - No collection with the given ID exists
+    /// - Network communication fails
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use chroma::ChromaHttpClient;
+    /// # async fn example(client: ChromaHttpClient) -> Result<(), Box<dyn std::error::Error>> {
+    /// let collection = client.get_collection_by_id("collection-uuid-here").await?;
+    /// println!("Collection name: {}", collection.name());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_collection_by_id(
+        &self,
+        id: impl AsRef<str>,
+    ) -> Result<ChromaCollection, ChromaHttpClientError> {
+        let tenant_id = self.get_tenant_id().await?;
+        let database_name = self.get_database_name().await?;
+
+        let collection: chroma_types::Collection = self
+            .send::<(), _, chroma_types::Collection>(
+                "get_collection_by_id",
+                Method::GET,
+                format!(
+                    "/api/v2/tenants/{}/databases/{}/collections/by-id/{}",
+                    tenant_id,
+                    database_name,
+                    id.as_ref()
+                ),
+                None,
+                None::<()>,
+            )
+            .await?;
+
+        Ok(ChromaCollection {
+            client: self.clone(),
+            collection: Arc::new(collection),
+        })
+    }
+
     /// Removes a collection and all its records from the database.
     ///
     /// Permanently deletes the collection and all contained embeddings, metadata, and documents.
@@ -1146,6 +1195,33 @@ mod tests {
             let name = collection.name().to_string();
             let collection = client.get_collection(collection.name()).await.unwrap();
             assert_eq!(collection.collection.name, name);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_k8s_integration_get_collection_by_id() {
+        with_client(|mut client| async move {
+            let collection = client.new_collection("my_collection").await;
+            let id = collection.id();
+            let name = collection.name().to_string();
+
+            let retrieved = client.get_collection_by_id(id.to_string()).await.unwrap();
+            assert_eq!(retrieved.name(), name);
+            assert_eq!(retrieved.id(), id);
+
+            let nonexistent_id = uuid::Uuid::new_v4().to_string();
+            let err = client
+                .get_collection_by_id(&nonexistent_id)
+                .await
+                .unwrap_err();
+            match err {
+                ChromaHttpClientError::ApiError(_, status) => {
+                    assert_eq!(status, StatusCode::NOT_FOUND);
+                }
+                _ => panic!("Expected ApiError for non-existent collection ID"),
+            };
         })
         .await;
     }

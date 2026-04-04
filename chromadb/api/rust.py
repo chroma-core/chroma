@@ -282,6 +282,25 @@ class RustBindingsAPI(ServerAPI):
         )
 
     @override
+    def get_collection_by_id(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel:
+        collection = self.bindings.get_collection_by_id(str(collection_id), tenant, database)
+        return CollectionModel(
+            id=collection.id,
+            name=collection.name,
+            configuration_json=collection.configuration,
+            serialized_schema=collection.schema,
+            metadata=collection.metadata,
+            dimension=collection.dimension,
+            tenant=collection.tenant,
+            database=collection.database,
+        )
+
+    @override
     def get_or_create_collection(
         self,
         name: str,

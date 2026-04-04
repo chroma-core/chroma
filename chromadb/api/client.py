@@ -276,6 +276,46 @@ class Client(SharedSystemClient, ClientAPI):
         )
 
     @override
+    def get_collection_by_id(
+        self,
+        id: UUID,
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
+    ) -> Collection:
+        """Get a collection by its ID.
+
+        Args:
+            id: The UUID of the collection.
+            embedding_function: Optional embedding function for the collection.
+            data_loader: Optional data loader for documents with URIs.
+
+        Returns:
+            Collection: The requested collection.
+
+        Raises:
+            ValueError: If the embedding function conflicts with configuration.
+        """
+        model = self._server.get_collection_by_id(
+            collection_id=id,
+            tenant=self.tenant,
+            database=self.database,
+        )
+        persisted_ef_config = model.configuration_json.get("embedding_function")
+
+        validate_embedding_function_conflict_on_get(
+            embedding_function, persisted_ef_config
+        )
+
+        return Collection(
+            client=self._server,
+            model=model,
+            embedding_function=embedding_function,
+            data_loader=data_loader,
+        )
+
+    @override
     def get_or_create_collection(
         self,
         name: str,

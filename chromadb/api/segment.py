@@ -337,6 +337,24 @@ class SegmentAPI(ServerAPI):
         else:
             raise NotFoundError(f"Collection {name} does not exist.")
 
+    @trace_method("SegmentAPI.get_collection_by_id", OpenTelemetryGranularity.OPERATION)
+    @override
+    @rate_limit
+    def get_collection_by_id(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel:
+        existing = self._sysdb.get_collections(
+            id=collection_id, tenant=tenant, database=database
+        )
+
+        if existing:
+            return existing[0]
+        else:
+            raise NotFoundError(f"Collection {collection_id} does not exist.")
+
     @trace_method("SegmentAPI.list_collection", OpenTelemetryGranularity.OPERATION)
     @override
     @rate_limit

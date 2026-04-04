@@ -22,14 +22,15 @@ use chroma_types::{
     DatabaseName, DeleteCollectionRecordsPayload, DeleteCollectionRecordsResponse,
     DeleteCollectionResponse, DeleteDatabaseRequest, DeleteDatabaseResponse, DetachFunctionRequest,
     DetachFunctionResponse, ForkCollectionResponse, GetAttachedFunctionResponse,
-    GetCollectionByCrnRequest, GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse,
-    GetRequest, GetRequestPayload, GetResponse, GetTenantRequest, GetTenantResponse,
-    IndexStatusResponse, InternalCollectionConfiguration, InternalUpdateCollectionConfiguration,
-    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
-    QueryRequest, QueryRequestPayload, QueryResponse, SearchRequest, SearchRequestPayload,
-    SearchResponse, UpdateCollectionPayload, UpdateCollectionRecordsPayload,
-    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateTenantRequest,
-    UpdateTenantResponse, UpsertCollectionRecordsPayload, UpsertCollectionRecordsResponse,
+    GetCollectionByCrnRequest, GetCollectionByIdRequest, GetCollectionRequest, GetDatabaseRequest,
+    GetDatabaseResponse, GetRequest, GetRequestPayload, GetResponse, GetTenantRequest,
+    GetTenantResponse, IndexStatusResponse, InternalCollectionConfiguration,
+    InternalUpdateCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesRequest, ListDatabasesResponse, QueryRequest, QueryRequestPayload, QueryResponse,
+    SearchRequest, SearchRequestPayload, SearchResponse, UpdateCollectionPayload,
+    UpdateCollectionRecordsPayload, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
+    UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsPayload,
+    UpsertCollectionRecordsResponse,
 };
 use mdac::{Rule, Scorecard, ScorecardGuard};
 use opentelemetry::global;
@@ -144,6 +145,7 @@ pub struct Metrics {
     count_collections: Counter<u64>,
     get_collection: Counter<u64>,
     get_collection_by_crn: Counter<u64>,
+    get_collection_by_id: Counter<u64>,
     update_collection: Counter<u64>,
     delete_collection: Counter<u64>,
     fork_collection: Counter<u64>,
@@ -183,6 +185,7 @@ impl Metrics {
             count_collections: meter.u64_counter("count_collections").build(),
             get_collection: meter.u64_counter("get_collection").build(),
             get_collection_by_crn: meter.u64_counter("get_collection_by_crn").build(),
+            get_collection_by_id: meter.u64_counter("get_collection_by_id").build(),
             update_collection: meter.u64_counter("update_collection").build(),
             delete_collection: meter.u64_counter("delete_collection").build(),
             fork_collection: meter.u64_counter("fork_collection").build(),
@@ -279,6 +282,10 @@ impl FrontendServer {
             .route("/api/v2/version", get(version))
             .route("/api/v2/auth/identity", get(get_user_identity))
             .route("/api/v2/collections/{crn}", get(get_collection_by_crn))
+            .route(
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/by-id/{collection_id}",
+                get(get_collection_by_id),
+            )
             .route("/api/v2/tenants", post(create_tenant))
             .route("/api/v2/tenants/{tenant_name}", get(get_tenant))
             .route("/api/v2/tenants/{tenant_name}", patch(update_tenant))
@@ -1477,6 +1484,77 @@ async fn get_collection_by_crn(
         .await?;
     let request = GetCollectionByCrnRequest::try_new(crn)?;
     let collection = server.frontend.get_collection_by_crn(request).await?;
+    Ok(Json(collection))
+}
+
+/// Get collection by ID
+/// Returns a collection by its UUID.
+#[utoipa::path(
+    get,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/by-id/{collection_id}",
+    summary = "Get collection by ID",
+    description = "Returns a collection by its UUID within a specific tenant and database.",
+    tag = "Collection",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
+    responses(
+        (status = 200, description = "Collection found", body = Collection),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "Collection UUID")
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "typescript",
+                "label": "Get collection by ID",
+                "source": "const collection = await client.getCollectionById({ id: 'collection-uuid-here' });"
+            },
+            {
+                "lang": "python",
+                "label": "Get collection by ID",
+                "source": "collection = client.get_collection_by_id(uuid.UUID('collection-uuid-here'))"
+            }
+        ]))
+    )
+)]
+async fn get_collection_by_id(
+    headers: HeaderMap,
+    Path((tenant, database, collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<Collection>, ServerError> {
+    server.metrics.get_collection_by_id.add(1, &[]);
+    tracing::info!(name: "get_collection_by_id", tenant = %tenant, database = %database, collection_id = %collection_id);
+
+    // First authorize with the provided tenant/database
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::GetCollection,
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
+                collection: Some(collection_id.clone()),
+            },
+        )
+        .await?;
+    let _guard =
+        server.scorecard_request(&["op:get_collection", format!("tenant:{}", tenant).as_str()])?;
+
+    let database_name = DatabaseName::new(&database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
+
+    // Fetch collection by ID, scoped to tenant/database
+    let request = GetCollectionByIdRequest::try_new(collection_id, tenant, database_name)?;
+    let collection = server.frontend.get_collection_by_id(request).await?;
+
     Ok(Json(collection))
 }
 
@@ -3375,6 +3453,7 @@ impl Modify for ChromaTokenSecurityAddon {
         count_collections,
         get_collection,
         get_collection_by_crn,
+        get_collection_by_id,
         update_collection,
         delete_collection,
         fork_collection,

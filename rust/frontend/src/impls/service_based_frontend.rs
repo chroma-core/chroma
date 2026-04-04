@@ -31,19 +31,20 @@ use chroma_types::{
     DeleteCollectionRequest, DeleteCollectionResponse, DeleteDatabaseError, DeleteDatabaseRequest,
     DeleteDatabaseResponse, DetachFunctionError, DetachFunctionRequest, DetachFunctionResponse,
     ForkCollectionError, ForkCollectionRequest, ForkCollectionResponse, GetCollectionByCrnError,
-    GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionError,
-    GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
-    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
-    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, Include,
-    IndexStatusError, IndexStatusResponse, KnnIndex, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
-    Operation, OperationRecord, Quantization, QueryError, QueryRequest, QueryResponse, ResetError,
-    ResetResponse, Schema, SchemaError, SearchRequest, SearchResponse, Segment, SegmentScope,
-    SegmentType, SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
-    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
-    UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse,
-    UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse,
-    VectorIndexConfiguration, Where,
+    GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionByIdError,
+    GetCollectionByIdRequest, GetCollectionByIdResponse, GetCollectionError, GetCollectionRequest,
+    GetCollectionResponse, GetCollectionsError, GetDatabaseError, GetDatabaseRequest,
+    GetDatabaseResponse, GetRequest, GetResponse, GetTenantError, GetTenantRequest,
+    GetTenantResponse, HealthCheckResponse, HeartbeatError, Include, IndexStatusError,
+    IndexStatusResponse, KnnIndex, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord,
+    Quantization, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse, Schema,
+    SchemaError, SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
+    UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
+    UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
+    UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsError,
+    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
+    Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -468,6 +469,47 @@ impl ServiceBasedFrontend {
                 .map_err(GetCollectionByCrnError::InvalidSchema)?;
         }
         Ok(collection)
+    }
+
+    pub async fn get_collection_by_id(
+        &mut self,
+        GetCollectionByIdRequest {
+            collection_id,
+            tenant_id,
+            database_name,
+            ..
+        }: GetCollectionByIdRequest,
+    ) -> Result<GetCollectionByIdResponse, GetCollectionByIdError> {
+        let mut collections = self
+            .sysdb_client
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(collection_id),
+                tenant: Some(tenant_id),
+                database_or_topology: Some(DatabaseOrTopology::Database(database_name)),
+                limit: Some(1),
+                ..Default::default()
+            })
+            .await
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        // Defensive: we should never have multiple collections with the same ID.
+        if collections.len() > 1 {
+            tracing::warn!(
+                collection_id = %collection_id,
+                count = collections.len(),
+                "get_collection_by_id returned multiple collections for a single ID"
+            );
+        }
+        if self.enable_schema {
+            for collection in &mut collections {
+                collection
+                    .reconcile_schema_for_read()
+                    .map_err(GetCollectionByIdError::InvalidSchema)?;
+            }
+        }
+        collections
+            .into_iter()
+            .next()
+            .ok_or(GetCollectionByIdError::NotFound(collection_id))
     }
 
     pub async fn create_collection(
