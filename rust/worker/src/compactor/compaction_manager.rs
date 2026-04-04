@@ -987,8 +987,6 @@ mod tests {
     use chroma_types::SegmentUuid;
     use chroma_types::{Collection, LogRecord, Operation, OperationRecord, Segment};
     use std::collections::HashMap;
-    use std::path::{Path, PathBuf};
-    use tokio::fs;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_compaction_manager() {
@@ -1202,13 +1200,7 @@ mod tests {
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
-        let hnsw_provider = HnswIndexProvider::new(
-            storage.clone(),
-            PathBuf::from(tmpdir.path().to_str().unwrap()),
-            hnsw_cache,
-            16,
-            false,
-        );
+        let hnsw_provider = HnswIndexProvider::new(storage.clone(), hnsw_cache, 16);
         let usearch_provider = chroma_index::usearch::USearchIndexProvider::new(
             storage.clone(),
             new_non_persistent_cache_for_test(),
@@ -1283,22 +1275,5 @@ mod tests {
         }
 
         assert_eq!(completed_compactions, expected_compactions);
-
-        check_purge_successful(tmpdir.path()).await;
-    }
-
-    pub async fn check_purge_successful(path: impl AsRef<Path>) {
-        let mut entries = fs::read_dir(&path).await.expect("Failed to read dir");
-
-        while let Some(entry) = entries.next_entry().await.expect("Failed to read next dir") {
-            let path = entry.path();
-            let metadata = entry.metadata().await.expect("Failed to read metadata");
-
-            if metadata.is_dir() {
-                assert!(path.ends_with("tenant"));
-            } else {
-                panic!("Expected hnsw purge to be successful")
-            }
-        }
     }
 }

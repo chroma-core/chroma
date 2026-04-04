@@ -1,6 +1,5 @@
 use std::{
     env,
-    path::PathBuf,
     process::{Command, Output},
     sync::Arc,
 };
@@ -22,13 +21,11 @@ const CHILD_ENV: &str = "CHROMA_HNSW_RELOAD_REPRO_CHILD";
 const SEED_ENV: &str = "CHROMA_HNSW_RELOAD_REPRO_SEED";
 const BATCHES_ENV: &str = "CHROMA_HNSW_RELOAD_REPRO_BATCH_COUNT";
 const WORKERS_ENV: &str = "CHROMA_HNSW_RELOAD_REPRO_WORKER_COUNT";
-const USE_DIRECT_ENV: &str = "CHROMA_HNSW_RELOAD_REPRO_USE_DIRECT_HNSW";
 const TEST_NAME: &str = "deleted_heads_can_abort_a_future_reload";
 
 // Broad command that is known to exercise this repro reliably.
 //
 //   CHROMA_HNSW_RELOAD_REPRO_CHILD=1 \
-//   CHROMA_HNSW_RELOAD_REPRO_USE_DIRECT_HNSW=1 \
 //   CHROMA_HNSW_RELOAD_REPRO_BATCH_COUNT=5 \
 //   CHROMA_HNSW_RELOAD_REPRO_WORKER_COUNT=10 \
 //   CHROMA_HNSW_RELOAD_REPRO_SEED=4 \
@@ -94,7 +91,7 @@ fn run_repro(seed: u64) {
         .build()
         .expect("runtime should build");
     runtime.block_on(async move {
-        let (storage_root, storage) = test_storage();
+        let (_storage_root, storage) = test_storage();
         let collection_id = CollectionUuid::new();
         let params = InternalSpannConfiguration {
             split_threshold: 100,
@@ -123,10 +120,6 @@ fn run_repro(seed: u64) {
             .ok()
             .and_then(|raw| raw.parse::<usize>().ok())
             .unwrap_or(10);
-        let use_direct_hnsw = env::var(USE_DIRECT_ENV)
-            .ok()
-            .map(|raw| raw == "1" || raw.eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
         let prefix_path = "";
         let distance_function: DistanceFunction = params.space.clone().into();
         let mut rng = StdRng::seed_from_u64(seed);
@@ -147,8 +140,7 @@ fn run_repro(seed: u64) {
 
         for batch in 0..batch_count {
             let blockfile_provider = new_blockfile_provider(storage.clone());
-            let hnsw_provider =
-                new_hnsw_provider(storage.clone(), storage_root.path(), use_direct_hnsw);
+            let hnsw_provider = new_hnsw_provider(storage.clone());
             let writer = SpannIndexWriter::from_id(
                 &hnsw_provider,
                 hnsw_id.as_ref(),
@@ -200,7 +192,7 @@ fn run_repro(seed: u64) {
         }
 
         let blockfile_provider = new_blockfile_provider(storage.clone());
-        let hnsw_provider = new_hnsw_provider(storage, storage_root.path(), use_direct_hnsw);
+        let hnsw_provider = new_hnsw_provider(storage);
         let _reader = Box::pin(SpannIndexReader::from_id(
             hnsw_id.as_ref(),
             &hnsw_provider,
@@ -231,16 +223,6 @@ fn new_blockfile_provider(storage: chroma_storage::Storage) -> BlockfileProvider
     )
 }
 
-fn new_hnsw_provider(
-    storage: chroma_storage::Storage,
-    root: &std::path::Path,
-    use_direct_hnsw: bool,
-) -> HnswIndexProvider {
-    HnswIndexProvider::new(
-        storage,
-        PathBuf::from(root),
-        new_non_persistent_cache_for_test(),
-        16,
-        use_direct_hnsw,
-    )
+fn new_hnsw_provider(storage: chroma_storage::Storage) -> HnswIndexProvider {
+    HnswIndexProvider::new(storage, new_non_persistent_cache_for_test(), 16)
 }

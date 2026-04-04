@@ -267,7 +267,7 @@ impl DistributedHNSWSegmentWriter {
     }
 
     pub async fn commit(self) -> Result<DistributedHNSWSegmentWriter, Box<dyn ChromaError>> {
-        let res = self.hnsw_index_provider.commit(self.index.clone());
+        let res = self.hnsw_index_provider.commit();
         match res {
             Ok(_) => Ok(self),
             Err(e) => Err(e),

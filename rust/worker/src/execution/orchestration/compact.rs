@@ -140,7 +140,6 @@ pub struct CompactionContext {
     pub fetch_log_concurrency: usize,
     pub max_compaction_size: usize,
     pub max_partition_size: usize,
-    pub hnsw_index_uuids: HashSet<IndexUuid>, // TODO(tanujnay112): Remove after direct hnsw is solidified
     pub is_function_disabled: bool,
     pub fragment_fetcher: Option<Arc<FragmentFetcher>>,
     pub bloom_filter_manager: Option<BloomFilterManager>,
@@ -166,7 +165,6 @@ impl Clone for CompactionContext {
             fetch_log_concurrency: self.fetch_log_concurrency,
             max_compaction_size: self.max_compaction_size,
             max_partition_size: self.max_partition_size,
-            hnsw_index_uuids: self.hnsw_index_uuids.clone(),
             is_function_disabled: self.is_function_disabled,
             fragment_fetcher: self.fragment_fetcher.clone(),
             bloom_filter_manager: self.bloom_filter_manager.clone(),
@@ -206,7 +204,6 @@ impl CompactionContext {
             fetch_log_concurrency: self.fetch_log_concurrency,
             max_compaction_size: self.max_compaction_size,
             max_partition_size: self.max_partition_size,
-            hnsw_index_uuids: self.hnsw_index_uuids.clone(),
             is_function_disabled: self.is_function_disabled,
             fragment_fetcher: self.fragment_fetcher.clone(),
             bloom_filter_manager: self.bloom_filter_manager.clone(),
@@ -332,7 +329,6 @@ impl CompactionContext {
             spann_provider,
             dispatcher,
             orchestrator_context,
-            hnsw_index_uuids: HashSet::new(),
             is_function_disabled,
             fragment_fetcher,
             bloom_filter_manager,
@@ -445,10 +441,6 @@ impl CompactionContext {
                         CompactionContextError::InvariantViolation("Collection info already set")
                     })?;
 
-                if let Some(hnsw_index_uuid) = collection_info.hnsw_index_uuid {
-                    self.hnsw_index_uuids.insert(hnsw_index_uuid);
-                }
-
                 Ok(Success::new(materialized, collection_info.clone()).into())
             }
             LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(repair) => {
@@ -460,10 +452,6 @@ impl CompactionContext {
                 .into())
             }
             LogFetchOrchestratorResponse::RequireFunctionBackfill(backfill) => {
-                if let Some(hnsw_index_uuid) = backfill.collection_info.hnsw_index_uuid {
-                    self.hnsw_index_uuids.insert(hnsw_index_uuid);
-                };
-
                 tracing::info!(
                     "Backfilling collection {}",
                     backfill.collection_info.collection_id
@@ -566,10 +554,6 @@ impl CompactionContext {
             } => {
                 // We are replacing the output collection info with the attached function output
                 self.collection_info = OnceCell::from(output_collection_info.clone());
-
-                if let Some(hnsw_index_uuid) = output_collection_info.hnsw_index_uuid {
-                    self.hnsw_index_uuids.insert(hnsw_index_uuid);
-                }
             }
         }
 
@@ -909,20 +893,7 @@ impl CompactionContext {
         })
     }
 
-    pub(crate) async fn cleanup(self) {
-        if self.hnsw_provider.use_direct_hnsw {
-            return;
-        }
-
-        // TODO(tanujnay112): Remove when use_direct_hnsw is fully deprecated
-        for hnsw_index_uuid in self.hnsw_index_uuids {
-            let _ = HnswIndexProvider::purge_one_id(
-                self.hnsw_provider.temporary_storage_path.as_path(),
-                hnsw_index_uuid,
-            )
-            .await;
-        }
-    }
+    pub(crate) async fn cleanup(self) {}
 }
 
 // ============== Component Implementation ==============
@@ -996,8 +967,6 @@ mod tests {
     };
     use chroma_types::DatabaseName;
     use std::collections::{HashMap, HashSet};
-    use std::path::{Path, PathBuf};
-    use tokio::fs;
 
     use chroma_blockstore::arrow::config::{BlockManagerConfig, TEST_MAX_BLOCK_SIZE_BYTES};
     use chroma_blockstore::provider::BlockfileProvider;
@@ -2075,13 +2044,7 @@ mod tests {
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
-        let hnsw_provider = HnswIndexProvider::new(
-            storage.clone(),
-            PathBuf::from(tmpdir.path()),
-            hnsw_cache,
-            16,
-            false,
-        );
+        let hnsw_provider = HnswIndexProvider::new(storage.clone(), hnsw_cache, 16);
         let usearch_provider = chroma_index::usearch::USearchIndexProvider::new(
             storage.clone(),
             new_non_persistent_cache_for_test(),
@@ -2277,13 +2240,7 @@ mod tests {
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
-        let hnsw_provider = HnswIndexProvider::new(
-            storage.clone(),
-            PathBuf::from(tmpdir.path()),
-            hnsw_cache,
-            16,
-            false,
-        );
+        let hnsw_provider = HnswIndexProvider::new(storage.clone(), hnsw_cache, 16);
         let usearch_provider = chroma_index::usearch::USearchIndexProvider::new(
             storage.clone(),
             new_non_persistent_cache_for_test(),
@@ -2478,13 +2435,7 @@ mod tests {
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
-        let hnsw_provider = HnswIndexProvider::new(
-            storage.clone(),
-            PathBuf::from(tmpdir.path()),
-            hnsw_cache,
-            16,
-            false,
-        );
+        let hnsw_provider = HnswIndexProvider::new(storage.clone(), hnsw_cache, 16);
         let usearch_provider = chroma_index::usearch::USearchIndexProvider::new(
             storage.clone(),
             new_non_persistent_cache_for_test(),
@@ -2752,13 +2703,7 @@ mod tests {
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
-        let hnsw_provider = HnswIndexProvider::new(
-            storage.clone(),
-            PathBuf::from(tmpdir.path().to_str().unwrap()),
-            hnsw_cache,
-            16,
-            false,
-        );
+        let hnsw_provider = HnswIndexProvider::new(storage.clone(), hnsw_cache, 16);
         let usearch_provider = chroma_index::usearch::USearchIndexProvider::new(
             storage.clone(),
             new_non_persistent_cache_for_test(),
@@ -2864,7 +2809,6 @@ mod tests {
             collection_after_compaction.log_position, 251,
             "Collection log position is wrong"
         );
-        check_purge_successful(tmpdir.path()).await;
         let new_records = get_all_records(
             &system,
             &dispatcher_handle,
@@ -2988,13 +2932,7 @@ mod tests {
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
-        let hnsw_provider = HnswIndexProvider::new(
-            storage.clone(),
-            PathBuf::from(tmpdir.path().to_str().unwrap()),
-            hnsw_cache,
-            16,
-            false,
-        );
+        let hnsw_provider = HnswIndexProvider::new(storage.clone(), hnsw_cache, 16);
         let usearch_provider = chroma_index::usearch::USearchIndexProvider::new(
             storage.clone(),
             new_non_persistent_cache_for_test(),
@@ -3177,7 +3115,6 @@ mod tests {
             "Collection log position should be 250 after processing all logs"
         );
 
-        check_purge_successful(tmpdir.path()).await;
         let new_cas = sysdb
             .get_collection_with_segments(None, collection_uuid)
             .await
@@ -3322,13 +3259,7 @@ mod tests {
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
-        let hnsw_provider = HnswIndexProvider::new(
-            storage.clone(),
-            PathBuf::from(tmpdir.path().to_str().unwrap()),
-            hnsw_cache,
-            16,
-            false,
-        );
+        let hnsw_provider = HnswIndexProvider::new(storage.clone(), hnsw_cache, 16);
         let usearch_provider = chroma_index::usearch::USearchIndexProvider::new(
             storage.clone(),
             new_non_persistent_cache_for_test(),
@@ -3533,21 +3464,6 @@ mod tests {
         )
         .await;
         assert_eq!(old_records, new_records);
-    }
-
-    pub async fn check_purge_successful(path: impl AsRef<Path>) {
-        let mut entries = fs::read_dir(&path).await.expect("Failed to read dir");
-
-        while let Some(entry) = entries.next_entry().await.expect("Failed to read next dir") {
-            let path = entry.path();
-            let metadata = entry.metadata().await.expect("Failed to read metadata");
-
-            if metadata.is_dir() {
-                assert!(path.ends_with("tenant"));
-            } else {
-                panic!("Expected hnsw purge to be successful")
-            }
-        }
     }
 
     /// Test that rebuilding a collection also rebuilds its attached function's output collection.
