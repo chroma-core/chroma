@@ -31,6 +31,11 @@ from chromadb.test.utils.cross_version import (
     get_path_to_version_install,
 )
 
+pytestmark = pytest.mark.skipif(
+    "CHROMA_INTEGRATION_TEST_ONLY" in os.environ,
+    reason="requires local persistence internals",
+)
+
 # Minimum persisted version we support, and other substantial change versions
 # 0.4.1 is the first version with persistence
 # 0.5.3 is the first version with the new API where the serverapi and client api return types and arguments differ
@@ -130,9 +135,7 @@ def configurations(versions: List[str]) -> List[Tuple[str, Settings]]:
         (
             version,
             Settings(
-                chroma_api_impl="chromadb.api.rust.RustBindingsAPI"
-                if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ
-                else "chromadb.api.segment.SegmentAPI",
+                chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
                 chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
                 chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
                 chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",

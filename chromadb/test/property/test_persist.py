@@ -36,8 +36,19 @@ import tempfile
 
 CreatePersistAPI = Callable[[], ServerAPI]
 
-configurations = (
-    [
+is_rust_bindings_mode = "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ
+is_integration_mode = "CHROMA_INTEGRATION_TEST_ONLY" in os.environ
+
+
+if is_integration_mode:
+    configurations = [
+        Settings(
+            allow_reset=True,
+            chroma_api_impl="chromadb.api.fastapi.FastAPI",
+        )
+    ]
+else:
+    configurations = [
         Settings(
             chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
             chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -49,20 +60,6 @@ configurations = (
             persist_directory=tempfile.mkdtemp(),
         )
     ]
-    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ
-    else [
-        Settings(
-            chroma_api_impl="chromadb.api.segment.SegmentAPI",
-            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
-            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
-            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
-            chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-            allow_reset=True,
-            is_persistent=True,
-            persist_directory=tempfile.mkdtemp(),
-        ),
-    ]
-)
 
 
 @pytest.fixture(scope="module", params=configurations)
@@ -171,6 +168,10 @@ def test_persist(
     del system_2
 
 
+@pytest.mark.skipif(
+    is_integration_mode,
+    reason="requires direct access to local segment files",
+)
 def test_sync_threshold(settings: Settings) -> None:
     system = System(settings)
     system.start()

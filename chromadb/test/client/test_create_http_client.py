@@ -1,4 +1,5 @@
 import subprocess
+import sys
 
 # Needs to be a module, not a file, so that local imports work.
 TEST_MODULE = "chromadb.test.client.create_http_client_with_basic_auth"
@@ -11,5 +12,5 @@ def test_main() -> None:
     #
     # See https://github.com/chroma-core/chroma/issues/1554
 
-    res = subprocess.run(["python", "-m", TEST_MODULE])
+    res = subprocess.run([sys.executable, "-m", TEST_MODULE], timeout=10)
     assert res.returncode == 0
