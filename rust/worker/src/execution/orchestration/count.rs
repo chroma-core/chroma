@@ -81,6 +81,12 @@ pub struct CountOrchestrator {
     // Bloom filter manager
     bloom_filter_manager: Option<BloomFilterManager>,
 
+    // Sharding (used once mask_logs_for_shard is wired)
+    #[allow(dead_code)]
+    shard_index: u32,
+    #[allow(dead_code)]
+    num_shards: u32,
+
     // Fetched log size
     fetch_log_bytes: Option<u64>,
 
@@ -89,6 +95,7 @@ pub struct CountOrchestrator {
 }
 
 impl CountOrchestrator {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         blockfile_provider: BlockfileProvider,
         dispatcher: chroma_system::ComponentHandle<Dispatcher>,
@@ -97,6 +104,8 @@ impl CountOrchestrator {
         fetch_log: FetchLogOperator,
         read_level: ReadLevel,
         bloom_filter_manager: Option<BloomFilterManager>,
+        shard_index: u32,
+        num_shards: u32,
     ) -> Self {
         let context = OrchestratorContext::new(dispatcher);
         Self {
@@ -107,6 +116,8 @@ impl CountOrchestrator {
             fetch_log,
             read_level,
             bloom_filter_manager,
+            shard_index,
+            num_shards,
             fetch_log_bytes: None,
             result_channel: None,
         }
