@@ -503,7 +503,7 @@ class ClientAPI(BaseAPI, ABC):
             Collection: The collection
 
         Raises:
-            ValueError: If no collection with the given ID exists.
+            NotFoundError: If no collection with the given ID exists.
 
         Examples:
             ```python

@@ -1207,15 +1207,13 @@ mod tests {
             let id = collection.id();
             let name = collection.name().to_string();
 
-            let retrieved = client
-                .get_collection_by_id(id.to_string())
-                .await
-                .unwrap();
+            let retrieved = client.get_collection_by_id(id.to_string()).await.unwrap();
             assert_eq!(retrieved.name(), name);
             assert_eq!(retrieved.id(), id);
 
+            let nonexistent_id = uuid::Uuid::new_v4().to_string();
             let err = client
-                .get_collection_by_id("00000000-0000-0000-0000-000000000000")
+                .get_collection_by_id(&nonexistent_id)
                 .await
                 .unwrap_err();
             match err {

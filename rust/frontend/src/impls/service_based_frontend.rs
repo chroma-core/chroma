@@ -491,6 +491,14 @@ impl ServiceBasedFrontend {
             })
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        // Defensive: we should never have multiple collections with the same ID.
+        if collections.len() > 1 {
+            tracing::warn!(
+                collection_id = %collection_id,
+                count = collections.len(),
+                "get_collection_by_id returned multiple collections for a single ID"
+            );
+        }
         if self.enable_schema {
             for collection in &mut collections {
                 collection
@@ -499,7 +507,8 @@ impl ServiceBasedFrontend {
             }
         }
         collections
-            .pop()
+            .into_iter()
+            .next()
             .ok_or(GetCollectionByIdError::NotFound(collection_id))
     }
 
