@@ -1608,6 +1608,7 @@ dependencies = [
 name = "chroma-blockstore"
 version = "0.1.0"
 dependencies = [
+ "ahash",
  "arrow",
  "async-trait",
  "bincode",
@@ -1629,6 +1630,7 @@ dependencies = [
  "proptest-state-machine",
  "prost 0.14.3",
  "rand 0.8.5",
+ "rayon",
  "roaring",
  "serde",
  "serde_bytes",
