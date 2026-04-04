@@ -1136,6 +1136,8 @@ mod tests {
             limit,
             project,
             None,
+            0,
+            1,
         );
 
         let result = get_orchestrator
@@ -1305,6 +1307,8 @@ mod tests {
             limit.clone(),
             project.clone(),
             None,
+            0,
+            1,
         );
 
         let old_results = get_orchestrator
@@ -1386,6 +1390,8 @@ mod tests {
             limit,
             project,
             None,
+            0,
+            1,
         );
 
         let new_results = get_orchestrator_new
@@ -1557,6 +1563,8 @@ mod tests {
             limit.clone(),
             project.clone(),
             None,
+            0,
+            1,
         );
 
         let old_vals = get_orchestrator
@@ -1632,6 +1640,8 @@ mod tests {
             limit,
             project,
             None,
+            0,
+            1,
         );
 
         let new_vals = get_orchestrator
