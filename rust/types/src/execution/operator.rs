@@ -27,12 +27,18 @@ pub type InitialInput = ();
 #[derive(Clone, Debug)]
 pub struct Scan {
     pub collection_and_segments: CollectionAndSegments,
+    pub shard_index: u32,
+    pub num_shards: u32,
+    /// Upper bound log offset scouted by the frontend.
+    /// 0 means the worker should scout independently.
+    pub log_upper_bound_offset: i64,
 }
 
 impl TryFrom<chroma_proto::ScanOperator> for Scan {
     type Error = QueryConversionError;
 
     fn try_from(value: chroma_proto::ScanOperator) -> Result<Self, Self::Error> {
+        let num_shards = value.num_shards.max(1);
         Ok(Self {
             collection_and_segments: CollectionAndSegments {
                 collection: value
@@ -52,6 +58,9 @@ impl TryFrom<chroma_proto::ScanOperator> for Scan {
                     .ok_or(QueryConversionError::field("vector segment"))?
                     .try_into()?,
             },
+            shard_index: value.shard_index,
+            num_shards,
+            log_upper_bound_offset: value.log_upper_bound_offset,
         })
     }
 }
@@ -71,6 +80,9 @@ impl TryFrom<Scan> for chroma_proto::ScanOperator {
             knn: Some(value.collection_and_segments.vector_segment.into()),
             metadata: Some(value.collection_and_segments.metadata_segment.into()),
             record: Some(value.collection_and_segments.record_segment.into()),
+            shard_index: value.shard_index,
+            num_shards: value.num_shards,
+            log_upper_bound_offset: value.log_upper_bound_offset,
         })
     }
 }

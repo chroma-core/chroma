@@ -11,6 +11,13 @@ message ScanOperator {
     Segment knn = 5;
     Segment metadata = 6;
     Segment record = 7;
+    // Which shard this worker is responsible for querying.
+    uint32 shard_index = 8;
+    // Total number of shards for the collection. 0 is treated as 1 (unsharded).
+    uint32 num_shards = 9;
+    // Upper bound log offset scouted by the frontend. 0 means the worker
+    // should scout independently (legacy / backward-compatible path).
+    int64 log_upper_bound_offset = 10;
 }
 
 message FilterOperator {

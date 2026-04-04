@@ -957,6 +957,9 @@ mod tests {
                 metadata: None,
                 file_paths: HashMap::new(),
             }),
+            shard_index: 0,
+            num_shards: 1,
+            log_upper_bound_offset: 0,
         }
     }
 
