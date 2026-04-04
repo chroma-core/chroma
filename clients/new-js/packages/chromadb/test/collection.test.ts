@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "@jest/globals";
 import { ChromaClient } from "../src";
+import { ChromaNotFoundError } from "../src/errors";
 import { DefaultEmbeddingFunction } from "@chroma-core/default-embed";
 
 describe("collections", () => {
@@ -113,7 +114,7 @@ describe("collections", () => {
   test("it should throw when getting collection by non-existent id", async () => {
     await expect(
       client.getCollectionById("00000000-0000-0000-0000-000000000000"),
-    ).rejects.toThrow();
+    ).rejects.toThrow(ChromaNotFoundError);
   });
 
   // Skip: forking is only supported on Chroma Cloud, not local Chroma

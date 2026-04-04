@@ -91,27 +91,6 @@ describe("collection operations", () => {
     expect(collection3.name).toBe("test3");
   });
 
-  test("it should get a collection by id", async () => {
-    const collection = await client.createCollection({
-      name: "test",
-      metadata: { key: "value" },
-    });
-    expect(collection).toBeDefined();
-    expect(collection.id).toBeDefined();
-
-    const retrieved = await client.getCollectionById({ id: collection.id });
-    expect(retrieved).toBeDefined();
-    expect(retrieved.name).toBe("test");
-    expect(retrieved.id).toBe(collection.id);
-    expect(retrieved.metadata).toEqual({ key: "value" });
-  });
-
-  test("it should throw when getting collection by non-existent id", async () => {
-    await expect(
-      client.getCollectionById({ id: "00000000-0000-0000-0000-000000000000" }),
-    ).rejects.toThrow();
-  });
-
   test("it should delete a collection", async () => {
     const collection = await client.createCollection({ name: "test" });
     let collections = await client.listCollections();
