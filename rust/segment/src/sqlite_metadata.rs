@@ -22,9 +22,9 @@ use chroma_types::{
     plan::{Count, Get},
     BooleanOperator, Chunk, CollectionUuid, CompositeExpression, ContainsOperator,
     DocumentExpression, DocumentOperator, LogRecord, Metadata, MetadataComparison,
-    MetadataExpression, MetadataSetValue, MetadataValue, MetadataValueConversionError, Operation,
-    OperationRecord, PrimitiveOperator, Schema, SegmentUuid, SetOperator, UpdateMetadata,
-    UpdateMetadataValue, Where, CHROMA_DOCUMENT_KEY,
+    MetadataExpression, MetadataSetValue, MetadataValue,
+    MetadataValueConversionError, Operation, OperationRecord, PrimitiveOperator, Schema,
+    SegmentUuid, SetOperator, UpdateMetadata, UpdateMetadataValue, Where, CHROMA_DOCUMENT_KEY,
 };
 use sea_query::{
     Alias, DeleteStatement, Expr, ExprTrait, Func, InsertStatement, LikeExpr, OnConflict, Query,
@@ -888,6 +888,20 @@ impl IntoSqliteExpr for MetadataExpression {
                         Expr::col((Embeddings::Table, Embeddings::Id)).not_in_subquery(subq)
                     }
                 }
+            }
+            MetadataComparison::Regex(pattern) => {
+                let scol =
+                    Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::StringValue)).into();
+                let subq = Query::select()
+                    .column(EmbeddingMetadata::Id)
+                    .from(EmbeddingMetadata::Table)
+                    .and_where(key_cond.clone())
+                    .and_where(Expr::cust_with_exprs(
+                        "? REGEXP ?",
+                        [scol, Expr::value(pattern)],
+                    ))
+                    .to_owned();
+                Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq)
             }
         }
     }

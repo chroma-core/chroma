@@ -1242,6 +1242,19 @@ def validate_where(where: Where) -> None:
                         raise ValueError(
                             f"Expected operand value to be a str, int, float, or bool for operator {operator}, got {operand}"
                         )
+                if operator == "$regex":
+                    if not isinstance(operand, str):
+                        raise ValueError(
+                            f"Expected operand value to be a str for operator {operator}, got {operand}"
+                        )
+                    try:
+                        import re as _re
+
+                        _re.compile(operand)
+                    except _re.error as e:
+                        raise ValueError(
+                            f"Invalid regex pattern for operator {operator}: {e}"
+                        )
                 if operator not in [
                     "$gt",
                     "$gte",
@@ -1253,13 +1266,16 @@ def validate_where(where: Where) -> None:
                     "$nin",
                     "$contains",
                     "$not_contains",
+                    "$regex",
                 ]:
                     raise ValueError(
                         f"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, "
-                        f"$contains, $not_contains, got {operator}"
+                        f"$contains, $not_contains, $regex, got {operator}"
                     )
 
-                if not isinstance(operand, (str, int, float, bool, list)):
+                if operator != "$regex" and not isinstance(
+                    operand, (str, int, float, bool, list)
+                ):
                     raise ValueError(
                         f"Expected where operand value to be a str, int, float, bool, or list of those type, got {operand}"
                     )
