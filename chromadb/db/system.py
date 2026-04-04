@@ -27,9 +27,9 @@ class SysDB(Component):
     @abstractmethod
     def create_database(
         self, id: UUID, name: str, tenant: str = DEFAULT_TENANT
-    ) -> None:
+    ) -> Database:
         """Create a new database in the System database. Raises an Error if the Database
-        already exists."""
+        already exists. Returns the created Database."""
         pass
 
     @abstractmethod
@@ -54,9 +54,9 @@ class SysDB(Component):
         pass
 
     @abstractmethod
-    def create_tenant(self, name: str) -> None:
+    def create_tenant(self, name: str) -> Tenant:
         """Create a new tenant in the System database. The name must be unique.
-        Raises an Error if the Tenant already exists."""
+        Raises an Error if the Tenant already exists. Returns the created Tenant."""
         pass
 
     @abstractmethod

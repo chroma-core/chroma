@@ -146,12 +146,18 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         self,
         name: str,
         tenant: str = DEFAULT_TENANT,
-    ) -> None:
+    ) -> Database:
         """Creates a database"""
-        self._make_request(
+        resp_json = self._make_request(
             "post",
             f"/tenants/{tenant}/databases",
             json={"name": name},
+        )
+        # Fallback for older servers that return empty body
+        if not resp_json or not isinstance(resp_json, dict):
+            return self.get_database(name=name, tenant=tenant)
+        return Database(
+            id=resp_json["id"], name=resp_json["name"], tenant=resp_json["tenant"]
         )
 
     # Migrated to rust in distributed.
@@ -211,8 +217,12 @@ class FastAPI(BaseHTTPClient, ServerAPI):
 
     @trace_method("FastAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
     @override
-    def create_tenant(self, name: str) -> None:
-        self._make_request("post", "/tenants", json={"name": name})
+    def create_tenant(self, name: str) -> Tenant:
+        resp_json = self._make_request("post", "/tenants", json={"name": name})
+        # Fallback for older servers that return empty body
+        if not resp_json or not isinstance(resp_json, dict):
+            return Tenant(name=name)
+        return Tenant(name=resp_json["name"])
 
     @trace_method("FastAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
     @override

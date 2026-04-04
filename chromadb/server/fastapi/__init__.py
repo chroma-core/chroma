@@ -568,10 +568,10 @@ class FastAPI(Server):
         self,
         request: Request,
         tenant: str,
-    ) -> None:
+    ) -> Database:
         def process_create_database(
             tenant: str, headers: Headers, raw_body: bytes
-        ) -> None:
+        ) -> Database:
             db = validate_model(CreateDatabase, orjson.loads(raw_body))
 
             # NOTE(rescrv, iron will auth):  Implemented.
@@ -587,7 +587,7 @@ class FastAPI(Server):
 
             return self._api.create_database(db.name, tenant)
 
-        await to_thread.run_sync(
+        return await to_thread.run_sync(
             process_create_database,
             tenant,
             request.headers,
@@ -648,8 +648,8 @@ class FastAPI(Server):
     async def create_tenant(
         self,
         request: Request,
-    ) -> None:
-        def process_create_tenant(request: Request, raw_body: bytes) -> None:
+    ) -> Tenant:
+        def process_create_tenant(request: Request, raw_body: bytes) -> Tenant:
             tenant = validate_model(CreateTenant, orjson.loads(raw_body))
 
             # NOTE(rescrv, iron will auth):  Implemented.
@@ -663,7 +663,7 @@ class FastAPI(Server):
 
             return self._api.create_tenant(tenant.name)
 
-        await to_thread.run_sync(
+        return await to_thread.run_sync(
             process_create_tenant,
             request,
             await request.body(),
@@ -1634,10 +1634,10 @@ class FastAPI(Server):
         self,
         request: Request,
         tenant: str = DEFAULT_TENANT,
-    ) -> None:
+    ) -> Database:
         def process_create_database(
             tenant: str, headers: Headers, raw_body: bytes
-        ) -> None:
+        ) -> Database:
             db = validate_model(CreateDatabase, orjson.loads(raw_body))
 
             (
@@ -1658,7 +1658,7 @@ class FastAPI(Server):
 
             return self._api.create_database(db.name, tenant)
 
-        await to_thread.run_sync(
+        return await to_thread.run_sync(
             process_create_database,
             tenant,
             request.headers,
@@ -1704,8 +1704,8 @@ class FastAPI(Server):
     async def create_tenant_v1(
         self,
         request: Request,
-    ) -> None:
-        def process_create_tenant(request: Request, raw_body: bytes) -> None:
+    ) -> Tenant:
+        def process_create_tenant(request: Request, raw_body: bytes) -> Tenant:
             tenant = validate_model(CreateTenant, orjson.loads(raw_body))
 
             # NOTE(rescrv, iron will auth):  v1
@@ -1721,7 +1721,7 @@ class FastAPI(Server):
 
             return self._api.create_tenant(tenant.name)
 
-        await to_thread.run_sync(
+        return await to_thread.run_sync(
             process_create_tenant,
             request,
             await request.body(),

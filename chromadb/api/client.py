@@ -631,12 +631,15 @@ class AdminClient(SharedSystemClient, AdminAPI):
         self._server = self._system.instance(ServerAPI)
 
     @override
-    def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+    def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
         """Create a database in a tenant.
 
         Args:
             name: Database name.
             tenant: Tenant that owns the database.
+
+        Returns:
+            The created Database.
         """
         return self._server.create_database(name=name, tenant=tenant)
 
@@ -673,7 +676,7 @@ class AdminClient(SharedSystemClient, AdminAPI):
         return self._server.list_databases(limit, offset, tenant=tenant)
 
     @override
-    def create_tenant(self, name: str) -> None:
+    def create_tenant(self, name: str) -> Tenant:
         return self._server.create_tenant(name=name)
 
     @override
