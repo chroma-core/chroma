@@ -187,7 +187,7 @@ def EphemeralClient(
         settings = Settings()
     settings.is_persistent = False
 
-    # Make sure paramaters are the correct types -- users can pass anything.
+    # Make sure parameters are the correct types -- users can pass anything.
     tenant = str(tenant)
     database = str(database)
 
@@ -219,7 +219,7 @@ def PersistentClient(
     settings.persist_directory = str(path)
     settings.is_persistent = True
 
-    # Make sure paramaters are the correct types -- users can pass anything.
+    # Make sure parameters are the correct types -- users can pass anything.
     tenant = str(tenant)
     database = str(database)
 
@@ -248,7 +248,7 @@ def RustClient(
     settings.is_persistent = path is not None
     settings.persist_directory = path or ""
 
-    # Make sure paramaters are the correct types -- users can pass anything.
+    # Make sure parameters are the correct types -- users can pass anything.
     tenant = str(tenant)
     database = str(database)
 
@@ -414,7 +414,7 @@ def CloudClient(
     if settings is None:
         settings = Settings()
 
-    # Make sure paramaters are the correct types -- users can pass anything.
+    # Make sure parameters are the correct types -- users can pass anything.
     tenant = tenant or os.environ.get("CHROMA_TENANT")
     if tenant is not None:
         tenant = str(tenant)
@@ -453,7 +453,7 @@ def Client(
     database: The database to use for this client. Defaults to the default database.
     """
 
-    # Make sure paramaters are the correct types -- users can pass anything.
+    # Make sure parameters are the correct types -- users can pass anything.
     tenant = str(tenant)
     database = str(database)
 
