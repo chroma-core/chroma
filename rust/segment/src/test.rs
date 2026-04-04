@@ -654,6 +654,13 @@ impl CheckRecord for MetadataExpression {
                     ContainsOperator::NotContains => !found,
                 }
             }
+            MetadataComparison::Regex(pattern) => stored.is_some_and(|v| {
+                if let MetadataValue::Str(s) = v {
+                    Regex::new(pattern).is_ok_and(|re| re.is_match(s))
+                } else {
+                    false
+                }
+            }),
         }
     }
 }

@@ -8,7 +8,7 @@ use futures::TryStreamExt;
 use thiserror::Error;
 use uuid::Uuid;
 
-use core::ops::BitOr;
+use core::ops::{BitOr, BitOrAssign};
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -665,6 +665,47 @@ impl<'me> MetadataIndexReader<'me> {
                 _ => Err(MetadataIndexError::InvalidKeyType),
             },
             _ => Err(MetadataIndexError::InvalidKeyType),
+        }
+    }
+
+    /// Scan all string values for `metadata_key` and return a bitmap of offset
+    /// IDs whose value matches `pattern`. Non-string metadata fields are skipped.
+    /// The pattern is expected to be pre-validated (returns empty bitmap on invalid pattern).
+    pub async fn regex_scan(
+        &'me self,
+        metadata_key: &str,
+        pattern: &str,
+    ) -> Result<RoaringBitmap, MetadataIndexError> {
+        match self {
+            MetadataIndexReader::StringMetadataIndexReader(blockfile_reader) => {
+                let chroma_regex =
+                    match chroma_types::regex::ChromaRegex::try_from(pattern.to_string()) {
+                        Ok(r) => r,
+                        Err(_) => return Ok(RoaringBitmap::new()),
+                    };
+                let regex = match chroma_regex.regex() {
+                    Ok(r) => r,
+                    Err(_) => return Ok(RoaringBitmap::new()),
+                };
+                blockfile_reader
+                    .get_range_stream(metadata_key..=metadata_key, ..)
+                    .try_fold(
+                        RoaringBitmap::new(),
+                        move |mut acc, (_, string_value, bitmap)| {
+                            let matches = regex.is_match(string_value);
+                            async move {
+                                if matches {
+                                    acc.bitor_assign(&bitmap);
+                                }
+                                Ok(acc)
+                            }
+                        },
+                    )
+                    .await
+                    .map_err(MetadataIndexError::BlockfileError)
+            }
+            // Regex only applies to string-valued metadata.
+            _ => Ok(RoaringBitmap::new()),
         }
     }
 
