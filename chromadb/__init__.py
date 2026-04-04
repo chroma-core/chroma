@@ -226,6 +226,41 @@ def PersistentClient(
     return ClientCreator(tenant=tenant, database=database, settings=settings)
 
 
+async def AsyncPersistentClient(
+    path: Union[str, Path] = "./chroma",
+    settings: Optional[Settings] = None,
+    tenant: str = DEFAULT_TENANT,
+    database: str = DEFAULT_DATABASE,
+) -> AsyncClientAPI:
+    """Create an async persistent client that stores data on disk.
+
+    This client is intended for local development and testing. For production,
+    prefer a server-backed Chroma instance.
+
+    Args:
+        path: Directory to store persisted data.
+        settings: Optional settings to override defaults.
+        tenant: Tenant name to use for requests.
+        database: Database name to use for requests.
+
+    Returns:
+        AsyncClientAPI: A configured async client instance.
+    """
+    if settings is None:
+        settings = Settings()
+    settings.persist_directory = str(path)
+    settings.is_persistent = True
+    settings.chroma_api_impl = "chromadb.api.async_rust.AsyncRustBindingsAPI"
+
+    # Make sure paramaters are the correct types -- users can pass anything.
+    tenant = str(tenant)
+    database = str(database)
+
+    return await AsyncClientCreator.create(
+        tenant=tenant, database=database, settings=settings
+    )
+
+
 def RustClient(
     path: Optional[str] = None,
     settings: Optional[Settings] = None,
