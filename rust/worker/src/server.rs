@@ -253,6 +253,7 @@ impl WorkerServer {
         &self,
         collection_and_segments: &CollectionAndSegments,
         batch_size: u32,
+        log_upper_bound_offset: i64,
     ) -> Result<FetchLogOperator, Status> {
         let database_name =
             chroma_types::DatabaseName::new(collection_and_segments.collection.database.clone())
@@ -272,6 +273,7 @@ impl WorkerServer {
             database_name,
             fetch_log_concurrency: self.fetch_log_concurrency,
             fragment_fetcher,
+            log_upper_bound_offset,
         })
     }
 
@@ -314,9 +316,14 @@ impl WorkerServer {
             .scan
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
 
-        let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
+        let scan = Scan::try_from(scan)?;
+        let collection_and_segments = scan.collection_and_segments;
         let collection_id = collection_and_segments.collection.collection_id;
-        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size)?;
+        let fetch_log = self.fetch_log(
+            &collection_and_segments,
+            self.fetch_log_batch_size,
+            scan.log_upper_bound_offset,
+        )?;
 
         let count_orchestrator = CountOrchestrator::new(
             self.blockfile_provider.clone(),
@@ -347,9 +354,14 @@ impl WorkerServer {
             .scan
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
 
-        let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
+        let scan = Scan::try_from(scan)?;
+        let collection_and_segments = scan.collection_and_segments;
         let collection_id = collection_and_segments.collection.collection_id;
-        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size)?;
+        let fetch_log = self.fetch_log(
+            &collection_and_segments,
+            self.fetch_log_batch_size,
+            scan.log_upper_bound_offset,
+        )?;
 
         let filter = get_inner
             .filter
@@ -405,10 +417,15 @@ impl WorkerServer {
             .scan
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
 
-        let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
+        let scan = Scan::try_from(scan)?;
+        let collection_and_segments = scan.collection_and_segments;
         let collection_id = collection_and_segments.collection.collection_id;
 
-        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size)?;
+        let fetch_log = self.fetch_log(
+            &collection_and_segments,
+            self.fetch_log_batch_size,
+            scan.log_upper_bound_offset,
+        )?;
 
         let filter = knn_inner
             .filter
@@ -614,10 +631,15 @@ impl WorkerServer {
         payload: chroma_proto::SearchPayload,
         read_level: ReadLevel,
     ) -> Result<RankOrchestratorOutput, Status> {
-        let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
+        let scan = Scan::try_from(scan)?;
+        let collection_and_segments = scan.collection_and_segments;
         let collection_id = collection_and_segments.collection.collection_id;
         let search_payload = SearchPayload::try_from(payload)?;
-        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size)?;
+        let fetch_log = self.fetch_log(
+            &collection_and_segments,
+            self.fetch_log_batch_size,
+            scan.log_upper_bound_offset,
+        )?;
 
         // We return early on uninitialized collection, otherwise
         // the downstream will error due to missing dimension

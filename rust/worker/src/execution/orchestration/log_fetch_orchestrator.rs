@@ -545,6 +545,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                     database_name,
                     fetch_log_concurrency: self.context.fetch_log_concurrency,
                     fragment_fetcher: self.context.fragment_fetcher.clone(),
+                    log_upper_bound_offset: 0,
                 }),
                 (),
                 ctx.receiver(),
