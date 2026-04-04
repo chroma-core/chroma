@@ -97,6 +97,25 @@ describe("collections", () => {
     expect(collection4.metadata).toEqual({ test: "test2" });
   });
 
+  test("it should get collection by id", async () => {
+    const collection = await client.createCollection({
+      name: "test",
+      metadata: { key: "value" },
+    });
+    expect(collection.id).toBeDefined();
+
+    const retrieved = await client.getCollectionById(collection.id);
+    expect(retrieved.name).toBe("test");
+    expect(retrieved.id).toBe(collection.id);
+    expect(retrieved.metadata).toEqual({ key: "value" });
+  });
+
+  test("it should throw when getting collection by non-existent id", async () => {
+    await expect(
+      client.getCollectionById("00000000-0000-0000-0000-000000000000"),
+    ).rejects.toThrow();
+  });
+
   // Skip: forking is only supported on Chroma Cloud, not local Chroma
   test.skip("it should fork collection", async () => {
     const collection = await client.createCollection({

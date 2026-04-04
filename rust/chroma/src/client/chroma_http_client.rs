@@ -1201,6 +1201,35 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
+    async fn test_k8s_integration_get_collection_by_id() {
+        with_client(|mut client| async move {
+            let collection = client.new_collection("my_collection").await;
+            let id = collection.id();
+            let name = collection.name().to_string();
+
+            let retrieved = client
+                .get_collection_by_id(id.to_string())
+                .await
+                .unwrap();
+            assert_eq!(retrieved.name(), name);
+            assert_eq!(retrieved.id(), id);
+
+            let err = client
+                .get_collection_by_id("00000000-0000-0000-0000-000000000000")
+                .await
+                .unwrap_err();
+            match err {
+                ChromaHttpClientError::ApiError(_, status) => {
+                    assert_eq!(status, StatusCode::NOT_FOUND);
+                }
+                _ => panic!("Expected ApiError for non-existent collection ID"),
+            };
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[test_log::test]
     async fn test_k8s_integration_delete_collection() {
         with_client(|client| async move {
             let name = unique_collection_name("to_be_deleted");

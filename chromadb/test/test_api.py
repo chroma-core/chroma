@@ -636,6 +636,23 @@ def test_add_a_collection(client):
         collection = client.get_collection("testspace2")
 
 
+def test_get_collection_by_id(client):
+    import uuid
+
+    client.reset()
+    collection = client.create_collection("testspace", metadata={"key": "value"})
+    collection_id = collection.id
+
+    retrieved = client.get_collection_by_id(collection_id)
+    assert retrieved.name == "testspace"
+    assert retrieved.id == collection_id
+    assert retrieved.metadata == {"key": "value"}
+
+    # non-existent id should raise
+    with pytest.raises(Exception):
+        client.get_collection_by_id(uuid.uuid4())
+
+
 def test_error_includes_trace_id(http_client):
     http_client.reset()
 
@@ -2604,9 +2621,9 @@ def test_metadata_delete_after_type_change_e2e(client):
     # Record still exists (has "keep" key) but "tags" is gone.
     items = collection.get(ids=["id1"])
     assert len(items["ids"]) == 1
-    assert "tags" not in items["metadatas"][0], (
-        f"tags key should be deleted, got {items['metadatas'][0]}"
-    )
+    assert (
+        "tags" not in items["metadatas"][0]
+    ), f"tags key should be deleted, got {items['metadatas'][0]}"
     assert items["metadatas"][0]["keep"] == "yes"
 
     # Neither scalar nor array queries should match.
