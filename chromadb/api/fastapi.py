@@ -786,7 +786,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
                     f"Chroma client version ({__version__}) may not be compatible "
                     f"with server version ({server_version}). "
                     f"Please ensure client and server use the same major.minor version.",
-                    stacklevel=2,
+                    stacklevel=3,
                 )
         except Exception as e:
             logger.debug("Version compatibility check failed", exc_info=e)
