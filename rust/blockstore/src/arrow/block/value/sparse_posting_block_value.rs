@@ -107,6 +107,11 @@ impl ArrowReadableValue<'_> for SparsePostingBlock {
             .collect()
     }
 
+    fn get_raw_bytes(array: &Arc<dyn Array>, index: usize) -> Option<&[u8]> {
+        let arr = array.as_any().downcast_ref::<BinaryArray>()?;
+        Some(arr.value(index))
+    }
+
     fn add_to_delta<K: ArrowWriteableKey>(
         prefix: &str,
         key: K,
