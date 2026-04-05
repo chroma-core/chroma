@@ -1,4 +1,4 @@
-from typing import Dict, Any, Type, Set
+from typing import Callable, Dict, Any, Optional, Type, TypeVar, Set, Union
 from chromadb.api.types import (
     EmbeddingFunction,
     DefaultEmbeddingFunction,
@@ -141,7 +141,7 @@ def get_builtins() -> Set[str]:
 
 
 # Dictionary of supported embedding functions
-known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignore
+known_embedding_functions: Dict[str, Type[EmbeddingFunction[Any]]] = {
     "cohere": CohereEmbeddingFunction,
     "openai": OpenAIEmbeddingFunction,
     "huggingface": HuggingFaceEmbeddingFunction,
@@ -173,7 +173,7 @@ known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignor
     "perplexity": PerplexityEmbeddingFunction,
 }
 
-sparse_known_embedding_functions: Dict[str, Type[SparseEmbeddingFunction]] = {  # type: ignore
+sparse_known_embedding_functions: Dict[str, Type[SparseEmbeddingFunction[Any]]] = {
     "huggingface_sparse": HuggingFaceSparseEmbeddingFunction,
     "fastembed_sparse": FastembedSparseEmbeddingFunction,
     "bm25": Bm25EmbeddingFunction,
@@ -182,7 +182,12 @@ sparse_known_embedding_functions: Dict[str, Type[SparseEmbeddingFunction]] = {  
 }
 
 
-def register_embedding_function(ef_class=None):  # type: ignore
+_EF = TypeVar("_EF", bound=Type[EmbeddingFunction[Any]])
+
+
+def register_embedding_function(
+    ef_class: Optional[_EF] = None,
+) -> Union[_EF, Callable[[_EF], _EF]]:
     """Register a custom embedding function.
 
     Can be used as a decorator:
@@ -198,7 +203,7 @@ def register_embedding_function(ef_class=None):  # type: ignore
         ef_class: The embedding function class to register.
     """
 
-    def _register(cls):  # type: ignore
+    def _register(cls: _EF) -> _EF:
         try:
             name = cls.name()
             known_embedding_functions[name] = cls
@@ -208,13 +213,18 @@ def register_embedding_function(ef_class=None):  # type: ignore
 
     # If called with a class, register it immediately
     if ef_class is not None:
-        return _register(ef_class)  # type: ignore
+        return _register(ef_class)
 
     # If called without arguments, return a decorator
     return _register
 
 
-def register_sparse_embedding_function(ef_class=None):  # type: ignore
+_SEF = TypeVar("_SEF", bound=Type[SparseEmbeddingFunction[Any]])
+
+
+def register_sparse_embedding_function(
+    ef_class: Optional[_SEF] = None,
+) -> Union[_SEF, Callable[[_SEF], _SEF]]:
     """Register a custom sparse embedding function.
 
     Can be used as a decorator:
@@ -224,7 +234,7 @@ def register_sparse_embedding_function(ef_class=None):  # type: ignore
             def name(cls): return "my_sparse_embedding"
     """
 
-    def _register(cls):  # type: ignore
+    def _register(cls: _SEF) -> _SEF:
         try:
             name = cls.name()
             sparse_known_embedding_functions[name] = cls
@@ -233,13 +243,13 @@ def register_sparse_embedding_function(ef_class=None):  # type: ignore
         return cls  # Return the class unchanged
 
     if ef_class is not None:
-        return _register(ef_class)  # type: ignore
+        return _register(ef_class)
 
     return _register
 
 
 # Function to convert config to embedding function
-def config_to_embedding_function(config: Dict[str, Any]) -> EmbeddingFunction:  # type: ignore
+def config_to_embedding_function(config: Dict[str, Any]) -> EmbeddingFunction[Any]:
     """Convert a config dictionary to an embedding function.
 
     Args:
