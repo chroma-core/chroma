@@ -23,6 +23,7 @@ mod segment;
 mod segment_scope;
 mod signed_rbm;
 mod spann_configuration;
+mod sparse_posting_block;
 mod spann_posting_list;
 #[cfg(feature = "testing")]
 pub mod strategies;
@@ -61,6 +62,7 @@ pub use segment::*;
 pub use segment_scope::*;
 pub use signed_rbm::*;
 pub use spann_configuration::*;
+pub use sparse_posting_block::*;
 pub use spann_posting_list::*;
 pub use task::*;
 pub use tenant::*;
