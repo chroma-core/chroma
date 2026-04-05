@@ -1,5 +1,6 @@
 import orjson
 import logging
+import warnings
 from typing import Any, Dict, Mapping, Optional, cast, Tuple, List
 from typing import Sequence
 from uuid import UUID
@@ -107,6 +108,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             _headers = self._auth_provider.authenticate()
             for header, value in _headers.items():
                 self._session.headers[header] = value.get_secret_value()
+        self._check_version_compatibility()
 
     @override
     def get_request_headers(self) -> Mapping[str, str]:
@@ -789,6 +791,22 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         """Resets the database"""
         resp_json = self._make_request("post", "/reset")
         return cast(bool, resp_json)
+
+    def _check_version_compatibility(self) -> None:
+        """Warn if client and server major.minor versions differ."""
+        try:
+            resp = self._session.get(self._api_url + "/version", timeout=5.0)
+            resp.raise_for_status()
+            server_version = resp.json()
+            if server_version.split(".")[:2] != __version__.split(".")[:2]:
+                warnings.warn(
+                    f"Chroma client version ({__version__}) may not be compatible "
+                    f"with server version ({server_version}). "
+                    f"Please ensure client and server use the same major.minor version.",
+                    stacklevel=3,
+                )
+        except Exception as e:
+            logger.debug("Version compatibility check failed", exc_info=e)
 
     @trace_method("FastAPI.get_version", OpenTelemetryGranularity.OPERATION)
     @override

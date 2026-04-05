@@ -4,6 +4,7 @@ import urllib.parse
 import orjson
 from typing import Any, Mapping, Optional, cast, Tuple, Sequence, Dict, List
 import logging
+import warnings
 import httpx
 from overrides import override
 from chromadb import __version__
@@ -810,6 +811,20 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     async def reset(self) -> bool:
         resp_json = await self._make_request("post", "/reset")
         return cast(bool, resp_json)
+
+    async def _check_version_compatibility(self) -> None:
+        """Warn if client and server major.minor versions differ."""
+        try:
+            server_version = await self.get_version()
+            if server_version.split(".")[:2] != __version__.split(".")[:2]:
+                warnings.warn(
+                    f"Chroma client version ({__version__}) may not be compatible "
+                    f"with server version ({server_version}). "
+                    f"Please ensure client and server use the same major.minor version.",
+                    stacklevel=2,
+                )
+        except Exception as e:
+            logger.debug("Version compatibility check failed", exc_info=e)
 
     @trace_method("AsyncFastAPI.get_version", OpenTelemetryGranularity.OPERATION)
     @override
