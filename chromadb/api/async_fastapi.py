@@ -792,9 +792,6 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         resp_json = await self._make_request("post", "/reset")
         return cast(bool, resp_json)
 
-    @trace_method("AsyncFastAPI.get_version", OpenTelemetryGranularity.OPERATION)
-    @override
-
     async def _check_version_compatibility(self) -> None:
         """Warn if client and server major.minor versions differ."""
         try:
@@ -809,6 +806,8 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         except Exception as e:
             logger.debug("Version compatibility check failed", exc_info=e)
 
+    @trace_method("AsyncFastAPI.get_version", OpenTelemetryGranularity.OPERATION)
+    @override
     async def get_version(self) -> str:
         resp_json = await self._make_request("get", "/version")
         return cast(str, resp_json)

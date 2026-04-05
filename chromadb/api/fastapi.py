@@ -775,9 +775,6 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         resp_json = self._make_request("post", "/reset")
         return cast(bool, resp_json)
 
-    @trace_method("FastAPI.get_version", OpenTelemetryGranularity.OPERATION)
-    @override
-
     def _check_version_compatibility(self) -> None:
         """Warn if client and server major.minor versions differ."""
         try:
@@ -794,6 +791,8 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         except Exception as e:
             logger.debug("Version compatibility check failed", exc_info=e)
 
+    @trace_method("FastAPI.get_version", OpenTelemetryGranularity.OPERATION)
+    @override
     def get_version(self) -> str:
         """Returns the version of the server"""
         resp_json = self._make_request("get", "/version")
