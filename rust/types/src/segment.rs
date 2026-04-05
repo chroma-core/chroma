@@ -124,6 +124,39 @@ pub struct Segment {
 }
 
 impl Segment {
+    pub fn get_shards(&self) -> Result<Vec<SegmentShard>, SegmentShardError> {
+        // If there are no file paths, return empty vector
+        if self.file_path.is_empty() {
+            let vec = vec![self.get_new_shard()];
+            return Ok(vec);
+        }
+
+        // Check that all file-path keys have the same number of shards
+        let counts: std::collections::HashSet<usize> =
+            self.file_path.values().map(|v| v.len()).collect();
+        if counts.len() > 1 {
+            return Err(SegmentShardError::InconsistentShardCounts(format!(
+                "Inconsistent shard counts across file_path keys in segment {}: {:?}",
+                self.id, counts
+            )));
+        }
+
+        // All paths should have the same number of shards
+        let num_shards = self
+            .file_path
+            .values()
+            .next()
+            .map(|paths| paths.len())
+            .unwrap_or(0);
+
+        // Create a SegmentShard for each shard index, propagating any errors
+        let shards: Result<Vec<SegmentShard>, SegmentShardError> = (0..num_shards)
+            .map(|shard_index| SegmentShard::try_from((self, shard_index as u32)))
+            .collect();
+
+        shards
+    }
+
     pub fn prefetch_supported(&self) -> bool {
         matches!(
             self.r#type,
@@ -218,6 +251,10 @@ pub enum SegmentShardError {
     EmptyPathString(String),
     #[error("Shard index {index} out of bounds for key '{key}' (len {len})")]
     ShardIndexOutOfBounds { key: String, index: u32, len: usize },
+    #[error("{0}")]
+    InconsistentShardCounts(String),
+    #[error("No shards found")]
+    EmptyShards,
 }
 
 impl ChromaError for SegmentShardError {
@@ -260,6 +297,19 @@ impl TryFrom<(&Segment, u32)> for SegmentShard {
             metadata: segment.metadata.clone(),
             file_path,
         })
+    }
+}
+
+impl Segment {
+    pub fn get_new_shard(&self) -> SegmentShard {
+        SegmentShard {
+            id: self.id,
+            r#type: self.r#type,
+            scope: self.scope.clone(),
+            collection: self.collection,
+            metadata: self.metadata.clone(),
+            file_path: HashMap::new(),
+        }
     }
 }
 
