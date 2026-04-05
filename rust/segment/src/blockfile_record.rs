@@ -1217,8 +1217,12 @@ impl<'me> RecordSegmentReader<'me> {
             futs.push(async move {
                 (
                     shard_index as u32,
-                    RecordSegmentReaderShard::from_segment(&shard_segment, blockfile_provider, bfm)
-                        .await,
+                    Box::pin(RecordSegmentReaderShard::from_segment(
+                        &shard_segment,
+                        blockfile_provider,
+                        bfm,
+                    ))
+                    .await,
                 )
             });
         }
@@ -1335,11 +1339,11 @@ pub async fn partition_logs_to_shard(
     } else {
         let shard_segment = SegmentShard::try_from((record_segment, shard_index))
             .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
-        let shard_reader = RecordSegmentReaderShard::from_segment(
+        let shard_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &shard_segment,
             blockfile_provider,
             bloom_filter_manager,
-        )
+        ))
         .await;
 
         let shard_reader = match shard_reader {
