@@ -2505,6 +2505,10 @@ mod tests {
             ) || segments
                 .iter()
                 .any(|s| s.r#type == SegmentType::Spann && s.scope == SegmentScope::VECTOR)
+                || segments
+                    .iter()
+                    .any(|s| s.r#type == SegmentType::QuantizedSpann
+                        && s.scope == SegmentScope::VECTOR)
         );
         assert!(segments
             .iter()
