@@ -7,12 +7,14 @@ use std::{
 
 use chroma_error::ChromaError;
 use chroma_types::{plan::SearchPayload, CollectionUuid, Metadata, UpdateMetadata, Where};
+use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use thiserror::Error;
 use validator::Validate;
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, EnumIter)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, EnumIter, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Action {
     CreateDatabase,
     CreateCollection,
@@ -72,12 +74,10 @@ impl TryFrom<&str> for Action {
     }
 }
 
+#[derive(Serialize)]
 pub struct QuotaPayload<'other> {
-    #[allow(dead_code)]
     pub action: Action,
-    #[allow(dead_code)]
     pub tenant: String,
-    #[allow(dead_code)]
     pub api_token: Option<String>,
     pub create_collection_metadata: Option<&'other Metadata>,
     pub update_collection_metadata: Option<&'other UpdateMetadata>,
@@ -236,7 +236,8 @@ impl<'other> QuotaPayload<'other> {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, EnumIter)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, EnumIter, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum UsageType {
     MetadataKeySizeBytes,            // Max metadata key size in bytes
     MetadataValueSizeBytes,          // Max metadata value size in bytes
@@ -398,12 +399,12 @@ lazy_static::lazy_static! {
     };
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct QuotaOverrides {
     pub limit: u32,
 }
 
-#[derive(Debug, Validate)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct QuotaExceededError {
     pub usage_type: UsageType,
     pub action: Action,
@@ -427,7 +428,7 @@ impl fmt::Display for QuotaExceededError {
     }
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Serialize, Deserialize)]
 pub enum QuotaEnforcerError {
     #[error("Quota exceeded: {0}")]
     QuotaExceeded(QuotaExceededError),
