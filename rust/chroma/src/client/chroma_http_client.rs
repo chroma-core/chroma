@@ -1,6 +1,6 @@
 use backon::ExponentialBuilder;
 use backon::Retryable;
-use chroma_api_types::ErrorResponse;
+use chroma_api_types::{ErrorIndexingStatus, ErrorResponse};
 use chroma_error::ChromaValidationError;
 use chroma_types::Collection;
 use chroma_types::Metadata;
@@ -35,8 +35,15 @@ pub enum ChromaHttpClientError {
     /// Chroma API returned an error status with a structured error message.
     ///
     /// Contains the error message from the server and the HTTP status code that triggered the error.
-    #[error("API error: {0:?} ({1})")]
-    ApiError(String, reqwest::StatusCode),
+    #[error("API error: {message:?} ({status})")]
+    ApiError {
+        /// The formatted error message returned by the server.
+        message: String,
+        /// The HTTP status code returned by the server.
+        status: reqwest::StatusCode,
+        /// Indexing progress attached to write-backpressure responses, when available.
+        indexing_status: Option<ErrorIndexingStatus>,
+    },
     /// Client lacks access to a unique database or cannot determine which database to use.
     #[error("Could not resolve database ID: {0}")]
     CouldNotResolveDatabaseId(String),
@@ -62,6 +69,19 @@ impl From<WhereError> for ChromaHttpClientError {
         match err {
             WhereError::Serialization(json) => Self::SerdeError(json),
             WhereError::Validation(_) => Self::InvalidWhere,
+        }
+    }
+}
+
+impl ChromaHttpClientError {
+    /// Returns the indexing status embedded in an API error response, when present.
+    pub fn indexing_status(&self) -> Option<&ErrorIndexingStatus> {
+        match self {
+            ChromaHttpClientError::ApiError {
+                indexing_status: Some(indexing_status),
+                ..
+            } => Some(indexing_status),
+            _ => None,
         }
     }
 }
@@ -924,10 +944,11 @@ impl ChromaHttpClient {
                                 text
                             );
 
-                            return Err(ChromaHttpClientError::ApiError(
-                                format!("Non-JSON error response: {}", text),
+                            return Err(ChromaHttpClientError::ApiError {
+                                message: format!("Non-JSON error response: {}", text),
                                 status,
-                            ));
+                                indexing_status: None,
+                            });
                         }
                     };
 
@@ -941,10 +962,11 @@ impl ChromaHttpClient {
                     }
 
                     if let Ok(api_error) = serde_json::from_value::<ErrorResponse>(json) {
-                        return Err(ChromaHttpClientError::ApiError(
-                            format!("{}: {}", api_error.error, api_error.message),
+                        return Err(ChromaHttpClientError::ApiError {
+                            message: format!("{}: {}", api_error.error, api_error.message),
                             status,
-                        ));
+                            indexing_status: api_error.indexing_status,
+                        });
                     }
                 }
 
@@ -1112,7 +1134,11 @@ mod tests {
                 .unwrap_err();
 
             match err {
-                ChromaHttpClientError::ApiError(msg, status) => {
+                ChromaHttpClientError::ApiError {
+                    message: msg,
+                    status,
+                    indexing_status: None,
+                } => {
                     assert_eq!(status, StatusCode::CONFLICT);
                     assert!(msg.contains("already exists"));
                 }
@@ -1242,7 +1268,11 @@ mod tests {
             let err = client.get_collection(name.clone()).await.unwrap_err();
 
             match err {
-                ChromaHttpClientError::ApiError(msg, status) => {
+                ChromaHttpClientError::ApiError {
+                    message: msg,
+                    status,
+                    indexing_status: None,
+                } => {
                     assert_eq!(status, StatusCode::NOT_FOUND);
                     assert!(msg.contains("does not exist"));
                 }
