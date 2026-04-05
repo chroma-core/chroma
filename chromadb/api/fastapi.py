@@ -1,5 +1,6 @@
 import orjson
 import logging
+import warnings
 from typing import Any, Dict, Mapping, Optional, cast, Tuple, List
 from typing import Sequence
 from uuid import UUID
@@ -101,6 +102,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
 
         if self._header is not None:
             self._session.headers.update(self._header)
+        self._check_version_compatibility()
 
         if system.settings.chroma_client_auth_provider:
             self._auth_provider = self.require(ClientAuthProvider)
@@ -775,6 +777,22 @@ class FastAPI(BaseHTTPClient, ServerAPI):
 
     @trace_method("FastAPI.get_version", OpenTelemetryGranularity.OPERATION)
     @override
+
+    def _check_version_compatibility(self) -> None:
+        """Warn if client and server major.minor versions differ."""
+        try:
+            server_version = self.get_version()
+            from chromadb import __version__ as client_version
+            if server_version.split(".")[:2] != client_version.split(".")[:2]:
+                warnings.warn(
+                    f"Chroma client version ({client_version}) may not be compatible "
+                    f"with server version ({server_version}). "
+                    f"Please ensure client and server use the same major.minor version.",
+                    stacklevel=2,
+                )
+        except Exception:
+            pass
+
     def get_version(self) -> str:
         """Returns the version of the server"""
         resp_json = self._make_request("get", "/version")
