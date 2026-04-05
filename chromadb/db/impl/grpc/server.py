@@ -295,6 +295,9 @@ class GrpcMockSysDB(SysDBServicer, Component):
             serialized_schema=None,
             metadata=from_proto_metadata(request.metadata),
             dimension=request.dimension,
+            description=request.description
+            if request.HasField("description")
+            else None,
             database=database,
             tenant=tenant,
             version=0,
@@ -477,6 +480,9 @@ class GrpcMockSysDB(SysDBServicer, Component):
             elif request.HasField("reset_metadata"):
                 if request.reset_metadata:
                     collection["metadata"] = {}
+
+            if request.HasField("description"):
+                collection["description"] = request.description
 
             return UpdateCollectionResponse()
 

@@ -109,6 +109,7 @@ class SysDB(Component):
         configuration: CreateCollectionConfiguration,
         segments: Sequence[Segment],
         metadata: Optional[Metadata] = None,
+        description: Optional[str] = None,
         dimension: Optional[int] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
@@ -177,6 +178,7 @@ class SysDB(Component):
         configuration: OptionalArgument[
             Optional[UpdateCollectionConfiguration]
         ] = Unspecified(),
+        description: OptionalArgument[Optional[str]] = Unspecified(),
     ) -> None:
         """Update a collection. Unspecified fields will be left unchanged. For metadata,
         keys with None values will be removed and keys not present in the UpdateMetadata

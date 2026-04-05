@@ -281,13 +281,15 @@ class Collection(CollectionCommon["ServerAPI"]):
         name: Optional[str] = None,
         metadata: Optional[CollectionMetadata] = None,
         configuration: Optional[UpdateCollectionConfiguration] = None,
+        description: Optional[str] = None,
     ) -> None:
-        """Update collection name, metadata, or configuration.
+        """Update collection name, metadata, configuration, or description.
 
         Args:
             name: New collection name.
             metadata: New metadata for the collection.
             configuration: New configuration for the collection.
+            description: New description for the collection.
         """
 
         self._validate_modify_request(metadata)
@@ -300,11 +302,14 @@ class Collection(CollectionCommon["ServerAPI"]):
             new_name=name,
             new_metadata=metadata,
             new_configuration=configuration,
+            new_description=description,
             tenant=self.tenant,
             database=self.database,
         )
 
-        self._update_model_after_modify_success(name, metadata, configuration)
+        self._update_model_after_modify_success(
+            name, metadata, configuration, description
+        )
 
     def fork(
         self,
