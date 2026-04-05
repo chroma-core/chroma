@@ -11,3 +11,6 @@ mod ms_08_edge_cases;
 mod ms_09_recall;
 mod ms_10_incremental_query;
 mod ms_11_vectorized_scoring;
+mod ms_12_cursor_view;
+mod ms_13_cursor_lazy;
+mod ms_14_three_batch_pipeline;

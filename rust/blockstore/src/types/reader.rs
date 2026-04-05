@@ -169,6 +169,30 @@ impl<
             BlockfileReader::ArrowBlockfileReader(reader) => reader.rank(prefix, key).await,
         }
     }
+
+    /// Synchronous raw-byte lookup in already-loaded blocks.
+    /// Returns `None` for `MemoryBlockfileReader` (no Arrow blocks),
+    /// or if the block is not cached / key is absent / value type
+    /// does not support raw access.
+    pub fn get_raw_from_cache(&self, prefix: &str, key: K) -> Option<&[u8]> {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(_) => None,
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                reader.get_raw_from_cache(prefix, key)
+            }
+        }
+    }
+
+    /// Number of Arrow blocks whose key range overlaps this prefix.
+    /// Returns `0` for `MemoryBlockfileReader`.
+    pub fn count_blocks_for_prefix(&self, prefix: &str) -> usize {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(_) => 0,
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                reader.count_blocks_for_prefix(prefix)
+            }
+        }
+    }
 }
 
 impl<

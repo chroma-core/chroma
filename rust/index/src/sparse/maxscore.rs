@@ -6,6 +6,7 @@ use chroma_types::{
     Directory, DirectoryBlock, SignedRoaringBitmap, SparsePostingBlock, DIRECTORY_PREFIX,
     MAX_BLOCK_ENTRIES,
 };
+use std::iter;
 use dashmap::DashMap;
 use futures::StreamExt;
 use thiserror::Error;
@@ -257,246 +258,7 @@ impl<'me> MaxScoreWriter<'me> {
     }
 }
 
-// ── PostingCursor ───────────────────────────────────────────────────
-
-/// Eager cursor backed by fully decompressed `SparsePostingBlock`s.
-pub struct PostingCursor {
-    blocks: Vec<SparsePostingBlock>,
-    dir_max_offsets: Vec<u32>,
-    pub(crate) dir_max_weights: Vec<f32>,
-    dim_max: f32,
-    block_count: usize,
-    block_idx: usize,
-    pos: usize,
-}
-
-impl PostingCursor {
-    pub fn from_blocks(blocks: Vec<SparsePostingBlock>) -> Self {
-        let dir_max_offsets: Vec<u32> = blocks.iter().map(|b| b.max_offset).collect();
-        let dir_max_weights: Vec<f32> = blocks.iter().map(|b| b.max_weight).collect();
-        let dim_max = dir_max_weights.iter().copied().fold(0.0f32, f32::max);
-        let block_count = blocks.len();
-
-        PostingCursor {
-            blocks,
-            dir_max_offsets,
-            dir_max_weights,
-            dim_max,
-            block_count,
-            block_idx: 0,
-            pos: 0,
-        }
-    }
-
-    pub fn block_count(&self) -> usize {
-        self.block_count
-    }
-
-    pub fn current(&self) -> Option<(u32, f32)> {
-        if self.block_idx >= self.block_count {
-            return None;
-        }
-        let offsets = self.blocks[self.block_idx].offsets();
-        let values = self.blocks[self.block_idx].values();
-        if self.pos < offsets.len() {
-            Some((offsets[self.pos], values[self.pos]))
-        } else {
-            None
-        }
-    }
-
-    pub fn advance(&mut self, target: u32, mask: &SignedRoaringBitmap) -> Option<(u32, f32)> {
-        while self.block_idx < self.block_count {
-            if self.dir_max_offsets[self.block_idx] < target {
-                self.block_idx += 1;
-                self.pos = 0;
-                continue;
-            }
-
-            let offsets = self.blocks[self.block_idx].offsets();
-            let values = self.blocks[self.block_idx].values();
-
-            if self.pos == 0 || offsets.get(self.pos).is_some_and(|&o| o < target) {
-                let start = self.pos;
-                self.pos = start + offsets[start..].partition_point(|&o| o < target);
-            }
-
-            while self.pos < offsets.len() {
-                let off = offsets[self.pos];
-                if mask.contains(off) {
-                    return Some((off, values[self.pos]));
-                }
-                self.pos += 1;
-            }
-
-            self.block_idx += 1;
-            self.pos = 0;
-        }
-        None
-    }
-
-    pub fn get_value(&mut self, doc_id: u32) -> Option<f32> {
-        let bi = self
-            .dir_max_offsets
-            .partition_point(|&max_off| max_off < doc_id);
-        if bi >= self.block_count {
-            return None;
-        }
-
-        let offsets = self.blocks[bi].offsets();
-        let values = self.blocks[bi].values();
-        if offsets.is_empty() || doc_id < offsets[0] {
-            return None;
-        }
-        match offsets.binary_search(&doc_id) {
-            Ok(idx) => Some(values[idx]),
-            Err(_) => None,
-        }
-    }
-
-    pub fn current_block_max(&self) -> f32 {
-        self.dir_max_weights
-            .get(self.block_idx)
-            .copied()
-            .unwrap_or(0.0)
-    }
-
-    pub fn dimension_max(&self) -> f32 {
-        self.dim_max
-    }
-
-    /// Return the MAX block-level weight across all blocks overlapping
-    /// [window_start, window_end].
-    pub fn window_upper_bound(&self, window_start: u32, window_end: u32) -> f32 {
-        let bi_start = self
-            .dir_max_offsets
-            .partition_point(|&max| max < window_start);
-        let mut max_w = 0.0f32;
-        for bi in bi_start..self.block_count {
-            max_w = max_w.max(self.dir_max_weights[bi]);
-            if self.dir_max_offsets[bi] >= window_end {
-                break;
-            }
-        }
-        max_w
-    }
-
-    pub fn next(&mut self) {
-        if self.block_idx >= self.block_count {
-            return;
-        }
-        self.pos += 1;
-        let len = self.blocks[self.block_idx].len();
-        if self.pos >= len {
-            self.block_idx += 1;
-            self.pos = 0;
-        }
-    }
-
-    pub fn current_block_end(&self) -> Option<u32> {
-        self.dir_max_offsets.get(self.block_idx).copied()
-    }
-
-    /// Batch-drain all entries in [window_start, window_end] into a flat
-    /// accumulator array. Each doc's score is accumulated as
-    /// `accum[(doc - window_start)] += query_weight * value`.
-    ///
-    /// The bitmap tracks touched slots for efficient enumeration.
-    pub fn drain_essential(
-        &mut self,
-        window_start: u32,
-        window_end: u32,
-        query_weight: f32,
-        accum: &mut [f32],
-        bitmap: &mut [u64],
-        mask: &SignedRoaringBitmap,
-    ) {
-        while self.block_idx < self.block_count {
-            if self.dir_max_offsets[self.block_idx] < window_start {
-                self.block_idx += 1;
-                self.pos = 0;
-                continue;
-            }
-
-            let offsets = self.blocks[self.block_idx].offsets();
-            let vals = self.blocks[self.block_idx].values();
-
-            if offsets.get(self.pos).is_some_and(|&o| o < window_start) {
-                self.pos = offsets.partition_point(|&o| o < window_start);
-            }
-            while self.pos < offsets.len() {
-                let doc = offsets[self.pos];
-                if doc > window_end {
-                    return;
-                }
-                if mask.contains(doc) {
-                    let idx = (doc - window_start) as usize;
-                    bitmap[idx >> 6] |= 1u64 << (idx & 63);
-                    accum[idx] += vals[self.pos] * query_weight;
-                }
-                self.pos += 1;
-            }
-
-            self.block_idx += 1;
-            self.pos = 0;
-        }
-    }
-
-    /// Merge-join this (non-essential) cursor against sorted candidates,
-    /// accumulating matched scores into `cand_scores`.
-    pub fn score_candidates(
-        &mut self,
-        window_start: u32,
-        window_end: u32,
-        query_weight: f32,
-        cand_docs: &[u32],
-        cand_scores: &mut [f32],
-    ) {
-        if cand_docs.is_empty() {
-            return;
-        }
-
-        let mut ci = 0;
-
-        while self.block_idx < self.block_count && ci < cand_docs.len() {
-            if self.dir_max_offsets[self.block_idx] < window_start
-                || self.dir_max_offsets[self.block_idx] < cand_docs[ci]
-            {
-                self.block_idx += 1;
-                self.pos = 0;
-                continue;
-            }
-
-            let offsets = self.blocks[self.block_idx].offsets();
-            let values = self.blocks[self.block_idx].values();
-
-            if offsets.get(self.pos).is_some_and(|&o| o < window_start) {
-                self.pos = offsets.partition_point(|&o| o < window_start);
-            }
-
-            while self.pos < offsets.len() && ci < cand_docs.len() {
-                let doc = offsets[self.pos];
-                if doc > window_end {
-                    return;
-                }
-                let cand = cand_docs[ci];
-                if doc < cand {
-                    self.pos += 1;
-                } else if doc > cand {
-                    ci += 1;
-                } else {
-                    cand_scores[ci] += query_weight * values[self.pos];
-                    self.pos += 1;
-                    ci += 1;
-                }
-            }
-            if self.pos >= offsets.len() {
-                self.block_idx += 1;
-                self.pos = 0;
-            }
-        }
-    }
-}
+pub use super::cursor::PostingCursor;
 
 // ── MaxScoreReader ───────────────────────────────────────────────
 
@@ -583,7 +345,7 @@ impl<'me> MaxScoreReader<'me> {
     pub async fn open_cursor(
         &'me self,
         encoded_dim: &str,
-    ) -> Result<Option<PostingCursor>, MaxScoreError> {
+    ) -> Result<Option<PostingCursor<'me>>, MaxScoreError> {
         let blocks = self.get_posting_blocks(encoded_dim).await?;
         if blocks.is_empty() {
             return Ok(None);
@@ -591,10 +353,16 @@ impl<'me> MaxScoreReader<'me> {
         Ok(Some(PostingCursor::from_blocks(blocks)))
     }
 
-    /// BlockMaxMaxScore query with window accumulator.
+    /// BlockMaxMaxScore query using the 3-batch I/O pipeline.
     ///
-    /// Eager-only: all posting blocks are loaded up front. Lazy I/O and
-    /// 3-batch pipeline are added in PR #3.
+    /// 1. **Batch 1 — directories**: load directory blocks for every
+    ///    query dimension in parallel, parse metadata.
+    /// 2. **Batch 2 — essential data**: small dims (≤2 Arrow blocks)
+    ///    get View cursors immediately; large dims get Lazy cursors
+    ///    whose blocks are loaded and populated in bulk.
+    /// 3. **Batch 3 — non-essential data**: after the threshold
+    ///    stabilizes, load remaining blocks for non-essential terms,
+    ///    pruning blocks that can't beat the threshold.
     pub async fn query(
         &'me self,
         query_vector: impl IntoIterator<Item = (u32, f32)>,
@@ -608,27 +376,94 @@ impl<'me> MaxScoreReader<'me> {
         let collected: Vec<(u32, f32)> = query_vector.into_iter().collect();
         let encoded_dims: Vec<String> = collected.iter().map(|(d, _)| encode_u32(*d)).collect();
 
-        // Open cursors for all query dimensions in parallel.
-        let cursor_results: Vec<Result<Option<PostingCursor>, MaxScoreError>> =
-            futures::stream::iter(encoded_dims.iter().map(|enc| self.open_cursor(enc)))
-                .buffer_unordered(encoded_dims.len())
-                .collect()
-                .await;
+        // ── Batch 1: load directory parts for all query dims ────────
+        let dir_prefixes: Vec<String> = encoded_dims
+            .iter()
+            .map(|d| format!("{}{}", DIRECTORY_PREFIX, d))
+            .collect();
+        self.posting_reader
+            .load_blocks_for_prefixes(dir_prefixes.iter().map(|s| s.as_str()))
+            .await;
 
-        let mut terms: Vec<TermState> = Vec::new();
-        for (idx, result) in cursor_results.into_iter().enumerate() {
-            let Some(mut cursor) = result? else {
+        struct TermMeta {
+            encoded_dim: String,
+            dir_max_offsets: Vec<u32>,
+            dir_max_weights: Vec<f32>,
+            query_weight: f32,
+            max_score: f32,
+        }
+
+        let mut metas: Vec<TermMeta> = Vec::new();
+        for (idx, &(_, query_weight)) in collected.iter().enumerate() {
+            let encoded_dim = encoded_dims[idx].clone();
+            let Some(dir) = self.get_directory(&encoded_dim).await? else {
                 continue;
             };
-            let query_weight = collected[idx].1;
-            cursor.advance(0, &mask);
-            let max_score = query_weight * cursor.dimension_max();
-            terms.push(TermState {
-                cursor,
+            if dir.num_blocks() == 0 {
+                continue;
+            }
+            let max_score = query_weight * dir.dim_max_weight();
+            metas.push(TermMeta {
+                encoded_dim,
+                dir_max_offsets: dir.max_offsets().to_vec(),
+                dir_max_weights: dir.max_weights().to_vec(),
                 query_weight,
                 max_score,
-                window_score: max_score,
             });
+        }
+
+        if metas.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // ── Build cursors ──────────────────────────────────────────
+        // Small dimensions (≤2 Arrow blocks) use the eager View path;
+        // large dimensions use Lazy cursors populated in Batch 2.
+        let mut terms: Vec<TermState<'me>> = Vec::new();
+        for meta in metas {
+            let block_count =
+                self.posting_reader.count_blocks_for_prefix(&meta.encoded_dim);
+
+            if block_count <= 2 {
+                self.posting_reader
+                    .load_blocks_for_prefixes(iter::once(meta.encoded_dim.as_str()))
+                    .await;
+                let n = meta.dir_max_offsets.len();
+                let raw_blocks: Vec<&[u8]> = (0..n)
+                    .filter_map(|seq| {
+                        self.posting_reader
+                            .get_raw_from_cache(&meta.encoded_dim, seq as u32)
+                    })
+                    .collect();
+
+                let mut cursor = if raw_blocks.len() == n {
+                    PostingCursor::open(raw_blocks, meta.dir_max_offsets, meta.dir_max_weights)
+                } else {
+                    let blocks = self.get_posting_blocks(&meta.encoded_dim).await?;
+                    if blocks.is_empty() {
+                        continue;
+                    }
+                    PostingCursor::from_blocks(blocks)
+                };
+                cursor.advance(0, &mask);
+                terms.push(TermState {
+                    cursor,
+                    encoded_dim: meta.encoded_dim,
+                    query_weight: meta.query_weight,
+                    max_score: meta.max_score,
+                    window_score: meta.max_score,
+                });
+            } else {
+                let cursor =
+                    PostingCursor::open_lazy(meta.dir_max_offsets, meta.dir_max_weights);
+                terms.push(TermState {
+                    cursor,
+                    encoded_dim: meta.encoded_dim,
+                    query_weight: meta.query_weight,
+                    max_score: meta.max_score,
+                    window_score: meta.max_score,
+                });
+            }
         }
 
         if terms.is_empty() {
@@ -637,6 +472,40 @@ impl<'me> MaxScoreReader<'me> {
 
         terms.sort_by(|a, b| a.max_score.total_cmp(&b.max_score));
 
+        // ── Batch 2: load all blocks for essential terms ───────────
+        // At threshold=MIN all terms are essential. Load their posting
+        // blocks so the first windows can run without blocking.
+        let essential_idx = 0usize;
+        {
+            let mut keys_to_load: Vec<(String, u32)> = Vec::new();
+            for t in terms[essential_idx..].iter() {
+                if t.cursor.is_lazy() {
+                    for bk in 0..t.cursor.block_count() as u32 {
+                        keys_to_load.push((t.encoded_dim.clone(), bk));
+                    }
+                }
+            }
+            if !keys_to_load.is_empty() {
+                self.posting_reader.load_data_for_keys(keys_to_load).await;
+                for t in terms[essential_idx..].iter_mut() {
+                    if t.cursor.is_lazy() {
+                        let dim = t.encoded_dim.clone();
+                        t.cursor
+                            .populate_all_from_cache(&self.posting_reader, &dim);
+                    }
+                }
+            }
+        }
+
+        for t in terms.iter_mut() {
+            if t.cursor.is_lazy() {
+                t.cursor.advance(0, &mask);
+            }
+        }
+
+        let mut non_essential_loaded = false;
+
+        // ── Window loop ────────────────────────────────────────────
         let k_usize = k as usize;
         let mut heap = TopKHeap::new(k_usize);
         let mut threshold = heap.threshold();
@@ -659,9 +528,6 @@ impl<'me> MaxScoreReader<'me> {
         while window_start <= max_doc_id {
             let window_end = (window_start + WINDOW_WIDTH - 1).min(max_doc_id);
 
-            // Per-window re-partition: compute each term's window-local
-            // upper bound, re-sort, and find the essential/non-essential
-            // split.
             for t in terms.iter_mut() {
                 t.window_score =
                     t.query_weight * t.cursor.window_upper_bound(window_start, window_end);
@@ -680,7 +546,6 @@ impl<'me> MaxScoreReader<'me> {
                 }
             }
 
-            // Phase 1: batch-drain essential terms into accumulator
             for term in terms[essential_idx..].iter_mut() {
                 term.cursor.drain_essential(
                     window_start,
@@ -692,7 +557,6 @@ impl<'me> MaxScoreReader<'me> {
                 );
             }
 
-            // Scan bitmap → sorted cand_docs + contiguous cand_scores
             cand_docs.clear();
             cand_scores.clear();
             for (word_idx, &word) in bitmap.iter().enumerate().take(BITMAP_WORDS) {
@@ -714,7 +578,35 @@ impl<'me> MaxScoreReader<'me> {
                 continue;
             }
 
-            // Phase 2: non-essential merge-join with budget pruning
+            // ── Batch 3: lazy-load non-essential blocks (once) ────
+            if !non_essential_loaded && essential_idx > 0 {
+                non_essential_loaded = true;
+                let mut ne_keys: Vec<(String, u32)> = Vec::new();
+                for t in terms.iter() {
+                    if !t.cursor.is_lazy() {
+                        continue;
+                    }
+                    for bi in 0..t.cursor.block_count() {
+                        if t.cursor.is_block_loaded(bi) {
+                            continue;
+                        }
+                        if t.query_weight * t.cursor.dir_max_weights[bi] > threshold {
+                            ne_keys.push((t.encoded_dim.clone(), bi as u32));
+                        }
+                    }
+                }
+                if !ne_keys.is_empty() {
+                    self.posting_reader.load_data_for_keys(ne_keys).await;
+                    for t in terms.iter_mut() {
+                        if t.cursor.is_lazy() {
+                            let dim = t.encoded_dim.clone();
+                            t.cursor
+                                .populate_all_from_cache(&self.posting_reader, &dim);
+                        }
+                    }
+                }
+            }
+
             if essential_idx > 0 {
                 let mut remaining_budget: f32 =
                     terms[..essential_idx].iter().map(|t| t.window_score).sum();
@@ -745,12 +637,10 @@ impl<'me> MaxScoreReader<'me> {
                 }
             }
 
-            // Phase 3: extract to heap and reset accumulator
             for (ci, &doc) in cand_docs.iter().enumerate() {
                 threshold = heap.push(cand_scores[ci], doc);
             }
 
-            // Zero accum slots + clear bitmap using the bitmap itself
             for (word_idx, word) in bitmap.iter_mut().enumerate().take(BITMAP_WORDS) {
                 let mut bits = *word;
                 while bits != 0 {
@@ -771,8 +661,9 @@ impl<'me> MaxScoreReader<'me> {
     }
 }
 
-struct TermState {
-    cursor: PostingCursor,
+struct TermState<'a> {
+    cursor: PostingCursor<'a>,
+    encoded_dim: String,
     query_weight: f32,
     max_score: f32,
     window_score: f32,
