@@ -1821,6 +1821,7 @@ dependencies = [
  "dashmap",
  "faer",
  "futures",
+ "half",
  "hnswlib",
  "indicatif",
  "itertools 0.13.0",
