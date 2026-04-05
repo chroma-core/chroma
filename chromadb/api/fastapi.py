@@ -102,13 +102,13 @@ class FastAPI(BaseHTTPClient, ServerAPI):
 
         if self._header is not None:
             self._session.headers.update(self._header)
-        self._check_version_compatibility()
 
         if system.settings.chroma_client_auth_provider:
             self._auth_provider = self.require(ClientAuthProvider)
             _headers = self._auth_provider.authenticate()
             for header, value in _headers.items():
                 self._session.headers[header] = value.get_secret_value()
+        self._check_version_compatibility()
 
     @override
     def get_request_headers(self) -> Mapping[str, str]:
@@ -782,16 +782,15 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         """Warn if client and server major.minor versions differ."""
         try:
             server_version = self.get_version()
-            from chromadb import __version__ as client_version
-            if server_version.split(".")[:2] != client_version.split(".")[:2]:
+            if server_version.split(".")[:2] != __version__.split(".")[:2]:
                 warnings.warn(
-                    f"Chroma client version ({client_version}) may not be compatible "
+                    f"Chroma client version ({__version__}) may not be compatible "
                     f"with server version ({server_version}). "
                     f"Please ensure client and server use the same major.minor version.",
                     stacklevel=2,
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Version compatibility check failed", exc_info=e)
 
     def get_version(self) -> str:
         """Returns the version of the server"""
