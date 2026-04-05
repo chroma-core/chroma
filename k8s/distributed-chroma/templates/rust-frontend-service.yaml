@@ -11,6 +11,42 @@ data:
 
 ---
 
+{{- if .Values.rustFrontendService.sidecars }}
+{{- if and .Values.rustFrontendService.sidecars.authSidecar .Values.rustFrontendService.sidecars.authSidecar.enabled .Values.rustFrontendService.sidecars.authSidecar.configMap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auth-sidecar-config
+  namespace: {{ .Values.namespace }}
+data:
+  sidecar-config.yaml: |
+{{  .Values.rustFrontendService.sidecars.authSidecar.configMap | indent 4 }}
+---
+{{- end }}
+{{- if and .Values.rustFrontendService.sidecars.quotaSidecar .Values.rustFrontendService.sidecars.quotaSidecar.enabled .Values.rustFrontendService.sidecars.quotaSidecar.configMap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: quota-sidecar-config
+  namespace: {{ .Values.namespace }}
+data:
+  sidecar-config.yaml: |
+{{  .Values.rustFrontendService.sidecars.quotaSidecar.configMap | indent 4 }}
+---
+{{- end }}
+{{- if and .Values.rustFrontendService.sidecars.billingMeteringSidecar .Values.rustFrontendService.sidecars.billingMeteringSidecar.enabled .Values.rustFrontendService.sidecars.billingMeteringSidecar.configMap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: billing-metering-sidecar-config
+  namespace: {{ .Values.namespace }}
+data:
+  sidecar-config.yaml: |
+{{  .Values.rustFrontendService.sidecars.billingMeteringSidecar.configMap | indent 4 }}
+---
+{{- end }}
+{{- end }}
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -62,6 +98,98 @@ spec:
             - name: rust-frontend-service-config
               mountPath: /config/
           {{ end }}
+        {{- if .Values.rustFrontendService.sidecars }}
+        {{- if .Values.rustFrontendService.sidecars.authSidecar }}
+        {{- if .Values.rustFrontendService.sidecars.authSidecar.enabled }}
+        - name: auth-sidecar
+          image: "{{ .Values.rustFrontendService.sidecars.authSidecar.image.repository }}:{{ .Values.rustFrontendService.sidecars.authSidecar.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8082
+          readinessProbe:
+            httpGet:
+              port: 8082
+              path: /healthz
+            periodSeconds: 5
+            failureThreshold: 6
+          env:
+            - name: CONFIG_PATH
+              value: "/config/sidecar-config.yaml"
+            {{- if .Values.rustFrontendService.sidecars.authSidecar.env }}
+              {{ .Values.rustFrontendService.sidecars.authSidecar.env | nindent 12 }}
+            {{- end }}
+          {{- if .Values.rustFrontendService.sidecars.authSidecar.resources }}
+          resources:
+            {{ toYaml .Values.rustFrontendService.sidecars.authSidecar.resources | nindent 12 }}
+          {{- end }}
+          {{- if .Values.rustFrontendService.sidecars.authSidecar.configMap }}
+          volumeMounts:
+            - name: auth-sidecar-config
+              mountPath: /config/
+          {{- end }}
+        {{- end }}
+        {{- end }}
+        {{- if .Values.rustFrontendService.sidecars.quotaSidecar }}
+        {{- if .Values.rustFrontendService.sidecars.quotaSidecar.enabled }}
+        - name: quota-sidecar
+          image: "{{ .Values.rustFrontendService.sidecars.quotaSidecar.image.repository }}:{{ .Values.rustFrontendService.sidecars.quotaSidecar.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8081
+          readinessProbe:
+            httpGet:
+              port: 8081
+              path: /healthz
+            periodSeconds: 5
+            failureThreshold: 6
+          env:
+            - name: CONFIG_PATH
+              value: "/config/sidecar-config.yaml"
+            {{- if .Values.rustFrontendService.sidecars.quotaSidecar.env }}
+              {{ .Values.rustFrontendService.sidecars.quotaSidecar.env | nindent 12 }}
+            {{- end }}
+          {{- if .Values.rustFrontendService.sidecars.quotaSidecar.resources }}
+          resources:
+            {{ toYaml .Values.rustFrontendService.sidecars.quotaSidecar.resources | nindent 12 }}
+          {{- end }}
+          {{- if .Values.rustFrontendService.sidecars.quotaSidecar.configMap }}
+          volumeMounts:
+            - name: quota-sidecar-config
+              mountPath: /config/
+          {{- end }}
+        {{- end }}
+        {{- end }}
+        {{- if .Values.rustFrontendService.sidecars.billingMeteringSidecar }}
+        {{- if .Values.rustFrontendService.sidecars.billingMeteringSidecar.enabled }}
+        - name: billing-metering-sidecar
+          image: "{{ .Values.rustFrontendService.sidecars.billingMeteringSidecar.image.repository }}:{{ .Values.rustFrontendService.sidecars.billingMeteringSidecar.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8083
+          readinessProbe:
+            httpGet:
+              port: 8083
+              path: /healthz
+            periodSeconds: 5
+            failureThreshold: 6
+          env:
+            - name: CONFIG_PATH
+              value: "/config/sidecar-config.yaml"
+            {{- if .Values.rustFrontendService.sidecars.billingMeteringSidecar.env }}
+              {{ .Values.rustFrontendService.sidecars.billingMeteringSidecar.env | nindent 12 }}
+            {{- end }}
+          {{- if .Values.rustFrontendService.sidecars.billingMeteringSidecar.resources }}
+          resources:
+            {{ toYaml .Values.rustFrontendService.sidecars.billingMeteringSidecar.resources | nindent 12 }}
+          {{- end }}
+          {{- if .Values.rustFrontendService.sidecars.billingMeteringSidecar.configMap }}
+          volumeMounts:
+            - name: billing-metering-sidecar-config
+              mountPath: /config/
+          {{- end }}
+        {{- end }}
+        {{- end }}
+        {{- end }}
 
       {{if .Values.rustFrontendService.tolerations}}
       tolerations:
@@ -76,6 +204,23 @@ spec:
         - name: rust-frontend-service-config
           configMap:
             name: rust-frontend-service-config
+        {{- if .Values.rustFrontendService.sidecars }}
+        {{- if and .Values.rustFrontendService.sidecars.authSidecar .Values.rustFrontendService.sidecars.authSidecar.enabled .Values.rustFrontendService.sidecars.authSidecar.configMap }}
+        - name: auth-sidecar-config
+          configMap:
+            name: auth-sidecar-config
+        {{- end }}
+        {{- if and .Values.rustFrontendService.sidecars.quotaSidecar .Values.rustFrontendService.sidecars.quotaSidecar.enabled .Values.rustFrontendService.sidecars.quotaSidecar.configMap }}
+        - name: quota-sidecar-config
+          configMap:
+            name: quota-sidecar-config
+        {{- end }}
+        {{- if and .Values.rustFrontendService.sidecars.billingMeteringSidecar .Values.rustFrontendService.sidecars.billingMeteringSidecar.enabled .Values.rustFrontendService.sidecars.billingMeteringSidecar.configMap }}
+        - name: billing-metering-sidecar-config
+          configMap:
+            name: billing-metering-sidecar-config
+        {{- end }}
+        {{- end }}
       {{ end }}
 
 ---

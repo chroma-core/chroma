@@ -1,5 +1,8 @@
 use crate::{
+    auth::http::HttpAuthConfig,
     executor::config::{ExecutorConfig, LocalExecutorConfig},
+    metering_http::HttpMeteringConfig,
+    quota::http::HttpQuotaEnforcerConfig,
     CollectionsWithSegmentsProviderConfig,
 };
 use chroma_log::config::LogConfig;
@@ -159,6 +162,54 @@ fn default_region() -> String {
     String::new()
 }
 
+/// Auth backend configuration. Default is Noop (no auth).
+#[derive(Deserialize, Serialize, Clone, Debug)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum AuthBackendConfig {
+    /// No authentication (default for OSS).
+    Noop,
+    /// HTTP-based authentication via sidecar.
+    Http(HttpAuthConfig),
+}
+
+impl Default for AuthBackendConfig {
+    fn default() -> Self {
+        Self::Noop
+    }
+}
+
+/// Quota backend configuration. Default is Noop (no enforcement).
+#[derive(Deserialize, Serialize, Clone, Debug)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum QuotaBackendConfig {
+    /// No quota enforcement (default for OSS).
+    Noop,
+    /// HTTP-based quota enforcement via sidecar.
+    Http(HttpQuotaEnforcerConfig),
+}
+
+impl Default for QuotaBackendConfig {
+    fn default() -> Self {
+        Self::Noop
+    }
+}
+
+/// Metering backend configuration. Default is Noop (no metering).
+#[derive(Deserialize, Serialize, Clone, Debug)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum MeteringBackendConfig {
+    /// No metering (default for OSS).
+    Noop,
+    /// HTTP-based metering via sidecar.
+    Http(HttpMeteringConfig),
+}
+
+impl Default for MeteringBackendConfig {
+    fn default() -> Self {
+        Self::Noop
+    }
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct FrontendServerConfig {
     #[serde(flatten)]
@@ -186,6 +237,15 @@ pub struct FrontendServerConfig {
     pub enable_span_indexing: bool,
     #[serde(default = "default_region")]
     pub region: String,
+    /// Auth backend config. Default: noop.
+    #[serde(default)]
+    pub auth: AuthBackendConfig,
+    /// Quota backend config. Default: noop.
+    #[serde(default)]
+    pub quota: QuotaBackendConfig,
+    /// Metering backend config. Default: noop.
+    #[serde(default)]
+    pub metering: MeteringBackendConfig,
 }
 
 const DEFAULT_CONFIG_PATH: &str = "sample_configs/distributed.yaml";

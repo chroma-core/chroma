@@ -7,6 +7,7 @@ pub mod config;
 pub mod executor;
 pub mod get_collection_with_segments_provider;
 pub mod impls;
+pub mod metering_http;
 pub mod quota;
 pub mod server;
 mod server_middleware;
@@ -146,6 +147,50 @@ pub async fn frontend_service_entrypoint_with_config(
     frontend_service_entrypoint_with_config_system_registry(
         auth,
         quota_enforcer,
+        system,
+        registry,
+        config,
+    )
+    .await;
+}
+
+/// Config-driven entrypoint that creates auth, quota, and metering
+/// backends from `FrontendServerConfig`. This is the primary entrypoint
+/// for the `frontend_service` binary.
+pub async fn frontend_service_entrypoint_from_config(config: &FrontendServerConfig) {
+    init_frontend_otel_tracing(config);
+
+    // Create auth backend from config
+    let auth_backend: Arc<dyn auth::AuthenticateAndAuthorize> = match &config.auth {
+        config::AuthBackendConfig::Noop => Arc::new(()),
+        config::AuthBackendConfig::Http(http_config) => {
+            Arc::new(auth::http::HttpAuthenticateAndAuthorize::new(http_config))
+        }
+    };
+
+    // Create quota backend from config
+    let quota_backend: Arc<dyn QuotaEnforcer> = match &config.quota {
+        config::QuotaBackendConfig::Noop => Arc::new(()),
+        config::QuotaBackendConfig::Http(http_config) => {
+            Arc::new(quota::http::HttpQuotaEnforcer::new(http_config))
+        }
+    };
+
+    // Create metering backend from config
+    match &config.metering {
+        config::MeteringBackendConfig::Noop => {}
+        config::MeteringBackendConfig::Http(http_config) => {
+            let sender = metering_http::HttpMeterEventSender::new(http_config);
+            chroma_metering::MeterEvent::init_receiver(Box::new(sender));
+        }
+    }
+
+    let system = System::new();
+    let registry = Registry::new();
+
+    frontend_service_entrypoint_with_config_system_registry(
+        auth_backend,
+        quota_backend,
         system,
         registry,
         config,

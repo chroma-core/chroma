@@ -1457,6 +1457,16 @@ impl serde::Serialize for Where {
     }
 }
 
+impl<'de> serde::Deserialize<'de> for Where {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        crate::where_parsing::parse_where(&value).map_err(serde::de::Error::custom)
+    }
+}
+
 impl From<bool> for Where {
     fn from(value: bool) -> Self {
         if value {
