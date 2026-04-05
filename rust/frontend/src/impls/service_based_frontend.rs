@@ -1279,6 +1279,9 @@ impl ServiceBasedFrontend {
                 .get(Get {
                     scan: Scan {
                         collection_and_segments,
+                        shard_index: 0,
+                        num_shards: 1,
+                        log_upper_bound_offset: 0,
                     },
                     filter,
                     limit: Limit { offset: 0, limit },
@@ -1493,6 +1496,9 @@ impl ServiceBasedFrontend {
             .count(Count {
                 scan: Scan {
                     collection_and_segments,
+                    shard_index: 0,
+                    num_shards: 1,
+                    log_upper_bound_offset: 0,
                 },
                 read_level,
             })
@@ -1680,6 +1686,9 @@ impl ServiceBasedFrontend {
             .get(Get {
                 scan: Scan {
                     collection_and_segments,
+                    shard_index: 0,
+                    num_shards: 1,
+                    log_upper_bound_offset: 0,
                 },
                 filter: Filter {
                     query_ids: ids,
@@ -1834,6 +1843,9 @@ impl ServiceBasedFrontend {
             .knn(Knn {
                 scan: Scan {
                     collection_and_segments,
+                    shard_index: 0,
+                    num_shards: 1,
+                    log_upper_bound_offset: 0,
                 },
                 filter: Filter {
                     query_ids: ids,
@@ -2031,6 +2043,9 @@ impl ServiceBasedFrontend {
         let search_plan = Search {
             scan: Scan {
                 collection_and_segments,
+                shard_index: 0,
+                num_shards: 1,
+                log_upper_bound_offset: 0,
             },
             payloads: request.searches,
             read_level: request.read_level,
