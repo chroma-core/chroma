@@ -781,7 +781,9 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     def _check_version_compatibility(self) -> None:
         """Warn if client and server major.minor versions differ."""
         try:
-            server_version = self.get_version()
+            resp = self._session.get(self._api_url + "/version", timeout=5.0)
+            resp.raise_for_status()
+            server_version = resp.json()
             if server_version.split(".")[:2] != __version__.split(".")[:2]:
                 warnings.warn(
                     f"Chroma client version ({__version__}) may not be compatible "
