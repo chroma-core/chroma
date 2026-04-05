@@ -38,6 +38,8 @@
     "build": "tsup",
     "watch": "tsup --watch",
     "genapi": "node --loader ts-node/esm scripts/gen-api.ts",
+    "genapi:sync": "node --loader ts-node/esm scripts/gen-api.ts sync",
+    "genapi:chromadb": "node --loader ts-node/esm scripts/gen-api.ts chromadb",
     "prettier": "prettier --write .",
     "release": "run-s build test && npm publish",
     "release_alpha": "run-s build test && npm publish --tag alpha",
