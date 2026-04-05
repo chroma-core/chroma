@@ -23,16 +23,16 @@ def assign(
     """
 
     if replication > len(members):
-        raise ValueError(
+        raise InvalidArgumentError(
             "Replication factor cannot be greater than the number of members"
         )
     if len(members) == 0:
-        raise ValueError("Cannot assign key to empty memberlist")
+        raise InvalidArgumentError("Cannot assign key to empty memberlist")
     if len(members) == 1:
         # Don't copy the input list for some safety
         return [members[0]]
     if key == "":
-        raise ValueError("Cannot assign empty key")
+        raise InvalidArgumentError("Cannot assign empty key")
 
     member_score_heap: List[Tuple[int, Member]] = []
     for member in members:
@@ -55,6 +55,7 @@ def merge_hashes(x: int, y: int) -> int:
     acc = (
         acc * 0xFF51AFD7ED558CCD
     ) % 2**64  # We need to mod here to prevent python from using arbitrary size int
+from chromadb.errors import InvalidArgumentError
     acc ^= acc >> 33
     acc = (acc * 0xC4CEB9FE1A85EC53) % 2**64
     acc ^= acc >> 33

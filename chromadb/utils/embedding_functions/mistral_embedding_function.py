@@ -21,14 +21,14 @@ class MistralEmbeddingFunction(EmbeddingFunction[Documents]):
         try:
             from mistralai import Mistral
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The mistralai python package is not installed. Please install it with `pip install mistralai`"
             )
         self.model = model
         self.api_key_env_var = api_key_env_var
         self.api_key = os.getenv(api_key_env_var)
         if not self.api_key:
-            raise ValueError(f"The {api_key_env_var} environment variable is not set.")
+            raise InvalidArgumentError(f"The {api_key_env_var} environment variable is not set.")
         self.client = Mistral(api_key=self.api_key)
 
     def __call__(self, input: Documents) -> Embeddings:
@@ -39,7 +39,7 @@ class MistralEmbeddingFunction(EmbeddingFunction[Documents]):
             input (Documents): A list of texts to get embeddings for.
         """
         if not all(isinstance(item, str) for item in input):
-            raise ValueError("Mistral only supports text documents, not images")
+            raise InvalidArgumentError("Mistral only supports text documents, not images")
         output = self.client.embeddings.create(
             model=self.model,
             inputs=input,
@@ -77,9 +77,10 @@ class MistralEmbeddingFunction(EmbeddingFunction[Documents]):
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
         if "model" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The model cannot be changed after the embedding function has been initialized."
             )
+from chromadb.errors import InvalidArgumentError
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:

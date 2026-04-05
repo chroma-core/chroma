@@ -26,14 +26,14 @@ class CohereEmbeddingFunction(EmbeddingFunction[Embeddable]):
         try:
             import cohere
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The cohere python package is not installed. Please install it with `pip install cohere`"
             )
 
         try:
             self._PILImage = importlib.import_module("PIL.Image")
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The PIL python package is not installed. Please install it with `pip install pillow`"
             )
 
@@ -50,7 +50,7 @@ class CohereEmbeddingFunction(EmbeddingFunction[Embeddable]):
 
         self.api_key = api_key or os.getenv(self.api_key_env_var)
         if not self.api_key:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"The {self.api_key_env_var} environment variable is not set."
             )
 
@@ -84,7 +84,7 @@ class CohereEmbeddingFunction(EmbeddingFunction[Embeddable]):
             base64_images = []
             for image_np in input:
                 if not isinstance(image_np, np.ndarray):
-                    raise ValueError(
+                    raise InvalidArgumentError(
                         f"Expected image input to be a numpy array, got {type(image_np)}"
                     )
 
@@ -102,7 +102,7 @@ class CohereEmbeddingFunction(EmbeddingFunction[Embeddable]):
                     base64_images.append(data_uri)
 
                 except Exception as e:
-                    raise ValueError(
+                    raise InvalidArgumentError(
                         f"Failed to convert image numpy array to base64 data URI: {e}"
                     ) from e
 
@@ -119,11 +119,11 @@ class CohereEmbeddingFunction(EmbeddingFunction[Embeddable]):
             has_texts = any(is_document(item) for item in input)
             has_images = any(is_image(item) for item in input)
             if has_texts and has_images:
-                raise ValueError(
+                raise InvalidArgumentError(
                     "Input contains a mix of text documents and images, which is not supported. Provide either all texts or all images."
                 )
             else:
-                raise ValueError(
+                raise InvalidArgumentError(
                     "Input must be a list of text documents (str) or a list of images (numpy arrays)."
                 )
 
@@ -164,9 +164,10 @@ class CohereEmbeddingFunction(EmbeddingFunction[Embeddable]):
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
         if "model_name" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The model name cannot be changed after the embedding function has been initialized."
             )
+from chromadb.errors import InvalidArgumentError
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:

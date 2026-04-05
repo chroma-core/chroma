@@ -28,7 +28,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         try:
             from sentence_transformers import SentenceTransformer
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The sentence_transformers python package is not installed. Please install it with `pip install sentence_transformers`"
             )
 
@@ -37,7 +37,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         self.normalize_embeddings = normalize_embeddings
         for key, value in kwargs.items():
             if not isinstance(value, (str, int, float, bool, list, dict, tuple)):
-                raise ValueError(f"Keyword argument {key} is not a primitive type")
+                raise InvalidArgumentError(f"Keyword argument {key} is not a primitive type")
         self.kwargs = kwargs
 
         if model_name not in self.models:
@@ -102,6 +102,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
+from chromadb.errors import InvalidArgumentError
         # model_name is also used as the identifier for model path if stored locally.
         # Users should be able to change the path if needed, so we should not validate that.
         # e.g. moving file path from /v1/my-model.bin to /v2/my-model.bin
