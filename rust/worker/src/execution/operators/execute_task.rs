@@ -5,7 +5,8 @@ use chroma_log::Log;
 use chroma_segment::types::HydratedMaterializedLogRecord;
 use chroma_segment::{
     blockfile_record::{
-        RecordSegmentReaderOptions, RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
+        RecordSegmentReader, RecordSegmentReaderOptions, RecordSegmentReaderShard,
+        RecordSegmentReaderShardCreationError,
     },
     bloom_filter::BloomFilterManager,
 };
@@ -191,7 +192,7 @@ pub struct ExecuteAttachedFunctionInput {
     /// The tenant ID
     pub tenant_id: String,
     /// The input collection's record segment to read existing data
-    pub input_record_segment: Option<RecordSegmentReaderShard<'static>>,
+    pub input_record_segment: Option<RecordSegmentReader<'static>>,
     /// The output collection ID where results are written
     pub output_collection_id: CollectionUuid,
     /// The current completion offset
@@ -312,15 +313,23 @@ impl Operator<ExecuteAttachedFunctionInput, ExecuteAttachedFunctionOutput>
         };
 
         for materialized_log in input.materialized_logs.iter() {
-            // Use the iterator to process each materialized record
-            for borrowed_record in materialized_log.result.iter() {
-                // Hydrate the record using the same pattern as materialize_logs operator
-                let hydrated_record = borrowed_record
-                    .hydrate(input_record_segment)
-                    .await
-                    .map_err(|e| ExecuteAttachedFunctionError::SegmentRead(Box::new(e)))?;
+            // Iterate over each shard in the partitioned result
+            for (shard_idx, shard_result) in materialized_log.result.shards.iter().enumerate() {
+                // Get the shard reader for this specific shard index
+                let shard_reader = input_record_segment
+                    .and_then(|reader| reader.get_shards().get(shard_idx))
+                    .and_then(|shard_opt| shard_opt.as_ref());
 
-                all_hydrated_records.push(hydrated_record);
+                // Now iterate over records in this shard
+                for borrowed_record in shard_result.iter() {
+                    // Hydrate the record using the correct shard
+                    let hydrated_record = borrowed_record
+                        .hydrate(shard_reader)
+                        .await
+                        .map_err(|e| ExecuteAttachedFunctionError::SegmentRead(Box::new(e)))?;
+
+                    all_hydrated_records.push(hydrated_record);
+                }
             }
 
             total_records_processed += materialized_log.result.len() as u64;

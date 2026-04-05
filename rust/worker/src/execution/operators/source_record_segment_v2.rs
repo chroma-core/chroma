@@ -2,6 +2,7 @@ use crate::execution::operators::materialize_logs::MaterializeLogOutput;
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::blockfile_record::RecordSegmentReaderShard;
+use chroma_segment::types::{materialize_logs_for_rebuild, PartitionedMaterializeLogsResult};
 use chroma_system::Operator;
 use chroma_types::{Chunk, LogRecord, Operation, OperationRecord};
 use futures::StreamExt;
@@ -115,14 +116,13 @@ impl Operator<SourceRecordSegmentV2Input, SourceRecordSegmentV2Output>
             if current_partition_logs.len() >= self.max_partition_size {
                 let logs_chunk = Chunk::new(current_partition_logs.into());
 
-                let materialized = chroma_segment::types::materialize_logs_for_rebuild(
-                    logs_chunk,
-                    current_partition_offsets,
-                )
-                .await?;
+                let materialized =
+                    materialize_logs_for_rebuild(logs_chunk, current_partition_offsets).await?;
 
                 let output = MaterializeLogOutput {
-                    result: materialized,
+                    result: PartitionedMaterializeLogsResult {
+                        shards: vec![materialized],
+                    },
                     collection_logical_size_delta: 0,
                 };
 
@@ -135,14 +135,13 @@ impl Operator<SourceRecordSegmentV2Input, SourceRecordSegmentV2Output>
         if !current_partition_logs.is_empty() {
             let logs_chunk = Chunk::new(current_partition_logs.into());
 
-            let materialized = chroma_segment::types::materialize_logs_for_rebuild(
-                logs_chunk,
-                current_partition_offsets,
-            )
-            .await?;
+            let materialized =
+                materialize_logs_for_rebuild(logs_chunk, current_partition_offsets).await?;
 
             let output = MaterializeLogOutput {
-                result: materialized,
+                result: PartitionedMaterializeLogsResult {
+                    shards: vec![materialized],
+                },
                 collection_logical_size_delta: 0,
             };
 
@@ -200,9 +199,11 @@ mod tests {
 
         // Verify operations are correct
         for partition in &output.partitions {
-            for record in partition.result.iter() {
-                // For rebuild, we expect AddNew operation
-                assert_eq!(record.get_operation(), MaterializedLogOperation::AddNew);
+            for shard in &partition.result.shards {
+                for record in shard.iter() {
+                    // For rebuild, we expect AddNew operation
+                    assert_eq!(record.get_operation(), MaterializedLogOperation::AddNew);
+                }
             }
         }
     }
@@ -235,9 +236,11 @@ mod tests {
         // Verify offset IDs are preserved (0-based from test data generation)
         let mut expected_offset_id = 1u32;
         for partition in &output.partitions {
-            for record in partition.result.iter() {
-                assert_eq!(record.get_offset_id(), expected_offset_id);
-                expected_offset_id += 1;
+            for shard in &partition.result.shards {
+                for record in shard.iter() {
+                    assert_eq!(record.get_offset_id(), expected_offset_id);
+                    expected_offset_id += 1;
+                }
             }
         }
     }

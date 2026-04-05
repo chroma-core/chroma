@@ -10,7 +10,7 @@ use chroma_segment::{
     },
     distributed_hnsw::DistributedHNSWSegmentFromSegmentError,
     distributed_spann::SpannSegmentWriterShardError,
-    types::{ChromaSegmentFlusher, ChromaSegmentWriter, MaterializeLogsResult},
+    types::{ChromaSegmentFlusher, ChromaSegmentWriter, PartitionedMaterializeLogsResult},
 };
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
@@ -200,7 +200,7 @@ impl ApplyLogsOrchestrator {
 
     async fn create_apply_log_to_segment_writer_tasks(
         &mut self,
-        materialized_logs: MaterializeLogsResult,
+        materialized_logs: PartitionedMaterializeLogsResult,
         ctx: &ComponentContext<Self>,
     ) -> Result<Vec<(TaskMessage, Option<Span>)>, CompactionContextError> {
         let mut tasks_to_run = Vec::new();

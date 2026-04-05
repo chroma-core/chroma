@@ -124,6 +124,7 @@ pub struct Segment {
 }
 
 impl Segment {
+    // INVARIANT: THIS ALWAYS RETURNS AT LEAST ONE SHARD
     pub fn get_shards(&self) -> Result<Vec<SegmentShard>, SegmentShardError> {
         // If there are no file paths, return empty vector
         if self.file_path.is_empty() {

@@ -8,8 +8,8 @@ use chroma_log::Log;
 use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentWriter},
     blockfile_record::{
-        RecordSegmentReaderOptions, RecordSegmentReaderShard,
-        RecordSegmentReaderShardCreationError, RecordSegmentWriter,
+        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
+        RecordSegmentReaderShard, RecordSegmentReaderShardCreationError, RecordSegmentWriter,
         RecordSegmentWriterCreationError,
     },
     bloom_filter::BloomFilterManager,
@@ -93,6 +93,8 @@ pub enum LogFetchOrchestratorError {
     #[error("Error prefetching segment: {0}")]
     PrefetchSegment(#[from] PrefetchSegmentError),
     #[error("Error creating record segment reader: {0}")]
+    RecordSegmentReader(#[from] RecordSegmentReaderCreationError),
+    #[error("Error creating record segment reader shard: {0}")]
     RecordSegmentReaderShard(#[from] RecordSegmentReaderShardCreationError),
     #[error("Error creating record segment writer: {0}")]
     RecordSegmentWriter(#[from] RecordSegmentWriterCreationError),
@@ -144,6 +146,7 @@ impl ChromaError for LogFetchOrchestratorError {
                 Self::PrefetchSegment(e) => e.should_trace_error(),
                 Self::QuantizedSpannSegment(e) => e.should_trace_error(),
                 Self::SegmentShard(e) => e.should_trace_error(),
+                Self::RecordSegmentReader(e) => e.should_trace_error(),
                 Self::RecordSegmentReaderShard(e) => e.should_trace_error(),
                 Self::RecordSegmentWriter(e) => e.should_trace_error(),
                 Self::RecvError(_) => true,
@@ -392,12 +395,14 @@ impl LogFetchOrchestrator {
             .ok()
             .and_then(|writers| writers.record_reader);
 
-        let next_max_offset_id = Arc::new(
-            record_reader
-                .as_ref()
-                .map(|reader| AtomicU32::new(reader.get_max_offset_id() + 1))
-                .unwrap_or_default(),
-        );
+        let next_max_offset_ids: Vec<Arc<AtomicU32>> = match record_reader.as_ref() {
+            Some(rr) => rr
+                .get_max_offset_ids()
+                .into_iter()
+                .map(|id| Arc::new(AtomicU32::new(id + 1)))
+                .collect(),
+            None => vec![Arc::new(AtomicU32::new(1))],
+        };
 
         if let Some(rr) = record_reader.as_ref() {
             let count = match rr.count().await {
@@ -432,7 +437,7 @@ impl LogFetchOrchestrator {
             let input = MaterializeLogInput::new(
                 partition.clone(),
                 record_reader.clone(),
-                next_max_offset_id.clone(),
+                next_max_offset_ids.clone(),
                 option,
             );
             let task = wrap(
@@ -467,6 +472,24 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
 
         let collection = output.collection.clone();
 
+        // Create RecordSegmentReader for MaterializeLogOperator
+        let record_segment_reader = self
+            .ok_or_terminate(
+                Box::pin(RecordSegmentReader::from_segment(
+                    &output.record_segment,
+                    &self.context.blockfile_provider,
+                    self.context.bloom_filter_manager.clone(),
+                ))
+                .await,
+                ctx,
+            )
+            .await;
+
+        if record_segment_reader.is_none() {
+            return;
+        }
+
+        // Also create RecordSegmentReaderShard for source operators
         let record_segment_shard = match self
             .ok_or_terminate(SegmentShard::try_from((&output.record_segment, 0)), ctx)
             .await
@@ -474,7 +497,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             Some(shard) => shard,
             None => return,
         };
-        let record_reader = match self
+        let record_reader_shard = match self
             .ok_or_terminate(
                 match Box::pin(RecordSegmentReaderShard::from_segment(
                     &record_segment_shard,
@@ -503,7 +526,8 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                 wrap(
                     Box::new(SourceRecordSegmentOperator::new()),
                     SourceRecordSegmentInput {
-                        record_segment_reader: record_reader.clone(),
+                        // TODO(tanujnay112): Rebuilds need to work with sharding
+                        record_segment_reader: record_reader_shard.clone(),
                     },
                     ctx.receiver(),
                     self.context
@@ -517,7 +541,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                         self.context.max_partition_size,
                     )),
                     SourceRecordSegmentV2Input {
-                        record_segment_reader: record_reader.clone(),
+                        record_segment_reader: record_reader_shard.clone(),
                     },
                     ctx.receiver(),
                     self.context
@@ -689,7 +713,9 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
 
         let writers = CompactWriters {
             // No record reader when rebuilding
-            record_reader: record_reader.clone().filter(|_| !self.context.is_rebuild),
+            record_reader: record_segment_reader
+                .clone()
+                .filter(|_| !self.context.is_rebuild),
             metadata_writer,
             record_writer,
             vector_writer,
