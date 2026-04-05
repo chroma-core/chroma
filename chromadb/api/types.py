@@ -24,6 +24,16 @@ from typing_extensions import TypedDict, Protocol, runtime_checkable
 from pydantic import BaseModel, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
+
+# Strict TypedDict for CMEK
+class CmekGcpDict(TypedDict):
+    """CMEK configuration for GCP."""
+
+    gcp: str
+
+
+CmekDict = CmekGcpDict
+
 import chromadb.errors as errors
 from chromadb.base_types import (
     Metadata,
@@ -1957,7 +1967,7 @@ class Cmek:
         raise ValueError(f"Unknown CMEK provider: {self.provider}")
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Cmek":
+    def from_dict(cls, data: Union[CmekDict, Dict[str, Any]]) -> "Cmek":
         """Deserialize CMEK from dictionary format.
 
         Args:
@@ -2604,7 +2614,7 @@ class Schema:
         return result
 
     @classmethod
-    def deserialize_from_json(cls, json_data: Dict[str, Any]) -> "Schema":
+    def deserialize_from_json(cls, json_data: Union[Dict[str, Any]]) -> "Schema":
         """Create Schema from JSON-serialized data."""
         # Create empty instance
         instance = cls.__new__(cls)
