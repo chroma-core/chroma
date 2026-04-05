@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package chroma;
+option go_package = "github.com/chroma-core/chroma/go/pkg/proto/faultspb";
+
+import "chromadb/proto/chroma.proto";
+
+message SelectFileLine {
+  string file = 1;
+  uint32 line = 2;
+}
+
+message SelectLabel {
+  string label = 3;
+}
+
+message ActionDelay {
+  uint64 delay_seconds = 4;
+}
+
+message FaultAction {
+  oneof act {
+    ActionUnavailable unavailable = 5;
+    ActionDelay delay = 6;
+  }
+}
+
+message FaultSelector {
+  oneof by {
+    SelectFileLine file_line = 15;
+    SelectLabel label = 14;
+  }
+}
+
+message ActionUnavailable {
+  // empty
+}
+
+message InjectFaultsRequest {
+  FaultSelector selector = 8;
+  FaultAction action = 9;
+}
+
+message InjectFaultsResponse {
+  // empty
+}
+
+message FaultEntry {
+  FaultSelector selector = 1;
+  FaultAction action = 2;
+}
+
+message ListFaultsRequest {
+  // empty
+}
+
+message ListFaultsResponse {
+  repeated FaultEntry faults = 1;
+}
+
+message ClearFaultsRequest {
+  FaultSelector selector = 1;
+}
+
+message ClearFaultsResponse {
+  uint64 cleared_count = 1;
+}
+
+service FaultInjectionService {
+  rpc InjectFaults(InjectFaultsRequest) returns (InjectFaultsResponse) {}
+  rpc ListFaults(ListFaultsRequest) returns (ListFaultsResponse) {}
+  rpc ClearFaults(ClearFaultsRequest) returns (ClearFaultsResponse) {}
+}
