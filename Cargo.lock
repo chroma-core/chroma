@@ -2161,9 +2161,11 @@ version = "0.13.3"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
+ "bitpacking",
  "chroma-error",
  "chrono",
  "criterion",
+ "half",
  "itertools 0.13.0",
  "proptest",
  "proptest-derive 0.5.1",
