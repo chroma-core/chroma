@@ -344,7 +344,7 @@ impl SpannerBackend {
         let backoff = ConstantBuilder::default()
             .with_delay(Duration::from_millis(100))
             .with_max_times(4);
-        let db_name_for_log = req.name.clone();
+        let db_name_for_log = req.name.clone().into_string();
 
         // Use a read-write transaction to atomically check tenant, check database, and insert
         let result = (|| {
