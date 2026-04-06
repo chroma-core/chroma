@@ -1215,11 +1215,7 @@ impl AdmissionControlledS3Storage {
         self.put_bytes(key, bytes.into(), options).await
     }
 
-    /// Holds a single rate-limiter permit for the duration of the
-    /// streaming upload — one token per stream. The permit provides
-    /// backpressure: if all tokens are occupied, new streams wait.
-    /// Parts are uploaded sequentially by the inner S3Storage, so
-    /// one permit accurately represents one sustained S3 operation.
+    /// One rate-limiter permit per stream, held for the entire upload.
     pub async fn put_stream<S>(
         &self,
         key: &str,
