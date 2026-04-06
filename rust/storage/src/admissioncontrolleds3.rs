@@ -1251,7 +1251,6 @@ impl AdmissionControlledS3Storage {
             }
             ACStorageProvider::Object(_) => Err(StorageError::NotImplemented),
         }
-        // Permit drops here via RAII.
     }
 
     pub async fn put_bytes(
