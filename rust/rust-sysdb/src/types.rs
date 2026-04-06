@@ -1345,7 +1345,10 @@ pub enum SysDbError {
 impl ChromaError for SysDbError {
     fn code(&self) -> ErrorCodes {
         match self {
-            SysDbError::Spanner(_) => ErrorCodes::Internal,
+            SysDbError::Spanner(err) => err
+                .try_as()
+                .map(|status| status.code().into())
+                .unwrap_or(ErrorCodes::Internal),
             SysDbError::NotFound(_) => ErrorCodes::NotFound,
             SysDbError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
             SysDbError::InvalidArgument(_) => ErrorCodes::InvalidArgument,
@@ -1364,6 +1367,13 @@ impl ChromaError for SysDbError {
             SysDbError::CollectionEntryIsStale => ErrorCodes::Internal,
             SysDbError::VersionFile(_) => ErrorCodes::Internal,
         }
+    }
+}
+
+impl SysDbError {
+    pub(crate) fn is_spanner_aborted(&self) -> bool {
+        self.try_as()
+            .is_some_and(|status| status.code() == tonic::Code::Aborted)
     }
 }
 
@@ -1398,6 +1408,27 @@ impl TryAs<GrpcStatus> for SysDbError {
             // for domain errors like NotFound, AlreadyExists, etc.
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SysDbError;
+    use chroma_error::{ChromaError, ErrorCodes};
+    use google_cloud_gax::grpc::Status as GrpcStatus;
+
+    #[test]
+    fn sysdb_error_recognizes_spanner_aborted() {
+        let err = SysDbError::from(GrpcStatus::aborted("aborted"));
+        assert!(err.is_spanner_aborted());
+        assert_eq!(err.code(), ErrorCodes::Aborted);
+    }
+
+    #[test]
+    fn sysdb_error_does_not_mark_non_aborted_spanner_errors() {
+        let err = SysDbError::from(GrpcStatus::internal("internal"));
+        assert!(!err.is_spanner_aborted());
+        assert_eq!(err.code(), ErrorCodes::Internal);
     }
 }
 
