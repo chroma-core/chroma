@@ -1758,7 +1758,7 @@ mod tests {
         .await
         .expect("materialize shard 1");
 
-        let shard1_segment = SegmentShard::try_from((&seg.record_segment, 0)).expect("valid shard");
+        let shard1_segment = SegmentShard::try_from((&seg.record_segment, 1)).expect("valid shard");
         let writer1 = RecordSegmentWriterShard::from_segment(
             &seg.collection.tenant,
             &seg.collection.database_id,
@@ -1821,7 +1821,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_shard_finds_correct_shard() {
-        let seg = build_two_shard_segment().await;
+        let seg = Box::pin(build_two_shard_segment()).await;
         let reader = RecordSegmentReader::from_segment(
             &seg.record_segment,
             &seg.blockfile_provider,
@@ -1856,7 +1856,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_shard_returns_none_for_unknown_id() {
-        let seg = build_two_shard_segment().await;
+        let seg = Box::pin(build_two_shard_segment()).await;
         let reader = RecordSegmentReader::from_segment(
             &seg.record_segment,
             &seg.blockfile_provider,
@@ -1911,7 +1911,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_partition_non_active_shard_keeps_own_records() {
-        let seg = build_two_shard_segment().await;
+        let seg = Box::pin(build_two_shard_segment()).await;
 
         // WAL with records from both shards
         let wal = Chunk::new(
@@ -1943,7 +1943,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_partition_active_shard_keeps_own_and_new_records() {
-        let seg = build_two_shard_segment().await;
+        let seg = Box::pin(build_two_shard_segment()).await;
 
         let wal = Chunk::new(
             vec![
@@ -1977,7 +1977,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_partition_preserves_existing_visibility() {
-        let seg = build_two_shard_segment().await;
+        let seg = Box::pin(build_two_shard_segment()).await;
 
         let mut wal = Chunk::new(
             vec![
@@ -2012,7 +2012,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_partition_empty_wal() {
-        let seg = build_two_shard_segment().await;
+        let seg = Box::pin(build_two_shard_segment()).await;
         let wal: Chunk<LogRecord> = Chunk::new(vec![].into());
 
         let result = partition_logs_to_shard(
@@ -2031,7 +2031,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_partition_all_new_records_non_active_shard_sees_nothing() {
-        let seg = build_two_shard_segment().await;
+        let seg = Box::pin(build_two_shard_segment()).await;
 
         let wal = Chunk::new(
             vec![
@@ -2061,7 +2061,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_partition_all_new_records_active_shard_sees_all() {
-        let seg = build_two_shard_segment().await;
+        let seg = Box::pin(build_two_shard_segment()).await;
 
         let wal = Chunk::new(
             vec![
@@ -2088,7 +2088,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_partition_delete_operations_routed_to_correct_shard() {
-        let seg = build_two_shard_segment().await;
+        let seg = Box::pin(build_two_shard_segment()).await;
 
         let wal = Chunk::new(
             vec![
@@ -2131,7 +2131,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_partition_without_bloom_filter_manager() {
-        let seg = build_two_shard_segment().await;
+        let seg = Box::pin(build_two_shard_segment()).await;
 
         let wal = Chunk::new(
             vec![
@@ -2207,7 +2207,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_partition_with_bloom_filter_threshold_exceeded() {
-        let seg = build_two_shard_segment().await;
+        let seg = Box::pin(build_two_shard_segment()).await;
 
         // Build a WAL with > 100 entries (default storage_fetch_threshold)
         // to trigger bloom filter usage. Mix of shard 0, shard 1, and new IDs.
