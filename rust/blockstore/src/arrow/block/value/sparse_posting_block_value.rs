@@ -90,7 +90,7 @@ impl ArrowReadableValue<'_> for SparsePostingBlock {
         let arr = array.as_any().downcast_ref::<BinaryArray>().unwrap();
         let bytes = arr.value(index);
         SparsePostingBlock::deserialize(bytes)
-            .expect("SparsePostingBlock: corrupt or truncated block bytes")
+            .expect("SparsePostingBlock: corrupt or truncated block bytes in blockfile")
     }
 
     fn get_range(array: &Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self> {
@@ -99,8 +99,10 @@ impl ArrowReadableValue<'_> for SparsePostingBlock {
             .slice(offset, length)
             .iter()
             .map(|data| {
-                data.and_then(SparsePostingBlock::deserialize)
-                    .expect("SparsePostingBlock value should not be null")
+                SparsePostingBlock::deserialize(
+                    data.expect("SparsePostingBlock value should not be null"),
+                )
+                .expect("SparsePostingBlock: corrupt or truncated block bytes in blockfile")
             })
             .collect()
     }

@@ -23,6 +23,8 @@ pub enum SparsePostingBlockError {
     EmptyEntries,
     TooManyEntries { count: usize },
     MismatchedLengths { offsets: usize, weights: usize },
+    TruncatedHeader { len: usize },
+    TruncatedBody { expected: usize, actual: usize },
 }
 
 impl fmt::Display for SparsePostingBlockError {
@@ -37,6 +39,12 @@ impl fmt::Display for SparsePostingBlockError {
                     f,
                     "directory: max_offsets len ({offsets}) != max_weights len ({weights})"
                 )
+            }
+            Self::TruncatedHeader { len } => {
+                write!(f, "expected at least {HEADER_SIZE} header bytes, got {len}")
+            }
+            Self::TruncatedBody { expected, actual } => {
+                write!(f, "expected {expected} body bytes, got {actual}")
             }
         }
     }
@@ -155,6 +163,10 @@ impl SparsePostingBlock {
         }
 
         let n = entries.len();
+        debug_assert!(
+            entries.windows(2).all(|w| w[0].0 <= w[1].0),
+            "from_sorted_entries: offsets must be monotonically non-decreasing"
+        );
         let min_offset = entries[0].0;
         let max_offset = entries[n - 1].0;
         let max_weight = entries
@@ -333,9 +345,9 @@ impl SparsePostingBlock {
     /// decompression is lazy.
     ///
     /// Returns `None` if the buffer is too small for the header.
-    pub fn deserialize(bytes: &[u8]) -> Option<Self> {
+    pub fn deserialize(bytes: &[u8]) -> Result<Self, SparsePostingBlockError> {
         if bytes.len() < HEADER_SIZE {
-            return None;
+            return Err(SparsePostingBlockError::TruncatedHeader { len: bytes.len() });
         }
 
         let num_entries = u16::from_le_bytes([bytes[0], bytes[1]]);
@@ -345,7 +357,7 @@ impl SparsePostingBlock {
         let max_offset = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
         let max_weight = f32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]);
 
-        Some(SparsePostingBlock {
+        Ok(SparsePostingBlock {
             min_offset,
             max_offset,
             max_weight,
@@ -372,19 +384,26 @@ impl SparsePostingBlock {
     // They are the hot path for lazy/view cursors in the query pipeline.
 
     /// Read the 16-byte header without heap allocation.
-    pub fn peek_header(bytes: &[u8]) -> PostingBlockHeader {
-        debug_assert!(bytes.len() >= HEADER_SIZE);
-        PostingBlockHeader {
+    pub fn peek_header(bytes: &[u8]) -> Result<PostingBlockHeader, SparsePostingBlockError> {
+        if bytes.len() < HEADER_SIZE {
+            return Err(SparsePostingBlockError::TruncatedHeader { len: bytes.len() });
+        }
+        Ok(PostingBlockHeader {
             num_entries: u16::from_le_bytes([bytes[0], bytes[1]]),
             bits_per_delta: bytes[2],
             min_offset: u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]),
             max_offset: u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]),
             max_weight: f32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]),
-        }
+        })
     }
 
     /// Decompress offsets from raw serialized bytes into a reusable buffer.
+    /// Must not be called on directory blocks.
     pub fn decompress_offsets_into(bytes: &[u8], hdr: &PostingBlockHeader, buf: &mut Vec<u32>) {
+        debug_assert!(
+            !hdr.is_directory(),
+            "decompress_offsets_into called on directory block"
+        );
         let n = hdr.num_entries as usize;
         buf.clear();
         buf.resize(n, 0);
@@ -425,23 +444,36 @@ impl SparsePostingBlock {
     }
 
     /// Zero-copy slice of the raw f16 weight bytes from serialized data.
-    /// Each weight is 2 bytes (f16 little-endian).
+    /// Each weight is 2 bytes (f16 little-endian). Must not be called on directory blocks.
     pub fn raw_weight_bytes<'a>(bytes: &'a [u8], hdr: &PostingBlockHeader) -> &'a [u8] {
+        debug_assert!(
+            !hdr.is_directory(),
+            "raw_weight_bytes called on directory block"
+        );
         let n = hdr.num_entries as usize;
         let w_start = Self::weight_byte_offset(hdr);
         &bytes[w_start..w_start + n * 2]
     }
 
     /// Read a single f16 weight at `index` and convert to f32. O(1).
+    /// Must not be called on directory blocks.
     pub fn read_value_at(bytes: &[u8], hdr: &PostingBlockHeader, index: usize) -> f32 {
+        debug_assert!(
+            !hdr.is_directory(),
+            "read_value_at called on directory block"
+        );
         debug_assert!(index < hdr.num_entries as usize);
         let byte_pos = Self::weight_byte_offset(hdr) + index * 2;
         f16::from_le_bytes([bytes[byte_pos], bytes[byte_pos + 1]]).to_f32()
     }
 
     /// Decompress f16 weights from raw serialized bytes into a reusable
-    /// f32 buffer.
+    /// f32 buffer. Must not be called on directory blocks.
     pub fn decompress_values_into(bytes: &[u8], hdr: &PostingBlockHeader, buf: &mut Vec<f32>) {
+        debug_assert!(
+            !hdr.is_directory(),
+            "decompress_values_into called on directory block"
+        );
         let n = hdr.num_entries as usize;
         buf.clear();
         buf.resize(n, 0.0);
@@ -734,7 +766,7 @@ mod tests {
         let entries = sequential_entries(100, 5, 200, 0.42);
         let block = make_block(&entries);
         let bytes = block.serialize();
-        let hdr = SparsePostingBlock::peek_header(&bytes);
+        let hdr = SparsePostingBlock::peek_header(&bytes).unwrap();
         assert_eq!(hdr.num_entries, 200);
         assert_eq!(hdr.min_offset, 100);
         assert_eq!(hdr.max_offset, 100 + 5 * 199);
@@ -745,7 +777,7 @@ mod tests {
         let entries = sequential_entries(50, 3, 300, 0.5);
         let block = make_block(&entries);
         let bytes = block.serialize();
-        let hdr = SparsePostingBlock::peek_header(&bytes);
+        let hdr = SparsePostingBlock::peek_header(&bytes).unwrap();
 
         let mut buf = Vec::new();
         SparsePostingBlock::decompress_offsets_into(&bytes, &hdr, &mut buf);
@@ -757,7 +789,7 @@ mod tests {
         let entries = sequential_entries(0, 1, 256, 0.7);
         let block = make_block(&entries);
         let bytes = block.serialize();
-        let hdr = SparsePostingBlock::peek_header(&bytes);
+        let hdr = SparsePostingBlock::peek_header(&bytes).unwrap();
 
         let mut buf = Vec::new();
         SparsePostingBlock::decompress_values_into(&bytes, &hdr, &mut buf);
@@ -771,7 +803,7 @@ mod tests {
         let entries: Vec<(u32, f32)> = (0..64).map(|i| (i * 10, 0.1 + 0.01 * i as f32)).collect();
         let block = make_block(&entries);
         let bytes = block.serialize();
-        let hdr = SparsePostingBlock::peek_header(&bytes);
+        let hdr = SparsePostingBlock::peek_header(&bytes).unwrap();
 
         for i in 0..entries.len() {
             let v = SparsePostingBlock::read_value_at(&bytes, &hdr, i);
@@ -784,7 +816,7 @@ mod tests {
         let entries = sequential_entries(0, 1, 200, 0.5);
         let block = make_block(&entries);
         let bytes = block.serialize();
-        let hdr = SparsePostingBlock::peek_header(&bytes);
+        let hdr = SparsePostingBlock::peek_header(&bytes).unwrap();
         let wb = SparsePostingBlock::raw_weight_bytes(&bytes, &hdr);
         assert_eq!(wb.len(), 200 * 2);
     }
@@ -843,9 +875,9 @@ mod tests {
     }
 
     #[test]
-    fn deserialize_too_short_returns_none() {
-        assert!(SparsePostingBlock::deserialize(&[0u8; 15]).is_none());
-        assert!(SparsePostingBlock::deserialize(&[]).is_none());
+    fn deserialize_too_short_returns_err() {
+        assert!(SparsePostingBlock::deserialize(&[0u8; 15]).is_err());
+        assert!(SparsePostingBlock::deserialize(&[]).is_err());
     }
 
     #[test]
@@ -1002,7 +1034,7 @@ mod tests {
         let entries: Vec<(u32, f32)> = (0..5).map(|i| (i * 10, 0.1 * (i as f32 + 1.0))).collect();
         let block = make_block(&entries);
         let bytes = block.serialize();
-        let hdr = SparsePostingBlock::peek_header(&bytes);
+        let hdr = SparsePostingBlock::peek_header(&bytes).unwrap();
         let wb = SparsePostingBlock::raw_weight_bytes(&bytes, &hdr);
         assert_eq!(wb.len(), 5 * 2);
 
@@ -1018,7 +1050,7 @@ mod tests {
     fn peek_header_directory_is_directory() {
         let dir = DirectoryBlock::new(&[10, 20, 30], &[0.5, 0.9, 0.2]).unwrap();
         let bytes = dir.into_block().serialize();
-        let hdr = SparsePostingBlock::peek_header(&bytes);
+        let hdr = SparsePostingBlock::peek_header(&bytes).unwrap();
         assert_eq!(hdr.bits_per_delta, DIRECTORY_SENTINEL);
     }
 
@@ -1084,7 +1116,7 @@ mod tests {
             let entries = sequential_entries(10, 3, count, 0.5);
             let block = make_block(&entries);
             let bytes = block.serialize();
-            let hdr = SparsePostingBlock::peek_header(&bytes);
+            let hdr = SparsePostingBlock::peek_header(&bytes).unwrap();
 
             let mut buf = Vec::new();
             SparsePostingBlock::decompress_offsets_into(&bytes, &hdr, &mut buf);
@@ -1102,7 +1134,7 @@ mod tests {
             let entries = sequential_entries(0, 1, count, 0.7);
             let block = make_block(&entries);
             let bytes = block.serialize();
-            let hdr = SparsePostingBlock::peek_header(&bytes);
+            let hdr = SparsePostingBlock::peek_header(&bytes).unwrap();
 
             let mut buf = Vec::new();
             SparsePostingBlock::decompress_values_into(&bytes, &hdr, &mut buf);
@@ -1123,7 +1155,7 @@ mod tests {
                 .collect();
             let block = make_block(&entries);
             let bytes = block.serialize();
-            let hdr = SparsePostingBlock::peek_header(&bytes);
+            let hdr = SparsePostingBlock::peek_header(&bytes).unwrap();
 
             for i in 0..count {
                 let v = SparsePostingBlock::read_value_at(&bytes, &hdr, i);
@@ -1227,7 +1259,7 @@ mod proptests {
         fn zero_copy_matches_lazy_offsets(entries in arb_entries(512)) {
             let block = SparsePostingBlock::from_sorted_entries(&entries).unwrap();
             let bytes = block.serialize();
-            let hdr = SparsePostingBlock::peek_header(&bytes);
+            let hdr = SparsePostingBlock::peek_header(&bytes).unwrap();
             let mut buf = Vec::new();
             SparsePostingBlock::decompress_offsets_into(&bytes, &hdr, &mut buf);
             prop_assert_eq!(buf.as_slice(), block.offsets());
@@ -1237,7 +1269,7 @@ mod proptests {
         fn zero_copy_matches_lazy_values(entries in arb_entries(512)) {
             let block = SparsePostingBlock::from_sorted_entries(&entries).unwrap();
             let bytes = block.serialize();
-            let hdr = SparsePostingBlock::peek_header(&bytes);
+            let hdr = SparsePostingBlock::peek_header(&bytes).unwrap();
             let mut buf = Vec::new();
             SparsePostingBlock::decompress_values_into(&bytes, &hdr, &mut buf);
             for (i, (&a, &b)) in buf.iter().zip(block.values().iter()).enumerate() {
