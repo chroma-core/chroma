@@ -78,9 +78,9 @@ pub struct PostingBlockHeader {
     /// Bits per delta for bitpacked offset decompression.
     /// Set to `0xFF` for directory blocks (different body layout).
     pub bits_per_delta: u8,
-    /// Smallest document offset (log ordinal) in this block.
+    /// Smallest document offset id in this block.
     pub min_offset: u32,
-    /// Largest document offset (log ordinal) in this block.
+    /// Largest document offset id in this block.
     pub max_offset: u32,
     /// Largest weight in this block. Used by block-max pruning to skip
     /// entire blocks whose max contribution cannot beat the threshold.
@@ -344,7 +344,8 @@ impl SparsePostingBlock {
     /// Deserialize from bytes. Only reads the 16-byte header; body
     /// decompression is lazy.
     ///
-    /// Returns `None` if the buffer is too small for the header.
+    /// Returns an error if the buffer is too small for the header or the
+    /// body is shorter than the header implies.
     pub fn deserialize(bytes: &[u8]) -> Result<Self, SparsePostingBlockError> {
         if bytes.len() < HEADER_SIZE {
             return Err(SparsePostingBlockError::TruncatedHeader { len: bytes.len() });
@@ -357,15 +358,36 @@ impl SparsePostingBlock {
         let max_offset = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
         let max_weight = f32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]);
 
+        let expected_body = Self::expected_body_size(num_entries as usize, bits_per_delta);
+        let actual_body = bytes.len() - HEADER_SIZE;
+        if actual_body < expected_body {
+            return Err(SparsePostingBlockError::TruncatedBody {
+                expected: expected_body,
+                actual: actual_body,
+            });
+        }
+
         Ok(SparsePostingBlock {
             min_offset,
             max_offset,
             max_weight,
             num_entries,
             bits_per_delta,
-            raw_body: bytes[HEADER_SIZE..].to_vec(),
+            raw_body: bytes[HEADER_SIZE..HEADER_SIZE + expected_body].to_vec(),
             decompressed: OnceLock::new(),
         })
+    }
+
+    /// Compute the expected body size (bytes after the header) from header fields.
+    fn expected_body_size(num_entries: usize, bits_per_delta: u8) -> usize {
+        if bits_per_delta == DIRECTORY_SENTINEL {
+            num_entries * 8
+        } else {
+            let full_groups = num_entries / BITPACK_GROUP_SIZE;
+            let remainder = num_entries % BITPACK_GROUP_SIZE;
+            let packed_group_bytes = BITPACK_GROUP_SIZE * (bits_per_delta as usize) / 8;
+            full_groups * packed_group_bytes + remainder * 4 + num_entries * 2
+        }
     }
 
     fn write_header(&self, buf: &mut Vec<u8>) {
@@ -881,6 +903,79 @@ mod tests {
     }
 
     #[test]
+    fn deserialize_truncated_body_returns_err() {
+        let entries = sequential_entries(0, 1, 200, 0.5);
+        let block = make_block(&entries);
+        let bytes = block.serialize();
+
+        let truncated = &bytes[..bytes.len() - 1];
+        let err = SparsePostingBlock::deserialize(truncated).unwrap_err();
+        assert!(
+            matches!(err, SparsePostingBlockError::TruncatedBody { .. }),
+            "expected TruncatedBody, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn deserialize_truncated_directory_body_returns_err() {
+        let dir = DirectoryBlock::new(&[10, 20, 30], &[0.5, 0.9, 0.2]).unwrap();
+        let bytes = dir.into_block().serialize();
+
+        let truncated = &bytes[..HEADER_SIZE + 3 * 8 - 1];
+        let err = SparsePostingBlock::deserialize(truncated).unwrap_err();
+        assert!(
+            matches!(err, SparsePostingBlockError::TruncatedBody { .. }),
+            "expected TruncatedBody, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn deserialize_header_only_data_block_returns_err() {
+        let entries = sequential_entries(0, 1, 200, 0.5);
+        let block = make_block(&entries);
+        let bytes = block.serialize();
+
+        let err = SparsePostingBlock::deserialize(&bytes[..HEADER_SIZE]).unwrap_err();
+        assert!(matches!(err, SparsePostingBlockError::TruncatedBody { .. }));
+    }
+
+    #[test]
+    fn expected_body_size_data_block() {
+        for count in [1, 2, 127, 128, 129, 256, 512, 1024, MAX_BLOCK_ENTRIES] {
+            let entries = sequential_entries(0, 1, count, 0.5);
+            let block = make_block(&entries);
+            let bytes = block.serialize();
+            assert_eq!(
+                SparsePostingBlock::expected_body_size(count, block.bits_per_delta),
+                bytes.len() - HEADER_SIZE,
+                "body size mismatch for count={count}"
+            );
+        }
+    }
+
+    #[test]
+    fn expected_body_size_directory_block() {
+        for count in [1, 3, 10, 100] {
+            assert_eq!(
+                SparsePostingBlock::expected_body_size(count, DIRECTORY_SENTINEL),
+                count * 8,
+                "directory body size mismatch for count={count}"
+            );
+        }
+    }
+
+    #[test]
+    fn deserialize_extra_trailing_bytes_ignored() {
+        let entries = sequential_entries(0, 1, 50, 0.5);
+        let block = make_block(&entries);
+        let mut bytes = block.serialize();
+        bytes.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
+
+        let restored = SparsePostingBlock::deserialize(&bytes).unwrap();
+        assert_eq!(restored.offsets(), block.offsets());
+    }
+
+    #[test]
     fn quantization_precision_random() {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
@@ -1208,11 +1303,7 @@ mod proptests {
                 offsets.sort();
                 offsets.dedup();
                 let n = offsets.len().min(weights.len());
-                offsets
-                    .into_iter()
-                    .zip(weights.into_iter())
-                    .take(n)
-                    .collect::<Vec<_>>()
+                offsets.into_iter().zip(weights).take(n).collect::<Vec<_>>()
             })
             .prop_filter("need at least one entry", |v| !v.is_empty())
     }
@@ -1287,6 +1378,18 @@ mod proptests {
             let block = SparsePostingBlock::from_sorted_entries(&entries).unwrap();
             let actual = block.serialize().len();
             prop_assert_eq!(block.serialized_size(), actual);
+        }
+
+        #[test]
+        fn serialized_size_survives_roundtrip(entries in arb_entries(512)) {
+            let block = SparsePostingBlock::from_sorted_entries(&entries).unwrap();
+            let size_before = block.serialized_size();
+            let bytes = block.serialize();
+            let restored = SparsePostingBlock::deserialize(&bytes).unwrap();
+            let size_after = restored.serialized_size();
+            prop_assert_eq!(size_before, bytes.len());
+            prop_assert_eq!(size_after, bytes.len());
+            prop_assert_eq!(size_before, size_after);
         }
     }
 }
