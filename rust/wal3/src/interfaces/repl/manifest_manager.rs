@@ -113,6 +113,10 @@ impl ManifestManager {
         let initial_offset = manifest
             .initial_offset
             .unwrap_or(LogPosition::from_offset(1));
+        // The intrinsic cursor reflects explicit reader progress stored in Spanner.
+        // Keep it unset at initialization so GC does not treat the log's starting
+        // offset as an active reader position.
+        let intrinsic_cursor = 0i64;
         for region in regions.iter() {
             mutations.push(insert(
                 "manifest_regions",
@@ -128,7 +132,7 @@ impl ManifestManager {
                     region,
                     &manifest.collected.hexdigest(),
                     &(initial_offset.offset() as i64),
-                    &(initial_offset.offset() as i64),
+                    &intrinsic_cursor,
                 ],
             ));
         }
@@ -1778,7 +1782,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_mcmr_integration_init_sets_intrinsic_cursor_for_each_region() {
+    async fn test_k8s_mcmr_integration_init_leaves_intrinsic_cursor_unset_for_each_region() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1802,9 +1806,19 @@ mod tests {
                 .await
                 .expect("load_intrinsic_cursor failed");
             assert_eq!(
-                Some(LogPosition::from_offset(1)),
+                None,
                 intrinsic_cursor,
-                "region {region} should inherit the manifest initial_offset as its intrinsic cursor"
+                "region {region} should start with no intrinsic cursor until a reader advances it"
+            );
+
+            let (manifest, _) = ManifestManager::load(&client, log_id, region)
+                .await
+                .expect("load failed")
+                .expect("manifest should exist");
+            assert_eq!(
+                LogPosition::from_offset(1),
+                manifest.oldest_timestamp(),
+                "region {region} should still expose the manifest initial_offset"
             );
         }
     }
