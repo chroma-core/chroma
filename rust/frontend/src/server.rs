@@ -206,6 +206,19 @@ impl Metrics {
     }
 }
 
+fn reject_topology_database_operation(
+    database_name: &DatabaseName,
+    unsupported_feature: &str,
+) -> Result<(), ServerError> {
+    if database_name.topology().is_some() {
+        return Err(ValidationError::InvalidArgument(format!(
+            "multi-region databases do not support {unsupported_feature}"
+        ))
+        .into());
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 pub(crate) struct FrontendServer {
     config: FrontendServerConfig,
@@ -1808,12 +1821,7 @@ async fn fork_collection(
     let database_name = DatabaseName::new(&database).ok_or_else(|| {
         ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
     })?;
-    if database_name.topology().is_some() {
-        return Err(ValidationError::InvalidArgument(
-            "multi-region databases do not support forking".to_string(),
-        )
-        .into());
-    }
+    reject_topology_database_operation(&database_name, "forking")?;
     let _guard = server.scorecard_request(&[
         "op:fork_collection",
         format!("tenant:{}", tenant).as_str(),
@@ -3278,6 +3286,7 @@ async fn attach_function(
     let database_name = DatabaseName::new(database).ok_or_else(|| {
         ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
     })?;
+    reject_topology_database_operation(&database_name, "attached functions")?;
     let res = server
         .frontend
         .attach_function(tenant, database_name, collection_id, request)
@@ -3336,6 +3345,7 @@ async fn get_attached_function(
     let database_name = DatabaseName::new(database).ok_or_else(|| {
         ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
     })?;
+    reject_topology_database_operation(&database_name, "attached functions")?;
     let attached_function = server
         .frontend
         .get_attached_function(tenant, database_name, collection_id, function_name)
@@ -3399,6 +3409,7 @@ async fn detach_function(
     let database_name_typed = DatabaseName::new(database_name).ok_or_else(|| {
         ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
     })?;
+    reject_topology_database_operation(&database_name_typed, "attached functions")?;
     let res = server
         .frontend
         .detach_function(tenant, database_name_typed, collection_id, name, request)
@@ -3481,6 +3492,7 @@ mod tests {
     use crate::{config::FrontendServerConfig, Frontend, FrontendServer};
     use chroma_config::{registry::Registry, Configurable};
     use chroma_system::System;
+    use reqwest::{Client, Method, RequestBuilder, StatusCode};
     use std::sync::Arc;
 
     async fn test_server(mut config: FrontendServerConfig) -> u16 {
@@ -3512,6 +3524,31 @@ mod tests {
         ready_rx.await.unwrap()
     }
 
+    async fn assert_invalid_argument(request: RequestBuilder, expected_message_fragment: &str) {
+        let res = request.send().await.unwrap();
+
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+        let response_json = res.json::<serde_json::Value>().await.unwrap();
+        assert_eq!(
+            response_json["error"],
+            serde_json::Value::String("InvalidArgumentError".to_string()),
+        );
+        assert!(
+            response_json["message"]
+                .as_str()
+                .unwrap()
+                .contains(expected_message_fragment),
+            "expected error message to contain {:?}, got: {:?}",
+            expected_message_fragment,
+            response_json["message"]
+        );
+    }
+
+    fn multi_region_database() -> &'static str {
+        "topology+multiregiondb"
+    }
+
     #[tokio::test]
     async fn test_cors() {
         let mut config = FrontendServerConfig::single_node_default();
@@ -3519,10 +3556,10 @@ mod tests {
 
         let port = test_server(config).await;
 
-        let client = reqwest::Client::new();
+        let client = Client::new();
         let res = client
             .request(
-                reqwest::Method::OPTIONS,
+                Method::OPTIONS,
                 format!("http://localhost:{}/api/v2/heartbeat", port),
             )
             .header("Origin", "http://localhost:8000")
@@ -3548,10 +3585,10 @@ mod tests {
 
         let port = test_server(config).await;
 
-        let client = reqwest::Client::new();
+        let client = Client::new();
         let res = client
             .request(
-                reqwest::Method::OPTIONS,
+                Method::OPTIONS,
                 format!("http://localhost:{}/api/v2/heartbeat", port),
             )
             .header("Origin", "http://localhost:8000")
@@ -3590,7 +3627,7 @@ mod tests {
         // By default, axum returns plaintext errors for some errors. This asserts that there's middleware to ensure all errors are returned as JSON.
         let port = test_server(FrontendServerConfig::single_node_default()).await;
 
-        let client = reqwest::Client::new();
+        let client = Client::new();
         let res = client
             .post(format!("http://localhost:{}/api/v2/tenants", port))
             .header("content-type", "application/json")
@@ -3615,42 +3652,97 @@ mod tests {
     async fn fork_collection_rejects_multi_region_database() {
         let port = test_server(FrontendServerConfig::single_node_default()).await;
 
-        let client = reqwest::Client::new();
+        let client = Client::new();
         let collection_id = uuid::Uuid::new_v4().to_string();
-        let res = client
-            .post(format!(
-                "http://localhost:{}/api/v2/tenants/test_tenant/databases/topology+multiregiondb/collections/{}/fork",
-                port, collection_id
-            ))
-            .header("content-type", "application/json")
-            .body(
-                serde_json::to_string(&serde_json::json!({
-                    "new_name": "forked_collection"
-                }))
-                .unwrap(),
-            )
-            .send()
-            .await
-            .unwrap();
+        assert_invalid_argument(
+            client
+                .post(format!(
+                    "http://localhost:{}/api/v2/tenants/test_tenant/databases/{}/collections/{}/fork",
+                    port,
+                    multi_region_database(),
+                    collection_id
+                ))
+                .header("content-type", "application/json")
+                .body(
+                    serde_json::to_string(&serde_json::json!({
+                        "new_name": "forked_collection"
+                    }))
+                    .unwrap(),
+                ),
+            "multi-region databases do not support forking",
+        )
+        .await;
+    }
 
-        assert_eq!(
-            res.status(),
-            reqwest::StatusCode::BAD_REQUEST,
-            "multi-region database fork should be rejected"
-        );
-        let response_json = res.json::<serde_json::Value>().await.unwrap();
-        assert_eq!(
-            response_json["error"],
-            serde_json::Value::String("InvalidArgumentError".to_string()),
-        );
-        println!("response_json: {:?}", response_json);
-        assert!(
-            response_json["message"]
-                .as_str()
-                .unwrap()
-                .contains("multi-region databases do not support forking"),
-            "expected multi-region error message, got: {:?}",
-            response_json["message"]
-        );
+    #[tokio::test]
+    async fn attach_function_rejects_multi_region_database() {
+        let port = test_server(FrontendServerConfig::single_node_default()).await;
+
+        let client = Client::new();
+        let collection_id = uuid::Uuid::new_v4().to_string();
+        assert_invalid_argument(
+            client
+                .post(format!(
+                    "http://localhost:{}/api/v2/tenants/test_tenant/databases/{}/collections/{}/functions/attach",
+                    port,
+                    multi_region_database(),
+                    collection_id
+                ))
+                .header("content-type", "application/json")
+                .body(
+                    serde_json::to_string(&serde_json::json!({
+                        "name": "my_function",
+                        "function_id": uuid::Uuid::new_v4().to_string(),
+                        "output_collection": "output_collection"
+                    }))
+                    .unwrap(),
+                ),
+            "multi-region databases do not support attached functions",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn get_attached_function_rejects_multi_region_database() {
+        let port = test_server(FrontendServerConfig::single_node_default()).await;
+
+        let client = Client::new();
+        let collection_id = uuid::Uuid::new_v4().to_string();
+        assert_invalid_argument(
+            client.get(format!(
+                "http://localhost:{}/api/v2/tenants/test_tenant/databases/{}/collections/{}/functions/my_function",
+                port,
+                multi_region_database(),
+                collection_id
+            )),
+            "multi-region databases do not support attached functions",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn detach_function_rejects_multi_region_database() {
+        let port = test_server(FrontendServerConfig::single_node_default()).await;
+
+        let client = Client::new();
+        let collection_id = uuid::Uuid::new_v4().to_string();
+        assert_invalid_argument(
+            client
+                .post(format!(
+                    "http://localhost:{}/api/v2/tenants/test_tenant/databases/{}/collections/{}/attached_functions/my_function/detach",
+                    port,
+                    multi_region_database(),
+                    collection_id
+                ))
+                .header("content-type", "application/json")
+                .body(
+                    serde_json::to_string(&serde_json::json!({
+                        "delete_output": false
+                    }))
+                    .unwrap(),
+                ),
+            "multi-region databases do not support attached functions",
+        )
+        .await;
     }
 }
