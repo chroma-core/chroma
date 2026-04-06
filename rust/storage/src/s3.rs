@@ -482,7 +482,7 @@ impl S3Storage {
     ///
     /// `total_size_bytes` must equal the sum of all chunk sizes yielded by
     /// the stream.  The method buffers up to one upload-part worth of data
-    /// (~5 MiB by default) before flushing each part to S3 via the
+    /// (configured via `upload_part_size_bytes`) before flushing each part to S3 via the
     /// standard multipart upload path.  For payloads smaller than the
     /// part size the upload is performed as a single PutObject request.
     pub async fn put_stream<S>(
@@ -532,7 +532,7 @@ impl S3Storage {
         &self,
         key: &str,
         total_size_bytes: usize,
-        mut stream: S,
+        stream: S,
         options: PutOptions,
     ) -> Result<Option<ETag>, StorageError>
     where
@@ -561,6 +561,54 @@ impl S3Storage {
             .s3_multipart_upload_parts
             .record(part_count as u64, &[]);
 
+        let result = self
+            .multipart_upload_stream_inner(
+                key,
+                total_size_bytes,
+                stream,
+                &upload_id,
+                part_count,
+                size_of_last_part,
+                options,
+            )
+            .await;
+
+        if let Err(ref _e) = result {
+            let _ = self
+                .client
+                .abort_multipart_upload()
+                .bucket(&self.bucket)
+                .key(key)
+                .upload_id(&upload_id)
+                .send()
+                .await;
+            self.metrics.s3_put_error_count.add(1, &[]);
+        }
+
+        let duration = stopwatch.finish();
+        if result.is_ok() && duration > Duration::from_secs(1) {
+            self.metrics
+                .s3_put_bytes_slow
+                .record(total_size_bytes as u64, &[]);
+        }
+
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn multipart_upload_stream_inner<S>(
+        &self,
+        key: &str,
+        total_size_bytes: usize,
+        mut stream: S,
+        upload_id: &str,
+        part_count: usize,
+        size_of_last_part: usize,
+        options: PutOptions,
+    ) -> Result<Option<ETag>, StorageError>
+    where
+        S: Stream<Item = Result<Bytes, StorageError>> + Send + Unpin,
+    {
         let mut upload_parts = Vec::with_capacity(part_count);
         // Leftover bytes from the previous iteration that didn't fill
         // a complete part.
@@ -591,32 +639,10 @@ impl S3Storage {
                             leftover = chunk.slice(need..);
                         }
                     }
-                    Some(Err(e)) => {
-                        // Best-effort abort; ignore errors from the
-                        // abort itself.
-                        let _ = self
-                            .client
-                            .abort_multipart_upload()
-                            .bucket(&self.bucket)
-                            .key(key)
-                            .upload_id(&upload_id)
-                            .send()
-                            .await;
-                        self.metrics.s3_put_error_count.add(1, &[]);
-                        return Err(e);
-                    }
+                    Some(Err(e)) => return Err(e),
                     None => {
                         // The while-loop condition guarantees
                         // part_buf.len() < expected_part_size here.
-                        let _ = self
-                            .client
-                            .abort_multipart_upload()
-                            .bucket(&self.bucket)
-                            .key(key)
-                            .upload_id(&upload_id)
-                            .send()
-                            .await;
-                        self.metrics.s3_put_error_count.add(1, &[]);
                         return Err(StorageError::Message {
                             message: format!(
                                 "Stream ended early at part {}/{}, expected {} bytes total",
@@ -636,54 +662,29 @@ impl S3Storage {
             let part_number = part_index as i32 + 1;
             let byte_stream = ByteStream::from(Bytes::from(part_buf));
 
-            let upload_part_res = self
+            let res = self
                 .client
                 .upload_part()
                 .key(key)
                 .bucket(&self.bucket)
-                .upload_id(&upload_id)
+                .upload_id(upload_id)
                 .body(byte_stream)
                 .part_number(part_number)
                 .send()
                 .await
                 .map_err(|err| StorageError::Generic {
                     source: Arc::new(err.into_service_error()),
-                });
+                })?;
 
-            match upload_part_res {
-                Ok(res) => {
-                    upload_parts.push(
-                        CompletedPart::builder()
-                            .e_tag(res.e_tag.unwrap_or_default())
-                            .part_number(part_number)
-                            .build(),
-                    );
-                }
-                Err(e) => {
-                    let _ = self
-                        .client
-                        .abort_multipart_upload()
-                        .bucket(&self.bucket)
-                        .key(key)
-                        .upload_id(&upload_id)
-                        .send()
-                        .await;
-                    self.metrics.s3_put_error_count.add(1, &[]);
-                    return Err(e);
-                }
-            }
+            upload_parts.push(
+                CompletedPart::builder()
+                    .e_tag(res.e_tag.unwrap_or_default())
+                    .part_number(part_number)
+                    .build(),
+            );
         }
 
         if !leftover.is_empty() {
-            let _ = self
-                .client
-                .abort_multipart_upload()
-                .bucket(&self.bucket)
-                .key(key)
-                .upload_id(&upload_id)
-                .send()
-                .await;
-            self.metrics.s3_put_error_count.add(1, &[]);
             return Err(StorageError::Message {
                 message: format!(
                     "Stream yielded more bytes than declared total_size_bytes={}",
@@ -698,29 +699,9 @@ impl S3Storage {
         loop {
             match stream.next().await {
                 None => break,
-                Some(Err(e)) => {
-                    let _ = self
-                        .client
-                        .abort_multipart_upload()
-                        .bucket(&self.bucket)
-                        .key(key)
-                        .upload_id(&upload_id)
-                        .send()
-                        .await;
-                    self.metrics.s3_put_error_count.add(1, &[]);
-                    return Err(e);
-                }
+                Some(Err(e)) => return Err(e),
                 Some(Ok(chunk)) if chunk.is_empty() => continue,
                 Some(Ok(_)) => {
-                    let _ = self
-                        .client
-                        .abort_multipart_upload()
-                        .bucket(&self.bucket)
-                        .key(key)
-                        .upload_id(&upload_id)
-                        .send()
-                        .await;
-                    self.metrics.s3_put_error_count.add(1, &[]);
                     return Err(StorageError::Message {
                         message: format!(
                             "Stream yielded more bytes than declared total_size_bytes={}",
@@ -731,30 +712,8 @@ impl S3Storage {
             }
         }
 
-        let result = self
-            .finish_multipart_upload(key, &upload_id, upload_parts, options)
-            .await;
-
-        if result.is_err() {
-            let _ = self
-                .client
-                .abort_multipart_upload()
-                .bucket(&self.bucket)
-                .key(key)
-                .upload_id(&upload_id)
-                .send()
-                .await;
-            self.metrics.s3_put_error_count.add(1, &[]);
-        }
-
-        let duration = stopwatch.finish();
-        if duration > Duration::from_secs(1) {
-            self.metrics
-                .s3_put_bytes_slow
-                .record(total_size_bytes as u64, &[]);
-        }
-
-        result
+        self.finish_multipart_upload(key, upload_id, upload_parts, options)
+            .await
     }
 
     #[tracing::instrument(skip(self, create_bytestream_fn), level = "trace")]
@@ -1596,19 +1555,42 @@ mod tests {
         assert_eq!(&*buf, &data);
     }
 
+    const PUT_STREAM_PART: usize = 1024 * 1024 * 8; // 8 MB
+
     #[tokio::test]
     // Naming this "test_k8s_integration_" means that the Tilt stack is required. See rust/worker/README.md.
-    async fn test_k8s_integration_put_stream_scenarios() {
-        let part = 1024 * 1024 * 8; // 8 MB
+    async fn test_k8s_integration_put_stream_oneshot_small_chunks() {
+        test_put_stream(1024, 256, PUT_STREAM_PART, PUT_STREAM_PART).await;
+    }
 
-        // Small file (oneshot path), chunks smaller than total
-        test_put_stream(1024, 256, part, part).await;
-        // Exactly at part boundary (multipart, one part)
-        test_put_stream(part, 4096, part, part).await;
-        // Over part size (multipart, multiple parts)
-        test_put_stream((part as f64 * 2.5) as usize, 4096, part, part).await;
-        // Stream chunks larger than part size
-        test_put_stream(part * 3, part * 2, part, part).await;
+    #[tokio::test]
+    // Naming this "test_k8s_integration_" means that the Tilt stack is required. See rust/worker/README.md.
+    async fn test_k8s_integration_put_stream_at_part_boundary() {
+        test_put_stream(PUT_STREAM_PART, 4096, PUT_STREAM_PART, PUT_STREAM_PART).await;
+    }
+
+    #[tokio::test]
+    // Naming this "test_k8s_integration_" means that the Tilt stack is required. See rust/worker/README.md.
+    async fn test_k8s_integration_put_stream_multipart_multiple_parts() {
+        test_put_stream(
+            (PUT_STREAM_PART as f64 * 2.5) as usize,
+            4096,
+            PUT_STREAM_PART,
+            PUT_STREAM_PART,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    // Naming this "test_k8s_integration_" means that the Tilt stack is required. See rust/worker/README.md.
+    async fn test_k8s_integration_put_stream_chunks_larger_than_part() {
+        test_put_stream(
+            PUT_STREAM_PART * 3,
+            PUT_STREAM_PART * 2,
+            PUT_STREAM_PART,
+            PUT_STREAM_PART,
+        )
+        .await;
     }
 
     #[tokio::test]
