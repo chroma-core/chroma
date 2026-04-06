@@ -13,9 +13,9 @@ use chroma_blockstore::{
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::fulltext::types::FullTextIndexError;
 use chroma_types::{
-    Cmek, DataRecord, DatabaseUuid, MaterializedLogOperation, SchemaError, Segment, SegmentShard,
-    SegmentType, SegmentUuid, MAX_OFFSET_ID, OFFSET_ID_TO_DATA, OFFSET_ID_TO_USER_ID,
-    USER_ID_BLOOM_FILTER, USER_ID_TO_OFFSET_ID,
+    Chunk, Cmek, DataRecord, DatabaseUuid, LogRecord, MaterializedLogOperation, SchemaError,
+    Segment, SegmentShard, SegmentShardError, SegmentType, SegmentUuid, MAX_OFFSET_ID,
+    OFFSET_ID_TO_DATA, OFFSET_ID_TO_USER_ID, USER_ID_BLOOM_FILTER, USER_ID_TO_OFFSET_ID,
 };
 use futures::{Stream, StreamExt, TryStreamExt};
 use std::collections::HashMap;
@@ -1172,20 +1172,229 @@ impl RecordSegmentReaderShard<'_> {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum RecordSegmentReaderCreationError {
+    #[error("Shard error: {0}")]
+    Shard(#[from] SegmentShardError),
+    #[error("Error creating shard reader for shard {shard_index}: {source}")]
+    ShardReader {
+        shard_index: u32,
+        source: Box<RecordSegmentReaderShardCreationError>,
+    },
+}
+
+impl ChromaError for RecordSegmentReaderCreationError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            RecordSegmentReaderCreationError::Shard(e) => e.code(),
+            RecordSegmentReaderCreationError::ShardReader { source, .. } => source.code(),
+        }
+    }
+}
+
+/// Multi-shard record segment reader that wraps N `RecordSegmentReaderShard`
+/// instances and can resolve which shard owns a given user ID.
+pub struct RecordSegmentReader<'me> {
+    shards: Vec<Option<RecordSegmentReaderShard<'me>>>,
+}
+
+impl<'me> RecordSegmentReader<'me> {
+    /// Construct a reader spanning all shards of the given segment.
+    ///
+    /// Each shard's blockfiles and bloom filter are opened in parallel.
+    /// Uninitialized shards are stored as `None` (no records to search).
+    pub async fn from_segment(
+        segment: &Segment,
+        blockfile_provider: &BlockfileProvider,
+        bloom_filter_manager: Option<BloomFilterManager>,
+    ) -> Result<Self, RecordSegmentReaderCreationError> {
+        let num_shards = segment.num_shards()?;
+
+        let mut futs = Vec::with_capacity(num_shards);
+        for shard_index in 0..num_shards {
+            let shard_segment = SegmentShard::try_from((segment, shard_index as u32))?;
+            let bfm = bloom_filter_manager.clone();
+            futs.push(async move {
+                (
+                    shard_index as u32,
+                    Box::pin(RecordSegmentReaderShard::from_segment(
+                        &shard_segment,
+                        blockfile_provider,
+                        bfm,
+                    ))
+                    .await,
+                )
+            });
+        }
+
+        let results = futures::future::join_all(futs).await;
+        let mut shards = Vec::with_capacity(num_shards);
+        for (shard_index, result) in results {
+            match result {
+                Ok(reader) => shards.push(Some(reader)),
+                Err(e)
+                    if matches!(
+                        *e,
+                        RecordSegmentReaderShardCreationError::UninitializedSegment
+                    ) =>
+                {
+                    shards.push(None);
+                }
+                Err(e) => {
+                    return Err(RecordSegmentReaderCreationError::ShardReader {
+                        shard_index,
+                        source: e,
+                    })
+                }
+            }
+        }
+
+        Ok(Self { shards })
+    }
+
+    /// Resolve which shard owns the given user ID.
+    ///
+    /// Checks each shard's bloom filter first (fast negative) when enabled in
+    /// `options`, then falls back to a blockfile lookup. Returns
+    /// `Some(shard_index)` if found, or `None` if the ID does not exist in any
+    /// shard (i.e. it is a new record).
+    pub async fn resolve_shard(
+        &self,
+        user_id: &str,
+        options: &RecordSegmentReaderOptions,
+    ) -> Result<Option<u32>, Box<dyn ChromaError>> {
+        for (idx, shard) in self.shards.iter().enumerate() {
+            if let Some(reader) = shard {
+                if reader.data_exists_for_user_id(user_id, options).await? {
+                    return Ok(Some(idx as u32));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn num_shards(&self) -> usize {
+        self.shards.len()
+    }
+}
+
+/// Filter a log chunk so only records belonging to `shard_index` remain visible.
+///
+/// - `num_shards <= 1`: returns `logs` unchanged (single-shard, no filtering needed).
+/// - Non-active shard (`shard_index < num_shards - 1`): uses bloom-filter-accelerated
+///   `data_exists_for_user_id` on the shard's own reader. Records not found in this
+///   shard are hidden.
+/// - Active shard (`shard_index == num_shards - 1`): constructs a `RecordSegmentReader`
+///   spanning all shards and uses `resolve_shard` to determine ownership. New records
+///   (not in any shard) are assigned to the active shard.
+///
+/// Bloom filters are used only when `bloom_filter_manager` is present and the number of
+/// **visible** log entries (`logs.len()`) is at least `storage_fetch_threshold()` on the
+/// manager — same rule as the query path filter and count operators.
+pub async fn partition_logs_to_shard(
+    mut logs: Chunk<LogRecord>,
+    shard_index: u32,
+    num_shards: u32,
+    record_segment: &Segment,
+    blockfile_provider: &BlockfileProvider,
+    bloom_filter_manager: Option<BloomFilterManager>,
+) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>> {
+    if num_shards <= 1 {
+        return Ok(logs);
+    }
+
+    let is_active_shard = shard_index == num_shards - 1;
+    let options = RecordSegmentReaderOptions {
+        use_bloom_filter: bloom_filter_manager
+            .as_ref()
+            .is_some_and(|mgr| logs.len() >= mgr.storage_fetch_threshold()),
+    };
+
+    let mut visibility = vec![false; logs.total_len()];
+
+    if is_active_shard {
+        let reader = RecordSegmentReader::from_segment(
+            record_segment,
+            blockfile_provider,
+            bloom_filter_manager,
+        )
+        .await
+        .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+
+        for (log_record, idx) in logs.iter() {
+            match reader
+                .resolve_shard(&log_record.record.id, &options)
+                .await?
+            {
+                Some(owner) if owner == shard_index => {
+                    visibility[idx] = true;
+                }
+                None => {
+                    // New record — active shard owns it.
+                    visibility[idx] = true;
+                }
+                Some(_) => {}
+            }
+        }
+    } else {
+        let shard_segment = SegmentShard::try_from((record_segment, shard_index))
+            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+        let shard_reader = Box::pin(RecordSegmentReaderShard::from_segment(
+            &shard_segment,
+            blockfile_provider,
+            bloom_filter_manager,
+        ))
+        .await;
+
+        let shard_reader = match shard_reader {
+            Ok(reader) => Some(reader),
+            Err(e)
+                if matches!(
+                    *e,
+                    RecordSegmentReaderShardCreationError::UninitializedSegment
+                ) =>
+            {
+                None
+            }
+            Err(e) => return Err(e as Box<dyn ChromaError>),
+        };
+
+        if let Some(reader) = &shard_reader {
+            for (log_record, idx) in logs.iter() {
+                if reader
+                    .data_exists_for_user_id(&log_record.record.id, &options)
+                    .await?
+                {
+                    visibility[idx] = true;
+                }
+            }
+        }
+    }
+
+    logs.set_visibility(visibility);
+    Ok(logs)
+}
+
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::sync::{atomic::AtomicU32, Arc};
 
     use chroma_blockstore::BlockfileWriter;
     use chroma_log::test::{int_as_id, upsert_generator, LogGenerator};
-    use chroma_types::{Chunk, SegmentShard, USER_ID_BLOOM_FILTER};
+    use chroma_types::{
+        Chunk, LogRecord, Operation, OperationRecord, SegmentShard, USER_ID_BLOOM_FILTER,
+    };
     use shuttle::{future, thread};
 
     use crate::{
         blockfile_record::MAX_OFFSET_ID, test::TestDistributedSegment, types::materialize_logs,
     };
 
-    use super::RecordSegmentWriterShard;
+    use super::{
+        partition_logs_to_shard, RecordSegmentReader, RecordSegmentReaderOptions,
+        RecordSegmentWriterShard,
+    };
 
     // The same record segment writer should be able to run concurrently on different threads without conflict
     #[test]
@@ -1493,5 +1702,570 @@ mod tests {
 
         assert_eq!(bf.stale_count(), 2, "Two deletes should be tracked");
         assert_eq!(bf.live_count(), 8, "8 records should remain live");
+    }
+
+    /// Build a 2-shard record segment using a single blockfile provider.
+    ///
+    /// Shard 0 contains IDs 1..=5, shard 1 contains IDs 6..=10.
+    /// Both shards are written through the same provider so blockfiles
+    /// are accessible from a single reader.
+    async fn build_two_shard_segment() -> TestDistributedSegment {
+        let seg = TestDistributedSegment::new().await;
+
+        // Compact shard 0 (IDs 1-5)
+        let logs0 = upsert_generator.generate_chunk(1..=5);
+        let materialized0 = materialize_logs(
+            &None,
+            logs0,
+            Some(AtomicU32::new(1).into()),
+            &super::RecordSegmentReaderOptions::default(),
+        )
+        .await
+        .expect("materialize shard 0");
+
+        let shard0_segment = SegmentShard::try_from((&seg.record_segment, 0)).expect("valid shard");
+        let writer0 = RecordSegmentWriterShard::from_segment(
+            &seg.collection.tenant,
+            &seg.collection.database_id,
+            &shard0_segment,
+            &seg.blockfile_provider,
+            None,
+            seg.bloom_filter_manager.clone(),
+        )
+        .await
+        .expect("create writer for shard 0");
+        writer0
+            .apply_materialized_log_chunk(&None, &materialized0)
+            .await
+            .expect("apply logs to shard 0");
+        let paths0 = Box::pin(
+            Box::pin(writer0.commit())
+                .await
+                .expect("commit shard 0")
+                .flush(),
+        )
+        .await
+        .expect("flush shard 0");
+
+        // Compact shard 1 (IDs 6-10) using the same blockfile provider
+        let logs1 = upsert_generator.generate_chunk(6..=10);
+        let materialized1 = materialize_logs(
+            &None,
+            logs1,
+            Some(AtomicU32::new(1).into()),
+            &super::RecordSegmentReaderOptions::default(),
+        )
+        .await
+        .expect("materialize shard 1");
+
+        let shard1_segment = SegmentShard::try_from((&seg.record_segment, 1)).expect("valid shard");
+        let writer1 = RecordSegmentWriterShard::from_segment(
+            &seg.collection.tenant,
+            &seg.collection.database_id,
+            &shard1_segment,
+            &seg.blockfile_provider,
+            None,
+            seg.bloom_filter_manager.clone(),
+        )
+        .await
+        .expect("create writer for shard 1");
+        writer1
+            .apply_materialized_log_chunk(&None, &materialized1)
+            .await
+            .expect("apply logs to shard 1");
+        let paths1 = Box::pin(
+            Box::pin(writer1.commit())
+                .await
+                .expect("commit shard 1")
+                .flush(),
+        )
+        .await
+        .expect("flush shard 1");
+
+        // Merge file_paths: each key gets [shard0_path, shard1_path]
+        let mut merged: HashMap<String, Vec<String>> = HashMap::new();
+        for key in paths0.keys().chain(paths1.keys()) {
+            if merged.contains_key(key) {
+                continue;
+            }
+            let mut v = Vec::new();
+            if let Some(p0) = paths0.get(key) {
+                v.extend(p0.iter().cloned());
+            }
+            if let Some(p1) = paths1.get(key) {
+                v.extend(p1.iter().cloned());
+            }
+            merged.insert(key.clone(), v);
+        }
+
+        let mut seg = seg;
+        seg.record_segment.file_path = merged;
+        seg
+    }
+
+    fn make_log(offset: i64, id: &str, op: Operation) -> LogRecord {
+        LogRecord {
+            log_offset: offset,
+            record: OperationRecord {
+                id: id.to_string(),
+                embedding: None,
+                encoding: None,
+                metadata: None,
+                document: None,
+                operation: op,
+            },
+        }
+    }
+
+    // ---- RecordSegmentReader tests ----
+
+    #[tokio::test]
+    async fn test_resolve_shard_finds_correct_shard() {
+        let seg = Box::pin(build_two_shard_segment()).await;
+        let reader = RecordSegmentReader::from_segment(
+            &seg.record_segment,
+            &seg.blockfile_provider,
+            seg.bloom_filter_manager.clone(),
+        )
+        .await
+        .expect("Should create multi-shard reader");
+
+        assert_eq!(reader.num_shards(), 2);
+        let opts = RecordSegmentReaderOptions {
+            use_bloom_filter: true,
+        };
+
+        // IDs 1-5 should be in shard 0
+        for i in 1..=5 {
+            let result = reader
+                .resolve_shard(&int_as_id(i), &opts)
+                .await
+                .expect("resolve_shard should not error");
+            assert_eq!(result, Some(0), "id {} should be in shard 0", i);
+        }
+
+        // IDs 6-10 should be in shard 1
+        for i in 6..=10 {
+            let result = reader
+                .resolve_shard(&int_as_id(i), &opts)
+                .await
+                .expect("resolve_shard should not error");
+            assert_eq!(result, Some(1), "id {} should be in shard 1", i);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_resolve_shard_returns_none_for_unknown_id() {
+        let seg = Box::pin(build_two_shard_segment()).await;
+        let reader = RecordSegmentReader::from_segment(
+            &seg.record_segment,
+            &seg.blockfile_provider,
+            seg.bloom_filter_manager.clone(),
+        )
+        .await
+        .expect("Should create multi-shard reader");
+
+        let opts = RecordSegmentReaderOptions {
+            use_bloom_filter: true,
+        };
+        let result = reader
+            .resolve_shard("id_nonexistent", &opts)
+            .await
+            .expect("resolve_shard should not error");
+        assert_eq!(result, None, "Unknown ID should return None");
+    }
+
+    // ---- partition_logs_to_shard tests ----
+
+    #[tokio::test]
+    async fn test_partition_single_shard_is_noop() {
+        let mut seg = TestDistributedSegment::new().await;
+        let logs_data = upsert_generator.generate_chunk(1..=5);
+        Box::pin(seg.compact_log(logs_data, 1)).await;
+
+        let wal = Chunk::new(
+            vec![
+                make_log(11, &int_as_id(1), Operation::Upsert),
+                make_log(12, &int_as_id(2), Operation::Upsert),
+            ]
+            .into(),
+        );
+
+        let result = partition_logs_to_shard(
+            wal.clone(),
+            0,
+            1, // single shard
+            &seg.record_segment,
+            &seg.blockfile_provider,
+            seg.bloom_filter_manager.clone(),
+        )
+        .await
+        .expect("Should succeed");
+
+        assert_eq!(
+            result.len(),
+            2,
+            "Single shard should return all logs unchanged"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_partition_non_active_shard_keeps_own_records() {
+        let seg = Box::pin(build_two_shard_segment()).await;
+
+        // WAL with records from both shards
+        let wal = Chunk::new(
+            vec![
+                make_log(11, &int_as_id(1), Operation::Upsert), // shard 0
+                make_log(12, &int_as_id(6), Operation::Upsert), // shard 1
+                make_log(13, &int_as_id(3), Operation::Upsert), // shard 0
+                make_log(14, &int_as_id(8), Operation::Upsert), // shard 1
+                make_log(15, "id_new", Operation::Add),         // new record
+            ]
+            .into(),
+        );
+
+        // Shard 0 (non-active) should only see its own records
+        let result = partition_logs_to_shard(
+            wal.clone(),
+            0,
+            2,
+            &seg.record_segment,
+            &seg.blockfile_provider,
+            seg.bloom_filter_manager.clone(),
+        )
+        .await
+        .expect("Should succeed");
+
+        let visible_ids: Vec<String> = result.iter().map(|(r, _)| r.record.id.clone()).collect();
+        assert_eq!(visible_ids, vec![int_as_id(1), int_as_id(3)]);
+    }
+
+    #[tokio::test]
+    async fn test_partition_active_shard_keeps_own_and_new_records() {
+        let seg = Box::pin(build_two_shard_segment()).await;
+
+        let wal = Chunk::new(
+            vec![
+                make_log(11, &int_as_id(1), Operation::Upsert), // shard 0
+                make_log(12, &int_as_id(6), Operation::Upsert), // shard 1
+                make_log(13, &int_as_id(3), Operation::Upsert), // shard 0
+                make_log(14, &int_as_id(8), Operation::Upsert), // shard 1
+                make_log(15, "id_new", Operation::Add),         // new record -> active shard
+            ]
+            .into(),
+        );
+
+        // Shard 1 (active) should see its own records + new records
+        let result = partition_logs_to_shard(
+            wal.clone(),
+            1,
+            2,
+            &seg.record_segment,
+            &seg.blockfile_provider,
+            seg.bloom_filter_manager.clone(),
+        )
+        .await
+        .expect("Should succeed");
+
+        let visible_ids: Vec<String> = result.iter().map(|(r, _)| r.record.id.clone()).collect();
+        assert_eq!(
+            visible_ids,
+            vec![int_as_id(6), int_as_id(8), "id_new".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_partition_preserves_existing_visibility() {
+        let seg = Box::pin(build_two_shard_segment()).await;
+
+        let mut wal = Chunk::new(
+            vec![
+                make_log(11, &int_as_id(1), Operation::Upsert), // shard 0
+                make_log(12, &int_as_id(2), Operation::Upsert), // shard 0
+                make_log(13, &int_as_id(3), Operation::Upsert), // shard 0
+            ]
+            .into(),
+        );
+
+        // Hide the second entry before calling partition
+        wal.set_visibility(vec![true, false, true]);
+
+        let result = partition_logs_to_shard(
+            wal,
+            0,
+            2,
+            &seg.record_segment,
+            &seg.blockfile_provider,
+            seg.bloom_filter_manager.clone(),
+        )
+        .await
+        .expect("Should succeed");
+
+        let visible_ids: Vec<String> = result.iter().map(|(r, _)| r.record.id.clone()).collect();
+        assert_eq!(
+            visible_ids,
+            vec![int_as_id(1), int_as_id(3)],
+            "Pre-hidden entry should remain hidden"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_partition_empty_wal() {
+        let seg = Box::pin(build_two_shard_segment()).await;
+        let wal: Chunk<LogRecord> = Chunk::new(vec![].into());
+
+        let result = partition_logs_to_shard(
+            wal,
+            0,
+            2,
+            &seg.record_segment,
+            &seg.blockfile_provider,
+            seg.bloom_filter_manager.clone(),
+        )
+        .await
+        .expect("Should succeed");
+
+        assert_eq!(result.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_partition_all_new_records_non_active_shard_sees_nothing() {
+        let seg = Box::pin(build_two_shard_segment()).await;
+
+        let wal = Chunk::new(
+            vec![
+                make_log(11, "brand_new_1", Operation::Add),
+                make_log(12, "brand_new_2", Operation::Add),
+            ]
+            .into(),
+        );
+
+        let result = partition_logs_to_shard(
+            wal,
+            0,
+            2,
+            &seg.record_segment,
+            &seg.blockfile_provider,
+            seg.bloom_filter_manager.clone(),
+        )
+        .await
+        .expect("Should succeed");
+
+        assert_eq!(
+            result.len(),
+            0,
+            "Non-active shard should not see new records"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_partition_all_new_records_active_shard_sees_all() {
+        let seg = Box::pin(build_two_shard_segment()).await;
+
+        let wal = Chunk::new(
+            vec![
+                make_log(11, "brand_new_1", Operation::Add),
+                make_log(12, "brand_new_2", Operation::Add),
+            ]
+            .into(),
+        );
+
+        let result = partition_logs_to_shard(
+            wal,
+            1,
+            2,
+            &seg.record_segment,
+            &seg.blockfile_provider,
+            seg.bloom_filter_manager.clone(),
+        )
+        .await
+        .expect("Should succeed");
+
+        let visible_ids: Vec<String> = result.iter().map(|(r, _)| r.record.id.clone()).collect();
+        assert_eq!(visible_ids, vec!["brand_new_1", "brand_new_2"]);
+    }
+
+    #[tokio::test]
+    async fn test_partition_delete_operations_routed_to_correct_shard() {
+        let seg = Box::pin(build_two_shard_segment()).await;
+
+        let wal = Chunk::new(
+            vec![
+                make_log(11, &int_as_id(2), Operation::Delete), // shard 0
+                make_log(12, &int_as_id(7), Operation::Delete), // shard 1
+                make_log(13, &int_as_id(4), Operation::Update), // shard 0
+                make_log(14, &int_as_id(9), Operation::Update), // shard 1
+            ]
+            .into(),
+        );
+
+        // Shard 0 should see its deletes/updates
+        let result0 = partition_logs_to_shard(
+            wal.clone(),
+            0,
+            2,
+            &seg.record_segment,
+            &seg.blockfile_provider,
+            seg.bloom_filter_manager.clone(),
+        )
+        .await
+        .expect("Should succeed");
+        let ids0: Vec<String> = result0.iter().map(|(r, _)| r.record.id.clone()).collect();
+        assert_eq!(ids0, vec![int_as_id(2), int_as_id(4)]);
+
+        // Shard 1 should see its deletes/updates
+        let result1 = partition_logs_to_shard(
+            wal,
+            1,
+            2,
+            &seg.record_segment,
+            &seg.blockfile_provider,
+            seg.bloom_filter_manager.clone(),
+        )
+        .await
+        .expect("Should succeed");
+        let ids1: Vec<String> = result1.iter().map(|(r, _)| r.record.id.clone()).collect();
+        assert_eq!(ids1, vec![int_as_id(7), int_as_id(9)]);
+    }
+
+    #[tokio::test]
+    async fn test_partition_without_bloom_filter_manager() {
+        let seg = Box::pin(build_two_shard_segment()).await;
+
+        let wal = Chunk::new(
+            vec![
+                make_log(11, &int_as_id(1), Operation::Upsert), // shard 0
+                make_log(12, &int_as_id(6), Operation::Upsert), // shard 1
+                make_log(13, "id_new", Operation::Add),         // new
+            ]
+            .into(),
+        );
+
+        // Non-active shard without bloom filter manager
+        let result0 = partition_logs_to_shard(
+            wal.clone(),
+            0,
+            2,
+            &seg.record_segment,
+            &seg.blockfile_provider,
+            None, // no bloom filter manager
+        )
+        .await
+        .expect("Should succeed without bloom filter manager");
+        let ids0: Vec<String> = result0.iter().map(|(r, _)| r.record.id.clone()).collect();
+        assert_eq!(ids0, vec![int_as_id(1)]);
+
+        // Active shard without bloom filter manager
+        let result1 = partition_logs_to_shard(
+            wal,
+            1,
+            2,
+            &seg.record_segment,
+            &seg.blockfile_provider,
+            None,
+        )
+        .await
+        .expect("Should succeed without bloom filter manager");
+        let ids1: Vec<String> = result1.iter().map(|(r, _)| r.record.id.clone()).collect();
+        assert_eq!(ids1, vec![int_as_id(6), "id_new".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_shard_single_shard_segment() {
+        let mut seg = TestDistributedSegment::new().await;
+        let logs = upsert_generator.generate_chunk(1..=5);
+        Box::pin(seg.compact_log(logs, 1)).await;
+
+        let reader = RecordSegmentReader::from_segment(
+            &seg.record_segment,
+            &seg.blockfile_provider,
+            seg.bloom_filter_manager.clone(),
+        )
+        .await
+        .expect("Should create single-shard reader");
+
+        assert_eq!(reader.num_shards(), 1);
+        let opts = RecordSegmentReaderOptions {
+            use_bloom_filter: true,
+        };
+
+        for i in 1..=5 {
+            let result = reader
+                .resolve_shard(&int_as_id(i), &opts)
+                .await
+                .expect("resolve_shard should not error");
+            assert_eq!(result, Some(0), "id {} should be in shard 0", i);
+        }
+
+        let result = reader
+            .resolve_shard("id_nonexistent", &opts)
+            .await
+            .expect("resolve_shard should not error");
+        assert_eq!(result, None);
+    }
+
+    #[tokio::test]
+    async fn test_partition_with_bloom_filter_threshold_exceeded() {
+        let seg = Box::pin(build_two_shard_segment()).await;
+
+        // Build a WAL with > 100 entries (default storage_fetch_threshold)
+        // to trigger bloom filter usage. Mix of shard 0, shard 1, and new IDs.
+        let mut logs = Vec::new();
+        for i in 0..120 {
+            let id = if i < 40 {
+                int_as_id((i % 5) + 1) // shard 0 IDs (1-5), repeated
+            } else if i < 80 {
+                int_as_id((i % 5) + 6) // shard 1 IDs (6-10), repeated
+            } else {
+                format!("new_{}", i)
+            };
+            logs.push(make_log((11 + i) as i64, &id, Operation::Upsert));
+        }
+        let wal = Chunk::new(logs.into());
+
+        // Non-active shard: should only see shard 0 IDs
+        let result0 = partition_logs_to_shard(
+            wal.clone(),
+            0,
+            2,
+            &seg.record_segment,
+            &seg.blockfile_provider,
+            seg.bloom_filter_manager.clone(),
+        )
+        .await
+        .expect("Should succeed");
+
+        for (record, _) in result0.iter() {
+            let id = &record.record.id;
+            assert!(
+                (1..=5).any(|i| *id == int_as_id(i)),
+                "Shard 0 should only contain IDs 1-5, got {}",
+                id
+            );
+        }
+
+        // Active shard: should see shard 1 IDs + new IDs
+        let result1 = partition_logs_to_shard(
+            wal,
+            1,
+            2,
+            &seg.record_segment,
+            &seg.blockfile_provider,
+            seg.bloom_filter_manager.clone(),
+        )
+        .await
+        .expect("Should succeed");
+
+        for (record, _) in result1.iter() {
+            let id = &record.record.id;
+            let is_shard1 = (6..=10).any(|i| *id == int_as_id(i));
+            let is_new = id.starts_with("new_");
+            assert!(
+                is_shard1 || is_new,
+                "Active shard should contain shard 1 IDs or new IDs, got {}",
+                id
+            );
+        }
     }
 }
