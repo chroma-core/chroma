@@ -179,7 +179,7 @@ async fn test_k8s_integration_gcs_cmek_invalid_key_fails() {
 // ============================================================================
 
 #[tokio::test]
-async fn test_s3_basic_operations() {
+async fn test_k8s_integration_s3_basic_operations() {
     let storage = chroma_storage::s3_client_for_test_with_new_bucket().await;
     let prefix = test_prefix("s3-basic");
 
@@ -187,7 +187,7 @@ async fn test_s3_basic_operations() {
 }
 
 #[tokio::test]
-async fn test_s3_multipart_operations() {
+async fn test_k8s_integration_s3_multipart_operations() {
     let storage = chroma_storage::s3_client_for_test_with_new_bucket().await;
     let prefix = test_prefix("s3-multipart");
 
@@ -195,7 +195,7 @@ async fn test_s3_multipart_operations() {
 }
 
 #[tokio::test]
-async fn test_s3_conditional_operations() {
+async fn test_k8s_integration_s3_conditional_operations() {
     let storage = chroma_storage::s3_client_for_test_with_new_bucket().await;
     let prefix = test_prefix("s3-conditional");
 
@@ -207,7 +207,7 @@ async fn test_s3_conditional_operations() {
 // ============================================================================
 
 #[tokio::test]
-async fn test_gcs_ac_basic_operations() {
+async fn test_k8s_integration_gcs_ac_basic_operations() {
     let obj_storage = create_gcs_storage().await;
     let ac_storage = AdmissionControlledS3Storage::new_object_with_default_policy(obj_storage);
     let storage = Storage::AdmissionControlledS3(ac_storage);
@@ -217,7 +217,7 @@ async fn test_gcs_ac_basic_operations() {
 }
 
 #[tokio::test]
-async fn test_gcs_ac_multipart_operations() {
+async fn test_k8s_integration_gcs_ac_multipart_operations() {
     let obj_storage = create_gcs_storage().await;
     let ac_storage = AdmissionControlledS3Storage::new_object_with_default_policy(obj_storage);
     let storage = Storage::AdmissionControlledS3(ac_storage);
@@ -227,7 +227,7 @@ async fn test_gcs_ac_multipart_operations() {
 }
 
 #[tokio::test]
-async fn test_gcs_ac_conditional_operations() {
+async fn test_k8s_integration_gcs_ac_conditional_operations() {
     let obj_storage = create_gcs_storage().await;
     let ac_storage = AdmissionControlledS3Storage::new_object_with_default_policy(obj_storage);
     let storage = Storage::AdmissionControlledS3(ac_storage);
@@ -237,7 +237,7 @@ async fn test_gcs_ac_conditional_operations() {
 }
 
 #[tokio::test]
-async fn test_gcs_ac_cmek_basic_operations() {
+async fn test_k8s_integration_gcs_ac_cmek_basic_operations() {
     let obj_storage = create_gcs_storage().await;
     let ac_storage = AdmissionControlledS3Storage::new_object_with_default_policy(obj_storage);
     let storage = Storage::AdmissionControlledS3(ac_storage);
@@ -247,7 +247,7 @@ async fn test_gcs_ac_cmek_basic_operations() {
 }
 
 #[tokio::test]
-async fn test_gcs_ac_cmek_multipart_operations() {
+async fn test_k8s_integration_gcs_ac_cmek_multipart_operations() {
     let obj_storage = create_gcs_storage().await;
     let ac_storage = AdmissionControlledS3Storage::new_object_with_default_policy(obj_storage);
     let storage = Storage::AdmissionControlledS3(ac_storage);
@@ -257,7 +257,7 @@ async fn test_gcs_ac_cmek_multipart_operations() {
 }
 
 #[tokio::test]
-async fn test_gcs_ac_cmek_invalid_key_fails() {
+async fn test_k8s_integration_gcs_ac_cmek_invalid_key_fails() {
     let obj_storage = create_gcs_storage().await;
     let ac_storage = AdmissionControlledS3Storage::new_object_with_default_policy(obj_storage);
     let storage = Storage::AdmissionControlledS3(ac_storage);
@@ -271,7 +271,7 @@ async fn test_gcs_ac_cmek_invalid_key_fails() {
 // ============================================================================
 
 #[tokio::test]
-async fn test_s3_ac_basic_operations() {
+async fn test_k8s_integration_s3_ac_basic_operations() {
     let base_storage = chroma_storage::s3_client_for_test_with_new_bucket().await;
 
     // Extract S3Storage from Storage enum to wrap in AdmissionControlled
@@ -288,7 +288,7 @@ async fn test_s3_ac_basic_operations() {
 }
 
 #[tokio::test]
-async fn test_s3_ac_multipart_operations() {
+async fn test_k8s_integration_s3_ac_multipart_operations() {
     let base_storage = chroma_storage::s3_client_for_test_with_new_bucket().await;
 
     let s3_storage = match base_storage {
@@ -304,7 +304,7 @@ async fn test_s3_ac_multipart_operations() {
 }
 
 #[tokio::test]
-async fn test_s3_ac_conditional_operations() {
+async fn test_k8s_integration_s3_ac_conditional_operations() {
     let base_storage = chroma_storage::s3_client_for_test_with_new_bucket().await;
 
     let s3_storage = match base_storage {
