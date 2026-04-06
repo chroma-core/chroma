@@ -5214,18 +5214,19 @@ mod tests {
 
     async fn dump_collectible_state(server: &LogServer, db_name: &str) -> String {
         let mut dump = String::new();
-        let need_to_compact_repl = server.need_to_compact_repl.lock();
-        dump.push_str("in-memory need_to_compact_repl:\n");
-        for ((topology, collection_id), rollup) in need_to_compact_repl.iter() {
-            dump.push_str(&format!(
-                "  topology={topology} collection_id={collection_id} start={} limit={} reinsert_count={} initial_insertion_epoch_us={}\n",
-                rollup.start_log_position.offset(),
-                rollup.limit_log_position.offset(),
-                rollup.reinsert_count,
-                rollup.initial_insertion_epoch_us,
-            ));
+        {
+            let need_to_compact_repl = server.need_to_compact_repl.lock();
+            dump.push_str("in-memory need_to_compact_repl:\n");
+            for ((topology, collection_id), rollup) in need_to_compact_repl.iter() {
+                dump.push_str(&format!(
+                    "  topology={topology} collection_id={collection_id} start={} limit={} reinsert_count={} initial_insertion_epoch_us={}\n",
+                    rollup.start_log_position.offset(),
+                    rollup.limit_log_position.offset(),
+                    rollup.reinsert_count,
+                    rollup.initial_insertion_epoch_us,
+                ));
+            }
         }
-        drop(need_to_compact_repl);
 
         let Some(topology_name) = DatabaseName::new(db_name)
             .and_then(|db| db.topology())
