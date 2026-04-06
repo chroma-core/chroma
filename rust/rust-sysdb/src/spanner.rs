@@ -11,6 +11,7 @@ use std::time::Duration;
 #[cfg(test)]
 use serial_test::serial;
 
+use backon::{ConstantBuilder, Retryable};
 use chroma_config::spanner::{SpannerChannelConfig, SpannerSessionPoolConfig};
 use chroma_config::{registry::Registry, Configurable, ADMIN_RPC_TIMEOUT_SECS};
 use chroma_error::{ChromaError, ErrorCodes};
@@ -1851,100 +1852,130 @@ impl SpannerBackend {
         };
 
         let region = self.local_region();
+        let num_active_versions = new_version_file
+            .version_history
+            .as_ref()
+            .map_or(0, |vh| vh.versions.len() as i32);
+        let backoff = ConstantBuilder::default()
+            .with_delay(Duration::from_millis(100))
+            .with_max_times(4);
 
-        let result = self
-        .client
-        .read_write_transaction::<(), SysDbError, _>(|tx| {
+        let result = (|| {
             let collection_id = collection_id.clone();
             let tenant_id = tenant_id.clone();
-            let total_records_post_compaction = req.total_records_post_compaction;
-            let size_bytes_post_compaction = req.size_bytes_post_compaction;
             let schema_str = req.schema_str.clone();
             let region = region.clone();
-            let log_position = req.log_position;
-            let num_active_versions = new_version_file
-                .version_history
-                .as_ref()
-                .map_or(0, |vh| vh.versions.len() as i32);
             let version_file_path = version_file_path.clone();
-            let db = self.clone();
             let flush_segment_compaction_infos = flush_segment_compaction_infos.clone();
-
             let old_version_file_name = old_version_file_name.clone();
-            Box::pin({
-                async move {
-                    // Update tenant's last compaction time first (before collection update)
-                    // This mimics Go's UpdateTenantLastCompactionTime
-                    let update_tenant_req = UpdateTenantRequest {
-                        tenant_id: tenant_id.clone(),
-                        last_compaction_time: latest_version_ts,
-                    };
-                    db.update_tenant(tx, update_tenant_req).await?;
+            let db = self.clone();
 
-                    let update_segment_req = UpdateSegmentRequest {
-                        collection_id: collection_id_uuid,
-                        flush_segment_compactions: flush_segment_compaction_infos.clone(),
-                    };
-                    db.update_segments(tx, update_segment_req).await?;
+            async move {
+                db.client
+                    .read_write_transaction::<(), SysDbError, _>(|tx| {
+                        let collection_id = collection_id.clone();
+                        let tenant_id = tenant_id.clone();
+                        let schema_str = schema_str.clone();
+                        let region = region.clone();
+                        let version_file_path = version_file_path.clone();
+                        let flush_segment_compaction_infos =
+                            flush_segment_compaction_infos.clone();
+                        let old_version_file_name = old_version_file_name.clone();
+                        let db = db.clone();
+                        let log_position = req.log_position;
+                        let total_records_post_compaction = req.total_records_post_compaction;
+                        let size_bytes_post_compaction = req.size_bytes_post_compaction;
 
-                    // Update collection with compaction results using CAS operation
-                    // This mimics Go's UpdateLogPositionAndVersionInfo with CAS semantics
-                    // TODO Need to see if updated_at time should be the commit timestamp o the versionfile updated_at timestamp
-                    // In go they're the same
-                    let mut update_stmt = Statement::new(
-                        "UPDATE collection_compaction_cursors SET
-                            last_compacted_offset = @log_position,
-                            version = @new_version,
-                            version_file_name = @version_file_name,
-                            total_records_post_compaction = @total_records_post_compaction,
-                            size_bytes_post_compaction = @size_bytes_post_compaction,
-                            last_compaction_time_secs = TIMESTAMP_SECONDS(@last_compaction_time_ts),
-                            updated_at = PENDING_COMMIT_TIMESTAMP(),
-                            num_versions = @num_active_versions,
-                            compaction_failure_count = 0,
-                            index_schema = COALESCE(PARSE_JSON(@schema_str), index_schema)
-                            WHERE collection_id = @collection_id AND (version = @current_version OR version IS NULL) AND region = @region AND (version_file_name = @old_version_file_name OR version_file_name IS NULL)",
-                    );
-                    update_stmt.add_param("collection_id", &collection_id);
-                    update_stmt.add_param("new_version", &(new_version as i64));
-                    update_stmt.add_param("log_position", &log_position);
-                    update_stmt.add_param(
-                        "total_records_post_compaction",
-                        &(total_records_post_compaction as i64),
-                    );
-                    update_stmt.add_param(
-                        "size_bytes_post_compaction",
-                        &(size_bytes_post_compaction as i64),
-                    );
-                    update_stmt.add_param("last_compaction_time_ts", &latest_version_ts);
-                    update_stmt.add_param("current_version", &(existing_version as i64));
-                    update_stmt
-                        .add_param("num_active_versions", &(num_active_versions as i64));
-                    update_stmt.add_param("version_file_name", &version_file_path);
-                    update_stmt.add_param("schema_str", &schema_str);
-                    update_stmt.add_param("region", &region.to_string());
-                    update_stmt.add_param("old_version_file_name", &old_version_file_name);
-                    let rows_affected = tx
-                        .update(update_stmt)
-                        .instrument(tracing::info_span!(
-                            "flush_compaction update query",
-                            collection_id = %collection_id,
-                            version_file_path = %version_file_path,
-                            region = %region,
-                        ))
-                        .await?;
+                        Box::pin({
+                            async move {
+                                // Update tenant's last compaction time first (before collection update)
+                                // This mimics Go's UpdateTenantLastCompactionTime
+                                let update_tenant_req = UpdateTenantRequest {
+                                    tenant_id: tenant_id.clone(),
+                                    last_compaction_time: latest_version_ts,
+                                };
+                                db.update_tenant(tx, update_tenant_req).await?;
 
-                    if rows_affected == 0 {
-                        // CAS operation failed - collection was updated by another transaction
-                        // This invokes a retry if this transaction in the Go code but that's
-                        // unnecessary here. If you failed to update the collection cursor
-                        // at the right version, your compaction should fail.
-                        return Err(SysDbError::CollectionEntryIsStale);
-                    }
+                                let update_segment_req = UpdateSegmentRequest {
+                                    collection_id: collection_id_uuid,
+                                    flush_segment_compactions: flush_segment_compaction_infos
+                                        .clone(),
+                                };
+                                db.update_segments(tx, update_segment_req).await?;
 
-                    Ok(())
-                }
-            })
+                                // Update collection with compaction results using CAS operation
+                                // This mimics Go's UpdateLogPositionAndVersionInfo with CAS semantics
+                                // TODO Need to see if updated_at time should be the commit timestamp o the versionfile updated_at timestamp
+                                // In go they're the same
+                                let mut update_stmt = Statement::new(
+                                    "UPDATE collection_compaction_cursors SET
+                                        last_compacted_offset = @log_position,
+                                        version = @new_version,
+                                        version_file_name = @version_file_name,
+                                        total_records_post_compaction = @total_records_post_compaction,
+                                        size_bytes_post_compaction = @size_bytes_post_compaction,
+                                        last_compaction_time_secs = TIMESTAMP_SECONDS(@last_compaction_time_ts),
+                                        updated_at = PENDING_COMMIT_TIMESTAMP(),
+                                        num_versions = @num_active_versions,
+                                        compaction_failure_count = 0,
+                                        index_schema = COALESCE(PARSE_JSON(@schema_str), index_schema)
+                                        WHERE collection_id = @collection_id AND (version = @current_version OR version IS NULL) AND region = @region AND (version_file_name = @old_version_file_name OR version_file_name IS NULL)",
+                                );
+                                update_stmt.add_param("collection_id", &collection_id);
+                                update_stmt.add_param("new_version", &(new_version as i64));
+                                update_stmt.add_param("log_position", &log_position);
+                                update_stmt.add_param(
+                                    "total_records_post_compaction",
+                                    &(total_records_post_compaction as i64),
+                                );
+                                update_stmt.add_param(
+                                    "size_bytes_post_compaction",
+                                    &(size_bytes_post_compaction as i64),
+                                );
+                                update_stmt
+                                    .add_param("last_compaction_time_ts", &latest_version_ts);
+                                update_stmt.add_param("current_version", &(existing_version as i64));
+                                update_stmt
+                                    .add_param("num_active_versions", &(num_active_versions as i64));
+                                update_stmt.add_param("version_file_name", &version_file_path);
+                                update_stmt.add_param("schema_str", &schema_str);
+                                update_stmt.add_param("region", &region.to_string());
+                                update_stmt
+                                    .add_param("old_version_file_name", &old_version_file_name);
+                                let rows_affected = tx
+                                    .update(update_stmt)
+                                    .instrument(tracing::info_span!(
+                                        "flush_compaction update query",
+                                        collection_id = %collection_id,
+                                        version_file_path = %version_file_path,
+                                        region = %region,
+                                    ))
+                                    .await?;
+
+                                if rows_affected == 0 {
+                                    // CAS operation failed - collection was updated by another transaction
+                                    // This invokes a retry if this transaction in the Go code but that's
+                                    // unnecessary here. If you failed to update the collection cursor
+                                    // at the right version, your compaction should fail.
+                                    return Err(SysDbError::CollectionEntryIsStale);
+                                }
+
+                                Ok(())
+                            }
+                        })
+                    })
+                    .await
+            }
+        })
+        .retry(backoff)
+        .when(|e: &SysDbError| e.is_spanner_aborted())
+        .notify(|e: &SysDbError, dur| {
+            tracing::warn!(
+                collection_id = %collection_id,
+                delay_ms = dur.as_millis(),
+                error = %e,
+                "Spanner aborted flush collection compaction transaction; retrying"
+            );
         })
         .await;
 

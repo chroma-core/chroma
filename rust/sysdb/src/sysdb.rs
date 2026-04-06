@@ -2570,13 +2570,7 @@ pub enum FlushCompactionError {
 impl ChromaError for FlushCompactionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            FlushCompactionError::FailedToFlushCompaction(status) => {
-                if status.code() == Code::FailedPrecondition {
-                    ErrorCodes::FailedPrecondition
-                } else {
-                    ErrorCodes::Internal
-                }
-            }
+            FlushCompactionError::FailedToFlushCompaction(status) => status.code().into(),
             FlushCompactionError::SegmentFlushInfoConversionError(_) => ErrorCodes::Internal,
             FlushCompactionError::CollectionFlushInfoConversionError(_) => ErrorCodes::Internal,
             FlushCompactionError::FlushCompactionResponseConversionError(_) => ErrorCodes::Internal,
@@ -2874,6 +2868,13 @@ mod tests {
         let fce = FlushCompactionError::FailedToFlushCompaction(Status::failed_precondition(
             "collection soft deleted",
         ));
+        assert!(!fce.should_trace_error());
+    }
+
+    #[test]
+    fn flush_compaction_error_preserves_aborted_code() {
+        let fce = FlushCompactionError::FailedToFlushCompaction(Status::aborted("retryable"));
+        assert_eq!(fce.code(), ErrorCodes::Aborted);
         assert!(!fce.should_trace_error());
     }
 
