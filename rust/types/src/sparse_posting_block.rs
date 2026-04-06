@@ -144,9 +144,7 @@ pub struct SparsePostingBlock {
 
 impl SparsePostingBlock {
     /// Build a block from pre-sorted `(offset, value)` pairs.
-    pub fn from_sorted_entries(
-        entries: &[(u32, f32)],
-    ) -> Result<Self, SparsePostingBlockError> {
+    pub fn from_sorted_entries(entries: &[(u32, f32)]) -> Result<Self, SparsePostingBlockError> {
         if entries.is_empty() {
             return Err(SparsePostingBlockError::EmptyEntries);
         }
@@ -175,9 +173,8 @@ impl SparsePostingBlock {
         for g in 0..full_groups {
             let start = g * BITPACK_GROUP_SIZE;
             let initial = if g == 0 { 0 } else { relative[start - 1] };
-            max_bits = max_bits.max(
-                packer.num_bits_sorted(initial, &relative[start..start + BITPACK_GROUP_SIZE]),
-            );
+            max_bits = max_bits
+                .max(packer.num_bits_sorted(initial, &relative[start..start + BITPACK_GROUP_SIZE]));
         }
 
         Ok(SparsePostingBlock {
@@ -503,10 +500,7 @@ impl DirectoryBlock {
     ///
     /// - `max_offsets[i]`: largest doc offset in posting block `i`
     /// - `max_weights[i]`: largest weight in posting block `i`
-    pub fn new(
-        max_offsets: &[u32],
-        max_weights: &[f32],
-    ) -> Result<Self, SparsePostingBlockError> {
+    pub fn new(max_offsets: &[u32], max_weights: &[f32]) -> Result<Self, SparsePostingBlockError> {
         if max_offsets.len() != max_weights.len() {
             return Err(SparsePostingBlockError::MismatchedLengths {
                 offsets: max_offsets.len(),
@@ -909,9 +903,7 @@ mod tests {
 
     #[test]
     fn from_sorted_entries_at_max_succeeds() {
-        let entries: Vec<(u32, f32)> = (0..MAX_BLOCK_ENTRIES)
-            .map(|i| (i as u32, 0.5))
-            .collect();
+        let entries: Vec<(u32, f32)> = (0..MAX_BLOCK_ENTRIES).map(|i| (i as u32, 0.5)).collect();
         let block = SparsePostingBlock::from_sorted_entries(&entries).unwrap();
         assert_eq!(block.len(), MAX_BLOCK_ENTRIES);
     }
@@ -957,9 +949,7 @@ mod tests {
     #[test]
     fn roundtrip_high_offsets() {
         let base = u32::MAX - 1000;
-        let entries: Vec<(u32, f32)> = (0..10)
-            .map(|i| (base + i * 100, 0.5))
-            .collect();
+        let entries: Vec<(u32, f32)> = (0..10).map(|i| (base + i * 100, 0.5)).collect();
         assert_roundtrip_offsets(&entries);
         assert_roundtrip_values(&entries);
     }
@@ -1009,9 +999,7 @@ mod tests {
 
     #[test]
     fn raw_weight_bytes_content_correct() {
-        let entries: Vec<(u32, f32)> = (0..5)
-            .map(|i| (i * 10, 0.1 * (i as f32 + 1.0)))
-            .collect();
+        let entries: Vec<(u32, f32)> = (0..5).map(|i| (i * 10, 0.1 * (i as f32 + 1.0))).collect();
         let block = make_block(&entries);
         let bytes = block.serialize();
         let hdr = SparsePostingBlock::peek_header(&bytes);
@@ -1176,9 +1164,7 @@ mod proptests {
     use super::*;
     use proptest::prelude::*;
 
-    fn arb_entries(
-        max_count: usize,
-    ) -> impl Strategy<Value = Vec<(u32, f32)>> {
+    fn arb_entries(max_count: usize) -> impl Strategy<Value = Vec<(u32, f32)>> {
         (1..=max_count)
             .prop_flat_map(|n| {
                 (
