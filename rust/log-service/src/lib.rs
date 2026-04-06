@@ -3687,6 +3687,7 @@ mod tests {
     use google_cloud_googleapis::spanner::admin::database::v1::DropDatabaseRequest;
     use google_cloud_spanner::admin::client::Client as AdminClient;
     use google_cloud_spanner::admin::AdminClientConfig;
+    use google_cloud_spanner::statement::Statement;
     use opentelemetry::global::meter;
     use proptest::prelude::*;
     use tokio::{runtime::Runtime, sync::mpsc::unbounded_channel, time::sleep};
@@ -5177,7 +5178,7 @@ mod tests {
 
     async fn validate_dirty_log_on_server(
         server: &LogServer,
-        _db_name: &str,
+        db_name: &str,
         collection_ids: &[CollectionUuid],
     ) {
         server
@@ -5203,7 +5204,129 @@ mod tests {
                 CollectionUuid::from_str(&info.collection_id)
                     .expect("Collection Uuid should be valid")
             }));
-        assert_eq!(got_collection_ids, expected_collection_ids);
+        if got_collection_ids != expected_collection_ids {
+            let debug_dump = dump_collectible_state(server, db_name).await;
+            panic!(
+                "dirty collection mismatch\nexpected: {expected_collection_ids:?}\ngot: {got_collection_ids:?}\ndirty_collections: {dirty_collections:#?}\n{debug_dump}"
+            );
+        }
+    }
+
+    async fn dump_collectible_state(server: &LogServer, db_name: &str) -> String {
+        let mut dump = String::new();
+        let need_to_compact_repl = server.need_to_compact_repl.lock();
+        dump.push_str("in-memory need_to_compact_repl:\n");
+        for ((topology, collection_id), rollup) in need_to_compact_repl.iter() {
+            dump.push_str(&format!(
+                "  topology={topology} collection_id={collection_id} start={} limit={} reinsert_count={} initial_insertion_epoch_us={}\n",
+                rollup.start_log_position.offset(),
+                rollup.limit_log_position.offset(),
+                rollup.reinsert_count,
+                rollup.initial_insertion_epoch_us,
+            ));
+        }
+        drop(need_to_compact_repl);
+
+        let Some(topology_name) = DatabaseName::new(db_name)
+            .and_then(|db| db.topology())
+            .and_then(|topology| TopologyName::new(topology).ok())
+        else {
+            return dump;
+        };
+        let Some((_regions, topology)) = server.storages.lookup_topology(&topology_name) else {
+            dump.push_str(&format!("missing topology {topology_name}\n"));
+            return dump;
+        };
+        let preferred_region = server.storages.preferred.as_str().to_string();
+        match ReplManifestManager::get_dirty_logs(
+            &topology.config.spanner,
+            preferred_region.as_str(),
+            server.config.record_count_threshold,
+            server.config.timeout_us,
+        )
+        .await
+        {
+            Ok(dirty_logs) => {
+                dump.push_str("spanner get_dirty_logs:\n");
+                for (log_id, compaction_offset, enumeration_offset, updated_at) in dirty_logs {
+                    let updated_at_us = updated_at
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .map(|d| d.as_micros())
+                        .unwrap_or(0);
+                    dump.push_str(&format!(
+                        "  log_id={log_id} compaction_offset={} enumeration_offset={} updated_at_us={updated_at_us}\n",
+                        compaction_offset.offset(),
+                        enumeration_offset.offset(),
+                    ));
+                }
+            }
+            Err(err) => {
+                dump.push_str(&format!("spanner get_dirty_logs failed: {err}\n"));
+            }
+        }
+
+        let mut stmt = Statement::new(
+            "
+            SELECT manifests.log_id, manifests.enumeration_offset, manifests.ignore_dirty,
+                UNIX_MICROS(COALESCE(manifests.updated_at, TIMESTAMP_SECONDS(0))) AS updated_at_us,
+                manifest_regions.region, manifest_regions.initial_offset, manifest_regions.intrinsic_cursor
+            FROM manifests
+                INNER JOIN manifest_regions
+                ON manifests.log_id = manifest_regions.log_id
+            ORDER BY manifests.log_id, manifest_regions.region
+            ",
+        );
+        let mut tx = match topology.config.spanner.read_only_transaction().await {
+            Ok(tx) => tx,
+            Err(err) => {
+                dump.push_str(&format!("spanner read_only_transaction failed: {err}\n"));
+                return dump;
+            }
+        };
+        let mut reader = match tx.query(stmt).await {
+            Ok(reader) => reader,
+            Err(err) => {
+                dump.push_str(&format!("spanner manifests query failed: {err}\n"));
+                return dump;
+            }
+        };
+        dump.push_str("spanner manifests/manifest_regions rows:\n");
+        while let Ok(Some(row)) = reader.next().await {
+            let log_id = row.column_by_name::<String>("log_id");
+            let enumeration_offset = row.column_by_name::<i64>("enumeration_offset");
+            let ignore_dirty = row.column_by_name::<bool>("ignore_dirty");
+            let updated_at_us = row.column_by_name::<i64>("updated_at_us");
+            let region = row.column_by_name::<String>("region");
+            let initial_offset = row.column_by_name::<Option<i64>>("initial_offset");
+            let intrinsic_cursor = row.column_by_name::<Option<i64>>("intrinsic_cursor");
+            match (
+                log_id,
+                enumeration_offset,
+                ignore_dirty,
+                updated_at_us,
+                region,
+                initial_offset,
+                intrinsic_cursor,
+            ) {
+                (
+                    Ok(log_id),
+                    Ok(enumeration_offset),
+                    Ok(ignore_dirty),
+                    Ok(updated_at_us),
+                    Ok(region),
+                    Ok(initial_offset),
+                    Ok(intrinsic_cursor),
+                ) => {
+                    dump.push_str(&format!(
+                        "  log_id={log_id} region={region} enumeration_offset={enumeration_offset} initial_offset={initial_offset:?} intrinsic_cursor={intrinsic_cursor:?} ignore_dirty={ignore_dirty} updated_at_us={updated_at_us}\n"
+                    ));
+                }
+                row_err => {
+                    dump.push_str(&format!("  failed to decode row: {row_err:?}\n"));
+                }
+            }
+        }
+        dump
     }
 
     #[async_trait::async_trait]
@@ -5479,6 +5602,17 @@ mod tests {
             }
             dtor.await;
         });
+    }
+
+    fn test_operation_record(id: impl Into<String>) -> OperationRecord {
+        OperationRecord {
+            id: id.into(),
+            embedding: Some(vec![1.0, 2.0, 3.0]),
+            encoding: None,
+            metadata: None,
+            document: None,
+            operation: Operation::Add,
+        }
     }
 
     fn test_fork_logs(
@@ -6259,6 +6393,42 @@ mod tests {
             .join()
             .expect("Spawned thread should not fail to join");
         }
+    }
+
+    #[test]
+    fn test_k8s_mcmr_integration_rust_log_service_dirty_logs_single_add_regression() {
+        std::thread::Builder::new()
+            .stack_size(1 << 22)
+            .spawn(move || {
+                test_dirty_logs(
+                    &format!("{TEST_TOPOLOGY_NAME}+dbname"),
+                    vec![(0, test_operation_record("single-add"))],
+                    mcmr_setup_log_server,
+                )
+            })
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
+    }
+
+    #[test]
+    fn test_k8s_mcmr_integration_rust_log_service_dirty_logs_three_adds_regression() {
+        std::thread::Builder::new()
+            .stack_size(1 << 22)
+            .spawn(move || {
+                test_dirty_logs(
+                    &format!("{TEST_TOPOLOGY_NAME}+dbname"),
+                    vec![
+                        (2, test_operation_record("third-add")),
+                        (0, test_operation_record("first-add")),
+                        (1, test_operation_record("second-add")),
+                    ],
+                    mcmr_setup_log_server,
+                )
+            })
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
     }
 
     proptest! {
