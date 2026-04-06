@@ -59,11 +59,15 @@ pub struct QuantizedSpannKnnOrchestrator {
     // Bloom filter manager
     bloom_filter_manager: Option<BloomFilterManager>,
 
+    // Sharding
+    shard_index: u32,
+
     // Result channel.
     result_channel: Option<Sender<Result<Vec<RecordMeasure>, KnnError>>>,
 }
 
 impl QuantizedSpannKnnOrchestrator {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         spann_provider: SpannProvider,
         dispatcher: ComponentHandle<Dispatcher>,
@@ -72,6 +76,7 @@ impl QuantizedSpannKnnOrchestrator {
         knn_filter_output: KnnFilterOutput,
         knn: Knn,
         bloom_filter_manager: Option<BloomFilterManager>,
+        shard_index: u32,
     ) -> Self {
         Self {
             collection_and_segments,
@@ -85,6 +90,7 @@ impl QuantizedSpannKnnOrchestrator {
             num_bruteforces: None,
             log_and_bruteforce_results: Vec::new(),
             bloom_filter_manager,
+            shard_index,
             result_channel: None,
         }
     }
@@ -137,6 +143,7 @@ impl Orchestrator for QuantizedSpannKnnOrchestrator {
                 log_offset_ids: self.knn_filter_output.filter_output.log_offset_ids.clone(),
                 distance_function: self.knn_filter_output.distance_function.clone(),
                 bloom_filter_manager: self.bloom_filter_manager.clone(),
+                shard_index: self.shard_index,
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -157,6 +164,7 @@ impl Orchestrator for QuantizedSpannKnnOrchestrator {
                     collection: self.collection_and_segments.collection.clone(),
                     spann_provider: self.spann_provider.clone(),
                     vector_segment: self.collection_and_segments.vector_segment.clone(),
+                    shard_index: self.shard_index,
                 }),
                 (),
                 ctx.receiver(),

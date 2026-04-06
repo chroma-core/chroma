@@ -88,6 +88,7 @@ fn bench_filter(criterion: &mut Criterion) {
             metadata_segment: test_segment.metadata_segment,
             record_segment: test_segment.record_segment,
             bloom_filter_manager: None,
+            shard_index: 0,
         };
 
         for (op, where_clause) in baseline_where_clauses() {

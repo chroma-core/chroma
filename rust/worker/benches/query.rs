@@ -107,6 +107,7 @@ fn knn(
             fetch: Sift1MData::k() as u32,
         },
         None,
+        0,
     )
 }
 

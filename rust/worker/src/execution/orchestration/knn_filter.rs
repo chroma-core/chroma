@@ -25,6 +25,9 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 use crate::execution::operators::{
     fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
     filter::{FilterError, FilterInput, FilterOutput},
+    filter_logs_for_shard::{
+        FilterLogsForShardError, FilterLogsForShardOperator, FilterLogsForShardOutput,
+    },
     knn_hnsw::KnnHnswError,
     knn_log::KnnLogError,
     knn_merge::KnnMergeError,
@@ -91,6 +94,8 @@ pub enum KnnError {
     InvalidSchema(#[from] SchemaError),
     #[error(transparent)]
     SegmentShard(#[from] SegmentShardError),
+    #[error("Error partitioning logs to shard: {0}")]
+    FilterLogsForShard(#[from] FilterLogsForShardError),
 }
 
 impl ChromaError for KnnError {
@@ -120,6 +125,7 @@ impl ChromaError for KnnError {
             KnnError::SpannSegmentReaderShardCreationError(e) => e.code(),
             KnnError::InvalidSchema(e) => e.code(),
             KnnError::SegmentShard(e) => e.code(),
+            KnnError::FilterLogsForShard(e) => e.code(),
         }
     }
 }
@@ -207,10 +213,8 @@ pub struct KnnFilterOrchestrator {
     // Bloom filter manager
     bloom_filter_manager: Option<BloomFilterManager>,
 
-    // Sharding (used once mask_logs_for_shard is wired)
-    #[allow(dead_code)]
+    // Sharding
     shard_index: u32,
-    #[allow(dead_code)]
     num_shards: u32,
 
     // Result channel
@@ -263,6 +267,7 @@ impl KnnFilterOrchestrator {
                 metadata_segment: self.collection_and_segments.metadata_segment.clone(),
                 record_segment: self.collection_and_segments.record_segment.clone(),
                 bloom_filter_manager: self.bloom_filter_manager.clone(),
+                shard_index: self.shard_index,
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -398,9 +403,41 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for KnnFilterOrchestrato
             None => return,
         };
 
-        self.fetched_logs = Some(output.clone());
+        let task = wrap(
+            Box::new(FilterLogsForShardOperator {
+                shard_index: self.shard_index,
+                num_shards: self.num_shards,
+                record_segment: self.collection_and_segments.record_segment.clone(),
+                blockfile_provider: self.blockfile_provider.clone(),
+                bloom_filter_manager: self.bloom_filter_manager.clone(),
+            }),
+            output,
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
+        self.send(task, ctx, Some(Span::current())).await;
+    }
+}
 
-        let task = self.create_filter_task(output, ctx);
+#[async_trait]
+impl Handler<TaskResult<FilterLogsForShardOutput, FilterLogsForShardError>>
+    for KnnFilterOrchestrator
+{
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<FilterLogsForShardOutput, FilterLogsForShardError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let partitioned = match self.ok_or_terminate(message.into_inner(), ctx).await {
+            Some(output) => output,
+            None => return,
+        };
+
+        self.fetched_logs = Some(partitioned.clone());
+
+        let task = self.create_filter_task(partitioned, ctx);
         self.send(task, ctx, Some(Span::current())).await;
     }
 }

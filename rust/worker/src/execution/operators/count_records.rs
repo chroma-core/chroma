@@ -27,6 +27,7 @@ pub(crate) struct CountRecordsInput {
     blockfile_provider: BlockfileProvider,
     log_records: Chunk<LogRecord>,
     bloom_filter_manager: Option<BloomFilterManager>,
+    shard_index: u32,
 }
 
 impl CountRecordsInput {
@@ -35,12 +36,14 @@ impl CountRecordsInput {
         blockfile_provider: BlockfileProvider,
         log_records: Chunk<LogRecord>,
         bloom_filter_manager: Option<BloomFilterManager>,
+        shard_index: u32,
     ) -> Self {
         Self {
             record_segment_definition,
             blockfile_provider,
             log_records,
             bloom_filter_manager,
+            shard_index,
         }
     }
 }
@@ -82,7 +85,8 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
         &self,
         input: &CountRecordsInput,
     ) -> Result<CountRecordsOutput, CountRecordsError> {
-        let record_segment_shard = SegmentShard::try_from((&input.record_segment_definition, 0))?;
+        let record_segment_shard =
+            SegmentShard::try_from((&input.record_segment_definition, input.shard_index))?;
         let segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment_shard,
             &input.blockfile_provider,
@@ -399,6 +403,7 @@ mod tests {
             blockfile_provider: in_memory_provider,
             log_records: data,
             bloom_filter_manager: None,
+            shard_index: 0,
         };
         let operator = CountRecordsOperator {};
         let count = operator
@@ -486,6 +491,7 @@ mod tests {
             blockfile_provider: in_memory_provider,
             log_records: data,
             bloom_filter_manager: None,
+            shard_index: 0,
         };
         let operator = CountRecordsOperator {};
         let count = operator

@@ -27,6 +27,7 @@ pub struct SparseLogKnnInput {
     pub mask: SignedRoaringBitmap,
     pub record_segment: Segment,
     pub bloom_filter_manager: Option<BloomFilterManager>,
+    pub shard_index: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -70,7 +71,8 @@ impl Operator<SparseLogKnnInput, SparseLogKnnOutput> for SparseLogKnn {
         input: &SparseLogKnnInput,
     ) -> Result<SparseLogKnnOutput, SparseLogKnnError> {
         let query_sparse_vector: CsVec<f32> = (&self.query).into();
-        let record_segment_shard = SegmentShard::try_from((&input.record_segment, 0))?;
+        let record_segment_shard =
+            SegmentShard::try_from((&input.record_segment, input.shard_index))?;
         let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment_shard,
             &input.blockfile_provider,
@@ -204,6 +206,7 @@ mod tests {
             record_segment: test_segment.record_segment.clone(),
             mask,
             bloom_filter_manager: None,
+            shard_index: 0,
         };
 
         (test_segment, input)
