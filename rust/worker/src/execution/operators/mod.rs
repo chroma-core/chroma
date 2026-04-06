@@ -15,6 +15,7 @@ pub(super) mod spann_centers_search;
 pub(super) mod spann_fetch_pl;
 
 pub mod filter;
+pub mod filter_logs_for_shard;
 pub mod idf;
 pub mod knn_hnsw;
 pub mod knn_log;
@@ -32,7 +33,6 @@ pub mod quantized_spann_load_cluster;
 pub mod rank;
 pub mod ranked_group_by;
 pub mod repair_log_offsets;
-pub mod filter_logs_for_shard;
 pub mod select;
 pub mod source_record_segment;
 pub mod source_record_segment_v2;

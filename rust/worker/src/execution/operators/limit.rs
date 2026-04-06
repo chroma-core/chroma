@@ -194,7 +194,8 @@ impl Operator<LimitInput, LimitOutput> for Limit {
     type Error = LimitError;
 
     async fn run(&self, input: &LimitInput) -> Result<LimitOutput, LimitError> {
-        let record_segment_shard = SegmentShard::try_from((&input.record_segment, input.shard_index))?;
+        let record_segment_shard =
+            SegmentShard::try_from((&input.record_segment, input.shard_index))?;
         let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment_shard,
             &input.blockfile_provider,
