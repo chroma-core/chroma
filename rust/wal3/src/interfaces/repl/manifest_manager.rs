@@ -1796,7 +1796,8 @@ mod tests {
         .expect("init failed");
 
         for region in ["region-a", "region-b"] {
-            let manager = ManifestManager::new(Arc::new(client.clone()), region.to_string(), log_id);
+            let manager =
+                ManifestManager::new(Arc::new(client.clone()), region.to_string(), log_id);
             let intrinsic_cursor = ManifestPublisher::load_intrinsic_cursor(&manager)
                 .await
                 .expect("load_intrinsic_cursor failed");
