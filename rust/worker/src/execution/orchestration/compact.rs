@@ -1107,6 +1107,7 @@ mod tests {
             database_name: chroma_types::DatabaseName::new("test_db").unwrap(),
             fetch_log_concurrency: 10,
             fragment_fetcher: None,
+            log_upper_bound_offset: 0,
         };
 
         let filter = Filter {
@@ -1280,6 +1281,7 @@ mod tests {
             database_name: database_name.clone(),
             fetch_log_concurrency: 10,
             fragment_fetcher: None,
+            log_upper_bound_offset: 0,
         };
 
         let limit = Limit {
@@ -1370,6 +1372,7 @@ mod tests {
             database_name: database_name.clone(),
             fetch_log_concurrency: 10,
             fragment_fetcher: None,
+            log_upper_bound_offset: 0,
         };
 
         // Query again to verify FTS still works after rebuild
@@ -1517,6 +1520,7 @@ mod tests {
             database_name: chroma_types::DatabaseName::new("test_db").unwrap(),
             fetch_log_concurrency: 10,
             fragment_fetcher: None,
+            log_upper_bound_offset: 0,
         };
         let filter = Filter {
             query_ids: None,
