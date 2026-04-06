@@ -6,13 +6,13 @@ use crate::{
     arrow::types::ArrowWriteableKey,
     key::{CompositeKey, KeyWrapper},
 };
-use chroma_types::SparsePostingBlock;
 use arrow::{
     array::{
         Array, ArrayRef, BooleanBuilder, Float32Builder, RecordBatch, StringBuilder, UInt32Builder,
     },
     datatypes::Field,
 };
+use chroma_types::SparsePostingBlock;
 use roaring::RoaringBitmap;
 use std::{
     collections::HashMap,
@@ -49,9 +49,7 @@ impl Debug for BlockStorage {
             BlockStorage::SpannPostingListDelta(_) => {
                 f.debug_struct("SpannPostingListDelta").finish()
             }
-            BlockStorage::SparsePostingBlock(_) => {
-                f.debug_struct("SparsePostingBlock").finish()
-            }
+            BlockStorage::SparsePostingBlock(_) => f.debug_struct("SparsePostingBlock").finish(),
         }
     }
 }
