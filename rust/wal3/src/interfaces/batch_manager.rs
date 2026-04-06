@@ -396,7 +396,7 @@ pub async fn upload_parquet(
         put_options = put_options.with_cmek(cmek);
     }
     loop {
-        tracing::info!("upload_parquet: {:?} with {} bytes", path, buffer.len());
+        tracing::info!(path = %path, bytes_uploaded = %buffer.len(), num_records = %messages.len(), "upload_parquet");
         // NOTE(rescrv):  This match block has been thoroughly reasoned through within the
         // `bootstrap` call above.  Don't change the error handling here without re-reasoning
         // there.
