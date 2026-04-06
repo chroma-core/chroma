@@ -99,12 +99,15 @@ impl ApplyLogToSegmentWriterOperator {
         input: &ApplyLogToSegmentWriterInput<'_>,
     ) -> Result<(), ApplyLogToSegmentWriterOperatorError> {
         if let Some(poison_offset) = input.poison_offset {
-            for shard in &input.materialized_logs.shards {
-                for record in shard.iter() {
-                    if record.get_offset_id() == poison_offset {
-                        return Err(ApplyLogToSegmentWriterOperatorError::PoisonOffsetFound);
-                    }
-                }
+            // Need to iterate over each shard, then each record in the shard
+            let found_poison = input.materialized_logs.iter().any(|shard| {
+                shard
+                    .into_iter()
+                    .any(|record| record.get_offset_id() == poison_offset)
+            });
+
+            if found_poison {
+                return Err(ApplyLogToSegmentWriterOperatorError::PoisonOffsetFound);
             }
         }
         Ok(())

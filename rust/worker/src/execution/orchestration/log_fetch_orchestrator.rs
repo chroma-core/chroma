@@ -350,6 +350,7 @@ impl LogFetchOrchestrator {
             false, // LogFetchOrchestrator doesn't need is_function_disabled
             fragment_fetcher,
             bloom_filter_manager,
+            None, // shard_size
         );
         LogFetchOrchestrator {
             collection_id,

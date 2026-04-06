@@ -103,6 +103,7 @@ impl Operator<MaterializeLogInput, MaterializeLogOutput> for MaterializeLogOpera
                 .as_ref()
                 .and_then(|reader: &RecordSegmentReader| reader.get_shards().get(shard_idx))
                 .unwrap_or(&None);
+            tracing::info!("Sending {} logs to shard index {}", logs.len(), shard_idx);
 
             // Get offset_id for this shard, or None if not available
             let offset_id = input.offset_ids.get(shard_idx).cloned();

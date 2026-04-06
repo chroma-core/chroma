@@ -1,5 +1,6 @@
+use std::cell::OnceCell;
+use std::collections::HashSet;
 use std::sync::Arc;
-use std::{cell::OnceCell, collections::HashSet};
 
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -92,12 +93,57 @@ pub enum ExecutionState {
     Register,
 }
 
+#[derive(Error, Debug)]
+pub enum CreateNewShardError {
+    #[error("Failed to create record shard: {0}")]
+    Record(#[from] chroma_segment::blockfile_record::RecordSegmentWriterCreationError),
+    #[error("Failed to create metadata shard: {0}")]
+    Metadata(#[from] chroma_segment::blockfile_metadata::MetadataSegmentWriterError),
+    #[error("Failed to create vector shard: {0}")]
+    Vector(#[from] chroma_segment::types::VectorSegmentWriterError),
+}
+
+impl ChromaError for CreateNewShardError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            Self::Record(e) => e.code(),
+            Self::Metadata(e) => e.code(),
+            Self::Vector(e) => e.code(),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct CompactWriters {
     pub(crate) record_reader: Option<RecordSegmentReader<'static>>,
     pub(crate) metadata_writer: MetadataSegmentWriter<'static>,
     pub(crate) record_writer: RecordSegmentWriter,
     pub(crate) vector_writer: VectorSegmentWriter,
+}
+
+impl CompactWriters {
+    pub async fn create_new_shard(
+        &mut self,
+        collection: &chroma_types::Collection,
+        blockfile_provider: &BlockfileProvider,
+        bloom_filter_manager: Option<BloomFilterManager>,
+        spann_provider: &SpannProvider,
+    ) -> Result<(), CreateNewShardError> {
+        let record_shard = self
+            .record_writer
+            .create_new_shard(collection, blockfile_provider, bloom_filter_manager)
+            .await?;
+
+        self.metadata_writer
+            .create_new_shard(collection, blockfile_provider)
+            .await?;
+
+        self.vector_writer
+            .create_new_shard(&record_shard, collection, spann_provider)
+            .await?;
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -143,6 +189,7 @@ pub struct CompactionContext {
     pub is_function_disabled: bool,
     pub fragment_fetcher: Option<Arc<FragmentFetcher>>,
     pub bloom_filter_manager: Option<BloomFilterManager>,
+    pub shard_size: Option<u64>,
     #[cfg(test)]
     pub poison_offset: Option<u32>,
 }
@@ -168,6 +215,7 @@ impl Clone for CompactionContext {
             is_function_disabled: self.is_function_disabled,
             fragment_fetcher: self.fragment_fetcher.clone(),
             bloom_filter_manager: self.bloom_filter_manager.clone(),
+            shard_size: self.shard_size,
             #[cfg(test)]
             poison_offset: self.poison_offset,
         }
@@ -207,6 +255,7 @@ impl CompactionContext {
             is_function_disabled: self.is_function_disabled,
             fragment_fetcher: self.fragment_fetcher.clone(),
             bloom_filter_manager: self.bloom_filter_manager.clone(),
+            shard_size: self.shard_size,
             #[cfg(test)]
             poison_offset: self.poison_offset,
         }
@@ -312,6 +361,7 @@ impl CompactionContext {
         is_function_disabled: bool,
         fragment_fetcher: Option<Arc<FragmentFetcher>>,
         bloom_filter_manager: Option<BloomFilterManager>,
+        shard_size: Option<u64>,
     ) -> Self {
         let orchestrator_context = OrchestratorContext::new(dispatcher.clone());
         CompactionContext {
@@ -332,6 +382,7 @@ impl CompactionContext {
             is_function_disabled,
             fragment_fetcher,
             bloom_filter_manager,
+            shard_size,
             #[cfg(test)]
             poison_offset: None,
         }
@@ -929,6 +980,7 @@ pub async fn compact(
     is_function_disabled: bool,
     fragment_fetcher: Option<Arc<FragmentFetcher>>,
     bloom_filter_manager: Option<BloomFilterManager>,
+    shard_size: Option<u64>,
     #[cfg(test)] poison_offset: Option<u32>,
 ) -> Result<CompactionResponse, CompactionError> {
     let mut compaction_context = CompactionContext::new(
@@ -947,6 +999,7 @@ pub async fn compact(
         is_function_disabled,
         fragment_fetcher,
         bloom_filter_manager,
+        shard_size,
     );
 
     #[cfg(test)]
@@ -1217,6 +1270,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         ))
         .await;
         assert!(compact_result.is_ok());
@@ -1320,6 +1374,7 @@ mod tests {
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
+            None,
             None,
             None,
             None,
@@ -1475,6 +1530,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         ))
         .await;
         assert!(compact_result.is_ok());
@@ -1560,6 +1616,7 @@ mod tests {
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
+            None,
             None,
             None,
             None,
@@ -1694,6 +1751,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         ))
         .await;
         assert!(compact_result.is_ok());
@@ -1745,6 +1803,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         ))
         .await;
         assert!(compact_result.is_ok());
@@ -1793,6 +1852,7 @@ mod tests {
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
+            None,
             None,
             None,
             None,
@@ -1934,6 +1994,7 @@ mod tests {
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
+            None,
             None,
             None,
             None,
@@ -2115,6 +2176,7 @@ mod tests {
             spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
+            None,
             None,
             None,
             None,
@@ -2312,7 +2374,8 @@ mod tests {
             false,
             None,
             None,
-            Some(2), // The apply operator processing this offset will fail.
+            None,
+            Some(2),
         ))
         .await;
 
@@ -2509,6 +2572,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         ))
         .await;
 
@@ -2545,6 +2609,7 @@ mod tests {
             spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
+            None,
             None,
             None,
             None,
@@ -2781,6 +2846,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         ))
         .await;
 
@@ -2996,6 +3062,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         ))
         .await;
 
@@ -3082,6 +3149,7 @@ mod tests {
             spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
+            None,
             None,
             None,
             None,
@@ -3334,6 +3402,7 @@ mod tests {
             false,
             None,
             None,
+            None, // shard_size
         );
 
         // Start compaction 1's log_fetch_orchestrator
@@ -3388,6 +3457,7 @@ mod tests {
             false,
             None,
             None,
+            None, // shard_size
         );
 
         // Now start compaction 2 and let it run completely using the compact() function
@@ -3411,6 +3481,7 @@ mod tests {
             spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
+            None,
             None,
             None,
             None,
@@ -3657,6 +3728,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         ))
         .await
         .expect("First compaction should succeed");
@@ -3746,6 +3818,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         ))
         .await
         .expect("Second compaction should succeed");
@@ -3806,6 +3879,7 @@ mod tests {
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
             false, // is_function_disabled = false for rebuild
+            None,
             None,
             None,
             None,

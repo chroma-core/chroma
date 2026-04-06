@@ -126,6 +126,11 @@ pub struct CompactorConfig {
     /// The cache configuration for the fragment fetcher used by pointer-based log fetch.
     #[serde(default)]
     pub fragment_fetcher_cache: chroma_cache::CacheConfig,
+
+    /// The size threshold for shards. When a shard exceeds this size, it will be sealed
+    /// and a new shard created. None or 0 means no limit.
+    #[serde(default = "CompactorConfig::default_shard_size")]
+    pub shard_size: Option<u64>,
 }
 
 impl CompactorConfig {
@@ -188,6 +193,10 @@ impl CompactorConfig {
     fn default_use_fragment_fetch() -> bool {
         false
     }
+
+    fn default_shard_size() -> Option<u64> {
+        None // No limit by default
+    }
 }
 
 impl Default for CompactorConfig {
@@ -212,6 +221,7 @@ impl Default for CompactorConfig {
             use_fragment_fetch: CompactorConfig::default_use_fragment_fetch(),
             collections_for_fragment_fetch: Vec::new(),
             fragment_fetcher_cache: chroma_cache::CacheConfig::default(),
+            shard_size: CompactorConfig::default_shard_size(),
         }
     }
 }

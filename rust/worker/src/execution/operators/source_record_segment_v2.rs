@@ -199,8 +199,10 @@ mod tests {
 
         // Verify operations are correct
         for partition in &output.partitions {
-            for shard in &partition.result.shards {
-                for record in shard.iter() {
+            // partition.result is PartitionedMaterializeLogsResult, iterate over shards
+            for shard in partition.result.iter() {
+                // Now iterate over records in each shard
+                for record in shard {
                     // For rebuild, we expect AddNew operation
                     assert_eq!(record.get_operation(), MaterializedLogOperation::AddNew);
                 }
@@ -236,8 +238,10 @@ mod tests {
         // Verify offset IDs are preserved (0-based from test data generation)
         let mut expected_offset_id = 1u32;
         for partition in &output.partitions {
-            for shard in &partition.result.shards {
-                for record in shard.iter() {
+            // partition.result is PartitionedMaterializeLogsResult, iterate over shards
+            for shard in partition.result.iter() {
+                // Now iterate over records in each shard
+                for record in shard {
                     assert_eq!(record.get_offset_id(), expected_offset_id);
                     expected_offset_id += 1;
                 }

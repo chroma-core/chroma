@@ -106,6 +106,7 @@ pub(crate) struct CompactionManagerContext {
     fragment_fetcher: Option<Arc<FragmentFetcher>>,
     collections_for_fragment_fetch: HashSet<CollectionUuid>,
     bloom_filter_manager: Option<BloomFilterManager>,
+    shard_size: Option<u64>,
 }
 
 pub(crate) struct CompactionManager {
@@ -160,6 +161,7 @@ impl CompactionManager {
         fragment_fetcher: Option<Arc<FragmentFetcher>>,
         collections_for_fragment_fetch: HashSet<CollectionUuid>,
         bloom_filter_manager: Option<BloomFilterManager>,
+        shard_size: Option<u64>,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (compact_awaiter_tx, compact_awaiter_rx) =
             mpsc::channel::<CompactionTask>(compaction_manager_queue_size);
@@ -198,6 +200,7 @@ impl CompactionManager {
                 fragment_fetcher,
                 collections_for_fragment_fetch,
                 bloom_filter_manager,
+                shard_size,
             },
             on_next_memberlist_signal: None,
             compact_awaiter_channel: compact_awaiter_tx,
@@ -469,6 +472,7 @@ impl CompactionManagerContext {
             is_function_disabled,
             fragment_fetcher,
             bloom_filter_manager,
+            self.shard_size,
             #[cfg(test)]
             None,
         ))
@@ -681,6 +685,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             fragment_fetcher,
             collections_for_fragment_fetch,
             Some(bloom_filter_manager),
+            config.compactor.shard_size,
         )
     }
 }
@@ -1239,6 +1244,7 @@ mod tests {
             None,           // fragment_fetcher
             HashSet::new(), // collections_for_fragment_fetch
             None,           // bloom_filter_manager
+            None,           // shard_size
         )
         .expect("Failed to create compaction manager in test");
 
