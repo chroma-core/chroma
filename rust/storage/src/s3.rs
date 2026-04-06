@@ -1590,6 +1590,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_k8s_integration_put_stream_admission_controlled() {
+        use crate::admissioncontrolleds3::AdmissionControlledS3Storage;
+
+        let storage = setup_with_bucket(PUT_STREAM_PART, PUT_STREAM_PART).await;
+        let ac_storage = AdmissionControlledS3Storage::new_s3_with_default_policy(storage);
+
+        let data = vec![42u8; 1024];
+        let total_size = data.len();
+        let chunks: Vec<Result<Bytes, StorageError>> = data
+            .chunks(256)
+            .map(|c| Ok(Bytes::copy_from_slice(c)))
+            .collect();
+        let stream = futures::stream::iter(chunks);
+
+        ac_storage
+            .put_stream("test-ac-stream", total_size, stream, PutOptions::default())
+            .await
+            .unwrap();
+
+        let buf = ac_storage
+            .get("test-ac-stream", GetOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(&*buf, &data);
+    }
+
+    #[tokio::test]
     // Naming this "test_k8s_integration_" means that the Tilt stack is required. See rust/worker/README.md.
     async fn test_k8s_integration_multipart_get() {
         // At 8 MB.

@@ -324,37 +324,3 @@ async fn test_s3_ac_conditional_operations() {
 
     utils::test_conditional_operations(&storage, &prefix, None).await;
 }
-
-#[tokio::test]
-#[ignore] // Requires local minio server running
-async fn test_s3_ac_put_stream() {
-    use bytes::Bytes;
-    use chroma_storage::{GetOptions, PutOptions, StorageError};
-
-    let base_storage = chroma_storage::s3_client_for_test_with_new_bucket().await;
-    let s3_storage = match base_storage {
-        Storage::S3(s3) => s3,
-        _ => panic!("Expected S3 storage"),
-    };
-    let ac_storage = AdmissionControlledS3Storage::new_s3_with_default_policy(s3_storage);
-    let storage = Storage::AdmissionControlledS3(ac_storage);
-
-    let data = vec![42u8; 1024];
-    let total_size = data.len();
-    let chunks: Vec<Result<Bytes, StorageError>> = data
-        .chunks(256)
-        .map(|c| Ok(Bytes::copy_from_slice(c)))
-        .collect();
-    let stream = futures::stream::iter(chunks);
-
-    storage
-        .put_stream("test-ac-stream", total_size, stream, PutOptions::default())
-        .await
-        .unwrap();
-
-    let buf = storage
-        .get("test-ac-stream", GetOptions::default())
-        .await
-        .unwrap();
-    assert_eq!(&*buf, &data);
-}
