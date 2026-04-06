@@ -5265,7 +5265,7 @@ mod tests {
             }
         }
 
-        let mut stmt = Statement::new(
+        let stmt = Statement::new(
             "
             SELECT manifests.log_id, manifests.enumeration_offset, manifests.ignore_dirty,
                 UNIX_MICROS(COALESCE(manifests.updated_at, TIMESTAMP_SECONDS(0))) AS updated_at_us,

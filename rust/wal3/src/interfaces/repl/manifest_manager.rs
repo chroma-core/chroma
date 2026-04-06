@@ -54,6 +54,16 @@ impl ManifestManager {
         Ok(Some(LogPosition::from_offset(offset as u64)))
     }
 
+    fn decode_intrinsic_cursor(
+        log_id: &Uuid,
+        offset: Option<i64>,
+    ) -> Result<Option<LogPosition>, Error> {
+        Ok(
+            Self::decode_optional_log_position(log_id, "intrinsic_cursor", offset)?
+                .filter(|position| position.offset() > 0),
+        )
+    }
+
     fn region_compaction_offset(
         intrinsic_cursor: Option<LogPosition>,
         initial_offset: Option<LogPosition>,
@@ -106,11 +116,18 @@ impl ManifestManager {
         for region in regions.iter() {
             mutations.push(insert(
                 "manifest_regions",
-                &["log_id", "region", "collected", "initial_offset"],
+                &[
+                    "log_id",
+                    "region",
+                    "collected",
+                    "initial_offset",
+                    "intrinsic_cursor",
+                ],
                 &[
                     &log_id.to_string(),
                     region,
                     &manifest.collected.hexdigest(),
+                    &(initial_offset.offset() as i64),
                     &(initial_offset.offset() as i64),
                 ],
             ));
@@ -276,9 +293,8 @@ impl ManifestManager {
             "initial_offset",
             manifest_row.column_by_name::<Option<i64>>("initial_offset")?,
         )?;
-        let intrinsic_cursor = Self::decode_optional_log_position(
+        let intrinsic_cursor = Self::decode_intrinsic_cursor(
             &log_id,
-            "intrinsic_cursor",
             manifest_row.column_by_name::<Option<i64>>("intrinsic_cursor")?,
         )?;
         let Some(setsum) = Setsum::from_hexdigest(&setsum) else {
@@ -438,9 +454,8 @@ impl ManifestManager {
             "initial_offset",
             manifest_row.column_by_name::<Option<i64>>("initial_offset")?,
         )?;
-        let intrinsic_cursor = Self::decode_optional_log_position(
+        let intrinsic_cursor = Self::decode_intrinsic_cursor(
             &log_id,
-            "intrinsic_cursor",
             manifest_row.column_by_name::<Option<i64>>("intrinsic_cursor")?,
         )?;
         let Some(collected) = Setsum::from_hexdigest(&collected) else {
@@ -536,9 +551,8 @@ impl ManifestManager {
         let Some(region_row) = region_rows.next().await? else {
             return Err(Error::UninitializedLog);
         };
-        let intrinsic_cursor = Self::decode_optional_log_position(
+        let intrinsic_cursor = Self::decode_intrinsic_cursor(
             &self.log_id,
-            "intrinsic_cursor",
             region_row.column_by_name::<Option<i64>>("intrinsic_cursor")?,
         )?;
         let initial_offset = Self::decode_optional_log_position(
@@ -634,12 +648,12 @@ impl ManifestManager {
         )))
     }
 
-    /// Returns log_ids from the manifests table that have fragments in the specified region and
-    /// have a spread between their intrinsic cursor and their enumeration_offset.
+    /// Returns log_ids from the manifests table whose state for the specified region has a spread
+    /// between its compaction cursor and enumeration offset.
     ///
     /// A spread indicates uncompacted data: the intrinsic cursor has not caught up to the
-    /// enumeration_offset.  Logs with no intrinsic cursor are included as they have never been
-    /// compacted.
+    /// enumeration_offset.  A region may be reported dirty even if it has no local fragments yet;
+    /// read repair will hydrate the region on demand.
     pub async fn get_dirty_logs(
         spanner: &Client,
         region: &str,
@@ -648,16 +662,17 @@ impl ManifestManager {
     ) -> Result<Vec<(Uuid, LogPosition, LogPosition, SystemTime)>, Error> {
         let mut stmt = Statement::new(
             "
-            SELECT DISTINCT manifests.log_id, manifest_regions.intrinsic_cursor, manifest_regions.initial_offset, manifests.enumeration_offset,
+            SELECT DISTINCT manifests.log_id, NULLIF(manifest_regions.intrinsic_cursor, 0) AS intrinsic_cursor,
+                manifest_regions.initial_offset, manifests.enumeration_offset,
                 COALESCE(manifests.updated_at, TIMESTAMP_SECONDS(0)) AS updated_at
             FROM manifests
                 INNER JOIN manifest_regions
                 ON manifests.log_id = manifest_regions.log_id
             WHERE manifest_regions.region = @region
                 AND (
-                    manifests.enumeration_offset - COALESCE(manifest_regions.intrinsic_cursor, manifest_regions.initial_offset, 0) >= @record_count_threshold
+                    manifests.enumeration_offset - COALESCE(NULLIF(manifest_regions.intrinsic_cursor, 0), manifest_regions.initial_offset, 0) >= @record_count_threshold
                     OR (
-                        manifests.enumeration_offset > COALESCE(manifest_regions.intrinsic_cursor, manifest_regions.initial_offset, 0)
+                        manifests.enumeration_offset > COALESCE(NULLIF(manifest_regions.intrinsic_cursor, 0), manifest_regions.initial_offset, 0)
                         AND UNIX_MICROS(CURRENT_TIMESTAMP()) - UNIX_MICROS(COALESCE(manifests.updated_at, TIMESTAMP_SECONDS(0))) >= @timeout_us
                     )
                 )
@@ -1760,6 +1775,37 @@ mod tests {
             "test_k8s_mcmr_integration_init_and_load: log_id={}, witness={:?}",
             log_id, pos_witness
         );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_init_sets_intrinsic_cursor_for_each_region() {
+        let Some(client) = setup_spanner_client().await else {
+            panic!("Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let log_id = Uuid::new_v4();
+        let mut manifest = Manifest::new_empty("test-writer");
+        manifest.initial_offset = Some(LogPosition::from_offset(1));
+        ManifestManager::init(
+            vec!["region-a".to_string(), "region-b".to_string()],
+            &client,
+            log_id,
+            &manifest,
+        )
+        .await
+        .expect("init failed");
+
+        for region in ["region-a", "region-b"] {
+            let manager = ManifestManager::new(Arc::new(client.clone()), region.to_string(), log_id);
+            let intrinsic_cursor = ManifestPublisher::load_intrinsic_cursor(&manager)
+                .await
+                .expect("load_intrinsic_cursor failed");
+            assert_eq!(
+                Some(LogPosition::from_offset(1)),
+                intrinsic_cursor,
+                "region {region} should inherit the manifest initial_offset as its intrinsic cursor"
+            );
+        }
     }
 
     // Load a non-existent manifest returns None.
@@ -3224,6 +3270,70 @@ mod tests {
             "test_k8s_mcmr_integration_get_dirty_logs_returns_uncompacted: found log_id={} in {} dirty logs",
             log_id,
             dirty_logs.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_get_dirty_logs_ignores_zero_intrinsic_cursor_default() {
+        let Some(client) = setup_spanner_client().await else {
+            panic!("Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let log_id = Uuid::new_v4();
+        let manifest = make_empty_manifest();
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
+            .await
+            .expect("init failed");
+
+        let dirty_logs = ManifestManager::get_dirty_logs(&client, "dummy", 1, u64::MAX)
+            .await
+            .expect("get_dirty_logs failed");
+
+        assert!(
+            !dirty_logs.iter().any(|(id, _, _, _)| *id == log_id),
+            "get_dirty_logs should not report a newly initialized log as dirty when intrinsic_cursor is still the default zero value, log_id={}, dirty_logs={:?}",
+            log_id,
+            dirty_logs
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_get_dirty_logs_includes_remote_only_fragments_for_read_repair(
+    ) {
+        let Some(client) = setup_spanner_client().await else {
+            panic!("Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let log_id = Uuid::new_v4();
+        let regions = vec!["region-a".to_string(), "region-b".to_string()];
+        ManifestManager::init(regions, &client, log_id, &make_empty_manifest())
+            .await
+            .expect("init failed");
+
+        let manager =
+            ManifestManager::new(Arc::new(client.clone()), "region-a".to_string(), log_id);
+        let pointer = FragmentUuid::generate();
+        manager
+            .publish_fragment(
+                &pointer,
+                "remote-only-path",
+                20,
+                100,
+                make_setsum(1),
+                &["region-b".to_string()],
+            )
+            .await
+            .expect("publish failed");
+
+        let dirty_logs = ManifestManager::get_dirty_logs(&client, "region-a", 1, u64::MAX)
+            .await
+            .expect("get_dirty_logs failed");
+
+        assert!(
+            dirty_logs.iter().any(|(id, _, _, _)| *id == log_id),
+            "get_dirty_logs should include a log in a new region so read repair can hydrate it, log_id={}, dirty_logs={:?}",
+            log_id,
+            dirty_logs
         );
     }
 
