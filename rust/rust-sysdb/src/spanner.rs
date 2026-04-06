@@ -341,81 +341,107 @@ impl SpannerBackend {
         &self,
         req: CreateDatabaseRequest,
     ) -> Result<CreateDatabaseResponse, SysDbError> {
+        let backoff = ConstantBuilder::default()
+            .with_delay(Duration::from_millis(100))
+            .with_max_times(4);
+        let db_name_for_log = req.name.clone();
+
         // Use a read-write transaction to atomically check tenant, check database, and insert
-        let result = self
-            .client
-            .read_write_transaction::<(), SysDbError, _>(|tx| {
-                let tenant_id = req.tenant_id.clone();
-                let db_id = req.id.to_string();
-                let db_name = req.name.clone().into_string();
-                Box::pin(async move {
-                    // Check if tenant exists within the same transaction
-                    let mut tenant_check_stmt = Statement::new(
-                        "SELECT id FROM tenants WHERE id = @id AND is_deleted = FALSE",
-                    );
-                    tenant_check_stmt.add_param("id", &tenant_id);
+        let result = (|| {
+            let db = self.clone();
+            let req = req.clone();
 
-                    let mut tenant_iter = tx
-                        .query(tenant_check_stmt)
-                        .instrument(tracing::debug_span!("check_tenant_exists"))
-                        .await?;
-                    if tenant_iter.next().await?.is_none() {
-                        return Err(SysDbError::NotFound(format!(
-                            "tenant '{}' not found",
-                            tenant_id
-                        )));
-                    }
+            async move {
+                db.client
+                    .read_write_transaction::<(), SysDbError, _>(|tx| {
+                        let tenant_id = req.tenant_id.clone();
+                        let db_id = req.id.to_string();
+                        let db_name = req.name.clone().into_string();
+                        Box::pin(async move {
+                            // Check if tenant exists within the same transaction
+                            let mut tenant_check_stmt = Statement::new(
+                                "SELECT id FROM tenants WHERE id = @id AND is_deleted = FALSE",
+                            );
+                            tenant_check_stmt.add_param("id", &tenant_id);
 
-                    // Check if database with this (name, tenant_id) combination already exists
-                    let mut name_check_stmt = Statement::new(
-                        "SELECT id FROM databases WHERE name = @name AND tenant_id = @tenant_id AND is_deleted = FALSE",
-                    );
-                    name_check_stmt.add_param("name", &db_name);
-                    name_check_stmt.add_param("tenant_id", &tenant_id);
+                            let mut tenant_iter = tx
+                                .query(tenant_check_stmt)
+                                .instrument(tracing::debug_span!("check_tenant_exists"))
+                                .await?;
+                            if tenant_iter.next().await?.is_none() {
+                                return Err(SysDbError::NotFound(format!(
+                                    "tenant '{}' not found",
+                                    tenant_id
+                                )));
+                            }
 
-                    let mut name_iter = tx.query(name_check_stmt).instrument(tracing::debug_span!("check_database_name_exists")).await?;
-                    if name_iter.next().await?.is_some() {
-                        return Err(SysDbError::AlreadyExists(format!(
-                            "database with name '{}' already exists for tenant '{}'",
-                            db_name, tenant_id
-                        )));
-                    }
+                            // Check if database with this (name, tenant_id) combination already exists
+                            let mut name_check_stmt = Statement::new(
+                                "SELECT id FROM databases WHERE name = @name AND tenant_id = @tenant_id AND is_deleted = FALSE",
+                            );
+                            name_check_stmt.add_param("name", &db_name);
+                            name_check_stmt.add_param("tenant_id", &tenant_id);
 
-                    // Check if database with this ID already exists
-                    let mut check_stmt = Statement::new(
-                        "SELECT id FROM databases WHERE id = @id AND is_deleted = FALSE",
-                    );
-                    check_stmt.add_param("id", &db_id);
+                            let mut name_iter = tx.query(name_check_stmt).instrument(tracing::debug_span!("check_database_name_exists")).await?;
+                            if name_iter.next().await?.is_some() {
+                                return Err(SysDbError::AlreadyExists(format!(
+                                    "database with name '{}' already exists for tenant '{}'",
+                                    db_name, tenant_id
+                                )));
+                            }
 
-                    let mut iter = tx
-                        .query(check_stmt)
-                        .instrument(tracing::debug_span!("check_database_exists"))
-                        .await?;
-                    if iter.next().await?.is_some() {
-                        return Err(SysDbError::AlreadyExists(format!(
-                            "database with id '{}' already exists",
-                            db_id
-                        )));
-                    }
+                            // Check if database with this ID already exists
+                            let mut check_stmt = Statement::new(
+                                "SELECT id FROM databases WHERE id = @id AND is_deleted = FALSE",
+                            );
+                            check_stmt.add_param("id", &db_id);
 
-                    // Insert the new database
-                    let mut insert_stmt = Statement::new(
-                        "INSERT INTO databases (id, name, tenant_id, is_deleted, created_at, updated_at) VALUES (@id, @name, @tenant_id, @is_deleted, PENDING_COMMIT_TIMESTAMP(), PENDING_COMMIT_TIMESTAMP())",
-                    );
-                    insert_stmt.add_param("id", &db_id);
-                    insert_stmt.add_param("name", &db_name);
-                    insert_stmt.add_param("tenant_id", &tenant_id);
-                    insert_stmt.add_param("is_deleted", &false);
+                            let mut iter = tx
+                                .query(check_stmt)
+                                .instrument(tracing::debug_span!("check_database_exists"))
+                                .await?;
+                            if iter.next().await?.is_some() {
+                                return Err(SysDbError::AlreadyExists(format!(
+                                    "database with id '{}' already exists",
+                                    db_id
+                                )));
+                            }
 
-                    tx.update(insert_stmt)
-                        .instrument(tracing::info_span!("insert_database"))
-                        .await?;
-                    tracing::info!("Created database: {} for tenant: {}", db_name, tenant_id);
+                            // Insert the new database
+                            let mut insert_stmt = Statement::new(
+                                "INSERT INTO databases (id, name, tenant_id, is_deleted, created_at, updated_at) VALUES (@id, @name, @tenant_id, @is_deleted, PENDING_COMMIT_TIMESTAMP(), PENDING_COMMIT_TIMESTAMP())",
+                            );
+                            insert_stmt.add_param("id", &db_id);
+                            insert_stmt.add_param("name", &db_name);
+                            insert_stmt.add_param("tenant_id", &tenant_id);
+                            insert_stmt.add_param("is_deleted", &false);
 
-                    Ok(())
-                })
-            })
-            .await;
+                            tx.update(insert_stmt)
+                                .instrument(tracing::info_span!("insert_database"))
+                                .await?;
+                            tracing::info!(
+                                "Created database: {} for tenant: {}",
+                                db_name,
+                                tenant_id
+                            );
+
+                            Ok(())
+                        })
+                    })
+                    .await
+            }
+        })
+        .retry(backoff)
+        .when(|e: &SysDbError| e.is_spanner_aborted())
+        .notify(|e: &SysDbError, dur| {
+            tracing::warn!(
+                database_name = %db_name_for_log,
+                delay_ms = dur.as_millis(),
+                error = %e,
+                "Spanner aborted create database transaction; retrying"
+            );
+        })
+        .await;
 
         match result {
             Ok((_, _)) => Ok(CreateDatabaseResponse {}),
