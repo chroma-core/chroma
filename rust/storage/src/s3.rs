@@ -1558,19 +1558,16 @@ mod tests {
     const PUT_STREAM_PART: usize = 1024 * 1024 * 8; // 8 MB
 
     #[tokio::test]
-    // Naming this "test_k8s_integration_" means that the Tilt stack is required. See rust/worker/README.md.
     async fn test_k8s_integration_put_stream_oneshot_small_chunks() {
         test_put_stream(1024, 256, PUT_STREAM_PART, PUT_STREAM_PART).await;
     }
 
     #[tokio::test]
-    // Naming this "test_k8s_integration_" means that the Tilt stack is required. See rust/worker/README.md.
     async fn test_k8s_integration_put_stream_at_part_boundary() {
         test_put_stream(PUT_STREAM_PART, 4096, PUT_STREAM_PART, PUT_STREAM_PART).await;
     }
 
     #[tokio::test]
-    // Naming this "test_k8s_integration_" means that the Tilt stack is required. See rust/worker/README.md.
     async fn test_k8s_integration_put_stream_multipart_multiple_parts() {
         test_put_stream(
             (PUT_STREAM_PART as f64 * 2.5) as usize,
@@ -1582,7 +1579,6 @@ mod tests {
     }
 
     #[tokio::test]
-    // Naming this "test_k8s_integration_" means that the Tilt stack is required. See rust/worker/README.md.
     async fn test_k8s_integration_put_stream_chunks_larger_than_part() {
         test_put_stream(
             PUT_STREAM_PART * 3,
