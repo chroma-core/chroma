@@ -112,7 +112,7 @@ fn test_invalid_cmek_gcs() -> Cmek {
 // ============================================================================
 
 #[tokio::test]
-async fn test_gcs_basic_operations() {
+async fn test_k8s_integration_gcs_basic_operations() {
     let obj_storage = create_gcs_storage().await;
     let storage = Storage::Object(obj_storage);
     let prefix = test_prefix("gcs-basic");
@@ -121,7 +121,7 @@ async fn test_gcs_basic_operations() {
 }
 
 #[tokio::test]
-async fn test_gcs_multipart_operations() {
+async fn test_k8s_integration_gcs_multipart_operations() {
     let obj_storage = create_gcs_storage().await;
     let storage = Storage::Object(obj_storage);
     let prefix = test_prefix("gcs-multipart");
@@ -130,7 +130,7 @@ async fn test_gcs_multipart_operations() {
 }
 
 #[tokio::test]
-async fn test_gcs_conditional_operations() {
+async fn test_k8s_integration_gcs_conditional_operations() {
     let obj_storage = create_gcs_storage().await;
     let storage = Storage::Object(obj_storage);
     let prefix = test_prefix("gcs-conditional");
@@ -139,7 +139,7 @@ async fn test_gcs_conditional_operations() {
 }
 
 #[tokio::test]
-async fn test_gcs_cmek_basic_operations() {
+async fn test_k8s_integration_gcs_cmek_basic_operations() {
     let obj_storage = create_gcs_storage().await;
     let storage = Storage::Object(obj_storage);
     let prefix = test_prefix("gcs-cmek-basic");
@@ -148,7 +148,7 @@ async fn test_gcs_cmek_basic_operations() {
 }
 
 #[tokio::test]
-async fn test_gcs_cmek_multipart_operations() {
+async fn test_k8s_integration_gcs_cmek_multipart_operations() {
     let obj_storage = create_gcs_storage().await;
     let storage = Storage::Object(obj_storage);
     let prefix = test_prefix("gcs-cmek-multipart");
@@ -157,7 +157,7 @@ async fn test_gcs_cmek_multipart_operations() {
 }
 
 #[tokio::test]
-async fn test_gcs_cmek_conditional_operations() {
+async fn test_k8s_integration_gcs_cmek_conditional_operations() {
     let obj_storage = create_gcs_storage().await;
     let storage = Storage::Object(obj_storage);
     let prefix = test_prefix("gcs-cmek-conditional");
@@ -166,7 +166,7 @@ async fn test_gcs_cmek_conditional_operations() {
 }
 
 #[tokio::test]
-async fn test_gcs_cmek_invalid_key_fails() {
+async fn test_k8s_integration_gcs_cmek_invalid_key_fails() {
     let obj_storage = create_gcs_storage().await;
     let storage = Storage::Object(obj_storage);
     let prefix = test_prefix("gcs-cmek-invalid");
@@ -179,7 +179,6 @@ async fn test_gcs_cmek_invalid_key_fails() {
 // ============================================================================
 
 #[tokio::test]
-#[ignore] // Requires local minio server running
 async fn test_s3_basic_operations() {
     let storage = chroma_storage::s3_client_for_test_with_new_bucket().await;
     let prefix = test_prefix("s3-basic");
@@ -188,7 +187,6 @@ async fn test_s3_basic_operations() {
 }
 
 #[tokio::test]
-#[ignore] // Requires local minio server running
 async fn test_s3_multipart_operations() {
     let storage = chroma_storage::s3_client_for_test_with_new_bucket().await;
     let prefix = test_prefix("s3-multipart");
@@ -197,7 +195,6 @@ async fn test_s3_multipart_operations() {
 }
 
 #[tokio::test]
-#[ignore] // Requires local minio server running
 async fn test_s3_conditional_operations() {
     let storage = chroma_storage::s3_client_for_test_with_new_bucket().await;
     let prefix = test_prefix("s3-conditional");
@@ -274,7 +271,6 @@ async fn test_gcs_ac_cmek_invalid_key_fails() {
 // ============================================================================
 
 #[tokio::test]
-#[ignore] // Requires local minio server running
 async fn test_s3_ac_basic_operations() {
     let base_storage = chroma_storage::s3_client_for_test_with_new_bucket().await;
 
@@ -292,7 +288,6 @@ async fn test_s3_ac_basic_operations() {
 }
 
 #[tokio::test]
-#[ignore] // Requires local minio server running
 async fn test_s3_ac_multipart_operations() {
     let base_storage = chroma_storage::s3_client_for_test_with_new_bucket().await;
 
@@ -309,7 +304,6 @@ async fn test_s3_ac_multipart_operations() {
 }
 
 #[tokio::test]
-#[ignore] // Requires local minio server running
 async fn test_s3_ac_conditional_operations() {
     let base_storage = chroma_storage::s3_client_for_test_with_new_bucket().await;
 
