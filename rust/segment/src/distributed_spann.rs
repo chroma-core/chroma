@@ -575,7 +575,7 @@ impl<'me> SpannSegmentReaderShard<'me> {
 
 #[cfg(test)]
 mod test {
-    use std::{collections::HashMap, path::PathBuf};
+    use std::collections::HashMap;
 
     use chroma_blockstore::{
         arrow::{
@@ -623,13 +623,7 @@ mod test {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let hnsw_provider = HnswIndexProvider::new(
-            storage.clone(),
-            PathBuf::from(tmp_dir.path().to_str().unwrap()),
-            hnsw_cache,
-            16,
-            false,
-        );
+        let hnsw_provider = HnswIndexProvider::new(storage.clone(), hnsw_cache, 16);
         let collection_id = CollectionUuid::new();
         let segment_id = SegmentUuid::new();
         let params = InternalSpannConfiguration::default();
@@ -762,13 +756,7 @@ mod test {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let hnsw_provider = HnswIndexProvider::new(
-            storage,
-            PathBuf::from(tmp_dir.path().to_str().unwrap()),
-            hnsw_cache,
-            16,
-            false,
-        );
+        let hnsw_provider = HnswIndexProvider::new(storage, hnsw_cache, 16);
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
                 PlGarbageCollectionConfig::default(),
@@ -880,13 +868,7 @@ mod test {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let hnsw_provider = HnswIndexProvider::new(
-            storage.clone(),
-            PathBuf::from(tmp_dir.path().to_str().unwrap()),
-            hnsw_cache,
-            16,
-            false,
-        );
+        let hnsw_provider = HnswIndexProvider::new(storage.clone(), hnsw_cache, 16);
         let collection_id = CollectionUuid::new();
         let segment_id = SegmentUuid::new();
         let params = InternalSpannConfiguration::default();
@@ -999,13 +981,7 @@ mod test {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let hnsw_provider = HnswIndexProvider::new(
-            storage,
-            PathBuf::from(tmp_dir.path().to_str().unwrap()),
-            hnsw_cache,
-            16,
-            false,
-        );
+        let hnsw_provider = HnswIndexProvider::new(storage, hnsw_cache, 16);
         let spann_segment_shard =
             SegmentShard::try_from((&spann_segment, 0)).expect("valid shard index");
         let spann_reader = SpannSegmentReaderShard::from_segment(
@@ -1074,13 +1050,7 @@ mod test {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let hnsw_provider = HnswIndexProvider::new(
-            storage.clone(),
-            PathBuf::from(tmp_dir.path().to_str().unwrap()),
-            hnsw_cache,
-            16,
-            false,
-        );
+        let hnsw_provider = HnswIndexProvider::new(storage.clone(), hnsw_cache, 16);
         let collection_id = CollectionUuid::new();
 
         let mut collection = Collection {
@@ -1197,13 +1167,7 @@ mod test {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let hnsw_provider = HnswIndexProvider::new(
-            storage,
-            PathBuf::from(tmp_dir.path().to_str().unwrap()),
-            hnsw_cache,
-            16,
-            false,
-        );
+        let hnsw_provider = HnswIndexProvider::new(storage, hnsw_cache, 16);
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
                 PlGarbageCollectionConfig {
