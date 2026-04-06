@@ -41,6 +41,8 @@ fn trivial_knn_filter(
         trivial_filter(),
         ReadLevel::IndexAndWal,
         None,
+        0,
+        1,
     )
 }
 
@@ -61,6 +63,8 @@ fn always_true_knn_filter(
         always_true_filter_for_modulo_metadata(),
         ReadLevel::IndexAndWal,
         None,
+        0,
+        1,
     )
 }
 
@@ -81,6 +85,8 @@ fn always_false_knn_filter(
         always_false_filter_for_modulo_metadata(),
         ReadLevel::IndexAndWal,
         None,
+        0,
+        1,
     )
 }
 

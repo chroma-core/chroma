@@ -144,6 +144,12 @@ pub struct GetOrchestrator {
     // Bloom filter manager
     bloom_filter_manager: Option<BloomFilterManager>,
 
+    // Sharding (used once mask_logs_for_shard is wired)
+    #[allow(dead_code)]
+    shard_index: u32,
+    #[allow(dead_code)]
+    num_shards: u32,
+
     // Result channel
     result_channel: Option<Sender<Result<GetResult, GetError>>>,
 }
@@ -160,6 +166,8 @@ impl GetOrchestrator {
         limit: Limit,
         projection: Projection,
         bloom_filter_manager: Option<BloomFilterManager>,
+        shard_index: u32,
+        num_shards: u32,
     ) -> Self {
         let context = OrchestratorContext::new(dispatcher);
         Self {
@@ -173,6 +181,8 @@ impl GetOrchestrator {
             limit,
             projection,
             bloom_filter_manager,
+            shard_index,
+            num_shards,
             result_channel: None,
         }
     }

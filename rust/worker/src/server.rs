@@ -334,6 +334,8 @@ impl WorkerServer {
             fetch_log,
             read_level,
             self.bloom_filter_manager_for_collection(collection_id),
+            scan.shard_index,
+            scan.num_shards,
         );
 
         match count_orchestrator.run(self.system.clone()).await {
@@ -386,6 +388,8 @@ impl WorkerServer {
             limit.into(),
             projection.into(),
             self.bloom_filter_manager_for_collection(collection_id),
+            scan.shard_index,
+            scan.num_shards,
         );
 
         match get_orchestrator.run(self.system.clone()).await {
@@ -470,6 +474,8 @@ impl WorkerServer {
             filter.try_into()?,
             ReadLevel::IndexAndWal, // Full consistency for KNN queries
             bloom_filter_manager.clone(),
+            scan.shard_index,
+            scan.num_shards,
         );
 
         let matching_records = match knn_filter_orchestrator.run(system.clone()).await {
@@ -658,6 +664,8 @@ impl WorkerServer {
             search_payload.filter.clone(),
             read_level, // Use the specified read level
             bloom_filter_manager.clone(),
+            scan.shard_index,
+            scan.num_shards,
         );
 
         let knn_filter_output = match knn_filter_orchestrator.run(self.system.clone()).await {

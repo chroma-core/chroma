@@ -207,6 +207,12 @@ pub struct KnnFilterOrchestrator {
     // Bloom filter manager
     bloom_filter_manager: Option<BloomFilterManager>,
 
+    // Sharding (used once mask_logs_for_shard is wired)
+    #[allow(dead_code)]
+    shard_index: u32,
+    #[allow(dead_code)]
+    num_shards: u32,
+
     // Result channel
     result_channel: Option<Sender<KnnFilterResult>>,
 }
@@ -223,6 +229,8 @@ impl KnnFilterOrchestrator {
         filter: Filter,
         read_level: ReadLevel,
         bloom_filter_manager: Option<BloomFilterManager>,
+        shard_index: u32,
+        num_shards: u32,
     ) -> Self {
         let context = OrchestratorContext::new(dispatcher);
         Self {
@@ -236,6 +244,8 @@ impl KnnFilterOrchestrator {
             read_level,
             filter,
             bloom_filter_manager,
+            shard_index,
+            num_shards,
             result_channel: None,
         }
     }
