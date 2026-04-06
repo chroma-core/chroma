@@ -118,11 +118,13 @@ pub async fn frontend_service_entrypoint_with_config_system_registry(
 
 pub fn init_frontend_otel_tracing(config: &FrontendServerConfig) {
     if let Some(config) = &config.open_telemetry {
-        let tracing_layers = vec![
+        let mut tracing_layers = vec![
             init_global_filter_layer(&config.filters),
-            init_otel_layer(&config.service_name, &config.endpoint),
             init_stdout_layer(),
         ];
+        if let Some(endpoint) = &config.endpoint {
+            tracing_layers.push(init_otel_layer(&config.service_name, endpoint));
+        }
         init_tracing(tracing_layers);
         init_panic_tracing_hook();
     } else {

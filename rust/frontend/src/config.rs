@@ -116,7 +116,7 @@ fn default_otel_filters() -> Vec<OtelFilter> {
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct OpenTelemetryConfig {
-    pub endpoint: String,
+    pub endpoint: Option<String>,
     #[serde(default = "default_otel_service_name")]
     pub service_name: String,
     #[serde(default = "default_otel_filters")]
