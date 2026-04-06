@@ -153,13 +153,10 @@ def _test_add(
         embedding_function=collection.embedding_function,
     )
 
-    initial_version1 = cast(int, coll1.get_model()["version"])
-    initial_version2 = cast(int, coll2.get_model()["version"])
-
     normalized_record_set = invariants.wrap_all(record_set)
     should_wait_for_compaction = not NOT_CLUSTER_ONLY and should_compact
-    current_version1 = initial_version1
-    current_version2 = initial_version2
+    current_version1 = cast(int, coll1.get_model()["version"])
+    current_version2 = cast(int, coll2.get_model()["version"])
     records_since_compaction_wait = 0
 
     # TODO: The type of add() is incorrect as it does not allow for metadatas
