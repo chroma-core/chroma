@@ -1806,8 +1806,7 @@ mod tests {
                 .await
                 .expect("load_intrinsic_cursor failed");
             assert_eq!(
-                None,
-                intrinsic_cursor,
+                None, intrinsic_cursor,
                 "region {region} should start with no intrinsic cursor until a reader advances it"
             );
 
