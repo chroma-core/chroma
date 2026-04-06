@@ -674,7 +674,7 @@ impl S3Storage {
             }
         }
 
-        if !leftover.is_empty() || stream.next().await.is_some() {
+        if !leftover.is_empty() {
             let _ = self
                 .client
                 .abort_multipart_upload()
@@ -690,6 +690,45 @@ impl S3Storage {
                     total_size_bytes
                 ),
             });
+        }
+
+        // Verify the stream is fully exhausted.
+        // - Propagate real stream errors instead of masking them.
+        // - Skip empty trailing chunks (0 bytes is not overflow).
+        loop {
+            match stream.next().await {
+                None => break,
+                Some(Err(e)) => {
+                    let _ = self
+                        .client
+                        .abort_multipart_upload()
+                        .bucket(&self.bucket)
+                        .key(key)
+                        .upload_id(&upload_id)
+                        .send()
+                        .await;
+                    self.metrics.s3_put_error_count.add(1, &[]);
+                    return Err(e);
+                }
+                Some(Ok(chunk)) if chunk.is_empty() => continue,
+                Some(Ok(_)) => {
+                    let _ = self
+                        .client
+                        .abort_multipart_upload()
+                        .bucket(&self.bucket)
+                        .key(key)
+                        .upload_id(&upload_id)
+                        .send()
+                        .await;
+                    self.metrics.s3_put_error_count.add(1, &[]);
+                    return Err(StorageError::Message {
+                        message: format!(
+                            "Stream yielded more bytes than declared total_size_bytes={}",
+                            total_size_bytes
+                        ),
+                    });
+                }
+            }
         }
 
         let result = self
