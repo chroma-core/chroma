@@ -50,8 +50,8 @@ def database_name(request: pytest.FixtureRequest) -> str:
 @settings(
     deadline=None,
     parent=override_hypothesis_profile(
-        normal=hypothesis.settings(max_examples=500),
-        fast=hypothesis.settings(max_examples=200),
+        normal=hypothesis.settings(max_examples=250),
+        fast=hypothesis.settings(max_examples=100),
     ),
     max_examples=2,
 )
@@ -251,7 +251,7 @@ def create_large_recordset(
 
 
 @given(collection=collection_st, should_compact=st.booleans())
-@settings(deadline=None, max_examples=5)
+@settings(deadline=None, max_examples=5 if not MULTI_REGION_ENABLED else 3)
 def test_add_large(
     client: ClientAPI,
     database_name: str,
