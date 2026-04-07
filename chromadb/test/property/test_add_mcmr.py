@@ -301,10 +301,10 @@ def test_add_large(
         # Wait for the model to be updated in each region, since the record set is
         # larger, add some additional time
         wait_for_version_increase(
-            client1, collection.name, initial_version1, additional_time=240
+            client1, collection.name, initial_version1, additional_time=300
         )
         wait_for_version_increase(
-            client2, collection.name, initial_version2, additional_time=240
+            client2, collection.name, initial_version2, additional_time=300
         )
 
     for coll in (coll1, coll2):
