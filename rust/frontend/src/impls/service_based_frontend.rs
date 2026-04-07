@@ -1467,23 +1467,22 @@ impl ServiceBasedFrontend {
                 where_clause: Some(where_clause),
             };
 
-            let get_result = self
-                .fan_out_get(Get {
-                    scan: Scan {
-                        collection_and_segments,
-                        shard_index: 0,
-                        num_shards: 1,
-                        log_upper_bound_offset,
-                    },
-                    filter,
-                    limit: Limit { offset: 0, limit },
-                    proj: Projection {
-                        document: false,
-                        embedding: false,
-                        metadata: false,
-                    },
-                })
-                .await?;
+            let get_result = Box::pin(self.fan_out_get(Get {
+                scan: Scan {
+                    collection_and_segments,
+                    shard_index: 0,
+                    num_shards: 1,
+                    log_upper_bound_offset,
+                },
+                filter,
+                limit: Limit { offset: 0, limit },
+                proj: Projection {
+                    document: false,
+                    embedding: false,
+                    metadata: false,
+                },
+            }))
+            .await?;
 
             let return_bytes = get_result.size_bytes();
 
@@ -1695,9 +1694,12 @@ impl ServiceBasedFrontend {
         } else {
             0
         };
-        let count_result = self
-            .fan_out_count(collection_and_segments, read_level, log_upper_bound_offset)
-            .await?;
+        let count_result = Box::pin(self.fan_out_count(
+            collection_and_segments,
+            read_level,
+            log_upper_bound_offset,
+        ))
+        .await?;
         let return_bytes = count_result.size_bytes();
 
         // Attach metadata to the metering context
@@ -1888,28 +1890,27 @@ impl ServiceBasedFrontend {
         } else {
             0
         };
-        let get_result = self
-            .fan_out_get(Get {
-                scan: Scan {
-                    collection_and_segments,
-                    shard_index: 0,
-                    num_shards: 1,
-                    log_upper_bound_offset,
-                },
-                filter: Filter {
-                    query_ids: ids,
-                    where_clause: r#where,
-                },
-                limit: Limit { offset, limit },
-                proj: Projection {
-                    document: include.0.contains(&Include::Document),
-                    embedding: include.0.contains(&Include::Embedding),
-                    // If URI is requested, metadata is also requested so we can extract the URI.
-                    metadata: (include.0.contains(&Include::Metadata)
-                        || include.0.contains(&Include::Uri)),
-                },
-            })
-            .await?;
+        let get_result = Box::pin(self.fan_out_get(Get {
+            scan: Scan {
+                collection_and_segments,
+                shard_index: 0,
+                num_shards: 1,
+                log_upper_bound_offset,
+            },
+            filter: Filter {
+                query_ids: ids,
+                where_clause: r#where,
+            },
+            limit: Limit { offset, limit },
+            proj: Projection {
+                document: include.0.contains(&Include::Document),
+                embedding: include.0.contains(&Include::Embedding),
+                // If URI is requested, metadata is also requested so we can extract the URI.
+                metadata: (include.0.contains(&Include::Metadata)
+                    || include.0.contains(&Include::Uri)),
+            },
+        }))
+        .await?;
         let return_bytes = get_result.size_bytes();
 
         // Attach metadata to the metering context
@@ -2056,34 +2057,33 @@ impl ServiceBasedFrontend {
         } else {
             0
         };
-        let query_result = self
-            .fan_out_knn(Knn {
-                scan: Scan {
-                    collection_and_segments,
-                    shard_index: 0,
-                    num_shards: 1,
-                    log_upper_bound_offset,
+        let query_result = Box::pin(self.fan_out_knn(Knn {
+            scan: Scan {
+                collection_and_segments,
+                shard_index: 0,
+                num_shards: 1,
+                log_upper_bound_offset,
+            },
+            filter: Filter {
+                query_ids: ids,
+                where_clause: r#where,
+            },
+            knn: KnnBatch {
+                embeddings,
+                fetch: n_results,
+            },
+            proj: KnnProjection {
+                projection: Projection {
+                    document: include.0.contains(&Include::Document),
+                    embedding: include.0.contains(&Include::Embedding),
+                    // If URI is requested, metadata is also requested so we can extract the URI.
+                    metadata: (include.0.contains(&Include::Metadata)
+                        || include.0.contains(&Include::Uri)),
                 },
-                filter: Filter {
-                    query_ids: ids,
-                    where_clause: r#where,
-                },
-                knn: KnnBatch {
-                    embeddings,
-                    fetch: n_results,
-                },
-                proj: KnnProjection {
-                    projection: Projection {
-                        document: include.0.contains(&Include::Document),
-                        embedding: include.0.contains(&Include::Embedding),
-                        // If URI is requested, metadata is also requested so we can extract the URI.
-                        metadata: (include.0.contains(&Include::Metadata)
-                            || include.0.contains(&Include::Uri)),
-                    },
-                    distance: include.0.contains(&Include::Distance),
-                },
-            })
-            .await?;
+                distance: include.0.contains(&Include::Distance),
+            },
+        }))
+        .await?;
         let return_bytes = query_result.size_bytes();
 
         // Attach metadata to the metering context
@@ -2281,7 +2281,7 @@ impl ServiceBasedFrontend {
             read_level: request.read_level,
         };
 
-        let result = self.fan_out_search(search_plan).await?;
+        let result = Box::pin(self.fan_out_search(search_plan)).await?;
 
         // Calculate return bytes (approximate size of the response)
         let return_bytes = result.size_bytes();
