@@ -18,6 +18,9 @@ on:
         default: 'blacksmith-8vcpu-ubuntu-2404'
         type: string
 
+env:
+  CHROMA_HYPOTHESIS_CI_REPRODUCE_ONLY: "1"
+
 jobs:
   test-rust-bindings:
     timeout-minutes: 90
