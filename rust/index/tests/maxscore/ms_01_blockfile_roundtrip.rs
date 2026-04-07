@@ -52,20 +52,48 @@ async fn directory_block_exists_and_decodable() {
 
 #[tokio::test]
 async fn multi_block_dimension_roundtrip() {
-    let entries: Vec<(u32, f32)> = (0..100).map(|i| (i, 0.5)).collect();
-    let docs: Vec<(u32, Vec<(u32, f32)>)> = entries
-        .iter()
-        .map(|&(off, _)| (off, vec![(1u32, 0.5f32)]))
+    let num_docs = 100u32;
+    let block_size = 10u32;
+    let docs: Vec<(u32, Vec<(u32, f32)>)> = (0..num_docs)
+        .map(|i| {
+            let weight = 0.1 + (i as f32) * 0.01;
+            (i, vec![(1u32, weight)])
+        })
         .collect();
 
-    let (_dir, _provider, reader) = common::build_index_with_block_size(docs, Some(10)).await;
+    let (_dir, _provider, reader) =
+        common::build_index_with_block_size(docs.clone(), Some(block_size)).await;
 
     let blocks = common::count_blocks(&reader, 1).await;
-    assert_eq!(blocks, 10);
+    assert_eq!(blocks, (num_docs / block_size) as usize);
 
     let all_entries = common::get_all_entries(&reader, 1).await;
-    assert_eq!(all_entries.len(), 100);
-    for (i, (off, _)) in all_entries.iter().enumerate() {
+    assert_eq!(all_entries.len(), num_docs as usize);
+    for (i, (off, val)) in all_entries.iter().enumerate() {
         assert_eq!(*off, i as u32);
+        let expected = 0.1 + (i as f32) * 0.01;
+        common::assert_approx(*val, expected, 5e-4);
+    }
+
+    let encoded = encode_u32(1);
+    let all: Vec<(u32, SparsePostingBlock)> = reader
+        .posting_reader()
+        .get_prefix(&encoded)
+        .await
+        .unwrap()
+        .collect();
+
+    let dir_entry = all.iter().find(|(k, _)| *k == u32::MAX);
+    assert!(dir_entry.is_some(), "directory block should be present");
+    let dir = DirectoryBlock::from_block(dir_entry.unwrap().1.clone()).unwrap();
+    let expected_blocks = (num_docs / block_size) as usize;
+    assert_eq!(dir.num_blocks(), expected_blocks);
+
+    let (max_offsets, max_weights) = dir.entries();
+    assert_eq!(max_offsets.len(), expected_blocks);
+    for block_idx in 0..expected_blocks {
+        let expected_last_offset = (block_idx as u32 + 1) * block_size - 1;
+        assert_eq!(max_offsets[block_idx], expected_last_offset);
+        assert!(max_weights[block_idx] > 0.0, "block {block_idx} max_weight should be positive");
     }
 }

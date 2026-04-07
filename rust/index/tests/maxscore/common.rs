@@ -1,9 +1,9 @@
 #![allow(dead_code)]
 
+use chroma_blockstore::provider::BlockfileProvider;
 use chroma_blockstore::{
     arrow::provider::BlockfileReaderOptions, test_arrow_blockfile_provider, BlockfileWriterOptions,
 };
-use chroma_blockstore::provider::BlockfileProvider;
 use chroma_index::sparse::maxscore::{
     BlockSparseReader, BlockSparseWriter, SPARSE_POSTING_BLOCK_SIZE_BYTES,
 };
@@ -30,14 +30,22 @@ pub fn sequential_entries(start: u32, step: u32, count: usize, weight: f32) -> V
 /// Build a fresh index from sparse vectors, returning a 'static reader.
 pub async fn build_index(
     vectors: Vec<(u32, Vec<(u32, f32)>)>,
-) -> (tempfile::TempDir, BlockfileProvider, BlockSparseReader<'static>) {
+) -> (
+    tempfile::TempDir,
+    BlockfileProvider,
+    BlockSparseReader<'static>,
+) {
     build_index_with_block_size(vectors, None).await
 }
 
 pub async fn build_index_with_block_size(
     vectors: Vec<(u32, Vec<(u32, f32)>)>,
     block_size: Option<u32>,
-) -> (tempfile::TempDir, BlockfileProvider, BlockSparseReader<'static>) {
+) -> (
+    tempfile::TempDir,
+    BlockfileProvider,
+    BlockSparseReader<'static>,
+) {
     let (temp_dir, provider) = test_arrow_blockfile_provider(SPARSE_POSTING_BLOCK_SIZE_BYTES);
 
     let posting_writer = provider
@@ -143,19 +151,13 @@ pub fn brute_force_topk(
 
 /// Count total blocks for a dimension.
 pub async fn count_blocks(reader: &BlockSparseReader<'_>, dim: u32) -> usize {
-    let blocks = reader
-        .get_posting_blocks(&encode_u32(dim))
-        .await
-        .unwrap();
+    let blocks = reader.get_posting_blocks(&encode_u32(dim)).await.unwrap();
     blocks.len()
 }
 
 /// Get all entries for a dimension from a reader.
 pub async fn get_all_entries(reader: &BlockSparseReader<'_>, dim: u32) -> Vec<(u32, f32)> {
-    let blocks = reader
-        .get_posting_blocks(&encode_u32(dim))
-        .await
-        .unwrap();
+    let blocks = reader.get_posting_blocks(&encode_u32(dim)).await.unwrap();
     blocks
         .into_iter()
         .flat_map(|b| b.offsets().to_vec().into_iter().zip(b.values().to_vec()))
