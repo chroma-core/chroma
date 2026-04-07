@@ -173,7 +173,9 @@ def _test_add(
     current_version = initial_version
     records_since_compaction_wait = 0
     has_waited_for_compaction = False
-    min_records_between_compaction_waits = max(MIN_RECORDS_BETWEEN_COMPACTION_WAITS, len(records_set["ids"]) // 10)
+    min_records_between_compaction_waits = max(
+        MIN_RECORDS_BETWEEN_COMPACTION_WAITS, len(record_set["ids"]) // 10
+    )
 
     # TODO: The type of add() is incorrect as it does not allow for metadatas
     # like [{"a": 1}, None, {"a": 3}]
