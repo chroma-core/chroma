@@ -174,6 +174,10 @@ struct Args {
     #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
     parallel_balancing: bool,
 
+    /// Use p90-radius-corrected leaf scoring during search navigation
+    #[arg(long)]
+    radius_corrected_nav: bool,
+
     /// Print legend explaining all table columns
     #[arg(long)]
     print_legend: bool,
@@ -512,10 +516,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         );
     }
     println!(
-        "  Quantization: 1-bit | Write nav: {:?} | Read nav: {} | NPA: {}",
+        "  Quantization: 1-bit | Write nav: {:?} | Read nav: {} | NPA: {} | Radius nav: {}",
         write_nav,
         args.read_navigation.join(","),
         if args.fp_npa { "f32" } else { "1x4" },
+        if args.radius_corrected_nav { "p90" } else { "off" },
     );
     println!("  Threads: {}", args.threads);
     println!();
@@ -906,7 +911,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             for &tau in &tau_values {
                 for &rr_c in &args.recall_rerank_centroids {
                     for &rr_v in &args.recall_rerank_vectors {
-                        let read_policy = ReadBeamPolicy::with_level_overrides(
+                        let mut read_policy = ReadBeamPolicy::with_level_overrides(
                             Some(tau),
                             beam_min,
                             beam_max,
@@ -914,6 +919,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             read_level_min_pcts.clone(),
                             level_widths.clone(),
                         );
+                        read_policy.radius_corrected = args.radius_corrected_nav;
 
                         struct QueryResult {
                             r100: f64,

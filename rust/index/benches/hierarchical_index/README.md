@@ -127,3 +127,50 @@ A better layout would keep the old codes in one contiguous `Vec<u8>` buffer
 and carry either the original slot index or final split labels through the
 split pipeline, so NPA can recover code slices directly by position instead
 of by hash lookup.
+
+### leaf selection
+
+Scanning posting lists is the dominant search cost (~50% of latency), so
+choosing which leaves to scan matters a lot. The current approach ranks
+leaves by `dist(q, centroid_i)`, but centroid distance is an imperfect proxy
+for whether a leaf actually contains nearest neighbors. The gap between
+achieved leaf-level recall ("L3 R@k") and optimal leaf-level recall
+("opt R@k") quantifies how much accuracy is left on the table.
+
+Candidate improvements, roughly ordered by expected impact-to-effort ratio:
+
+1. **Radius-corrected scoring.** Store `max_radius = max_j ||v_j - c_i||`
+   per leaf (one extra f32). Rank leaves by `dist(q, c_i) - max_radius_i`
+   instead of raw centroid distance. By the triangle inequality this gives
+   a lower bound on the closest vector in the leaf, so leaves whose spread
+   reaches toward the query get promoted.
+
+2. **Multi-representative navigation.** Store 2-3 representative points per
+   leaf (e.g. k-means within the leaf, or centroid + two furthest-apart
+   vectors). Score = `min_k dist(q, rep_k)`. This captures elongated or
+   multi-modal clusters that a single centroid misrepresents.
+
+3. **Directional variance correction.** Store the top-1 principal component
+   direction `d_i` and its variance `sigma_i^2` per leaf (dim + 1 extra
+   floats). Compute a corrected distance that accounts for how much of the
+   `(q - c_i)` displacement aligns with the cluster's spread axis. Leaves
+   whose elongation axis points toward the query get a scoring boost.
+
+4. **Leaf reranking with codes.** After navigation produces candidate leaves,
+   store a single 1-bit or 4-bit summary code per leaf (quantized centroid
+   or a representative code). Use these codes for a cheap second rerank pass
+   before committing to the expensive full posting list scan. This adds a
+   lightweight intermediate stage between centroid ranking and full scan.
+
+5. **Query-adaptive leaf count.** Instead of scanning a fixed number of
+   leaves, dynamically decide how many to scan based on the distribution of
+   candidate centroid distances. If there is a clear gap ("elbow") in the
+   sorted distances, stop early; if distances are tightly packed, scan more.
+   This avoids over-scanning easy queries and under-scanning hard ones.
+
+6. **Half-space aware navigation.** Precompute decision boundaries between
+   adjacent leaves as hyperplanes (the perpendicular bisector between pairs
+   of nearby centroids). At query time, a dot product against each boundary
+   reveals which side the query falls on, providing a geometric signal that
+   pure distance-to-centroid misses -- especially for queries near the
+   boundary between two clusters.
