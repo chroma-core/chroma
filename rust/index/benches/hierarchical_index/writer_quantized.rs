@@ -65,6 +65,9 @@ pub struct HierarchicalSpannConfig {
     pub fp_npa: bool,
     /// If true, add() skips inline balance; caller must invoke balance_index() explicitly.
     pub deferred_balance: bool,
+    /// Number of representative codes to store per leaf for leaf reranking.
+    /// 0 disables the feature.
+    pub representative_count: usize,
 }
 
 impl Default for HierarchicalSpannConfig {
@@ -89,6 +92,7 @@ impl Default for HierarchicalSpannConfig {
             read_navigation: NavigationMode::OneBit,
             fp_npa: true,
             deferred_balance: false,
+            representative_count: 0,
         }
     }
 }
@@ -108,6 +112,11 @@ struct LeafNode {
     /// 90th-percentile L2 distance from vectors to centroid, used for
     /// radius-corrected leaf scoring during navigation.
     p90_radius: f32,
+    /// Representative codes for leaf reranking (Variant B: parent-relative).
+    /// Contiguous buffer of R codes, each code_size bytes, quantized as
+    /// residuals relative to the parent centroid. Scored against the
+    /// navigation QuantizedQuery during beam selection.
+    representative_codes: Vec<u8>,
 }
 
 struct InternalNode {
@@ -864,6 +873,10 @@ pub struct ReadBeamPolicy {
     /// When true, leaf scores are corrected by subtracting the leaf's p90 radius
     /// from the centroid distance (in L2 space) before beam selection.
     pub radius_corrected: bool,
+    /// Number of representative codes per leaf to score during navigation.
+    /// When > 0, the minimum of centroid distance and representative code
+    /// distances is used as the leaf score.
+    pub leaf_rerank_reps: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -883,6 +896,7 @@ impl ReadBeamPolicy {
             level_min_pcts: Vec::new(),
             level_widths: Vec::new(),
             radius_corrected: false,
+            leaf_rerank_reps: 0,
         }
     }
 
@@ -902,6 +916,7 @@ impl ReadBeamPolicy {
             level_min_pcts,
             level_widths,
             radius_corrected: false,
+            leaf_rerank_reps: 0,
         }
     }
 
@@ -994,6 +1009,7 @@ impl HierarchicalSpannWriter {
                 codes: Vec::new(),
                 parent_id: None,
                 p90_radius: 0.0,
+                representative_codes: Vec::new(),
             }),
         );
 
@@ -1067,6 +1083,112 @@ impl HierarchicalSpannWriter {
     fn correct_leaf_dist(raw_dist: f32, p90_radius: f32) -> f32 {
         let corrected = (raw_dist.sqrt() - p90_radius).max(0.0);
         corrected * corrected
+    }
+
+    /// Select R representative vectors by farthest-point sampling and quantize
+    /// them as residuals relative to `parent_centroid` (Variant B coordinate system).
+    /// Returns a contiguous buffer of R * code_size bytes.
+    fn compute_representative_codes(
+        embeddings: &[EmbeddingPoint],
+        parent_centroid: &[f32],
+        r: usize,
+    ) -> Vec<u8> {
+        if embeddings.is_empty() || r == 0 {
+            return Vec::new();
+        }
+        let r = r.min(embeddings.len());
+
+        // Farthest-point sampling: start with the point closest to the
+        // leaf centroid (already well-represented by the centroid code),
+        // then greedily pick the point farthest from all selected points.
+        let n = embeddings.len();
+        let mut min_dist_to_selected = vec![f32::MAX; n];
+        let mut selected_indices: Vec<usize> = Vec::with_capacity(r);
+
+        // Compute leaf centroid from embeddings
+        let dim = embeddings[0].2.len();
+        let mut leaf_centroid = vec![0.0f32; dim];
+        for (_, _, emb) in embeddings {
+            for (c, &e) in leaf_centroid.iter_mut().zip(emb.iter()) {
+                *c += e;
+            }
+        }
+        let inv_n = 1.0 / n as f32;
+        for c in &mut leaf_centroid {
+            *c *= inv_n;
+        }
+
+        // Seed: closest to leaf centroid
+        let first = embeddings
+            .iter()
+            .enumerate()
+            .map(|(i, (_, _, emb))| {
+                let d: f32 = emb.iter().zip(leaf_centroid.iter()).map(|(a, b)| (a - b) * (a - b)).sum();
+                (i, d)
+            })
+            .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        selected_indices.push(first);
+
+        // Update min distances from the first selected point
+        let first_emb = &embeddings[first].2;
+        for i in 0..n {
+            let d: f32 = embeddings[i].2.iter().zip(first_emb.iter()).map(|(a, b)| (a - b) * (a - b)).sum();
+            min_dist_to_selected[i] = d;
+        }
+
+        // Greedily select remaining points
+        for _ in 1..r {
+            let next = min_dist_to_selected
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            selected_indices.push(next);
+
+            let next_emb = &embeddings[next].2;
+            for i in 0..n {
+                let d: f32 = embeddings[i].2.iter().zip(next_emb.iter()).map(|(a, b)| (a - b) * (a - b)).sum();
+                min_dist_to_selected[i] = min_dist_to_selected[i].min(d);
+            }
+        }
+
+        // Quantize selected vectors relative to parent centroid (4-bit for higher fidelity)
+        let mut codes = Vec::new();
+        for &idx in &selected_indices {
+            let code = Code::<4>::quantize(&embeddings[idx].2, parent_centroid);
+            push_code(&mut codes, code.as_ref());
+        }
+        codes
+    }
+
+    /// Score a leaf's 4-bit representative codes and return the minimum distance.
+    /// Returns f32::MAX if no representative codes exist.
+    fn min_representative_dist(
+        leaf: &LeafNode,
+        distance_fn: &DistanceFunction,
+        r_q: &[f32],
+        c_norm: f32,
+        c_dot_q: f32,
+        q_norm: f32,
+        rep_code_size: usize,
+    ) -> f32 {
+        if leaf.representative_codes.is_empty() {
+            return f32::MAX;
+        }
+        let count = leaf.representative_codes.len() / rep_code_size;
+        let mut min_dist = f32::MAX;
+        for i in 0..count {
+            let code_bytes = code_slice(&leaf.representative_codes, i, rep_code_size);
+            let dist = Code::<4, _>::new(code_bytes)
+                .distance_query(distance_fn, r_q, c_norm, c_dot_q, q_norm);
+            if dist < min_dist {
+                min_dist = dist;
+            }
+        }
+        min_dist
     }
 
     fn root_id(&self) -> NodeId {
@@ -1214,6 +1336,10 @@ impl HierarchicalSpannWriter {
         }
         drop(root_node);
 
+        let reps = policy.leaf_rerank_reps;
+        let q_norm = if reps > 0 { Self::vec_norm(query) } else { 0.0 };
+        let rcs = self.rep_code_size();
+
         let mut leaves: Vec<(NodeId, f32)> = Vec::new();
         let mut beam: Vec<NodeId> = vec![root];
         let mut dist_nanos = 0u64;
@@ -1228,11 +1354,26 @@ impl HierarchicalSpannWriter {
             for &node_id in &beam {
                 if let Some(node_ref) = self.nodes.get(&node_id) {
                     if let TreeNode::Internal(internal) = node_ref.value() {
+                        let parent_centroid = internal.centroid.clone();
                         let children: Vec<NodeId> = internal.children.clone();
                         drop(node_ref);
+
+                        let (rep_r_q, rep_c_norm, rep_c_dot_q) = if reps > 0 {
+                            let c_norm = Self::vec_norm(&parent_centroid);
+                            let r_q: Vec<f32> = query.iter().zip(parent_centroid.iter()).map(|(q, c)| q - c).collect();
+                            let c_dot_q = f32::dot(&parent_centroid, query).unwrap_or(0.0) as f32;
+                            (Some(r_q), c_norm, c_dot_q)
+                        } else {
+                            (None, 0.0, 0.0)
+                        };
+
                         for child_id in children {
                             if let Some(child) = self.nodes.get(&child_id) {
-                                let raw_dist = self.dist(query, child.centroid());
+                                let mut raw_dist = self.dist(query, child.centroid());
+                                if let (Some(r_q), TreeNode::Leaf(leaf)) = (&rep_r_q, child.value()) {
+                                    let rep_dist = Self::min_representative_dist(leaf, &self.distance_fn, r_q, rep_c_norm, rep_c_dot_q, q_norm, rcs);
+                                    raw_dist = raw_dist.min(rep_dist);
+                                }
                                 let dist = if policy.radius_corrected {
                                     if let TreeNode::Leaf(leaf) = child.value() {
                                         Self::correct_leaf_dist(raw_dist, leaf.p90_radius)
@@ -1366,6 +1507,8 @@ impl HierarchicalSpannWriter {
         let q_norm = Self::vec_norm(query);
         let padded_bytes = self.padded_bytes();
         let rerank_factor = rerank_centroids;
+        let reps = policy.leaf_rerank_reps;
+        let rcs = self.rep_code_size();
 
         let mut leaves: Vec<(NodeId, f32)> = Vec::new();
         let mut beam: Vec<NodeId> = vec![root];
@@ -1403,12 +1546,18 @@ impl HierarchicalSpannWriter {
                             if let Some(child) = self.nodes.get(&child_id) {
                                 let code_bytes = child.centroid_code();
                                 let dt0 = Instant::now();
-                                let raw_dist = if code_bytes.is_empty() {
+                                let mut raw_dist = if code_bytes.is_empty() {
                                     self.dist(query, child.centroid())
                                 } else {
                                     Code::<1, _>::new(code_bytes)
                                         .distance_quantized_query(&self.distance_fn, &qq)
                                 };
+                                if reps > 0 {
+                                    if let TreeNode::Leaf(leaf) = child.value() {
+                                        let rep_dist = Self::min_representative_dist(leaf, &self.distance_fn, &r_q, c_norm, c_dot_q, q_norm, rcs);
+                                        raw_dist = raw_dist.min(rep_dist);
+                                    }
+                                }
                                 dist_distance_nanos += dt0.elapsed().as_nanos() as u64;
                                 let dist = if policy.radius_corrected {
                                     if let TreeNode::Leaf(leaf) = child.value() {
@@ -1584,6 +1733,9 @@ impl HierarchicalSpannWriter {
 
         let rerank_factor = rerank_centroids;
         let dim = self.dim;
+        let reps = policy.leaf_rerank_reps;
+        let q_norm_reps = if reps > 0 { Self::vec_norm(query) } else { 0.0 };
+        let rcs = self.rep_code_size();
 
         let mut leaves: Vec<(NodeId, f32)> = Vec::new();
         let mut beam: Vec<NodeId> = vec![root];
@@ -1611,11 +1763,19 @@ impl HierarchicalSpannWriter {
                         let query_code = Code::<1>::quantize(query, &parent_centroid);
                         dist_quantize_nanos += qt0.elapsed().as_nanos() as u64;
 
+                        let (rep_r_q, rep_c_dot_q) = if reps > 0 {
+                            let r_q: Vec<f32> = query.iter().zip(parent_centroid.iter()).map(|(q, c)| q - c).collect();
+                            let c_dot_q = f32::dot(&parent_centroid, query).unwrap_or(0.0) as f32;
+                            (Some(r_q), c_dot_q)
+                        } else {
+                            (None, 0.0)
+                        };
+
                         for child_id in children {
                             if let Some(child) = self.nodes.get(&child_id) {
                                 let code_bytes = child.centroid_code();
                                 let dt0 = Instant::now();
-                                let raw_dist = if code_bytes.is_empty() {
+                                let mut raw_dist = if code_bytes.is_empty() {
                                     self.dist(query, child.centroid())
                                 } else {
                                     let child_code = Code::<1, _>::new(code_bytes);
@@ -1626,6 +1786,10 @@ impl HierarchicalSpannWriter {
                                         dim,
                                     )
                                 };
+                                if let (Some(r_q), TreeNode::Leaf(leaf)) = (&rep_r_q, child.value()) {
+                                    let rep_dist = Self::min_representative_dist(leaf, &self.distance_fn, r_q, c_norm, rep_c_dot_q, q_norm_reps, rcs);
+                                    raw_dist = raw_dist.min(rep_dist);
+                                }
                                 dist_distance_nanos += dt0.elapsed().as_nanos() as u64;
                                 let dist = if policy.radius_corrected {
                                     if let TreeNode::Leaf(leaf) = child.value() {
@@ -2147,6 +2311,7 @@ impl HierarchicalSpannWriter {
                     codes,
                     parent_id,
                     p90_radius,
+                    representative_codes: Vec::new(),
                 }),
             );
             return;
@@ -2185,6 +2350,14 @@ impl HierarchicalSpannWriter {
             let code = Code::<1>::quantize(emb, &right_centroid);
             push_code(&mut right_codes, code.as_ref());
         }
+
+        let rep_count = self.config.representative_count;
+        let parent_centroid_for_reps = parent_id
+            .and_then(|pid| self.nodes.get(&pid).map(|n| n.centroid().to_vec()))
+            .unwrap_or_else(|| vec![0.0; self.dim]);
+        let left_reps = Self::compute_representative_codes(&left_group, &parent_centroid_for_reps, rep_count);
+        let right_reps = Self::compute_representative_codes(&right_group, &parent_centroid_for_reps, rep_count);
+
         self.stats.split_quantize_nanos.fetch_add(
             quantize_start.elapsed().as_nanos() as u64,
             Ordering::Relaxed,
@@ -2200,6 +2373,7 @@ impl HierarchicalSpannWriter {
                 codes: left_codes,
                 parent_id: None,
                 p90_radius: left_p90,
+                representative_codes: left_reps,
             }),
         );
         self.nodes.insert(
@@ -2212,6 +2386,7 @@ impl HierarchicalSpannWriter {
                 codes: right_codes,
                 parent_id: None,
                 p90_radius: right_p90,
+                representative_codes: right_reps,
             }),
         );
 
@@ -2892,6 +3067,7 @@ impl HierarchicalSpannWriter {
                         codes: Vec::new(),
                         parent_id,
                         p90_radius: 0.0,
+                        representative_codes: Vec::new(),
                     }),
                 );
                 return;
@@ -2912,6 +3088,7 @@ impl HierarchicalSpannWriter {
                         codes: Vec::new(),
                         parent_id,
                         p90_radius: 0.0,
+                        representative_codes: Vec::new(),
                     }),
                 );
                 return;
@@ -3115,6 +3292,7 @@ impl HierarchicalSpannWriter {
                         codes: Vec::new(),
                         parent_id: None,
                         p90_radius: 0.0,
+                        representative_codes: Vec::new(),
                     }),
                 );
                 self.root_id.store(new_root, Ordering::Relaxed);
@@ -3206,6 +3384,10 @@ impl HierarchicalSpannWriter {
 
     fn code_size(&self) -> usize {
         Code::<1, Vec<u8>>::size(self.dim)
+    }
+
+    fn rep_code_size(&self) -> usize {
+        Code::<4, Vec<u8>>::size(self.dim)
     }
 
     /// Compute ||v||.
@@ -3416,6 +3598,8 @@ impl HierarchicalSpannWriter {
         let padded_bytes = self.padded_bytes();
         let rerank_factor = rerank_centroids;
         let dim = self.dim;
+        let reps = policy.leaf_rerank_reps;
+        let rcs = self.rep_code_size();
 
         let mut levels = Vec::new();
         let mut beam: Vec<NodeId> = vec![root];
@@ -3431,11 +3615,23 @@ impl HierarchicalSpannWriter {
                         drop(node_ref);
 
                         let rc = policy.radius_corrected;
+                        let c_norm = Self::vec_norm(&parent_centroid);
+                        let r_q: Vec<f32> = query.iter().zip(parent_centroid.iter()).map(|(q, c)| q - c).collect();
+                        let c_dot_q = f32::dot(&parent_centroid, query).unwrap_or(0.0) as f32;
+
+                        let use_reps = reps > 0;
+
                         match nav_mode {
                             NavigationMode::Fp => {
                                 for child_id in children {
                                     if let Some(child) = self.nodes.get(&child_id) {
-                                        let raw_dist = self.dist(query, child.centroid());
+                                        let mut raw_dist = self.dist(query, child.centroid());
+                                        if use_reps {
+                                            if let TreeNode::Leaf(leaf) = child.value() {
+                                                let rep_dist = Self::min_representative_dist(leaf, &self.distance_fn, &r_q, c_norm, c_dot_q, q_norm, rcs);
+                                                raw_dist = raw_dist.min(rep_dist);
+                                            }
+                                        }
                                         let dist = if rc {
                                             if let TreeNode::Leaf(leaf) = child.value() {
                                                 Self::correct_leaf_dist(raw_dist, leaf.p90_radius)
@@ -3446,13 +3642,12 @@ impl HierarchicalSpannWriter {
                                 }
                             }
                             NavigationMode::OneBit => {
-                                let c_norm = Self::vec_norm(&parent_centroid);
                                 let query_code = Code::<1>::quantize(query, &parent_centroid);
 
                                 for child_id in children {
                                     if let Some(child) = self.nodes.get(&child_id) {
                                         let code_bytes = child.centroid_code();
-                                        let raw_dist = if code_bytes.is_empty() {
+                                        let mut raw_dist = if code_bytes.is_empty() {
                                             self.dist(query, child.centroid())
                                         } else {
                                             let child_code = Code::<1, _>::new(code_bytes);
@@ -3463,6 +3658,12 @@ impl HierarchicalSpannWriter {
                                                 dim,
                                             )
                                         };
+                                        if use_reps {
+                                            if let TreeNode::Leaf(leaf) = child.value() {
+                                                let rep_dist = Self::min_representative_dist(leaf, &self.distance_fn, &r_q, c_norm, c_dot_q, q_norm, rcs);
+                                                raw_dist = raw_dist.min(rep_dist);
+                                            }
+                                        }
                                         let dist = if rc {
                                             if let TreeNode::Leaf(leaf) = child.value() {
                                                 Self::correct_leaf_dist(raw_dist, leaf.p90_radius)
@@ -3473,14 +3674,6 @@ impl HierarchicalSpannWriter {
                                 }
                             }
                             NavigationMode::FourBit => {
-                                let c_norm = Self::vec_norm(&parent_centroid);
-                                let r_q: Vec<f32> = query
-                                    .iter()
-                                    .zip(parent_centroid.iter())
-                                    .map(|(q, c)| q - c)
-                                    .collect();
-                                let c_dot_q =
-                                    f32::dot(&parent_centroid, query).unwrap_or(0.0) as f32;
                                 let qq = QuantizedQuery::new(
                                     &r_q,
                                     padded_bytes,
@@ -3492,12 +3685,18 @@ impl HierarchicalSpannWriter {
                                 for child_id in children {
                                     if let Some(child) = self.nodes.get(&child_id) {
                                         let code_bytes = child.centroid_code();
-                                        let raw_dist = if code_bytes.is_empty() {
+                                        let mut raw_dist = if code_bytes.is_empty() {
                                             self.dist(query, child.centroid())
                                         } else {
                                             Code::<1, _>::new(code_bytes)
                                                 .distance_quantized_query(&self.distance_fn, &qq)
                                         };
+                                        if use_reps {
+                                            if let TreeNode::Leaf(leaf) = child.value() {
+                                                let rep_dist = Self::min_representative_dist(leaf, &self.distance_fn, &r_q, c_norm, c_dot_q, q_norm, rcs);
+                                                raw_dist = raw_dist.min(rep_dist);
+                                            }
+                                        }
                                         let dist = if rc {
                                             if let TreeNode::Leaf(leaf) = child.value() {
                                                 Self::correct_leaf_dist(raw_dist, leaf.p90_radius)
@@ -3864,6 +4063,7 @@ impl HierarchicalSpannWriter {
             child_counts: Vec<usize>,
             leaf_count: usize,
             leaf_sizes: Vec<usize>,
+            leaf_p90_radii: Vec<f32>,
             child_to_parent_dists: Vec<f32>,
         }
 
@@ -3873,6 +4073,7 @@ impl HierarchicalSpannWriter {
                 child_counts: Vec::new(),
                 leaf_count: 0,
                 leaf_sizes: Vec::new(),
+                leaf_p90_radii: Vec::new(),
                 child_to_parent_dists: Vec::new(),
             })
             .collect();
@@ -3906,6 +4107,7 @@ impl HierarchicalSpannWriter {
                     TreeNode::Leaf(leaf) => {
                         levels[level].leaf_count += 1;
                         levels[level].leaf_sizes.push(leaf.ids.len());
+                        levels[level].leaf_p90_radii.push(leaf.p90_radius);
                         total_leaf_entries += leaf.ids.len();
                     }
                 }
@@ -3950,6 +4152,43 @@ impl HierarchicalSpannWriter {
                     format_count_fn(total_vecs),
                     min_s, p25, p50, p75, max_s,
                 );
+            }
+
+            if !ls.leaf_p90_radii.is_empty() {
+                let radii = &ls.leaf_p90_radii;
+                let min_r = percentile_f32(radii, 0);
+                let p25_r = percentile_f32(radii, 25);
+                let p50_r = percentile_f32(radii, 50);
+                let p75_r = percentile_f32(radii, 75);
+                let max_r = percentile_f32(radii, 100);
+                let avg_r = radii.iter().sum::<f32>() / radii.len() as f32;
+                println!(
+                    "  |            p90 radius (L2): min={:.3}, p25={:.3}, p50={:.3}, avg={:.3}, p75={:.3}, max={:.3}",
+                    min_r, p25_r, p50_r, avg_r, p75_r, max_r,
+                );
+
+                let sizes = &ls.leaf_sizes;
+                if sizes.len() == radii.len() && sizes.len() > 1 {
+                    let n = sizes.len() as f64;
+                    let s_mean = sizes.iter().sum::<usize>() as f64 / n;
+                    let r_mean = radii.iter().sum::<f32>() as f64 / n;
+                    let mut cov = 0.0f64;
+                    let mut s_var = 0.0f64;
+                    let mut r_var = 0.0f64;
+                    for i in 0..sizes.len() {
+                        let sd = sizes[i] as f64 - s_mean;
+                        let rd = radii[i] as f64 - r_mean;
+                        cov += sd * rd;
+                        s_var += sd * sd;
+                        r_var += rd * rd;
+                    }
+                    let denom = (s_var * r_var).sqrt();
+                    let pearson_r = if denom > 0.0 { cov / denom } else { 0.0 };
+                    println!(
+                        "  |            size vs p90_radius correlation: r={:.3}",
+                        pearson_r,
+                    );
+                }
             }
 
             if !ls.child_to_parent_dists.is_empty() {

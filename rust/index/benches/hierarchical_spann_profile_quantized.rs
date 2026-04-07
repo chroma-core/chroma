@@ -178,6 +178,10 @@ struct Args {
     #[arg(long)]
     radius_corrected_nav: bool,
 
+    /// Number of representative codes per leaf for leaf reranking (0 = off)
+    #[arg(long, default_value = "0")]
+    leaf_rerank_reps: usize,
+
     /// Print legend explaining all table columns
     #[arg(long)]
     print_legend: bool,
@@ -470,6 +474,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         read_navigation: read_nav,
         fp_npa: args.fp_npa,
         deferred_balance: args.deferred_balance,
+        representative_count: args.leaf_rerank_reps,
     };
 
     println!("=== 1-Bit Quantized Hierarchical SPANN Writer Benchmark ===");
@@ -516,11 +521,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         );
     }
     println!(
-        "  Quantization: 1-bit | Write nav: {:?} | Read nav: {} | NPA: {} | Radius nav: {}",
+        "  Quantization: 1-bit | Write nav: {:?} | Read nav: {} | NPA: {} | Radius nav: {} | Leaf reps: {}",
         write_nav,
         args.read_navigation.join(","),
         if args.fp_npa { "f32" } else { "1x4" },
         if args.radius_corrected_nav { "p90" } else { "off" },
+        if args.leaf_rerank_reps > 0 { format!("{}", args.leaf_rerank_reps) } else { "off".to_string() },
     );
     println!("  Threads: {}", args.threads);
     println!();
@@ -920,6 +926,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             level_widths.clone(),
                         );
                         read_policy.radius_corrected = args.radius_corrected_nav;
+                        read_policy.leaf_rerank_reps = args.leaf_rerank_reps;
 
                         struct QueryResult {
                             r100: f64,
@@ -1085,6 +1092,101 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
         let recall_time = recall_start.elapsed();
         println!("  Recall duration: {}", format_duration(recall_time));
+
+        if args.radius_corrected_nav {
+            let diag_tau = tau_values[0];
+            let diag_rr_c = args.recall_rerank_centroids[0];
+            let diag_nav = read_navs[0];
+
+            let mut policy_rc = ReadBeamPolicy::with_level_overrides(
+                Some(diag_tau),
+                beam_min,
+                beam_max,
+                read_level_taus.clone(),
+                read_level_min_pcts.clone(),
+                level_widths.clone(),
+            );
+            policy_rc.radius_corrected = true;
+            policy_rc.leaf_rerank_reps = args.leaf_rerank_reps;
+
+            let mut policy_no_rc = ReadBeamPolicy::with_level_overrides(
+                Some(diag_tau),
+                beam_min,
+                beam_max,
+                read_level_taus.clone(),
+                read_level_min_pcts.clone(),
+                level_widths.clone(),
+            );
+            policy_no_rc.radius_corrected = false;
+            policy_no_rc.leaf_rerank_reps = args.leaf_rerank_reps;
+
+            println!("\n--- Radius Correction Diagnostic (tau={:.2}, rr_c={}x, nav={:?}) ---",
+                diag_tau, diag_rr_c, diag_nav);
+
+            struct RcDiag {
+                leaf_r100_rc: f64,
+                leaf_r100_no_rc: f64,
+                leaf_beam_rc: usize,
+                leaf_beam_no_rc: usize,
+            }
+
+            let diags: Vec<RcDiag> = recall_pool.install(|| {
+                checkpoint_queries.par_iter().map(|gt| {
+                    let gt_100: HashSet<u32> =
+                        gt.neighbors.iter().take(100).copied().collect();
+
+                    let lr_rc = writer.diagnose_level_recall_with_policy(
+                        &gt.vector, &gt_100, diag_rr_c, diag_nav, &policy_rc,
+                    );
+                    let lr_no = writer.diagnose_level_recall_with_policy(
+                        &gt.vector, &gt_100, diag_rr_c, diag_nav, &policy_no_rc,
+                    );
+
+                    let last_rc = lr_rc.last().map(|l| (l.reachable_100, l.beam_size)).unwrap_or((0.0, 0));
+                    let last_no = lr_no.last().map(|l| (l.reachable_100, l.beam_size)).unwrap_or((0.0, 0));
+
+                    RcDiag {
+                        leaf_r100_rc: last_rc.0,
+                        leaf_r100_no_rc: last_no.0,
+                        leaf_beam_rc: last_rc.1,
+                        leaf_beam_no_rc: last_no.1,
+                    }
+                }).collect()
+            });
+
+            let n = diags.len() as f64;
+            let avg_rc = diags.iter().map(|d| d.leaf_r100_rc).sum::<f64>() / n;
+            let avg_no = diags.iter().map(|d| d.leaf_r100_no_rc).sum::<f64>() / n;
+            let avg_beam_rc = diags.iter().map(|d| d.leaf_beam_rc).sum::<usize>() as f64 / n;
+            let avg_beam_no = diags.iter().map(|d| d.leaf_beam_no_rc).sum::<usize>() as f64 / n;
+
+            let mut improved = 0usize;
+            let mut degraded = 0usize;
+            let mut unchanged = 0usize;
+            for d in &diags {
+                let delta = d.leaf_r100_rc - d.leaf_r100_no_rc;
+                if delta > 0.005 {
+                    improved += 1;
+                } else if delta < -0.005 {
+                    degraded += 1;
+                } else {
+                    unchanged += 1;
+                }
+            }
+
+            println!("  Leaf R@100 with rc:    {:.2}%  (avg beam: {:.1})", avg_rc * 100.0, avg_beam_rc);
+            println!("  Leaf R@100 without rc: {:.2}%  (avg beam: {:.1})", avg_no * 100.0, avg_beam_no);
+            println!("  Delta:                 {:+.2}%", (avg_rc - avg_no) * 100.0);
+            println!("  Per-query: {} improved, {} degraded, {} unchanged (threshold: 0.5%)", improved, degraded, unchanged);
+
+            let mut deltas: Vec<f64> = diags.iter().map(|d| d.leaf_r100_rc - d.leaf_r100_no_rc).collect();
+            deltas.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let p10 = deltas[(0.1 * (deltas.len() - 1) as f64) as usize];
+            let p50 = deltas[(0.5 * (deltas.len() - 1) as f64) as usize];
+            let p90 = deltas[(0.9 * (deltas.len() - 1) as f64) as usize];
+            println!("  Delta distribution: p10={:+.2}%, p50={:+.2}%, p90={:+.2}%",
+                p10 * 100.0, p50 * 100.0, p90 * 100.0);
+        }
     }
 
     if args.print_legend {
