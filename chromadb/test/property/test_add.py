@@ -22,15 +22,14 @@ from chromadb.test.utils.wait_for_version_increase import wait_for_version_incre
 from chromadb.utils.batch_utils import create_batches
 
 MIN_RECORDS_BETWEEN_COMPACTION_WAITS = 10
-SMALL_MAX_RECORDS = 100
-MEDIUM_MIN_RECORDS = 100
-MEDIUM_MAX_RECORDS = 200
-LARGE_MIN_RECORDS = 2_000
-LARGE_MAX_RECORDS = 5_000
+SMALL_MAX_RECORDS = 250
+MEDIUM_MIN_RECORDS = 150
+MEDIUM_MAX_RECORDS = 300
+LARGE_MIN_RECORDS = 5_000
+LARGE_MAX_RECORDS = 15_000
 
 
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
-rare_compaction_st = st.integers(min_value=0, max_value=3).map(lambda value: value == 3)
 
 TEST_DATABASE_NAMES = [pytest.param(DEFAULT_DATABASE, id="classic")]
 
@@ -56,10 +55,10 @@ def database_name(request: pytest.FixtureRequest) -> str:
 @settings(
     deadline=None,
     parent=override_hypothesis_profile(
-        normal=hypothesis.settings(max_examples=25),
-        fast=hypothesis.settings(max_examples=10),
+        normal=hypothesis.settings(max_examples=100),
+        fast=hypothesis.settings(max_examples=40),
     ),
-    max_examples=1,
+    max_examples=2,
 )
 def test_add_miniscule(
     client: ClientAPI,
@@ -85,13 +84,13 @@ def test_add_miniscule(
     record_set=strategies.recordsets(
         collection_st, min_size=1, max_size=SMALL_MAX_RECORDS
     ),
-    should_compact=rare_compaction_st,
+    should_compact=st.booleans(),
 )
 @settings(
     deadline=None,
     parent=override_hypothesis_profile(
-        normal=hypothesis.settings(max_examples=12),
-        fast=hypothesis.settings(max_examples=5),
+        normal=hypothesis.settings(max_examples=50),
+        fast=hypothesis.settings(max_examples=20),
     ),
 )
 def test_add_small(
@@ -117,16 +116,16 @@ def test_add_small(
         collection_st,
         min_size=MEDIUM_MIN_RECORDS,
         max_size=MEDIUM_MAX_RECORDS,
-        num_unique_metadata=3,
+        num_unique_metadata=4,
         min_metadata_size=1,
-        max_metadata_size=3,
+        max_metadata_size=4,
     ),
-    should_compact=rare_compaction_st,
+    should_compact=st.booleans(),
 )
 @settings(
     deadline=None,
     parent=override_hypothesis_profile(
-        normal=hypothesis.settings(max_examples=2),
+        normal=hypothesis.settings(max_examples=3),
         fast=hypothesis.settings(max_examples=1),
     ),
     suppress_health_check=[
@@ -210,7 +209,7 @@ def _test_add(
         not NOT_CLUSTER_ONLY
         and always_compact
         and not has_waited_for_compaction
-        and len(normalized_record_set["ids"]) > 0
+        and len(normalized_record_set["ids"]) > MIN_RECORDS_BETWEEN_COMPACTION_WAITS
     ):
         current_version = wait_for_version_increase(
             client, collection.name, current_version
@@ -262,7 +261,7 @@ def create_large_recordset(
 
 
 @given(collection=collection_st, should_compact=st.booleans())
-@settings(deadline=None, max_examples=1)
+@settings(deadline=None, max_examples=2)
 def test_add_large(
     client: ClientAPI,
     database_name: str,
