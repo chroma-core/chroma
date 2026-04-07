@@ -1,3 +1,6 @@
+use std::future::Future;
+use std::time::Duration;
+
 use super::config;
 use async_trait::async_trait;
 use backon::ExponentialBuilder;
@@ -14,8 +17,8 @@ use chroma_system::System;
 use chroma_types::chroma_proto::query_executor_client::QueryExecutorClient;
 use chroma_types::SegmentType;
 use chroma_types::{
-    operator::{CountResult, GetResult, KnnBatchResult, SearchResult},
-    plan::{Count, Get, Knn, Search},
+    operator::{CountResult, GetResult, KnnBatchResult, Scan, SearchResult},
+    plan::{Count, Get, Knn, PlanToProtoError, Search},
     ExecutorError,
 };
 
@@ -128,17 +131,29 @@ impl DistributedExecutor {
 }
 
 impl DistributedExecutor {
-    ///////////////////////// Plan Operations /////////////////////////
-    pub async fn count(&mut self, plan: Count) -> Result<CountResult, ExecutorError> {
-        let collection = &plan.scan.collection_and_segments.collection;
+    fn resolve_clients(&mut self, scan: &Scan) -> Result<Vec<QueryClient>, ExecutorError> {
+        let collection = &scan.collection_and_segments.collection;
         let tier = self.tiers_config.resolve_tier(collection);
-        let assignment_key = format!("{}:{}", collection.collection_id, plan.scan.shard_index);
-        let clients = self
-            .client_assigner
+        let assignment_key = format!("{}:{}", collection.collection_id, scan.shard_index);
+        self.client_assigner
             .clients(&assignment_key, tier)
-            .map_err(|e| ExecutorError::Internal(e.boxed()))?;
-        let plan: chroma_types::chroma_proto::CountPlan = plan.clone().try_into()?;
+            .map_err(|e| ExecutorError::Internal(e.boxed()))
+    }
+
+    ///////////////////////// Plan Operations /////////////////////////
+    pub async fn count<F, Fut>(
+        &mut self,
+        plan: Count,
+        replan_closure: F,
+    ) -> Result<CountResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<Count, Box<dyn ChromaError>>>,
+    {
+        let clients = self.resolve_clients(&plan.scan)?;
+        let plan_proto: chroma_types::chroma_proto::CountPlan = plan.clone().try_into()?;
         let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let last_error = std::sync::Arc::new(parking_lot::Mutex::new(tonic::Code::Ok));
         let config = self.client_selection_config.clone();
         let res = {
             let attempt_count = attempt_count.clone();
@@ -146,26 +161,65 @@ impl DistributedExecutor {
                 let current_attempt =
                     attempt_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let is_retry = current_attempt > 0;
+                if is_retry {
+                    let last_error_code = *last_error.lock();
+                    let replan =
+                        replan_closure(last_error_code)
+                            .await
+                            .map_err(|e| -> tonic::Status {
+                                tonic::Status::new(
+                                    e.code().into(),
+                                    format!("Failed to replan count: {:?}", e),
+                                )
+                            })?;
+                    let replan_proto: chroma_types::chroma_proto::CountPlan =
+                        replan.try_into().map_err(|e: PlanToProtoError| {
+                            tonic::Status::internal(format!(
+                                "Failed to convert count plan to proto: {:?}",
+                                e
+                            ))
+                        })?;
+                    return choose_query_client_weighted(&clients, &config, is_retry)?
+                        .count(Request::new(replan_proto))
+                        .await;
+                }
                 choose_query_client_weighted(&clients, &config, is_retry)?
-                    .count(Request::new(plan.clone()))
+                    .count(Request::new(plan_proto.clone()))
                     .await
             })
             .retry(self.backoff)
             .when(is_retryable_error)
+            .notify(|e: &tonic::Status, _dur: Duration| {
+                *last_error.lock() = e.code();
+                tracing::info!(
+                    "Retrying count for collection {}, error {:?}",
+                    plan.scan.collection_and_segments.collection.collection_id,
+                    e
+                );
+            })
+            .adjust(|e: &tonic::Status, d| {
+                if e.code() == tonic::Code::NotFound {
+                    return Some(Duration::ZERO);
+                }
+                d
+            })
             .await?
         };
         Ok(res.into_inner().into())
     }
 
-    pub async fn get(&mut self, plan: Get) -> Result<GetResult, ExecutorError> {
-        let collection = &plan.scan.collection_and_segments.collection;
-        let tier = self.tiers_config.resolve_tier(collection);
-        let assignment_key = format!("{}:{}", collection.collection_id, plan.scan.shard_index);
-        let clients = self
-            .client_assigner
-            .clients(&assignment_key, tier)
-            .map_err(|e| ExecutorError::Internal(e.boxed()))?;
+    pub async fn get<F, Fut>(
+        &mut self,
+        plan: Get,
+        replan_closure: F,
+    ) -> Result<GetResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<Get, Box<dyn ChromaError>>>,
+    {
+        let clients = self.resolve_clients(&plan.scan)?;
         let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let last_error = std::sync::Arc::new(parking_lot::Mutex::new(tonic::Code::Ok));
         let config = self.client_selection_config.clone();
         let res = {
             let attempt_count = attempt_count.clone();
@@ -173,26 +227,58 @@ impl DistributedExecutor {
                 let current_attempt =
                     attempt_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let is_retry = current_attempt > 0;
+                if is_retry {
+                    let last_error_code = *last_error.lock();
+                    let replan =
+                        replan_closure(last_error_code)
+                            .await
+                            .map_err(|e| -> tonic::Status {
+                                tonic::Status::new(
+                                    e.code().into(),
+                                    format!("Failed to replan get: {:?}", e),
+                                )
+                            })?;
+                    return choose_query_client_weighted(&clients, &config, is_retry)?
+                        .get(Request::new(replan.try_into()?))
+                        .await;
+                }
                 choose_query_client_weighted(&clients, &config, is_retry)?
                     .get(Request::new(plan.clone().try_into()?))
                     .await
             })
             .retry(self.backoff)
             .when(is_retryable_error)
+            .notify(|e: &tonic::Status, _dur: Duration| {
+                *last_error.lock() = e.code();
+                tracing::info!(
+                    "Retrying get for collection {}, error {:?}",
+                    plan.scan.collection_and_segments.collection.collection_id,
+                    e
+                );
+            })
+            .adjust(|e: &tonic::Status, d| {
+                if e.code() == tonic::Code::NotFound {
+                    return Some(Duration::ZERO);
+                }
+                d
+            })
             .await?
         };
         Ok(res.into_inner().try_into()?)
     }
 
-    pub async fn knn(&mut self, plan: Knn) -> Result<KnnBatchResult, ExecutorError> {
-        let collection = &plan.scan.collection_and_segments.collection;
-        let tier = self.tiers_config.resolve_tier(collection);
-        let assignment_key = format!("{}:{}", collection.collection_id, plan.scan.shard_index);
-        let clients = self
-            .client_assigner
-            .clients(&assignment_key, tier)
-            .map_err(|e| ExecutorError::Internal(e.boxed()))?;
+    pub async fn knn<F, Fut>(
+        &mut self,
+        plan: Knn,
+        replan_closure: F,
+    ) -> Result<KnnBatchResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<Knn, Box<dyn ChromaError>>>,
+    {
+        let clients = self.resolve_clients(&plan.scan)?;
         let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let last_error = std::sync::Arc::new(parking_lot::Mutex::new(tonic::Code::Ok));
         let config = self.client_selection_config.clone();
         let res = {
             let attempt_count = attempt_count.clone();
@@ -200,30 +286,59 @@ impl DistributedExecutor {
                 let current_attempt =
                     attempt_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let is_retry = current_attempt > 0;
+                if is_retry {
+                    let last_error_code = *last_error.lock();
+                    let replan =
+                        replan_closure(last_error_code)
+                            .await
+                            .map_err(|e| -> tonic::Status {
+                                tonic::Status::new(
+                                    e.code().into(),
+                                    format!("Failed to replan knn: {:?}", e),
+                                )
+                            })?;
+                    return choose_query_client_weighted(&clients, &config, is_retry)?
+                        .knn(Request::new(replan.try_into()?))
+                        .await;
+                }
                 choose_query_client_weighted(&clients, &config, is_retry)?
                     .knn(Request::new(plan.clone().try_into()?))
                     .await
             })
             .retry(self.backoff)
             .when(is_retryable_error)
+            .notify(|e: &tonic::Status, _dur: Duration| {
+                *last_error.lock() = e.code();
+                tracing::info!(
+                    "Retrying knn for collection {}, error {:?}",
+                    plan.scan.collection_and_segments.collection.collection_id,
+                    e
+                );
+            })
+            .adjust(|e: &tonic::Status, d| {
+                if e.code() == tonic::Code::NotFound {
+                    return Some(Duration::ZERO);
+                }
+                d
+            })
             .await?
         };
         Ok(res.into_inner().try_into()?)
     }
 
-    pub async fn search(&mut self, plan: Search) -> Result<SearchResult, ExecutorError> {
-        let collection = &plan.scan.collection_and_segments.collection;
-        let tier = self.tiers_config.resolve_tier(collection);
-        let assignment_key = format!("{}:{}", collection.collection_id, plan.scan.shard_index);
-        let clients = self
-            .client_assigner
-            .clients(&assignment_key, tier)
-            .map_err(|e| ExecutorError::Internal(e.boxed()))?;
-
-        // Convert plan to proto
-        let request: chroma_types::chroma_proto::SearchPlan = plan.try_into()?;
-
+    pub async fn search<F, Fut>(
+        &mut self,
+        plan: Search,
+        replan_closure: F,
+    ) -> Result<SearchResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<Search, Box<dyn ChromaError>>>,
+    {
+        let clients = self.resolve_clients(&plan.scan)?;
+        let plan_proto: chroma_types::chroma_proto::SearchPlan = plan.clone().try_into()?;
         let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let last_error = std::sync::Arc::new(parking_lot::Mutex::new(tonic::Code::Ok));
         let config = self.client_selection_config.clone();
         let res = {
             let attempt_count = attempt_count.clone();
@@ -231,12 +346,41 @@ impl DistributedExecutor {
                 let current_attempt =
                     attempt_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let is_retry = current_attempt > 0;
+                if is_retry {
+                    let last_error_code = *last_error.lock();
+                    let replan =
+                        replan_closure(last_error_code)
+                            .await
+                            .map_err(|e| -> tonic::Status {
+                                tonic::Status::new(
+                                    e.code().into(),
+                                    format!("Failed to replan search: {:?}", e),
+                                )
+                            })?;
+                    return choose_query_client_weighted(&clients, &config, is_retry)?
+                        .search(Request::new(replan.try_into()?))
+                        .await;
+                }
                 choose_query_client_weighted(&clients, &config, is_retry)?
-                    .search(Request::new(request.clone()))
+                    .search(Request::new(plan_proto.clone()))
                     .await
             })
             .retry(self.backoff)
             .when(is_retryable_error)
+            .notify(|e: &tonic::Status, _dur: Duration| {
+                *last_error.lock() = e.code();
+                tracing::info!(
+                    "Retrying search for collection {}, error {:?}",
+                    plan.scan.collection_and_segments.collection.collection_id,
+                    e
+                );
+            })
+            .adjust(|e: &tonic::Status, d| {
+                if e.code() == tonic::Code::NotFound {
+                    return Some(Duration::ZERO);
+                }
+                d
+            })
             .await?
         };
         Ok(res.into_inner().try_into()?)
@@ -307,10 +451,15 @@ fn choose_query_client_weighted(
 }
 
 fn is_retryable_error(e: &tonic::Status) -> bool {
-    e.code() == tonic::Code::Unavailable
-        || e.code() == tonic::Code::DeadlineExceeded
-        || e.code() == tonic::Code::Aborted
-        || e.code() == tonic::Code::ResourceExhausted
+    matches!(
+        e.code(),
+        tonic::Code::Unavailable
+            | tonic::Code::DeadlineExceeded
+            | tonic::Code::Aborted
+            | tonic::Code::ResourceExhausted
+            | tonic::Code::NotFound
+            | tonic::Code::Unknown
+    )
 }
 
 fn no_clients_found_status() -> tonic::Status {

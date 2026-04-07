@@ -62,13 +62,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 struct Metrics {
     fork_retries_counter: Counter<u64>,
     delete_retries_counter: Counter<u64>,
-    count_retries_counter: Counter<u64>,
-    query_retries_counter: Counter<u64>,
-    get_retries_counter: Counter<u64>,
     add_retries_counter: Counter<u64>,
     update_retries_counter: Counter<u64>,
     upsert_retries_counter: Counter<u64>,
-    search_retries_counter: Counter<u64>,
     metering_fork_counter: Counter<u64>,
     metering_read_counter: Counter<u64>,
     metering_write_counter: Counter<u64>,
@@ -110,13 +106,9 @@ impl ServiceBasedFrontend {
         let meter = global::meter("chroma");
         let fork_retries_counter = meter.u64_counter("fork_retries").build();
         let delete_retries_counter = meter.u64_counter("delete_retries").build();
-        let count_retries_counter = meter.u64_counter("count_retries").build();
-        let query_retries_counter = meter.u64_counter("query_retries").build();
-        let get_retries_counter = meter.u64_counter("get_retries").build();
         let add_retries_counter = meter.u64_counter("add_retries").build();
         let update_retries_counter = meter.u64_counter("update_retries").build();
         let upsert_retries_counter = meter.u64_counter("upsert_retries").build();
-        let search_retries_counter = meter.u64_counter("search_retries").build();
         let metering_fork_counter = meter.u64_counter("metering_events_sent.fork").with_description("The number of fork metering events sent by the frontend to the metering event receiver.").build();
         let metering_read_counter = meter.u64_counter("metering_events_sent.read").with_description("The number of read metering events sent by the frontend to the metering event receiver.").build();
         let metering_write_counter = meter.u64_counter("metering_events_sent.write").with_description("The number of write metering events sent by the frontend to the metering event receiver.").build();
@@ -124,13 +116,9 @@ impl ServiceBasedFrontend {
         let metrics = Arc::new(Metrics {
             fork_retries_counter,
             delete_retries_counter,
-            count_retries_counter,
-            query_retries_counter,
-            get_retries_counter,
             add_retries_counter,
             update_retries_counter,
             upsert_retries_counter,
-            search_retries_counter,
             metering_fork_counter,
             metering_read_counter,
             metering_write_counter,
@@ -175,36 +163,95 @@ impl ServiceBasedFrontend {
             .record_segment
             .num_shards()
             .map_err(|e| ExecutorError::Internal(Box::new(e)))? as u32;
+        let collection_id = cas.collection.collection_id;
+        let database_name = DatabaseName::new(cas.collection.database.clone());
         if num_shards <= 1 {
+            let provider = self.collections_with_segments_provider.clone();
             return self
                 .executor
                 .clone()
-                .count(Count {
-                    scan: Scan {
-                        collection_and_segments: cas,
-                        shard_index: 0,
-                        num_shards: 1,
-                        log_upper_bound_offset,
+                .count(
+                    Count {
+                        scan: Scan {
+                            collection_and_segments: cas,
+                            shard_index: 0,
+                            num_shards: 1,
+                            log_upper_bound_offset,
+                        },
+                        read_level,
                     },
-                    read_level,
-                })
+                    move |code: tonic::Code| {
+                        let mut provider = provider.clone();
+                        let database_name = database_name.clone();
+                        async move {
+                            if code == tonic::Code::NotFound {
+                                provider
+                                    .collections_with_segments_cache
+                                    .remove(&collection_id)
+                                    .await;
+                            }
+                            let new_cas = provider
+                                .get_collection_with_segments(database_name, collection_id)
+                                .await
+                                .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+                            Ok(Count {
+                                scan: Scan {
+                                    collection_and_segments: new_cas,
+                                    shard_index: 0,
+                                    num_shards: 1,
+                                    log_upper_bound_offset,
+                                },
+                                read_level,
+                            })
+                        }
+                    },
+                )
                 .await;
         }
         let futs: Vec<_> = (0..num_shards)
             .map(|shard_index| {
                 let mut executor = self.executor.clone();
                 let cas = cas.clone();
+                let provider = self.collections_with_segments_provider.clone();
+                let database_name = database_name.clone();
                 async move {
                     executor
-                        .count(Count {
-                            scan: Scan {
-                                collection_and_segments: cas,
-                                shard_index,
-                                num_shards,
-                                log_upper_bound_offset,
+                        .count(
+                            Count {
+                                scan: Scan {
+                                    collection_and_segments: cas,
+                                    shard_index,
+                                    num_shards,
+                                    log_upper_bound_offset,
+                                },
+                                read_level,
                             },
-                            read_level,
-                        })
+                            move |code: tonic::Code| {
+                                let mut provider = provider.clone();
+                                let database_name = database_name.clone();
+                                async move {
+                                    if code == tonic::Code::NotFound {
+                                        provider
+                                            .collections_with_segments_cache
+                                            .remove(&collection_id)
+                                            .await;
+                                    }
+                                    let new_cas = provider
+                                        .get_collection_with_segments(database_name, collection_id)
+                                        .await
+                                        .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+                                    Ok(Count {
+                                        scan: Scan {
+                                            collection_and_segments: new_cas,
+                                            shard_index,
+                                            num_shards,
+                                            log_upper_bound_offset,
+                                        },
+                                        read_level,
+                                    })
+                                }
+                            },
+                        )
                         .await
                 }
             })
@@ -223,8 +270,41 @@ impl ServiceBasedFrontend {
             .record_segment
             .num_shards()
             .map_err(|e| ExecutorError::Internal(Box::new(e)))? as u32;
+        let collection_id = plan.scan.collection_and_segments.collection.collection_id;
+        let database_name = DatabaseName::new(
+            plan.scan
+                .collection_and_segments
+                .collection
+                .database
+                .clone(),
+        );
         if num_shards <= 1 {
-            return self.executor.clone().get(plan).await;
+            let provider = self.collections_with_segments_provider.clone();
+            return self
+                .executor
+                .clone()
+                .get(plan.clone(), move |code: tonic::Code| {
+                    let mut provider = provider.clone();
+                    let mut replan = plan.clone();
+                    let database_name = database_name.clone();
+                    async move {
+                        if code == tonic::Code::NotFound {
+                            provider
+                                .collections_with_segments_cache
+                                .remove(&collection_id)
+                                .await;
+                        }
+                        let new_cas = provider
+                            .get_collection_with_segments(database_name, collection_id)
+                            .await
+                            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+                        replan.scan.collection_and_segments = new_cas;
+                        replan.scan.shard_index = 0;
+                        replan.scan.num_shards = 1;
+                        Ok(replan)
+                    }
+                })
+                .await;
         }
         let futs: Vec<_> = (0..num_shards)
             .map(|shard_index| {
@@ -232,7 +312,33 @@ impl ServiceBasedFrontend {
                 let mut shard_plan = plan.clone();
                 shard_plan.scan.shard_index = shard_index;
                 shard_plan.scan.num_shards = num_shards;
-                async move { executor.get(shard_plan).await }
+                let provider = self.collections_with_segments_provider.clone();
+                let database_name = database_name.clone();
+                async move {
+                    executor
+                        .get(shard_plan.clone(), move |code: tonic::Code| {
+                            let mut provider = provider.clone();
+                            let mut replan = shard_plan.clone();
+                            let database_name = database_name.clone();
+                            async move {
+                                if code == tonic::Code::NotFound {
+                                    provider
+                                        .collections_with_segments_cache
+                                        .remove(&collection_id)
+                                        .await;
+                                }
+                                let new_cas = provider
+                                    .get_collection_with_segments(database_name, collection_id)
+                                    .await
+                                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+                                replan.scan.collection_and_segments = new_cas;
+                                replan.scan.shard_index = shard_index;
+                                replan.scan.num_shards = num_shards;
+                                Ok(replan)
+                            }
+                        })
+                        .await
+                }
             })
             .collect();
         let results = futures::future::try_join_all(futs).await?;
@@ -258,8 +364,41 @@ impl ServiceBasedFrontend {
             .record_segment
             .num_shards()
             .map_err(|e| ExecutorError::Internal(Box::new(e)))? as u32;
+        let collection_id = plan.scan.collection_and_segments.collection.collection_id;
+        let database_name = DatabaseName::new(
+            plan.scan
+                .collection_and_segments
+                .collection
+                .database
+                .clone(),
+        );
         if num_shards <= 1 {
-            return self.executor.clone().knn(plan).await;
+            let provider = self.collections_with_segments_provider.clone();
+            return self
+                .executor
+                .clone()
+                .knn(plan.clone(), move |code: tonic::Code| {
+                    let mut provider = provider.clone();
+                    let mut replan = plan.clone();
+                    let database_name = database_name.clone();
+                    async move {
+                        if code == tonic::Code::NotFound {
+                            provider
+                                .collections_with_segments_cache
+                                .remove(&collection_id)
+                                .await;
+                        }
+                        let new_cas = provider
+                            .get_collection_with_segments(database_name, collection_id)
+                            .await
+                            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+                        replan.scan.collection_and_segments = new_cas;
+                        replan.scan.shard_index = 0;
+                        replan.scan.num_shards = 1;
+                        Ok(replan)
+                    }
+                })
+                .await;
         }
         let futs: Vec<_> = (0..num_shards)
             .map(|shard_index| {
@@ -267,7 +406,33 @@ impl ServiceBasedFrontend {
                 let mut shard_plan = plan.clone();
                 shard_plan.scan.shard_index = shard_index;
                 shard_plan.scan.num_shards = num_shards;
-                async move { executor.knn(shard_plan).await }
+                let provider = self.collections_with_segments_provider.clone();
+                let database_name = database_name.clone();
+                async move {
+                    executor
+                        .knn(shard_plan.clone(), move |code: tonic::Code| {
+                            let mut provider = provider.clone();
+                            let mut replan = shard_plan.clone();
+                            let database_name = database_name.clone();
+                            async move {
+                                if code == tonic::Code::NotFound {
+                                    provider
+                                        .collections_with_segments_cache
+                                        .remove(&collection_id)
+                                        .await;
+                                }
+                                let new_cas = provider
+                                    .get_collection_with_segments(database_name, collection_id)
+                                    .await
+                                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+                                replan.scan.collection_and_segments = new_cas;
+                                replan.scan.shard_index = shard_index;
+                                replan.scan.num_shards = num_shards;
+                                Ok(replan)
+                            }
+                        })
+                        .await
+                }
             })
             .collect();
         let results = futures::future::try_join_all(futs).await?;
@@ -302,8 +467,41 @@ impl ServiceBasedFrontend {
             .record_segment
             .num_shards()
             .map_err(|e| ExecutorError::Internal(Box::new(e)))? as u32;
+        let collection_id = plan.scan.collection_and_segments.collection.collection_id;
+        let database_name = DatabaseName::new(
+            plan.scan
+                .collection_and_segments
+                .collection
+                .database
+                .clone(),
+        );
         if num_shards <= 1 {
-            return self.executor.clone().search(plan).await;
+            let provider = self.collections_with_segments_provider.clone();
+            return self
+                .executor
+                .clone()
+                .search(plan.clone(), move |code: tonic::Code| {
+                    let mut provider = provider.clone();
+                    let mut replan = plan.clone();
+                    let database_name = database_name.clone();
+                    async move {
+                        if code == tonic::Code::NotFound {
+                            provider
+                                .collections_with_segments_cache
+                                .remove(&collection_id)
+                                .await;
+                        }
+                        let new_cas = provider
+                            .get_collection_with_segments(database_name, collection_id)
+                            .await
+                            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+                        replan.scan.collection_and_segments = new_cas;
+                        replan.scan.shard_index = 0;
+                        replan.scan.num_shards = 1;
+                        Ok(replan)
+                    }
+                })
+                .await;
         }
         let futs: Vec<_> = (0..num_shards)
             .map(|shard_index| {
@@ -311,7 +509,33 @@ impl ServiceBasedFrontend {
                 let mut shard_plan = plan.clone();
                 shard_plan.scan.shard_index = shard_index;
                 shard_plan.scan.num_shards = num_shards;
-                async move { executor.search(shard_plan).await }
+                let provider = self.collections_with_segments_provider.clone();
+                let database_name = database_name.clone();
+                async move {
+                    executor
+                        .search(shard_plan.clone(), move |code: tonic::Code| {
+                            let mut provider = provider.clone();
+                            let mut replan = shard_plan.clone();
+                            let database_name = database_name.clone();
+                            async move {
+                                if code == tonic::Code::NotFound {
+                                    provider
+                                        .collections_with_segments_cache
+                                        .remove(&collection_id)
+                                        .await;
+                                }
+                                let new_cas = provider
+                                    .get_collection_with_segments(database_name, collection_id)
+                                    .await
+                                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+                                replan.scan.collection_and_segments = new_cas;
+                                replan.scan.shard_index = shard_index;
+                                replan.scan.num_shards = num_shards;
+                                Ok(replan)
+                            }
+                        })
+                        .await
+                }
             })
             .collect();
         let results = futures::future::try_join_all(futs).await?;
@@ -1660,7 +1884,7 @@ impl ServiceBasedFrontend {
         res
     }
 
-    pub async fn retryable_count(
+    pub async fn count(
         &mut self,
         CountRequest {
             database_name,
@@ -1741,52 +1965,6 @@ impl ServiceBasedFrontend {
         Ok(count_result.count)
     }
 
-    pub async fn count(&mut self, request: CountRequest) -> Result<CountResponse, QueryError> {
-        let retries = Arc::new(AtomicUsize::new(0));
-        let count_to_retry = || {
-            let mut self_clone = self.clone();
-            let request_clone = request.clone();
-            let cache_clone = self
-                .collections_with_segments_provider
-                .collections_with_segments_cache
-                .clone();
-            async move {
-                let res = Box::pin(self_clone.retryable_count(request_clone)).await;
-                match res {
-                    Ok(res) => Ok(res),
-                    Err(e) => {
-                        if e.code() == ErrorCodes::NotFound {
-                            tracing::info!(
-                                "Invalidating cache for collection {}",
-                                request.collection_id
-                            );
-                            cache_clone.remove(&request.collection_id).await;
-                        }
-                        Err(e)
-                    }
-                }
-            }
-        };
-        let res = count_to_retry
-            .retry(self.collections_with_segments_provider.get_retry_backoff())
-            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-            .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
-            .notify(|_, _| {
-                let retried = retries.fetch_add(1, Ordering::Relaxed);
-                if retried > 0 {
-                    tracing::info!(
-                        "Retrying count() request for collection {}",
-                        request.collection_id
-                    );
-                }
-            })
-            .await;
-        self.metrics
-            .count_retries_counter
-            .add(retries.load(Ordering::Relaxed) as u64, &[]);
-        res
-    }
-
     pub async fn indexing_status(
         &mut self,
         database_name: DatabaseName,
@@ -1835,7 +2013,7 @@ impl ServiceBasedFrontend {
         })
     }
 
-    async fn retryable_get(
+    pub async fn get(
         &mut self,
         GetRequest {
             database_name,
@@ -1953,55 +2131,7 @@ impl ServiceBasedFrontend {
         Ok((get_result, include).into())
     }
 
-    pub async fn get(&mut self, request: GetRequest) -> Result<GetResponse, QueryError> {
-        let retries = Arc::new(AtomicUsize::new(0));
-        let get_to_retry = || {
-            let mut self_clone = self.clone();
-            let request_clone = request.clone();
-            let cache_clone = self
-                .collections_with_segments_provider
-                .collections_with_segments_cache
-                .clone();
-            async move {
-                let res = Box::pin(self_clone.retryable_get(request_clone)).await;
-                match res {
-                    Ok(res) => Ok(res),
-                    Err(e) => {
-                        if e.code() == ErrorCodes::NotFound {
-                            tracing::info!(
-                                "Invalidating cache for collection {}",
-                                request.collection_id
-                            );
-                            cache_clone.remove(&request.collection_id).await;
-                        }
-                        Err(e)
-                    }
-                }
-            }
-        };
-        let res = Box::pin(
-            get_to_retry
-                .retry(self.collections_with_segments_provider.get_retry_backoff())
-                // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-                .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
-                .notify(|_, _| {
-                    let retried = retries.fetch_add(1, Ordering::Relaxed);
-                    if retried > 0 {
-                        tracing::info!(
-                            "Retrying get() request for collection {}",
-                            request.collection_id
-                        );
-                    }
-                }),
-        )
-        .await;
-        self.metrics
-            .get_retries_counter
-            .add(retries.load(Ordering::Relaxed) as u64, &[]);
-        res
-    }
-
-    async fn retryable_query(
+    pub async fn query(
         &mut self,
         QueryRequest {
             database_name,
@@ -2019,6 +2149,16 @@ impl ServiceBasedFrontend {
                 "database name must be at least 3 characters".to_string(),
             )))
         })?;
+        self.validate_embedding(
+            database_name_typed.clone(),
+            collection_id,
+            Some(&embeddings),
+            false,
+            |embedding| Some(embedding.len()),
+        )
+        .await
+        .map_err(|err| err.boxed())?;
+
         let collection_and_segments = self
             .collections_with_segments_provider
             .get_collection_with_segments(Some(database_name_typed.clone()), collection_id)
@@ -2126,75 +2266,7 @@ impl ServiceBasedFrontend {
         Ok((query_result, include).into())
     }
 
-    pub async fn query(&mut self, request: QueryRequest) -> Result<QueryResponse, QueryError> {
-        let database_name_typed = DatabaseName::new(&request.database_name).ok_or_else(|| {
-            QueryError::Other(Box::new(ValidationError::InvalidArgument(
-                "database name must be at least 3 characters".to_string(),
-            )))
-        })?;
-        self.validate_embedding(
-            database_name_typed,
-            request.collection_id,
-            Some(&request.embeddings),
-            false,
-            |embedding| Some(embedding.len()),
-        )
-        .await
-        .map_err(|err| err.boxed())?;
-
-        let retries = Arc::new(AtomicUsize::new(0));
-        let query_to_retry = || {
-            let mut self_clone = self.clone();
-            let request_clone = request.clone();
-            let cache_clone = self
-                .collections_with_segments_provider
-                .collections_with_segments_cache
-                .clone();
-            async move {
-                let res = Box::pin(self_clone.retryable_query(request_clone)).await;
-                match res {
-                    Ok(res) => Ok(res),
-                    Err(e) => {
-                        if e.code() == ErrorCodes::NotFound {
-                            tracing::info!(
-                                "Invalidating cache for collection {}",
-                                request.collection_id
-                            );
-                            cache_clone.remove(&request.collection_id).await;
-                        }
-                        Err(e)
-                    }
-                }
-            }
-        };
-        let res = Box::pin(
-            query_to_retry
-                .retry(self.collections_with_segments_provider.get_retry_backoff())
-                // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-                .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
-                .notify(|_, _| {
-                    let retried = retries.fetch_add(1, Ordering::Relaxed);
-                    if retried > 0 {
-                        tracing::info!(
-                            "Retrying query() request for collection {}",
-                            request.collection_id
-                        );
-                    }
-                }),
-        )
-        .await;
-        self.metrics
-            .query_retries_counter
-            .add(retries.load(Ordering::Relaxed) as u64, &[]);
-        res
-    }
-
-    pub async fn retryable_search(
-        &mut self,
-        request: SearchRequest,
-    ) -> Result<SearchResponse, QueryError> {
-        // TODO: The dispatch logic is mostly the same for count/get/query/search, we should consider unifying them
-        // Get collection and segments once for all queries
+    pub async fn search(&mut self, request: SearchRequest) -> Result<SearchResponse, QueryError> {
         let database_name_typed = DatabaseName::new(&request.database_name).ok_or_else(|| {
             QueryError::Other(Box::new(ValidationError::InvalidArgument(
                 "database name must be at least 3 characters".to_string(),
@@ -2324,53 +2396,6 @@ impl ServiceBasedFrontend {
         }
 
         Ok((result, searches_for_select).into())
-    }
-
-    pub async fn search(&mut self, request: SearchRequest) -> Result<SearchResponse, QueryError> {
-        // TODO: The retry logic is mostly the same for count/get/query/search, we should consider unifying them
-        let retries = Arc::new(AtomicUsize::new(0));
-        let search_to_retry = || {
-            let mut self_clone = self.clone();
-            let request_clone = request.clone();
-            let cache_clone = self
-                .collections_with_segments_provider
-                .collections_with_segments_cache
-                .clone();
-            async move {
-                let res = Box::pin(self_clone.retryable_search(request_clone)).await;
-                match res {
-                    Ok(res) => Ok(res),
-                    Err(e) => {
-                        if e.code() == ErrorCodes::NotFound {
-                            tracing::info!(
-                                "Invalidating cache for collection {}",
-                                request.collection_id
-                            );
-                            cache_clone.remove(&request.collection_id).await;
-                        }
-                        Err(e)
-                    }
-                }
-            }
-        };
-        let res = search_to_retry
-            .retry(self.collections_with_segments_provider.get_retry_backoff())
-            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-            .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
-            .notify(|_, _| {
-                let retried = retries.fetch_add(1, Ordering::Relaxed);
-                if retried > 0 {
-                    tracing::info!(
-                        "Retrying search() request for collection {}",
-                        request.collection_id
-                    );
-                }
-            })
-            .await;
-        self.metrics
-            .search_retries_counter
-            .add(retries.load(Ordering::Relaxed) as u64, &[]);
-        res
     }
 
     pub async fn attach_function(
