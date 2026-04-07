@@ -3687,7 +3687,6 @@ mod tests {
     use google_cloud_googleapis::spanner::admin::database::v1::DropDatabaseRequest;
     use google_cloud_spanner::admin::client::Client as AdminClient;
     use google_cloud_spanner::admin::AdminClientConfig;
-    use google_cloud_spanner::statement::Statement;
     use opentelemetry::global::meter;
     use proptest::prelude::*;
     use tokio::{runtime::Runtime, sync::mpsc::unbounded_channel, time::sleep};
@@ -5178,7 +5177,6 @@ mod tests {
 
     async fn validate_dirty_log_on_server(
         server: &LogServer,
-        db_name: &str,
         collection_ids: &[CollectionUuid],
     ) {
         server
@@ -5419,7 +5417,7 @@ mod tests {
         runtime.block_on(async move {
             let (ctor, dtor) = setup_log_server();
             let log_server = ctor.await;
-            validate_dirty_log_on_server(&log_server, &db_name, &[]).await;
+            validate_dirty_log_on_server(&log_server, &[]).await;
 
             let collection_id = CollectionUuid::new();
 
@@ -5427,7 +5425,7 @@ mod tests {
                 push_log_to_server(&log_server, &db_name, collection_id, chunk).await;
             }
 
-            validate_dirty_log_on_server(&log_server, &db_name, &[collection_id]).await;
+            validate_dirty_log_on_server(&log_server, &[collection_id]).await;
             validate_log_on_server(
                 &log_server,
                 &db_name,
@@ -5440,7 +5438,7 @@ mod tests {
             let enum_offset = get_enum_offset_on_server(&log_server, &db_name, collection_id).await;
             update_compact_offset_on_server(&log_server, &db_name, collection_id, enum_offset)
                 .await;
-            validate_dirty_log_on_server(&log_server, &db_name, &[]).await;
+            validate_dirty_log_on_server(&log_server, &[]).await;
             dtor.await;
         });
     }
@@ -5456,7 +5454,7 @@ mod tests {
         runtime.block_on(async move {
             let (ctor, dtor) = setup_log_server();
             let log_server = ctor.await;
-            validate_dirty_log_on_server(&log_server, &db_name, &[]).await;
+            validate_dirty_log_on_server(&log_server, &[]).await;
 
             let mut collection_id_with_ord = Vec::new();
             for (index, operation) in operations {
@@ -5476,7 +5474,7 @@ mod tests {
 
             while let Some(collection_id) = collection_ids.pop() {
                 update_compact_offset_on_server(&log_server, &db_name, collection_id, 1).await;
-                validate_dirty_log_on_server(&log_server, &db_name, &collection_ids).await;
+                validate_dirty_log_on_server(&log_server, &collection_ids).await;
             }
             dtor.await;
         });
@@ -5506,7 +5504,7 @@ mod tests {
         runtime.block_on(async move {
             let (ctor, dtor) = setup_log_server();
             let log_server = ctor.await;
-            validate_dirty_log_on_server(&log_server, &db_name, &[]).await;
+            validate_dirty_log_on_server(&log_server, &[]).await;
 
             let source_collection_id = CollectionUuid::new();
             let fork_collection_id = CollectionUuid::new();
@@ -5560,7 +5558,7 @@ mod tests {
                 dirty_collection_ids.push(fork_collection_id);
             }
 
-            validate_dirty_log_on_server(&log_server, &db_name, &dirty_collection_ids).await;
+            validate_dirty_log_on_server(&log_server, &dirty_collection_ids).await;
             validate_log_on_server(
                 &log_server,
                 &db_name,
@@ -5604,7 +5602,7 @@ mod tests {
                 )
                 .await;
             }
-            validate_dirty_log_on_server(&log_server, &db_name, &[]).await;
+            validate_dirty_log_on_server(&log_server, &[]).await;
             dtor.await;
         });
     }
