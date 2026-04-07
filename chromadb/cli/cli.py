@@ -50,4 +50,7 @@ def app():
     if ["chroma", "update"] in args:
         update()
         return
-    chromadb_rust_bindings.cli(args)
+    try:
+        chromadb_rust_bindings.cli(args)
+    except KeyboardInterrupt:
+        pass
