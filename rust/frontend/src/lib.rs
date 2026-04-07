@@ -131,6 +131,8 @@ pub fn init_frontend_otel_tracing(config: &FrontendServerConfig) {
             init_stdout_layer(),
         ];
         init_tracing(tracing_layers);
+    } else {
+        eprintln!("No telemetry is configured.");
     }
 }
 

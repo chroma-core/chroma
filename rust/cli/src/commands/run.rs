@@ -108,7 +108,7 @@ fn display_run_message(config: &FrontendServerConfig) {
 }
 
 pub fn run(args: RunArgs) -> Result<(), CliError> {
-    let mut config = match &args.config_path {
+    let config = match &args.config_path {
         Some(config_path) => {
             if !std::path::Path::new(config_path).exists() {
                 eprintln!(
@@ -124,12 +124,14 @@ pub fn run(args: RunArgs) -> Result<(), CliError> {
             }
             FrontendServerConfig::load_from_path(config_path)
         }
-        None => override_default_config_with_args(args)?,
+        None => {
+            let mut config = override_default_config_with_args(args)?;
+            config.stdout_tracing = true;
+            config
+        }
     };
 
     display_run_message(&config);
-
-    config.stdout_tracing = true;
 
     let runtime = tokio::runtime::Runtime::new().map_err(|_| RunError::ServerStartFailed)?;
     runtime.block_on(async {
