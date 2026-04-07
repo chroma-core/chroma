@@ -5175,10 +5175,7 @@ mod tests {
         }
     }
 
-    async fn validate_dirty_log_on_server(
-        server: &LogServer,
-        collection_ids: &[CollectionUuid],
-    ) {
+    async fn validate_dirty_log_on_server(server: &LogServer, collection_ids: &[CollectionUuid]) {
         server
             .roll_dirty_log_s3_cycle()
             .await
