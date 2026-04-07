@@ -19,18 +19,23 @@ use chroma_sqlite::db::SqliteDb;
 use chroma_sysdb::{DatabaseOrTopology, GetCollectionsOptions, SysDb};
 use chroma_system::System;
 use chroma_types::{
-    operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
+    operator::{
+        CountResult, Filter, GetResult, KnnBatch, KnnBatchResult, KnnProjection,
+        KnnProjectionOutput, Limit, Projection, ProjectionOutput, Scan, SearchPayloadResult,
+        SearchResult,
+    },
     plan::{Count, Get, Knn, Search},
     AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
-    AttachFunctionRequest, AttachFunctionResponse, Cmek, Collection, CollectionUuid,
-    CountCollectionsError, CountCollectionsRequest, CountCollectionsResponse, CountRequest,
-    CountResponse, CreateCollectionError, CreateCollectionRequest, CreateCollectionResponse,
-    CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError,
-    CreateTenantRequest, CreateTenantResponse, DatabaseName, DeleteCollectionError,
-    DeleteCollectionRecordsError, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse,
-    DeleteCollectionRequest, DeleteCollectionResponse, DeleteDatabaseError, DeleteDatabaseRequest,
-    DeleteDatabaseResponse, DetachFunctionError, DetachFunctionRequest, DetachFunctionResponse,
-    ForkCollectionError, ForkCollectionRequest, ForkCollectionResponse, GetCollectionByCrnError,
+    AttachFunctionRequest, AttachFunctionResponse, Cmek, Collection, CollectionAndSegments,
+    CollectionUuid, CountCollectionsError, CountCollectionsRequest, CountCollectionsResponse,
+    CountRequest, CountResponse, CreateCollectionError, CreateCollectionRequest,
+    CreateCollectionResponse, CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse,
+    CreateTenantError, CreateTenantRequest, CreateTenantResponse, DatabaseName,
+    DeleteCollectionError, DeleteCollectionRecordsError, DeleteCollectionRecordsRequest,
+    DeleteCollectionRecordsResponse, DeleteCollectionRequest, DeleteCollectionResponse,
+    DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, DetachFunctionError,
+    DetachFunctionRequest, DetachFunctionResponse, ExecutorError, ForkCollectionError,
+    ForkCollectionRequest, ForkCollectionResponse, GetCollectionByCrnError,
     GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionByIdError,
     GetCollectionByIdRequest, GetCollectionByIdResponse, GetCollectionError, GetCollectionRequest,
     GetCollectionResponse, GetCollectionsError, GetDatabaseError, GetDatabaseRequest,
@@ -158,6 +163,179 @@ impl ServiceBasedFrontend {
             tenants_with_quantization_enabled,
             enable_log_scouting,
         }
+    }
+
+    async fn fan_out_count(
+        &self,
+        cas: CollectionAndSegments,
+        read_level: chroma_types::plan::ReadLevel,
+        log_upper_bound_offset: i64,
+    ) -> Result<CountResult, ExecutorError> {
+        let num_shards = cas
+            .record_segment
+            .num_shards()
+            .map_err(|e| ExecutorError::Internal(Box::new(e)))? as u32;
+        if num_shards <= 1 {
+            return self
+                .executor
+                .clone()
+                .count(Count {
+                    scan: Scan {
+                        collection_and_segments: cas,
+                        shard_index: 0,
+                        num_shards: 1,
+                        log_upper_bound_offset,
+                    },
+                    read_level,
+                })
+                .await;
+        }
+        let futs: Vec<_> = (0..num_shards)
+            .map(|shard_index| {
+                let mut executor = self.executor.clone();
+                let cas = cas.clone();
+                async move {
+                    executor
+                        .count(Count {
+                            scan: Scan {
+                                collection_and_segments: cas,
+                                shard_index,
+                                num_shards,
+                                log_upper_bound_offset,
+                            },
+                            read_level,
+                        })
+                        .await
+                }
+            })
+            .collect();
+        let results = futures::future::try_join_all(futs).await?;
+        Ok(CountResult {
+            count: results.iter().map(|r| r.count).sum(),
+            pulled_log_bytes: results.iter().map(|r| r.pulled_log_bytes).sum(),
+        })
+    }
+
+    async fn fan_out_get(&self, plan: Get) -> Result<GetResult, ExecutorError> {
+        let num_shards = plan
+            .scan
+            .collection_and_segments
+            .record_segment
+            .num_shards()
+            .map_err(|e| ExecutorError::Internal(Box::new(e)))? as u32;
+        if num_shards <= 1 {
+            return self.executor.clone().get(plan).await;
+        }
+        let futs: Vec<_> = (0..num_shards)
+            .map(|shard_index| {
+                let mut executor = self.executor.clone();
+                let mut shard_plan = plan.clone();
+                shard_plan.scan.shard_index = shard_index;
+                shard_plan.scan.num_shards = num_shards;
+                async move { executor.get(shard_plan).await }
+            })
+            .collect();
+        let results = futures::future::try_join_all(futs).await?;
+        // TODO(PR 9): apply limit/offset re-adjustment for multi-shard
+        let mut merged_records = Vec::new();
+        let mut total_pulled_log_bytes = 0u64;
+        for r in results {
+            merged_records.extend(r.result.records);
+            total_pulled_log_bytes += r.pulled_log_bytes;
+        }
+        Ok(GetResult {
+            pulled_log_bytes: total_pulled_log_bytes,
+            result: ProjectionOutput {
+                records: merged_records,
+            },
+        })
+    }
+
+    async fn fan_out_knn(&self, plan: Knn) -> Result<KnnBatchResult, ExecutorError> {
+        let num_shards = plan
+            .scan
+            .collection_and_segments
+            .record_segment
+            .num_shards()
+            .map_err(|e| ExecutorError::Internal(Box::new(e)))? as u32;
+        if num_shards <= 1 {
+            return self.executor.clone().knn(plan).await;
+        }
+        let futs: Vec<_> = (0..num_shards)
+            .map(|shard_index| {
+                let mut executor = self.executor.clone();
+                let mut shard_plan = plan.clone();
+                shard_plan.scan.shard_index = shard_index;
+                shard_plan.scan.num_shards = num_shards;
+                async move { executor.knn(shard_plan).await }
+            })
+            .collect();
+        let results = futures::future::try_join_all(futs).await?;
+        // TODO(PR 11): merge by distance per embedding, global top-k
+        let first = &results[0];
+        let num_embeddings = first.results.len();
+        let mut merged_results = vec![
+            KnnProjectionOutput {
+                records: Vec::new()
+            };
+            num_embeddings
+        ];
+        let mut total_pulled_log_bytes = 0u64;
+        for r in &results {
+            total_pulled_log_bytes += r.pulled_log_bytes;
+            for (i, knn_output) in r.results.iter().enumerate() {
+                if i < merged_results.len() {
+                    merged_results[i].records.extend(knn_output.records.clone());
+                }
+            }
+        }
+        Ok(KnnBatchResult {
+            pulled_log_bytes: total_pulled_log_bytes,
+            results: merged_results,
+        })
+    }
+
+    async fn fan_out_search(&self, plan: Search) -> Result<SearchResult, ExecutorError> {
+        let num_shards = plan
+            .scan
+            .collection_and_segments
+            .record_segment
+            .num_shards()
+            .map_err(|e| ExecutorError::Internal(Box::new(e)))? as u32;
+        if num_shards <= 1 {
+            return self.executor.clone().search(plan).await;
+        }
+        let futs: Vec<_> = (0..num_shards)
+            .map(|shard_index| {
+                let mut executor = self.executor.clone();
+                let mut shard_plan = plan.clone();
+                shard_plan.scan.shard_index = shard_index;
+                shard_plan.scan.num_shards = num_shards;
+                async move { executor.search(shard_plan).await }
+            })
+            .collect();
+        let results = futures::future::try_join_all(futs).await?;
+        // TODO(PR 10): merge by score per payload, apply original offset/limit
+        let num_payloads = results[0].results.len();
+        let mut merged_payloads = vec![
+            SearchPayloadResult {
+                records: Vec::new()
+            };
+            num_payloads
+        ];
+        let mut total_pulled_log_bytes = 0u64;
+        for r in &results {
+            total_pulled_log_bytes += r.pulled_log_bytes;
+            for (i, payload) in r.results.iter().enumerate() {
+                if i < merged_payloads.len() {
+                    merged_payloads[i].records.extend(payload.records.clone());
+                }
+            }
+        }
+        Ok(SearchResult {
+            results: merged_payloads,
+            pulled_log_bytes: total_pulled_log_bytes,
+        })
     }
 
     /// Check if quantization should be enabled for the given tenant
@@ -874,7 +1052,7 @@ impl ServiceBasedFrontend {
         let fork_to_retry = || {
             let mut self_clone = self.clone();
             let request_clone = request.clone();
-            async move { self_clone.retryable_fork(request_clone).await }
+            async move { Box::pin(self_clone.retryable_fork(request_clone)).await }
         };
 
         let res = fork_to_retry
@@ -1289,24 +1467,22 @@ impl ServiceBasedFrontend {
                 where_clause: Some(where_clause),
             };
 
-            let get_result = self
-                .executor
-                .get(Get {
-                    scan: Scan {
-                        collection_and_segments,
-                        shard_index: 0,
-                        num_shards: 1,
-                        log_upper_bound_offset,
-                    },
-                    filter,
-                    limit: Limit { offset: 0, limit },
-                    proj: Projection {
-                        document: false,
-                        embedding: false,
-                        metadata: false,
-                    },
-                })
-                .await?;
+            let get_result = Box::pin(self.fan_out_get(Get {
+                scan: Scan {
+                    collection_and_segments,
+                    shard_index: 0,
+                    num_shards: 1,
+                    log_upper_bound_offset,
+                },
+                filter,
+                limit: Limit { offset: 0, limit },
+                proj: Projection {
+                    document: false,
+                    embedding: false,
+                    metadata: false,
+                },
+            }))
+            .await?;
 
             let return_bytes = get_result.size_bytes();
 
@@ -1518,18 +1694,12 @@ impl ServiceBasedFrontend {
         } else {
             0
         };
-        let count_result = self
-            .executor
-            .count(Count {
-                scan: Scan {
-                    collection_and_segments,
-                    shard_index: 0,
-                    num_shards: 1,
-                    log_upper_bound_offset,
-                },
-                read_level,
-            })
-            .await?;
+        let count_result = Box::pin(self.fan_out_count(
+            collection_and_segments,
+            read_level,
+            log_upper_bound_offset,
+        ))
+        .await?;
         let return_bytes = count_result.size_bytes();
 
         // Attach metadata to the metering context
@@ -1581,7 +1751,7 @@ impl ServiceBasedFrontend {
                 .collections_with_segments_cache
                 .clone();
             async move {
-                let res = self_clone.retryable_count(request_clone).await;
+                let res = Box::pin(self_clone.retryable_count(request_clone)).await;
                 match res {
                     Ok(res) => Ok(res),
                     Err(e) => {
@@ -1720,29 +1890,27 @@ impl ServiceBasedFrontend {
         } else {
             0
         };
-        let get_result = self
-            .executor
-            .get(Get {
-                scan: Scan {
-                    collection_and_segments,
-                    shard_index: 0,
-                    num_shards: 1,
-                    log_upper_bound_offset,
-                },
-                filter: Filter {
-                    query_ids: ids,
-                    where_clause: r#where,
-                },
-                limit: Limit { offset, limit },
-                proj: Projection {
-                    document: include.0.contains(&Include::Document),
-                    embedding: include.0.contains(&Include::Embedding),
-                    // If URI is requested, metadata is also requested so we can extract the URI.
-                    metadata: (include.0.contains(&Include::Metadata)
-                        || include.0.contains(&Include::Uri)),
-                },
-            })
-            .await?;
+        let get_result = Box::pin(self.fan_out_get(Get {
+            scan: Scan {
+                collection_and_segments,
+                shard_index: 0,
+                num_shards: 1,
+                log_upper_bound_offset,
+            },
+            filter: Filter {
+                query_ids: ids,
+                where_clause: r#where,
+            },
+            limit: Limit { offset, limit },
+            proj: Projection {
+                document: include.0.contains(&Include::Document),
+                embedding: include.0.contains(&Include::Embedding),
+                // If URI is requested, metadata is also requested so we can extract the URI.
+                metadata: (include.0.contains(&Include::Metadata)
+                    || include.0.contains(&Include::Uri)),
+            },
+        }))
+        .await?;
         let return_bytes = get_result.size_bytes();
 
         // Attach metadata to the metering context
@@ -1889,35 +2057,33 @@ impl ServiceBasedFrontend {
         } else {
             0
         };
-        let query_result = self
-            .executor
-            .knn(Knn {
-                scan: Scan {
-                    collection_and_segments,
-                    shard_index: 0,
-                    num_shards: 1,
-                    log_upper_bound_offset,
+        let query_result = Box::pin(self.fan_out_knn(Knn {
+            scan: Scan {
+                collection_and_segments,
+                shard_index: 0,
+                num_shards: 1,
+                log_upper_bound_offset,
+            },
+            filter: Filter {
+                query_ids: ids,
+                where_clause: r#where,
+            },
+            knn: KnnBatch {
+                embeddings,
+                fetch: n_results,
+            },
+            proj: KnnProjection {
+                projection: Projection {
+                    document: include.0.contains(&Include::Document),
+                    embedding: include.0.contains(&Include::Embedding),
+                    // If URI is requested, metadata is also requested so we can extract the URI.
+                    metadata: (include.0.contains(&Include::Metadata)
+                        || include.0.contains(&Include::Uri)),
                 },
-                filter: Filter {
-                    query_ids: ids,
-                    where_clause: r#where,
-                },
-                knn: KnnBatch {
-                    embeddings,
-                    fetch: n_results,
-                },
-                proj: KnnProjection {
-                    projection: Projection {
-                        document: include.0.contains(&Include::Document),
-                        embedding: include.0.contains(&Include::Embedding),
-                        // If URI is requested, metadata is also requested so we can extract the URI.
-                        metadata: (include.0.contains(&Include::Metadata)
-                            || include.0.contains(&Include::Uri)),
-                    },
-                    distance: include.0.contains(&Include::Distance),
-                },
-            })
-            .await?;
+                distance: include.0.contains(&Include::Distance),
+            },
+        }))
+        .await?;
         let return_bytes = query_result.size_bytes();
 
         // Attach metadata to the metering context
@@ -2115,8 +2281,7 @@ impl ServiceBasedFrontend {
             read_level: request.read_level,
         };
 
-        // Execute the single search plan using the executor
-        let result = self.executor.search(search_plan).await?;
+        let result = Box::pin(self.fan_out_search(search_plan)).await?;
 
         // Calculate return bytes (approximate size of the response)
         let return_bytes = result.size_bytes();
@@ -2172,7 +2337,7 @@ impl ServiceBasedFrontend {
                 .collections_with_segments_cache
                 .clone();
             async move {
-                let res = self_clone.retryable_search(request_clone).await;
+                let res = Box::pin(self_clone.retryable_search(request_clone)).await;
                 match res {
                     Ok(res) => Ok(res),
                     Err(e) => {
