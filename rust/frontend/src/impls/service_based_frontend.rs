@@ -167,46 +167,43 @@ impl ServiceBasedFrontend {
         let database_name = DatabaseName::new(cas.collection.database.clone());
         if num_shards <= 1 {
             let provider = self.collections_with_segments_provider.clone();
-            return self
-                .executor
-                .clone()
-                .count(
-                    Count {
-                        scan: Scan {
-                            collection_and_segments: cas,
-                            shard_index: 0,
-                            num_shards: 1,
-                            log_upper_bound_offset,
-                        },
-                        read_level,
+            return Box::pin(self.executor.clone().count(
+                Count {
+                    scan: Scan {
+                        collection_and_segments: cas,
+                        shard_index: 0,
+                        num_shards: 1,
+                        log_upper_bound_offset,
                     },
-                    move |code: tonic::Code| {
-                        let mut provider = provider.clone();
-                        let database_name = database_name.clone();
-                        async move {
-                            if code == tonic::Code::NotFound {
-                                provider
-                                    .collections_with_segments_cache
-                                    .remove(&collection_id)
-                                    .await;
-                            }
-                            let new_cas = provider
-                                .get_collection_with_segments(database_name, collection_id)
-                                .await
-                                .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
-                            Ok(Count {
-                                scan: Scan {
-                                    collection_and_segments: new_cas,
-                                    shard_index: 0,
-                                    num_shards: 1,
-                                    log_upper_bound_offset,
-                                },
-                                read_level,
-                            })
+                    read_level,
+                },
+                move |code: tonic::Code| {
+                    let mut provider = provider.clone();
+                    let database_name = database_name.clone();
+                    async move {
+                        if code == tonic::Code::NotFound {
+                            provider
+                                .collections_with_segments_cache
+                                .remove(&collection_id)
+                                .await;
                         }
-                    },
-                )
-                .await;
+                        let new_cas = provider
+                            .get_collection_with_segments(database_name, collection_id)
+                            .await
+                            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+                        Ok(Count {
+                            scan: Scan {
+                                collection_and_segments: new_cas,
+                                shard_index: 0,
+                                num_shards: 1,
+                                log_upper_bound_offset,
+                            },
+                            read_level,
+                        })
+                    }
+                },
+            ))
+            .await;
         }
         let futs: Vec<_> = (0..num_shards)
             .map(|shard_index| {
@@ -215,44 +212,43 @@ impl ServiceBasedFrontend {
                 let provider = self.collections_with_segments_provider.clone();
                 let database_name = database_name.clone();
                 async move {
-                    executor
-                        .count(
-                            Count {
-                                scan: Scan {
-                                    collection_and_segments: cas,
-                                    shard_index,
-                                    num_shards,
-                                    log_upper_bound_offset,
-                                },
-                                read_level,
+                    Box::pin(executor.count(
+                        Count {
+                            scan: Scan {
+                                collection_and_segments: cas,
+                                shard_index,
+                                num_shards,
+                                log_upper_bound_offset,
                             },
-                            move |code: tonic::Code| {
-                                let mut provider = provider.clone();
-                                let database_name = database_name.clone();
-                                async move {
-                                    if code == tonic::Code::NotFound {
-                                        provider
-                                            .collections_with_segments_cache
-                                            .remove(&collection_id)
-                                            .await;
-                                    }
-                                    let new_cas = provider
-                                        .get_collection_with_segments(database_name, collection_id)
-                                        .await
-                                        .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
-                                    Ok(Count {
-                                        scan: Scan {
-                                            collection_and_segments: new_cas,
-                                            shard_index,
-                                            num_shards,
-                                            log_upper_bound_offset,
-                                        },
-                                        read_level,
-                                    })
+                            read_level,
+                        },
+                        move |code: tonic::Code| {
+                            let mut provider = provider.clone();
+                            let database_name = database_name.clone();
+                            async move {
+                                if code == tonic::Code::NotFound {
+                                    provider
+                                        .collections_with_segments_cache
+                                        .remove(&collection_id)
+                                        .await;
                                 }
-                            },
-                        )
-                        .await
+                                let new_cas = provider
+                                    .get_collection_with_segments(database_name, collection_id)
+                                    .await
+                                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+                                Ok(Count {
+                                    scan: Scan {
+                                        collection_and_segments: new_cas,
+                                        shard_index,
+                                        num_shards,
+                                        log_upper_bound_offset,
+                                    },
+                                    read_level,
+                                })
+                            }
+                        },
+                    ))
+                    .await
                 }
             })
             .collect();
@@ -280,31 +276,32 @@ impl ServiceBasedFrontend {
         );
         if num_shards <= 1 {
             let provider = self.collections_with_segments_provider.clone();
-            return self
-                .executor
-                .clone()
-                .get(plan.clone(), move |code: tonic::Code| {
-                    let mut provider = provider.clone();
-                    let mut replan = plan.clone();
-                    let database_name = database_name.clone();
-                    async move {
-                        if code == tonic::Code::NotFound {
-                            provider
-                                .collections_with_segments_cache
-                                .remove(&collection_id)
-                                .await;
+            return Box::pin(
+                self.executor
+                    .clone()
+                    .get(plan.clone(), move |code: tonic::Code| {
+                        let mut provider = provider.clone();
+                        let mut replan = plan.clone();
+                        let database_name = database_name.clone();
+                        async move {
+                            if code == tonic::Code::NotFound {
+                                provider
+                                    .collections_with_segments_cache
+                                    .remove(&collection_id)
+                                    .await;
+                            }
+                            let new_cas = provider
+                                .get_collection_with_segments(database_name, collection_id)
+                                .await
+                                .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+                            replan.scan.collection_and_segments = new_cas;
+                            replan.scan.shard_index = 0;
+                            replan.scan.num_shards = 1;
+                            Ok(replan)
                         }
-                        let new_cas = provider
-                            .get_collection_with_segments(database_name, collection_id)
-                            .await
-                            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
-                        replan.scan.collection_and_segments = new_cas;
-                        replan.scan.shard_index = 0;
-                        replan.scan.num_shards = 1;
-                        Ok(replan)
-                    }
-                })
-                .await;
+                    }),
+            )
+            .await;
         }
         let futs: Vec<_> = (0..num_shards)
             .map(|shard_index| {
@@ -315,29 +312,28 @@ impl ServiceBasedFrontend {
                 let provider = self.collections_with_segments_provider.clone();
                 let database_name = database_name.clone();
                 async move {
-                    executor
-                        .get(shard_plan.clone(), move |code: tonic::Code| {
-                            let mut provider = provider.clone();
-                            let mut replan = shard_plan.clone();
-                            let database_name = database_name.clone();
-                            async move {
-                                if code == tonic::Code::NotFound {
-                                    provider
-                                        .collections_with_segments_cache
-                                        .remove(&collection_id)
-                                        .await;
-                                }
-                                let new_cas = provider
-                                    .get_collection_with_segments(database_name, collection_id)
-                                    .await
-                                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
-                                replan.scan.collection_and_segments = new_cas;
-                                replan.scan.shard_index = shard_index;
-                                replan.scan.num_shards = num_shards;
-                                Ok(replan)
+                    Box::pin(executor.get(shard_plan.clone(), move |code: tonic::Code| {
+                        let mut provider = provider.clone();
+                        let mut replan = shard_plan.clone();
+                        let database_name = database_name.clone();
+                        async move {
+                            if code == tonic::Code::NotFound {
+                                provider
+                                    .collections_with_segments_cache
+                                    .remove(&collection_id)
+                                    .await;
                             }
-                        })
-                        .await
+                            let new_cas = provider
+                                .get_collection_with_segments(database_name, collection_id)
+                                .await
+                                .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+                            replan.scan.collection_and_segments = new_cas;
+                            replan.scan.shard_index = shard_index;
+                            replan.scan.num_shards = num_shards;
+                            Ok(replan)
+                        }
+                    }))
+                    .await
                 }
             })
             .collect();
@@ -374,31 +370,32 @@ impl ServiceBasedFrontend {
         );
         if num_shards <= 1 {
             let provider = self.collections_with_segments_provider.clone();
-            return self
-                .executor
-                .clone()
-                .knn(plan.clone(), move |code: tonic::Code| {
-                    let mut provider = provider.clone();
-                    let mut replan = plan.clone();
-                    let database_name = database_name.clone();
-                    async move {
-                        if code == tonic::Code::NotFound {
-                            provider
-                                .collections_with_segments_cache
-                                .remove(&collection_id)
-                                .await;
+            return Box::pin(
+                self.executor
+                    .clone()
+                    .knn(plan.clone(), move |code: tonic::Code| {
+                        let mut provider = provider.clone();
+                        let mut replan = plan.clone();
+                        let database_name = database_name.clone();
+                        async move {
+                            if code == tonic::Code::NotFound {
+                                provider
+                                    .collections_with_segments_cache
+                                    .remove(&collection_id)
+                                    .await;
+                            }
+                            let new_cas = provider
+                                .get_collection_with_segments(database_name, collection_id)
+                                .await
+                                .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+                            replan.scan.collection_and_segments = new_cas;
+                            replan.scan.shard_index = 0;
+                            replan.scan.num_shards = 1;
+                            Ok(replan)
                         }
-                        let new_cas = provider
-                            .get_collection_with_segments(database_name, collection_id)
-                            .await
-                            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
-                        replan.scan.collection_and_segments = new_cas;
-                        replan.scan.shard_index = 0;
-                        replan.scan.num_shards = 1;
-                        Ok(replan)
-                    }
-                })
-                .await;
+                    }),
+            )
+            .await;
         }
         let futs: Vec<_> = (0..num_shards)
             .map(|shard_index| {
@@ -409,29 +406,28 @@ impl ServiceBasedFrontend {
                 let provider = self.collections_with_segments_provider.clone();
                 let database_name = database_name.clone();
                 async move {
-                    executor
-                        .knn(shard_plan.clone(), move |code: tonic::Code| {
-                            let mut provider = provider.clone();
-                            let mut replan = shard_plan.clone();
-                            let database_name = database_name.clone();
-                            async move {
-                                if code == tonic::Code::NotFound {
-                                    provider
-                                        .collections_with_segments_cache
-                                        .remove(&collection_id)
-                                        .await;
-                                }
-                                let new_cas = provider
-                                    .get_collection_with_segments(database_name, collection_id)
-                                    .await
-                                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
-                                replan.scan.collection_and_segments = new_cas;
-                                replan.scan.shard_index = shard_index;
-                                replan.scan.num_shards = num_shards;
-                                Ok(replan)
+                    Box::pin(executor.knn(shard_plan.clone(), move |code: tonic::Code| {
+                        let mut provider = provider.clone();
+                        let mut replan = shard_plan.clone();
+                        let database_name = database_name.clone();
+                        async move {
+                            if code == tonic::Code::NotFound {
+                                provider
+                                    .collections_with_segments_cache
+                                    .remove(&collection_id)
+                                    .await;
                             }
-                        })
-                        .await
+                            let new_cas = provider
+                                .get_collection_with_segments(database_name, collection_id)
+                                .await
+                                .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+                            replan.scan.collection_and_segments = new_cas;
+                            replan.scan.shard_index = shard_index;
+                            replan.scan.num_shards = num_shards;
+                            Ok(replan)
+                        }
+                    }))
+                    .await
                 }
             })
             .collect();
@@ -477,10 +473,9 @@ impl ServiceBasedFrontend {
         );
         if num_shards <= 1 {
             let provider = self.collections_with_segments_provider.clone();
-            return self
-                .executor
-                .clone()
-                .search(plan.clone(), move |code: tonic::Code| {
+            return Box::pin(self.executor.clone().search(
+                plan.clone(),
+                move |code: tonic::Code| {
                     let mut provider = provider.clone();
                     let mut replan = plan.clone();
                     let database_name = database_name.clone();
@@ -500,8 +495,9 @@ impl ServiceBasedFrontend {
                         replan.scan.num_shards = 1;
                         Ok(replan)
                     }
-                })
-                .await;
+                },
+            ))
+            .await;
         }
         let futs: Vec<_> = (0..num_shards)
             .map(|shard_index| {
