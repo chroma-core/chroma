@@ -28,6 +28,100 @@ use tracing::{Instrument, Span};
 
 const DEFAULT_BLOOM_FILTER_CAPACITY: u64 = 100_000;
 
+#[derive(Error, Debug)]
+#[error(transparent)]
+pub struct RecordSegmentWriterError(#[from] RecordSegmentWriterShardCreationError);
+
+impl chroma_error::ChromaError for RecordSegmentWriterError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        self.0.code()
+    }
+}
+
+#[derive(Error, Debug)]
+#[error(transparent)]
+pub struct RecordSegmentWriterCreationError(#[from] RecordSegmentWriterShardCreationError);
+
+impl chroma_error::ChromaError for RecordSegmentWriterCreationError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        self.0.code()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RecordSegmentWriter {
+    shards: Vec<RecordSegmentWriterShard>,
+    pub id: SegmentUuid,
+}
+
+impl RecordSegmentWriter {
+    pub async fn from_segment(
+        tenant: &str,
+        database_id: &DatabaseUuid,
+        segment: &Segment,
+        blockfile_provider: &BlockfileProvider,
+        cmek: Option<Cmek>,
+        bloom_filter_manager: Option<BloomFilterManager>,
+    ) -> Result<Self, RecordSegmentWriterCreationError> {
+        let segment_shards = segment
+            .get_shards()
+            .map_err(RecordSegmentWriterShardCreationError::SegmentShard)?;
+
+        // Create futures for all shards
+        let futures: Vec<_> = segment_shards
+            .iter()
+            .map(|shard| {
+                RecordSegmentWriterShard::from_segment(
+                    tenant,
+                    database_id,
+                    shard,
+                    blockfile_provider,
+                    cmek.clone(),
+                    bloom_filter_manager.clone(),
+                )
+            })
+            .collect();
+
+        // Await all futures concurrently
+        let writer_shards = futures::future::try_join_all(futures).await?;
+
+        Ok(Self {
+            shards: writer_shards,
+            id: segment.id,
+        })
+    }
+
+    pub async fn apply_materialized_log_chunk(
+        &self,
+        record_segment_reader: &Option<RecordSegmentReaderShard<'_>>,
+        materialized: &MaterializeLogsResult,
+    ) -> Result<(), ApplyMaterializedLogError> {
+        // Apply to all shards concurrently
+        let futures = self
+            .shards
+            .iter()
+            .map(|shard| shard.apply_materialized_log_chunk(record_segment_reader, materialized));
+
+        // TODO: Limit concurrency?
+        futures::future::try_join_all(futures).await?;
+        Ok(())
+    }
+
+    pub async fn commit(self) -> Result<RecordSegmentFlusher, Box<dyn ChromaError>> {
+        let futures = self
+            .shards
+            .into_iter()
+            .map(|shard| Box::pin(shard.commit()));
+
+        let flusher_shards = futures::future::try_join_all(futures).await?;
+
+        Ok(RecordSegmentFlusher {
+            shards: flusher_shards,
+            id: self.id,
+        })
+    }
+}
+
 #[derive(Clone)]
 pub struct RecordSegmentWriterShard {
     // These are Option<> so that we can take() them when we commit
@@ -73,6 +167,8 @@ pub enum RecordSegmentWriterShardCreationError {
     BloomFilterError(#[from] BloomFilterError),
     #[error("Record segment reader error: {0}")]
     RecordSegmentReaderShardError(#[from] RecordSegmentReaderShardCreationError),
+    #[error("Segment shard error: {0}")]
+    SegmentShard(#[from] chroma_types::SegmentShardError),
     #[error("Bloom filter rebuild error: {0}")]
     BloomFilterRebuildError(Box<dyn ChromaError>),
 }
@@ -705,6 +801,36 @@ impl ChromaError for ApplyMaterializedLogError {
             #[cfg(feature = "usearch")]
             ApplyMaterializedLogError::QuantizedSpannSegmentError(e) => e.code(),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct RecordSegmentFlusher {
+    shards: Vec<RecordSegmentFlusherShard>,
+    pub id: SegmentUuid,
+}
+
+impl RecordSegmentFlusher {
+    pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
+        // Flush all shards and collect file paths
+        let mut all_file_paths = HashMap::new();
+
+        for shard in self.shards {
+            let shard_paths = Box::pin(shard.flush()).await?;
+            for (key, mut paths) in shard_paths {
+                all_file_paths
+                    .entry(key)
+                    .or_insert_with(Vec::new)
+                    .append(&mut paths);
+            }
+        }
+
+        Ok(all_file_paths)
+    }
+
+    pub fn count(&self) -> u64 {
+        // Sum counts from all shards
+        self.shards.iter().map(|shard| shard.count()).sum()
     }
 }
 

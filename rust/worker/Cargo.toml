@@ -3,6 +3,9 @@ name = "worker"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+usearch = ["chroma-segment/usearch", "chroma-index/usearch"]
+
 [[bin]]
 name = "compaction_service"
 path = "src/bin/compaction_service.rs"

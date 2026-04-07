@@ -30,7 +30,9 @@ use chroma_types::SPARSE_MAX;
 use chroma_types::SPARSE_OFFSET_VALUE;
 use chroma_types::STRING_METADATA;
 use chroma_types::U32_METADATA;
-use chroma_types::{MaterializedLogOperation, MetadataValue, Segment, SegmentShard, SegmentUuid};
+use chroma_types::{
+    MaterializedLogOperation, MetadataValue, Segment, SegmentShard, SegmentShardError, SegmentUuid,
+};
 use core::panic;
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
@@ -57,6 +59,104 @@ impl Debug for MetadataSegmentWriterShard<'_> {
     }
 }
 
+#[derive(Error, Debug)]
+#[error(transparent)]
+pub struct MetadataSegmentWriterError(#[from] MetadataSegmentError);
+
+impl chroma_error::ChromaError for MetadataSegmentWriterError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        self.0.code()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct MetadataSegmentWriter<'me> {
+    shards: Vec<MetadataSegmentWriterShard<'me>>,
+    pub id: SegmentUuid,
+}
+
+impl<'me> MetadataSegmentWriter<'me> {
+    pub async fn from_segment(
+        tenant: &str,
+        database_id: &DatabaseUuid,
+        segment: &Segment,
+        blockfile_provider: &BlockfileProvider,
+        cmek: Option<Cmek>,
+    ) -> Result<Self, MetadataSegmentWriterError> {
+        let segment_shards = segment
+            .get_shards()
+            .map_err(MetadataSegmentError::SegmentShard)?;
+
+        if segment_shards.is_empty() {
+            return Err(MetadataSegmentWriterError(
+                MetadataSegmentError::SegmentShard(SegmentShardError::EmptyShards),
+            ));
+        }
+
+        // Create futures for all shards
+        let futures: Vec<_> = segment_shards
+            .iter()
+            .map(|shard| {
+                MetadataSegmentWriterShard::from_segment(
+                    tenant,
+                    database_id,
+                    shard,
+                    blockfile_provider,
+                    cmek.clone(),
+                )
+            })
+            .collect();
+
+        // Await all futures concurrently
+        let writer_shards = futures::future::try_join_all(futures).await?;
+
+        Ok(Self {
+            shards: writer_shards,
+            id: segment.id,
+        })
+    }
+
+    pub async fn apply_materialized_log_chunk(
+        &self,
+        record_segment_reader: &Option<RecordSegmentReaderShard<'_>>,
+        materialized: &MaterializeLogsResult,
+        schema: Option<Schema>,
+    ) -> Result<Option<Schema>, ApplyMaterializedLogError> {
+        // Apply to all shards concurrently
+        // TODO(tanujnay112): This ONLY WORKS if we have one shard.
+        let futures = self.shards.iter().map(|shard| {
+            shard.apply_materialized_log_chunk(record_segment_reader, materialized, schema.clone())
+        });
+
+        let results = futures::future::try_join_all(futures).await?;
+
+        // Return the first non-None schema from any shard
+        Ok(results.into_iter().find(|s| s.is_some()).flatten())
+    }
+
+    pub async fn finish(&mut self) -> Result<(), Box<dyn ChromaError>> {
+        // Call finish on all shards concurrently
+        let futures = self.shards.iter_mut().map(|shard| shard.finish());
+
+        futures::future::try_join_all(futures).await?;
+        Ok(())
+    }
+
+    pub async fn commit(self) -> Result<MetadataSegmentFlusher, Box<dyn ChromaError>> {
+        let futures = self
+            .shards
+            .into_iter()
+            .map(|shard| Box::pin(shard.commit()));
+
+        let flusher_shards = futures::future::try_join_all(futures).await?;
+
+        Ok(MetadataSegmentFlusher {
+            shards: flusher_shards,
+            id: self.id,
+        })
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum MetadataSegmentError {
     #[error("Invalid segment type")]
@@ -75,6 +175,10 @@ pub enum MetadataSegmentError {
     #[error("Missing file {0}")]
     MissingFile(String),
     #[error("Count not parse UUID {0}")]
+    UUID(String),
+    #[error("Segment shard error: {0}")]
+    SegmentShard(#[from] chroma_types::SegmentShardError),
+    #[error("UUID parse error: {0}")]
     UuidParseError(String),
     #[error("No writer found")]
     NoWriter,
@@ -84,7 +188,7 @@ pub enum MetadataSegmentError {
     BlockfileWriteError,
     #[error("Limit and offset are not currently supported")]
     LimitOffsetNotSupported,
-    #[error("Could not query metadata index {0}")]
+    #[error("Metadata index error: {0}")]
     MetadataIndexQueryError(#[from] MetadataIndexError),
 }
 
@@ -98,6 +202,8 @@ impl ChromaError for MetadataSegmentError {
             MetadataSegmentError::FullTextIndexFilesIntegrityError => ErrorCodes::Internal,
             MetadataSegmentError::IncorrectNumberOfFiles => ErrorCodes::Internal,
             MetadataSegmentError::MissingFile(_) => ErrorCodes::Internal,
+            MetadataSegmentError::UUID(_) => ErrorCodes::Internal,
+            MetadataSegmentError::SegmentShard(e) => e.code(),
             MetadataSegmentError::UuidParseError(_) => ErrorCodes::Internal,
             MetadataSegmentError::NoWriter => ErrorCodes::Internal,
             MetadataSegmentError::EmptyPathVector => ErrorCodes::Internal,
@@ -808,6 +914,10 @@ impl<'me> MetadataSegmentWriterShard<'me> {
         let mut count = 0u64;
         let mut schema = schema;
         let mut schema_modified = false;
+        tracing::info!(
+            "Applying metadata materialized log chunk with {} records",
+            materialized.len()
+        );
 
         self.apply_fts_logs(record_segment_reader, materialized, &schema)
             .await?;
@@ -1162,6 +1272,31 @@ impl<'me> MetadataSegmentWriterShard<'me> {
             u32_metadata_index_flusher: u32_metadata_flusher,
             sparse_index_flusher,
         })
+    }
+}
+
+#[derive(Debug)]
+pub struct MetadataSegmentFlusher {
+    shards: Vec<MetadataSegmentFlusherShard>,
+    pub id: SegmentUuid,
+}
+
+impl MetadataSegmentFlusher {
+    pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
+        // Flush all shards and collect file paths
+        let mut all_file_paths = HashMap::new();
+
+        for shard in self.shards {
+            let shard_paths = Box::pin(shard.flush()).await?;
+            for (key, mut paths) in shard_paths {
+                all_file_paths
+                    .entry(key)
+                    .or_insert_with(Vec::new)
+                    .append(&mut paths);
+            }
+        }
+
+        Ok(all_file_paths)
     }
 }
 

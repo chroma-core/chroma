@@ -9,16 +9,19 @@ use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{Instrument, Span};
+
 use uuid::Uuid;
 
+use crate::blockfile_record::{RecordSegmentFlusher, RecordSegmentWriter};
 use crate::distributed_spann::{SpannSegmentFlusherShard, SpannSegmentWriterShard};
 #[cfg(feature = "usearch")]
 use crate::quantized_spann::{QuantizedSpannSegmentFlusherShard, QuantizedSpannSegmentWriterShard};
+use crate::spann_provider::SpannProvider;
+use chroma_index::hnsw_provider::HnswIndexProvider;
 
-use super::blockfile_metadata::{MetadataSegmentFlusherShard, MetadataSegmentWriterShard};
+use super::blockfile_metadata::{MetadataSegmentFlusher, MetadataSegmentWriter};
 use super::blockfile_record::{
-    ApplyMaterializedLogError, RecordSegmentFlusherShard, RecordSegmentReaderOptions,
-    RecordSegmentReaderShard, RecordSegmentWriterShard,
+    ApplyMaterializedLogError, RecordSegmentReaderOptions, RecordSegmentReaderShard,
 };
 use super::distributed_hnsw::DistributedHNSWSegmentWriter;
 
@@ -1067,29 +1070,179 @@ impl VectorSegmentWriterShard {
         }
     }
 
-    pub async fn commit(self) -> Result<ChromaSegmentFlusher, Box<dyn ChromaError>> {
+    pub async fn commit(self) -> Result<VectorSegmentFlusherShard, Box<dyn ChromaError>> {
         match self {
-            VectorSegmentWriterShard::Hnsw(writer) => writer.commit().await.map(|w| {
-                ChromaSegmentFlusher::VectorSegment(VectorSegmentFlusherShard::Hnsw(Box::new(w)))
-            }),
+            VectorSegmentWriterShard::Hnsw(writer) => writer
+                .commit()
+                .await
+                .map(|w| VectorSegmentFlusherShard::Hnsw(Box::new(w))),
             #[cfg(feature = "usearch")]
-            VectorSegmentWriterShard::QuantizedSpann(writer) => {
-                Box::pin(writer.commit()).await.map(|f| {
-                    ChromaSegmentFlusher::VectorSegment(VectorSegmentFlusherShard::QuantizedSpann(
-                        f,
-                    ))
-                })
-            }
+            VectorSegmentWriterShard::QuantizedSpann(writer) => Box::pin(writer.commit())
+                .await
+                .map(VectorSegmentFlusherShard::QuantizedSpann),
             VectorSegmentWriterShard::Spann(writer) => Box::pin(writer.commit())
                 .await
-                .map(|w| ChromaSegmentFlusher::VectorSegment(VectorSegmentFlusherShard::Spann(w))),
+                .map(VectorSegmentFlusherShard::Spann),
         }
     }
 }
 
-type RecordSegmentWriter = RecordSegmentWriterShard;
-type MetadataSegmentWriter<'a> = MetadataSegmentWriterShard<'a>;
-type VectorSegmentWriter = VectorSegmentWriterShard;
+#[derive(Error, Debug)]
+pub enum VectorSegmentWriterError {
+    #[error("Failed to get segment shards: {0}")]
+    GetShards(#[from] chroma_types::SegmentShardError),
+    #[error("Mismatched shard count: vector segments has {vector_shards} shards, record segments has {record_shards} shards")]
+    MismatchedShardCount {
+        vector_shards: usize,
+        record_shards: usize,
+    },
+    #[error("Failed to create HNSW writer: {0}")]
+    CreateHnswWriter(Box<dyn ChromaError>),
+    #[cfg(feature = "usearch")]
+    #[error("Failed to create QuantizedSpann writer: {0}")]
+    CreateQuantizedSpannWriter(crate::quantized_spann::QuantizedSpannSegmentError),
+    #[error("Failed to create Spann writer: {0}")]
+    CreateSpannWriter(crate::distributed_spann::SpannSegmentWriterShardError),
+    #[error("Unsupported vector segment type: {0:?}")]
+    UnsupportedSegmentType(chroma_types::SegmentType),
+}
+
+impl ChromaError for VectorSegmentWriterError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            Self::GetShards(e) => e.code(),
+            Self::MismatchedShardCount { .. } => ErrorCodes::Internal,
+            Self::CreateHnswWriter(e) => e.code(),
+            #[cfg(feature = "usearch")]
+            Self::CreateQuantizedSpannWriter(e) => e.code(),
+            Self::CreateSpannWriter(e) => e.code(),
+            Self::UnsupportedSegmentType(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct VectorSegmentWriter {
+    shards: Vec<VectorSegmentWriterShard>,
+    pub id: SegmentUuid,
+}
+
+impl VectorSegmentWriter {
+    pub async fn from_segment(
+        collection: &chroma_types::Collection,
+        vector_segment: &chroma_types::Segment,
+        record_segment: &chroma_types::Segment,
+        dimension: usize,
+        hnsw_provider: &HnswIndexProvider,
+        spann_provider: &SpannProvider,
+        cmek: Option<chroma_types::Cmek>,
+    ) -> Result<Self, VectorSegmentWriterError> {
+        let segment_shards = vector_segment.get_shards()?;
+        let record_segment_shards = record_segment.get_shards()?;
+
+        // Check that we have matching shard counts
+        if segment_shards.len() != record_segment_shards.len() {
+            return Err(VectorSegmentWriterError::MismatchedShardCount {
+                vector_shards: segment_shards.len(),
+                record_shards: record_segment_shards.len(),
+            });
+        }
+
+        let mut writer_shards = Vec::new();
+
+        // record_segment_shard is only used when usearch feature is enabled
+        #[allow(unused_variables)]
+        for (segment_shard, record_segment_shard) in
+            segment_shards.iter().zip(record_segment_shards.iter())
+        {
+            let writer_shard = match vector_segment.r#type {
+                chroma_types::SegmentType::HnswDistributed => {
+                    let writer = DistributedHNSWSegmentWriter::from_segment(
+                        collection,
+                        vector_segment,
+                        dimension,
+                        hnsw_provider.clone(),
+                        cmek.clone(),
+                    )
+                    .await
+                    .map_err(|e| {
+                        VectorSegmentWriterError::CreateHnswWriter(e as Box<dyn ChromaError>)
+                    })?;
+                    VectorSegmentWriterShard::Hnsw(writer)
+                }
+                #[cfg(feature = "usearch")]
+                chroma_types::SegmentType::QuantizedSpann => {
+                    let writer = spann_provider
+                        .write_quantized_usearch(collection, segment_shard, record_segment_shard)
+                        .await
+                        .map_err(VectorSegmentWriterError::CreateQuantizedSpannWriter)?;
+                    VectorSegmentWriterShard::QuantizedSpann(writer)
+                }
+                chroma_types::SegmentType::Spann => {
+                    let writer: SpannSegmentWriterShard = spann_provider
+                        .write(collection, segment_shard, dimension, cmek.clone())
+                        .await
+                        .map_err(VectorSegmentWriterError::CreateSpannWriter)?;
+                    VectorSegmentWriterShard::Spann(writer)
+                }
+                _ => {
+                    return Err(VectorSegmentWriterError::UnsupportedSegmentType(
+                        vector_segment.r#type,
+                    ));
+                }
+            };
+
+            writer_shards.push(writer_shard);
+        }
+
+        Ok(Self {
+            shards: writer_shards,
+            id: vector_segment.id,
+        })
+    }
+
+    pub async fn apply_materialized_log_chunk(
+        &self,
+        record_segment_reader: &Option<RecordSegmentReaderShard<'_>>,
+        materialized: &MaterializeLogsResult,
+    ) -> Result<(), ApplyMaterializedLogError> {
+        // Apply to all shards concurrently
+        let futures = self
+            .shards
+            .iter()
+            .map(|shard| shard.apply_materialized_log_chunk(record_segment_reader, materialized));
+
+        futures::future::try_join_all(futures).await?;
+        Ok(())
+    }
+
+    pub async fn finish(&mut self) -> Result<(), Box<dyn ChromaError>> {
+        // Call finish on all shards concurrently
+        let futures = self.shards.iter_mut().map(|shard| shard.finish());
+
+        futures::future::try_join_all(futures).await?;
+        Ok(())
+    }
+
+    pub fn get_id(&self) -> SegmentUuid {
+        self.id
+    }
+
+    pub fn get_name(&self) -> &'static str {
+        "VectorSegmentWriter"
+    }
+
+    pub async fn commit(self) -> Result<VectorSegmentFlusher, Box<dyn ChromaError>> {
+        let futures = self.shards.into_iter().map(|shard| shard.commit());
+
+        let flusher_shards = futures::future::try_join_all(futures).await?;
+
+        Ok(VectorSegmentFlusher {
+            shards: flusher_shards,
+            id: self.id,
+        })
+    }
+}
 
 #[derive(Clone, Debug)]
 #[allow(clippy::large_enum_variant)]
@@ -1155,8 +1308,43 @@ impl ChromaSegmentWriter<'_> {
             ChromaSegmentWriter::MetadataSegment(writer) => Box::pin(writer.commit())
                 .await
                 .map(ChromaSegmentFlusher::MetadataSegment),
-            ChromaSegmentWriter::VectorSegment(writer) => Box::pin(writer.commit()).await,
+            ChromaSegmentWriter::VectorSegment(writer) => Box::pin(writer.commit())
+                .await
+                .map(ChromaSegmentFlusher::VectorSegment),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct VectorSegmentFlusher {
+    shards: Vec<VectorSegmentFlusherShard>,
+    pub id: SegmentUuid,
+}
+
+impl VectorSegmentFlusher {
+    pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
+        // Flush all shards and collect file paths
+        let mut all_file_paths = HashMap::new();
+
+        for shard in self.shards {
+            let shard_paths = match shard {
+                VectorSegmentFlusherShard::Hnsw(flusher) => flusher.flush().await,
+                #[cfg(feature = "usearch")]
+                VectorSegmentFlusherShard::QuantizedSpann(flusher) => {
+                    Box::pin(flusher.flush()).await
+                }
+                VectorSegmentFlusherShard::Spann(flusher) => Box::pin(flusher.flush()).await,
+            }?;
+
+            for (key, mut paths) in shard_paths {
+                all_file_paths
+                    .entry(key)
+                    .or_insert_with(Vec::new)
+                    .append(&mut paths);
+            }
+        }
+
+        Ok(all_file_paths)
     }
 }
 
@@ -1168,10 +1356,6 @@ pub enum VectorSegmentFlusherShard {
     QuantizedSpann(QuantizedSpannSegmentFlusherShard),
     Spann(SpannSegmentFlusherShard),
 }
-
-type RecordSegmentFlusher = RecordSegmentFlusherShard;
-type MetadataSegmentFlusher = MetadataSegmentFlusherShard;
-type VectorSegmentFlusher = VectorSegmentFlusherShard;
 
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
@@ -1193,12 +1377,7 @@ impl ChromaSegmentFlusher {
         match self {
             ChromaSegmentFlusher::RecordSegment(flusher) => flusher.id,
             ChromaSegmentFlusher::MetadataSegment(flusher) => flusher.id,
-            ChromaSegmentFlusher::VectorSegment(flusher) => match flusher {
-                VectorSegmentFlusherShard::Hnsw(writer) => writer.id,
-                #[cfg(feature = "usearch")]
-                VectorSegmentFlusherShard::QuantizedSpann(flusher) => flusher.id,
-                VectorSegmentFlusherShard::Spann(writer) => writer.id,
-            },
+            ChromaSegmentFlusher::VectorSegment(flusher) => flusher.id,
         }
     }
 
@@ -1206,12 +1385,7 @@ impl ChromaSegmentFlusher {
         match self {
             ChromaSegmentFlusher::RecordSegment(_) => "RecordSegmentFlusher",
             ChromaSegmentFlusher::MetadataSegment(_) => "MetadataSegmentFlusher",
-            ChromaSegmentFlusher::VectorSegment(flusher) => match flusher {
-                VectorSegmentFlusherShard::Hnsw(_) => "DistributedHNSWSegmentFlusher",
-                #[cfg(feature = "usearch")]
-                VectorSegmentFlusherShard::QuantizedSpann(_) => "QuantizedSpannSegmentFlusher",
-                VectorSegmentFlusherShard::Spann(_) => "SpannSegmentFlusher",
-            },
+            ChromaSegmentFlusher::VectorSegment(_) => "VectorSegmentFlusher",
         }
     }
 
@@ -1219,14 +1393,7 @@ impl ChromaSegmentFlusher {
         match self {
             ChromaSegmentFlusher::RecordSegment(flusher) => Box::pin(flusher.flush()).await,
             ChromaSegmentFlusher::MetadataSegment(flusher) => Box::pin(flusher.flush()).await,
-            ChromaSegmentFlusher::VectorSegment(flusher) => match flusher {
-                VectorSegmentFlusherShard::Hnsw(flusher) => flusher.flush().await,
-                #[cfg(feature = "usearch")]
-                VectorSegmentFlusherShard::QuantizedSpann(flusher) => {
-                    Box::pin(flusher.flush()).await
-                }
-                VectorSegmentFlusherShard::Spann(flusher) => Box::pin(flusher.flush()).await,
-            },
+            ChromaSegmentFlusher::VectorSegment(flusher) => Box::pin(flusher.flush()).await,
         }
     }
 }
