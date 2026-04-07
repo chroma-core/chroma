@@ -1052,7 +1052,7 @@ impl ServiceBasedFrontend {
         let fork_to_retry = || {
             let mut self_clone = self.clone();
             let request_clone = request.clone();
-            async move { self_clone.retryable_fork(request_clone).await }
+            async move { Box::pin(self_clone.retryable_fork(request_clone)).await }
         };
 
         let res = fork_to_retry
@@ -1749,7 +1749,7 @@ impl ServiceBasedFrontend {
                 .collections_with_segments_cache
                 .clone();
             async move {
-                let res = self_clone.retryable_count(request_clone).await;
+                let res = Box::pin(self_clone.retryable_count(request_clone)).await;
                 match res {
                     Ok(res) => Ok(res),
                     Err(e) => {
@@ -2337,7 +2337,7 @@ impl ServiceBasedFrontend {
                 .collections_with_segments_cache
                 .clone();
             async move {
-                let res = self_clone.retryable_search(request_clone).await;
+                let res = Box::pin(self_clone.retryable_search(request_clone)).await;
                 match res {
                     Ok(res) => Ok(res),
                     Err(e) => {
