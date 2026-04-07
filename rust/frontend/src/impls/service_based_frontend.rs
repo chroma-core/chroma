@@ -303,19 +303,33 @@ impl ServiceBasedFrontend {
             )
             .await;
         }
+        // Each shard only sees a subset of records, so we can't push the
+        // original offset to individual shards—a shard may hold fewer
+        // matching records than the offset. Instead, ask every shard for
+        // offset+limit results (offset=0) and apply the real offset/limit
+        // after merging.
+        let original_limit = plan.limit.clone();
         let futs: Vec<_> = (0..num_shards)
             .map(|shard_index| {
                 let mut executor = self.executor.clone();
                 let mut shard_plan = plan.clone();
                 shard_plan.scan.shard_index = shard_index;
                 shard_plan.scan.num_shards = num_shards;
+                shard_plan.limit = Limit {
+                    offset: 0,
+                    limit: original_limit
+                        .limit
+                        .map(|l| l.saturating_add(original_limit.offset)),
+                };
                 let provider = self.collections_with_segments_provider.clone();
                 let database_name = database_name.clone();
+                let original_limit = original_limit.clone();
                 async move {
                     Box::pin(executor.get(shard_plan.clone(), move |code: tonic::Code| {
                         let mut provider = provider.clone();
                         let mut replan = shard_plan.clone();
                         let database_name = database_name.clone();
+                        let original_limit = original_limit.clone();
                         async move {
                             if code == tonic::Code::NotFound {
                                 provider
@@ -330,6 +344,12 @@ impl ServiceBasedFrontend {
                             replan.scan.collection_and_segments = new_cas;
                             replan.scan.shard_index = shard_index;
                             replan.scan.num_shards = num_shards;
+                            replan.limit = Limit {
+                                offset: 0,
+                                limit: original_limit
+                                    .limit
+                                    .map(|l| l.saturating_add(original_limit.offset)),
+                            };
                             Ok(replan)
                         }
                     }))
@@ -338,13 +358,22 @@ impl ServiceBasedFrontend {
             })
             .collect();
         let results = futures::future::try_join_all(futs).await?;
-        // TODO(PR 9): apply limit/offset re-adjustment for multi-shard
         let mut merged_records = Vec::new();
         let mut total_pulled_log_bytes = 0u64;
         for r in results {
             merged_records.extend(r.result.records);
             total_pulled_log_bytes += r.pulled_log_bytes;
         }
+        let offset = original_limit.offset as usize;
+        let merged_records = if let Some(limit) = original_limit.limit {
+            merged_records
+                .into_iter()
+                .skip(offset)
+                .take(limit as usize)
+                .collect()
+        } else {
+            merged_records.into_iter().skip(offset).collect()
+        };
         Ok(GetResult {
             pulled_log_bytes: total_pulled_log_bytes,
             result: ProjectionOutput {
@@ -432,9 +461,8 @@ impl ServiceBasedFrontend {
             })
             .collect();
         let results = futures::future::try_join_all(futs).await?;
-        // TODO(PR 11): merge by distance per embedding, global top-k
-        let first = &results[0];
-        let num_embeddings = first.results.len();
+        let fetch = plan.knn.fetch as usize;
+        let num_embeddings = results[0].results.len();
         let mut merged_results = vec![
             KnnProjectionOutput {
                 records: Vec::new()
@@ -449,6 +477,14 @@ impl ServiceBasedFrontend {
                     merged_results[i].records.extend(knn_output.records.clone());
                 }
             }
+        }
+        for output in &mut merged_results {
+            output.records.sort_by(|a, b| {
+                a.distance
+                    .partial_cmp(&b.distance)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            output.records.truncate(fetch);
         }
         Ok(KnnBatchResult {
             pulled_log_bytes: total_pulled_log_bytes,
