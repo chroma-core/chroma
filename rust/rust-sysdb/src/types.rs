@@ -1371,9 +1371,10 @@ impl ChromaError for SysDbError {
 }
 
 impl SysDbError {
-    pub(crate) fn is_spanner_aborted(&self) -> bool {
-        self.try_as()
-            .is_some_and(|status| status.code() == tonic::Code::Aborted)
+    pub(crate) fn is_retryable_spanner_status(&self) -> bool {
+        self.try_as().is_some_and(|status| {
+            matches!(status.code(), tonic::Code::Aborted | tonic::Code::Cancelled)
+        })
     }
 }
 
@@ -1418,16 +1419,23 @@ mod tests {
     use google_cloud_gax::grpc::Status as GrpcStatus;
 
     #[test]
-    fn sysdb_error_recognizes_spanner_aborted() {
+    fn sysdb_error_recognizes_spanner_aborted_as_retryable() {
         let err = SysDbError::from(GrpcStatus::aborted("aborted"));
-        assert!(err.is_spanner_aborted());
+        assert!(err.is_retryable_spanner_status());
         assert_eq!(err.code(), ErrorCodes::Aborted);
     }
 
     #[test]
-    fn sysdb_error_does_not_mark_non_aborted_spanner_errors() {
+    fn sysdb_error_recognizes_spanner_cancelled_as_retryable() {
+        let err = SysDbError::from(GrpcStatus::cancelled("cancelled"));
+        assert!(err.is_retryable_spanner_status());
+        assert_eq!(err.code(), ErrorCodes::Cancelled);
+    }
+
+    #[test]
+    fn sysdb_error_does_not_mark_non_retryable_spanner_errors() {
         let err = SysDbError::from(GrpcStatus::internal("internal"));
-        assert!(!err.is_spanner_aborted());
+        assert!(!err.is_retryable_spanner_status());
         assert_eq!(err.code(), ErrorCodes::Internal);
     }
 }
