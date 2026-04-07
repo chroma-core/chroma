@@ -1,6 +1,6 @@
 use crate::ui_utils::{HOLIDAY_LOGO, LOGO};
 use crate::utils::CliError;
-use chroma_frontend::config::{FrontendServerConfig, OpenTelemetryConfig};
+use chroma_frontend::config::FrontendServerConfig;
 use chroma_frontend::frontend_service_entrypoint_with_config;
 use chrono::{Datelike, Local};
 use clap::Parser;
@@ -129,11 +129,7 @@ pub fn run(args: RunArgs) -> Result<(), CliError> {
 
     display_run_message(&config);
 
-    config.open_telemetry.get_or_insert(OpenTelemetryConfig {
-        endpoint: None,
-        service_name: "chroma".to_string(),
-        filters: vec![],
-    });
+    config.stdout_tracing = true;
 
     let runtime = tokio::runtime::Runtime::new().map_err(|_| RunError::ServerStartFailed)?;
     runtime.block_on(async {

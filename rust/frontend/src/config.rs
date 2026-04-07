@@ -116,7 +116,7 @@ fn default_otel_filters() -> Vec<OtelFilter> {
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct OpenTelemetryConfig {
-    pub endpoint: Option<String>,
+    pub endpoint: String,
     #[serde(default = "default_otel_service_name")]
     pub service_name: String,
     #[serde(default = "default_otel_filters")]
@@ -176,6 +176,8 @@ pub struct FrontendServerConfig {
     #[serde(default)]
     pub scorecard: Vec<ScorecardRule>,
     pub open_telemetry: Option<OpenTelemetryConfig>,
+    #[serde(default)]
+    pub stdout_tracing: bool,
     #[serde(default = "default_persist_path")]
     pub persist_path: String,
     #[serde(default = "default_sqlite_filename")]
