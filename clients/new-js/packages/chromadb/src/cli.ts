@@ -53,12 +53,6 @@ const main = async () => {
     return;
   }
 
-  // This listener replaces Node's default SignalExit handler (which calls
-  // raise(SIGINT) and creates an infinite signal loop when chained by tokio's
-  // signal_hook). The callback itself never fires while binding.cli() blocks
-  // the event loop — the actual SIGINT is handled by tokio's graceful shutdown
-  // in server.rs. After shutdown completes and the event loop resumes, the
-  // callback fires to ensure the process exits cleanly.
   process.on("SIGINT", () => {
     process.exit(0);
   });
