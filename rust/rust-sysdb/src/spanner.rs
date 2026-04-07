@@ -874,7 +874,7 @@ impl SpannerBackend {
         let filter = req.filter;
 
         // Use local region for reads
-        let region = self.local_region();
+        let region = self.local_region().clone();
 
         // Build dynamic query based on which filters are provided
         let mut where_clauses: Vec<String> = Vec::new();
@@ -974,76 +974,104 @@ impl SpannerBackend {
             pagination = pagination,
         );
 
-        let mut stmt = Statement::new(&query);
-        stmt.add_param("region", &region.to_string());
-
-        // Bind parameters based on which filters are set
-        if let Some(ref ids) = ids_str {
-            stmt.add_param("collection_ids", ids);
-        }
-        if let Some(ref name) = filter.name {
-            stmt.add_param("name", name);
-        }
-        if let Some(ref tenant_id) = filter.tenant_id {
-            stmt.add_param("tenant_id", tenant_id);
-        }
-        if let Some(ref database_name) = filter.database_name {
-            stmt.add_param("database_name", &database_name.as_ref());
-        }
-
         tracing::debug!("Get collection query is: {}", query);
 
-        let mut tx = self.client.single().await?;
-        let mut result_set = tx
-            .query(stmt)
-            .instrument(tracing::info_span!("get_collections query"))
-            .await?;
+        let backoff = ConstantBuilder::default()
+            .with_delay(Duration::from_millis(250))
+            .with_max_times(4);
 
-        // Collect all rows, grouped by collection_id, preserving query order (created_at ASC)
-        let mut collection_order: Vec<String> = Vec::new();
-        let mut rows_by_collection: std::collections::HashMap<String, Vec<Row>> =
-            std::collections::HashMap::new();
+        (|| {
+            let db = self.clone();
+            let query = query.clone();
+            let region = region.clone();
+            let ids_str = ids_str.clone();
+            let filter = filter.clone();
 
-        while let Some(row) = result_set.next().await? {
-            let collection_id: String = row
-                .column_by_name("collection_id")
-                .map_err(SysDbError::FailedToReadColumn)?;
+            async move {
+                let mut stmt = Statement::new(&query);
+                stmt.add_param("region", &region.to_string());
 
-            if !rows_by_collection.contains_key(&collection_id) {
-                collection_order.push(collection_id.clone());
-            }
-            rows_by_collection
-                .entry(collection_id)
-                .or_default()
-                .push(row);
-        }
-
-        // Convert each group of rows to a Collection, preserving the query order
-        let mut collections = Vec::new();
-        let mut soft_deleted_ids = std::collections::HashSet::new();
-        for collection_id in collection_order {
-            if let Some(rows) = rows_by_collection.remove(&collection_id) {
-                let is_deleted: bool = rows[0]
-                    .column_by_name("is_deleted")
-                    .map_err(SysDbError::FailedToReadColumn)?;
-                let collection = Collection::try_from(SpannerRows { rows })?;
-                if is_deleted {
-                    tracing::debug!(
-                        "Adding collection {} to soft_deleted_ids",
-                        collection.collection_id
-                    );
-                    soft_deleted_ids.insert(collection.collection_id);
+                // Bind parameters based on which filters are set
+                if let Some(ref ids) = ids_str {
+                    stmt.add_param("collection_ids", ids);
                 }
-                collections.push(collection);
+                if let Some(ref name) = filter.name {
+                    stmt.add_param("name", name);
+                }
+                if let Some(ref tenant_id) = filter.tenant_id {
+                    stmt.add_param("tenant_id", tenant_id);
+                }
+                if let Some(ref database_name) = filter.database_name {
+                    stmt.add_param("database_name", &database_name.as_ref());
+                }
+
+                let mut tx = db.client.single().await?;
+                let mut result_set = tx
+                    .query(stmt)
+                    .instrument(tracing::info_span!("get_collections query"))
+                    .await?;
+
+                // Collect all rows, grouped by collection_id, preserving query order (created_at ASC)
+                let mut collection_order: Vec<String> = Vec::new();
+                let mut rows_by_collection: std::collections::HashMap<String, Vec<Row>> =
+                    std::collections::HashMap::new();
+
+                while let Some(row) = result_set.next().await? {
+                    let collection_id: String = row
+                        .column_by_name("collection_id")
+                        .map_err(SysDbError::FailedToReadColumn)?;
+
+                    if !rows_by_collection.contains_key(&collection_id) {
+                        collection_order.push(collection_id.clone());
+                    }
+                    rows_by_collection
+                        .entry(collection_id)
+                        .or_default()
+                        .push(row);
+                }
+
+                // Convert each group of rows to a Collection, preserving the query order
+                let mut collections = Vec::new();
+                let mut soft_deleted_ids = std::collections::HashSet::new();
+                for collection_id in collection_order {
+                    if let Some(rows) = rows_by_collection.remove(&collection_id) {
+                        let is_deleted: bool = rows[0]
+                            .column_by_name("is_deleted")
+                            .map_err(SysDbError::FailedToReadColumn)?;
+                        let collection = Collection::try_from(SpannerRows { rows })?;
+                        if is_deleted {
+                            tracing::debug!(
+                                "Adding collection {} to soft_deleted_ids",
+                                collection.collection_id
+                            );
+                            soft_deleted_ids.insert(collection.collection_id);
+                        }
+                        collections.push(collection);
+                    }
+                }
+
+                tracing::debug!("Final soft_deleted_ids: {:?}", soft_deleted_ids);
+
+                Ok(GetCollectionsResponse {
+                    collections,
+                    soft_deleted_ids,
+                })
             }
-        }
-
-        tracing::debug!("Final soft_deleted_ids: {:?}", soft_deleted_ids);
-
-        Ok(GetCollectionsResponse {
-            collections,
-            soft_deleted_ids,
         })
+        .retry(backoff)
+        .when(|e: &SysDbError| e.is_spanner_aborted())
+        .notify(|e: &SysDbError, dur| {
+            tracing::warn!(
+                tenant_id = ?filter.tenant_id,
+                database_name = ?filter.database_name,
+                collection_name = ?filter.name,
+                ids_count = ?filter.ids.as_ref().map(Vec::len),
+                delay_ms = dur.as_millis(),
+                error = %e,
+                "Spanner aborted get_collections query; retrying"
+            );
+        })
+        .await
     }
 
     /// Count collections for a tenant, optionally filtered by database.
@@ -1883,7 +1911,7 @@ impl SpannerBackend {
             .as_ref()
             .map_or(0, |vh| vh.versions.len() as i32);
         let backoff = ConstantBuilder::default()
-            .with_delay(Duration::from_millis(100))
+            .with_delay(Duration::from_millis(250))
             .with_max_times(4);
 
         let result = (|| {
