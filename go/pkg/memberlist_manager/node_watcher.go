@@ -35,12 +35,21 @@ const (
 
 const MemberLabel = "member-type"
 
+// ZoneLabel is the well-known Kubernetes node label for topology zone.
+// Cloud providers populate this automatically:
+//   - AWS EKS: e.g. "us-east-1a", "us-west-2b"
+//   - GCP GKE: e.g. "us-central1-a", "europe-west1-b"
+//   - Azure AKS: e.g. "eastus-1", "westus2-2"
+const ZoneLabel = "topology.kubernetes.io/zone"
+
 type KubernetesWatcher struct {
 	stopCh         chan struct{}
 	isRunning      bool
 	clientSet      kubernetes.Interface      // clientset for the service
 	informer       cache.SharedIndexInformer // informer for the service
 	lister         lister_v1.PodLister       // lister for the service
+	nodeLister     lister_v1.NodeLister      // lister for nodes (to look up zone labels)
+	nodeInformer   cache.SharedIndexInformer // informer for nodes
 	callbacks      []NodeWatcherCallback
 	informerHandle cache.ResourceEventHandlerRegistration
 }
@@ -48,15 +57,22 @@ type KubernetesWatcher struct {
 func NewKubernetesWatcher(clientset kubernetes.Interface, coordinator_namespace string, pod_label string, resyncPeriod time.Duration) *KubernetesWatcher {
 	log.Info("Creating new kubernetes watcher", zap.String("namespace", coordinator_namespace), zap.String("pod label", pod_label), zap.Duration("resync period", resyncPeriod))
 	labelSelector := labels.SelectorFromSet(map[string]string{MemberLabel: pod_label})
-	factory := informers.NewSharedInformerFactoryWithOptions(clientset, resyncPeriod, informers.WithNamespace(coordinator_namespace), informers.WithTweakListOptions(func(options *metav1.ListOptions) { options.LabelSelector = labelSelector.String() }))
-	podInformer := factory.Core().V1().Pods().Informer()
-	podLister := factory.Core().V1().Pods().Lister()
+	podFactory := informers.NewSharedInformerFactoryWithOptions(clientset, resyncPeriod, informers.WithNamespace(coordinator_namespace), informers.WithTweakListOptions(func(options *metav1.ListOptions) { options.LabelSelector = labelSelector.String() }))
+	podInformer := podFactory.Core().V1().Pods().Informer()
+	podLister := podFactory.Core().V1().Pods().Lister()
+
+	// Create a separate informer factory for nodes (cluster-scoped, no namespace filter)
+	nodeFactory := informers.NewSharedInformerFactory(clientset, resyncPeriod)
+	nodeInformer := nodeFactory.Core().V1().Nodes().Informer()
+	nodeLister := nodeFactory.Core().V1().Nodes().Lister()
 
 	w := &KubernetesWatcher{
-		isRunning: false,
-		clientSet: clientset,
-		informer:  podInformer,
-		lister:    podLister,
+		isRunning:    false,
+		clientSet:    clientset,
+		informer:     podInformer,
+		lister:       podLister,
+		nodeLister:   nodeLister,
+		nodeInformer: nodeInformer,
 	}
 
 	return w
@@ -122,8 +138,9 @@ func (w *KubernetesWatcher) Start() error {
 	w.isRunning = true
 
 	go w.informer.Run(w.stopCh)
+	go w.nodeInformer.Run(w.stopCh)
 
-	if !cache.WaitForCacheSync(w.stopCh, w.informer.HasSynced) {
+	if !cache.WaitForCacheSync(w.stopCh, w.informer.HasSynced, w.nodeInformer.HasSynced) {
 		log.Error("Failed to sync cache")
 	}
 
@@ -169,7 +186,8 @@ func (w *KubernetesWatcher) ListReadyMembers() (Memberlist, error) {
 						// Pod is being deleted, don't include it in the member list
 						continue
 					}
-					memberlist = append(memberlist, Member{pod.Name, pod.Status.PodIP, pod.Spec.NodeName})
+					zone := w.getNodeZone(pod.Spec.NodeName)
+					memberlist = append(memberlist, Member{pod.Name, pod.Status.PodIP, pod.Spec.NodeName, zone})
 				}
 				break
 			}
@@ -177,4 +195,21 @@ func (w *KubernetesWatcher) ListReadyMembers() (Memberlist, error) {
 	}
 	log.Debug("ListReadyMembers", zap.Any("memberlist", memberlist))
 	return memberlist, nil
+}
+
+// getNodeZone looks up the topology zone label for the given node name.
+// Returns empty string if the node is not found or doesn't have a zone label.
+func (w *KubernetesWatcher) getNodeZone(nodeName string) string {
+	if nodeName == "" {
+		return ""
+	}
+	node, err := w.nodeLister.Get(nodeName)
+	if err != nil {
+		log.Debug("Failed to get node for zone lookup", zap.String("node", nodeName), zap.Error(err))
+		return ""
+	}
+	if node.Labels == nil {
+		return ""
+	}
+	return node.Labels[ZoneLabel]
 }

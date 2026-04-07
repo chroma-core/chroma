@@ -31,6 +31,8 @@ spec:
                         type: string
                       member_node_name:
                         type: string
+                      member_zone:
+                        type: string
   scope: Namespaced
   names:
     plural: memberlists
