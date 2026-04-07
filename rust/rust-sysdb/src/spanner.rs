@@ -432,13 +432,13 @@ impl SpannerBackend {
             }
         })
         .retry(backoff)
-        .when(|e: &SysDbError| e.is_spanner_aborted())
+        .when(|e: &SysDbError| e.is_retryable_spanner_status())
         .notify(|e: &SysDbError, dur| {
             tracing::warn!(
                 database_name = %db_name_for_log,
                 delay_ms = dur.as_millis(),
                 error = %e,
-                "Spanner aborted create database transaction; retrying"
+                "Spanner aborted or cancelled create database transaction; retrying"
             );
         })
         .await;
@@ -1059,7 +1059,7 @@ impl SpannerBackend {
             }
         })
         .retry(backoff)
-        .when(|e: &SysDbError| e.is_spanner_aborted())
+        .when(|e: &SysDbError| e.is_retryable_spanner_status())
         .notify(|e: &SysDbError, dur| {
             tracing::warn!(
                 tenant_id = ?filter.tenant_id,
@@ -1068,7 +1068,7 @@ impl SpannerBackend {
                 ids_count = ?filter.ids.as_ref().map(Vec::len),
                 delay_ms = dur.as_millis(),
                 error = %e,
-                "Spanner aborted get_collections query; retrying"
+                "Spanner aborted or cancelled get_collections query; retrying"
             );
         })
         .await
@@ -2022,13 +2022,13 @@ impl SpannerBackend {
             }
         })
         .retry(backoff)
-        .when(|e: &SysDbError| e.is_spanner_aborted())
+        .when(|e: &SysDbError| e.is_retryable_spanner_status())
         .notify(|e: &SysDbError, dur| {
             tracing::warn!(
                 collection_id = %collection_id,
                 delay_ms = dur.as_millis(),
                 error = %e,
-                "Spanner aborted flush collection compaction transaction; retrying"
+                "Spanner aborted or cancelled flush collection compaction transaction; retrying"
             );
         })
         .await;
