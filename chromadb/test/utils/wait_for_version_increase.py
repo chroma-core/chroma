@@ -1,5 +1,4 @@
 import time
-import traceback
 from chromadb.api import ClientAPI
 from chromadb.test.conftest import COMPACTION_SLEEP
 
@@ -33,7 +32,6 @@ def wait_for_version_increase(
         time.sleep(TIMEOUT_INTERVAL)
         if time.time() > deadline:
             collection_id = client.get_collection(collection_name).id
-            traceback.print_stack()
             raise TimeoutError(
                 "Model was not updated in time for "
                 f"{collection_id}; waited for version >= {target_version}, "
