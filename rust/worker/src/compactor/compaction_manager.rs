@@ -1148,6 +1148,7 @@ mod tests {
             member_id: "member_1".to_string(),
             member_ip: "10.0.0.1".to_string(),
             member_node_name: "node_1".to_string(),
+            member_zone: String::new(),
         };
         let compaction_manager_queue_size = 1000;
         let max_concurrent_jobs = 10;

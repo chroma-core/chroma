@@ -24,14 +24,16 @@ type Member struct {
 	id   string
 	ip   string
 	node string
+	zone string
 }
 
-// NewMember creates a new Member with the given id, ip, and node
-func NewMember(id, ip, node string) Member {
+// NewMember creates a new Member with the given id, ip, node, and zone
+func NewMember(id, ip, node, zone string) Member {
 	return Member{
 		id:   id,
 		ip:   ip,
 		node: node,
+		zone: zone,
 	}
 }
 
@@ -45,11 +47,17 @@ func (m Member) GetID() string {
 	return m.id
 }
 
+// GetZone returns the availability zone of the member
+func (m Member) GetZone() string {
+	return m.zone
+}
+
 // MarshalLogObject implements the zapcore.ObjectMarshaler interface
 func (m Member) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddString("id", m.id)
 	enc.AddString("ip", m.ip)
 	enc.AddString("node", m.node)
+	enc.AddString("zone", m.zone)
 	return nil
 }
 
@@ -133,8 +141,14 @@ func (s *CRMemberlistStore) GetMemberlist(ctx context.Context) (return_memberlis
 		if !ok {
 			member_node_name = ""
 		}
+		// If the member_zone is in the CR, extract it, otherwise set it to empty string
+		// This is for backwards compatibility with older CRs that don't have member_zone
+		member_zone, ok := member_map["member_zone"].(string)
+		if !ok {
+			member_zone = ""
+		}
 
-		memberlist = append(memberlist, Member{member_id, member_ip, member_node_name})
+		memberlist = append(memberlist, Member{member_id, member_ip, member_node_name, member_zone})
 	}
 	return memberlist, unstrucuted.GetResourceVersion(), nil
 }
@@ -163,6 +177,7 @@ func (list Memberlist) toCr(namespace string, memberlistName string, resourceVer
 			"member_id":        member.id,
 			"member_ip":        member.ip,
 			"member_node_name": member.node,
+			"member_zone":      member.zone,
 		}
 	}
 

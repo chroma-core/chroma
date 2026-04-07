@@ -30,6 +30,7 @@ class Member:
     id: str
     ip: str
     node: str
+    zone: str = ""
 
 
 Memberlist = List[Member]

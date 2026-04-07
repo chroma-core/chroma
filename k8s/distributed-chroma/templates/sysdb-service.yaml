@@ -119,3 +119,31 @@ subjects:
 - kind: ServiceAccount
   name: sysdb-serviceaccount
   namespace: {{ .Values.namespace }}
+
+---
+
+# ClusterRole to allow sysdb to read node labels (needed to populate
+# topology.kubernetes.io/zone into the memberlist for zone-aware routing).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: node-reader
+rules:
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "watch"]
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sysdb-node-reader-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: node-reader
+subjects:
+- kind: ServiceAccount
+  name: sysdb-serviceaccount
+  namespace: {{ .Values.namespace }}

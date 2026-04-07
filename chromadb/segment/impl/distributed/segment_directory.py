@@ -35,9 +35,9 @@ class MockMemberlistProvider(MemberlistProvider, EnforceOverrides):
     def __init__(self, system: System):
         super().__init__(system)
         self._memberlist = [
-            Member(id="a", ip="10.0.0.1", node="node1"),
-            Member(id="b", ip="10.0.0.2", node="node2"),
-            Member(id="c", ip="10.0.0.3", node="node3"),
+            Member(id="a", ip="10.0.0.1", node="node1", zone="us-east-1a"),
+            Member(id="b", ip="10.0.0.2", node="node2", zone="us-east-1b"),
+            Member(id="c", ip="10.0.0.3", node="node3", zone="us-east-1c"),
         ]
 
     @override
@@ -211,7 +211,8 @@ class CustomResourceMemberlistProvider(MemberlistProvider, EnforceOverrides):
             id = m["member_id"]
             ip = m["member_ip"] if "member_ip" in m else ""
             node = m["member_node_name"] if "member_node_name" in m else ""
-            parsed.append(Member(id=id, ip=ip, node=node))
+            zone = m["member_zone"] if "member_zone" in m else ""
+            parsed.append(Member(id=id, ip=ip, node=node, zone=zone))
         return parsed
 
     def _notify(self, memberlist: Memberlist) -> None:

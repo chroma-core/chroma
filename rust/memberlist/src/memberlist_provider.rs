@@ -48,6 +48,9 @@ pub struct Member {
     pub member_ip: String,
     // The k8s node name of the member
     pub member_node_name: String,
+    // The availability zone of the k8s node (from topology.kubernetes.io/zone label)
+    #[serde(default)]
+    pub member_zone: String,
 }
 
 /* =========== CR Provider ============== */

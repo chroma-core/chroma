@@ -547,6 +547,7 @@ mod test {
                 member_id: i.to_string(),
                 member_node_name: format!("node{}", i),
                 member_ip: format!("10.0.0.{}", i),
+                member_zone: String::new(),
             };
             memberlist.push(member);
         }

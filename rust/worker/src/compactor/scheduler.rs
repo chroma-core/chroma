@@ -754,6 +754,7 @@ mod tests {
                 member_id: "member_1".to_string(),
                 member_ip: "10.0.0.1".to_string(),
                 member_node_name: "node_1".to_string(),
+                member_zone: String::new(),
             };
 
             let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
@@ -882,6 +883,7 @@ mod tests {
             member_id: "member_2".to_string(),
             member_ip: "10.0.0.2".to_string(),
             member_node_name: "node_2".to_string(),
+            member_zone: String::new(),
         };
 
         f.scheduler
@@ -985,6 +987,7 @@ mod tests {
             member_id: "member_1".to_string(),
             member_ip: "10.0.0.1".to_string(),
             member_node_name: "node_1".to_string(),
+            member_zone: String::new(),
         };
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
         assignment_policy.set_members(vec![my_member.member_id.clone()]);
@@ -1084,6 +1087,7 @@ mod tests {
             member_id: "member_1".to_string(),
             member_ip: "10.0.0.1".to_string(),
             member_node_name: "node_1".to_string(),
+            member_zone: String::new(),
         };
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
         assignment_policy.set_members(vec![my_member.member_id.clone()]);
@@ -1363,6 +1367,7 @@ mod tests {
             member_id: "member_1".to_string(),
             member_ip: "0.0.0.1".to_string(),
             member_node_name: "node_1".to_string(),
+            member_zone: String::new(),
         };
         let scheduler_policy = Box::new(LasCompactionTimeSchedulerPolicy {});
         let max_concurrent_jobs = 1000;
