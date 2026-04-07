@@ -938,6 +938,20 @@ impl RollupPerCollection {
         now_us.saturating_sub(self.initial_insertion_epoch_us as u128)
     }
 
+    /// Whether this rollup should be selected for compaction given the provided thresholds.
+    fn should_compact(
+        &self,
+        min_compaction_size: u64,
+        reinsert_threshold: u64,
+        timeout_us: u64,
+    ) -> bool {
+        let now_us = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("time never moves to before epoch")
+            .as_micros();
+        self.should_compact_at(now_us, min_compaction_size, reinsert_threshold, timeout_us)
+    }
+
     fn should_compact_at(
         &self,
         now_us: u128,
@@ -1386,29 +1400,12 @@ impl LogServer {
                 let mut need_to_compact_s3 = self.need_to_compact_s3.lock();
                 if let Entry::Occupied(mut entry) = need_to_compact_s3.entry(collection_id) {
                     let rollup = entry.get_mut();
-                    let previous_start_log_offset = rollup.start_log_position.offset();
-                    let previous_limit_log_offset = rollup.limit_log_position.offset();
-                    let previous_uncompacted_records = rollup.uncompacted_record_count();
                     rollup.start_log_position = std::cmp::max(
                         rollup.start_log_position,
                         LogPosition::from_offset(adjusted_log_offset as u64),
                     );
                     rollup.reinsert_count = 0;
-                    let removed = rollup.is_empty();
-                    tracing::info!(
-                        collection_id = %collection_id,
-                        topology_name = ?Option::<TopologyName>::None,
-                        adjusted_log_offset,
-                        previous_start_log_offset,
-                        previous_limit_log_offset,
-                        previous_uncompacted_records,
-                        new_start_log_offset = rollup.start_log_position.offset(),
-                        new_limit_log_offset = rollup.limit_log_position.offset(),
-                        new_uncompacted_records = rollup.uncompacted_record_count(),
-                        removed,
-                        "Updated cached dirty collection after collection log offset update"
-                    );
-                    if removed {
+                    if rollup.is_empty() {
                         entry.remove();
                     }
                 }
@@ -1418,31 +1415,13 @@ impl LogServer {
                 if let Entry::Occupied(mut entry) =
                     need_to_compact_repl.entry((topology_name, collection_id))
                 {
-                    let topology_name = entry.key().0.clone();
                     let rollup = entry.get_mut();
-                    let previous_start_log_offset = rollup.start_log_position.offset();
-                    let previous_limit_log_offset = rollup.limit_log_position.offset();
-                    let previous_uncompacted_records = rollup.uncompacted_record_count();
                     rollup.start_log_position = std::cmp::max(
                         rollup.start_log_position,
                         LogPosition::from_offset(adjusted_log_offset as u64),
                     );
                     rollup.reinsert_count = 0;
-                    let removed = rollup.is_empty();
-                    tracing::info!(
-                        collection_id = %collection_id,
-                        topology_name = %topology_name,
-                        adjusted_log_offset,
-                        previous_start_log_offset,
-                        previous_limit_log_offset,
-                        previous_uncompacted_records,
-                        new_start_log_offset = rollup.start_log_position.offset(),
-                        new_limit_log_offset = rollup.limit_log_position.offset(),
-                        new_uncompacted_records = rollup.uncompacted_record_count(),
-                        removed,
-                        "Updated cached dirty collection after collection log offset update"
-                    );
-                    if removed {
+                    if rollup.is_empty() {
                         entry.remove();
                     }
                 }
@@ -1459,48 +1438,15 @@ impl LogServer {
         // TODO(rescrv):  Realistically we could make this configurable.
         const MAX_COLLECTION_INFO_NUMBER: usize = 10000;
         let mut selected_rollups = Vec::with_capacity(MAX_COLLECTION_INFO_NUMBER);
-        let now_us = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("time never moves to before epoch")
-            .as_micros();
-        tracing::info!(
-            min_compaction_size = request.min_compaction_size,
-            reinsert_threshold = self.config.reinsert_threshold,
-            timeout_us = self.config.timeout_us,
-            "Selecting dirty collections for compaction"
-        );
         // Collect from the S3 map.
         {
             let need_to_compact_s3 = self.need_to_compact_s3.lock();
-            tracing::info!(
-                source = "s3",
-                cached_dirty_collection_count = need_to_compact_s3.len(),
-                "Inspecting cached dirty collections for compaction"
-            );
             for (collection_id, rollup) in need_to_compact_s3.iter() {
-                let should_compact = rollup.should_compact_at(
-                    now_us,
+                if rollup.should_compact(
                     request.min_compaction_size,
                     self.config.reinsert_threshold,
                     self.config.timeout_us,
-                );
-                tracing::info!(
-                    source = "s3",
-                    collection_id = %collection_id,
-                    topology_name = ?Option::<TopologyName>::None,
-                    start_log_offset = rollup.start_log_position.offset(),
-                    limit_log_offset = rollup.limit_log_position.offset(),
-                    uncompacted_records = rollup.uncompacted_record_count(),
-                    reinsert_count = rollup.reinsert_count,
-                    initial_insertion_epoch_us = rollup.initial_insertion_epoch_us,
-                    time_on_log_us = rollup.time_on_log_us(now_us),
-                    min_compaction_size = request.min_compaction_size,
-                    reinsert_threshold = self.config.reinsert_threshold,
-                    timeout_us = self.config.timeout_us,
-                    should_compact,
-                    "Evaluated cached dirty collection for compaction"
-                );
-                if should_compact {
+                ) {
                     selected_rollups.push(((None, *collection_id), *rollup));
                 }
             }
@@ -1508,55 +1454,19 @@ impl LogServer {
         // Collect from the repl map.
         {
             let need_to_compact_repl = self.need_to_compact_repl.lock();
-            tracing::info!(
-                source = "repl",
-                cached_dirty_collection_count = need_to_compact_repl.len(),
-                "Inspecting cached dirty collections for compaction"
-            );
             for ((topology_name, collection_id), rollup) in need_to_compact_repl.iter() {
-                let should_compact = rollup.should_compact_at(
-                    now_us,
+                if rollup.should_compact(
                     request.min_compaction_size,
                     self.config.reinsert_threshold,
                     self.config.timeout_us,
-                );
-                tracing::info!(
-                    source = "repl",
-                    collection_id = %collection_id,
-                    topology_name = %topology_name,
-                    start_log_offset = rollup.start_log_position.offset(),
-                    limit_log_offset = rollup.limit_log_position.offset(),
-                    uncompacted_records = rollup.uncompacted_record_count(),
-                    reinsert_count = rollup.reinsert_count,
-                    initial_insertion_epoch_us = rollup.initial_insertion_epoch_us,
-                    time_on_log_us = rollup.time_on_log_us(now_us),
-                    min_compaction_size = request.min_compaction_size,
-                    reinsert_threshold = self.config.reinsert_threshold,
-                    timeout_us = self.config.timeout_us,
-                    should_compact,
-                    "Evaluated cached dirty collection for compaction"
-                );
-                if should_compact {
+                ) {
                     selected_rollups.push(((Some(topology_name.clone()), *collection_id), *rollup));
                 }
             }
         }
-        tracing::info!(
-            selected_dirty_collection_count = selected_rollups.len(),
-            "Selected dirty collections for compaction"
-        );
         // Then allocate the collection ID strings outside the lock.
         let mut all_collection_info = Vec::with_capacity(selected_rollups.len());
         for ((topology_name, collection_id), rollup) in selected_rollups.into_iter() {
-            tracing::info!(
-                collection_id = %collection_id,
-                topology_name = ?topology_name,
-                first_log_offset = rollup.start_log_position.offset(),
-                first_log_ts = rollup.start_log_position.offset(),
-                uncompacted_records = rollup.uncompacted_record_count(),
-                reinsert_count = rollup.reinsert_count,
-                "Returning dirty collection to compactor"
-            );
             all_collection_info.push(CollectionInfo {
                 collection_id: collection_id.to_string(),
                 topology_name: topology_name.map(|t| t.to_string()),
@@ -1577,25 +1487,6 @@ impl LogServer {
             Ok((_, _bp, mut ru)) => {
                 {
                     let mut need_to_compact_s3 = self.need_to_compact_s3.lock();
-                    tracing::info!(
-                        source = "s3",
-                        previous_cached_dirty_collection_count = need_to_compact_s3.len(),
-                        new_cached_dirty_collection_count = ru.len(),
-                        "Replacing cached dirty collection rollups"
-                    );
-                    for (collection_id, rollup) in &ru {
-                        tracing::info!(
-                            source = "s3",
-                            collection_id = %collection_id,
-                            topology_name = ?Option::<TopologyName>::None,
-                            start_log_offset = rollup.start_log_position.offset(),
-                            limit_log_offset = rollup.limit_log_position.offset(),
-                            uncompacted_records = rollup.uncompacted_record_count(),
-                            reinsert_count = rollup.reinsert_count,
-                            initial_insertion_epoch_us = rollup.initial_insertion_epoch_us,
-                            "Caching dirty collection rollup"
-                        );
-                    }
                     std::mem::swap(&mut *need_to_compact_s3, &mut ru);
                 }
                 self.record_uncompacted_rollup_metrics();
@@ -1626,25 +1517,6 @@ impl LogServer {
                 Ok((topology_name, _bp, ru)) => {
                     let topology_name = topology_name
                         .expect("roll_dirty_log_repl always returns Some(topology_name)");
-                    tracing::info!(
-                        source = "repl",
-                        topology_name = %topology_name,
-                        dirty_collection_count = ru.len(),
-                        "Merging topology dirty collection rollups"
-                    );
-                    for ((_, collection_id), rollup) in &ru {
-                        tracing::info!(
-                            source = "repl",
-                            collection_id = %collection_id,
-                            topology_name = %topology_name,
-                            start_log_offset = rollup.start_log_position.offset(),
-                            limit_log_offset = rollup.limit_log_position.offset(),
-                            uncompacted_records = rollup.uncompacted_record_count(),
-                            reinsert_count = rollup.reinsert_count,
-                            initial_insertion_epoch_us = rollup.initial_insertion_epoch_us,
-                            "Merging topology dirty collection rollup"
-                        );
-                    }
                     for ((_, collection_id), v) in ru.into_iter() {
                         match rollups.entry((topology_name.clone(), collection_id)) {
                             Entry::Occupied(mut entry) => {
@@ -1663,12 +1535,6 @@ impl LogServer {
         }
         {
             let mut need_to_compact_repl = self.need_to_compact_repl.lock();
-            tracing::info!(
-                source = "repl",
-                previous_cached_dirty_collection_count = need_to_compact_repl.len(),
-                new_cached_dirty_collection_count = rollups.len(),
-                "Replacing cached topology dirty collection rollups"
-            );
             std::mem::swap(&mut *need_to_compact_repl, &mut rollups);
         }
         self.record_uncompacted_rollup_metrics();
