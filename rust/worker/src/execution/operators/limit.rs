@@ -43,6 +43,7 @@ pub struct LimitInput {
     pub log_offset_ids: SignedRoaringBitmap,
     pub compact_offset_ids: SignedRoaringBitmap,
     pub bloom_filter_manager: Option<BloomFilterManager>,
+    pub shard_index: u32,
 }
 
 #[derive(Debug)]
@@ -193,7 +194,8 @@ impl Operator<LimitInput, LimitOutput> for Limit {
     type Error = LimitError;
 
     async fn run(&self, input: &LimitInput) -> Result<LimitOutput, LimitError> {
-        let record_segment_shard = SegmentShard::try_from((&input.record_segment, 0))?;
+        let record_segment_shard =
+            SegmentShard::try_from((&input.record_segment, input.shard_index))?;
         let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment_shard,
             &input.blockfile_provider,
@@ -329,6 +331,7 @@ mod tests {
                 log_offset_ids,
                 compact_offset_ids,
                 bloom_filter_manager: None,
+                shard_index: 0,
             },
         )
     }

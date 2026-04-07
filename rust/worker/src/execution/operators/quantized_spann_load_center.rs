@@ -35,6 +35,7 @@ pub struct QuantizedSpannLoadCenterOperator {
     pub collection: Collection,
     pub spann_provider: SpannProvider,
     pub vector_segment: Segment,
+    pub shard_index: u32,
 }
 
 #[async_trait]
@@ -45,7 +46,8 @@ impl Operator<(), QuantizedSpannLoadCenterOutput> for QuantizedSpannLoadCenterOp
         &self,
         _input: &(),
     ) -> Result<QuantizedSpannLoadCenterOutput, QuantizedSpannLoadCenterError> {
-        let vector_segment_shard = SegmentShard::try_from((&self.vector_segment, 0))?;
+        let vector_segment_shard =
+            SegmentShard::try_from((&self.vector_segment, self.shard_index))?;
         let reader = self
             .spann_provider
             .read_quantized_usearch(&self.collection, &vector_segment_shard)

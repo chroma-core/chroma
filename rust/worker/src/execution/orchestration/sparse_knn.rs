@@ -101,6 +101,9 @@ pub struct SparseKnnOrchestrator {
     // Bloom filter manager
     bloom_filter_manager: Option<BloomFilterManager>,
 
+    // Sharding
+    shard_index: u32,
+
     // Result channel
     result_channel: Option<Sender<Result<Vec<RecordMeasure>, SparseKnnError>>>,
 }
@@ -117,6 +120,7 @@ impl SparseKnnOrchestrator {
         key: String,
         limit: u32,
         bloom_filter_manager: Option<BloomFilterManager>,
+        shard_index: u32,
     ) -> Self {
         let context = OrchestratorContext::new(dispatcher);
         Self {
@@ -131,6 +135,7 @@ impl SparseKnnOrchestrator {
             batch_measures: Vec::with_capacity(2),
             merge: Merge { k: limit },
             bloom_filter_manager,
+            shard_index,
             result_channel: None,
         }
     }
@@ -152,6 +157,7 @@ impl SparseKnnOrchestrator {
                 mask: self.knn_filter_output.filter_output.log_offset_ids.clone(),
                 record_segment: self.collection_and_segments.record_segment.clone(),
                 bloom_filter_manager: self.bloom_filter_manager.clone(),
+                shard_index: self.shard_index,
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -171,6 +177,7 @@ impl SparseKnnOrchestrator {
                     .compact_offset_ids
                     .clone(),
                 metadata_segment: self.collection_and_segments.metadata_segment.clone(),
+                shard_index: self.shard_index,
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -244,6 +251,7 @@ impl Orchestrator for SparseKnnOrchestrator {
                     metadata_segment: self.collection_and_segments.metadata_segment.clone(),
                     record_segment: self.collection_and_segments.record_segment.clone(),
                     bloom_filter_manager: self.bloom_filter_manager.clone(),
+                    shard_index: self.shard_index,
                 },
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),

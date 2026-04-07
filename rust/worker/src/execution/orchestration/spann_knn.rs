@@ -69,6 +69,9 @@ pub struct SpannKnnOrchestrator {
     // Bloom filter manager
     bloom_filter_manager: Option<BloomFilterManager>,
 
+    // Sharding
+    shard_index: u32,
+
     // Result channel
     result_channel: Option<Sender<Result<Vec<RecordMeasure>, KnnError>>>,
     spann_reader: Option<SpannSegmentReaderShard<'static>>,
@@ -85,6 +88,7 @@ impl SpannKnnOrchestrator {
         k: usize,
         query: Vec<f32>,
         bloom_filter_manager: Option<BloomFilterManager>,
+        shard_index: u32,
     ) -> Self {
         let normalized_query_emb =
             if knn_filter_output.distance_function == DistanceFunction::Cosine {
@@ -116,6 +120,7 @@ impl SpannKnnOrchestrator {
             records: Vec::new(),
             merge: Merge { k: k as u32 },
             bloom_filter_manager,
+            shard_index,
             result_channel: None,
             spann_reader: None,
         }
@@ -167,6 +172,7 @@ impl Orchestrator for SpannKnnOrchestrator {
                 log_offset_ids: self.knn_filter_output.filter_output.log_offset_ids.clone(),
                 distance_function: self.knn_filter_output.distance_function.clone(),
                 bloom_filter_manager: self.bloom_filter_manager.clone(),
+                shard_index: self.shard_index,
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -174,7 +180,10 @@ impl Orchestrator for SpannKnnOrchestrator {
         tasks.push((knn_log_task, Some(Span::current())));
         let vector_segment_shard = match self
             .ok_or_terminate(
-                SegmentShard::try_from((&self.collection_and_segments.vector_segment, 0)),
+                SegmentShard::try_from((
+                    &self.collection_and_segments.vector_segment,
+                    self.shard_index,
+                )),
                 ctx,
             )
             .await

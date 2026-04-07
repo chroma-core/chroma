@@ -28,6 +28,7 @@ pub struct KnnLogInput {
     pub log_offset_ids: SignedRoaringBitmap,
     pub distance_function: DistanceFunction,
     pub bloom_filter_manager: Option<BloomFilterManager>,
+    pub shard_index: u32,
 }
 
 #[derive(Error, Debug)]
@@ -58,7 +59,8 @@ impl Operator<KnnLogInput, KnnOutput> for Knn {
     type Error = KnnLogError;
 
     async fn run(&self, input: &KnnLogInput) -> Result<KnnOutput, KnnLogError> {
-        let record_segment_shard = SegmentShard::try_from((&input.record_segment, 0))?;
+        let record_segment_shard =
+            SegmentShard::try_from((&input.record_segment, input.shard_index))?;
         let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment_shard,
             &input.blockfile_provider,
@@ -166,6 +168,7 @@ mod tests {
             distance_function: metric,
             log_offset_ids,
             bloom_filter_manager: None,
+            shard_index: 0,
         }
     }
 

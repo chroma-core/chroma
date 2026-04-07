@@ -28,6 +28,7 @@ pub struct SelectInput {
     pub blockfile_provider: BlockfileProvider,
     pub record_segment: Segment,
     pub bloom_filter_manager: Option<BloomFilterManager>,
+    pub shard_index: u32,
 }
 
 /// Output from the Select operator - returns SearchPayloadResult
@@ -76,7 +77,8 @@ impl Operator<SelectInput, SelectOutput> for Select {
             });
         }
 
-        let record_segment_shard = SegmentShard::try_from((&input.record_segment, 0))?;
+        let record_segment_shard =
+            SegmentShard::try_from((&input.record_segment, input.shard_index))?;
         let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment_shard,
             &input.blockfile_provider,
@@ -298,6 +300,7 @@ mod tests {
             blockfile_provider: test_segment.blockfile_provider.clone(),
             record_segment: test_segment.record_segment.clone(),
             bloom_filter_manager: None,
+            shard_index: 0,
         };
 
         (test_segment, input)
@@ -396,6 +399,7 @@ mod tests {
             blockfile_provider: test_segment.blockfile_provider.clone(),
             record_segment: test_segment.record_segment.clone(),
             bloom_filter_manager: None,
+            shard_index: 0,
         };
 
         let mut keys = HashSet::new();
@@ -461,6 +465,7 @@ mod tests {
             blockfile_provider: test_segment.blockfile_provider.clone(),
             record_segment: test_segment.record_segment.clone(),
             bloom_filter_manager: None,
+            shard_index: 0,
         };
 
         let mut keys = HashSet::new();
@@ -499,6 +504,7 @@ mod tests {
             blockfile_provider: test_segment.blockfile_provider,
             record_segment: test_segment.record_segment,
             bloom_filter_manager: None,
+            shard_index: 0,
         };
 
         let mut keys = HashSet::new();

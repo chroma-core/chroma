@@ -42,6 +42,7 @@ pub struct IdfInput {
     pub metadata_segment: Segment,
     pub record_segment: Segment,
     pub bloom_filter_manager: Option<BloomFilterManager>,
+    pub shard_index: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -91,7 +92,8 @@ impl Operator<IdfInput, IdfOutput> for Idf {
 
         // Create both segment readers in parallel since they are independent
         let record_segment_reader_fut = async {
-            let record_segment_shard = SegmentShard::try_from((&input.record_segment, 0))?;
+            let record_segment_shard =
+                SegmentShard::try_from((&input.record_segment, input.shard_index))?;
             match Box::pin(RecordSegmentReaderShard::from_segment(
                 &record_segment_shard,
                 &input.blockfile_provider,
@@ -115,7 +117,8 @@ impl Operator<IdfInput, IdfOutput> for Idf {
             }
         };
 
-        let metadata_segment_shard = SegmentShard::try_from((&input.metadata_segment, 0))?;
+        let metadata_segment_shard =
+            SegmentShard::try_from((&input.metadata_segment, input.shard_index))?;
         let metadata_segment_reader_fut = async {
             Box::pin(MetadataSegmentReaderShard::from_segment(
                 &metadata_segment_shard,
@@ -322,6 +325,7 @@ mod tests {
             metadata_segment: test_segment.metadata_segment.clone(),
             record_segment: test_segment.record_segment.clone(),
             bloom_filter_manager: None,
+            shard_index: 0,
         };
 
         (test_segment, input)

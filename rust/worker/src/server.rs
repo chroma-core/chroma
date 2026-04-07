@@ -504,6 +504,7 @@ impl WorkerServer {
                     let knn_projection = knn_projection.clone();
                     let segment_type = vector_segment_type;
                     let bloom_filter_manager = bloom_filter_manager.clone();
+                    let shard_index = scan.shard_index;
 
                     async move {
                         // Run KNN orchestrator — dispatch based on segment type.
@@ -516,6 +517,7 @@ impl WorkerServer {
                                 matching_records.clone(),
                                 knn,
                                 bloom_filter_manager.clone(),
+                                shard_index,
                             )
                             .run(system.clone())
                             .await
@@ -529,6 +531,7 @@ impl WorkerServer {
                                 knn.fetch as usize,
                                 knn.embedding,
                                 bloom_filter_manager.clone(),
+                                shard_index,
                             )
                             .run(system.clone())
                             .await
@@ -545,6 +548,7 @@ impl WorkerServer {
                             record_distances,
                             knn_projection,
                             bloom_filter_manager,
+                            shard_index,
                         );
                         projection_orchestrator
                             .run(system)
@@ -569,6 +573,7 @@ impl WorkerServer {
             }
         } else {
             // Create unified futures that run KNN then projection
+            let shard_index = scan.shard_index;
             let knn_with_projection_futures =
                 Vec::from(KnnBatch::try_from(knn)?).into_iter().map(|knn| {
                     let blockfile_provider = self.blockfile_provider.clone();
@@ -590,6 +595,7 @@ impl WorkerServer {
                             matching_records.clone(),
                             knn,
                             bloom_filter_manager.clone(),
+                            shard_index,
                         );
                         let record_distances = knn_orchestrator
                             .run(system.clone())
@@ -606,6 +612,7 @@ impl WorkerServer {
                             record_distances,
                             knn_projection,
                             bloom_filter_manager,
+                            shard_index,
                         );
                         projection_orchestrator
                             .run(system)
@@ -686,6 +693,7 @@ impl WorkerServer {
             let blockfile_provider = self.blockfile_provider.clone();
             let spann_provider = self.spann_provider.clone();
             let bloom_filter_manager = bloom_filter_manager.clone();
+            let shard_index = scan.shard_index;
 
             knn_futures.push(async move {
                 let result = match knn_query.query {
@@ -706,6 +714,7 @@ impl WorkerServer {
                                     fetch: knn_query.limit,
                                 },
                                 bloom_filter_manager,
+                                shard_index,
                             )
                             .run(system_clone)
                             .await
@@ -719,6 +728,7 @@ impl WorkerServer {
                                 knn_query.limit as usize,
                                 query,
                                 bloom_filter_manager,
+                                shard_index,
                             )
                             .run(system_clone)
                             .await
@@ -737,6 +747,7 @@ impl WorkerServer {
                                     knn_filter_output_clone,
                                     knn,
                                     bloom_filter_manager,
+                                    shard_index,
                                 )
                                 .run(system_clone)
                                 .await
@@ -756,6 +767,7 @@ impl WorkerServer {
                             knn_query.key.to_string(),
                             knn_query.limit,
                             bloom_filter_manager,
+                            shard_index,
                         );
 
                         sparse_orchestrator
@@ -787,6 +799,7 @@ impl WorkerServer {
             search_payload.select,
             collection_and_segments,
             bloom_filter_manager,
+            scan.shard_index,
         );
 
         rank_orchestrator

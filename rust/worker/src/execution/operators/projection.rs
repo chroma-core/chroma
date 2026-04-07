@@ -40,6 +40,7 @@ pub struct ProjectionInput {
     pub record_segment: Segment,
     pub offset_ids: Vec<u32>,
     pub bloom_filter_manager: Option<BloomFilterManager>,
+    pub shard_index: u32,
 }
 
 #[derive(Error, Debug)]
@@ -87,7 +88,8 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
             input.offset_ids.len(),
             needs_data,
         );
-        let record_segment_shard = SegmentShard::try_from((&input.record_segment, 0))?;
+        let record_segment_shard =
+            SegmentShard::try_from((&input.record_segment, input.shard_index))?;
         let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment_shard,
             &input.blockfile_provider,
@@ -272,6 +274,7 @@ mod tests {
                 record_segment,
                 offset_ids,
                 bloom_filter_manager: None,
+                shard_index: 0,
             },
         )
     }

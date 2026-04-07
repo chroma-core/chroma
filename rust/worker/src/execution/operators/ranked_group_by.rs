@@ -40,6 +40,7 @@ pub struct RankedGroupByInput {
     /// Record segment for metadata lookup
     pub record_segment: Segment,
     pub bloom_filter_manager: Option<BloomFilterManager>,
+    pub shard_index: u32,
 }
 
 /// Output from the RankedGroupBy operator
@@ -121,7 +122,8 @@ impl Operator<RankedGroupByInput, RankedGroupByOutput> for GroupBy {
 
         // --- Metadata hydration ---
 
-        let record_segment_shard = SegmentShard::try_from((&input.record_segment, 0))?;
+        let record_segment_shard =
+            SegmentShard::try_from((&input.record_segment, input.shard_index))?;
         let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
             &record_segment_shard,
             &input.blockfile_provider,
@@ -365,6 +367,7 @@ mod tests {
                 blockfile_provider,
                 record_segment,
                 bloom_filter_manager: None,
+                shard_index: 0,
             },
         )
     }

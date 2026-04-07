@@ -15,6 +15,7 @@ pub struct SparseIndexKnnInput {
     pub blockfile_provider: BlockfileProvider,
     pub mask: SignedRoaringBitmap,
     pub metadata_segment: Segment,
+    pub shard_index: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -57,7 +58,8 @@ impl Operator<SparseIndexKnnInput, SparseIndexKnnOutput> for SparseIndexKnn {
         &self,
         input: &SparseIndexKnnInput,
     ) -> Result<SparseIndexKnnOutput, SparseIndexKnnError> {
-        let metadata_segment_shard = SegmentShard::try_from((&input.metadata_segment, 0))?;
+        let metadata_segment_shard =
+            SegmentShard::try_from((&input.metadata_segment, input.shard_index))?;
         let metadata_segement_reader = Box::pin(MetadataSegmentReaderShard::from_segment(
             &metadata_segment_shard,
             &input.blockfile_provider,

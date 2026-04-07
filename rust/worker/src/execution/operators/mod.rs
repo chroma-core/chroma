@@ -15,6 +15,7 @@ pub(super) mod spann_centers_search;
 pub(super) mod spann_fetch_pl;
 
 pub mod filter;
+pub mod filter_logs_for_shard;
 pub mod idf;
 pub mod knn_hnsw;
 pub mod knn_log;
