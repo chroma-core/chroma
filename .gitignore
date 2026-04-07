@@ -45,3 +45,6 @@ target/
 
 # Rapid test data
 testdata
+
+notes
+rustfmt.toml
