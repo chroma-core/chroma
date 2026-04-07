@@ -3,8 +3,10 @@ use std::{any::Any, future::Future, sync::Arc};
 use self::config::StorageConfig;
 use admissioncontrolleds3::StorageRequestPriority;
 use async_trait::async_trait;
+use bytes::Bytes;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
+use futures::Stream;
 
 pub mod admissioncontrolleds3;
 pub mod config;
@@ -403,6 +405,30 @@ impl Storage {
             Storage::Object(obj) => obj.put(key, bytes.into(), options).await.map(Some),
             Storage::Local(local) => local.put_bytes(key, &bytes, options).await,
             Storage::AdmissionControlledS3(as3) => as3.put_bytes(key, bytes.into(), options).await,
+        }
+    }
+
+    pub async fn put_stream<S>(
+        &self,
+        key: &str,
+        total_size_bytes: usize,
+        stream: S,
+        options: PutOptions,
+    ) -> Result<Option<ETag>, StorageError>
+    where
+        S: Stream<Item = Result<Bytes, StorageError>> + Send + Unpin,
+    {
+        match self {
+            Storage::S3(s3) => s3.put_stream(key, total_size_bytes, stream, options).await,
+            Storage::Local(local) => {
+                local
+                    .put_stream(key, total_size_bytes, stream, options)
+                    .await
+            }
+            Storage::AdmissionControlledS3(as3) => {
+                as3.put_stream(key, total_size_bytes, stream, options).await
+            }
+            Storage::Object(_) => Err(StorageError::NotImplemented),
         }
     }
 

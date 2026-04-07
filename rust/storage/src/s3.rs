@@ -33,6 +33,7 @@ use chroma_tracing::util::Stopwatch;
 use futures::future::BoxFuture;
 use futures::stream;
 use futures::FutureExt;
+use futures::Stream;
 use futures::StreamExt;
 use rand::Rng;
 use std::clone::Clone;
@@ -474,6 +475,245 @@ impl S3Storage {
             options,
         )
         .await
+    }
+
+    /// Upload data from an async stream of `Bytes` chunks directly to S3,
+    /// without buffering the entire payload to disk or memory first.
+    ///
+    /// `total_size_bytes` must equal the sum of all chunk sizes yielded by
+    /// the stream.  The method buffers up to one upload-part worth of data
+    /// (configured via `upload_part_size_bytes`) before flushing each part to S3 via the
+    /// standard multipart upload path.  For payloads smaller than the
+    /// part size the upload is performed as a single PutObject request.
+    pub async fn put_stream<S>(
+        &self,
+        key: &str,
+        total_size_bytes: usize,
+        stream: S,
+        options: PutOptions,
+    ) -> Result<Option<ETag>, StorageError>
+    where
+        S: Stream<Item = Result<Bytes, StorageError>> + Send + Unpin,
+    {
+        if self.is_oneshot_upload(total_size_bytes) {
+            // Small upload: collect the whole stream into a single
+            // ByteStream and do a one-shot PutObject.
+            let buf = collect_stream(stream, total_size_bytes).await?;
+            if buf.len() != total_size_bytes {
+                self.metrics.s3_put_error_count.add(1, &[]);
+                return Err(StorageError::Message {
+                    message: format!(
+                        "Stream yielded {} bytes, expected {}",
+                        buf.len(),
+                        total_size_bytes
+                    ),
+                });
+            }
+            let buf = Arc::new(buf);
+            self.put_object(
+                key,
+                total_size_bytes,
+                move |range| {
+                    let buf = buf.clone();
+                    async move { Ok(ByteStream::from(buf.slice(range))) }.boxed()
+                },
+                options,
+            )
+            .await
+        } else {
+            self.multipart_upload_stream(key, total_size_bytes, stream, options)
+                .await
+        }
+    }
+
+    /// Perform a multipart upload by reading from a forward-only
+    /// stream, buffering one part at a time.
+    async fn multipart_upload_stream<S>(
+        &self,
+        key: &str,
+        total_size_bytes: usize,
+        stream: S,
+        options: PutOptions,
+    ) -> Result<Option<ETag>, StorageError>
+    where
+        S: Stream<Item = Result<Bytes, StorageError>> + Send + Unpin,
+    {
+        self.metrics.s3_put_count.add(1, &[]);
+        self.metrics
+            .s3_put_bytes
+            .record(total_size_bytes as u64, &[]);
+        let stopwatch = Stopwatch::new(
+            &self.metrics.s3_put_latency_ms,
+            &[],
+            chroma_tracing::util::StopWatchUnit::Millis,
+        );
+
+        let (part_count, size_of_last_part, upload_id) =
+            match self.prepare_multipart_upload(key, total_size_bytes).await {
+                Ok(v) => v,
+                Err(e) => {
+                    self.metrics.s3_put_error_count.add(1, &[]);
+                    return Err(e);
+                }
+            };
+
+        self.metrics
+            .s3_multipart_upload_parts
+            .record(part_count as u64, &[]);
+
+        let result = self
+            .multipart_upload_stream_inner(
+                key,
+                total_size_bytes,
+                stream,
+                &upload_id,
+                part_count,
+                size_of_last_part,
+                options,
+            )
+            .await;
+
+        if let Err(ref _e) = result {
+            let _ = self
+                .client
+                .abort_multipart_upload()
+                .bucket(&self.bucket)
+                .key(key)
+                .upload_id(&upload_id)
+                .send()
+                .await;
+            self.metrics.s3_put_error_count.add(1, &[]);
+        }
+
+        let duration = stopwatch.finish();
+        if result.is_ok() && duration > Duration::from_secs(1) {
+            self.metrics
+                .s3_put_bytes_slow
+                .record(total_size_bytes as u64, &[]);
+        }
+
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn multipart_upload_stream_inner<S>(
+        &self,
+        key: &str,
+        total_size_bytes: usize,
+        mut stream: S,
+        upload_id: &str,
+        part_count: usize,
+        size_of_last_part: usize,
+        options: PutOptions,
+    ) -> Result<Option<ETag>, StorageError>
+    where
+        S: Stream<Item = Result<Bytes, StorageError>> + Send + Unpin,
+    {
+        let mut upload_parts = Vec::with_capacity(part_count);
+        // Leftover bytes from the previous iteration that didn't fill
+        // a complete part.
+        let mut leftover = Bytes::new();
+
+        for part_index in 0..part_count {
+            let expected_part_size = if part_index == part_count - 1 {
+                size_of_last_part
+            } else {
+                self.upload_part_size_bytes
+            };
+
+            // Fill the part buffer from the stream.
+            let mut part_buf = Vec::with_capacity(expected_part_size);
+            if !leftover.is_empty() {
+                let take = leftover.len().min(expected_part_size);
+                part_buf.extend_from_slice(&leftover[..take]);
+                leftover = leftover.slice(take..);
+            }
+            while part_buf.len() < expected_part_size {
+                match stream.next().await {
+                    Some(Ok(chunk)) => {
+                        let need = expected_part_size - part_buf.len();
+                        if chunk.len() <= need {
+                            part_buf.extend_from_slice(&chunk);
+                        } else {
+                            part_buf.extend_from_slice(&chunk[..need]);
+                            leftover = chunk.slice(need..);
+                        }
+                    }
+                    Some(Err(e)) => return Err(e),
+                    None => {
+                        // The while-loop condition guarantees
+                        // part_buf.len() < expected_part_size here.
+                        return Err(StorageError::Message {
+                            message: format!(
+                                "Stream ended early at part {}/{}, expected {} bytes total",
+                                part_index + 1,
+                                part_count,
+                                total_size_bytes
+                            ),
+                        });
+                    }
+                }
+            }
+
+            self.metrics
+                .s3_upload_part_bytes
+                .record(part_buf.len() as u64, &[]);
+
+            let part_number = part_index as i32 + 1;
+            let byte_stream = ByteStream::from(Bytes::from(part_buf));
+
+            let res = self
+                .client
+                .upload_part()
+                .key(key)
+                .bucket(&self.bucket)
+                .upload_id(upload_id)
+                .body(byte_stream)
+                .part_number(part_number)
+                .send()
+                .await
+                .map_err(|err| StorageError::Generic {
+                    source: Arc::new(err.into_service_error()),
+                })?;
+
+            upload_parts.push(
+                CompletedPart::builder()
+                    .e_tag(res.e_tag.unwrap_or_default())
+                    .part_number(part_number)
+                    .build(),
+            );
+        }
+
+        if !leftover.is_empty() {
+            return Err(StorageError::Message {
+                message: format!(
+                    "Stream yielded more bytes than declared total_size_bytes={}",
+                    total_size_bytes
+                ),
+            });
+        }
+
+        // Verify the stream is fully exhausted.
+        // - Propagate real stream errors instead of masking them.
+        // - Skip empty trailing chunks (0 bytes is not overflow).
+        loop {
+            match stream.next().await {
+                None => break,
+                Some(Err(e)) => return Err(e),
+                Some(Ok(chunk)) if chunk.is_empty() => continue,
+                Some(Ok(_)) => {
+                    return Err(StorageError::Message {
+                        message: format!(
+                            "Stream yielded more bytes than declared total_size_bytes={}",
+                            total_size_bytes
+                        ),
+                    });
+                }
+            }
+        }
+
+        self.finish_multipart_upload(key, upload_id, upload_parts, options)
+            .await
     }
 
     #[tracing::instrument(skip(self, create_bytestream_fn), level = "trace")]
@@ -1051,6 +1291,18 @@ impl Configurable<StorageConfig> for S3Storage {
     }
 }
 
+/// Collect every chunk from a stream into a single contiguous `Bytes`.
+async fn collect_stream<S>(mut stream: S, size_hint: usize) -> Result<Bytes, StorageError>
+where
+    S: Stream<Item = Result<Bytes, StorageError>> + Send + Unpin,
+{
+    let mut buf = Vec::with_capacity(size_hint);
+    while let Some(chunk) = stream.next().await {
+        buf.extend_from_slice(&chunk?);
+    }
+    Ok(Bytes::from(buf))
+}
+
 pub async fn s3_config_for_localhost_with_bucket_name(
     name: impl Into<String>,
 ) -> crate::StorageConfig {
@@ -1270,6 +1522,98 @@ mod tests {
             test_download_part_size_bytes,
         )
         .await;
+    }
+
+    async fn test_put_stream(
+        total_size: usize,
+        chunk_size: usize,
+        upload_part_size_bytes: usize,
+        download_part_size_bytes: usize,
+    ) {
+        let storage = setup_with_bucket(upload_part_size_bytes, download_part_size_bytes).await;
+
+        let mut rng = rand_xorshift::XorShiftRng::seed_from_u64(42);
+        let mut data = vec![0u8; total_size];
+        rng.try_fill(&mut data[..]).unwrap();
+
+        // Build a stream that yields `chunk_size`-byte Bytes chunks.
+        let chunks: Vec<Result<Bytes, StorageError>> = data
+            .chunks(chunk_size)
+            .map(|c| Ok(Bytes::copy_from_slice(c)))
+            .collect();
+        let stream = futures::stream::iter(chunks);
+
+        storage
+            .put_stream("test-stream", total_size, stream, PutOptions::default())
+            .await
+            .unwrap();
+
+        let buf = storage
+            .get("test-stream", GetOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(&*buf, &data);
+    }
+
+    const PUT_STREAM_PART: usize = 1024 * 1024 * 8; // 8 MB
+
+    #[tokio::test]
+    async fn test_k8s_integration_put_stream_oneshot_small_chunks() {
+        test_put_stream(1024, 256, PUT_STREAM_PART, PUT_STREAM_PART).await;
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_put_stream_at_part_boundary() {
+        test_put_stream(PUT_STREAM_PART, 4096, PUT_STREAM_PART, PUT_STREAM_PART).await;
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_put_stream_multipart_multiple_parts() {
+        test_put_stream(
+            (PUT_STREAM_PART as f64 * 2.5) as usize,
+            4096,
+            PUT_STREAM_PART,
+            PUT_STREAM_PART,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_put_stream_chunks_larger_than_part() {
+        test_put_stream(
+            PUT_STREAM_PART * 3,
+            PUT_STREAM_PART * 2,
+            PUT_STREAM_PART,
+            PUT_STREAM_PART,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_put_stream_admission_controlled() {
+        use crate::admissioncontrolleds3::AdmissionControlledS3Storage;
+
+        let storage = setup_with_bucket(PUT_STREAM_PART, PUT_STREAM_PART).await;
+        let ac_storage = AdmissionControlledS3Storage::new_s3_with_default_policy(storage);
+
+        let data = vec![42u8; 1024];
+        let total_size = data.len();
+        let chunks: Vec<Result<Bytes, StorageError>> = data
+            .chunks(256)
+            .map(|c| Ok(Bytes::copy_from_slice(c)))
+            .collect();
+        let stream = futures::stream::iter(chunks);
+
+        ac_storage
+            .put_stream("test-ac-stream", total_size, stream, PutOptions::default())
+            .await
+            .unwrap();
+
+        let buf = ac_storage
+            .get("test-ac-stream", GetOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(&*buf, &data);
     }
 
     #[tokio::test]
