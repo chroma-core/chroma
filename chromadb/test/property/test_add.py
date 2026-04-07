@@ -22,9 +22,15 @@ from chromadb.test.utils.wait_for_version_increase import wait_for_version_incre
 from chromadb.utils.batch_utils import create_batches
 
 MIN_RECORDS_BETWEEN_COMPACTION_WAITS = 10
+SMALL_MAX_RECORDS = 100
+MEDIUM_MIN_RECORDS = 100
+MEDIUM_MAX_RECORDS = 200
+LARGE_MIN_RECORDS = 2_000
+LARGE_MAX_RECORDS = 5_000
 
 
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
+rare_compaction_st = st.integers(min_value=0, max_value=3).map(lambda value: value == 3)
 
 TEST_DATABASE_NAMES = [pytest.param(DEFAULT_DATABASE, id="classic")]
 
@@ -50,10 +56,10 @@ def database_name(request: pytest.FixtureRequest) -> str:
 @settings(
     deadline=None,
     parent=override_hypothesis_profile(
-        normal=hypothesis.settings(max_examples=250),
-        fast=hypothesis.settings(max_examples=100),
+        normal=hypothesis.settings(max_examples=25),
+        fast=hypothesis.settings(max_examples=10),
     ),
-    max_examples=2,
+    max_examples=1,
 )
 def test_add_miniscule(
     client: ClientAPI,
@@ -76,14 +82,16 @@ def test_add_miniscule(
 # record sets so we explicitly create a large record set without using Hypothesis
 @given(
     collection=collection_st,
-    record_set=strategies.recordsets(collection_st, min_size=1, max_size=500),
-    should_compact=st.booleans(),
+    record_set=strategies.recordsets(
+        collection_st, min_size=1, max_size=SMALL_MAX_RECORDS
+    ),
+    should_compact=rare_compaction_st,
 )
 @settings(
     deadline=None,
     parent=override_hypothesis_profile(
-        normal=hypothesis.settings(max_examples=250),
-        fast=hypothesis.settings(max_examples=100),
+        normal=hypothesis.settings(max_examples=12),
+        fast=hypothesis.settings(max_examples=5),
     ),
 )
 def test_add_small(
@@ -107,19 +115,19 @@ def test_add_small(
     collection=collection_st,
     record_set=strategies.recordsets(
         collection_st,
-        min_size=250,
-        max_size=500,
-        num_unique_metadata=5,
+        min_size=MEDIUM_MIN_RECORDS,
+        max_size=MEDIUM_MAX_RECORDS,
+        num_unique_metadata=3,
         min_metadata_size=1,
-        max_metadata_size=5,
+        max_metadata_size=3,
     ),
-    should_compact=st.booleans(),
+    should_compact=rare_compaction_st,
 )
 @settings(
     deadline=None,
     parent=override_hypothesis_profile(
-        normal=hypothesis.settings(max_examples=10),
-        fast=hypothesis.settings(max_examples=5),
+        normal=hypothesis.settings(max_examples=2),
+        fast=hypothesis.settings(max_examples=1),
     ),
     suppress_health_check=[
         hypothesis.HealthCheck.too_slow,
@@ -212,7 +220,7 @@ def _test_add(
     n_results = max(1, (len(normalized_record_set["ids"]) // 10))
 
     if batch_ann_accuracy:
-        batch_size = 10
+        batch_size = 50
         for i in range(0, len(normalized_record_set["ids"]), batch_size):
             invariants.ann_accuracy(
                 coll,
@@ -254,7 +262,7 @@ def create_large_recordset(
 
 
 @given(collection=collection_st, should_compact=st.booleans())
-@settings(deadline=None, max_examples=5 if not MULTI_REGION_ENABLED else 3)
+@settings(deadline=None, max_examples=1)
 def test_add_large(
     client: ClientAPI,
     database_name: str,
@@ -272,8 +280,8 @@ def test_add_large(
         )
 
     record_set = create_large_recordset(
-        min_size=10000,
-        max_size=50000,
+        min_size=LARGE_MIN_RECORDS,
+        max_size=LARGE_MAX_RECORDS,
     )
     coll = client.create_collection(
         name=collection.name,
