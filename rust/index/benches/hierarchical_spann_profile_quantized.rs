@@ -22,6 +22,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use datasets::{format_count, recall_at_k, Dataset, DatasetType, MetricType, Query};
 use hierarchical_index::writer_quantized::{
     format_task_tables, HierarchicalSpannConfig, HierarchicalSpannWriter, NavigationMode,
+    ReadBeamPolicy,
     SearchTimings, WriterStatsSnapshot,
 };
 
@@ -48,13 +49,13 @@ struct Args {
     #[arg(long, default_value = "1000000")]
     checkpoint_size: usize,
 
-    /// Min beam width for dynamic beam
-    #[arg(long, default_value = "10")]
-    beam_min: usize,
+    /// Min beam width for read/search dynamic beam
+    #[arg(long = "read-beam-min", default_value = "10")]
+    read_beam_min: usize,
 
-    /// Max beam width for dynamic beam
-    #[arg(long, default_value = "50000")]
-    beam_max: usize,
+    /// Max beam width for read/search dynamic beam
+    #[arg(long = "read-beam-max", default_value = "128")]
+    read_beam_max: usize,
 
     #[arg(long, default_value = "100")]
     branching_factor: usize,
@@ -69,12 +70,21 @@ struct Args {
     #[arg(long, default_value = "1.0")]
     write_beam_tau: f64,
 
+    /// Per-level write taus overriding the global write tau, comma-separated.
+    /// Use `_` to fall back to the global write tau for a level.
+    #[arg(long)]
+    write_level_taus: Option<String>,
+
+    /// Per-level minimum write beam widths as percentages of the full level width, comma-separated
+    #[arg(long)]
+    write_level_min_pcts: Option<String>,
+
     /// Min beam width for write path
     #[arg(long, default_value = "10")]
     write_beam_min: usize,
 
     /// Max beam width for write path
-    #[arg(long, default_value = "50000")]
+    #[arg(long, default_value = "512")]
     write_beam_max: usize,
 
     /// Max replicas per vector (RNG select)
@@ -90,7 +100,13 @@ struct Args {
     write_rng_factor: f32,
 
     /// Force brute-force ground truth computation (slow at scale)
-    #[arg(long)]
+    #[arg(
+        long,
+        default_value = "true",
+        action = clap::ArgAction::Set,
+        num_args = 0..=1,
+        default_missing_value = "true"
+    )]
     brute_force_gt: bool,
 
     /// Compute a flat k-means GT baseline using the same number of clusters as leaf nodes
@@ -113,6 +129,15 @@ struct Args {
     #[arg(long, default_value = "1.0")]
     beam_tau: f64,
 
+    /// Per-level read taus overriding the global recall tau, comma-separated.
+    /// Use `_` to fall back to the per-row tau for a level.
+    #[arg(long)]
+    read_level_taus: Option<String>,
+
+    /// Per-level minimum beam widths as percentages of the full level width, comma-separated
+    #[arg(long)]
+    read_level_min_pcts: Option<String>,
+
     /// Number of threads for parallel add
     #[arg(long, default_value = "1")]
     threads: usize,
@@ -122,7 +147,7 @@ struct Args {
     write_navigation: String,
 
     /// Read-path navigation modes to sweep during recall: fp, 1bit, 4bit
-    #[arg(long, default_value = "1bit", value_delimiter = ',')]
+    #[arg(long, default_value = "4bit", value_delimiter = ',')]
     read_navigation: Vec<String>,
 
     /// Use full precision f32 distances for NPA instead of quantized
@@ -142,11 +167,11 @@ struct Args {
     recall_rerank_vectors: Vec<usize>,
 
     /// Defer splits/merges until an explicit balance_index() call after each checkpoint
-    #[arg(long)]
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
     deferred_balance: bool,
 
     /// Run deferred balancing in parallel across subtrees
-    #[arg(long)]
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
     parallel_balancing: bool,
 
     /// Print legend explaining all table columns
@@ -191,6 +216,42 @@ fn format_mb(mb: f64) -> String {
     } else {
         format!("{:.2}GB", mb / 1024.0)
     }
+}
+
+fn parse_level_taus(input: Option<&str>) -> Result<Vec<Option<f64>>, Box<dyn std::error::Error + Send + Sync>> {
+    let Some(input) = input else {
+        return Ok(Vec::new());
+    };
+    input
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            let token = s.trim();
+            if token == "_" || token.eq_ignore_ascii_case("default") {
+                Ok(None)
+            } else {
+                Ok(Some(token.parse::<f64>()?))
+            }
+        })
+        .collect()
+}
+
+fn parse_level_f64s(input: Option<&str>) -> Result<Vec<f64>, Box<dyn std::error::Error + Send + Sync>> {
+    let Some(input) = input else {
+        return Ok(Vec::new());
+    };
+    input
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(|s| Ok(s.trim().parse::<f64>()?))
+        .collect()
+}
+
+fn format_level_taus(taus: &[Option<f64>]) -> String {
+    taus.iter()
+        .map(|tau| tau.map(|t| format!("{:.2}", t)).unwrap_or_else(|| "_".to_string()))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn compute_ground_truth(
@@ -334,6 +395,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         std::env::args().filter(|a| a != "--bench"),
     );
 
+    let write_level_taus = parse_level_taus(args.write_level_taus.as_deref())?;
+    let write_level_min_pcts = parse_level_f64s(args.write_level_min_pcts.as_deref())?;
+    let read_level_taus = parse_level_taus(args.read_level_taus.as_deref())?;
+    let read_level_min_pcts = parse_level_f64s(args.read_level_min_pcts.as_deref())?;
+
     let distance_fn = args.metric.to_distance_function();
 
     let dataset: Box<dyn Dataset> = match args.dataset {
@@ -387,9 +453,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         write_beam_tau: args.write_beam_tau,
         write_beam_min: args.write_beam_min,
         write_beam_max: args.write_beam_max,
+        write_level_taus: write_level_taus.clone(),
+        write_level_min_pcts: write_level_min_pcts.clone(),
         beam_tau: args.beam_tau,
-        beam_min: args.beam_min,
-        beam_max: args.beam_max,
+        beam_min: args.read_beam_min,
+        beam_max: args.read_beam_max,
         max_replicas: args.max_replicas,
         write_rng_epsilon: args.write_rng_epsilon,
         write_rng_factor: args.write_rng_factor,
@@ -430,11 +498,24 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "  Write beam: tau={} min={} max={}",
         config.write_beam_tau, config.write_beam_min, config.write_beam_max,
     );
+    if !write_level_taus.is_empty() || !write_level_min_pcts.is_empty() {
+        println!(
+            "  Write beam schedule: taus=[{}] min_pcts=[{}] leaf_min={} leaf_max={}",
+            format_level_taus(&write_level_taus),
+            write_level_min_pcts
+                .iter()
+                .map(|v| format!("{:.1}", v))
+                .collect::<Vec<_>>()
+                .join(","),
+            config.write_beam_min,
+            config.write_beam_max,
+        );
+    }
     println!(
         "  Quantization: 1-bit | Write nav: {:?} | Read nav: {} | NPA: {}",
         write_nav,
         args.read_navigation.join(","),
-        if args.fp_npa { "f32" } else { "1-bit" },
+        if args.fp_npa { "f32" } else { "1x4" },
     );
     println!("  Threads: {}", args.threads);
     println!();
@@ -588,8 +669,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     println!("\n=== Build Summary ===");
     writer.print_tree_stats(format_count);
-    println!("\n{}", format_task_tables(&all_snapshots));
-
     let total_time = total_start.elapsed();
     let overall_throughput = total_vectors as f64 / total_time.as_secs_f64();
 
@@ -600,21 +679,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         format_duration(total_time),
         overall_throughput,
     );
-
-    println!("=== Recall ===");
-    println!(
-        "  Search beam: tau={} min={} max={} | Tau sweep: {:?}",
-        args.beam_tau, args.beam_min, args.beam_max, tau_values,
-    );
-    println!(
-        "  Rerank centroids: {:?} | Rerank vectors: {:?}",
-        args.recall_rerank_centroids, args.recall_rerank_vectors,
-    );
-    println!(
-        "  Read nav: {} | Brute-force GT: {}",
-        args.read_navigation.join(","),
-        args.brute_force_gt,
-    );
+    println!("{}", format_task_tables(&all_snapshots));
 
     let precomputed: Vec<&Query> = queries_by_checkpoint
         .get(&(total_vectors as u64))
@@ -685,6 +750,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let num_queries = checkpoint_queries.len();
 
         let level_counts = writer.level_node_counts();
+        let level_widths: Vec<usize> = level_counts.iter().skip(1).take(num_levels).copied().collect();
 
         let mut beam_col_headers: Vec<String> = Vec::new();
         for lvl in 1..=num_levels {
@@ -694,8 +760,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let beam_col_width = beam_col_headers.iter().map(|h| h.len()).max().unwrap_or(12).max(12);
 
         let mut header = format!(
-            "  | {:>6} | {:>6} | {:>6} | {:>4} |",
-            "tau", "rr_c", "rr_v", "nav",
+            "  | {:>4} | {:>6} | {:>6} | {:>6} |",
+            "nav", "tau", "rr_c", "rr_v",
         );
         for lvl in 0..num_levels {
             header.push_str(&format!(
@@ -713,7 +779,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         ));
 
         let mut separator = format!(
-            "  |{:-^8}|{:-^8}|{:-^8}|{:-^6}|",
+            "  |{:-^6}|{:-^8}|{:-^8}|{:-^8}|",
             "", "", "", "",
         );
         for _ in 1..=num_levels {
@@ -737,6 +803,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         all_p100.sort_unstable();
         all_p95.sort_unstable();
         all_p90.sort_unstable();
+        println!("\n=== Index Quality ===");
         println!("  Index: {} vectors", format_count(writer.total_vectors()));
         print_cluster_stats("GT clusters (p100)", &all_p100);
         print_cluster_stats("GT clusters (p95) ", &all_p95);
@@ -782,8 +849,38 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             print_cluster_stats("Optimal GT clusters (p90) ", &optimal_p90);
         }
 
-        let beam_min = args.beam_min;
-        let beam_max = args.beam_max;
+        println!("\n=== Recall ===");
+        println!(
+            "  Search beam: tau={} min={} max={} | Tau sweep: {:?}",
+            args.beam_tau, args.read_beam_min, args.read_beam_max, tau_values,
+        );
+        println!(
+            "  Rerank centroids: {:?} | Rerank vectors: {:?}",
+            args.recall_rerank_centroids, args.recall_rerank_vectors,
+        );
+        println!(
+            "  Read nav: {} | Brute-force GT: {}",
+            args.read_navigation.join(","),
+            args.brute_force_gt,
+        );
+        if !read_level_taus.is_empty()
+            || !read_level_min_pcts.is_empty()
+        {
+            println!(
+                "  Read beam schedule: taus=[{}] min_pcts=[{}] leaf_min={} leaf_max={}",
+                format_level_taus(&read_level_taus),
+                read_level_min_pcts
+                    .iter()
+                    .map(|v| format!("{:.1}", v))
+                    .collect::<Vec<_>>()
+                    .join(","),
+                format_count(args.read_beam_min),
+                format_count(args.read_beam_max),
+            );
+        }
+
+        let beam_min = args.read_beam_min;
+        let beam_max = args.read_beam_max;
 
         let recall_pool = rayon::ThreadPoolBuilder::new()
             .num_threads(32)
@@ -809,6 +906,15 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             for &tau in &tau_values {
                 for &rr_c in &args.recall_rerank_centroids {
                     for &rr_v in &args.recall_rerank_vectors {
+                        let read_policy = ReadBeamPolicy::with_level_overrides(
+                            Some(tau),
+                            beam_min,
+                            beam_max,
+                            read_level_taus.clone(),
+                            read_level_min_pcts.clone(),
+                            level_widths.clone(),
+                        );
+
                         struct QueryResult {
                             r100: f64,
                             nanos: u64,
@@ -823,8 +929,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         let results: Vec<QueryResult> = recall_pool.install(|| {
                             checkpoint_queries.par_iter().map(|gt| {
                                 let t0 = Instant::now();
-                                let (results, scanned, _leaves_scanned, timings) =
-                                    writer.search(&gt.vector, k, tau, beam_min, beam_max, rr_c, rr_v, recall_nav);
+                                let (results, scanned, _leaves_scanned, timings) = writer
+                                    .search_with_policy(&gt.vector, k, rr_c, rr_v, recall_nav, &read_policy);
                                 let nanos = t0.elapsed().as_nanos() as u64;
 
                                 let result_ids: Vec<u32> = results.iter().map(|(id, _)| *id).collect();
@@ -832,8 +938,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
                                 let gt_100: HashSet<u32> =
                                     gt.neighbors.iter().take(100).copied().collect();
-                                let level_recall =
-                                    writer.diagnose_level_recall(&gt.vector, &gt_100, tau, beam_min, beam_max, rr_c, recall_nav);
+                                let level_recall = writer.diagnose_level_recall_with_policy(
+                                    &gt.vector,
+                                    &gt_100,
+                                    rr_c,
+                                    recall_nav,
+                                    &read_policy,
+                                );
 
                                 let mut level_r100 = vec![0.0f64; num_levels];
                                 let mut level_beam = vec![0u64; num_levels];
@@ -888,11 +999,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         let avg_scanned = total_scanned / num_queries;
 
                         let mut row = format!(
-                            "  | {:>6.2} | {:>5}x | {:>5}x | {:>4} |",
+                            "  | {:>4} | {:>6.2} | {:>5}x | {:>5}x |",
+                            nav_label,
                             tau,
                             rr_c,
                             rr_v,
-                            nav_label,
                         );
                         let dim = dimension;
                         let mut total_mb = 0.0f64;

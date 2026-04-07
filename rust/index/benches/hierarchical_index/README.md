@@ -94,3 +94,36 @@ leaf, avoiding degenerate tiny clusters that immediately trigger merges.
 The `balancing` DashSet prevents two threads from concurrently splitting
 or merging the same leaf. If a thread attempts to balance a cluster that
 is already being balanced by another thread, it returns immediately.
+
+## Search performance notes
+
+### beam shape
+
+There is likely an optimal number of nodes to visit at each level that
+minimizes latency while preserving target recall. That optimum depends on
+dataset dimensionality, dataset structure, tree size / row width, and other
+factors. Today the benchmark approximates this with a mostly static per-level
+tau schedule. In the future this policy could be made more expressive, using
+some combination of per-level tau, row-width percentages, and static min/max
+beam limits, potentially learned for each dataset during ingestion or
+compaction.
+
+### code changes
+
+A likely future improvement is to replace the per-query dedup `HashMap<u32, f32>`
+with dense scratch arrays keyed by vector id, for example:
+
+- `seen_epoch: Vec<u32>`
+- `best_dist: Vec<f32>`
+- `touched_ids: Vec<u32>`
+
+That would avoid hashing and pointer chasing during dedup, which should be
+faster on benchmark datasets where ids are dense and bounded.
+
+Another likely improvement is in split-time NPA for quantized codes. The
+current path rebuilds a `HashMap<u32, Vec<u8>>` from vector id to old code,
+which adds hashing, per-entry allocation, and pointer chasing to a hot loop.
+A better layout would keep the old codes in one contiguous `Vec<u8>` buffer
+and carry either the original slot index or final split labels through the
+split pipeline, so NPA can recover code slices directly by position instead
+of by hash lookup.

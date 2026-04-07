@@ -19,6 +19,7 @@ import pyarrow.parquet as pq
 from tqdm.auto import tqdm
 
 from wikipedia_cohere_dataset import REPO_ID, ensure_shard_cached, list_dataset_shards
+
 DEFAULT_COLLECTION = "100m_quantized_spann"
 DEFAULT_TARGET_COUNT = 100_000_000
 DEFAULT_CHUNK_SIZE = 1_000_000
@@ -30,9 +31,23 @@ DEFAULT_CLOUD_HOST = "api.trychroma.com"
 DEFAULT_CLOUD_PORT = 443
 DEFAULT_HTTP_TIMEOUT_SECS = 30.0
 DEFAULT_PROGRESS_SAVE_INTERVAL_VECTORS = 10_000
+DEFAULT_MAX_WRITE_REQUESTS_PER_MINUTE = (
+    463.0  # 100M vectors in 12hours. I've seen it do 30k/hr, 500/min
+)
+DEFAULT_MIN_WRITE_REQUESTS_PER_MINUTE = 30.0
+DEFAULT_RATE_LIMIT_BACKOFF_FACTOR = 0.5
+DEFAULT_RATE_LIMIT_RECOVERY_FACTOR = 1.05
+DEFAULT_RATE_LIMIT_RECOVERY_SUCCESSES = 20
 
 # Progress file lives next to this script so cwd and repo layout do not matter.
 _SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+def default_progress_file_for_collection(collection_name: str) -> Path:
+    safe_name = "".join(
+        ch if ch.isalnum() or ch in ("-", "_", ".") else "_" for ch in collection_name
+    )
+    return _SCRIPT_DIR / f"{safe_name}.progress.json"
 
 
 @dataclass
@@ -84,9 +99,7 @@ def cursor_for_global_row(global_row: int, row_counts: Sequence[int]) -> Cursor:
         if global_row < cum + n:
             return Cursor(i, global_row - cum)
         cum += n
-    raise RuntimeError(
-        f"global_row {global_row} is past total dataset rows ({cum})"
-    )
+    raise RuntimeError(f"global_row {global_row} is past total dataset rows ({cum})")
 
 
 class ShardRowCounter:
@@ -227,9 +240,7 @@ class ProgressTracker:
         self.cursor = Cursor(**data.get("cursor", {}))
         self.current_chunk_index = self.committed_rows // self.chunk_size
         # Rows [0, committed_rows) are treated as already on the server.
-        self._intervals = (
-            [(0, self.committed_rows)] if self.committed_rows > 0 else []
-        )
+        self._intervals = [(0, self.committed_rows)] if self.committed_rows > 0 else []
         self._last_saved_watermark = self.committed_rows
         self._last_save_time = time.time()
 
@@ -344,6 +355,111 @@ class FailureState:
             return self.error
 
 
+class WriteRateLimiter:
+    """Shared adaptive limiter across upload threads.
+
+    Chroma Cloud documents concurrent write and batch-size quotas, but does not
+    publish a requests-per-minute limit. This limiter keeps the average request
+    start rate under a configurable ceiling and adapts downward when Chroma
+    responds with write backpressure.
+    """
+
+    def __init__(
+        self,
+        requests_per_minute: float,
+        min_requests_per_minute: float = DEFAULT_MIN_WRITE_REQUESTS_PER_MINUTE,
+        backoff_factor: float = DEFAULT_RATE_LIMIT_BACKOFF_FACTOR,
+        recovery_factor: float = DEFAULT_RATE_LIMIT_RECOVERY_FACTOR,
+        recovery_successes: int = DEFAULT_RATE_LIMIT_RECOVERY_SUCCESSES,
+    ) -> None:
+        self.requests_per_minute = requests_per_minute
+        self.current_requests_per_minute = requests_per_minute
+        self.min_requests_per_minute = min(min_requests_per_minute, requests_per_minute)
+        self.backoff_factor = backoff_factor
+        self.recovery_factor = recovery_factor
+        self.recovery_successes = recovery_successes
+        self._interval_secs = 60.0 / requests_per_minute
+        self._next_allowed_at = time.monotonic()
+        self._lock = threading.Lock()
+        self._success_streak = 0
+
+    def _set_rate_unlocked(self, requests_per_minute: float) -> None:
+        self.current_requests_per_minute = requests_per_minute
+        self._interval_secs = 60.0 / requests_per_minute
+        self._next_allowed_at = (
+            max(self._next_allowed_at, time.monotonic()) + self._interval_secs
+        )
+
+    def acquire(
+        self,
+        stop_event: threading.Event,
+        progress_bars: Optional["ProgressBars"] = None,
+    ) -> None:
+        while True:
+            if stop_event.is_set():
+                raise KeyboardInterrupt()
+
+            with self._lock:
+                now = time.monotonic()
+                wait_secs = self._next_allowed_at - now
+                if wait_secs <= 0:
+                    self._next_allowed_at = (
+                        max(self._next_allowed_at, now) + self._interval_secs
+                    )
+                    return
+
+            if progress_bars is not None and wait_secs >= 1.0:
+                progress_bars.set_upload_status(
+                    f"throttling for {wait_secs:.1f}s ({self.current_requests_per_minute:.0f} req/min)"
+                )
+            time.sleep(min(wait_secs, 0.25))
+
+    def report_rate_limited(
+        self,
+        *,
+        is_compaction_backpressure: bool,
+        progress_bars: Optional["ProgressBars"] = None,
+    ) -> float:
+        with self._lock:
+            factor = self.backoff_factor if is_compaction_backpressure else 0.8
+            new_rate = max(
+                self.min_requests_per_minute,
+                self.current_requests_per_minute * factor,
+            )
+            self._success_streak = 0
+            if new_rate != self.current_requests_per_minute:
+                self._set_rate_unlocked(new_rate)
+            if progress_bars is not None:
+                progress_bars.set_upload_status(
+                    f"adaptive rate {self.current_requests_per_minute:.0f} req/min"
+                )
+            return self.current_requests_per_minute
+
+    def report_success(self, progress_bars: Optional["ProgressBars"] = None) -> float:
+        with self._lock:
+            if self.current_requests_per_minute >= self.requests_per_minute:
+                self._success_streak = 0
+                return self.current_requests_per_minute
+
+            self._success_streak += 1
+            if self._success_streak < self.recovery_successes:
+                return self.current_requests_per_minute
+
+            self._success_streak = 0
+            new_rate = min(
+                self.requests_per_minute,
+                self.current_requests_per_minute * self.recovery_factor,
+            )
+            if new_rate != self.current_requests_per_minute:
+                self.current_requests_per_minute = new_rate
+                self._interval_secs = 60.0 / new_rate
+            if progress_bars is not None:
+                progress_bars.set_upload_status(
+                    f"recovering to {self.current_requests_per_minute:.0f} req/min"
+                )
+            return self.current_requests_per_minute
+
+
 class ProgressBars:
     def __init__(
         self,
@@ -354,6 +470,10 @@ class ProgressBars:
         upload_desc: str,
     ) -> None:
         self.lock = threading.Lock()
+        self._download_status = ""
+        self._upload_status = ""
+        self._last_download_status_at = 0.0
+        self._last_upload_status_at = 0.0
         self.download = tqdm(
             total=total_vectors,
             initial=initial_vectors,
@@ -377,12 +497,28 @@ class ProgressBars:
         with self.lock:
             self.upload.update(count)
 
-    def set_download_status(self, status: str) -> None:
+    def set_download_status(self, status: str, min_interval_secs: float = 0.5) -> None:
         with self.lock:
+            now = time.monotonic()
+            if (
+                status == self._download_status
+                or now - self._last_download_status_at < min_interval_secs
+            ):
+                return
+            self._download_status = status
+            self._last_download_status_at = now
             self.download.set_postfix_str(status)
 
-    def set_upload_status(self, status: str) -> None:
+    def set_upload_status(self, status: str, min_interval_secs: float = 1.0) -> None:
         with self.lock:
+            now = time.monotonic()
+            if (
+                status == self._upload_status
+                or now - self._last_upload_status_at < min_interval_secs
+            ):
+                return
+            self._upload_status = status
+            self._last_upload_status_at = now
             self.upload.set_postfix_str(status)
 
     def close(self) -> None:
@@ -516,7 +652,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--progress-file",
-        default=str(_SCRIPT_DIR / "ingest_100m_quantized_spann.progress.json"),
+        default=None,
     )
     parser.add_argument(
         "--progress-save-interval-vectors",
@@ -534,6 +670,21 @@ def parse_args() -> argparse.Namespace:
         help="Also persist progress at least this often even if the interval is not reached.",
     )
     parser.add_argument(
+        "--max-write-requests-per-minute",
+        type=float,
+        default=DEFAULT_MAX_WRITE_REQUESTS_PER_MINUTE,
+        help=(
+            "Client-side global write pacing across all upload threads. "
+            "Use 0 to disable. Default: 463 req/min."
+        ),
+    )
+    parser.add_argument(
+        "--min-write-requests-per-minute",
+        type=float,
+        default=DEFAULT_MIN_WRITE_REQUESTS_PER_MINUTE,
+        help="Lower bound for adaptive write pacing. Default: 30 req/min.",
+    )
+    parser.add_argument(
         "--id-prefix",
         default="wiki-",
         help="Prefix for generated auto-incrementing record ids.",
@@ -543,7 +694,10 @@ def parse_args() -> argparse.Namespace:
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.progress_file is None:
+        args.progress_file = str(default_progress_file_for_collection(args.collection))
+    return args
 
 
 def configure_logging(level: str) -> None:
@@ -595,10 +749,26 @@ def is_transient(exc: BaseException) -> bool:
     return status_code in {408, 500, 502, 503, 504}
 
 
-def backoff_sleep(attempt: int, minimum: float = 1.0, maximum: float = 60.0) -> None:
+def is_compaction_backpressure(exc: BaseException) -> bool:
+    return "log needs compaction" in str(exc).lower()
+
+
+def backoff_sleep(attempt: int, minimum: float = 1.0, maximum: float = 60.0) -> float:
     delay = min(maximum, minimum * (2**attempt))
     delay += random.uniform(0.0, min(1.0, delay / 4.0))
     time.sleep(delay)
+    return delay
+
+
+def interruptible_sleep(stop_event: threading.Event, delay_secs: float) -> None:
+    end = time.monotonic() + delay_secs
+    while True:
+        if stop_event.is_set():
+            raise KeyboardInterrupt()
+        remaining = end - time.monotonic()
+        if remaining <= 0:
+            return
+        time.sleep(min(remaining, 0.25))
 
 
 def create_collection(args: argparse.Namespace) -> ChromaCloudCollection:
@@ -621,22 +791,78 @@ def create_collection(args: argparse.Namespace) -> ChromaCloudCollection:
 
 
 def upload_with_backoff(
-    collection: Any, task: UploadTask, max_attempts: int = 12
+    collection: Any,
+    task: UploadTask,
+    stop_event: threading.Event,
+    rate_limiter: Optional[WriteRateLimiter],
+    progress_bars: ProgressBars,
+    max_attempts: int = 12,
 ) -> None:
-    for attempt in range(max_attempts):
+    transient_attempt = 0
+    rate_limit_attempt = 0
+    while True:
+        if stop_event.is_set():
+            raise KeyboardInterrupt()
         try:
+            if rate_limiter is not None:
+                rate_limiter.acquire(stop_event, progress_bars)
             collection.upsert(ids=task.ids, embeddings=task.embeddings)
+            if rate_limiter is not None:
+                rate_limiter.report_success(progress_bars)
             return
         except BaseException as exc:
-            if not is_transient(exc) or attempt == max_attempts - 1:
+            if isinstance(exc, KeyboardInterrupt):
                 raise
+            if not is_transient(exc):
+                raise
+
+            if is_rate_limited(exc):
+                rate_limit_attempt += 1
+                transient_attempt = 0
+                compaction_backpressure = is_compaction_backpressure(exc)
+                minimum = 5.0 if compaction_backpressure else 2.0
+                maximum = 600.0 if compaction_backpressure else 240.0
+                adaptive_rate = None
+                if rate_limiter is not None:
+                    adaptive_rate = rate_limiter.report_rate_limited(
+                        is_compaction_backpressure=compaction_backpressure,
+                        progress_bars=progress_bars,
+                    )
+                delay = min(maximum, minimum * (2 ** min(rate_limit_attempt - 1, 10)))
+                delay += random.uniform(0.0, min(1.0, delay / 4.0))
+                progress_bars.set_upload_status(
+                    f"429 backoff {delay:.1f}s at {adaptive_rate:.0f} req/min for ids {task.start_id}-{task.start_id + task.count - 1}"
+                    if adaptive_rate is not None
+                    else f"429 backoff {delay:.1f}s for ids {task.start_id}-{task.start_id + task.count - 1}"
+                )
+                logging.warning(
+                    "Rate limited on id range %s..%s; retrying in %.1fs (attempt %s, adaptive rate %.1f req/min): %s",
+                    task.start_id,
+                    task.start_id + task.count - 1,
+                    delay,
+                    rate_limit_attempt,
+                    adaptive_rate if adaptive_rate is not None else -1.0,
+                    exc,
+                )
+                interruptible_sleep(stop_event, delay)
+                continue
+
+            if transient_attempt >= max_attempts:
+                raise
+
+            transient_attempt += 1
+            delay = min(60.0, 1.0 * (2 ** min(transient_attempt - 1, 10)))
+            delay += random.uniform(0.0, min(1.0, delay / 4.0))
             logging.warning(
-                "Retrying upload for id range %s..%s after error: %s",
+                "Retrying transient upload error for id range %s..%s in %.1fs (attempt %s/%s): %s",
                 task.start_id,
                 task.start_id + task.count - 1,
+                delay,
+                transient_attempt,
+                max_attempts,
                 exc,
             )
-            backoff_sleep(attempt)
+            interruptible_sleep(stop_event, delay)
 
 
 def make_ids(prefix: str, start_id: int, count: int) -> List[str]:
@@ -651,6 +877,7 @@ def worker_loop(
     failures: FailureState,
     progress_bars: ProgressBars,
     progress: "ProgressTracker",
+    rate_limiter: Optional[WriteRateLimiter],
 ) -> None:
     collection = create_collection(args)
     progress_bars.set_upload_status("starting workers")
@@ -660,10 +887,13 @@ def worker_loop(
         try:
             if task is None:
                 return
-            progress_bars.set_upload_status(
-                f"chunk {task.chunk_index} ids {task.start_id}-{task.start_id + task.count - 1}"
+            upload_with_backoff(
+                collection,
+                task,
+                stop_event,
+                rate_limiter,
+                progress_bars,
             )
-            upload_with_backoff(collection, task)
             progress.report_upload_done(
                 task.start_id,
                 task.count,
@@ -794,10 +1024,12 @@ def validate_shard_iteration(
         raise RuntimeError("Progress cursor row offset is negative.")
 
 
-def install_signal_handlers(stop_event: threading.Event) -> None:
+def install_signal_handlers(stop_event: Optional[threading.Event] = None) -> None:
     def _handler(signum: int, _frame: Any) -> None:
-        logging.warning("Received signal %s; stopping after current work.", signum)
-        stop_event.set()
+        logging.warning("Received signal %s; exiting.", signum)
+        if stop_event is not None:
+            stop_event.set()
+        raise KeyboardInterrupt()
 
     signal.signal(signal.SIGINT, _handler)
     signal.signal(signal.SIGTERM, _handler)
@@ -907,6 +1139,7 @@ def main() -> None:
     args = parse_args()
     configure_logging(args.log_level)
     require_args(args)
+    install_signal_handlers()
 
     shards = list_dataset_shards(REPO_ID)
     progress = ProgressTracker(
@@ -935,7 +1168,10 @@ def main() -> None:
         return
 
     if args.dry_run:
-        run_dry_run(args, shards, progress.cursor)
+        try:
+            run_dry_run(args, shards, progress.cursor)
+        except KeyboardInterrupt:
+            logging.warning("Interrupted by user.")
         return
 
     task_queue: "queue.Queue[Optional[UploadTask]]" = queue.Queue(
@@ -950,6 +1186,22 @@ def main() -> None:
         download_desc="Download/read",
         upload_desc="Upload",
     )
+    rate_limiter = (
+        WriteRateLimiter(
+            args.max_write_requests_per_minute,
+            min_requests_per_minute=args.min_write_requests_per_minute,
+        )
+        if args.max_write_requests_per_minute > 0
+        else None
+    )
+    if rate_limiter is not None:
+        logging.info(
+            "Client-side adaptive write pacing enabled at %.1f requests/minute (min %.1f).",
+            args.max_write_requests_per_minute,
+            args.min_write_requests_per_minute,
+        )
+    else:
+        logging.info("Client-side write pacing disabled.")
 
     chunk_statuses: Dict[int, ChunkStatus] = {}
     workers = [
@@ -964,6 +1216,7 @@ def main() -> None:
                 failures,
                 progress_bars,
                 progress,
+                rate_limiter,
             ),
             daemon=True,
         )
@@ -981,6 +1234,7 @@ def main() -> None:
         len(shards),
     )
 
+    interrupted_by_user = False
     try:
         while True:
             committed_rows = progress.committed_rows
@@ -989,9 +1243,7 @@ def main() -> None:
             chunk_base = (committed_rows // args.chunk_size) * args.chunk_size
             offset_in_chunk = committed_rows - chunk_base
             space_in_chunk = args.chunk_size - offset_in_chunk
-            rows_in_chunk = min(
-                space_in_chunk, args.target_count - committed_rows
-            )
+            rows_in_chunk = min(space_in_chunk, args.target_count - committed_rows)
             chunk_index = committed_rows // args.chunk_size
             chunk_status = ChunkStatus(
                 chunk_index=chunk_index, target_rows=rows_in_chunk
@@ -1047,20 +1299,24 @@ def main() -> None:
             if failure is not None:
                 raise failure
             logging.warning("Stopped before reaching target.")
+    except KeyboardInterrupt:
+        interrupted_by_user = True
+        logging.warning("Interrupted by user.")
     finally:
         stop_event.set()
         progress.force_save()
-        for _ in workers:
-            task_queue.put(None)
-        task_queue.join()
-        for worker in workers:
-            worker.join(timeout=5.0)
+        if not interrupted_by_user:
+            for _ in workers:
+                task_queue.put(None)
+            task_queue.join()
+            for worker in workers:
+                worker.join(timeout=5.0)
+        else:
+            logging.warning("Skipping worker drain due to user interrupt.")
         progress.force_save()
         progress_bars.close()
 
-    logging.info(
-        "Ingest finished at %s committed rows.", progress.committed_rows
-    )
+    logging.info("Ingest finished at %s committed rows.", progress.committed_rows)
 
 
 if __name__ == "__main__":
