@@ -176,7 +176,7 @@ def _test_add(
         else:
             coll2.add(*batch)
         if should_wait_for_compaction:
-            records_since_compaction_wait += len(batch)
+            records_since_compaction_wait += len(batch[0])
             if records_since_compaction_wait >= MIN_RECORDS_BETWEEN_COMPACTION_WAITS:
                 current_version1 = wait_for_version_increase(
                     client1, collection.name, current_version1
