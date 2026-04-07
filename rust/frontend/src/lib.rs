@@ -126,10 +126,7 @@ pub fn init_frontend_otel_tracing(config: &FrontendServerConfig) {
         init_tracing(tracing_layers);
         init_panic_tracing_hook();
     } else if config.stdout_tracing {
-        let tracing_layers = vec![
-            init_global_filter_layer(&[]),
-            init_stdout_layer(),
-        ];
+        let tracing_layers = vec![init_global_filter_layer(&[]), init_stdout_layer()];
         init_tracing(tracing_layers);
     } else {
         eprintln!("No telemetry is configured.");
