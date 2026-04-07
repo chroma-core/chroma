@@ -117,16 +117,19 @@ pub async fn frontend_service_entrypoint_with_config_system_registry(
 }
 
 pub fn init_frontend_otel_tracing(config: &FrontendServerConfig) {
-    if let Some(config) = &config.open_telemetry {
+    if let Some(otel_config) = &config.open_telemetry {
         let tracing_layers = vec![
-            init_global_filter_layer(&config.filters),
-            init_otel_layer(&config.service_name, &config.endpoint),
+            init_global_filter_layer(&otel_config.filters),
+            init_otel_layer(&otel_config.service_name, &otel_config.endpoint),
             init_stdout_layer(),
         ];
         init_tracing(tracing_layers);
         init_panic_tracing_hook();
+    } else if config.stdout_tracing {
+        let tracing_layers = vec![init_global_filter_layer(&[]), init_stdout_layer()];
+        init_tracing(tracing_layers);
     } else {
-        eprintln!("OpenTelemetry is not enabled because it is missing from the config.");
+        eprintln!("No telemetry is configured.");
     }
 }
 

@@ -183,6 +183,8 @@ pub struct FrontendServerConfig {
     #[serde(default)]
     pub scorecard: Vec<ScorecardRule>,
     pub open_telemetry: Option<OpenTelemetryConfig>,
+    #[serde(default)]
+    pub stdout_tracing: bool,
     #[serde(default = "default_persist_path")]
     pub persist_path: String,
     #[serde(default = "default_sqlite_filename")]

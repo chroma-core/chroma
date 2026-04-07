@@ -124,7 +124,11 @@ pub fn run(args: RunArgs) -> Result<(), CliError> {
             }
             FrontendServerConfig::load_from_path(config_path)
         }
-        None => override_default_config_with_args(args)?,
+        None => {
+            let mut config = override_default_config_with_args(args)?;
+            config.stdout_tracing = true;
+            config
+        }
     };
 
     display_run_message(&config);
