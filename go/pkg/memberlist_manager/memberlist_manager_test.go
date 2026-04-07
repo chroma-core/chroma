@@ -55,7 +55,7 @@ func TestNodeWatcher(t *testing.T) {
 			t.Fatalf("Error getting node status: %v", err)
 		}
 
-		return reflect.DeepEqual(memberlist, Memberlist{Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0"}})
+		return reflect.DeepEqual(memberlist, Memberlist{Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0", zone: ""}})
 	}, 10, 1*time.Second)
 	if !ok {
 		t.Fatalf("Node status did not update after adding a pod")
@@ -86,7 +86,7 @@ func TestNodeWatcher(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Error getting node status: %v", err)
 		}
-		return reflect.DeepEqual(memberlist, Memberlist{Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0"}})
+		return reflect.DeepEqual(memberlist, Memberlist{Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0", zone: ""}})
 	}, 10, 1*time.Second)
 	if !ok {
 		t.Fatalf("Node status did not update after adding a not ready pod")
@@ -111,13 +111,13 @@ func TestMemberlistStore(t *testing.T) {
 	assert.Equal(t, Memberlist{}, memberlist)
 
 	// Add a member to the memberlist
-	memberlist_store.UpdateMemberlist(context.Background(), Memberlist{Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0"}, Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}}, "0")
+	memberlist_store.UpdateMemberlist(context.Background(), Memberlist{Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0", zone: ""}, Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1", zone: ""}}, "0")
 	memberlist, _, err = memberlist_store.GetMemberlist(context.Background())
 	if err != nil {
 		t.Fatalf("Error getting memberlist: %v", err)
 	}
 	// assert the memberlist has the correct members
-	if !memberlistSame(memberlist, Memberlist{Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0"}, Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}}) {
+	if !memberlistSame(memberlist, Memberlist{Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0", zone: ""}, Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1", zone: ""}}) {
 		t.Fatalf("Memberlist did not update after adding a member")
 	}
 }
@@ -190,7 +190,7 @@ func TestMemberlistManager(t *testing.T) {
 
 	// Get the memberlist
 	ok := retryUntilCondition(func() bool {
-		return getMemberlistAndCompare(t, memberlistStore, Memberlist{Member{id: "test-pod-0", ip: "10.0.0.49", node: "test-node-0"}})
+		return getMemberlistAndCompare(t, memberlistStore, Memberlist{Member{id: "test-pod-0", ip: "10.0.0.49", node: "test-node-0", zone: ""}})
 	}, 30, 1*time.Second)
 	if !ok {
 		t.Fatalf("Memberlist did not update after adding a pod")
@@ -201,7 +201,7 @@ func TestMemberlistManager(t *testing.T) {
 
 	// Get the memberlist
 	ok = retryUntilCondition(func() bool {
-		return getMemberlistAndCompare(t, memberlistStore, Memberlist{Member{id: "test-pod-0", ip: "10.0.0.49", node: "test-node-0"}, Member{id: "test-pod-1", ip: "10.0.0.50", node: "test-node-1"}})
+		return getMemberlistAndCompare(t, memberlistStore, Memberlist{Member{id: "test-pod-0", ip: "10.0.0.49", node: "test-node-0", zone: ""}, Member{id: "test-pod-1", ip: "10.0.0.50", node: "test-node-1", zone: ""}})
 	}, 30, 1*time.Second)
 	if !ok {
 		t.Fatalf("Memberlist did not update after adding a pod")
@@ -212,7 +212,7 @@ func TestMemberlistManager(t *testing.T) {
 
 	// Get the memberlist
 	ok = retryUntilCondition(func() bool {
-		return getMemberlistAndCompare(t, memberlistStore, Memberlist{Member{id: "test-pod-1", ip: "10.0.0.50", node: "test-node-1"}})
+		return getMemberlistAndCompare(t, memberlistStore, Memberlist{Member{id: "test-pod-1", ip: "10.0.0.50", node: "test-node-1", zone: ""}})
 	}, 30, 1*time.Second)
 	if !ok {
 		t.Fatalf("Memberlist did not update after deleting a pod")
@@ -223,40 +223,40 @@ func TestMemberlistSame(t *testing.T) {
 	memberlist := Memberlist{}
 	assert.True(t, memberlistSame(memberlist, memberlist))
 
-	newMemberlist := Memberlist{Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0"}}
+	newMemberlist := Memberlist{Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0", zone: ""}}
 	assert.False(t, memberlistSame(memberlist, newMemberlist))
 	assert.False(t, memberlistSame(newMemberlist, memberlist))
 	assert.True(t, memberlistSame(newMemberlist, newMemberlist))
 
-	memberlist = Memberlist{Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}}
+	memberlist = Memberlist{Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1", zone: ""}}
 	assert.False(t, memberlistSame(newMemberlist, memberlist))
 	assert.False(t, memberlistSame(memberlist, newMemberlist))
 	assert.True(t, memberlistSame(memberlist, memberlist))
 
-	memberlist = Memberlist{Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0"}, Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}}
-	newMemberlist = Memberlist{Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0"}, Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}}
+	memberlist = Memberlist{Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0", zone: ""}, Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1", zone: ""}}
+	newMemberlist = Memberlist{Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0", zone: ""}, Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1", zone: ""}}
 	assert.True(t, memberlistSame(memberlist, newMemberlist))
 	assert.True(t, memberlistSame(newMemberlist, memberlist))
 
-	memberlist = Memberlist{Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0"}, Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}}
-	newMemberlist = Memberlist{Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}, Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0"}}
+	memberlist = Memberlist{Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0", zone: ""}, Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1", zone: ""}}
+	newMemberlist = Memberlist{Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1", zone: ""}, Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0", zone: ""}}
 	assert.True(t, memberlistSame(memberlist, newMemberlist))
 	assert.True(t, memberlistSame(newMemberlist, memberlist))
 
-	memberlist = Memberlist{Member{id: "test-pod-0", ip: "10.0.0.2", node: "test-node-0"}, Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}}
-	newMemberlist = Memberlist{Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}, Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0"}}
+	memberlist = Memberlist{Member{id: "test-pod-0", ip: "10.0.0.2", node: "test-node-0", zone: ""}, Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1", zone: ""}}
+	newMemberlist = Memberlist{Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1", zone: ""}, Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0", zone: ""}}
 	assert.False(t, memberlistSame(memberlist, newMemberlist))
 	assert.False(t, memberlistSame(newMemberlist, memberlist))
 
 	// Just one ip wrong
-	memberlist = Memberlist{Member{id: "test-pod-0", ip: "10.0.0.2", node: "test-node-0"}, Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}}
-	newMemberlist = Memberlist{Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}, Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0"}}
+	memberlist = Memberlist{Member{id: "test-pod-0", ip: "10.0.0.2", node: "test-node-0", zone: ""}, Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1", zone: ""}}
+	newMemberlist = Memberlist{Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1", zone: ""}, Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0", zone: ""}}
 	assert.False(t, memberlistSame(memberlist, newMemberlist))
 	assert.False(t, memberlistSame(newMemberlist, memberlist))
 
 	// Just one node wrong
-	memberlist = Memberlist{Member{id: "test-pod-0", ip: "10.0.0.2", node: "test-node-2"}, Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}}
-	newMemberlist = Memberlist{Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}, Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0"}}
+	memberlist = Memberlist{Member{id: "test-pod-0", ip: "10.0.0.2", node: "test-node-2", zone: ""}, Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1", zone: ""}}
+	newMemberlist = Memberlist{Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1", zone: ""}, Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0", zone: ""}}
 	assert.False(t, memberlistSame(memberlist, newMemberlist))
 	assert.False(t, memberlistSame(newMemberlist, memberlist))
 }

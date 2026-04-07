@@ -1051,6 +1051,7 @@ mod tests {
                     member_id: "test-gc".to_string(),
                     member_ip: "0.0.0.0".to_string(),
                     member_node_name: "test-gc-node".to_string(),
+                    member_zone: String::new(),
                 }],
                 None,
             )
@@ -1152,6 +1153,7 @@ mod tests {
                     member_id: "test-gc".to_string(),
                     member_ip: "0.0.0.0".to_string(),
                     member_node_name: "test-gc-node".to_string(),
+                    member_zone: String::new(),
                 }],
                 None,
             )

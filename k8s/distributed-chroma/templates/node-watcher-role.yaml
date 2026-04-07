@@ -1,0 +1,30 @@
+---
+
+# ClusterRole (not namespaced Role) because nodes are cluster-scoped resources.
+# Required by the sysdb coordinator to look up topology.kubernetes.io/zone labels
+# on nodes when populating the memberlist CRD with zone information.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: node-watcher
+rules:
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "watch"]
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sysdb-node-watcher-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: node-watcher
+subjects:
+- kind: ServiceAccount
+  name: sysdb-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---

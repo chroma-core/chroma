@@ -211,7 +211,8 @@ class CustomResourceMemberlistProvider(MemberlistProvider, EnforceOverrides):
             id = m["member_id"]
             ip = m["member_ip"] if "member_ip" in m else ""
             node = m["member_node_name"] if "member_node_name" in m else ""
-            parsed.append(Member(id=id, ip=ip, node=node))
+            zone = m["member_zone"] if "member_zone" in m else ""
+            parsed.append(Member(id=id, ip=ip, node=node, zone=zone))
         return parsed
 
     def _notify(self, memberlist: Memberlist) -> None:

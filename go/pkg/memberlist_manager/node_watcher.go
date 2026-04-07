@@ -35,12 +35,19 @@ const (
 
 const MemberLabel = "member-type"
 
+// ZoneLabel is the well-known Kubernetes node label for topology zone.
+// Automatically populated by cloud-controller-manager on AWS EKS (e.g. "us-east-1a"),
+// GCP GKE (e.g. "us-central1-a"), and Azure AKS (e.g. "1", "2", "3").
+const ZoneLabel = "topology.kubernetes.io/zone"
+
 type KubernetesWatcher struct {
 	stopCh         chan struct{}
 	isRunning      bool
 	clientSet      kubernetes.Interface      // clientset for the service
 	informer       cache.SharedIndexInformer // informer for the service
 	lister         lister_v1.PodLister       // lister for the service
+	nodeLister     lister_v1.NodeLister      // lister for nodes (used to look up zone labels)
+	nodeInformer   cache.SharedIndexInformer // informer for nodes
 	callbacks      []NodeWatcherCallback
 	informerHandle cache.ResourceEventHandlerRegistration
 }
@@ -52,11 +59,18 @@ func NewKubernetesWatcher(clientset kubernetes.Interface, coordinator_namespace 
 	podInformer := factory.Core().V1().Pods().Informer()
 	podLister := factory.Core().V1().Pods().Lister()
 
+	// Create a cluster-scoped factory for nodes (nodes are not namespaced)
+	nodeFactory := informers.NewSharedInformerFactory(clientset, resyncPeriod)
+	nodeInformer := nodeFactory.Core().V1().Nodes().Informer()
+	nodeLister := nodeFactory.Core().V1().Nodes().Lister()
+
 	w := &KubernetesWatcher{
-		isRunning: false,
-		clientSet: clientset,
-		informer:  podInformer,
-		lister:    podLister,
+		isRunning:    false,
+		clientSet:    clientset,
+		informer:     podInformer,
+		lister:       podLister,
+		nodeLister:   nodeLister,
+		nodeInformer: nodeInformer,
 	}
 
 	return w
@@ -122,8 +136,9 @@ func (w *KubernetesWatcher) Start() error {
 	w.isRunning = true
 
 	go w.informer.Run(w.stopCh)
+	go w.nodeInformer.Run(w.stopCh)
 
-	if !cache.WaitForCacheSync(w.stopCh, w.informer.HasSynced) {
+	if !cache.WaitForCacheSync(w.stopCh, w.informer.HasSynced, w.nodeInformer.HasSynced) {
 		log.Error("Failed to sync cache")
 	}
 
@@ -155,6 +170,18 @@ func (w *KubernetesWatcher) notify(update string) {
 	}
 }
 
+func (w *KubernetesWatcher) getNodeZone(nodeName string) string {
+	if nodeName == "" {
+		return ""
+	}
+	node, err := w.nodeLister.Get(nodeName)
+	if err != nil {
+		log.Warn("Failed to get node for zone lookup", zap.String("node", nodeName), zap.Error(err))
+		return ""
+	}
+	return node.Labels[ZoneLabel]
+}
+
 func (w *KubernetesWatcher) ListReadyMembers() (Memberlist, error) {
 	pods, err := w.lister.List(labels.Everything())
 	if err != nil {
@@ -169,7 +196,8 @@ func (w *KubernetesWatcher) ListReadyMembers() (Memberlist, error) {
 						// Pod is being deleted, don't include it in the member list
 						continue
 					}
-					memberlist = append(memberlist, Member{pod.Name, pod.Status.PodIP, pod.Spec.NodeName})
+					zone := w.getNodeZone(pod.Spec.NodeName)
+					memberlist = append(memberlist, Member{pod.Name, pod.Status.PodIP, pod.Spec.NodeName, zone})
 				}
 				break
 			}

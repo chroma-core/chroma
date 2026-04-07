@@ -28,7 +28,7 @@ def update_memberlist(n: int, memberlist_name: str = "test-memberlist") -> Membe
         "metadata": {"name": memberlist_name},
         "spec": {
             "members": [
-                {"member_id": m.id, "member_ip": m.ip, "member_node_name": m.node}
+                {"member_id": m.id, "member_ip": m.ip, "member_node_name": m.node, "member_zone": m.zone}
                 for m in members
             ]
         },
