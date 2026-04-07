@@ -217,11 +217,6 @@ impl Scheduler {
     }
 
     async fn get_collections_with_new_data(&mut self) -> Vec<CollectionInfo> {
-        tracing::info!(
-            min_compaction_size = self.min_compaction_size,
-            oneoff_collection_count = self.oneoff_collections.len(),
-            "Fetching dirty collections from log service"
-        );
         let collections = self
             .log
             .get_collections_with_new_data(self.min_compaction_size as u64)
@@ -239,20 +234,7 @@ impl Scheduler {
 
         match collections {
             Ok(mut collections) => {
-                tracing::info!(
-                    dirty_collection_count = collections.len(),
-                    oneoff_collection_count = one_off_collections.len(),
-                    "Fetched dirty collections from log service"
-                );
-                for collection in &collections {
-                    tracing::info!(
-                        collection_id = %collection.collection_id,
-                        topology_name = ?collection.topology_name,
-                        first_log_offset = collection.first_log_offset,
-                        first_log_ts = collection.first_log_ts,
-                        "Dirty collection returned by log service"
-                    );
-                }
+                tracing::info!("Collections with new data: {collections:?}");
                 let collection_ids: HashSet<_> =
                     collections.iter().map(|c| c.collection_id).collect();
                 let one_off_collections = one_off_collections
@@ -262,11 +244,7 @@ impl Scheduler {
                 collections
             }
             Err(e) => {
-                tracing::error!(
-                    error = ?e,
-                    oneoff_collection_count = one_off_collections.len(),
-                    "Failed to fetch dirty collections from log service; falling back to one-off collections"
-                );
+                tracing::error!("Error: {:?}", e);
                 one_off_collections
             }
         }
@@ -294,11 +272,6 @@ impl Scheduler {
             const BATCH_SIZE: usize = 1_000;
             let ids: Vec<CollectionUuid> =
                 collection_infos.iter().map(|c| c.collection_id).collect();
-            tracing::info!(
-                topology = ?topology,
-                collection_info_count = collection_infos.len(),
-                "Fetching sysdb records for dirty collections"
-            );
             let mut all_collections = Vec::new();
             let mut had_error = false;
             for batch in ids.chunks(BATCH_SIZE) {
@@ -331,10 +304,7 @@ impl Scheduler {
             }
             if all_collections.len() != collection_infos.len() {
                 tracing::warn!(
-                    topology = ?topology,
-                    input_collection_count = collection_infos.len(),
-                    returned_collection_count = all_collections.len(),
-                    "Returned collection info does not match number of input collections"
+                    "returned collection info does not match number of input collections"
                 );
             }
             let mut info_map: HashMap<_, _> = collection_infos
@@ -346,10 +316,10 @@ impl Scheduler {
                 if let Some(info) = info_map.remove(&collection.collection_id) {
                     if collection.compaction_failure_count >= self.max_failure_count {
                         tracing::info!(
-                            collection_id = %collection.collection_id,
-                            compaction_failure_count = collection.compaction_failure_count,
-                            max_failure_count = self.max_failure_count,
-                            "Ignoring dirty collection because it has too many compaction failures"
+                            "Ignoring collection {} - too many compaction failures ({}/{})",
+                            collection.collection_id,
+                            collection.compaction_failure_count,
+                            self.max_failure_count
                         );
                     } else {
                         with_infos.push((collection, info));
@@ -357,13 +327,6 @@ impl Scheduler {
                 }
             }
             for (id, info) in info_map {
-                tracing::warn!(
-                    collection_id = %id,
-                    topology_name = ?info.topology_name,
-                    first_log_offset = info.first_log_offset,
-                    first_log_ts = info.first_log_ts,
-                    "Dirty collection was not found in sysdb; tracking as deleted"
-                );
                 self.oneoff_collections.remove(&id);
                 self.deleted_collections.insert(id, info.topology_name);
             }
@@ -379,18 +342,6 @@ impl Scheduler {
                         name = "offset in sysdb is less than offset in log"
                     )
                 } else {
-                    tracing::info!(
-                        collection_id = %collection.collection_id,
-                        tenant_id = %collection.tenant,
-                        database_name = %collection.database,
-                        topology_name = ?info.topology_name,
-                        sysdb_log_position = collection.log_position,
-                        compaction_start_offset = collection.log_position + 1,
-                        first_log_offset = info.first_log_offset,
-                        collection_version = collection.version,
-                        collection_logical_size_bytes = collection.size_bytes_post_compaction,
-                        "Dirty collection verified for compaction scheduling"
-                    );
                     collection_records.push(CollectionRecord {
                         collection_id: collection.collection_id,
                         tenant_id: collection.tenant.clone(),
@@ -425,18 +376,16 @@ impl Scheduler {
                 .contains(&collection.collection_id)
             {
                 tracing::info!(
-                    collection_id = %collection.collection_id,
-                    topology_name = ?collection.topology_name,
-                    "Ignoring dirty collection because it is disabled for compaction"
+                    "Ignoring collection: {:?} because it is disabled for compaction",
+                    collection.collection_id
                 );
                 continue;
             }
 
             if self.is_job_in_progress(&collection.collection_id).await {
                 tracing::info!(
-                    collection_id = %collection.collection_id,
-                    topology_name = ?collection.topology_name,
-                    "Compaction is already in progress for dirty collection; skipping"
+                    "Compaction for {} is already in progress, skipping",
+                    collection.collection_id
                 );
                 continue;
             }
@@ -450,23 +399,10 @@ impl Scheduler {
                 Ok(member) => {
                     if member == self.my_member_id {
                         filtered_collections.push(collection);
-                    } else {
-                        tracing::info!(
-                            collection_id = %collection.collection_id,
-                            topology_name = ?collection.topology_name,
-                            assigned_member = %member,
-                            local_member = %self.my_member_id,
-                            "Dirty collection assigned to another compactor member; skipping locally"
-                        );
                     }
                 }
                 Err(e) => {
-                    tracing::error!(
-                        collection_id = %collection.collection_id,
-                        topology_name = ?collection.topology_name,
-                        error = ?e,
-                        "Failed to assign dirty collection to compactor member"
-                    );
+                    tracing::error!("Error: {:?}", e);
                     continue;
                 }
             }
@@ -476,12 +412,6 @@ impl Scheduler {
 
     pub(crate) async fn schedule_internal(&mut self, collection_records: Vec<CollectionRecord>) {
         self.job_queue.clear();
-        tracing::info!(
-            collection_record_count = collection_records.len(),
-            in_progress_job_count = self.in_progress_jobs.len(),
-            max_concurrent_jobs = self.max_concurrent_jobs,
-            "Scheduling verified dirty collections for compaction"
-        );
         let mut oneoff_collections = Vec::with_capacity(collection_records.len());
         let mut regular_collections = Vec::with_capacity(collection_records.len());
         for record in collection_records {
@@ -514,9 +444,6 @@ impl Scheduler {
         dropped_jobs_count += oneoff_collections.len().saturating_sub(rem_capacity);
         for (database_name, record) in oneoff_collections.into_iter().take(rem_capacity) {
             tracing::info!(
-                collection_id = %record.collection_id,
-                database_name = ?database_name,
-                compaction_start_offset = record.offset,
                 collection_version = record.collection_version,
                 "Creating one-off compaction job for collection"
             );
@@ -539,9 +466,6 @@ impl Scheduler {
             if !seen.contains(&record.collection_id) {
                 tracing::info!(
                     collection_id = %record.collection_id,
-                    compaction_start_offset = record.offset,
-                    collection_version = record.collection_version,
-                    remaining_capacity = rem_capacity,
                     "Max concurrent jobs reached, skipping compaction"
                 );
             }
@@ -549,7 +473,6 @@ impl Scheduler {
         for job in &selected {
             tracing::info!(
                 collection_id = %job.collection_id,
-                database_name = ?job.database_name,
                 "Enqueuing compaction job"
             );
         }
