@@ -307,7 +307,8 @@ impl ServiceBasedFrontend {
         // original offset to individual shards—a shard may hold fewer
         // matching records than the offset. Instead, ask every shard for
         // offset+limit results (offset=0) and apply the real offset/limit
-        // after merging.
+        // after merging. When limit is None (unbounded) and offset is 0,
+        // this is a no-op: None.map(..) stays None, and skip(0) is identity.
         let original_limit = plan.limit.clone();
         let futs: Vec<_> = (0..num_shards)
             .map(|shard_index| {
@@ -365,15 +366,12 @@ impl ServiceBasedFrontend {
             total_pulled_log_bytes += r.pulled_log_bytes;
         }
         let offset = original_limit.offset as usize;
-        let merged_records = if let Some(limit) = original_limit.limit {
-            merged_records
-                .into_iter()
-                .skip(offset)
-                .take(limit as usize)
-                .collect()
-        } else {
-            merged_records.into_iter().skip(offset).collect()
-        };
+        let limit = original_limit.limit.unwrap_or(u32::MAX) as usize;
+        let merged_records: Vec<_> = merged_records
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect();
         Ok(GetResult {
             pulled_log_bytes: total_pulled_log_bytes,
             result: ProjectionOutput {
@@ -470,11 +468,11 @@ impl ServiceBasedFrontend {
             num_embeddings
         ];
         let mut total_pulled_log_bytes = 0u64;
-        for r in &results {
+        for r in results {
             total_pulled_log_bytes += r.pulled_log_bytes;
-            for (i, knn_output) in r.results.iter().enumerate() {
+            for (i, knn_output) in r.results.into_iter().enumerate() {
                 if i < merged_results.len() {
-                    merged_results[i].records.extend(knn_output.records.clone());
+                    merged_results[i].records.extend(knn_output.records);
                 }
             }
         }
@@ -535,20 +533,37 @@ impl ServiceBasedFrontend {
             ))
             .await;
         }
+        // Each shard only sees a subset of records, so we push
+        // offset=0, limit=offset+limit per payload to every shard and
+        // apply the real offset/limit after merging. When a payload's
+        // limit is None (unbounded) and offset is 0, this is a no-op:
+        // None.map(..) stays None, and skip(0) is identity.
+        let original_limits: Vec<Limit> = plan.payloads.iter().map(|p| p.limit.clone()).collect();
         let futs: Vec<_> = (0..num_shards)
             .map(|shard_index| {
                 let mut executor = self.executor.clone();
                 let mut shard_plan = plan.clone();
                 shard_plan.scan.shard_index = shard_index;
                 shard_plan.scan.num_shards = num_shards;
+                for payload in &mut shard_plan.payloads {
+                    payload.limit = Limit {
+                        offset: 0,
+                        limit: payload
+                            .limit
+                            .limit
+                            .map(|l| l.saturating_add(payload.limit.offset)),
+                    };
+                }
                 let provider = self.collections_with_segments_provider.clone();
                 let database_name = database_name.clone();
+                let original_limits = original_limits.clone();
                 async move {
                     Box::pin(
                         executor.search(shard_plan.clone(), move |code: tonic::Code| {
                             let mut provider = provider.clone();
                             let mut replan = shard_plan.clone();
                             let database_name = database_name.clone();
+                            let original_limits = original_limits.clone();
                             async move {
                                 if code == tonic::Code::NotFound {
                                     provider
@@ -563,6 +578,14 @@ impl ServiceBasedFrontend {
                                 replan.scan.collection_and_segments = new_cas;
                                 replan.scan.shard_index = shard_index;
                                 replan.scan.num_shards = num_shards;
+                                for (payload, orig) in
+                                    replan.payloads.iter_mut().zip(original_limits.iter())
+                                {
+                                    payload.limit = Limit {
+                                        offset: 0,
+                                        limit: orig.limit.map(|l| l.saturating_add(orig.offset)),
+                                    };
+                                }
                                 Ok(replan)
                             }
                         }),
@@ -572,7 +595,6 @@ impl ServiceBasedFrontend {
             })
             .collect();
         let results = futures::future::try_join_all(futs).await?;
-        // TODO(PR 10): merge by score per payload, apply original offset/limit
         let num_payloads = results[0].results.len();
         let mut merged_payloads = vec![
             SearchPayloadResult {
@@ -581,13 +603,24 @@ impl ServiceBasedFrontend {
             num_payloads
         ];
         let mut total_pulled_log_bytes = 0u64;
-        for r in &results {
+        for r in results {
             total_pulled_log_bytes += r.pulled_log_bytes;
-            for (i, payload) in r.results.iter().enumerate() {
+            for (i, payload) in r.results.into_iter().enumerate() {
                 if i < merged_payloads.len() {
-                    merged_payloads[i].records.extend(payload.records.clone());
+                    merged_payloads[i].records.extend(payload.records);
                 }
             }
+        }
+        for (payload_result, orig_limit) in merged_payloads.iter_mut().zip(original_limits.iter()) {
+            payload_result.records.sort_by(|a, b| {
+                a.score
+                    .partial_cmp(&b.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            let offset = orig_limit.offset as usize;
+            let limit = orig_limit.limit.unwrap_or(u32::MAX) as usize;
+            let records = std::mem::take(&mut payload_result.records);
+            payload_result.records = records.into_iter().skip(offset).take(limit).collect();
         }
         Ok(SearchResult {
             results: merged_payloads,
