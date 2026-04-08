@@ -2060,7 +2060,7 @@ def test_vector_index_config_with_key_document_source(
     schema = Schema()
     schema.create_index(
         config=VectorIndexConfig(
-            source_key=Key.DOCUMENT,  # type: ignore[arg-type]
+            source_key=Key.DOCUMENT,
             embedding_function=SimpleEmbeddingFunction(dim=5),
         )
     )
@@ -2110,7 +2110,7 @@ def test_sparse_vector_index_config_with_key_types(
     schema1 = Schema().create_index(
         key="sparse1",
         config=SparseVectorIndexConfig(
-            source_key=Key.DOCUMENT,  # type: ignore[arg-type]
+            source_key=Key.DOCUMENT,
             embedding_function=sparse_ef,
         ),
     )
@@ -2626,7 +2626,7 @@ def test_search_api_uses_embedded_searches_with_sparse_embeddings(
     schema = Schema().create_index(
         key="sparse_field",
         config=SparseVectorIndexConfig(
-            source_key=Key.DOCUMENT,  # type: ignore[arg-type]
+            source_key=Key.DOCUMENT,
             embedding_function=sparse_ef,
         ),
     )
