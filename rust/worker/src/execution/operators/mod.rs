@@ -8,6 +8,7 @@ pub mod flush_segment_writer;
 pub mod fragment_fetch;
 pub mod get_attached_function;
 pub mod get_collection_and_segments;
+pub mod io_group_operator;
 pub mod materialize_logs;
 pub(super) mod register;
 pub mod spann_bf_pl;
