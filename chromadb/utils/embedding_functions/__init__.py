@@ -95,6 +95,12 @@ from chromadb.utils.embedding_functions.chroma_bm25_embedding_function import (
 from chromadb.utils.embedding_functions.perplexity_embedding_function import (
     PerplexityEmbeddingFunction,
 )
+from chromadb.utils.embedding_functions.mock_embedding_function import (
+    MockEmbeddingFunction,
+)
+from chromadb.utils.embedding_functions.mock_sparse_embedding_function import (
+    MockSparseEmbeddingFunction,
+)
 
 
 # Get all the class names for backward compatibility
@@ -132,7 +138,9 @@ _all_classes: Set[str] = {
     "ChromaCloudQwenEmbeddingFunction",
     "ChromaCloudSpladeEmbeddingFunction",
     "ChromaBm25EmbeddingFunction",
-    "PerplexityEmbeddingFunction"
+    "PerplexityEmbeddingFunction",
+    "MockEmbeddingFunction",
+    "MockSparseEmbeddingFunction",
 }
 
 
@@ -171,6 +179,7 @@ known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignor
     "together_ai": TogetherAIEmbeddingFunction,
     "chroma-cloud-qwen": ChromaCloudQwenEmbeddingFunction,
     "perplexity": PerplexityEmbeddingFunction,
+    "mock": MockEmbeddingFunction,
 }
 
 sparse_known_embedding_functions: Dict[str, Type[SparseEmbeddingFunction]] = {  # type: ignore
@@ -179,6 +188,7 @@ sparse_known_embedding_functions: Dict[str, Type[SparseEmbeddingFunction]] = {  
     "bm25": Bm25EmbeddingFunction,
     "chroma-cloud-splade": ChromaCloudSpladeEmbeddingFunction,
     "chroma_bm25": ChromaBm25EmbeddingFunction,
+    "mock_sparse": MockSparseEmbeddingFunction,
 }
 
 
@@ -301,6 +311,8 @@ __all__ = [
     "ChromaCloudSpladeEmbeddingFunction",
     "ChromaBm25EmbeddingFunction",
     "PerplexityEmbeddingFunction",
+    "MockEmbeddingFunction",
+    "MockSparseEmbeddingFunction",
     "register_embedding_function",
     "config_to_embedding_function",
     "known_embedding_functions",
