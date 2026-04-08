@@ -123,7 +123,6 @@ class WebSourceConfig:
 
 @dataclass
 class CreateGitHubSourceArgs:
-    database_name: str
     github: GitHubSourceConfig
     embedding: Optional[SyncEmbeddingConfig] = None
     chunking: Optional[ChunkingConfig] = None
@@ -131,7 +130,6 @@ class CreateGitHubSourceArgs:
 
 @dataclass
 class CreateS3SourceArgs:
-    database_name: str
     s3: S3SourceConfig
     embedding: Optional[SyncEmbeddingConfig] = None
     chunking: Optional[ChunkingConfig] = None
@@ -139,7 +137,6 @@ class CreateS3SourceArgs:
 
 @dataclass
 class CreateWebSourceArgs:
-    database_name: str
     web: WebSourceConfig
     embedding: Optional[SyncEmbeddingConfig] = None
     chunking: Optional[ChunkingConfig] = None
@@ -184,7 +181,6 @@ CreateInvocationArgs = Union[
 
 @dataclass
 class ListSourcesOptions:
-    database_name: Optional[str] = None
     source_type: Optional[SourceTypeFilter] = None
     limit: Optional[int] = None
     offset: Optional[int] = None
@@ -194,7 +190,6 @@ class ListSourcesOptions:
 @dataclass
 class ListInvocationsOptions:
     source_id: Optional[str] = None
-    database_name: Optional[str] = None
     source_type: Optional[SourceTypeFilter] = None
     status: Optional[InvocationStatus] = None
     limit: Optional[int] = None

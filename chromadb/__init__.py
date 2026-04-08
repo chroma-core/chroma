@@ -102,11 +102,9 @@ __all__ = [
     "BoolInvertedIndexConfig",
     # Read Level
     "ReadLevel",
-    # Sync Client
-    "SyncClient",
 ]
 
-from chromadb.sync_client import SyncClient
+from chromadb.sync_client import CloudSyncClient
 from chromadb.types import CloudClientArg
 
 logger = logging.getLogger(__name__)
@@ -114,6 +112,15 @@ logger = logging.getLogger(__name__)
 __settings = Settings()
 
 __version__ = "1.5.7"
+
+
+class _CloudClient(ClientCreator):
+    sync: CloudSyncClient
+
+    def close(self) -> None:
+        if hasattr(self, "sync"):
+            self.sync.close()
+        super().close()
 
 
 # Workaround to deal with Colab's old sqlite3 version
@@ -382,7 +389,8 @@ def CloudClient(
     cloud_host: str = "api.trychroma.com",
     cloud_port: int = 443,
     enable_ssl: bool = True,
-) -> ClientAPI:
+    sync_host: str = "sync.trychroma.com",
+) -> _CloudClient:
     """Create a client for Chroma Cloud.
 
     If not provided, `tenant`, `database`, and `api_key` will be inferred from the environment variables `CHROMA_TENANT`, `CHROMA_DATABASE`, and `CHROMA_API_KEY`.
@@ -392,9 +400,10 @@ def CloudClient(
         database: Database name to use, or None to infer from credentials.
         api_key: API key for Chroma Cloud.
         settings: Optional settings to override defaults.
+        sync_host: Hostname for the Chroma Sync service.
 
     Returns:
-        ClientAPI: A configured client instance.
+        _CloudClient: A configured client instance with a bound `sync` API.
 
     Raises:
         ValueError: If no API key is provided or available in the environment.
@@ -430,6 +439,7 @@ def CloudClient(
     cloud_host = str(cloud_host)
     cloud_port = int(cloud_port)
     enable_ssl = bool(enable_ssl)
+    sync_host = str(sync_host)
 
     settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
     settings.chroma_server_host = cloud_host
@@ -443,7 +453,15 @@ def CloudClient(
     settings.chroma_auth_token_transport_header = TokenTransportHeader.X_CHROMA_TOKEN
     settings.chroma_overwrite_singleton_tenant_database_access_from_auth = True
 
-    return ClientCreator(tenant=tenant, database=database, settings=settings)
+    client = _CloudClient(tenant=tenant, database=database, settings=settings)
+    client.sync = CloudSyncClient(
+        api_key=api_key,
+        host=sync_host,
+        database_name=lambda: str(client.database),
+        headers=settings.chroma_server_headers,
+        verify=settings.chroma_server_ssl_verify,
+    )
+    return client
 
 
 def Client(

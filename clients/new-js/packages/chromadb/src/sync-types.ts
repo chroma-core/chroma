@@ -78,7 +78,6 @@ export interface WebSourceConfig {
 }
 
 export interface CreateSourceBase {
-  databaseName: string;
   embedding?: SyncEmbeddingConfig;
   chunking?: SyncChunkingConfig;
 }
@@ -123,21 +122,11 @@ export interface ListOptions {
 }
 
 export interface ListSourcesOptions extends ListOptions {
-  databaseName?: string;
   sourceType?: SourceTypeFilter;
 }
 
 export interface ListInvocationsOptions extends ListOptions {
   sourceId?: string;
-  databaseName?: string;
   sourceType?: SourceTypeFilter;
   status?: InvocationStatusFilter;
-}
-
-export interface SyncClientArgs {
-  apiKey?: string;
-  host?: string;
-  fetchOptions?: Omit<RequestInit, "headers"> & {
-    headers?: Record<string, string>;
-  };
 }

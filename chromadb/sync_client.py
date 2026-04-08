@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import asdict
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Callable, Dict, List, Optional, Union, cast
 from urllib.parse import urlparse
 
 import httpx
@@ -123,7 +122,7 @@ def _chunking_config_to_api(config: Any) -> Optional[Dict[str, Any]]:
     if config is None:
         return None
     d = asdict(config)
-    return {k: v for k, v in d.items() if v is not None}
+    return _strip_none(d)
 
 
 def _strip_none(d: Dict[str, Any]) -> Dict[str, Any]:
@@ -131,42 +130,43 @@ def _strip_none(d: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in d.items() if v is not None}
 
 
-class SyncClient:
-    """Client for the Chroma Sync service.
-
-    The Sync service manages syncing data from external sources (GitHub, S3, web)
-    into Chroma collections.
-    """
+class CloudSyncClient:
+    """Sync API bound to a CloudClient's scoped database."""
 
     _client: httpx.Client
+    _database_name: Callable[[], str]
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        api_key: str,
+        database_name: Callable[[], str],
         host: Optional[str] = None,
+        headers: Optional[Dict[str, str]] = None,
+        verify: Optional[Union[bool, str]] = None,
     ) -> None:
-        api_key = api_key or os.environ.get("CHROMA_API_KEY")
-        if not api_key:
-            raise InvalidArgumentError(
-                "Missing API key. Please provide it to the SyncClient constructor "
-                "or set your CHROMA_API_KEY environment variable."
-            )
-
         if host is not None:
             base_url = f"https://{host}"
         else:
             base_url = f"https://{DEFAULT_SYNC_HOST}"
 
-        self._client = httpx.Client(
-            base_url=base_url,
-            headers={"x-chroma-token": api_key},
-        )
+        self._database_name = database_name
+        client_kwargs: Dict[str, Any] = {
+            "base_url": base_url,
+            "headers": {
+                **(headers or {}),
+                "x-chroma-token": api_key,
+            },
+        }
+        if verify is not None:
+            client_kwargs["verify"] = verify
+
+        self._client = httpx.Client(**client_kwargs)
 
     def close(self) -> None:
         """Close the underlying HTTP client and release resources."""
         self._client.close()
 
-    def __enter__(self) -> "SyncClient":
+    def __enter__(self) -> "CloudSyncClient":
         return self
 
     def __exit__(self, *args: object) -> None:
@@ -198,7 +198,7 @@ class SyncClient:
         opts = opts or ListSourcesOptions()
         params = _strip_none(
             {
-                "database_name": opts.database_name,
+                "database_name": self._database_name(),
                 "source_type": opts.source_type.value if opts.source_type else None,
                 "limit": opts.limit,
                 "offset": opts.offset,
@@ -215,7 +215,7 @@ class SyncClient:
         repository = _parse_github_repository(config.github.repository)
 
         body: Dict[str, Any] = {
-            "database_name": config.database_name,
+            "database_name": self._database_name(),
             "github": _strip_none(
                 {
                     "repository": repository,
@@ -243,7 +243,7 @@ class SyncClient:
         bucket_name = _parse_s3_bucket_name(config.s3.bucket_name)
 
         body: Dict[str, Any] = {
-            "database_name": config.database_name,
+            "database_name": self._database_name(),
             "s3": _strip_none(
                 {
                     "bucket_name": bucket_name,
@@ -276,7 +276,7 @@ class SyncClient:
         starting_url = _validate_starting_url(config.web.starting_url)
 
         body: Dict[str, Any] = {
-            "database_name": config.database_name,
+            "database_name": self._database_name(),
             "web_scrape": _strip_none(
                 {
                     "starting_url": starting_url,
@@ -319,10 +319,11 @@ class SyncClient:
     ) -> List[Invocation]:
         """List invocations, with optional filtering."""
         opts = opts or ListInvocationsOptions()
+        database_name = None if opts.source_id is not None else self._database_name()
         params = _strip_none(
             {
                 "source_id": opts.source_id,
-                "database_name": opts.database_name,
+                "database_name": database_name,
                 "source_type": opts.source_type.value if opts.source_type else None,
                 "status": opts.status.value if opts.status else None,
                 "limit": opts.limit,

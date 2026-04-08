@@ -8,9 +8,7 @@ import {
 import type { CreateSourcePayload, CreateJobPayload } from "./sync-api";
 import { chromaFetch } from "./chroma-fetch";
 import { ChromaValueError } from "./errors";
-import * as process from "node:process";
 import type {
-  SyncClientArgs,
   SyncSource,
   Invocation,
   InvocationsByKeysResult,
@@ -120,27 +118,77 @@ function toApiEmbeddingConfig(config?: SyncEmbeddingConfig) {
   };
 }
 
-export class SyncClient {
+function toHeaderRecord(
+  headers?: HeadersInit,
+): Record<string, string> | undefined {
+  if (!headers) {
+    return undefined;
+  }
+
+  if (headers instanceof Headers) {
+    const headerRecord: Record<string, string> = {};
+    headers.forEach((value, key) => {
+      headerRecord[key] = value;
+    });
+    return headerRecord;
+  }
+
+  if (Array.isArray(headers)) {
+    return Object.fromEntries(headers);
+  }
+
+  return headers;
+}
+
+interface CloudSyncClientArgs {
+  apiKey: string;
+  host?: string;
+  fetchOptions?: RequestInit;
+  databaseName: () => Promise<string>;
+}
+
+export interface CloudSyncAPI {
+  listSources(opts?: ListSourcesOptions): Promise<SyncSource[]>;
+  createGitHubSource(
+    config: CreateGitHubSourceArgs,
+  ): Promise<{ sourceId: string }>;
+  createS3Source(config: CreateS3SourceArgs): Promise<{ sourceId: string }>;
+  createWebSource(config: CreateWebSourceArgs): Promise<{ sourceId: string }>;
+  getSource(sourceId: string): Promise<SyncSource>;
+  deleteSource(sourceId: string): Promise<void>;
+  listInvocations(opts?: ListInvocationsOptions): Promise<Invocation[]>;
+  getInvocation(invocationId: string): Promise<Invocation>;
+  cancelInvocation(invocationId: string): Promise<void>;
+  createInvocation(
+    sourceId: string,
+    config: CreateInvocationArgs,
+  ): Promise<{ invocationId: string }>;
+  getLatestInvocationsByKeys(
+    sourceId: string,
+    objectKeys: string[],
+  ): Promise<InvocationsByKeysResult>;
+  health(): Promise<void>;
+}
+
+export class CloudSyncClient implements CloudSyncAPI {
   private readonly apiClient: ReturnType<typeof createClient>;
+  private readonly databaseName: () => Promise<string>;
 
-  constructor(args: SyncClientArgs = {}) {
-    const apiKey = args.apiKey || process.env.CHROMA_API_KEY;
-    if (!apiKey) {
-      throw new ChromaValueError(
-        "Missing API key. Please provide it to the SyncClient constructor or set your CHROMA_API_KEY environment variable",
-      );
-    }
-
+  constructor(args: CloudSyncClientArgs) {
+    this.databaseName = args.databaseName;
     this.apiClient = createClient(
       createConfig({
+        signal: args.fetchOptions?.signal,
+        credentials: args.fetchOptions?.credentials,
+        keepalive: args.fetchOptions?.keepalive,
         baseUrl: args.host
           ? `https://${args.host}`
           : "https://sync.trychroma.com",
         throwOnError: true,
         fetch: chromaFetch,
         headers: {
-          "x-chroma-token": apiKey,
-          ...args.fetchOptions?.headers,
+          ...toHeaderRecord(args.fetchOptions?.headers),
+          "x-chroma-token": args.apiKey,
         },
       }),
     );
@@ -152,7 +200,7 @@ export class SyncClient {
     const { data } = await SourceService.listSources({
       client: this.apiClient,
       query: {
-        database_name: opts.databaseName,
+        database_name: await this.databaseName(),
         source_type: opts.sourceType,
         limit: opts.limit,
         offset: opts.offset,
@@ -168,7 +216,7 @@ export class SyncClient {
     const repository = parseGitHubRepository(config.github.repository);
 
     const body: CreateSourcePayload = {
-      database_name: config.databaseName,
+      database_name: await this.databaseName(),
       embedding: toApiEmbeddingConfig(config.embedding),
       chunking: config.chunking,
       github: {
@@ -191,7 +239,7 @@ export class SyncClient {
     const bucketName = parseS3BucketName(config.s3.bucketName);
 
     const body: CreateSourcePayload = {
-      database_name: config.databaseName,
+      database_name: await this.databaseName(),
       embedding: toApiEmbeddingConfig(config.embedding),
       chunking: config.chunking,
       s3: {
@@ -217,7 +265,7 @@ export class SyncClient {
     const startingUrl = validateStartingUrl(config.web.startingUrl);
 
     const body: CreateSourcePayload = {
-      database_name: config.databaseName,
+      database_name: await this.databaseName(),
       embedding: toApiEmbeddingConfig(config.embedding),
       chunking: config.chunking,
       web_scrape: {
@@ -256,11 +304,13 @@ export class SyncClient {
   async listInvocations(
     opts: ListInvocationsOptions = {},
   ): Promise<Invocation[]> {
+    const databaseName =
+      opts.sourceId === undefined ? await this.databaseName() : undefined;
     const { data } = await InvocationService.listJobs({
       client: this.apiClient,
       query: {
         source_id: opts.sourceId,
-        database_name: opts.databaseName,
+        database_name: databaseName,
         source_type: opts.sourceType,
         status: opts.status,
         limit: opts.limit,

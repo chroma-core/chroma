@@ -17,5 +17,4 @@ export * from "./errors";
 export * from "./collection-configuration";
 export * from "./execution";
 export * from "./schema";
-export * from "./sync-client";
 export * from "./sync-types";
