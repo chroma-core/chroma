@@ -305,7 +305,7 @@ impl ManifestManager {
         let enumeration_offset = enumeration_offset as u64;
         let compaction_offset =
             Self::region_compaction_offset(intrinsic_cursor, stored_initial_offset);
-        let mut stmt2 = Statement::new(
+        let mut stmt2 = Statement::new(format!(
             "
             SELECT
                 fragments.ident,
@@ -314,11 +314,12 @@ impl ManifestManager {
                 fragments.position_limit,
                 fragments.num_bytes,
                 fragments.setsum
-            FROM fragments
+            FROM fragments@{{FORCE_INDEX={}}}
             WHERE fragments.log_id = @log_id
                 AND fragments.position_limit > @compaction_offset
             ",
-        );
+            Self::FRAGMENTS_BY_POSITION_LIMIT_INDEX,
+        ));
         stmt2.add_param("log_id", &log_id.to_string());
         stmt2.add_param("compaction_offset", &(compaction_offset.offset() as i64));
         // Load the fragments.
@@ -456,14 +457,15 @@ impl ManifestManager {
         let enumeration_offset = enumeration_offset as u64;
         let compaction_offset =
             Self::region_compaction_offset(intrinsic_cursor, stored_initial_offset);
-        let mut stmt2 = Statement::new(
+        let mut stmt2 = Statement::new(format!(
             "
             SELECT MIN(fragments.position_start) AS min_position_start
-            FROM fragments
+            FROM fragments@{{FORCE_INDEX={}}}
             WHERE fragments.log_id = @log_id
                 AND fragments.position_limit > @compaction_offset
             ",
-        );
+            Self::FRAGMENTS_BY_POSITION_LIMIT_INDEX,
+        ));
         stmt2.add_param("log_id", &log_id.to_string());
         stmt2.add_param("compaction_offset", &(compaction_offset.offset() as i64));
         let mut iter = tx.query(stmt2).await?;
