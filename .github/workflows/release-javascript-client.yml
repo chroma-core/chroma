@@ -78,10 +78,6 @@ jobs:
         PACKAGE_NAME=$(jq -r '.name' $CHROMADB_PKG)
         jq --arg org "$ORG_NAME" --arg name "$PACKAGE_NAME" '.name = "\($org)/\($name)"' $CHROMADB_PKG > tmp.$$.json && mv tmp.$$.json $CHROMADB_PKG
 
-        # Update chromadb-client package
-        CLIENT_PKG="./packages/chromadb-client/package.json"
-        PACKAGE_NAME=$(jq -r '.name' $CLIENT_PKG)
-        jq --arg org "$ORG_NAME" --arg name "$PACKAGE_NAME" '.name = "\($org)/\($name)"' $CLIENT_PKG > tmp.$$.json && mv tmp.$$.json $CLIENT_PKG
       working-directory: ./clients/js/
     - name: Publish packages
       run: pnpm publish -r --access public --no-git-checks
