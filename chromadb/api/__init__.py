@@ -438,7 +438,7 @@ class ClientAPI(BaseAPI, ABC):
             Collection: The newly created collection.
 
         Raises:
-            ValueError: If the collection already exists and get_or_create is False.
+            UniqueConstraintError: If the collection already exists and get_or_create is False.
             ValueError: If the collection name is invalid.
 
         Examples:
@@ -472,7 +472,7 @@ class ClientAPI(BaseAPI, ABC):
             Collection: The collection
 
         Raises:
-            ValueError: If the collection does not exist
+            NotFoundError: If the collection does not exist
 
         Examples:
             ```python
