@@ -67,7 +67,7 @@ def test_provider_repeating(providers: List[str]) -> None:
 
 def test_invalid_sha256() -> None:
     ef = ONNXMiniLM_L6_V2()
-    shutil.rmtree(ef.DOWNLOAD_PATH)  # clean up any existing models
+    shutil.rmtree(ef.download_path)  # clean up any existing models
     with pytest.raises(ValueError) as e:
         ef._MODEL_SHA256 = "invalid"
         ef(["test"])
@@ -76,15 +76,15 @@ def test_invalid_sha256() -> None:
 
 def test_partial_download() -> None:
     ef = ONNXMiniLM_L6_V2()
-    shutil.rmtree(ef.DOWNLOAD_PATH, ignore_errors=True)  # clean up any existing models
-    os.makedirs(ef.DOWNLOAD_PATH, exist_ok=True)
-    path = os.path.join(ef.DOWNLOAD_PATH, ef.ARCHIVE_FILENAME)
+    shutil.rmtree(ef.download_path, ignore_errors=True)  # clean up any existing models
+    os.makedirs(ef.download_path, exist_ok=True)
+    path = os.path.join(ef.download_path, ef.ARCHIVE_FILENAME)
     with open(path, "wb") as f:  # create invalid file to simulate partial download
         f.write(b"invalid")
     ef._download_model_if_not_exists()  # re-download model
     assert os.path.exists(path)
     assert _verify_sha256(
-        str(os.path.join(ef.DOWNLOAD_PATH, ef.ARCHIVE_FILENAME)),
+        str(os.path.join(ef.download_path, ef.ARCHIVE_FILENAME)),
         ef._MODEL_SHA256,
     )
     assert len(ef(["test"])) == 1
