@@ -171,7 +171,10 @@ impl Segment {
         )
     }
 
-    pub fn filepaths_to_prefetch(&self) -> Vec<String> {
+    /// Returns the file paths that should be prefetched for this segment.
+    /// If shard_index is None, returns the active shard's file paths. If shard_index is Some, returns
+    /// only the file paths for that shard.
+    pub fn filepaths_to_prefetch(&self, shard_index: Option<u32>) -> Vec<String> {
         let mut res = Vec::new();
         match self.r#type {
             SegmentType::QuantizedSpann => {
@@ -181,13 +184,23 @@ impl Segment {
                     QUANTIZED_SPANN_SCALAR_METADATA,
                 ] {
                     if let Some(paths) = self.file_path.get(key) {
-                        res.extend(paths.iter().cloned());
+                        if let Some(path) = match shard_index {
+                            Some(index) => paths.get(index as usize),
+                            None => paths.last(),
+                        } {
+                            res.push(path.clone());
+                        }
                     }
                 }
             }
             SegmentType::Spann => {
                 if let Some(pl_path) = self.file_path.get(POSTING_LIST_PATH) {
-                    res.extend(pl_path.iter().cloned());
+                    if let Some(path) = match shard_index {
+                        Some(index) => pl_path.get(index as usize),
+                        None => pl_path.last(),
+                    } {
+                        res.push(path.clone());
+                    }
                 }
             }
             SegmentType::BlockfileMetadata | SegmentType::BlockfileRecord => {
@@ -195,7 +208,12 @@ impl Segment {
                     if key == USER_ID_BLOOM_FILTER {
                         continue;
                     }
-                    res.extend(paths.iter().cloned());
+                    if let Some(path) = match shard_index {
+                        Some(index) => paths.get(index as usize),
+                        None => paths.last(),
+                    } {
+                        res.push(path.clone());
+                    }
                 }
             }
             _ => {}

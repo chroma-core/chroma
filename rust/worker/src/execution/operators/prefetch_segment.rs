@@ -19,6 +19,7 @@ impl PrefetchSegmentOperator {
 pub struct PrefetchSegmentInput {
     segment: Segment,
     blockfile_provider: BlockfileProvider,
+    shard_index: Option<u32>,
 }
 
 impl PrefetchSegmentInput {
@@ -26,6 +27,19 @@ impl PrefetchSegmentInput {
         Self {
             segment,
             blockfile_provider,
+            shard_index: None, // Will only prefetch active (last) shard by default
+        }
+    }
+
+    pub fn new_with_shard(
+        segment: Segment,
+        blockfile_provider: BlockfileProvider,
+        shard_index: Option<u32>,
+    ) -> Self {
+        Self {
+            segment,
+            blockfile_provider,
+            shard_index,
         }
     }
 }
@@ -74,7 +88,7 @@ impl Operator<PrefetchSegmentInput, PrefetchSegmentOutput> for PrefetchSegmentOp
 
         let mut futures = input
             .segment
-            .filepaths_to_prefetch()
+            .filepaths_to_prefetch(input.shard_index)
             .into_iter()
             .map(|blockfile_path| async move {
                 let (prefix, blockfile_id) = Segment::extract_prefix_and_id(&blockfile_path)?;

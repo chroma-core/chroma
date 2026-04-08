@@ -296,9 +296,10 @@ impl Orchestrator for KnnFilterOrchestrator {
         // prefetch spann segment
         let prefetch_task = wrap(
             Box::new(PrefetchSegmentOperator::new()),
-            PrefetchSegmentInput::new(
+            PrefetchSegmentInput::new_with_shard(
                 self.collection_and_segments.vector_segment.clone(),
                 self.blockfile_provider.clone(),
+                Some(self.shard_index),
             ),
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -311,9 +312,10 @@ impl Orchestrator for KnnFilterOrchestrator {
         // prefetch record segment
         let prefetch_record_segment_task = wrap(
             Box::new(PrefetchSegmentOperator::new()),
-            PrefetchSegmentInput::new(
+            PrefetchSegmentInput::new_with_shard(
                 self.collection_and_segments.record_segment.clone(),
                 self.blockfile_provider.clone(),
+                Some(self.shard_index),
             ),
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -326,9 +328,10 @@ impl Orchestrator for KnnFilterOrchestrator {
         // Prefetch metadata segment.
         let prefetch_metadata_task = wrap(
             Box::new(PrefetchSegmentOperator::new()),
-            PrefetchSegmentInput::new(
+            PrefetchSegmentInput::new_with_shard(
                 self.collection_and_segments.metadata_segment.clone(),
                 self.blockfile_provider.clone(),
+                Some(self.shard_index),
             ),
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
