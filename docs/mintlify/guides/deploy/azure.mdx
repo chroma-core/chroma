@@ -50,7 +50,17 @@ location            = "your-location"
 machine_type        = "Standard_B1s"
 ```
 
-### Step 4: Initialize and deploy with Terraform
+### Step 4: Generate new Key Pairs
+Generate a new key pair in the ssh folder:
+- Windows: `C:\Users\<YourUsername>\.ssh\`
+- Linux/macOS: `~/.ssh/` (i.e. `$HOME/.ssh/`)
+
+Please choose a strong passphrase.
+```bash
+ssh-keygen -t rsa -b 4096 -f id_rsa 
+```
+
+### Step 5: Initialize and deploy with Terraform
 
 Download our [Azure Terraform configuration](https://github.com/chroma-core/chroma/blob/main/deployments/azure/main.tf) to the same directory as your `chroma.tfvars` file. Then run the following commands to deploy your Chroma stack.
 
@@ -78,7 +88,7 @@ After a few minutes, you can get the IP address of your instance with
 terraform output -raw public_ip_address
 ```
 
-### Step 5: Chroma Client Set-Up
+### Step 6: Chroma Client Set-Up
 
 <Tabs>
 
@@ -133,7 +143,7 @@ chroma_client.heartbeat().await?;
 
 </Tabs>
 
-### Step 5: Clean Up (optional).
+### Step 7: Clean Up (optional).
 
 To destroy the stack and remove all Azure resources, use the `terraform destroy` command.
 
