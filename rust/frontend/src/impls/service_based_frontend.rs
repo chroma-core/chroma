@@ -508,8 +508,8 @@ impl ServiceBasedFrontend {
                 let provider = self.collections_with_segments_provider.clone();
                 let database_name = database_name.clone();
                 async move {
-                    executor
-                        .search(shard_plan.clone(), move |code: tonic::Code| {
+                    Box::pin(
+                        executor.search(shard_plan.clone(), move |code: tonic::Code| {
                             let mut provider = provider.clone();
                             let mut replan = shard_plan.clone();
                             let database_name = database_name.clone();
@@ -529,8 +529,9 @@ impl ServiceBasedFrontend {
                                 replan.scan.num_shards = num_shards;
                                 Ok(replan)
                             }
-                        })
-                        .await
+                        }),
+                    )
+                    .await
                 }
             })
             .collect();
