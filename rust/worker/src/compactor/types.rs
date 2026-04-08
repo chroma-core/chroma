@@ -7,6 +7,7 @@ use tokio::sync::oneshot;
 pub(crate) struct CompactionJob {
     pub(crate) collection_id: CollectionUuid,
     pub(crate) database_name: DatabaseName,
+    pub(crate) tenant_id: String,
 }
 
 #[derive(Clone, Debug)]

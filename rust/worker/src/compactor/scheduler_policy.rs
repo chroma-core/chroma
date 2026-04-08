@@ -59,6 +59,7 @@ impl SchedulerPolicy for LasCompactionTimeSchedulerPolicy {
             tasks.push(CompactionJob {
                 collection_id: collection.collection_id,
                 database_name,
+                tenant_id: collection.tenant_id.clone(),
             });
         }
         tasks

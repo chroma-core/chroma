@@ -450,6 +450,7 @@ impl Scheduler {
             self.job_queue.push(CompactionJob {
                 collection_id: record.collection_id,
                 database_name: database_name.clone(),
+                tenant_id: record.tenant_id.clone(),
             });
             self.oneoff_collections.remove(&record.collection_id);
             rem_capacity -= 1;
