@@ -51,6 +51,9 @@ impl chroma_error::ChromaError for RecordSegmentWriterCreationError {
 pub struct RecordSegmentWriter {
     shards: Vec<RecordSegmentWriterShard>,
     pub id: SegmentUuid,
+    // TODO(tanujnay112): Remove SegmentUuid from above as its
+    // redundant with this.
+    segment: Segment,
 }
 
 impl RecordSegmentWriter {
@@ -87,7 +90,40 @@ impl RecordSegmentWriter {
         Ok(Self {
             shards: writer_shards,
             id: segment.id,
+            segment: segment.clone(),
         })
+    }
+
+    /// Returns the number of shards in the writer
+    pub fn num_shards(&self) -> usize {
+        self.shards.len()
+    }
+
+    /// Returns a read-only view of the shards
+    pub fn shards(&self) -> &[RecordSegmentWriterShard] {
+        &self.shards
+    }
+
+    pub async fn create_new_shard(
+        &mut self,
+        collection: &chroma_types::Collection,
+        blockfile_provider: &BlockfileProvider,
+        bloom_filter_manager: Option<BloomFilterManager>,
+    ) -> Result<SegmentShard, RecordSegmentWriterCreationError> {
+        let new_shard_segment = self.segment.new_shard();
+
+        let new_writer_shard = RecordSegmentWriterShard::from_segment(
+            &collection.tenant,
+            &collection.database_id,
+            &new_shard_segment,
+            blockfile_provider,
+            collection.schema.as_ref().and_then(|s| s.cmek.clone()),
+            bloom_filter_manager,
+        )
+        .await?;
+
+        self.shards.push(new_writer_shard);
+        Ok(new_shard_segment)
     }
 
     pub async fn apply_materialized_log_chunk(
@@ -850,6 +886,11 @@ impl RecordSegmentFlusher {
             }
         }
 
+        tracing::info!(
+            "Flushed all record segment shards. flushed_files: {:?}",
+            all_file_paths
+        );
+
         Ok(all_file_paths)
     }
 
@@ -1495,6 +1536,13 @@ impl<'me> RecordSegmentReader<'me> {
             .collect::<Vec<_>>();
 
         Ok(sharded_logs)
+    }
+
+    pub async fn get_active_shard_record_count(&self) -> Result<usize, Box<dyn ChromaError>> {
+        match self.shards.last() {
+            Some(Some(shard)) => shard.count().await,
+            _ => Ok(0),
+        }
     }
 }
 

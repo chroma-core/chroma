@@ -73,6 +73,9 @@ impl chroma_error::ChromaError for MetadataSegmentWriterError {
 pub struct MetadataSegmentWriter<'me> {
     shards: Vec<MetadataSegmentWriterShard<'me>>,
     pub id: SegmentUuid,
+    // TODO(tanujnay112): Remove SegmentUuid from above as its
+    // redundant with this.
+    segment: Segment,
 }
 
 impl<'me> MetadataSegmentWriter<'me> {
@@ -113,7 +116,43 @@ impl<'me> MetadataSegmentWriter<'me> {
         Ok(Self {
             shards: writer_shards,
             id: segment.id,
+            segment: segment.clone(),
         })
+    }
+
+    /// Returns the number of shards in the writer
+    pub fn num_shards(&self) -> usize {
+        self.shards.len()
+    }
+
+    /// Returns a read-only view of the shards
+    pub fn shards(&self) -> &[MetadataSegmentWriterShard<'me>] {
+        &self.shards
+    }
+
+    pub async fn create_new_shard(
+        &mut self,
+        collection: &chroma_types::Collection,
+        blockfile_provider: &BlockfileProvider,
+    ) -> Result<(), MetadataSegmentWriterError> {
+        // Create a new segment shard with empty file paths
+        let new_shard_segment = self.segment.new_shard();
+        let cmek = collection.schema.as_ref().and_then(|s| s.cmek.clone());
+
+        // Create the new writer shard
+        let new_writer_shard = MetadataSegmentWriterShard::from_segment(
+            &collection.tenant,
+            &collection.database_id,
+            &new_shard_segment,
+            blockfile_provider,
+            cmek,
+        )
+        .await?;
+
+        // Add to our shards vector
+        self.shards.push(new_writer_shard);
+
+        Ok(())
     }
 
     pub async fn apply_materialized_log_chunk(
@@ -124,6 +163,10 @@ impl<'me> MetadataSegmentWriter<'me> {
     ) -> Result<Option<Schema>, ApplyMaterializedLogError> {
         // Apply to all shards concurrently
         let partitions = &materialized.shards;
+        tracing::info!(
+            "Applying materialized log chunk to {} shards",
+            partitions.len()
+        );
 
         // Extract shard readers ahead of time
         let shard_readers: Vec<_> = (0..self.shards.len())

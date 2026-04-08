@@ -36,6 +36,7 @@ use crate::execution::{
             FlushSegmentWriterOutput,
         },
         materialize_logs::MaterializeLogOutput,
+        seal_operator::{SealInput, SealOperator, SealOperatorError, SealOutput},
     },
     orchestration::compact::{CollectionCompactInfo, CompactionContextError},
 };
@@ -97,6 +98,8 @@ pub enum ApplyLogsOrchestratorError {
     SpannSegment(#[from] SpannSegmentWriterShardError),
     #[error("Could not count current segment: {0}")]
     CountError(Box<dyn chroma_error::ChromaError>),
+    #[error("Error sealing segment: {0}")]
+    Seal(#[from] SealOperatorError),
 }
 
 impl ChromaError for ApplyLogsOrchestratorError {
@@ -124,6 +127,7 @@ impl ChromaError for ApplyLogsOrchestratorError {
             Self::Result(_) => true,
             Self::SpannSegment(e) => e.should_trace_error(),
             Self::CountError(e) => e.should_trace_error(),
+            Self::Seal(e) => e.should_trace_error(),
         }
     }
 }
@@ -474,6 +478,69 @@ impl Orchestrator for ApplyLogsOrchestrator {
             }
         };
 
+        if let Some(shard_size) = self.context.shard_size {
+            if shard_size != 0 {
+                // Get the writers
+                let writers = match self.context.get_segment_writers() {
+                    Ok(writers) => writers,
+                    Err(e) => {
+                        self.terminate_with_result(Err(e.into()), ctx).await;
+                        return Vec::new();
+                    }
+                };
+
+                let collection = match self.context.collection_info.get() {
+                    Some(collection_info) => collection_info.collection.clone(),
+                    None => {
+                        self.terminate_with_result(
+                            Err(ApplyLogsOrchestratorError::InvariantViolation(
+                                "Collection info should have been set before sealing",
+                            )),
+                            ctx,
+                        )
+                        .await;
+                        return Vec::new();
+                    }
+                };
+
+                let collection_logical_size_delta = materialized_outputs
+                    .iter()
+                    .map(|output| output.collection_logical_size_delta)
+                    .sum();
+
+                self.collection_logical_size_delta_bytes = collection_logical_size_delta;
+
+                // might have to seal the active shard and create a new one
+                let operator = SealOperator::new();
+                let input = SealInput::new(
+                    writers,
+                    materialized_outputs
+                        .iter()
+                        .map(|output| output.result.clone())
+                        .collect(),
+                    self.context.shard_size,
+                    collection,
+                    self.context.blockfile_provider.clone(),
+                    self.context.bloom_filter_manager.clone(),
+                    self.context.spann_provider.clone(),
+                    #[cfg(test)]
+                    self.context.poison_offset,
+                );
+                let task = wrap(
+                    operator,
+                    input,
+                    ctx.receiver(),
+                    self.context
+                        .orchestrator_context
+                        .task_cancellation_token
+                        .clone(),
+                );
+                tasks.push((task, None));
+
+                return tasks;
+            }
+        }
+
         for materialized_output in materialized_outputs.iter() {
             if materialized_output.result.is_empty() {
                 self.terminate_with_result(
@@ -666,6 +733,87 @@ impl Handler<TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorErro
 
         if self.num_uncompleted_tasks_by_segment.is_empty() {
             self.finish_materialized_output(ctx).await;
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<SealOutput, SealOperatorError>> for ApplyLogsOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<SealOutput, SealOperatorError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let seal_output = match message.into_inner() {
+            Ok(output) => output,
+            Err(e) => {
+                let error = match e {
+                    chroma_system::TaskError::TaskFailed(seal_error) => {
+                        ApplyLogsOrchestratorError::Seal(seal_error)
+                    }
+                    chroma_system::TaskError::Panic(_) | chroma_system::TaskError::Aborted => {
+                        ApplyLogsOrchestratorError::InvariantViolation("Seal task failed")
+                    }
+                };
+                self.terminate_with_result(Err(error), ctx).await;
+                return;
+            }
+        };
+
+        match self.context.get_collection_info_mut() {
+            Ok(collection_info) => {
+                collection_info.writers = Some(seal_output.sealed_writers.clone());
+            }
+            Err(_) => {
+                self.terminate_with_result(
+                    Err(ApplyLogsOrchestratorError::InvariantViolation(
+                        "Collection info should have been set",
+                    )),
+                    ctx,
+                )
+                .await;
+                return;
+            }
+        }
+
+        let logs_to_apply = seal_output.split_materialized_outputs;
+        for materialized_output in logs_to_apply {
+            if materialized_output.shards.is_empty() {
+                self.terminate_with_result(
+                    Err(ApplyLogsOrchestratorError::InvariantViolation(
+                        "Attempting to apply an empty materialized output",
+                    )),
+                    ctx,
+                )
+                .await;
+                return;
+            }
+
+            // Create tasks for this materialized output
+            let result = self
+                .create_apply_log_to_segment_writer_tasks(materialized_output, ctx)
+                .await;
+
+            let tasks = match result {
+                Ok(tasks) => tasks,
+                Err(e) => {
+                    self.terminate_with_result(Err(e.into()), ctx).await;
+                    return;
+                }
+            };
+
+            // Dispatch the tasks immediately
+            for (task, span) in tasks {
+                let res = self.dispatcher().send(task, span).await;
+                if let Err(e) = res {
+                    tracing::error!("Failed to dispatch apply log task: {}", e);
+                    self.terminate_with_result(Err(ApplyLogsOrchestratorError::Channel(e)), ctx)
+                        .await;
+                    return;
+                }
+            }
         }
     }
 }

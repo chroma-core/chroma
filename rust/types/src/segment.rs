@@ -128,7 +128,7 @@ impl Segment {
     pub fn get_shards(&self) -> Result<Vec<SegmentShard>, SegmentShardError> {
         // If there are no file paths, return empty vector
         if self.file_path.is_empty() {
-            let vec = vec![self.get_new_shard()];
+            let vec = vec![self.new_shard()];
             return Ok(vec);
         }
 
@@ -330,7 +330,7 @@ impl TryFrom<(&Segment, u32)> for SegmentShard {
 }
 
 impl Segment {
-    pub fn get_new_shard(&self) -> SegmentShard {
+    pub fn new_shard(&self) -> SegmentShard {
         SegmentShard {
             id: self.id,
             r#type: self.r#type,

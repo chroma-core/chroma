@@ -2,7 +2,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
     logical_size_of_metadata, Chunk, DataRecord, DeletedMetadata, LogRecord,
     MaterializedLogOperation, Metadata, MetadataDelta, MetadataValue, MetadataValueConversionError,
-    Operation, Schema, SegmentUuid, UpdateMetadata, UpdateMetadataValue,
+    Operation, Schema, SegmentType, SegmentUuid, UpdateMetadata, UpdateMetadataValue,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU32;
@@ -553,6 +553,32 @@ impl PartitionedMaterializeLogsResult {
     pub fn has_backfill(&self) -> bool {
         self.shards.iter().any(|s| s.has_backfill())
     }
+
+    pub fn split(&self, pivot_offset_id: u32) -> Option<PartitionedMaterializeLogsResult> {
+        let mut new_partitioned = self.clone();
+        let active_shard = new_partitioned.shards.last_mut()?;
+        let new_active_shard = active_shard.split(pivot_offset_id);
+        new_partitioned.shards.push(new_active_shard);
+        Some(new_partitioned)
+    }
+
+    pub fn get_active_record_delta(&self) -> i32 {
+        let active_shard = match self.shards.last() {
+            Some(shard) => shard,
+            None => return 0,
+        };
+
+        let mut count = 0;
+        for (record, _) in active_shard.materialized.iter() {
+            let delta = match record.final_operation {
+                MaterializedLogOperation::AddNew => 1,
+                MaterializedLogOperation::DeleteExisting => -1,
+                _ => 0,
+            };
+            count += delta;
+        }
+        count
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -571,6 +597,10 @@ impl MaterializeLogsResult {
         self.materialized.len()
     }
 
+    pub fn total_len(&self) -> usize {
+        self.materialized.total_len()
+    }
+
     pub fn has_backfill(&self) -> bool {
         self.has_backfill
     }
@@ -578,9 +608,34 @@ impl MaterializeLogsResult {
     pub fn iter(&'_ self) -> MaterializeLogsResultIter<'_> {
         MaterializeLogsResultIter {
             logs: &self.logs,
-            chunk: &self.materialized,
+            inner: self.materialized.iter(),
             index: 0,
         }
+    }
+
+    pub fn split(&mut self, pivot_offset_id: u32) -> MaterializeLogsResult {
+        let mut other_mat_logs = self.clone();
+        let mut old_visibility = vec![false; self.materialized.total_len()];
+        let mut new_visibility = old_visibility.clone();
+        (0..self.materialized.total_len()).for_each(|i| {
+            if let Some(true) = self.materialized.get_visibility(i) {
+                old_visibility[i] = true;
+            }
+        });
+
+        for (record, idx) in self.materialized.iter() {
+            if record.final_operation == MaterializedLogOperation::AddNew
+                && record.offset_id >= pivot_offset_id
+            {
+                old_visibility[idx] = false;
+                new_visibility[idx] = true;
+            }
+        }
+
+        self.materialized.set_visibility(old_visibility);
+
+        other_mat_logs.materialized.set_visibility(new_visibility);
+        other_mat_logs
     }
 }
 
@@ -592,7 +647,7 @@ impl<'log_data> IntoIterator for &'log_data MaterializeLogsResult {
     fn into_iter(self) -> Self::IntoIter {
         MaterializeLogsResultIter {
             logs: &self.logs,
-            chunk: &self.materialized,
+            inner: self.materialized.iter(),
             index: 0,
         }
     }
@@ -600,7 +655,7 @@ impl<'log_data> IntoIterator for &'log_data MaterializeLogsResult {
 
 pub struct MaterializeLogsResultIter<'log_data> {
     logs: &'log_data Chunk<LogRecord>,
-    chunk: &'log_data Chunk<MaterializedLogRecord>,
+    inner: chroma_types::DataChunkIteraror<'log_data, MaterializedLogRecord>,
     index: usize,
 }
 
@@ -608,16 +663,19 @@ impl<'log_data> Iterator for MaterializeLogsResultIter<'log_data> {
     type Item = BorrowedMaterializedLogRecord<'log_data>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index < self.chunk.len() {
-            let item = BorrowedMaterializedLogRecord {
-                materialized_log_record: self.chunk.get(self.index).unwrap(),
+        self.inner.next().map(|(materialized_log_record, index)| {
+            self.index = index;
+            BorrowedMaterializedLogRecord {
+                materialized_log_record,
                 logs: self.logs,
-            };
-            self.index += 1;
-            Some(item)
-        } else {
-            None
-        }
+            }
+        })
+    }
+}
+
+impl<'log_data> MaterializeLogsResultIter<'log_data> {
+    pub fn get_index(&self) -> usize {
+        self.index
     }
 }
 
@@ -1130,6 +1188,8 @@ pub enum VectorSegmentWriterError {
     CreateSpannWriter(crate::distributed_spann::SpannSegmentWriterShardError),
     #[error("Unsupported vector segment type: {0:?}")]
     UnsupportedSegmentType(chroma_types::SegmentType),
+    #[error("Invalid collection passed")]
+    InvalidCollection,
 }
 
 impl ChromaError for VectorSegmentWriterError {
@@ -1142,6 +1202,7 @@ impl ChromaError for VectorSegmentWriterError {
             Self::CreateQuantizedSpannWriter(e) => e.code(),
             Self::CreateSpannWriter(e) => e.code(),
             Self::UnsupportedSegmentType(_) => ErrorCodes::Internal,
+            Self::InvalidCollection => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -1150,6 +1211,8 @@ impl ChromaError for VectorSegmentWriterError {
 pub struct VectorSegmentWriter {
     shards: Vec<VectorSegmentWriterShard>,
     pub id: SegmentUuid,
+    // Fields needed for create_new_shard
+    vector_segment: chroma_types::Segment,
 }
 
 impl VectorSegmentWriter {
@@ -1223,6 +1286,7 @@ impl VectorSegmentWriter {
         Ok(Self {
             shards: writer_shards,
             id: vector_segment.id,
+            vector_segment: vector_segment.clone(),
         })
     }
 
@@ -1295,6 +1359,66 @@ impl VectorSegmentWriter {
             shards: flusher_shards,
             id: self.id,
         })
+    }
+
+    pub async fn create_new_shard(
+        &mut self,
+        #[allow(unused_variables)] record_shard: &chroma_types::SegmentShard,
+        collection: &chroma_types::Collection,
+        spann_provider: &SpannProvider,
+    ) -> Result<(), VectorSegmentWriterError> {
+        if collection.collection_id != self.vector_segment.collection {
+            return Err(VectorSegmentWriterError::InvalidCollection);
+        }
+
+        // For legacy vector segments (HNSW), creating a new shard is not yet implemented
+        if self.vector_segment.r#type != SegmentType::Spann
+            && self.vector_segment.r#type != SegmentType::QuantizedSpann
+        {
+            return Err(VectorSegmentWriterError::UnsupportedSegmentType(
+                self.vector_segment.r#type,
+            ));
+        }
+
+        // Guard against QuantizedSpann when usearch feature is disabled
+        #[cfg(not(feature = "usearch"))]
+        if self.vector_segment.r#type == SegmentType::QuantizedSpann {
+            return Err(VectorSegmentWriterError::UnsupportedSegmentType(
+                self.vector_segment.r#type,
+            ));
+        }
+
+        let new_shard_segment = self.vector_segment.new_shard();
+        let dimension = collection
+            .dimension
+            .ok_or(VectorSegmentWriterError::InvalidCollection)? as usize;
+        let cmek = collection.schema.as_ref().and_then(|s| s.cmek.clone());
+
+        let new_writer_shard = match self.vector_segment.r#type {
+            SegmentType::Spann => {
+                let writer: SpannSegmentWriterShard = spann_provider
+                    .write(collection, &new_shard_segment, dimension, cmek)
+                    .await
+                    .map_err(VectorSegmentWriterError::CreateSpannWriter)?;
+                VectorSegmentWriterShard::Spann(writer)
+            }
+            #[cfg(feature = "usearch")]
+            SegmentType::QuantizedSpann => {
+                let writer = spann_provider
+                    .write_quantized_usearch(collection, &new_shard_segment, record_shard)
+                    .await
+                    .map_err(VectorSegmentWriterError::CreateQuantizedSpannWriter)?;
+                VectorSegmentWriterShard::QuantizedSpann(writer)
+            }
+            _ => {
+                return Err(VectorSegmentWriterError::UnsupportedSegmentType(
+                    self.vector_segment.r#type,
+                ));
+            }
+        };
+
+        self.shards.push(new_writer_shard);
+        Ok(())
     }
 }
 

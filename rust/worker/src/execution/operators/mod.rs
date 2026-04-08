@@ -33,6 +33,7 @@ pub mod quantized_spann_load_cluster;
 pub mod rank;
 pub mod ranked_group_by;
 pub mod repair_log_offsets;
+pub mod seal_operator;
 pub mod select;
 pub mod source_record_segment;
 pub mod source_record_segment_v2;
