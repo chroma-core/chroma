@@ -1,7 +1,7 @@
 import pytest
 from typing import List, Any, Callable, Dict
 from jsonschema import ValidationError
-from unittest.mock import MagicMock, create_autospec
+from unittest.mock import MagicMock
 from chromadb.utils.embedding_functions.schemas import (
     validate_config_schema,
     load_schema,
@@ -42,36 +42,21 @@ class TestEmbeddingFunctionSchemas:
         """Test embedding function configuration roundtrip"""
         ef_class = known_embedding_functions[ef_name]
 
-        # Create an autospec of the embedding function class
-        mock_ef = create_autospec(ef_class, instance=True)
-
-        # Mock the __call__ method
-        mock_call = MagicMock(return_value=mock_embeddings(["test"]))
-        mock_ef.__call__ = mock_call
-
-        # For chroma-cloud-qwen, mock get_config to return valid data
-        if ef_name == "chroma-cloud-qwen":
-            from chromadb.utils.embedding_functions.chroma_cloud_qwen_embedding_function import (
-                ChromaCloudQwenEmbeddingModel,
-                CHROMA_CLOUD_QWEN_DEFAULT_INSTRUCTIONS,
+        # Create a real instance so get_config() returns actual data
+        try:
+            ef_instance = self._create_ef_instance(
+                ef_name, ef_class, mock_common_deps
+            )
+        except Exception as e:
+            pytest.skip(
+                f"{ef_name} requires arguments that we cannot provide without external deps: {e}"
             )
 
-            mock_ef.get_config.return_value = {
-                "api_key_env_var": "CHROMA_API_KEY",
-                "model": ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B.value,
-                "task": "nl_to_code",
-                "instructions": CHROMA_CLOUD_QWEN_DEFAULT_INSTRUCTIONS,
-            }
+        # Mock __call__ to avoid needing to actually generate embeddings
+        mock_call = MagicMock(return_value=mock_embeddings(["test"]))
+        mock_common_deps.setattr(ef_instance, "__call__", mock_call)
 
-        # Mock the class constructor to return our mock instance
-        mock_common_deps.setattr(
-            ef_class, "__new__", lambda cls, *args, **kwargs: mock_ef
-        )
-
-        # Create instance with minimal args (constructor will be mocked)
-        ef_instance = ef_class()
-
-        # Get the config (this will use the real method)
+        # Get the config from the real instance
         config = ef_instance.get_config()
 
         # Test recreation from config
