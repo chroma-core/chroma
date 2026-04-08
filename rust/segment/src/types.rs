@@ -12,7 +12,7 @@ use tracing::{Instrument, Span};
 
 use uuid::Uuid;
 
-use crate::blockfile_record::{RecordSegmentFlusher, RecordSegmentWriter};
+use crate::blockfile_record::{RecordSegmentFlusher, RecordSegmentReader, RecordSegmentWriter};
 use crate::distributed_spann::{SpannSegmentFlusherShard, SpannSegmentWriterShard};
 #[cfg(feature = "usearch")]
 use crate::quantized_spann::{QuantizedSpannSegmentFlusherShard, QuantizedSpannSegmentWriterShard};
@@ -137,7 +137,7 @@ impl ChromaError for LogMaterializerError {
 /// E.x. `final_document_at_log_index: Option<usize>` is used instead of `final_document: Option<&str>` to avoid holding references to the data.
 /// This allows `MaterializedLogRecord` (and types above it) to be trivially Send'able.
 #[derive(Debug)]
-struct MaterializedLogRecord {
+pub struct MaterializedLogRecord {
     // False if the record exists only in the log, otherwise true.
     offset_id_exists_in_segment: bool,
     // If present in the record segment then it is the offset id
@@ -530,11 +530,36 @@ impl<'log_data, 'segment_data: 'log_data> HydratedMaterializedLogRecord<'log_dat
     }
 }
 
+// If a shard does not contain any logs,
+// there still needs to be an empty entry for it.
+#[derive(Debug, Clone)]
+pub struct PartitionedMaterializeLogsResult {
+    pub shards: Vec<MaterializeLogsResult>,
+}
+
+impl PartitionedMaterializeLogsResult {
+    pub fn is_empty(&self) -> bool {
+        self.shards.is_empty() || self.shards.iter().all(|s| s.is_empty())
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &MaterializeLogsResult> {
+        self.shards.iter()
+    }
+
+    pub fn len(&self) -> usize {
+        self.shards.iter().map(|s| s.len()).sum()
+    }
+
+    pub fn has_backfill(&self) -> bool {
+        self.shards.iter().any(|s| s.has_backfill())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MaterializeLogsResult {
-    logs: Chunk<LogRecord>,
-    materialized: Chunk<MaterializedLogRecord>,
-    has_backfill: bool,
+    pub logs: Chunk<LogRecord>,
+    pub materialized: Chunk<MaterializedLogRecord>,
+    pub has_backfill: bool,
 }
 
 impl MaterializeLogsResult {
@@ -1203,14 +1228,43 @@ impl VectorSegmentWriter {
 
     pub async fn apply_materialized_log_chunk(
         &self,
-        record_segment_reader: &Option<RecordSegmentReaderShard<'_>>,
-        materialized: &MaterializeLogsResult,
+        record_segment_reader: &Option<RecordSegmentReader<'_>>,
+        materialized: &PartitionedMaterializeLogsResult,
     ) -> Result<(), ApplyMaterializedLogError> {
         // Apply to all shards concurrently
+        let partitions = &materialized.shards;
+
+        // Ensure the number of partitions matches the number of shards
+        if self.shards.len() != partitions.len() {
+            return Err(ApplyMaterializedLogError::InvalidNumberOfPartitions {
+                expected: self.shards.len(),
+                actual: partitions.len(),
+            });
+        }
+
+        // Extract shard readers ahead of time
+        let shard_readers: Vec<_> = (0..self.shards.len())
+            .map(|shard_idx| {
+                record_segment_reader.as_ref().and_then(|reader| {
+                    reader
+                        .get_shards()
+                        .get(shard_idx)
+                        .and_then(|opt| opt.as_ref())
+                        .cloned()
+                })
+            })
+            .collect();
+
         let futures = self
             .shards
             .iter()
-            .map(|shard| shard.apply_materialized_log_chunk(record_segment_reader, materialized));
+            .zip(partitions.iter())
+            .zip(shard_readers.into_iter())
+            .map(|((shard, partitions_logs), shard_reader)| async move {
+                shard
+                    .apply_materialized_log_chunk(&shard_reader, partitions_logs)
+                    .await
+            });
 
         futures::future::try_join_all(futures).await?;
         Ok(())
@@ -1271,8 +1325,8 @@ impl ChromaSegmentWriter<'_> {
 
     pub async fn apply_materialized_log_chunk(
         &self,
-        record_segment_reader: &Option<RecordSegmentReaderShard<'_>>,
-        materialized: &MaterializeLogsResult,
+        record_segment_reader: &Option<RecordSegmentReader<'_>>,
+        materialized: &PartitionedMaterializeLogsResult,
         schema: Option<Schema>,
     ) -> Result<Option<Schema>, ApplyMaterializedLogError> {
         match self {

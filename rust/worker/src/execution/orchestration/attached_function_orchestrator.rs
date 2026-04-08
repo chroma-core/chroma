@@ -8,7 +8,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentWriter},
     blockfile_record::{
-        RecordSegmentReaderOptions, RecordSegmentReaderShard,
+        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
         RecordSegmentReaderShardCreationError, RecordSegmentWriter,
         RecordSegmentWriterShardCreationError,
     },
@@ -122,8 +122,10 @@ pub enum AttachedFunctionOrchestratorError {
     RecordSegmentWriterShard(#[from] RecordSegmentWriterShardCreationError),
     #[error("Error creating record segment writer: {0}")]
     RecordSegmentWriter(#[from] chroma_segment::blockfile_record::RecordSegmentWriterCreationError),
-    #[error("Error creating record segment reader: {0}")]
+    #[error("RecordSegmentReaderShard creation failed")]
     RecordSegmentReaderShard(#[from] RecordSegmentReaderShardCreationError),
+    #[error("RecordSegmentReader creation failed")]
+    RecordSegmentReader(#[from] RecordSegmentReaderCreationError),
     #[error("Error creating hnsw writer: {0}")]
     HnswSegment(#[from] DistributedHNSWSegmentFromSegmentError),
     #[error("Error creating quantized spann writer: {0}")]
@@ -160,6 +162,7 @@ impl ChromaError for AttachedFunctionOrchestratorError {
             AttachedFunctionOrchestratorError::RecordSegmentWriterShard(e) => e.code(),
             AttachedFunctionOrchestratorError::RecordSegmentWriter(e) => e.code(),
             AttachedFunctionOrchestratorError::RecordSegmentReaderShard(e) => e.code(),
+            AttachedFunctionOrchestratorError::RecordSegmentReader(e) => e.code(),
             AttachedFunctionOrchestratorError::HnswSegment(e) => e.code(),
             AttachedFunctionOrchestratorError::QuantizedSpannSegment(e) => e.code(),
             AttachedFunctionOrchestratorError::SpannSegment(e) => e.code(),
@@ -196,6 +199,7 @@ impl ChromaError for AttachedFunctionOrchestratorError {
             AttachedFunctionOrchestratorError::RecordSegmentReaderShard(e) => {
                 e.should_trace_error()
             }
+            AttachedFunctionOrchestratorError::RecordSegmentReader(e) => e.should_trace_error(),
             AttachedFunctionOrchestratorError::HnswSegment(e) => e.should_trace_error(),
             AttachedFunctionOrchestratorError::QuantizedSpannSegment(e) => e.should_trace_error(),
             AttachedFunctionOrchestratorError::SpannSegment(e) => e.should_trace_error(),
@@ -390,12 +394,13 @@ impl AttachedFunctionOrchestrator {
                 .collection_id
         );
 
-        let next_max_offset_id = Arc::new(
-            record_reader
-                .as_ref()
-                .map(|reader| AtomicU32::new(reader.get_max_offset_id() + 1))
-                .unwrap_or_default(),
-        );
+        let next_max_offset_ids: Vec<Arc<AtomicU32>> = record_reader
+            .as_ref()
+            .map(|rr| rr.get_max_offset_ids())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|id| Arc::new(AtomicU32::new(id + 1)))
+            .collect();
 
         if let Some(rr) = record_reader.as_ref() {
             let count = match rr.count().await {
@@ -432,7 +437,7 @@ impl AttachedFunctionOrchestrator {
             let input = MaterializeLogInput::new(
                 partition.clone(),
                 record_reader.clone(),
-                next_max_offset_id.clone(),
+                next_max_offset_ids.clone(),
                 plan,
             );
             let task = wrap(
@@ -731,35 +736,28 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
         };
 
         // Create record reader for the output collection to load existing statistics
-        let record_segment_shard = match self
+        let _record_segment_shard = match self
             .ok_or_terminate(SegmentShard::try_from((&message.record_segment, 0)), ctx)
             .await
         {
             Some(shard) => shard,
             None => return,
         };
-        let record_reader = match self
+        let record_reader = self
             .ok_or_terminate(
-                match Box::pin(RecordSegmentReaderShard::from_segment(
-                    &record_segment_shard,
+                Box::pin(RecordSegmentReader::from_segment(
+                    &message.record_segment,
                     &self.output_context.blockfile_provider,
                     self.output_context.bloom_filter_manager.clone(),
                 ))
-                .await
-                {
-                    Ok(reader) => Ok(Some(reader)),
-                    Err(err) => match *err {
-                        RecordSegmentReaderShardCreationError::UninitializedSegment => Ok(None),
-                        _ => Err(*err),
-                    },
-                },
+                .await,
                 ctx,
             )
-            .await
-        {
-            Some(reader) => reader,
-            None => return,
-        };
+            .await;
+
+        if record_reader.is_none() {
+            return;
+        }
 
         let writers = CompactWriters {
             record_reader: record_reader.filter(|_| !self.output_context.is_rebuild),

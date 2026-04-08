@@ -3,9 +3,9 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
     blockfile_metadata::MetadataSegmentError,
     blockfile_record::{
-        ApplyMaterializedLogError, RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
+        ApplyMaterializedLogError, RecordSegmentReader, RecordSegmentReaderShardCreationError,
     },
-    types::{ChromaSegmentWriter, LogMaterializerError, MaterializeLogsResult},
+    types::{ChromaSegmentWriter, LogMaterializerError, PartitionedMaterializeLogsResult},
 };
 use chroma_system::Operator;
 use chroma_types::{Schema, SegmentUuid};
@@ -59,8 +59,8 @@ impl ApplyLogToSegmentWriterOperator {
 #[derive(Debug)]
 pub struct ApplyLogToSegmentWriterInput<'bf> {
     segment_writer: ChromaSegmentWriter<'bf>,
-    materialized_logs: MaterializeLogsResult,
-    record_segment_reader: Option<RecordSegmentReaderShard<'bf>>,
+    materialized_logs: PartitionedMaterializeLogsResult,
+    record_segment_reader: Option<RecordSegmentReader<'bf>>,
     schema: Option<Schema>,
     #[cfg(test)]
     poison_offset: Option<u32>,
@@ -69,8 +69,8 @@ pub struct ApplyLogToSegmentWriterInput<'bf> {
 impl<'bf> ApplyLogToSegmentWriterInput<'bf> {
     pub fn new(
         segment_writer: ChromaSegmentWriter<'bf>,
-        materialized_logs: MaterializeLogsResult,
-        record_segment_reader: Option<RecordSegmentReaderShard<'bf>>,
+        materialized_logs: PartitionedMaterializeLogsResult,
+        record_segment_reader: Option<RecordSegmentReader<'bf>>,
         schema: Option<Schema>,
         #[cfg(test)] poison_offset: Option<u32>,
     ) -> Self {
@@ -99,12 +99,12 @@ impl ApplyLogToSegmentWriterOperator {
         input: &ApplyLogToSegmentWriterInput<'_>,
     ) -> Result<(), ApplyLogToSegmentWriterOperatorError> {
         if let Some(poison_offset) = input.poison_offset {
-            if input
-                .materialized_logs
-                .iter()
-                .any(|log| log.get_offset_id() == poison_offset)
-            {
-                return Err(ApplyLogToSegmentWriterOperatorError::PoisonOffsetFound);
+            for shard in &input.materialized_logs.shards {
+                for record in shard.iter() {
+                    if record.get_offset_id() == poison_offset {
+                        return Err(ApplyLogToSegmentWriterOperatorError::PoisonOffsetFound);
+                    }
+                }
             }
         }
         Ok(())

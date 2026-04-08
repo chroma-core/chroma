@@ -1,8 +1,8 @@
 use crate::types::ChromaSegmentFlusher;
 
 use super::blockfile_record::ApplyMaterializedLogError;
-use super::blockfile_record::RecordSegmentReaderShard;
-use super::types::MaterializeLogsResult;
+use super::types::{MaterializeLogsResult, PartitionedMaterializeLogsResult};
+use crate::blockfile_record::{RecordSegmentReader, RecordSegmentReaderShard};
 use chroma_blockstore::arrow::provider::BlockfileReaderOptions;
 use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError, ReadKey, ReadValue};
 use chroma_blockstore::BlockfileReader;
@@ -118,20 +118,55 @@ impl<'me> MetadataSegmentWriter<'me> {
 
     pub async fn apply_materialized_log_chunk(
         &self,
-        record_segment_reader: &Option<RecordSegmentReaderShard<'_>>,
-        materialized: &MaterializeLogsResult,
+        record_segment_reader: &Option<RecordSegmentReader<'_>>,
+        materialized: &PartitionedMaterializeLogsResult,
         schema: Option<Schema>,
     ) -> Result<Option<Schema>, ApplyMaterializedLogError> {
         // Apply to all shards concurrently
-        // TODO(tanujnay112): This ONLY WORKS if we have one shard.
-        let futures = self.shards.iter().map(|shard| {
-            shard.apply_materialized_log_chunk(record_segment_reader, materialized, schema.clone())
-        });
+        let partitions = &materialized.shards;
+
+        // Extract shard readers ahead of time
+        let shard_readers: Vec<_> = (0..self.shards.len())
+            .map(|shard_idx| {
+                record_segment_reader.as_ref().and_then(|reader| {
+                    reader
+                        .get_shards()
+                        .get(shard_idx)
+                        .and_then(|opt| opt.as_ref())
+                        .cloned()
+                })
+            })
+            .collect();
+
+        let futures = self
+            .shards
+            .iter()
+            .zip(partitions.iter())
+            .zip(shard_readers.into_iter())
+            .map(|((shard, partitioned), shard_reader)| {
+                let schema_clone = schema.clone();
+                async move {
+                    shard
+                        .apply_materialized_log_chunk(&shard_reader, partitioned, schema_clone)
+                        .await
+                }
+            });
 
         let results = futures::future::try_join_all(futures).await?;
 
-        // Return the first non-None schema from any shard
-        Ok(results.into_iter().find(|s| s.is_some()).flatten())
+        let res = results.into_iter().try_fold(
+            None,
+            |acc, result| -> Result<Option<Schema>, ApplyMaterializedLogError> {
+                match (acc, result) {
+                    (None, Some(schema)) => Ok(Some(schema)),
+                    (None, None) => Ok(None),
+                    (Some(existing), Some(schema)) => Ok(Some(existing.merge(&schema)?)),
+                    (Some(existing), None) => Ok(Some(existing)),
+                }
+            },
+        )?;
+
+        Ok(res)
     }
 
     pub async fn finish(&mut self) -> Result<(), Box<dyn ChromaError>> {
