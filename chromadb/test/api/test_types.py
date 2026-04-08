@@ -103,3 +103,17 @@ def test_embedding_function_results_format_when_response_is_invalid() -> None:
         from chromadb.api.types import normalize_embeddings
 
         normalize_embeddings(result)
+
+
+def test_normalize_embeddings_empty_list_raises_value_error() -> None:
+    from chromadb.api.types import normalize_embeddings
+
+    with pytest.raises(ValueError, match="non-empty"):
+        normalize_embeddings([])
+
+
+def test_normalize_embeddings_empty_inner_list_raises_value_error() -> None:
+    from chromadb.api.types import normalize_embeddings
+
+    with pytest.raises(ValueError, match="non-empty list"):
+        normalize_embeddings([[]])
