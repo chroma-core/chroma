@@ -96,6 +96,10 @@ pub struct S3StorageConfig {
     pub request_retry_count: u32,
     #[serde(default = "S3StorageConfig::default_stall_protection_ms")]
     pub stall_protection_ms: u64,
+    #[serde(default = "S3StorageConfig::default_stall_download_enabled")]
+    pub stall_download_enabled: bool,
+    #[serde(default = "S3StorageConfig::default_stall_upload_enabled")]
+    pub stall_upload_enabled: bool,
     #[serde(default = "S3StorageConfig::default_upload_part_size_bytes")]
     pub upload_part_size_bytes: usize,
     #[serde(default = "S3StorageConfig::default_download_part_size_bytes")]
@@ -128,6 +132,14 @@ impl S3StorageConfig {
         5000
     }
 
+    fn default_stall_download_enabled() -> bool {
+        false
+    }
+
+    fn default_stall_upload_enabled() -> bool {
+        true
+    }
+
     fn default_upload_part_size_bytes() -> usize {
         5 * 1024 * 1024
     }
@@ -147,6 +159,8 @@ impl Default for S3StorageConfig {
             request_timeout_ms: S3StorageConfig::default_request_timeout_ms(),
             request_retry_count: S3StorageConfig::default_request_retry_count(),
             stall_protection_ms: S3StorageConfig::default_stall_protection_ms(),
+            stall_download_enabled: S3StorageConfig::default_stall_download_enabled(),
+            stall_upload_enabled: S3StorageConfig::default_stall_upload_enabled(),
             upload_part_size_bytes: S3StorageConfig::default_upload_part_size_bytes(),
             download_part_size_bytes: S3StorageConfig::default_download_part_size_bytes(),
         }

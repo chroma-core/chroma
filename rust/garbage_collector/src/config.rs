@@ -186,6 +186,8 @@ mod tests {
                 if let S3CredentialsConfig::Minio = storage_config.credentials {
                     assert_eq!(storage_config.connect_timeout_ms, 5000);
                     assert_eq!(storage_config.request_timeout_ms, 30000);
+                    assert!(!storage_config.stall_download_enabled);
+                    assert!(storage_config.stall_upload_enabled);
                     assert_eq!(storage_config.upload_part_size_bytes, 536870912);
                     assert_eq!(storage_config.download_part_size_bytes, 8388608);
                 } else {

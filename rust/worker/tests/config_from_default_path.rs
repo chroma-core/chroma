@@ -38,6 +38,8 @@ fn test_config_from_default_path() {
                             credentials: Minio
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
+                            stall_download_enabled: true
+                            stall_upload_enabled: false
                             upload_part_size_bytes: 8388608
                             download_part_size_bytes: 8388608
                         rate_limiting_policy:
@@ -231,6 +233,8 @@ fn test_config_from_default_path() {
         match config.query_service.storage {
             chroma_storage::config::StorageConfig::AdmissionControlledS3(config) => {
                 assert_eq!(config.s3_config.bucket, "chroma");
+                assert!(config.s3_config.stall_download_enabled);
+                assert!(!config.s3_config.stall_upload_enabled);
                 match config.rate_limiting_policy {
                     chroma_storage::config::RateLimitingConfig::CountBasedPolicy(config) => {
                         assert_eq!(config.max_concurrent_requests, 15);
@@ -245,6 +249,8 @@ fn test_config_from_default_path() {
         match config.compaction_service.storage {
             chroma_storage::config::StorageConfig::AdmissionControlledS3(config) => {
                 assert_eq!(config.s3_config.bucket, "chroma");
+                assert!(!config.s3_config.stall_download_enabled);
+                assert!(config.s3_config.stall_upload_enabled);
                 match config.rate_limiting_policy {
                     chroma_storage::config::RateLimitingConfig::CountBasedPolicy(config) => {
                         assert_eq!(config.max_concurrent_requests, 15);
