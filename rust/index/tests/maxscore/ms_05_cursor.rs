@@ -8,9 +8,8 @@ fn all_mask() -> SignedRoaringBitmap {
 
 #[test]
 fn cursor_sequential_advance() {
-    let block = SparsePostingBlock::from_sorted_entries(&[
-        (0, 0.1), (1, 0.2), (2, 0.3), (3, 0.4),
-    ]).unwrap();
+    let block =
+        SparsePostingBlock::from_sorted_entries(&[(0, 0.1), (1, 0.2), (2, 0.3), (3, 0.4)]).unwrap();
     let mut cursor = PostingCursor::from_blocks(vec![block]);
 
     assert_eq!(cursor.advance(0, &all_mask()), Some((0, 0.1)));
@@ -36,9 +35,8 @@ fn cursor_multi_block_advance() {
 
 #[test]
 fn cursor_advance_with_include_mask() {
-    let block = SparsePostingBlock::from_sorted_entries(&[
-        (0, 0.1), (1, 0.2), (2, 0.3), (3, 0.4),
-    ]).unwrap();
+    let block =
+        SparsePostingBlock::from_sorted_entries(&[(0, 0.1), (1, 0.2), (2, 0.3), (3, 0.4)]).unwrap();
     let mut rbm = roaring::RoaringBitmap::new();
     rbm.insert(1);
     rbm.insert(3);
@@ -52,9 +50,8 @@ fn cursor_advance_with_include_mask() {
 
 #[test]
 fn cursor_advance_with_exclude_mask() {
-    let block = SparsePostingBlock::from_sorted_entries(&[
-        (0, 0.1), (1, 0.2), (2, 0.3), (3, 0.4),
-    ]).unwrap();
+    let block =
+        SparsePostingBlock::from_sorted_entries(&[(0, 0.1), (1, 0.2), (2, 0.3), (3, 0.4)]).unwrap();
     let mut rbm = roaring::RoaringBitmap::new();
     rbm.insert(0);
     rbm.insert(2);
@@ -92,9 +89,7 @@ fn cursor_get_value_across_blocks() {
 
 #[test]
 fn cursor_drain_essential_basic() {
-    let block = SparsePostingBlock::from_sorted_entries(&[
-        (0, 0.5), (1, 0.25), (2, 0.75),
-    ]).unwrap();
+    let block = SparsePostingBlock::from_sorted_entries(&[(0, 0.5), (1, 0.25), (2, 0.75)]).unwrap();
     let mut cursor = PostingCursor::from_blocks(vec![block]);
     let mask = all_mask();
 
@@ -111,9 +106,9 @@ fn cursor_drain_essential_basic() {
 
 #[test]
 fn cursor_score_candidates_basic() {
-    let block = SparsePostingBlock::from_sorted_entries(&[
-        (0, 0.5), (1, 0.25), (2, 0.75), (5, 0.1),
-    ]).unwrap();
+    let block =
+        SparsePostingBlock::from_sorted_entries(&[(0, 0.5), (1, 0.25), (2, 0.75), (5, 0.1)])
+            .unwrap();
     let mut cursor = PostingCursor::from_blocks(vec![block]);
 
     let cand_docs = vec![0, 2, 5];

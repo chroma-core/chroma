@@ -22,9 +22,7 @@ async fn single_doc_many_dims() {
 
 #[tokio::test]
 async fn single_block_when_block_size_large() {
-    let docs: Vec<(u32, Vec<(u32, f32)>)> = (0..10)
-        .map(|i| (i, vec![(1u32, 0.5f32)]))
-        .collect();
+    let docs: Vec<(u32, Vec<(u32, f32)>)> = (0..10).map(|i| (i, vec![(1u32, 0.5f32)])).collect();
     let (_dir, _provider, reader) = common::build_index_with_block_size(docs, Some(1024)).await;
     let blocks = common::count_blocks(&reader, 1).await;
     assert_eq!(blocks, 1);
@@ -32,9 +30,7 @@ async fn single_block_when_block_size_large() {
 
 #[tokio::test]
 async fn one_block_per_doc() {
-    let docs: Vec<(u32, Vec<(u32, f32)>)> = (0..5)
-        .map(|i| (i, vec![(1u32, 0.5f32)]))
-        .collect();
+    let docs: Vec<(u32, Vec<(u32, f32)>)> = (0..5).map(|i| (i, vec![(1u32, 0.5f32)])).collect();
     let (_dir, _provider, reader) = common::build_index_with_block_size(docs, Some(1)).await;
     let blocks = common::count_blocks(&reader, 1).await;
     assert_eq!(blocks, 5);

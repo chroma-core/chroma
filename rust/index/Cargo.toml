@@ -37,7 +37,7 @@ hnswlib = { workspace = true }
 opentelemetry = { version = "0.27.0", default-features = false, features = ["trace", "metrics"] }
 simsimd = { workspace = true }
 dashmap = { workspace = true }
-half = "2"
+half = { workspace = true }
 usearch = { workspace = true, optional = true }
 faer = { workspace = true }
 

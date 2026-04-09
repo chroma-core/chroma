@@ -2,10 +2,7 @@ use crate::common;
 
 #[tokio::test]
 async fn incremental_add() {
-    let docs = vec![
-        (0u32, vec![(1u32, 0.5)]),
-        (1, vec![(1, 0.8)]),
-    ];
+    let docs = vec![(0u32, vec![(1u32, 0.5)]), (1, vec![(1, 0.8)])];
     let (_dir, provider, reader) = common::build_index(docs).await;
 
     let writer = common::fork_writer(&provider, &reader).await;
@@ -39,10 +36,7 @@ async fn incremental_delete() {
 
 #[tokio::test]
 async fn incremental_update() {
-    let docs = vec![
-        (0u32, vec![(1u32, 0.5)]),
-        (1, vec![(1, 0.8)]),
-    ];
+    let docs = vec![(0u32, vec![(1u32, 0.5)]), (1, vec![(1, 0.8)])];
     let (_dir, provider, reader) = common::build_index(docs).await;
 
     let writer = common::fork_writer(&provider, &reader).await;
@@ -56,10 +50,7 @@ async fn incremental_update() {
 
 #[tokio::test]
 async fn incremental_delete_all_in_dimension() {
-    let docs = vec![
-        (0u32, vec![(1u32, 0.5)]),
-        (1, vec![(1, 0.8)]),
-    ];
+    let docs = vec![(0u32, vec![(1u32, 0.5)]), (1, vec![(1, 0.8)])];
     let (_dir, provider, reader) = common::build_index(docs).await;
 
     let writer = common::fork_writer(&provider, &reader).await;

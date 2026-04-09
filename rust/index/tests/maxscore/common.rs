@@ -76,7 +76,11 @@ pub async fn build_index_with_block_size(
         .unwrap();
 
     let reader = BlockSparseReader::new(posting_reader);
-    let reader: BlockSparseReader<'static> = unsafe { std::mem::transmute(reader) };
+    // SAFETY: The reader borrows from the BlockfileProvider's block cache.
+    // Both the provider and TempDir (which owns the backing storage) are
+    // returned alongside the reader and must outlive it in the caller.
+    let reader: BlockSparseReader<'static> =
+        unsafe { std::mem::transmute::<BlockSparseReader<'_>, BlockSparseReader<'static>>(reader) };
 
     (temp_dir, provider, reader)
 }
@@ -114,7 +118,9 @@ pub async fn commit_writer(
         .unwrap();
 
     let reader = BlockSparseReader::new(posting_reader);
-    unsafe { std::mem::transmute(reader) }
+    // SAFETY: The reader borrows from the BlockfileProvider's block cache.
+    // The caller must ensure the provider outlives the returned reader.
+    unsafe { std::mem::transmute::<BlockSparseReader<'_>, BlockSparseReader<'static>>(reader) }
 }
 
 /// Brute-force top-k scoring for reference comparisons.
@@ -162,4 +168,34 @@ pub async fn get_all_entries(reader: &BlockSparseReader<'_>, dim: u32) -> Vec<(u
         .into_iter()
         .flat_map(|b| b.offsets().to_vec().into_iter().zip(b.values().to_vec()))
         .collect()
+}
+
+/// Tie-aware recall: a result is a hit if it appears in the brute-force
+/// top-k, OR if its score is within `tolerance` of the k-th brute-force
+/// score (i.e. it's tied at the boundary and f16 quantization swapped
+/// the ranking).
+pub fn tie_aware_recall(
+    result_offsets: &[u32],
+    result_scores: &[f32],
+    brute: &[(u32, f32)],
+    tolerance: f32,
+) -> f64 {
+    if brute.is_empty() {
+        return 1.0;
+    }
+    let k = brute.len();
+    let boundary_score = brute[k - 1].1;
+    let brute_offsets: std::collections::HashSet<u32> = brute.iter().map(|(o, _)| *o).collect();
+
+    let mut hits = 0;
+    for (i, &off) in result_offsets.iter().enumerate() {
+        if brute_offsets.contains(&off) {
+            hits += 1;
+        } else if (result_scores[i] - boundary_score).abs() <= tolerance {
+            // Score is within f16 tolerance of the boundary — a tie that
+            // f16 quantization could have swapped.
+            hits += 1;
+        }
+    }
+    hits as f64 / k as f64
 }
