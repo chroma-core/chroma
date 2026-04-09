@@ -13,7 +13,7 @@ path = "src/lib.rs"
 async-trait = { workspace = true }
 base64 = { workspace = true }
 bitpacking = { workspace = true }
-half = "2"
+half = { workspace = true }
 chrono = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
