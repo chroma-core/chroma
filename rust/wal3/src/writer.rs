@@ -732,6 +732,33 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
         Ok(log_position)
     }
 
+    /// Perform phase 0 of garbage collection.
+    ///
+    /// Transition any existing gc/GARBAGE state back to empty without deleting queued garbage.
+    ///
+    #[tracing::instrument(skip(self, _options))]
+    pub(crate) async fn garbage_collect_phase0_reset_garbage(
+        &self,
+        _options: &GarbageCollectionOptions,
+    ) -> Result<(), Error> {
+        let Some((garbage, e_tag)) =
+            Garbage::load(&self.options.throttle_manifest, &self.batch_manager).await?
+        else {
+            return Ok(());
+        };
+        if garbage.is_empty() {
+            return Ok(());
+        }
+        let Some(e_tag) = e_tag.as_ref() else {
+            return Err(Error::GarbageCollection(
+                "loaded garbage without e_tag".to_string(),
+            ));
+        };
+        self.batch_manager
+            .reset_garbage(&self.options.throttle_manifest, e_tag)
+            .await
+    }
+
     /// Perform phase 1 of garbage collection.
     ///
     /// Pre-condition:  manifest/MANIFEST exists.

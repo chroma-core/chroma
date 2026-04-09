@@ -580,6 +580,14 @@ impl<
         Ok(Self { log })
     }
 
+    /// Perform phase 0 of garbage collection: reset any pending gc/GARBAGE state to empty.
+    pub async fn garbage_collect_phase0_reset_garbage(
+        &self,
+        options: &GarbageCollectionOptions,
+    ) -> Result<(), Error> {
+        self.log.garbage_collect_phase0_reset_garbage(options).await
+    }
+
     pub async fn garbage_collect_phase1_compute_garbage(
         &self,
         options: &GarbageCollectionOptions,

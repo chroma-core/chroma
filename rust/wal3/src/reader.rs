@@ -15,7 +15,7 @@ use crate::interfaces::{
 };
 use crate::{
     CursorWitness, Error, Fragment, FragmentSeqNo, LogPosition, LogReaderOptions, Manifest,
-    ManifestAndWitness, ScrubError, ScrubSuccess, SnapshotCache,
+    ManifestAndWitness, ManifestBoundsAndWitness, ScrubError, ScrubSuccess, SnapshotCache,
 };
 
 fn ranges_overlap(lhs: (LogPosition, LogPosition), rhs: (LogPosition, LogPosition)) -> bool {
@@ -112,7 +112,7 @@ pub fn scan_from_manifest(
 
 /// Post process the fragments such that only records starting at from and not exceeding limits
 /// will be processed.  Sets *short_read=true when the limits truncate the log.
-fn post_process_fragments(
+pub(crate) fn post_process_fragments(
     mut fragments: Vec<Fragment>,
     from: LogPosition,
     limits: Limits,
@@ -225,6 +225,12 @@ impl<P: FragmentPointer, FC: FragmentConsumer, MC: ManifestConsumer<P>> LogReade
         }
     }
 
+    pub async fn manifest_bounds_and_witness(
+        &self,
+    ) -> Result<Option<ManifestBoundsAndWitness>, Error> {
+        self.manifest_consumer.manifest_bounds_and_witness().await
+    }
+
     pub async fn oldest_timestamp(&self) -> Result<LogPosition, Error> {
         let Some((manifest, _)) = self.manifest_consumer.manifest_load().await? else {
             return Err(Error::UninitializedLog);
@@ -251,6 +257,14 @@ impl<P: FragmentPointer, FC: FragmentConsumer, MC: ManifestConsumer<P>> LogReade
         let mut short_read = false;
         self.scan_with_cache(&manifest, from, limits, &mut short_read)
             .await
+    }
+
+    pub async fn scan_partial(
+        &self,
+        from: LogPosition,
+        limits: Limits,
+    ) -> Result<Option<Vec<Fragment>>, Error> {
+        self.manifest_consumer.scan_partial(from, limits).await
     }
 
     /// Scan up to:
@@ -546,13 +560,112 @@ impl LogReader<(FragmentSeqNo, LogPosition), s3::S3FragmentPuller, s3::ManifestR
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    use chroma_storage::ETag;
     use setsum::Setsum;
 
     use crate::interfaces::s3::{ManifestManager, ManifestReader};
-    use crate::interfaces::{FragmentManagerFactory, ManifestManagerFactory};
-    use crate::{Fragment, FragmentIdentifier, FragmentSeqNo};
+    use crate::interfaces::{
+        FragmentConsumer, FragmentManagerFactory, ManifestConsumer, ManifestManagerFactory,
+    };
+    use crate::{
+        CursorWitness, Fragment, FragmentIdentifier, FragmentSeqNo, ManifestBounds,
+        ManifestBoundsAndWitness, ManifestWitness, Snapshot, SnapshotPointer,
+    };
 
     use super::*;
+
+    struct TestFragmentConsumer;
+
+    #[async_trait::async_trait]
+    impl FragmentConsumer for TestFragmentConsumer {
+        async fn read_bytes(&self, _path: &str) -> Result<Arc<Vec<u8>>, Error> {
+            unreachable!("read_bytes is not used in this test")
+        }
+
+        async fn parse_parquet(
+            &self,
+            _parquet: &[u8],
+            _fragment_first_log_position: LogPosition,
+        ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
+            unreachable!("parse_parquet is not used in this test")
+        }
+
+        async fn parse_parquet_fast(
+            &self,
+            _parquet: &[u8],
+            _fragment_first_log_position: LogPosition,
+        ) -> Result<(Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
+            unreachable!("parse_parquet_fast is not used in this test")
+        }
+
+        async fn read_fragment(
+            &self,
+            _path: &str,
+            _fragment_first_log_position: LogPosition,
+        ) -> Result<Option<Fragment>, Error> {
+            unreachable!("read_fragment is not used in this test")
+        }
+    }
+
+    struct TrackingManifestConsumer {
+        bounds: Option<ManifestBoundsAndWitness>,
+        fragments: Option<Vec<Fragment>>,
+        manifest_load_calls: Arc<AtomicUsize>,
+        bounds_calls: Arc<AtomicUsize>,
+        partial_calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl ManifestConsumer<(FragmentSeqNo, LogPosition)> for TrackingManifestConsumer {
+        async fn snapshot_load(
+            &self,
+            _pointer: &SnapshotPointer,
+        ) -> Result<Option<Snapshot>, Error> {
+            unreachable!("snapshot_load is not used in this test")
+        }
+
+        async fn manifest_head(&self, _witness: &ManifestWitness) -> Result<bool, Error> {
+            unreachable!("manifest_head is not used in this test")
+        }
+
+        async fn manifest_load(&self) -> Result<Option<(Manifest, ManifestWitness)>, Error> {
+            self.manifest_load_calls.fetch_add(1, Ordering::Relaxed);
+            unreachable!("manifest_load should not be called")
+        }
+
+        async fn manifest_bounds_and_witness(
+            &self,
+        ) -> Result<Option<ManifestBoundsAndWitness>, Error> {
+            self.bounds_calls.fetch_add(1, Ordering::Relaxed);
+            Ok(self.bounds.clone())
+        }
+
+        async fn scan_partial(
+            &self,
+            _from: LogPosition,
+            _limits: Limits,
+        ) -> Result<Option<Vec<Fragment>>, Error> {
+            self.partial_calls.fetch_add(1, Ordering::Relaxed);
+            Ok(self.fragments.clone())
+        }
+
+        async fn update_intrinsic_cursor(
+            &self,
+            _position: LogPosition,
+            _epoch_us: u64,
+            _writer: &str,
+            _allow_rollback: bool,
+        ) -> Result<Option<CursorWitness>, Error> {
+            unreachable!("update_intrinsic_cursor is not used in this test")
+        }
+
+        async fn load_intrinsic_cursor(&self) -> Result<Option<LogPosition>, Error> {
+            unreachable!("load_intrinsic_cursor is not used in this test")
+        }
+    }
 
     #[test]
     fn post_process_fragments_uses_from_position_for_record_limits() {
@@ -706,6 +819,84 @@ mod tests {
             FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1))
         );
         assert!(short_read);
+    }
+
+    #[tokio::test]
+    async fn manifest_bounds_and_witness_uses_consumer_override() {
+        let manifest_load_calls = Arc::new(AtomicUsize::new(0));
+        let bounds_calls = Arc::new(AtomicUsize::new(0));
+        let partial_calls = Arc::new(AtomicUsize::new(0));
+        let expected = ManifestBoundsAndWitness {
+            bounds: ManifestBounds {
+                oldest_timestamp: LogPosition::from_offset(5),
+                next_write_timestamp: LogPosition::from_offset(42),
+            },
+            witness: ManifestWitness::ETag(ETag("test-etag".to_string())),
+        };
+        let reader = LogReader::new(
+            LogReaderOptions::default(),
+            TestFragmentConsumer,
+            TrackingManifestConsumer {
+                bounds: Some(expected.clone()),
+                fragments: None,
+                manifest_load_calls: Arc::clone(&manifest_load_calls),
+                bounds_calls: Arc::clone(&bounds_calls),
+                partial_calls: Arc::clone(&partial_calls),
+            },
+        );
+
+        let observed = reader
+            .manifest_bounds_and_witness()
+            .await
+            .expect("bounds load should succeed")
+            .expect("bounds should be present");
+        assert_eq!(expected, observed);
+        assert_eq!(0, manifest_load_calls.load(Ordering::Relaxed));
+        assert_eq!(1, bounds_calls.load(Ordering::Relaxed));
+        assert_eq!(0, partial_calls.load(Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn scan_partial_uses_consumer_override() {
+        let manifest_load_calls = Arc::new(AtomicUsize::new(0));
+        let bounds_calls = Arc::new(AtomicUsize::new(0));
+        let partial_calls = Arc::new(AtomicUsize::new(0));
+        let expected = vec![Fragment {
+            path: "fragment1".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+            start: LogPosition::from_offset(10),
+            limit: LogPosition::from_offset(20),
+            num_bytes: 128,
+            setsum: Setsum::default(),
+        }];
+        let reader = LogReader::new(
+            LogReaderOptions::default(),
+            TestFragmentConsumer,
+            TrackingManifestConsumer {
+                bounds: None,
+                fragments: Some(expected.clone()),
+                manifest_load_calls: Arc::clone(&manifest_load_calls),
+                bounds_calls: Arc::clone(&bounds_calls),
+                partial_calls: Arc::clone(&partial_calls),
+            },
+        );
+
+        let observed = reader
+            .scan_partial(
+                LogPosition::from_offset(10),
+                Limits {
+                    max_files: Some(2),
+                    max_bytes: Some(1024),
+                    max_records: Some(10),
+                },
+            )
+            .await
+            .expect("partial scan should succeed")
+            .expect("partial scan should be present");
+        assert_eq!(expected, observed);
+        assert_eq!(0, manifest_load_calls.load(Ordering::Relaxed));
+        assert_eq!(0, bounds_calls.load(Ordering::Relaxed));
+        assert_eq!(1, partial_calls.load(Ordering::Relaxed));
     }
 
     #[test]
