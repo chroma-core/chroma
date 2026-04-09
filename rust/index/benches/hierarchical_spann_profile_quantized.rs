@@ -21,9 +21,8 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 use datasets::{format_count, recall_at_k, Dataset, DatasetType, MetricType, Query};
 use hierarchical_index::writer_quantized::{
-    format_task_tables, HierarchicalSpannConfig, HierarchicalSpannWriter, NavigationMode,
-    ReadBeamPolicy,
-    SearchTimings, WriterStatsSnapshot,
+    format_task_tables, HierarchicalSpannConfig, HierarchicalSpannWriter, LeafMissDiagnostic,
+    LeafTraits, NavigationMode, ReadBeamPolicy, SearchTimings, WriterStatsSnapshot,
 };
 
 // =============================================================================
@@ -181,6 +180,14 @@ struct Args {
     /// Number of representative codes per leaf for leaf reranking (0 = off)
     #[arg(long, default_value = "0")]
     leaf_rerank_reps: usize,
+
+    /// Print leaf-miss diagnostic: rank distribution of missed GT-containing leaves
+    #[arg(long)]
+    leaf_miss_diagnostic: bool,
+
+    /// Print search geometry: cluster radius, search radius, GT radius distributions
+    #[arg(long)]
+    geometry_diagnostic: bool,
 
     /// Print legend explaining all table columns
     #[arg(long)]
@@ -1186,6 +1193,315 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let p90 = deltas[(0.9 * (deltas.len() - 1) as f64) as usize];
             println!("  Delta distribution: p10={:+.2}%, p50={:+.2}%, p90={:+.2}%",
                 p10 * 100.0, p50 * 100.0, p90 * 100.0);
+        }
+
+        if args.leaf_miss_diagnostic || args.geometry_diagnostic {
+            let diag_tau = tau_values[0];
+            let diag_rr_c = args.recall_rerank_centroids[0];
+            let diag_nav = read_navs[0];
+
+            let mut policy = ReadBeamPolicy::with_level_overrides(
+                Some(diag_tau),
+                beam_min,
+                beam_max,
+                read_level_taus.clone(),
+                read_level_min_pcts.clone(),
+                level_widths.clone(),
+            );
+            policy.radius_corrected = args.radius_corrected_nav;
+            policy.leaf_rerank_reps = args.leaf_rerank_reps;
+
+            let diags: Vec<LeafMissDiagnostic> = recall_pool.install(|| {
+                checkpoint_queries.par_iter().map(|gt| {
+                    let gt_100: HashSet<u32> = gt.neighbors.iter().take(100).copied().collect();
+                    writer.diagnose_leaf_miss_ranks(&gt.vector, &gt_100, diag_rr_c, diag_nav, &policy)
+                }).collect()
+            });
+
+          if args.leaf_miss_diagnostic {
+            println!("\n--- Leaf Miss Diagnostic (tau={:.2}, rr_c={}x, nav={:?}) ---",
+                diag_tau, diag_rr_c, diag_nav);
+
+            let n = diags.len() as f64;
+            let avg_beam: f64 = diags.iter().map(|d| d.beam_size as f64).sum::<f64>() / n;
+            let avg_total: f64 = diags.iter().map(|d| d.total_leaves as f64).sum::<f64>() / n;
+            let avg_missed: f64 = diags.iter().map(|d| d.missed_gt_ranks.len() as f64).sum::<f64>() / n;
+            let total_missed: usize = diags.iter().map(|d| d.missed_gt_ranks.len()).sum();
+
+            println!("  Avg beam: {:.1} / {:.0} leaves", avg_beam, avg_total);
+            println!("  Avg missed GT vectors: {:.1} / 100 ({} total across {} queries)",
+                avg_missed, total_missed, diags.len());
+
+            if total_missed > 0 {
+                let mut all_ranks: Vec<usize> = diags.iter()
+                    .flat_map(|d| d.missed_gt_ranks.iter().map(|&(_, rank)| rank))
+                    .collect();
+                all_ranks.sort_unstable();
+
+                let pct = |idx: f64| all_ranks[(idx * (all_ranks.len() - 1) as f64) as usize];
+                println!("  Missed leaf rank distribution (1-indexed):");
+                println!("    min={}, p10={}, p25={}, p50={}, p75={}, p90={}, max={}",
+                    all_ranks[0],
+                    pct(0.10), pct(0.25), pct(0.50), pct(0.75), pct(0.90),
+                    all_ranks[all_ranks.len() - 1],
+                );
+
+                let expansions = [5, 10, 20, 50, 100];
+                println!("  Recovery by beam expansion:");
+                for &extra in &expansions {
+                    let mut recovered = 0usize;
+                    for d in &diags {
+                        for &(_, rank) in &d.missed_gt_ranks {
+                            if rank <= d.beam_size + extra {
+                                recovered += 1;
+                            }
+                        }
+                    }
+                    let pct_recovered = if total_missed > 0 { recovered as f64 / total_missed as f64 * 100.0 } else { 0.0 };
+                    println!("    +{:>3} leaves: {:>4} / {} missed recovered ({:.1}%)",
+                        extra, recovered, total_missed, pct_recovered);
+                }
+
+                let mut per_query: Vec<(usize, usize, Vec<usize>)> = diags.iter().enumerate()
+                    .filter(|(_, d)| !d.missed_gt_ranks.is_empty())
+                    .map(|(qi, d)| {
+                        let ranks: Vec<usize> = d.missed_gt_ranks.iter().map(|&(_, r)| r).collect();
+                        (qi, d.beam_size, ranks)
+                    })
+                    .collect();
+                per_query.sort_by(|a, b| b.2.len().cmp(&a.2.len()));
+
+                let show = per_query.len().min(10);
+                println!("  Top {} queries by missed GT count:", show);
+                for entry in per_query.iter().take(show) {
+                    let qi = entry.0;
+                    let beam = entry.1;
+                    let ranks = &entry.2;
+                    let near = ranks.iter().filter(|r| **r <= beam + 20).count();
+                    let far = ranks.iter().filter(|r| **r > beam * 2).count();
+                    println!("    q{:>3}: {} missed, beam={}, near-miss(+20)={}, far-miss(>2x beam)={}, ranks={:?}",
+                        qi, ranks.len(), beam, near, far,
+                        if ranks.len() <= 20 { ranks.clone() } else {
+                            let mut trunc = ranks[..10].to_vec();
+                            trunc.push(0);
+                            trunc.extend_from_slice(&ranks[ranks.len()-5..]);
+                            trunc
+                        });
+                }
+            }
+
+            // Leaf traits comparison: selected-with-GT vs selected-no-GT vs missed-with-GT.
+            let all_sel_gt: Vec<&LeafTraits> = diags.iter().flat_map(|d| d.selected_with_gt.iter()).collect();
+            let all_sel_no: Vec<&LeafTraits> = diags.iter().flat_map(|d| d.selected_no_gt.iter()).collect();
+            let all_miss: Vec<&LeafTraits> = diags.iter().flat_map(|d| d.missed_with_gt.iter()).collect();
+
+            struct TraitSummary {
+                label: &'static str,
+                n: usize,
+                score: [f64; 7],
+                rank: [f64; 7],
+                leaf_size: [f64; 7],
+                p90_rad: [f64; 5],
+                gt_count: [f64; 4],
+                min_gt_d: [f64; 7],
+                score_gt: [f64; 5],
+            }
+
+            fn compute_trait_summary(label: &'static str, traits: &[&LeafTraits]) -> Option<TraitSummary> {
+                if traits.is_empty() {
+                    return None;
+                }
+                let fp = |v: &[f32], p: f64| v[(p * (v.len() - 1) as f64) as usize] as f64;
+                let up = |v: &[usize], p: f64| v[(p * (v.len() - 1) as f64) as usize] as f64;
+                let favg = |v: &[f32]| v.iter().map(|x| *x as f64).sum::<f64>() / v.len() as f64;
+                let uavg = |v: &[usize]| v.iter().sum::<usize>() as f64 / v.len() as f64;
+
+                let mut scores: Vec<f32> = traits.iter().map(|t| t.score).collect();
+                scores.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                let mut sizes: Vec<usize> = traits.iter().map(|t| t.leaf_size).collect();
+                sizes.sort_unstable();
+                let mut radii: Vec<f32> = traits.iter().map(|t| t.p90_radius).collect();
+                radii.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                let mut ranks: Vec<usize> = traits.iter().map(|t| t.rank).collect();
+                ranks.sort_unstable();
+
+                let score = [scores[0] as f64, fp(&scores, 0.25), fp(&scores, 0.5), favg(&scores),
+                    fp(&scores, 0.75), fp(&scores, 0.9), *scores.last().unwrap() as f64];
+                let rank = [ranks[0] as f64, up(&ranks, 0.25), up(&ranks, 0.5), uavg(&ranks),
+                    up(&ranks, 0.75), up(&ranks, 0.9), *ranks.last().unwrap() as f64];
+                let leaf_size = [sizes[0] as f64, up(&sizes, 0.25), up(&sizes, 0.5), uavg(&sizes),
+                    up(&sizes, 0.75), up(&sizes, 0.9), *sizes.last().unwrap() as f64];
+                let p90_rad = [radii[0] as f64, fp(&radii, 0.25), fp(&radii, 0.5), favg(&radii),
+                    *radii.last().unwrap() as f64];
+
+                let gt_only: Vec<&LeafTraits> = traits.iter().filter(|t| t.gt_count > 0).copied().collect();
+                let mut gt_counts: Vec<usize> = traits.iter().map(|t| t.gt_count).collect();
+                gt_counts.sort_unstable();
+                let gt_count = [gt_counts[0] as f64, up(&gt_counts, 0.5), uavg(&gt_counts),
+                    *gt_counts.last().unwrap() as f64];
+
+                let mut min_gt_d = [0.0f64; 7];
+                let mut score_gt = [0.0f64; 5];
+                if !gt_only.is_empty() {
+                    let mut gt_dists: Vec<f32> = gt_only.iter().map(|t| t.min_gt_dist).collect();
+                    gt_dists.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    min_gt_d = [gt_dists[0] as f64, fp(&gt_dists, 0.25), fp(&gt_dists, 0.5),
+                        favg(&gt_dists), fp(&gt_dists, 0.75), fp(&gt_dists, 0.9), *gt_dists.last().unwrap() as f64];
+
+                    let mut ratios: Vec<f32> = gt_only.iter()
+                        .filter(|t| t.min_gt_dist > 1e-10)
+                        .map(|t| t.score / t.min_gt_dist)
+                        .collect();
+                    if !ratios.is_empty() {
+                        ratios.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                        score_gt = [ratios[0] as f64, fp(&ratios, 0.25), fp(&ratios, 0.5),
+                            favg(&ratios), *ratios.last().unwrap() as f64];
+                    }
+                }
+
+                Some(TraitSummary { label, n: traits.len(), score, rank, leaf_size, p90_rad, gt_count, min_gt_d, score_gt })
+            }
+
+            let summaries: Vec<TraitSummary> = [
+                ("Sel+GT (TP)", &all_sel_gt),
+                ("Sel+noGT (FP)", &all_sel_no),
+                ("Miss+GT (FN)", &all_miss),
+            ].iter().filter_map(|(label, data)| compute_trait_summary(label, data)).collect();
+
+            if !summaries.is_empty() {
+                println!("\n  --- Leaf Traits Comparison ---");
+                let w = 16;
+                print!("  {:14}", "metric");
+                for s in &summaries {
+                    print!("  {:>w$}", format!("{} ({})", s.label, s.n), w = w);
+                }
+                println!();
+                print!("  {:14}", "--------------");
+                for _ in &summaries {
+                    print!("  {:>w$}", "----------------", w = w);
+                }
+                println!();
+
+                let row_f4 = |label: &str, idx: usize, summaries: &[TraitSummary], getter: fn(&TraitSummary) -> &[f64]| {
+                    print!("  {:14}", label);
+                    for s in summaries {
+                        let v = getter(s);
+                        if idx < v.len() {
+                            print!("  {:>w$.4}", v[idx], w = w);
+                        } else {
+                            print!("  {:>w$}", "", w = w);
+                        }
+                    }
+                    println!();
+                };
+
+                let row_f0 = |label: &str, idx: usize, summaries: &[TraitSummary], getter: fn(&TraitSummary) -> &[f64]| {
+                    print!("  {:14}", label);
+                    for s in summaries {
+                        let v = getter(s);
+                        if idx < v.len() {
+                            print!("  {:>w$.0}", v[idx], w = w);
+                        } else {
+                            print!("  {:>w$}", "", w = w);
+                        }
+                    }
+                    println!();
+                };
+
+                let stats7 = ["min", "p25", "p50", "avg", "p75", "p90", "max"];
+
+                println!("  -- score (centroid dist) --");
+                for (i, &lbl) in stats7.iter().enumerate() {
+                    row_f4(lbl, i, &summaries, |s| &s.score);
+                }
+
+                println!("  -- rank --");
+                for (i, &lbl) in stats7.iter().enumerate() {
+                    row_f0(lbl, i, &summaries, |s| &s.rank);
+                }
+
+                println!("  -- leaf_size --");
+                for (i, &lbl) in stats7.iter().enumerate() {
+                    row_f0(lbl, i, &summaries, |s| &s.leaf_size);
+                }
+
+                let stats5a = ["min", "p25", "p50", "avg", "max"];
+                println!("  -- p90_radius --");
+                for (i, &lbl) in stats5a.iter().enumerate() {
+                    row_f4(lbl, i, &summaries, |s| &s.p90_rad);
+                }
+
+                let stats4 = ["min", "p50", "avg", "max"];
+                println!("  -- gt_count --");
+                for (i, &lbl) in stats4.iter().enumerate() {
+                    row_f0(lbl, i, &summaries, |s| &s.gt_count);
+                }
+
+                println!("  -- min_gt_dist --");
+                for (i, &lbl) in stats7.iter().enumerate() {
+                    row_f4(lbl, i, &summaries, |s| &s.min_gt_d);
+                }
+
+                let stats5b = ["min", "p25", "p50", "avg", "max"];
+                println!("  -- score(centroid dist)/gt_dist -- (< 1 means centroid is closer to the query than the GT vector");
+                for (i, &lbl) in stats5b.iter().enumerate() {
+                    row_f4(lbl, i, &summaries, |s| &s.score_gt);
+                }
+            }
+          } // end if args.leaf_miss_diagnostic
+
+          if args.geometry_diagnostic {
+            println!("\n  --- Search Geometry (tau={:.2}, rr_c={}x, nav={:?}) ---",
+                diag_tau, diag_rr_c, diag_nav);
+
+            let pf = |v: &[f32], p: f64| -> f32 {
+                if v.is_empty() { return 0.0; }
+                v[(p * (v.len() - 1) as f64) as usize]
+            };
+
+            let mut cluster_radii: Vec<f32> = diags.iter().map(|d| {
+                let mut r = d.beam_cluster_radii.clone();
+                r.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                if r.is_empty() { 0.0 } else { r[r.len() / 2] }
+            }).collect();
+            cluster_radii.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+            let mut search_radii: Vec<f32> = diags.iter().map(|d| d.search_radius).collect();
+            search_radii.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+            let mut beam_radii: Vec<f32> = diags.iter().map(|d| d.beam_radius).collect();
+            beam_radii.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+            let mut gt_radii: Vec<f32> = diags.iter().map(|d| {
+                d.gt_distances.iter().cloned().fold(0.0f32, f32::max)
+            }).collect();
+            gt_radii.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+            println!("  {:32}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}",
+                "metric", "min", "p25", "p50", "p75", "p90", "max");
+            println!("  {:32}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}",
+                "--------------------------------", "-------", "-------", "-------",
+                "-------", "-------", "-------");
+
+            for (label, vals) in [
+                ("cluster radius (beam med p90)", &cluster_radii),
+                ("search radius (d1*(1+tau))", &search_radii),
+                ("beam radius (farthest sel.)", &beam_radii),
+                ("GT radius (max gt dist)", &gt_radii),
+            ] {
+                if !vals.is_empty() {
+                    println!("  {:32}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}",
+                        label,
+                        pf(vals, 0.0),
+                        pf(vals, 0.25),
+                        pf(vals, 0.50),
+                        pf(vals, 0.75),
+                        pf(vals, 0.90),
+                        pf(vals, 1.0),
+                    );
+                }
+            }
+          } // end if args.geometry_diagnostic
         }
     }
 

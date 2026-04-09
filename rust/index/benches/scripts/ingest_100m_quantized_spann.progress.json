@@ -1,10 +1,10 @@
 {
   "chunk_size": 1000000,
   "collection": "100m_quantized_spann",
-  "committed_rows": 181626,
+  "committed_rows": 7001000,
   "cursor": {
-    "row_offset_in_shard": 66300,
-    "shard_index": 4
+    "row_offset_in_shard": 74611,
+    "shard_index": 86
   },
   "repo_id": "CohereLabs/wikipedia-2023-11-embed-multilingual-v3",
   "shards": [
@@ -2716,6 +2716,6 @@
     "zh/0027.parquet",
     "zu/0000.parquet"
   ],
-  "target_count": 1000000,
-  "updated_at": "2026-04-03T00:13:02Z"
+  "target_count": 100000000,
+  "updated_at": "2026-04-03T02:00:54Z"
 }
