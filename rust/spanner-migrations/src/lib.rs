@@ -17,7 +17,6 @@ pub use migrations::MIGRATION_DIRS;
 use std::time::Duration;
 
 use chroma_config::spanner::{SpannerChannelConfig, SpannerConfig, SpannerSessionPoolConfig};
-use chroma_config::ADMIN_RPC_TIMEOUT_SECS;
 use google_cloud_gax::conn::Environment;
 use google_cloud_spanner::admin::client::Client as AdminClient;
 use google_cloud_spanner::admin::AdminClientConfig;
@@ -48,9 +47,7 @@ fn to_channel_config(cfg: &SpannerChannelConfig) -> ChannelConfig {
 }
 
 fn apply_admin_channel_config(config: &mut AdminClientConfig, cfg: &SpannerChannelConfig) {
-    // Admin RPCs such as CreateDatabase and UpdateDatabaseDdl routinely run for minutes, so they
-    // need a much larger deadline than the online data-plane RPC timeout.
-    config.timeout = Duration::from_secs(ADMIN_RPC_TIMEOUT_SECS);
+    config.timeout = Duration::from_secs(cfg.admin_rpc_timeout_secs);
     config.connect_timeout = Duration::from_secs(cfg.connect_timeout_secs);
     config.http2_keep_alive_interval =
         Some(Duration::from_secs(cfg.http2_keep_alive_interval_secs));
@@ -150,7 +147,7 @@ pub async fn run_migrations(
             };
             let admin_client_config = AdminClientConfig {
                 environment: Environment::Emulator(emulator.grpc_endpoint()),
-                timeout: Duration::from_secs(ADMIN_RPC_TIMEOUT_SECS),
+                timeout: Duration::from_secs(emulator.channel.admin_rpc_timeout_secs),
                 connect_timeout: Duration::from_secs(emulator.channel.connect_timeout_secs),
                 http2_keep_alive_interval: Some(Duration::from_secs(
                     emulator.channel.http2_keep_alive_interval_secs,
@@ -239,12 +236,13 @@ mod tests {
     #[test]
     fn admin_timeout_is_not_coupled_to_data_rpc_timeout() {
         let channel_config = SpannerChannelConfig {
+            num_channels: 4,
             timeout_secs: 30,
             connect_timeout_secs: 7,
             http2_keep_alive_interval_secs: 11,
             keep_alive_timeout_secs: 13,
             keep_alive_while_idle: false,
-            ..Default::default()
+            admin_rpc_timeout_secs: 30 * 60,
         };
         let mut admin_client_config = AdminClientConfig::default();
 
@@ -252,7 +250,7 @@ mod tests {
 
         assert_eq!(
             admin_client_config.timeout,
-            Duration::from_secs(ADMIN_RPC_TIMEOUT_SECS)
+            Duration::from_secs(channel_config.admin_rpc_timeout_secs)
         );
         assert_eq!(admin_client_config.connect_timeout, Duration::from_secs(7));
         assert_eq!(
