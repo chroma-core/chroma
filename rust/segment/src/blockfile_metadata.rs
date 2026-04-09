@@ -1676,6 +1676,7 @@ mod test {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
@@ -2053,6 +2054,7 @@ mod test {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let tenant = String::from("test_tenant");
         let database_id = DatabaseUuid::new();
@@ -2360,6 +2362,7 @@ mod test {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
@@ -2636,6 +2639,7 @@ mod test {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
@@ -2900,6 +2904,7 @@ mod test {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
@@ -3205,6 +3210,7 @@ mod test {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let tenant = String::from("test_tenant");
         let database_id = DatabaseUuid::new();
@@ -3385,6 +3391,7 @@ mod test {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
@@ -3617,6 +3624,7 @@ mod test {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
@@ -3837,6 +3845,7 @@ mod test {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);

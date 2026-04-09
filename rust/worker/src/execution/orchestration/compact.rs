@@ -2118,6 +2118,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let hnsw_provider = HnswIndexProvider::new(storage.clone(), hnsw_cache, 16);
         let usearch_provider = chroma_index::usearch::USearchIndexProvider::new(
@@ -2315,6 +2316,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let hnsw_provider = HnswIndexProvider::new(storage.clone(), hnsw_cache, 16);
         let usearch_provider = chroma_index::usearch::USearchIndexProvider::new(
@@ -2511,6 +2513,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let hnsw_provider = HnswIndexProvider::new(storage.clone(), hnsw_cache, 16);
         let usearch_provider = chroma_index::usearch::USearchIndexProvider::new(
@@ -2781,6 +2784,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let hnsw_provider = HnswIndexProvider::new(storage.clone(), hnsw_cache, 16);
         let usearch_provider = chroma_index::usearch::USearchIndexProvider::new(
@@ -3011,6 +3015,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let hnsw_provider = HnswIndexProvider::new(storage.clone(), hnsw_cache, 16);
         let usearch_provider = chroma_index::usearch::USearchIndexProvider::new(
@@ -3340,6 +3345,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let hnsw_provider = HnswIndexProvider::new(storage.clone(), hnsw_cache, 16);
         let usearch_provider = chroma_index::usearch::USearchIndexProvider::new(

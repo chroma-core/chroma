@@ -176,6 +176,7 @@ mod test {
             TEST_MAX_BLOCK_SIZE_BYTES,
             cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let delta = block_manager.create::<&str, Vec<u32>, UnorderedBlockDelta>();
 
@@ -231,6 +232,7 @@ mod test {
             TEST_MAX_BLOCK_SIZE_BYTES,
             cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let delta = block_manager.create::<&str, String, UnorderedBlockDelta>();
         let delta_id = delta.id;
@@ -315,6 +317,7 @@ mod test {
             TEST_MAX_BLOCK_SIZE_BYTES,
             cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let delta = block_manager.create::<f32, String, UnorderedBlockDelta>();
 
@@ -367,6 +370,7 @@ mod test {
             TEST_MAX_BLOCK_SIZE_BYTES,
             cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let delta = block_manager.create::<&str, RoaringBitmap, UnorderedBlockDelta>();
 
@@ -416,6 +420,7 @@ mod test {
             TEST_MAX_BLOCK_SIZE_BYTES,
             cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let ids = ["embedding_id_2", "embedding_id_0", "embedding_id_1"];
         let embeddings = [
@@ -493,6 +498,7 @@ mod test {
             TEST_MAX_BLOCK_SIZE_BYTES,
             cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let delta = block_manager.create::<u32, String, UnorderedBlockDelta>();
 
@@ -534,6 +540,7 @@ mod test {
             TEST_MAX_BLOCK_SIZE_BYTES,
             cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let delta = block_manager.create::<u32, u32, UnorderedBlockDelta>();
         let delta_id = delta.id;

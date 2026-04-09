@@ -968,6 +968,7 @@ mod tests {
             block_cache,
             root_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let pl_blockfile_writer = provider
@@ -1013,6 +1014,7 @@ mod tests {
             block_cache,
             root_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let pl_blockfile_writer = provider
@@ -1061,6 +1063,7 @@ mod tests {
             block_cache,
             root_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let pl_blockfile_writer = provider
@@ -1152,6 +1155,7 @@ mod tests {
             block_cache,
             root_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let pl_blockfile_writer = provider
@@ -1239,6 +1243,7 @@ mod tests {
             block_cache,
             root_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let pl_blockfile_writer = provider
