@@ -247,6 +247,7 @@ pub fn benchmark(c: &mut Criterion) {
         block_cache,
         sparse_index_cache,
         BlockManagerConfig::default_num_concurrent_block_flushes(),
+        BlockManagerConfig::default_max_concurrent_block_loads(),
     );
 
     // todo: sizes should be configurable

@@ -4,6 +4,7 @@ use std::{
     sync::Arc,
 };
 
+use chroma_blockstore::arrow::config::BlockManagerConfig;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
 use chroma_config::{registry::Registry, Configurable};
@@ -218,8 +219,8 @@ fn new_blockfile_provider(storage: chroma_storage::Storage) -> BlockfileProvider
         8 * 1024 * 1024,
         new_cache_for_test(),
         new_cache_for_test(),
-        chroma_blockstore::arrow::config::BlockManagerConfig::default_num_concurrent_block_flushes(
-        ),
+        BlockManagerConfig::default_num_concurrent_block_flushes(),
+        BlockManagerConfig::default_max_concurrent_block_loads(),
     )
 }
 

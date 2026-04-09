@@ -21,6 +21,8 @@ pub struct BlockManagerConfig {
     pub block_cache_config: CacheConfig,
     #[serde(default = "BlockManagerConfig::default_num_concurrent_block_flushes")]
     pub num_concurrent_block_flushes: usize,
+    #[serde(default = "BlockManagerConfig::default_max_concurrent_block_loads")]
+    pub max_concurrent_block_loads: usize,
 }
 
 impl BlockManagerConfig {
@@ -30,6 +32,10 @@ impl BlockManagerConfig {
 
     pub fn default_num_concurrent_block_flushes() -> usize {
         40
+    }
+
+    pub fn default_max_concurrent_block_loads() -> usize {
+        0
     }
 
     pub fn validate(&self) -> bool {
@@ -47,6 +53,7 @@ impl Default for BlockManagerConfig {
             }),
             num_concurrent_block_flushes: BlockManagerConfig::default_num_concurrent_block_flushes(
             ),
+            max_concurrent_block_loads: BlockManagerConfig::default_max_concurrent_block_loads(),
         }
     }
 }

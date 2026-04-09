@@ -71,6 +71,7 @@ fn add_to_index_and_get_reader<'a>(
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);

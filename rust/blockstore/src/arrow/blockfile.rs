@@ -16,7 +16,6 @@ use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
 use chroma_types::Cmek;
-use futures::future::{join_all, try_join_all};
 use futures::{Stream, StreamExt, TryStreamExt};
 use parking_lot::{Mutex, RwLock};
 use std::collections::HashSet;
@@ -523,16 +522,24 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     /// # Returns
     /// - `()`: Returns nothing.
     async fn load_blocks(&self, block_ids: &[Uuid]) {
-        // TODO: These need to be separate tasks enqueued onto dispatcher.
-        let mut futures = Vec::new();
-        for block_id in block_ids {
-            // Skip if already loaded in this reader's cache.
-            // The block manager's get() will handle checking its own cache.
-            if !self.loaded_blocks.read().contains_key(block_id) {
-                futures.push(self.get_block(*block_id, StorageRequestPriority::P0));
-            }
+        let block_ids_to_load: Vec<Uuid> = block_ids
+            .iter()
+            .copied()
+            .filter(|id| !self.loaded_blocks.read().contains_key(id))
+            .collect();
+
+        if block_ids_to_load.is_empty() {
+            return;
         }
-        join_all(futures).await;
+
+        // Bound concurrency to avoid overwhelming a single-threaded runtime
+        // with too many in-flight S3 streams (e.g. during quantized SPANN splits
+        // that can issue 500+ block fetches at once).
+        futures::stream::iter(block_ids_to_load)
+            .map(|id| self.get_block(id, StorageRequestPriority::P0))
+            .buffer_unordered(self.block_manager.max_concurrent_block_loads())
+            .for_each(|_| async {})
+            .await;
     }
 
     pub(crate) async fn load_blocks_for_keys(&self, keys: impl IntoIterator<Item = (String, K)>) {
@@ -608,7 +615,10 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             .instrument(Span::current())
         });
 
-        let block_iters = try_join_all(block_futures).await?;
+        let block_iters: Vec<_> = futures::stream::iter(block_futures)
+            .buffer_unordered(self.block_manager.max_concurrent_block_loads())
+            .try_collect()
+            .await?;
 
         Ok(block_iters.into_iter().flatten())
     }
@@ -665,6 +675,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             .sparse_index
             .get_block_ids_range(prefix_range.clone());
 
+        let block_futures_is_empty = block_ids.is_empty();
         let block_futures = block_ids.into_iter().map(|block_id| {
             async move {
                 match self.get_block(block_id, StorageRequestPriority::P0).await {
@@ -678,7 +689,14 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             .instrument(Span::current())
         });
 
-        let blocks = try_join_all(block_futures).await?;
+        let blocks: Vec<&Block> = if !block_futures_is_empty {
+            futures::stream::iter(block_futures)
+                .buffer_unordered(self.block_manager.max_concurrent_block_loads())
+                .try_collect()
+                .await?
+        } else {
+            vec![]
+        };
         Ok(blocks
             .into_iter()
             .flat_map(move |block| block.get_range(prefix_range.clone(), key_range.clone())))
@@ -876,6 +894,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -922,6 +941,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let tenant = "test_tenant";
         let db_id = DatabaseUuid::new();
@@ -1042,6 +1062,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
 
@@ -1117,6 +1138,7 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
                 BlockManagerConfig::default_num_concurrent_block_flushes(),
+                BlockManagerConfig::default_max_concurrent_block_loads(),
             );
             let prefix_path = String::from("");
             let writer = blockfile_provider
@@ -1190,6 +1212,7 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
                 BlockManagerConfig::default_num_concurrent_block_flushes(),
+                BlockManagerConfig::default_max_concurrent_block_loads(),
             );
             let prefix_path = String::from("");
             let writer = blockfile_provider
@@ -1352,6 +1375,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -1398,6 +1422,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -1521,6 +1546,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let custom_block_size = 100 * 1024 * 1024; // 100 MiB
@@ -1680,6 +1706,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -1728,6 +1755,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
 
@@ -1774,6 +1802,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
 
@@ -1814,6 +1843,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         let prefix_path = String::from("");
@@ -1867,6 +1897,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         let prefix_path = String::from("");
@@ -1910,6 +1941,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         let prefix_path = String::from("");
@@ -1968,6 +2000,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         let prefix_path = String::from("");
@@ -2015,6 +2048,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -2095,6 +2129,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -2137,6 +2172,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -2236,6 +2272,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
 
@@ -2276,6 +2313,7 @@ mod tests {
             16384,
             block_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         // Manually create a v1 blockfile with no counts
@@ -2349,6 +2387,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         // This test is rather fragile, but it is the best way to test the migration
@@ -2421,6 +2460,7 @@ mod tests {
             block_cache,
             root_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         let read_options = BlockfileReaderOptions::new(first_write_id, prefix_path.to_string());
@@ -2522,6 +2562,7 @@ mod tests {
             max_block_size_bytes,
             block_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         ////////////////////////// STEP 1 //////////////////////////
@@ -2589,6 +2630,7 @@ mod tests {
             block_cache,
             root_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         let read_options = BlockfileReaderOptions::new(first_write_id, prefix_path.to_string());
@@ -2685,6 +2727,7 @@ mod tests {
             block_cache,
             root_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         let writer = blockfile_provider
@@ -2751,6 +2794,7 @@ mod tests {
             max_block_size_bytes,
             block_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         ////////////////////////// STEP 1 //////////////////////////
@@ -2818,6 +2862,7 @@ mod tests {
             block_cache,
             root_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         let read_options = BlockfileReaderOptions::new(first_write_id, prefix_path.to_string());
@@ -2914,6 +2959,7 @@ mod tests {
             block_cache,
             root_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         let writer = blockfile_provider

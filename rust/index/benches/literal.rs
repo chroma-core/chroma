@@ -212,6 +212,7 @@ fn bench_literal(criterion: &mut Criterion) {
         new_cache_for_test(),
         new_cache_for_test(),
         BlockManagerConfig::default_num_concurrent_block_flushes(),
+        BlockManagerConfig::default_max_concurrent_block_loads(),
     );
     let blockfile_provider = BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
     let mut blockfile_id = None;
@@ -261,6 +262,7 @@ fn bench_literal(criterion: &mut Criterion) {
         new_cache_for_test(),
         new_cache_for_test(),
         BlockManagerConfig::default_num_concurrent_block_flushes(),
+        BlockManagerConfig::default_max_concurrent_block_loads(),
     );
     let blockfile_provider = BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
     let reader_options = BlockfileReaderOptions::new(
