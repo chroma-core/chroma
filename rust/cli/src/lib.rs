@@ -1,5 +1,6 @@
 mod client;
 mod commands;
+mod terminal;
 mod tui;
 mod ui_utils;
 mod utils;

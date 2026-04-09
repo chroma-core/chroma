@@ -1,11 +1,9 @@
+use crate::terminal::{SystemTerminal, Terminal};
 use crate::utils::{
     read_config, read_profiles, write_config, write_profiles, CliConfig, CliError, Profiles,
-    UtilsError,
 };
 use clap::{Args, Subcommand};
 use colored::Colorize;
-use dialoguer::theme::ColorfulTheme;
-use dialoguer::Input;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -116,16 +114,14 @@ fn rename_success_message(old_name: &str, new_name: &str) -> String {
         .to_string()
 }
 
-fn confirm_deletion(profile_name: &str) -> Result<bool, CliError> {
-    println!("{}", confirm_profile_delete_message(profile_name));
+fn confirm_deletion(profile_name: &str, term: &mut dyn Terminal) -> Result<bool, CliError> {
+    term.println(&confirm_profile_delete_message(profile_name));
 
-    let confirm: String = Input::with_theme(&ColorfulTheme::default())
-        .interact_text()
-        .map_err(|_| UtilsError::UserInputFailed)?;
+    let confirm = term.prompt_input()?;
 
     let confirmed = confirm.to_lowercase() == "y" || confirm.to_lowercase() == "yes";
     if confirmed {
-        println!();
+        term.println("");
     }
 
     Ok(confirmed)
@@ -135,6 +131,7 @@ fn delete_profile(
     args: DeleteArgs,
     profiles: &mut Profiles,
     config: &mut CliConfig,
+    term: &mut dyn Terminal,
 ) -> Result<(), CliError> {
     let delete_profile_name = args.name;
     if !profiles.contains_key(&delete_profile_name) {
@@ -142,39 +139,41 @@ fn delete_profile(
     }
 
     if config.current_profile == delete_profile_name {
-        let confirmed = args.force || confirm_deletion(&delete_profile_name)?;
+        let confirmed = args.force || confirm_deletion(&delete_profile_name, term)?;
         if confirmed {
             config.current_profile = "".to_string();
-            write_config(config)?
         } else {
-            println!("{}", profile_delete_abort_message());
+            term.println(&profile_delete_abort_message());
             return Ok(());
         }
     };
 
     profiles.remove(&delete_profile_name);
-    write_profiles(profiles)?;
 
-    println!("{}", profile_delete_success_message(&delete_profile_name));
+    term.println(&profile_delete_success_message(&delete_profile_name));
     Ok(())
 }
 
-fn list_profiles(profiles: Profiles, config: CliConfig) -> Result<(), CliError> {
+fn list_profiles(
+    profiles: &Profiles,
+    config: &CliConfig,
+    term: &mut dyn Terminal,
+) -> Result<(), CliError> {
     if profiles.is_empty() {
-        println!("{}", no_profiles_found_message());
+        term.println(&no_profiles_found_message());
         return Ok(());
     }
 
-    println!("{}", "Available profiles:".blue().bold());
+    term.println(&format!("{}", "Available profiles:".blue().bold()));
 
     if !config.current_profile.is_empty() {
         let current_profile_label = format!("{} (current)", config.current_profile).bold();
-        println!("{} {}", ">".yellow(), current_profile_label);
+        term.println(&format!("{} {}", ">".yellow(), current_profile_label));
     }
 
     for key in profiles.keys() {
         if *key != config.current_profile {
-            println!("{} {}", ">".yellow(), key);
+            term.println(&format!("{} {}", ">".yellow(), key));
         }
     }
 
@@ -185,6 +184,7 @@ fn rename(
     args: RenameArgs,
     profiles: &mut Profiles,
     config: &mut CliConfig,
+    term: &mut dyn Terminal,
 ) -> Result<(), CliError> {
     let rename_profile_name = args.name;
     let new_name = args.new_name;
@@ -203,51 +203,352 @@ fn rename(
         new_name.clone(),
         profiles.get(&rename_profile_name).unwrap().clone(),
     );
-    write_profiles(profiles)?;
 
     if is_current {
         config.current_profile = new_name.clone();
-        write_config(config)?;
     }
 
-    println!(
-        "{}",
-        rename_success_message(&rename_profile_name, &new_name)
-    );
+    term.println(&rename_success_message(&rename_profile_name, &new_name));
 
     Ok(())
 }
 
-fn show(config: CliConfig) -> Result<(), CliError> {
+fn show(config: &CliConfig, term: &mut dyn Terminal) -> Result<(), CliError> {
     if config.current_profile.is_empty() {
-        println!("{}", no_current_profile_message());
+        term.println(&no_current_profile_message());
         return Ok(());
     }
 
-    println!("{}", current_profile_message(&config.current_profile));
+    term.println(&current_profile_message(&config.current_profile));
     Ok(())
 }
 
-fn use_profile(args: UseArgs, profiles: Profiles, config: &mut CliConfig) -> Result<(), CliError> {
+fn use_profile(
+    args: UseArgs,
+    profiles: &Profiles,
+    config: &mut CliConfig,
+    term: &mut dyn Terminal,
+) -> Result<(), CliError> {
     if !profiles.contains_key(&args.name) {
         return Err(ProfileError::ProfileNotFound(args.name.clone()).into());
     }
 
     config.current_profile = args.name;
-    write_config(config)?;
-    println!("{}", current_profile_set_message(&config.current_profile));
+    term.println(&current_profile_set_message(&config.current_profile));
     Ok(())
 }
 
 pub fn profile_command(command: ProfileCommand) -> Result<(), CliError> {
     let mut profiles = read_profiles()?;
     let mut config = read_config()?;
+    let mut term = SystemTerminal;
 
     match command {
-        ProfileCommand::Delete(args) => delete_profile(args, &mut profiles, &mut config),
-        ProfileCommand::List => list_profiles(profiles, config),
-        ProfileCommand::Rename(args) => rename(args, &mut profiles, &mut config),
-        ProfileCommand::Show => show(config),
-        ProfileCommand::Use(args) => use_profile(args, profiles, &mut config),
+        ProfileCommand::Delete(args) => {
+            delete_profile(args, &mut profiles, &mut config, &mut term)?;
+            write_profiles(&profiles)?;
+            write_config(&config)?;
+        }
+        ProfileCommand::List => list_profiles(&profiles, &config, &mut term)?,
+        ProfileCommand::Rename(args) => {
+            rename(args, &mut profiles, &mut config, &mut term)?;
+            write_profiles(&profiles)?;
+            write_config(&config)?;
+        }
+        ProfileCommand::Show => show(&config, &mut term)?,
+        ProfileCommand::Use(args) => {
+            use_profile(args, &profiles, &mut config, &mut term)?;
+            write_config(&config)?;
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::terminal::test_terminal::TestTerminal;
+    use crate::utils::Profile;
+    use std::collections::HashMap;
+
+    fn make_config(current_profile: &str) -> CliConfig {
+        CliConfig {
+            current_profile: current_profile.to_string(),
+            sample_apps: Default::default(),
+            theme: Default::default(),
+        }
+    }
+
+    fn make_profiles(names: &[&str]) -> Profiles {
+        let mut profiles = HashMap::new();
+        for name in names {
+            profiles.insert(
+                name.to_string(),
+                Profile::new("test-api-key".to_string(), "test-tenant".to_string()),
+            );
+        }
+        profiles
+    }
+
+    // ── show ──
+
+    #[test]
+    fn test_show_displays_current_profile() {
+        let config = make_config("my-profile");
+        let mut term = TestTerminal::new();
+
+        show(&config, &mut term).unwrap();
+
+        assert_eq!(term.output.len(), 1);
+        assert!(term.output[0].contains("my-profile"));
+        assert!(term.output[0].contains("Current profile:"));
+    }
+
+    #[test]
+    fn test_show_no_current_profile() {
+        let config = make_config("");
+        let mut term = TestTerminal::new();
+
+        show(&config, &mut term).unwrap();
+
+        assert_eq!(term.output.len(), 1);
+        assert!(term.output[0].contains("No profile set currently"));
+    }
+
+    // ── list ──
+
+    #[test]
+    fn test_list_empty_profiles() {
+        let profiles = make_profiles(&[]);
+        let config = make_config("");
+        let mut term = TestTerminal::new();
+
+        list_profiles(&profiles, &config, &mut term).unwrap();
+
+        assert_eq!(term.output.len(), 1);
+        assert!(term.output[0].contains("No profiles defined"));
+    }
+
+    #[test]
+    fn test_list_profiles_shows_current() {
+        let profiles = make_profiles(&["default", "staging"]);
+        let config = make_config("default");
+        let mut term = TestTerminal::new();
+
+        list_profiles(&profiles, &config, &mut term).unwrap();
+
+        assert!(term.output[0].contains("Available profiles:"));
+        assert!(term.output[1].contains("default"));
+        assert!(term.output[1].contains("(current)"));
+    }
+
+    // ── use ──
+
+    #[test]
+    fn test_use_profile_switches_current() {
+        let profiles = make_profiles(&["a", "b"]);
+        let mut config = make_config("a");
+        let mut term = TestTerminal::new();
+
+        use_profile(
+            UseArgs {
+                name: "b".to_string(),
+            },
+            &profiles,
+            &mut config,
+            &mut term,
+        )
+        .unwrap();
+
+        assert_eq!(config.current_profile, "b");
+        assert!(term.output[0].contains("Current profile set to"));
+    }
+
+    #[test]
+    fn test_use_profile_not_found() {
+        let profiles = make_profiles(&["a"]);
+        let mut config = make_config("a");
+        let mut term = TestTerminal::new();
+
+        let result = use_profile(
+            UseArgs {
+                name: "nonexistent".to_string(),
+            },
+            &profiles,
+            &mut config,
+            &mut term,
+        );
+
+        assert!(result.is_err());
+    }
+
+    // ── delete ──
+
+    #[test]
+    fn test_delete_non_current_profile() {
+        let mut profiles = make_profiles(&["a", "b"]);
+        let mut config = make_config("a");
+        let mut term = TestTerminal::new();
+
+        delete_profile(
+            DeleteArgs {
+                name: "b".to_string(),
+                force: false,
+            },
+            &mut profiles,
+            &mut config,
+            &mut term,
+        )
+        .unwrap();
+
+        assert!(!profiles.contains_key("b"));
+        assert!(profiles.contains_key("a"));
+        assert!(term.output.last().unwrap().contains("successfully removed"));
+    }
+
+    #[test]
+    fn test_delete_current_profile_with_force() {
+        let mut profiles = make_profiles(&["a"]);
+        let mut config = make_config("a");
+        let mut term = TestTerminal::new();
+
+        delete_profile(
+            DeleteArgs {
+                name: "a".to_string(),
+                force: true,
+            },
+            &mut profiles,
+            &mut config,
+            &mut term,
+        )
+        .unwrap();
+
+        assert!(!profiles.contains_key("a"));
+        assert_eq!(config.current_profile, "");
+    }
+
+    #[test]
+    fn test_delete_current_profile_confirmed() {
+        let mut profiles = make_profiles(&["a"]);
+        let mut config = make_config("a");
+        let mut term = TestTerminal::new().with_inputs(vec!["y"]);
+
+        delete_profile(
+            DeleteArgs {
+                name: "a".to_string(),
+                force: false,
+            },
+            &mut profiles,
+            &mut config,
+            &mut term,
+        )
+        .unwrap();
+
+        assert!(!profiles.contains_key("a"));
+        assert_eq!(config.current_profile, "");
+    }
+
+    #[test]
+    fn test_delete_current_profile_denied() {
+        let mut profiles = make_profiles(&["a"]);
+        let mut config = make_config("a");
+        let mut term = TestTerminal::new().with_inputs(vec!["n"]);
+
+        delete_profile(
+            DeleteArgs {
+                name: "a".to_string(),
+                force: false,
+            },
+            &mut profiles,
+            &mut config,
+            &mut term,
+        )
+        .unwrap();
+
+        assert!(profiles.contains_key("a"));
+        assert_eq!(config.current_profile, "a");
+        assert!(term.output.last().unwrap().contains("Delete cancelled"));
+    }
+
+    #[test]
+    fn test_delete_nonexistent_profile() {
+        let mut profiles = make_profiles(&["a"]);
+        let mut config = make_config("a");
+        let mut term = TestTerminal::new();
+
+        let result = delete_profile(
+            DeleteArgs {
+                name: "nope".to_string(),
+                force: false,
+            },
+            &mut profiles,
+            &mut config,
+            &mut term,
+        );
+
+        assert!(result.is_err());
+    }
+
+    // ── rename ──
+
+    #[test]
+    fn test_rename_profile() {
+        let mut profiles = make_profiles(&["old-name"]);
+        let mut config = make_config("");
+        let mut term = TestTerminal::new();
+
+        rename(
+            RenameArgs {
+                name: "old-name".to_string(),
+                new_name: "new-name".to_string(),
+            },
+            &mut profiles,
+            &mut config,
+            &mut term,
+        )
+        .unwrap();
+
+        assert!(profiles.contains_key("new-name"));
+        assert!(term.output[0].contains("Successfully renamed"));
+    }
+
+    #[test]
+    fn test_rename_current_profile_updates_config() {
+        let mut profiles = make_profiles(&["active"]);
+        let mut config = make_config("active");
+        let mut term = TestTerminal::new();
+
+        rename(
+            RenameArgs {
+                name: "active".to_string(),
+                new_name: "renamed".to_string(),
+            },
+            &mut profiles,
+            &mut config,
+            &mut term,
+        )
+        .unwrap();
+
+        assert_eq!(config.current_profile, "renamed");
+    }
+
+    #[test]
+    fn test_rename_to_existing_name_fails() {
+        let mut profiles = make_profiles(&["a", "b"]);
+        let mut config = make_config("a");
+        let mut term = TestTerminal::new();
+
+        let result = rename(
+            RenameArgs {
+                name: "a".to_string(),
+                new_name: "b".to_string(),
+            },
+            &mut profiles,
+            &mut config,
+            &mut term,
+        );
+
+        assert!(result.is_err());
     }
 }
