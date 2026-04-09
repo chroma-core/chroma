@@ -114,10 +114,7 @@ fn rename_success_message(old_name: &str, new_name: &str) -> String {
         .to_string()
 }
 
-fn confirm_deletion(
-    profile_name: &str,
-    term: &mut dyn Terminal,
-) -> Result<bool, CliError> {
+fn confirm_deletion(profile_name: &str, term: &mut dyn Terminal) -> Result<bool, CliError> {
     term.println(&confirm_profile_delete_message(profile_name));
 
     let confirm = term.prompt_input()?;
@@ -354,7 +351,15 @@ mod tests {
         let mut config = make_config("a");
         let mut term = TestTerminal::new();
 
-        use_profile(UseArgs { name: "b".to_string() }, &profiles, &mut config, &mut term).unwrap();
+        use_profile(
+            UseArgs {
+                name: "b".to_string(),
+            },
+            &profiles,
+            &mut config,
+            &mut term,
+        )
+        .unwrap();
 
         assert_eq!(config.current_profile, "b");
         assert!(term.output[0].contains("Current profile set to"));
@@ -367,7 +372,9 @@ mod tests {
         let mut term = TestTerminal::new();
 
         let result = use_profile(
-            UseArgs { name: "nonexistent".to_string() },
+            UseArgs {
+                name: "nonexistent".to_string(),
+            },
             &profiles,
             &mut config,
             &mut term,
@@ -385,7 +392,10 @@ mod tests {
         let mut term = TestTerminal::new();
 
         delete_profile(
-            DeleteArgs { name: "b".to_string(), force: false },
+            DeleteArgs {
+                name: "b".to_string(),
+                force: false,
+            },
             &mut profiles,
             &mut config,
             &mut term,
@@ -404,7 +414,10 @@ mod tests {
         let mut term = TestTerminal::new();
 
         delete_profile(
-            DeleteArgs { name: "a".to_string(), force: true },
+            DeleteArgs {
+                name: "a".to_string(),
+                force: true,
+            },
             &mut profiles,
             &mut config,
             &mut term,
@@ -422,7 +435,10 @@ mod tests {
         let mut term = TestTerminal::new().with_inputs(vec!["y"]);
 
         delete_profile(
-            DeleteArgs { name: "a".to_string(), force: false },
+            DeleteArgs {
+                name: "a".to_string(),
+                force: false,
+            },
             &mut profiles,
             &mut config,
             &mut term,
@@ -440,7 +456,10 @@ mod tests {
         let mut term = TestTerminal::new().with_inputs(vec!["n"]);
 
         delete_profile(
-            DeleteArgs { name: "a".to_string(), force: false },
+            DeleteArgs {
+                name: "a".to_string(),
+                force: false,
+            },
             &mut profiles,
             &mut config,
             &mut term,
@@ -459,7 +478,10 @@ mod tests {
         let mut term = TestTerminal::new();
 
         let result = delete_profile(
-            DeleteArgs { name: "nope".to_string(), force: false },
+            DeleteArgs {
+                name: "nope".to_string(),
+                force: false,
+            },
             &mut profiles,
             &mut config,
             &mut term,
@@ -477,7 +499,10 @@ mod tests {
         let mut term = TestTerminal::new();
 
         rename(
-            RenameArgs { name: "old-name".to_string(), new_name: "new-name".to_string() },
+            RenameArgs {
+                name: "old-name".to_string(),
+                new_name: "new-name".to_string(),
+            },
             &mut profiles,
             &mut config,
             &mut term,
@@ -495,7 +520,10 @@ mod tests {
         let mut term = TestTerminal::new();
 
         rename(
-            RenameArgs { name: "active".to_string(), new_name: "renamed".to_string() },
+            RenameArgs {
+                name: "active".to_string(),
+                new_name: "renamed".to_string(),
+            },
             &mut profiles,
             &mut config,
             &mut term,
@@ -512,7 +540,10 @@ mod tests {
         let mut term = TestTerminal::new();
 
         let result = rename(
-            RenameArgs { name: "a".to_string(), new_name: "b".to_string() },
+            RenameArgs {
+                name: "a".to_string(),
+                new_name: "b".to_string(),
+            },
             &mut profiles,
             &mut config,
             &mut term,
