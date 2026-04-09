@@ -675,6 +675,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             .sparse_index
             .get_block_ids_range(prefix_range.clone());
 
+        let block_futures_is_empty = block_ids.is_empty();
         let block_futures = block_ids.into_iter().map(|block_id| {
             async move {
                 match self.get_block(block_id, StorageRequestPriority::P0).await {
@@ -688,10 +689,14 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             .instrument(Span::current())
         });
 
-        let blocks: Vec<&Block> = futures::stream::iter(block_futures)
+        let blocks: Vec<&Block> = if !block_futures_is_empty {
+            futures::stream::iter(block_futures)
             .buffer_unordered(self.block_manager.max_concurrent_block_loads())
             .try_collect()
-            .await?;
+            .await?
+        } else {
+            vec![]
+        };
         Ok(blocks
             .into_iter()
             .flat_map(move |block| block.get_range(prefix_range.clone(), key_range.clone())))
