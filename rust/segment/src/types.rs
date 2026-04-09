@@ -2,23 +2,26 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
     logical_size_of_metadata, Chunk, DataRecord, DeletedMetadata, LogRecord,
     MaterializedLogOperation, Metadata, MetadataDelta, MetadataValue, MetadataValueConversionError,
-    Operation, Schema, SegmentUuid, UpdateMetadata, UpdateMetadataValue,
+    Operation, Schema, SegmentType, SegmentUuid, UpdateMetadata, UpdateMetadataValue,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{Instrument, Span};
+
 use uuid::Uuid;
 
+use crate::blockfile_record::{RecordSegmentFlusher, RecordSegmentReader, RecordSegmentWriter};
 use crate::distributed_spann::{SpannSegmentFlusherShard, SpannSegmentWriterShard};
 #[cfg(feature = "usearch")]
 use crate::quantized_spann::{QuantizedSpannSegmentFlusherShard, QuantizedSpannSegmentWriterShard};
+use crate::spann_provider::SpannProvider;
+use chroma_index::hnsw_provider::HnswIndexProvider;
 
-use super::blockfile_metadata::{MetadataSegmentFlusherShard, MetadataSegmentWriterShard};
+use super::blockfile_metadata::{MetadataSegmentFlusher, MetadataSegmentWriter};
 use super::blockfile_record::{
-    ApplyMaterializedLogError, RecordSegmentFlusherShard, RecordSegmentReaderOptions,
-    RecordSegmentReaderShard, RecordSegmentWriterShard,
+    ApplyMaterializedLogError, RecordSegmentReaderOptions, RecordSegmentReaderShard,
 };
 use super::distributed_hnsw::DistributedHNSWSegmentWriter;
 
@@ -134,7 +137,7 @@ impl ChromaError for LogMaterializerError {
 /// E.x. `final_document_at_log_index: Option<usize>` is used instead of `final_document: Option<&str>` to avoid holding references to the data.
 /// This allows `MaterializedLogRecord` (and types above it) to be trivially Send'able.
 #[derive(Debug)]
-struct MaterializedLogRecord {
+pub struct MaterializedLogRecord {
     // False if the record exists only in the log, otherwise true.
     offset_id_exists_in_segment: bool,
     // If present in the record segment then it is the offset id
@@ -527,11 +530,62 @@ impl<'log_data, 'segment_data: 'log_data> HydratedMaterializedLogRecord<'log_dat
     }
 }
 
+// If a shard does not contain any logs,
+// there still needs to be an empty entry for it.
+#[derive(Debug, Clone)]
+pub struct PartitionedMaterializeLogsResult {
+    pub shards: Vec<MaterializeLogsResult>,
+}
+
+impl PartitionedMaterializeLogsResult {
+    pub fn is_empty(&self) -> bool {
+        self.shards.is_empty() || self.shards.iter().all(|s| s.is_empty())
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &MaterializeLogsResult> {
+        self.shards.iter()
+    }
+
+    pub fn len(&self) -> usize {
+        self.shards.iter().map(|s| s.len()).sum()
+    }
+
+    pub fn has_backfill(&self) -> bool {
+        self.shards.iter().any(|s| s.has_backfill())
+    }
+
+    pub fn split(&self, pivot_offset_id: u32) -> Option<PartitionedMaterializeLogsResult> {
+        let mut new_partitioned = self.clone();
+        let active_shard = new_partitioned.shards.last_mut()?;
+        let new_active_shard = active_shard.split(pivot_offset_id);
+        new_partitioned.shards.push(new_active_shard);
+        Some(new_partitioned)
+    }
+
+    pub fn get_active_record_delta(&self) -> i32 {
+        let active_shard = match self.shards.last() {
+            Some(shard) => shard,
+            None => return 0,
+        };
+
+        let mut count = 0;
+        for (record, _) in active_shard.materialized.iter() {
+            let delta = match record.final_operation {
+                MaterializedLogOperation::AddNew => 1,
+                MaterializedLogOperation::DeleteExisting => -1,
+                _ => 0,
+            };
+            count += delta;
+        }
+        count
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MaterializeLogsResult {
-    logs: Chunk<LogRecord>,
-    materialized: Chunk<MaterializedLogRecord>,
-    has_backfill: bool,
+    pub logs: Chunk<LogRecord>,
+    pub materialized: Chunk<MaterializedLogRecord>,
+    pub has_backfill: bool,
 }
 
 impl MaterializeLogsResult {
@@ -543,6 +597,10 @@ impl MaterializeLogsResult {
         self.materialized.len()
     }
 
+    pub fn total_len(&self) -> usize {
+        self.materialized.total_len()
+    }
+
     pub fn has_backfill(&self) -> bool {
         self.has_backfill
     }
@@ -550,9 +608,34 @@ impl MaterializeLogsResult {
     pub fn iter(&'_ self) -> MaterializeLogsResultIter<'_> {
         MaterializeLogsResultIter {
             logs: &self.logs,
-            chunk: &self.materialized,
+            inner: self.materialized.iter(),
             index: 0,
         }
+    }
+
+    pub fn split(&mut self, pivot_offset_id: u32) -> MaterializeLogsResult {
+        let mut other_mat_logs = self.clone();
+        let mut old_visibility = vec![false; self.materialized.total_len()];
+        let mut new_visibility = old_visibility.clone();
+        (0..self.materialized.total_len()).for_each(|i| {
+            if let Some(true) = self.materialized.get_visibility(i) {
+                old_visibility[i] = true;
+            }
+        });
+
+        for (record, idx) in self.materialized.iter() {
+            if record.final_operation == MaterializedLogOperation::AddNew
+                && record.offset_id >= pivot_offset_id
+            {
+                old_visibility[idx] = false;
+                new_visibility[idx] = true;
+            }
+        }
+
+        self.materialized.set_visibility(old_visibility);
+
+        other_mat_logs.materialized.set_visibility(new_visibility);
+        other_mat_logs
     }
 }
 
@@ -564,7 +647,7 @@ impl<'log_data> IntoIterator for &'log_data MaterializeLogsResult {
     fn into_iter(self) -> Self::IntoIter {
         MaterializeLogsResultIter {
             logs: &self.logs,
-            chunk: &self.materialized,
+            inner: self.materialized.iter(),
             index: 0,
         }
     }
@@ -572,7 +655,7 @@ impl<'log_data> IntoIterator for &'log_data MaterializeLogsResult {
 
 pub struct MaterializeLogsResultIter<'log_data> {
     logs: &'log_data Chunk<LogRecord>,
-    chunk: &'log_data Chunk<MaterializedLogRecord>,
+    inner: chroma_types::DataChunkIteraror<'log_data, MaterializedLogRecord>,
     index: usize,
 }
 
@@ -580,16 +663,19 @@ impl<'log_data> Iterator for MaterializeLogsResultIter<'log_data> {
     type Item = BorrowedMaterializedLogRecord<'log_data>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index < self.chunk.len() {
-            let item = BorrowedMaterializedLogRecord {
-                materialized_log_record: self.chunk.get(self.index).unwrap(),
+        self.inner.next().map(|(materialized_log_record, index)| {
+            self.index = index;
+            BorrowedMaterializedLogRecord {
+                materialized_log_record,
                 logs: self.logs,
-            };
-            self.index += 1;
-            Some(item)
-        } else {
-            None
-        }
+            }
+        })
+    }
+}
+
+impl<'log_data> MaterializeLogsResultIter<'log_data> {
+    pub fn get_index(&self) -> usize {
+        self.index
     }
 }
 
@@ -1067,29 +1153,274 @@ impl VectorSegmentWriterShard {
         }
     }
 
-    pub async fn commit(self) -> Result<ChromaSegmentFlusher, Box<dyn ChromaError>> {
+    pub async fn commit(self) -> Result<VectorSegmentFlusherShard, Box<dyn ChromaError>> {
         match self {
-            VectorSegmentWriterShard::Hnsw(writer) => writer.commit().await.map(|w| {
-                ChromaSegmentFlusher::VectorSegment(VectorSegmentFlusherShard::Hnsw(Box::new(w)))
-            }),
+            VectorSegmentWriterShard::Hnsw(writer) => writer
+                .commit()
+                .await
+                .map(|w| VectorSegmentFlusherShard::Hnsw(Box::new(w))),
             #[cfg(feature = "usearch")]
-            VectorSegmentWriterShard::QuantizedSpann(writer) => {
-                Box::pin(writer.commit()).await.map(|f| {
-                    ChromaSegmentFlusher::VectorSegment(VectorSegmentFlusherShard::QuantizedSpann(
-                        f,
-                    ))
-                })
-            }
+            VectorSegmentWriterShard::QuantizedSpann(writer) => Box::pin(writer.commit())
+                .await
+                .map(VectorSegmentFlusherShard::QuantizedSpann),
             VectorSegmentWriterShard::Spann(writer) => Box::pin(writer.commit())
                 .await
-                .map(|w| ChromaSegmentFlusher::VectorSegment(VectorSegmentFlusherShard::Spann(w))),
+                .map(VectorSegmentFlusherShard::Spann),
         }
     }
 }
 
-type RecordSegmentWriter = RecordSegmentWriterShard;
-type MetadataSegmentWriter<'a> = MetadataSegmentWriterShard<'a>;
-type VectorSegmentWriter = VectorSegmentWriterShard;
+#[derive(Error, Debug)]
+pub enum VectorSegmentWriterError {
+    #[error("Failed to get segment shards: {0}")]
+    GetShards(#[from] chroma_types::SegmentShardError),
+    #[error("Mismatched shard count: vector segments has {vector_shards} shards, record segments has {record_shards} shards")]
+    MismatchedShardCount {
+        vector_shards: usize,
+        record_shards: usize,
+    },
+    #[error("Failed to create HNSW writer: {0}")]
+    CreateHnswWriter(Box<dyn ChromaError>),
+    #[cfg(feature = "usearch")]
+    #[error("Failed to create QuantizedSpann writer: {0}")]
+    CreateQuantizedSpannWriter(crate::quantized_spann::QuantizedSpannSegmentError),
+    #[error("Failed to create Spann writer: {0}")]
+    CreateSpannWriter(crate::distributed_spann::SpannSegmentWriterShardError),
+    #[error("Unsupported vector segment type: {0:?}")]
+    UnsupportedSegmentType(chroma_types::SegmentType),
+    #[error("Invalid collection passed")]
+    InvalidCollection,
+}
+
+impl ChromaError for VectorSegmentWriterError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            Self::GetShards(e) => e.code(),
+            Self::MismatchedShardCount { .. } => ErrorCodes::Internal,
+            Self::CreateHnswWriter(e) => e.code(),
+            #[cfg(feature = "usearch")]
+            Self::CreateQuantizedSpannWriter(e) => e.code(),
+            Self::CreateSpannWriter(e) => e.code(),
+            Self::UnsupportedSegmentType(_) => ErrorCodes::Internal,
+            Self::InvalidCollection => ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct VectorSegmentWriter {
+    shards: Vec<VectorSegmentWriterShard>,
+    pub id: SegmentUuid,
+    // Fields needed for create_new_shard
+    vector_segment: chroma_types::Segment,
+}
+
+impl VectorSegmentWriter {
+    pub async fn from_segment(
+        collection: &chroma_types::Collection,
+        vector_segment: &chroma_types::Segment,
+        record_segment: &chroma_types::Segment,
+        dimension: usize,
+        hnsw_provider: &HnswIndexProvider,
+        spann_provider: &SpannProvider,
+        cmek: Option<chroma_types::Cmek>,
+    ) -> Result<Self, VectorSegmentWriterError> {
+        let segment_shards = vector_segment.get_shards()?;
+        let record_segment_shards = record_segment.get_shards()?;
+
+        // Check that we have matching shard counts
+        if segment_shards.len() != record_segment_shards.len() {
+            return Err(VectorSegmentWriterError::MismatchedShardCount {
+                vector_shards: segment_shards.len(),
+                record_shards: record_segment_shards.len(),
+            });
+        }
+
+        let mut writer_shards = Vec::new();
+
+        // record_segment_shard is only used when usearch feature is enabled
+        #[allow(unused_variables)]
+        for (segment_shard, record_segment_shard) in
+            segment_shards.iter().zip(record_segment_shards.iter())
+        {
+            let writer_shard = match vector_segment.r#type {
+                chroma_types::SegmentType::HnswDistributed => {
+                    let writer = DistributedHNSWSegmentWriter::from_segment(
+                        collection,
+                        vector_segment,
+                        dimension,
+                        hnsw_provider.clone(),
+                        cmek.clone(),
+                    )
+                    .await
+                    .map_err(|e| {
+                        VectorSegmentWriterError::CreateHnswWriter(e as Box<dyn ChromaError>)
+                    })?;
+                    VectorSegmentWriterShard::Hnsw(writer)
+                }
+                #[cfg(feature = "usearch")]
+                chroma_types::SegmentType::QuantizedSpann => {
+                    let writer = spann_provider
+                        .write_quantized_usearch(collection, segment_shard, record_segment_shard)
+                        .await
+                        .map_err(VectorSegmentWriterError::CreateQuantizedSpannWriter)?;
+                    VectorSegmentWriterShard::QuantizedSpann(writer)
+                }
+                chroma_types::SegmentType::Spann => {
+                    let writer: SpannSegmentWriterShard = spann_provider
+                        .write(collection, segment_shard, dimension, cmek.clone())
+                        .await
+                        .map_err(VectorSegmentWriterError::CreateSpannWriter)?;
+                    VectorSegmentWriterShard::Spann(writer)
+                }
+                _ => {
+                    return Err(VectorSegmentWriterError::UnsupportedSegmentType(
+                        vector_segment.r#type,
+                    ));
+                }
+            };
+
+            writer_shards.push(writer_shard);
+        }
+
+        Ok(Self {
+            shards: writer_shards,
+            id: vector_segment.id,
+            vector_segment: vector_segment.clone(),
+        })
+    }
+
+    pub async fn apply_materialized_log_chunk(
+        &self,
+        record_segment_reader: &Option<RecordSegmentReader<'_>>,
+        materialized: &PartitionedMaterializeLogsResult,
+    ) -> Result<(), ApplyMaterializedLogError> {
+        // Apply to all shards concurrently
+        let partitions = &materialized.shards;
+
+        // Ensure the number of partitions matches the number of shards
+        if self.shards.len() != partitions.len() {
+            return Err(ApplyMaterializedLogError::InvalidNumberOfPartitions {
+                expected: self.shards.len(),
+                actual: partitions.len(),
+            });
+        }
+
+        // Extract shard readers ahead of time
+        let shard_readers: Vec<_> = (0..self.shards.len())
+            .map(|shard_idx| {
+                record_segment_reader.as_ref().and_then(|reader| {
+                    reader
+                        .get_shards()
+                        .get(shard_idx)
+                        .and_then(|opt| opt.as_ref())
+                        .cloned()
+                })
+            })
+            .collect();
+
+        let futures = self
+            .shards
+            .iter()
+            .zip(partitions.iter())
+            .zip(shard_readers.into_iter())
+            .map(|((shard, partitions_logs), shard_reader)| async move {
+                shard
+                    .apply_materialized_log_chunk(&shard_reader, partitions_logs)
+                    .await
+            });
+
+        futures::future::try_join_all(futures).await?;
+        Ok(())
+    }
+
+    pub async fn finish(&mut self) -> Result<(), Box<dyn ChromaError>> {
+        // Call finish on all shards concurrently
+        let futures = self.shards.iter_mut().map(|shard| shard.finish());
+
+        futures::future::try_join_all(futures).await?;
+        Ok(())
+    }
+
+    pub fn get_id(&self) -> SegmentUuid {
+        self.id
+    }
+
+    pub fn get_name(&self) -> &'static str {
+        "VectorSegmentWriter"
+    }
+
+    pub async fn commit(self) -> Result<VectorSegmentFlusher, Box<dyn ChromaError>> {
+        let futures = self.shards.into_iter().map(|shard| shard.commit());
+
+        let flusher_shards = futures::future::try_join_all(futures).await?;
+
+        Ok(VectorSegmentFlusher {
+            shards: flusher_shards,
+            id: self.id,
+        })
+    }
+
+    pub async fn create_new_shard(
+        &mut self,
+        #[allow(unused_variables)] record_shard: &chroma_types::SegmentShard,
+        collection: &chroma_types::Collection,
+        spann_provider: &SpannProvider,
+    ) -> Result<(), VectorSegmentWriterError> {
+        if collection.collection_id != self.vector_segment.collection {
+            return Err(VectorSegmentWriterError::InvalidCollection);
+        }
+
+        // For legacy vector segments (HNSW), creating a new shard is not yet implemented
+        if self.vector_segment.r#type != SegmentType::Spann
+            && self.vector_segment.r#type != SegmentType::QuantizedSpann
+        {
+            return Err(VectorSegmentWriterError::UnsupportedSegmentType(
+                self.vector_segment.r#type,
+            ));
+        }
+
+        // Guard against QuantizedSpann when usearch feature is disabled
+        #[cfg(not(feature = "usearch"))]
+        if self.vector_segment.r#type == SegmentType::QuantizedSpann {
+            return Err(VectorSegmentWriterError::UnsupportedSegmentType(
+                self.vector_segment.r#type,
+            ));
+        }
+
+        let new_shard_segment = self.vector_segment.new_shard();
+        let dimension = collection
+            .dimension
+            .ok_or(VectorSegmentWriterError::InvalidCollection)? as usize;
+        let cmek = collection.schema.as_ref().and_then(|s| s.cmek.clone());
+
+        let new_writer_shard = match self.vector_segment.r#type {
+            SegmentType::Spann => {
+                let writer: SpannSegmentWriterShard = spann_provider
+                    .write(collection, &new_shard_segment, dimension, cmek)
+                    .await
+                    .map_err(VectorSegmentWriterError::CreateSpannWriter)?;
+                VectorSegmentWriterShard::Spann(writer)
+            }
+            #[cfg(feature = "usearch")]
+            SegmentType::QuantizedSpann => {
+                let writer = spann_provider
+                    .write_quantized_usearch(collection, &new_shard_segment, record_shard)
+                    .await
+                    .map_err(VectorSegmentWriterError::CreateQuantizedSpannWriter)?;
+                VectorSegmentWriterShard::QuantizedSpann(writer)
+            }
+            _ => {
+                return Err(VectorSegmentWriterError::UnsupportedSegmentType(
+                    self.vector_segment.r#type,
+                ));
+            }
+        };
+
+        self.shards.push(new_writer_shard);
+        Ok(())
+    }
+}
 
 #[derive(Clone, Debug)]
 #[allow(clippy::large_enum_variant)]
@@ -1118,8 +1449,8 @@ impl ChromaSegmentWriter<'_> {
 
     pub async fn apply_materialized_log_chunk(
         &self,
-        record_segment_reader: &Option<RecordSegmentReaderShard<'_>>,
-        materialized: &MaterializeLogsResult,
+        record_segment_reader: &Option<RecordSegmentReader<'_>>,
+        materialized: &PartitionedMaterializeLogsResult,
         schema: Option<Schema>,
     ) -> Result<Option<Schema>, ApplyMaterializedLogError> {
         match self {
@@ -1155,8 +1486,43 @@ impl ChromaSegmentWriter<'_> {
             ChromaSegmentWriter::MetadataSegment(writer) => Box::pin(writer.commit())
                 .await
                 .map(ChromaSegmentFlusher::MetadataSegment),
-            ChromaSegmentWriter::VectorSegment(writer) => Box::pin(writer.commit()).await,
+            ChromaSegmentWriter::VectorSegment(writer) => Box::pin(writer.commit())
+                .await
+                .map(ChromaSegmentFlusher::VectorSegment),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct VectorSegmentFlusher {
+    shards: Vec<VectorSegmentFlusherShard>,
+    pub id: SegmentUuid,
+}
+
+impl VectorSegmentFlusher {
+    pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
+        // Flush all shards and collect file paths
+        let mut all_file_paths = HashMap::new();
+
+        for shard in self.shards {
+            let shard_paths = match shard {
+                VectorSegmentFlusherShard::Hnsw(flusher) => flusher.flush().await,
+                #[cfg(feature = "usearch")]
+                VectorSegmentFlusherShard::QuantizedSpann(flusher) => {
+                    Box::pin(flusher.flush()).await
+                }
+                VectorSegmentFlusherShard::Spann(flusher) => Box::pin(flusher.flush()).await,
+            }?;
+
+            for (key, mut paths) in shard_paths {
+                all_file_paths
+                    .entry(key)
+                    .or_insert_with(Vec::new)
+                    .append(&mut paths);
+            }
+        }
+
+        Ok(all_file_paths)
     }
 }
 
@@ -1168,10 +1534,6 @@ pub enum VectorSegmentFlusherShard {
     QuantizedSpann(QuantizedSpannSegmentFlusherShard),
     Spann(SpannSegmentFlusherShard),
 }
-
-type RecordSegmentFlusher = RecordSegmentFlusherShard;
-type MetadataSegmentFlusher = MetadataSegmentFlusherShard;
-type VectorSegmentFlusher = VectorSegmentFlusherShard;
 
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
@@ -1193,12 +1555,7 @@ impl ChromaSegmentFlusher {
         match self {
             ChromaSegmentFlusher::RecordSegment(flusher) => flusher.id,
             ChromaSegmentFlusher::MetadataSegment(flusher) => flusher.id,
-            ChromaSegmentFlusher::VectorSegment(flusher) => match flusher {
-                VectorSegmentFlusherShard::Hnsw(writer) => writer.id,
-                #[cfg(feature = "usearch")]
-                VectorSegmentFlusherShard::QuantizedSpann(flusher) => flusher.id,
-                VectorSegmentFlusherShard::Spann(writer) => writer.id,
-            },
+            ChromaSegmentFlusher::VectorSegment(flusher) => flusher.id,
         }
     }
 
@@ -1206,12 +1563,7 @@ impl ChromaSegmentFlusher {
         match self {
             ChromaSegmentFlusher::RecordSegment(_) => "RecordSegmentFlusher",
             ChromaSegmentFlusher::MetadataSegment(_) => "MetadataSegmentFlusher",
-            ChromaSegmentFlusher::VectorSegment(flusher) => match flusher {
-                VectorSegmentFlusherShard::Hnsw(_) => "DistributedHNSWSegmentFlusher",
-                #[cfg(feature = "usearch")]
-                VectorSegmentFlusherShard::QuantizedSpann(_) => "QuantizedSpannSegmentFlusher",
-                VectorSegmentFlusherShard::Spann(_) => "SpannSegmentFlusher",
-            },
+            ChromaSegmentFlusher::VectorSegment(_) => "VectorSegmentFlusher",
         }
     }
 
@@ -1219,14 +1571,7 @@ impl ChromaSegmentFlusher {
         match self {
             ChromaSegmentFlusher::RecordSegment(flusher) => Box::pin(flusher.flush()).await,
             ChromaSegmentFlusher::MetadataSegment(flusher) => Box::pin(flusher.flush()).await,
-            ChromaSegmentFlusher::VectorSegment(flusher) => match flusher {
-                VectorSegmentFlusherShard::Hnsw(flusher) => flusher.flush().await,
-                #[cfg(feature = "usearch")]
-                VectorSegmentFlusherShard::QuantizedSpann(flusher) => {
-                    Box::pin(flusher.flush()).await
-                }
-                VectorSegmentFlusherShard::Spann(flusher) => Box::pin(flusher.flush()).await,
-            },
+            ChromaSegmentFlusher::VectorSegment(flusher) => Box::pin(flusher.flush()).await,
         }
     }
 }
@@ -1262,6 +1607,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
@@ -1599,6 +1945,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
@@ -1928,6 +2275,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
@@ -2276,6 +2624,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);

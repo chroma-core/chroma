@@ -15,6 +15,18 @@ const DIRECTORY_SENTINEL: u8 = 0xFF;
 pub const MAX_BLOCK_ENTRIES: usize = 4096;
 
 const HEADER_SIZE: usize = 16;
+const DIRECTORY_ENTRY_SIZE: usize = 8; // u32 max_offset + f32 max_weight
+
+/// Prefix tag prepended to a dimension-id key for directory block parts.
+///
+/// The blockfile composite key uses `(prefix: String, key: u32)`.  Posting
+/// data blocks use the bare `encode_u32(dim_id)` as their prefix, while
+/// directory parts prepend this tag so the reader can fetch directories
+/// without pulling posting data:
+///
+/// - Posting blocks: prefix = `encode_u32(dim)`, key = `0, 1, 2, …`
+/// - Directory parts: prefix = `DIRECTORY_PREFIX.to_owned() + &encode_u32(dim)`, key = `0, 1, 2, …`
+pub const DIRECTORY_PREFIX: &str = "d";
 
 // ── Error type ──────────────────────────────────────────────────────
 
@@ -334,11 +346,8 @@ impl SparsePostingBlock {
     /// Byte length of the serialized representation (computable without
     /// decompression).
     pub fn serialized_size(&self) -> usize {
-        let n = self.num_entries as usize;
-        let full_groups = n / BITPACK_GROUP_SIZE;
-        let remainder = n % BITPACK_GROUP_SIZE;
-        let packed_group_bytes = BITPACK_GROUP_SIZE * (self.bits_per_delta as usize) / 8;
-        HEADER_SIZE + full_groups * packed_group_bytes + remainder * 4 + n * 2
+        HEADER_SIZE
+            + Self::expected_body_size(self.num_entries as usize, self.bits_per_delta)
     }
 
     /// Deserialize from bytes. Only reads the 16-byte header; body
@@ -628,6 +637,109 @@ impl DirectoryBlock {
     /// for storage in the blockstore.
     pub fn into_block(self) -> SparsePostingBlock {
         self.0
+    }
+}
+
+// ── Directory (in-memory merged view) ───────────────────────────────
+
+/// In-memory directory covering all posting blocks for a dimension.
+///
+/// Unlike [`DirectoryBlock`] (a single on-disk part limited to `u16`
+/// entries), `Directory` holds the complete `(max_offset, max_weight)`
+/// list with no size restriction. It is the owner on both the write
+/// and read paths:
+///
+/// - **Write**: accumulate entries, then call [`into_parts`] to produce
+///   `Vec<DirectoryBlock>` sized for the blockfile.
+/// - **Read**: load `DirectoryBlock` parts, then call [`from_parts`] to
+///   get back the full `Directory`.
+#[derive(Debug, Clone)]
+pub struct Directory {
+    max_offsets: Vec<u32>,
+    max_weights: Vec<f32>,
+    dim_max_weight: f32,
+}
+
+impl Directory {
+    /// Create a directory from per-posting-block metadata.
+    pub fn new(
+        max_offsets: Vec<u32>,
+        max_weights: Vec<f32>,
+    ) -> Result<Self, SparsePostingBlockError> {
+        if max_offsets.len() != max_weights.len() {
+            return Err(SparsePostingBlockError::MismatchedLengths {
+                offsets: max_offsets.len(),
+                weights: max_weights.len(),
+            });
+        }
+        if max_offsets.is_empty() {
+            return Err(SparsePostingBlockError::EmptyEntries);
+        }
+        let dim_max_weight = max_weights.iter().copied().fold(0.0f32, f32::max);
+        Ok(Directory {
+            max_offsets,
+            max_weights,
+            dim_max_weight,
+        })
+    }
+
+    /// Reconstruct a directory from on-disk [`DirectoryBlock`] parts.
+    pub fn from_parts(
+        parts: impl IntoIterator<Item = DirectoryBlock>,
+    ) -> Result<Self, SparsePostingBlockError> {
+        let mut max_offsets = Vec::new();
+        let mut max_weights = Vec::new();
+        for part in parts {
+            let (o, w) = part.entries();
+            max_offsets.extend(o);
+            max_weights.extend(w);
+        }
+        Self::new(max_offsets, max_weights)
+    }
+
+    /// Split into [`DirectoryBlock`] parts that each fit within a
+    /// block-size budget.
+    ///
+    /// Use [`max_entries_for_block_size`] to derive `max_entries_per_part`
+    /// from the blockfile's `max_block_size_bytes`.
+    pub fn into_parts(self, max_entries_per_part: usize) -> Vec<DirectoryBlock> {
+        let cap = max_entries_per_part.max(1);
+        self.max_offsets
+            .chunks(cap)
+            .zip(self.max_weights.chunks(cap))
+            .map(|(o, w)| DirectoryBlock::new(o, w).expect("chunk from valid directory"))
+            .collect()
+    }
+
+    pub fn max_offsets(&self) -> &[u32] {
+        &self.max_offsets
+    }
+
+    pub fn max_weights(&self) -> &[f32] {
+        &self.max_weights
+    }
+
+    /// Dimension-level maximum weight (max of all per-block max_weights).
+    pub fn dim_max_weight(&self) -> f32 {
+        self.dim_max_weight
+    }
+
+    /// Number of posting blocks summarized.
+    pub fn num_blocks(&self) -> usize {
+        self.max_offsets.len()
+    }
+
+    /// Maximum directory entries per [`DirectoryBlock`] part that fit
+    /// within `max_block_size_bytes`.
+    ///
+    /// Each entry is 8 bytes (u32 offset + f32 weight) plus a 16-byte
+    /// header per part. A fixed headroom is reserved for Arrow per-row
+    /// overhead (offset buffers, prefix/key columns, alignment padding).
+    pub fn max_entries_for_block_size(max_block_size_bytes: usize) -> usize {
+        const ARROW_OVERHEAD_ESTIMATE: usize = 256;
+        max_block_size_bytes
+            .saturating_sub(HEADER_SIZE + ARROW_OVERHEAD_ESTIMATE)
+            / DIRECTORY_ENTRY_SIZE
     }
 }
 
@@ -1056,6 +1168,231 @@ mod tests {
         assert!(block.is_directory());
         assert_eq!(block.offsets(), &[] as &[u32]);
         assert_eq!(block.values(), &[] as &[f32]);
+    }
+
+    // ── Directory (in-memory partitioned view) ────────────────────────
+
+    fn make_dir_data(n: usize) -> (Vec<u32>, Vec<f32>) {
+        let offsets: Vec<u32> = (0..n).map(|i| (i as u32 + 1) * 100).collect();
+        let weights: Vec<f32> = (0..n).map(|i| 0.1 + 0.001 * i as f32).collect();
+        (offsets, weights)
+    }
+
+    #[test]
+    fn directory_into_parts_single_part() {
+        let (offsets, weights) = make_dir_data(10);
+        let dir = Directory::new(offsets.clone(), weights.clone()).unwrap();
+        let parts = dir.into_parts(100);
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].num_blocks(), 10);
+        let (o, w) = parts[0].entries();
+        assert_eq!(o, offsets);
+        assert_eq!(w, weights);
+    }
+
+    #[test]
+    fn directory_into_parts_exact_split() {
+        let (offsets, weights) = make_dir_data(100);
+        let dir = Directory::new(offsets.clone(), weights.clone()).unwrap();
+        let parts = dir.into_parts(50);
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0].num_blocks(), 50);
+        assert_eq!(parts[1].num_blocks(), 50);
+
+        let merged = Directory::from_parts(parts).unwrap();
+        assert_eq!(merged.max_offsets(), &offsets[..]);
+        assert_eq!(merged.max_weights(), &weights[..]);
+    }
+
+    #[test]
+    fn directory_into_parts_uneven_split() {
+        let (offsets, weights) = make_dir_data(105);
+        let dir = Directory::new(offsets.clone(), weights.clone()).unwrap();
+        let parts = dir.into_parts(50);
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0].num_blocks(), 50);
+        assert_eq!(parts[1].num_blocks(), 50);
+        assert_eq!(parts[2].num_blocks(), 5);
+
+        let merged = Directory::from_parts(parts).unwrap();
+        assert_eq!(merged.max_offsets(), &offsets[..]);
+        assert_eq!(merged.max_weights(), &weights[..]);
+    }
+
+    #[test]
+    fn directory_into_parts_one_per_part() {
+        let (offsets, weights) = make_dir_data(5);
+        let dir = Directory::new(offsets.clone(), weights.clone()).unwrap();
+        let parts = dir.into_parts(1);
+        assert_eq!(parts.len(), 5);
+        for (i, part) in parts.iter().enumerate() {
+            assert_eq!(part.num_blocks(), 1);
+            let (o, w) = part.entries();
+            assert_eq!(o, vec![offsets[i]]);
+            assert_eq!(w, vec![weights[i]]);
+        }
+
+        let merged = Directory::from_parts(parts).unwrap();
+        assert_eq!(merged.max_offsets(), &offsets[..]);
+        assert_eq!(merged.max_weights(), &weights[..]);
+    }
+
+    #[test]
+    fn directory_into_parts_single_entry() {
+        let dir = Directory::new(vec![42], vec![0.5]).unwrap();
+        let parts = dir.into_parts(100);
+        assert_eq!(parts.len(), 1);
+        let (o, w) = parts[0].entries();
+        assert_eq!(o, vec![42]);
+        assert_eq!(w, vec![0.5]);
+    }
+
+    #[test]
+    fn directory_roundtrip_through_serialize() {
+        let (offsets, weights) = make_dir_data(250);
+        let dir = Directory::new(offsets.clone(), weights.clone()).unwrap();
+        let parts = dir.into_parts(100);
+        assert_eq!(parts.len(), 3);
+
+        let restored_parts: Vec<DirectoryBlock> = parts
+            .into_iter()
+            .map(|p| {
+                let bytes = p.into_block().serialize();
+                let block = SparsePostingBlock::deserialize(&bytes).unwrap();
+                assert!(block.is_directory());
+                DirectoryBlock::from_block(block).unwrap()
+            })
+            .collect();
+
+        let merged = Directory::from_parts(restored_parts).unwrap();
+        assert_eq!(merged.max_offsets(), &offsets[..]);
+        assert_eq!(merged.max_weights(), &weights[..]);
+    }
+
+    #[test]
+    fn directory_large_partitioned() {
+        let n = 10_000;
+        let (offsets, weights) = make_dir_data(n);
+        let max_per_part = Directory::max_entries_for_block_size(16384);
+
+        let dir = Directory::new(offsets.clone(), weights.clone()).unwrap();
+        let parts = dir.into_parts(max_per_part);
+        assert!(parts.len() > 1, "should produce multiple parts at 16KiB");
+        for part in &parts {
+            let block = part.clone().into_block();
+            assert!(
+                block.serialized_size() <= 16384,
+                "part serialized size {} exceeds 16KiB",
+                block.serialized_size()
+            );
+        }
+
+        let merged = Directory::from_parts(parts).unwrap();
+        assert_eq!(merged.max_offsets(), &offsets[..]);
+        assert_eq!(merged.max_weights(), &weights[..]);
+    }
+
+    #[test]
+    fn directory_exceeds_u16_entries() {
+        let n = 70_000; // > u16::MAX (65535)
+        let (offsets, weights) = make_dir_data(n);
+        let dir = Directory::new(offsets.clone(), weights.clone()).unwrap();
+        assert_eq!(dir.num_blocks(), n);
+        assert_eq!(dir.max_offsets().len(), n);
+
+        let parts = dir.into_parts(10_000);
+        assert_eq!(parts.len(), 7);
+
+        // Full serialize/deserialize roundtrip of every part.
+        let restored: Vec<DirectoryBlock> = parts
+            .into_iter()
+            .map(|p| {
+                let bytes = p.into_block().serialize();
+                let block = SparsePostingBlock::deserialize(&bytes).unwrap();
+                assert!(block.is_directory());
+                DirectoryBlock::from_block(block).unwrap()
+            })
+            .collect();
+
+        let merged = Directory::from_parts(restored).unwrap();
+        assert_eq!(merged.num_blocks(), n);
+        assert_eq!(merged.max_offsets(), &offsets[..]);
+        assert_eq!(merged.max_weights(), &weights[..]);
+    }
+
+    #[test]
+    fn directory_into_parts_zero_clamps_to_one() {
+        let (offsets, weights) = make_dir_data(3);
+        let dir = Directory::new(offsets.clone(), weights.clone()).unwrap();
+        let parts = dir.into_parts(0);
+        assert_eq!(parts.len(), 3);
+        for part in &parts {
+            assert_eq!(part.num_blocks(), 1);
+        }
+        let merged = Directory::from_parts(parts).unwrap();
+        assert_eq!(merged.max_offsets(), &offsets[..]);
+        assert_eq!(merged.max_weights(), &weights[..]);
+    }
+
+    #[test]
+    fn directory_from_parts_preserves_dim_max() {
+        let parts = vec![
+            DirectoryBlock::new(&[10, 20], &[0.3, 0.5]).unwrap(),
+            DirectoryBlock::new(&[30, 40], &[0.9, 0.1]).unwrap(),
+            DirectoryBlock::new(&[50], &[0.6]).unwrap(),
+        ];
+        let merged = Directory::from_parts(parts).unwrap();
+        assert_eq!(merged.dim_max_weight(), 0.9);
+        assert_eq!(merged.num_blocks(), 5);
+    }
+
+    #[test]
+    fn directory_max_entries_for_block_size() {
+        const OVERHEAD: usize = HEADER_SIZE + 256;
+        assert_eq!(
+            Directory::max_entries_for_block_size(16384),
+            (16384 - OVERHEAD) / DIRECTORY_ENTRY_SIZE
+        );
+        assert_eq!(
+            Directory::max_entries_for_block_size(512 * 1024),
+            (512 * 1024 - OVERHEAD) / DIRECTORY_ENTRY_SIZE
+        );
+        assert_eq!(Directory::max_entries_for_block_size(OVERHEAD), 0);
+        assert_eq!(Directory::max_entries_for_block_size(0), 0);
+    }
+
+    #[test]
+    fn directory_from_parts_single() {
+        let part = DirectoryBlock::new(&[10, 20, 30], &[0.5, 0.9, 0.2]).unwrap();
+        let dir = Directory::from_parts(vec![part]).unwrap();
+        assert_eq!(dir.max_offsets(), &[10, 20, 30]);
+        assert_eq!(dir.max_weights(), &[0.5, 0.9, 0.2]);
+    }
+
+    #[test]
+    fn directory_from_parts_empty_returns_error() {
+        let err = Directory::from_parts(vec![]).unwrap_err();
+        assert!(matches!(err, SparsePostingBlockError::EmptyEntries));
+    }
+
+    #[test]
+    fn directory_new_empty_returns_error() {
+        let err = Directory::new(vec![], vec![]).unwrap_err();
+        assert!(matches!(err, SparsePostingBlockError::EmptyEntries));
+    }
+
+    #[test]
+    fn directory_new_mismatched_returns_error() {
+        let err = Directory::new(vec![1, 2, 3], vec![0.5]).unwrap_err();
+        assert!(matches!(
+            err,
+            SparsePostingBlockError::MismatchedLengths { .. }
+        ));
+    }
+
+    #[test]
+    fn directory_prefix_constant() {
+        assert_eq!(DIRECTORY_PREFIX, "d");
     }
 
     // ── len/is_empty coverage ───────────────────────────────────────
