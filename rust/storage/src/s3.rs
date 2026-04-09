@@ -1186,8 +1186,8 @@ impl Configurable<StorageConfig> for S3Storage {
                     .build();
 
                 let stalled_config = StalledStreamProtectionConfig::enabled()
-                    .download_enabled(false)
-                    .upload_enabled(true)
+                    .download_enabled(s3_config.stall_download_enabled)
+                    .upload_enabled(s3_config.stall_upload_enabled)
                     .grace_period(Duration::from_millis(s3_config.stall_protection_ms))
                     .build();
 
