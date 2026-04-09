@@ -4,7 +4,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{DirectoryBlock, SignedRoaringBitmap, SparsePostingBlock};
+use chroma_types::{
+    Directory, DirectoryBlock, SignedRoaringBitmap, SparsePostingBlock, DIRECTORY_PREFIX,
+};
 use dashmap::DashMap;
 use thiserror::Error;
 use uuid::Uuid;
@@ -56,7 +58,6 @@ pub async fn rescore_and_select(
 }
 
 const DEFAULT_BLOCK_SIZE: u32 = 1024;
-const DIRECTORY_KEY: u32 = u32::MAX;
 
 pub const SPARSE_POSTING_BLOCK_SIZE_BYTES: usize = 1024 * 1024;
 
@@ -184,6 +185,19 @@ impl<'me> BlockSparseWriter<'me> {
             .collect();
         encoded_dims.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
+        // Two-pass commit: posting blocks first (sorted by encoded_dim),
+        // then directory parts (sorted by dir_prefix). This satisfies the
+        // blockfile's ordered_mutations requirement since all "d"-prefixed
+        // directory keys sort after the plain base64 posting keys for
+        // realistic dimension IDs.
+        struct DirWork {
+            prefix: String,
+            directory: Option<Directory>,
+            old_part_count: u32,
+        }
+        let mut dir_work: Vec<DirWork> = Vec::with_capacity(encoded_dims.len());
+
+        // ── Pass 1: posting blocks ─────────────────────────────────────
         for (encoded_dim, dimension_id) in &encoded_dims {
             let delta_updates = self.delta.remove(dimension_id);
 
@@ -195,9 +209,11 @@ impl<'me> BlockSparseWriter<'me> {
 
             let mut entries = std::collections::HashMap::new();
             let mut old_block_count = 0u32;
+            let mut old_dir_part_count = 0u32;
             if let Some(ref reader) = self.old_reader {
                 let blocks = reader.get_posting_blocks(encoded_dim).await?;
                 old_block_count = blocks.len() as u32;
+                old_dir_part_count = reader.count_directory_parts(encoded_dim).await? as u32;
                 for block in blocks {
                     for (off, val) in block.offsets().iter().zip(block.values().iter()) {
                         entries.insert(*off, *val);
@@ -217,15 +233,19 @@ impl<'me> BlockSparseWriter<'me> {
                 }
             }
 
+            let dir_prefix = format!("{}{}", DIRECTORY_PREFIX, encoded_dim);
+
             if entries.is_empty() {
                 for seq in 0..old_block_count {
                     self.posting_writer
                         .delete::<_, SparsePostingBlock>(encoded_dim, seq)
                         .await?;
                 }
-                self.posting_writer
-                    .delete::<_, SparsePostingBlock>(encoded_dim, DIRECTORY_KEY)
-                    .await?;
+                dir_work.push(DirWork {
+                    prefix: dir_prefix,
+                    directory: None,
+                    old_part_count: old_dir_part_count,
+                });
                 continue;
             }
 
@@ -252,11 +272,40 @@ impl<'me> BlockSparseWriter<'me> {
                     .await?;
             }
 
-            let directory = DirectoryBlock::new(&dir_max_offsets, &dir_max_weights)
+            let directory = Directory::new(dir_max_offsets, dir_max_weights)
                 .expect("directory: offsets/weights aligned by construction");
-            self.posting_writer
-                .set(encoded_dim, DIRECTORY_KEY, directory.into_block())
-                .await?;
+            dir_work.push(DirWork {
+                prefix: dir_prefix,
+                directory: Some(directory),
+                old_part_count: old_dir_part_count,
+            });
+        }
+
+        // ── Pass 2: directory parts (all dir prefixes sort after posting
+        //    prefixes because DIRECTORY_PREFIX = "d" > base64 uppercase) ─
+        dir_work.sort_by(|a, b| a.prefix.cmp(&b.prefix));
+        let max_entries = Directory::max_entries_for_block_size(SPARSE_POSTING_BLOCK_SIZE_BYTES);
+        for dw in dir_work {
+            if let Some(directory) = dw.directory {
+                let parts = directory.into_parts(max_entries);
+                let new_count = parts.len() as u32;
+                for (seq, part) in parts.into_iter().enumerate() {
+                    self.posting_writer
+                        .set(&dw.prefix, seq as u32, part.into_block())
+                        .await?;
+                }
+                for seq in new_count..dw.old_part_count {
+                    self.posting_writer
+                        .delete::<_, SparsePostingBlock>(&dw.prefix, seq)
+                        .await?;
+                }
+            } else {
+                for seq in 0..dw.old_part_count {
+                    self.posting_writer
+                        .delete::<_, SparsePostingBlock>(&dw.prefix, seq)
+                        .await?;
+                }
+            }
         }
 
         let flusher = self
@@ -544,11 +593,36 @@ impl<'me> BlockSparseReader<'me> {
     ) -> Result<Vec<SparsePostingBlock>, BlockSparseError> {
         let blocks: Vec<(u32, SparsePostingBlock)> =
             self.posting_reader.get_prefix(encoded_dim).await?.collect();
-        Ok(blocks
+        Ok(blocks.into_iter().map(|(_, b)| b).collect())
+    }
+
+    /// Load the full directory for a dimension from its directory parts.
+    pub async fn get_directory(
+        &self,
+        encoded_dim: &str,
+    ) -> Result<Option<Directory>, BlockSparseError> {
+        let dir_prefix = format!("{}{}", DIRECTORY_PREFIX, encoded_dim);
+        let parts: Vec<(u32, SparsePostingBlock)> =
+            self.posting_reader.get_prefix(&dir_prefix).await?.collect();
+        if parts.is_empty() {
+            return Ok(None);
+        }
+        let dir_blocks: Vec<DirectoryBlock> = parts
             .into_iter()
-            .filter(|(key, _)| *key != DIRECTORY_KEY)
-            .map(|(_, b)| b)
-            .collect())
+            .filter_map(|(_, b)| DirectoryBlock::from_block(b).ok())
+            .collect();
+        Ok(Directory::from_parts(dir_blocks).ok())
+    }
+
+    /// Count the number of directory parts stored for a dimension.
+    pub async fn count_directory_parts(
+        &self,
+        encoded_dim: &str,
+    ) -> Result<usize, BlockSparseError> {
+        let dir_prefix = format!("{}{}", DIRECTORY_PREFIX, encoded_dim);
+        let parts: Vec<(u32, SparsePostingBlock)> =
+            self.posting_reader.get_prefix(&dir_prefix).await?.collect();
+        Ok(parts.len())
     }
 
     pub async fn get_all_dimension_ids(&self) -> Result<Vec<u32>, BlockSparseError> {
@@ -557,7 +631,12 @@ impl<'me> BlockSparseReader<'me> {
 
         let mut dims: Vec<u32> = all
             .iter()
-            .filter_map(|(prefix, _, _)| decode_u32(prefix).ok())
+            .filter_map(|(prefix, _, _)| {
+                if prefix.starts_with(DIRECTORY_PREFIX) {
+                    return None;
+                }
+                decode_u32(prefix).ok()
+            })
             .collect();
         dims.sort_unstable();
         dims.dedup();
