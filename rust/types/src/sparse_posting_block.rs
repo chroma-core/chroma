@@ -251,20 +251,48 @@ impl SparsePostingBlock {
         bits_per_delta: u8,
         min_offset: u32,
     ) -> Decompressed {
+        let mut offsets = Vec::new();
+        Self::decompress_offsets_from_body(
+            raw_body,
+            num_entries,
+            bits_per_delta,
+            min_offset,
+            &mut offsets,
+        );
+
+        let weight_start = Self::body_weight_offset(num_entries, bits_per_delta);
+        let weight_bytes = &raw_body[weight_start..weight_start + num_entries * 2];
+        let values: Vec<f32> = weight_bytes
+            .chunks_exact(2)
+            .map(|b| f16::from_le_bytes([b[0], b[1]]).to_f32())
+            .collect();
+
+        Decompressed { offsets, values }
+    }
+
+    /// Core offset decompression: decompress bitpacked groups from raw body
+    /// bytes (after the 16-byte header) into `buf`, truncated to `num_entries`.
+    fn decompress_offsets_from_body(
+        raw_body: &[u8],
+        num_entries: usize,
+        bits_per_delta: u8,
+        min_offset: u32,
+        buf: &mut Vec<u32>,
+    ) {
         let packer = BitPacker4x::new();
         let num_groups = num_entries.div_ceil(BITPACK_GROUP_SIZE);
         let packed_group_bytes = BITPACK_GROUP_SIZE * (bits_per_delta as usize) / 8;
 
-        // Decompress all groups (the last group may contain padding beyond
-        // num_entries — we truncate below).
         let padded_len = num_groups * BITPACK_GROUP_SIZE;
-        let mut offsets = vec![0u32; padded_len];
+        buf.clear();
+        buf.resize(padded_len, 0);
+
         let mut byte_offset = 0;
         let mut initial = 0u32;
 
         for g in 0..num_groups {
             let group_end = byte_offset + packed_group_bytes;
-            let group = &mut offsets[g * BITPACK_GROUP_SIZE..(g + 1) * BITPACK_GROUP_SIZE];
+            let group = &mut buf[g * BITPACK_GROUP_SIZE..(g + 1) * BITPACK_GROUP_SIZE];
             packer.decompress_sorted(
                 initial,
                 &raw_body[byte_offset..group_end],
@@ -278,15 +306,14 @@ impl SparsePostingBlock {
             byte_offset = group_end;
         }
 
-        offsets.truncate(num_entries);
+        buf.truncate(num_entries);
+    }
 
-        let weight_bytes = &raw_body[byte_offset..byte_offset + num_entries * 2];
-        let values: Vec<f32> = weight_bytes
-            .chunks_exact(2)
-            .map(|b| f16::from_le_bytes([b[0], b[1]]).to_f32())
-            .collect();
-
-        Decompressed { offsets, values }
+    /// Byte offset of the weight section within the body (after the header).
+    fn body_weight_offset(num_entries: usize, bits_per_delta: u8) -> usize {
+        let num_groups = num_entries.div_ceil(BITPACK_GROUP_SIZE);
+        let packed_group_bytes = BITPACK_GROUP_SIZE * (bits_per_delta as usize) / 8;
+        num_groups * packed_group_bytes
     }
 
     // ── Serialization ───────────────────────────────────────────────
@@ -395,9 +422,7 @@ impl SparsePostingBlock {
         if bits_per_delta == DIRECTORY_SENTINEL {
             num_entries * 8
         } else {
-            let num_groups = num_entries.div_ceil(BITPACK_GROUP_SIZE);
-            let packed_group_bytes = BITPACK_GROUP_SIZE * (bits_per_delta as usize) / 8;
-            num_groups * packed_group_bytes + num_entries * 2
+            Self::body_weight_offset(num_entries, bits_per_delta) + num_entries * 2
         }
     }
 
@@ -437,37 +462,13 @@ impl SparsePostingBlock {
             !hdr.is_directory(),
             "decompress_offsets_into called on directory block"
         );
-        let num_entries = hdr.num_entries as usize;
-        let num_groups = num_entries.div_ceil(BITPACK_GROUP_SIZE);
-        let packed_group_bytes = BITPACK_GROUP_SIZE * (hdr.bits_per_delta as usize) / 8;
-
-        // Allocate for full groups (may include padding), decompress, truncate.
-        let padded_len = num_groups * BITPACK_GROUP_SIZE;
-        buf.clear();
-        buf.resize(padded_len, 0);
-
-        let raw_body = &bytes[HEADER_SIZE..];
-        let packer = BitPacker4x::new();
-        let mut byte_offset = 0;
-        let mut initial = 0u32;
-
-        for g in 0..num_groups {
-            let group_end = byte_offset + packed_group_bytes;
-            let group = &mut buf[g * BITPACK_GROUP_SIZE..(g + 1) * BITPACK_GROUP_SIZE];
-            packer.decompress_sorted(
-                initial,
-                &raw_body[byte_offset..group_end],
-                group,
-                hdr.bits_per_delta,
-            );
-            initial = group[BITPACK_GROUP_SIZE - 1];
-            for offset in group.iter_mut() {
-                *offset += hdr.min_offset;
-            }
-            byte_offset = group_end;
-        }
-
-        buf.truncate(num_entries);
+        Self::decompress_offsets_from_body(
+            &bytes[HEADER_SIZE..],
+            hdr.num_entries as usize,
+            hdr.bits_per_delta,
+            hdr.min_offset,
+            buf,
+        );
     }
 
     /// Zero-copy slice of the raw f16 weight bytes from serialized data.
@@ -513,10 +514,7 @@ impl SparsePostingBlock {
     /// Byte offset of the weight section from the start of the serialized
     /// block (including the 16-byte header).
     fn weight_byte_offset(hdr: &PostingBlockHeader) -> usize {
-        let num_entries = hdr.num_entries as usize;
-        let num_groups = num_entries.div_ceil(BITPACK_GROUP_SIZE);
-        let packed_group_bytes = BITPACK_GROUP_SIZE * (hdr.bits_per_delta as usize) / 8;
-        HEADER_SIZE + num_groups * packed_group_bytes
+        HEADER_SIZE + Self::body_weight_offset(hdr.num_entries as usize, hdr.bits_per_delta)
     }
 
     pub fn is_directory(&self) -> bool {
