@@ -656,6 +656,7 @@ impl BlockManager {
 
     /// Returns the concurrency limit for block loads.
     /// A configured value of 0 means unbounded (returns `usize::MAX`).
+    /// Never returns 0 -- `buffer_unordered(0)` deadlocks.
     pub(super) fn max_concurrent_block_loads(&self) -> usize {
         match self.max_concurrent_block_loads {
             0 => usize::MAX,

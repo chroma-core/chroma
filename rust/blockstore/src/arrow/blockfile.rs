@@ -528,6 +528,10 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             .filter(|id| !self.loaded_blocks.read().contains_key(id))
             .collect();
 
+        if block_ids_to_load.is_empty() {
+            return;
+        }
+
         // Bound concurrency to avoid overwhelming a single-threaded runtime
         // with too many in-flight S3 streams (e.g. during quantized SPANN splits
         // that can issue 500+ block fetches at once).
@@ -684,7 +688,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             .instrument(Span::current())
         });
 
-        let blocks: Vec<_> = futures::stream::iter(block_futures)
+        let blocks: Vec<&Block> = futures::stream::iter(block_futures)
             .buffer_unordered(self.block_manager.max_concurrent_block_loads())
             .try_collect()
             .await?;
