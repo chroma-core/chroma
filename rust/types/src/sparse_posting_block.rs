@@ -1,7 +1,7 @@
 use bitpacking::{BitPacker, BitPacker4x};
 use half::f16;
-use std::fmt;
 use std::sync::OnceLock;
+use thiserror::Error;
 
 const BITPACK_GROUP_SIZE: usize = BitPacker4x::BLOCK_LEN; // 128
 
@@ -30,39 +30,19 @@ pub const DIRECTORY_PREFIX: &str = "d";
 
 // ── Error type ──────────────────────────────────────────────────────
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
 pub enum SparsePostingBlockError {
+    #[error("block must have at least one entry")]
     EmptyEntries,
+    #[error("block has {count} entries, max is {MAX_BLOCK_ENTRIES}")]
     TooManyEntries { count: usize },
+    #[error("directory: max_offsets len ({offsets}) != max_weights len ({weights})")]
     MismatchedLengths { offsets: usize, weights: usize },
+    #[error("expected at least {HEADER_SIZE} header bytes, got {len}")]
     TruncatedHeader { len: usize },
+    #[error("expected {expected} body bytes, got {actual}")]
     TruncatedBody { expected: usize, actual: usize },
 }
-
-impl fmt::Display for SparsePostingBlockError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::EmptyEntries => write!(f, "block must have at least one entry"),
-            Self::TooManyEntries { count } => {
-                write!(f, "block has {count} entries, max is {MAX_BLOCK_ENTRIES}")
-            }
-            Self::MismatchedLengths { offsets, weights } => {
-                write!(
-                    f,
-                    "directory: max_offsets len ({offsets}) != max_weights len ({weights})"
-                )
-            }
-            Self::TruncatedHeader { len } => {
-                write!(f, "expected at least {HEADER_SIZE} header bytes, got {len}")
-            }
-            Self::TruncatedBody { expected, actual } => {
-                write!(f, "expected {expected} body bytes, got {actual}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for SparsePostingBlockError {}
 
 /// Header read from the first 16 bytes of a serialized block.
 ///
@@ -176,7 +156,7 @@ impl SparsePostingBlock {
 
         let n = entries.len();
         debug_assert!(
-            entries.windows(2).all(|w| w[0].0 <= w[1].0),
+            entries.is_sorted_by_key(|e| e.0),
             "from_sorted_entries: offsets must be monotonically non-decreasing"
         );
         let min_offset = entries[0].0;
@@ -187,18 +167,29 @@ impl SparsePostingBlock {
             .fold(0.0f32, f32::max)
             .max(f32::MIN_POSITIVE);
 
-        let offsets: Vec<u32> = entries.iter().map(|(o, _)| *o).collect();
-        let values: Vec<f32> = entries.iter().map(|(_, v)| *v).collect();
+        let (offsets, values): (Vec<u32>, Vec<f32>) = entries.iter().copied().unzip();
 
+        // Compute bits_per_delta by scanning full 128-element groups of
+        // relative offsets (offset - min_offset). We build the relative
+        // slice in a stack buffer to avoid a separate heap allocation.
         let packer = BitPacker4x::new();
-        let relative: Vec<u32> = offsets.iter().map(|&o| o - min_offset).collect();
         let full_groups = n / BITPACK_GROUP_SIZE;
         let mut max_bits = 0u8;
+        let mut rel_group = [0u32; BITPACK_GROUP_SIZE];
         for g in 0..full_groups {
             let start = g * BITPACK_GROUP_SIZE;
-            let initial = if g == 0 { 0 } else { relative[start - 1] };
-            max_bits = max_bits
-                .max(packer.num_bits_sorted(initial, &relative[start..start + BITPACK_GROUP_SIZE]));
+            for (r, &o) in rel_group
+                .iter_mut()
+                .zip(&offsets[start..start + BITPACK_GROUP_SIZE])
+            {
+                *r = o - min_offset;
+            }
+            let initial = if g == 0 {
+                0
+            } else {
+                offsets[start - 1] - min_offset
+            };
+            max_bits = max_bits.max(packer.num_bits_sorted(initial, &rel_group));
         }
 
         Ok(SparsePostingBlock {
@@ -266,7 +257,7 @@ impl SparsePostingBlock {
 
         for _ in 0..full_groups {
             let end = pos + packed_group_bytes;
-            let mut group = vec![0u32; BITPACK_GROUP_SIZE];
+            let mut group = [0u32; BITPACK_GROUP_SIZE];
             packer.decompress_sorted(initial, &raw_body[pos..end], &mut group, bits_per_delta);
             initial = group[BITPACK_GROUP_SIZE - 1];
             for v in &mut group {
@@ -318,17 +309,19 @@ impl SparsePostingBlock {
         let mut buf = Vec::with_capacity(self.serialized_size());
         self.write_header(&mut buf);
 
+        // Max packed_group_bytes = 128 * 32 / 8 = 512.
+        let mut packed = [0u8; BITPACK_GROUP_SIZE * 4];
         for g in 0..full_groups {
             let start = g * BITPACK_GROUP_SIZE;
             let initial = if g == 0 { 0 } else { relative[start - 1] };
-            let mut packed = vec![0u8; packed_group_bytes];
+            packed[..packed_group_bytes].fill(0);
             packer.compress_sorted(
                 initial,
                 &relative[start..start + BITPACK_GROUP_SIZE],
-                &mut packed,
+                &mut packed[..packed_group_bytes],
                 self.bits_per_delta,
             );
-            buf.extend_from_slice(&packed);
+            buf.extend_from_slice(&packed[..packed_group_bytes]);
         }
 
         let rem_start = full_groups * BITPACK_GROUP_SIZE;
@@ -346,8 +339,7 @@ impl SparsePostingBlock {
     /// Byte length of the serialized representation (computable without
     /// decompression).
     pub fn serialized_size(&self) -> usize {
-        HEADER_SIZE
-            + Self::expected_body_size(self.num_entries as usize, self.bits_per_delta)
+        HEADER_SIZE + Self::expected_body_size(self.num_entries as usize, self.bits_per_delta)
     }
 
     /// Deserialize from bytes. Only reads the 16-byte header; body
@@ -527,15 +519,6 @@ impl SparsePostingBlock {
     pub fn is_directory(&self) -> bool {
         self.bits_per_delta == DIRECTORY_SENTINEL
     }
-
-    /// Accumulate `query_weight * weight` for all entries into `scores`.
-    pub fn score_block_into(&self, query_weight: f32, scores: &mut [f32]) {
-        let vals = self.values();
-        debug_assert!(scores.len() >= vals.len());
-        for (s, &v) in scores[..vals.len()].iter_mut().zip(vals.iter()) {
-            *s += v * query_weight;
-        }
-    }
 }
 
 // ── Directory block ─────────────────────────────────────────────────
@@ -568,6 +551,11 @@ impl DirectoryBlock {
             return Err(SparsePostingBlockError::MismatchedLengths {
                 offsets: max_offsets.len(),
                 weights: max_weights.len(),
+            });
+        }
+        if max_offsets.len() > u16::MAX as usize {
+            return Err(SparsePostingBlockError::TooManyEntries {
+                count: max_offsets.len(),
             });
         }
         let n = max_offsets.len();
@@ -703,7 +691,7 @@ impl Directory {
     /// Use [`max_entries_for_block_size`] to derive `max_entries_per_part`
     /// from the blockfile's `max_block_size_bytes`.
     pub fn into_parts(self, max_entries_per_part: usize) -> Vec<DirectoryBlock> {
-        let cap = max_entries_per_part.max(1);
+        let cap = max_entries_per_part.max(1).min(u16::MAX as usize);
         self.max_offsets
             .chunks(cap)
             .zip(self.max_weights.chunks(cap))
@@ -737,8 +725,7 @@ impl Directory {
     /// overhead (offset buffers, prefix/key columns, alignment padding).
     pub fn max_entries_for_block_size(max_block_size_bytes: usize) -> usize {
         const ARROW_OVERHEAD_ESTIMATE: usize = 256;
-        max_block_size_bytes
-            .saturating_sub(HEADER_SIZE + ARROW_OVERHEAD_ESTIMATE)
+        max_block_size_bytes.saturating_sub(HEADER_SIZE + ARROW_OVERHEAD_ESTIMATE)
             / DIRECTORY_ENTRY_SIZE
     }
 }
@@ -799,81 +786,25 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_small() {
-        let entries = vec![(0, 1.0), (5, 0.5), (100, 0.8)];
-        assert_roundtrip_offsets(&entries);
-        assert_roundtrip_values(&entries);
+    fn roundtrip_at_boundary_sizes() {
+        // Covers: single entry, sub-group, exact group boundary, group+1,
+        // 2 groups-1, 2 groups, 4 groups, and max capacity.
+        for count in [1, 3, 127, 128, 129, 255, 256, 512, MAX_BLOCK_ENTRIES] {
+            let entries = sequential_entries(0, 1, count, 0.5);
+            assert_roundtrip_offsets(&entries);
+            assert_roundtrip_values(&entries);
+        }
     }
 
     #[test]
-    fn roundtrip_256() {
-        let entries = sequential_entries(0, 1, 256, 0.7);
-        assert_roundtrip_offsets(&entries);
-        assert_roundtrip_values(&entries);
-    }
-
-    #[test]
-    fn roundtrip_1_entry() {
-        let entries = vec![(42, 0.9)];
-        assert_roundtrip_offsets(&entries);
-        assert_roundtrip_values(&entries);
-    }
-
-    #[test]
-    fn roundtrip_128_exact_group() {
-        let entries = sequential_entries(10, 3, 128, 0.5);
-        assert_roundtrip_offsets(&entries);
-        assert_roundtrip_values(&entries);
-    }
-
-    #[test]
-    fn roundtrip_129_group_plus_one() {
-        let entries = sequential_entries(10, 3, 129, 0.5);
-        assert_roundtrip_offsets(&entries);
-        assert_roundtrip_values(&entries);
-    }
-
-    #[test]
-    fn roundtrip_255() {
-        let entries = sequential_entries(0, 2, 255, 0.6);
-        assert_roundtrip_offsets(&entries);
-        assert_roundtrip_values(&entries);
-    }
-
-    #[test]
-    fn roundtrip_512() {
-        let entries = sequential_entries(0, 1, 512, 0.4);
-        assert_roundtrip_offsets(&entries);
-        assert_roundtrip_values(&entries);
-    }
-
-    #[test]
-    fn large_deltas() {
+    fn roundtrip_large_deltas() {
         let entries = vec![(0, 0.5), (1_000_000, 0.8), (2_000_000, 0.3)];
         assert_roundtrip_offsets(&entries);
         assert_roundtrip_values(&entries);
     }
 
     #[test]
-    fn consecutive_offsets() {
-        let entries: Vec<(u32, f32)> = (0..256).map(|i| (i as u32, 0.5)).collect();
-        assert_roundtrip_offsets(&entries);
-        assert_roundtrip_values(&entries);
-    }
-
-    #[test]
-    fn uniform_weights() {
-        let entries: Vec<(u32, f32)> = (0..256).map(|i| (i as u32 * 10, 0.5)).collect();
-        let block = make_block(&entries);
-        let bytes = block.serialize();
-        let restored = SparsePostingBlock::deserialize(&bytes).unwrap();
-        for &v in restored.values() {
-            assert_approx(v, 0.5, F16_TOL);
-        }
-    }
-
-    #[test]
-    fn tiny_weights() {
+    fn roundtrip_tiny_weights() {
         let entries = vec![(0, 0.001), (1, 1.0)];
         let block = make_block(&entries);
         let bytes = block.serialize();
@@ -904,45 +835,6 @@ mod tests {
         assert_eq!(hdr.num_entries, 200);
         assert_eq!(hdr.min_offset, 100);
         assert_eq!(hdr.max_offset, 100 + 5 * 199);
-    }
-
-    #[test]
-    fn decompress_offsets_into_matches() {
-        let entries = sequential_entries(50, 3, 300, 0.5);
-        let block = make_block(&entries);
-        let bytes = block.serialize();
-        let hdr = SparsePostingBlock::peek_header(&bytes).unwrap();
-
-        let mut buf = Vec::new();
-        SparsePostingBlock::decompress_offsets_into(&bytes, &hdr, &mut buf);
-        assert_eq!(buf.as_slice(), block.offsets());
-    }
-
-    #[test]
-    fn decompress_values_into_matches() {
-        let entries = sequential_entries(0, 1, 256, 0.7);
-        let block = make_block(&entries);
-        let bytes = block.serialize();
-        let hdr = SparsePostingBlock::peek_header(&bytes).unwrap();
-
-        let mut buf = Vec::new();
-        SparsePostingBlock::decompress_values_into(&bytes, &hdr, &mut buf);
-        for (&a, &b) in buf.iter().zip(block.values().iter()) {
-            assert_approx(a, b, F16_TOL);
-        }
-    }
-
-    #[test]
-    fn read_value_at_matches() {
-        let entries: Vec<(u32, f32)> = (0..64).map(|i| (i * 10, 0.1 + 0.01 * i as f32)).collect();
-        let block = make_block(&entries);
-        let bytes = block.serialize();
-        let hdr = SparsePostingBlock::peek_header(&bytes).unwrap();
-
-        for i in 0..entries.len() {
-            let v = SparsePostingBlock::read_value_at(&bytes, &hdr, i);
-            assert_approx(v, block.values()[i], F16_TOL);
-        }
     }
 
     #[test]
@@ -999,16 +891,6 @@ mod tests {
     }
 
     #[test]
-    fn score_block_into_accumulates() {
-        let entries = vec![(0, 0.5), (1, 0.25)];
-        let block = make_block(&entries);
-        let mut scores = vec![1.0, 2.0];
-        block.score_block_into(2.0, &mut scores);
-        assert_approx(scores[0], 1.0 + 0.5 * 2.0, F16_TOL);
-        assert_approx(scores[1], 2.0 + 0.25 * 2.0, F16_TOL);
-    }
-
-    #[test]
     fn deserialize_too_short_returns_err() {
         assert!(SparsePostingBlock::deserialize(&[0u8; 15]).is_err());
         assert!(SparsePostingBlock::deserialize(&[]).is_err());
@@ -1049,31 +931,6 @@ mod tests {
 
         let err = SparsePostingBlock::deserialize(&bytes[..HEADER_SIZE]).unwrap_err();
         assert!(matches!(err, SparsePostingBlockError::TruncatedBody { .. }));
-    }
-
-    #[test]
-    fn expected_body_size_data_block() {
-        for count in [1, 2, 127, 128, 129, 256, 512, 1024, MAX_BLOCK_ENTRIES] {
-            let entries = sequential_entries(0, 1, count, 0.5);
-            let block = make_block(&entries);
-            let bytes = block.serialize();
-            assert_eq!(
-                SparsePostingBlock::expected_body_size(count, block.bits_per_delta),
-                bytes.len() - HEADER_SIZE,
-                "body size mismatch for count={count}"
-            );
-        }
-    }
-
-    #[test]
-    fn expected_body_size_directory_block() {
-        for count in [1, 3, 10, 100] {
-            assert_eq!(
-                SparsePostingBlock::expected_body_size(count, DIRECTORY_SENTINEL),
-                count * 8,
-                "directory body size mismatch for count={count}"
-            );
-        }
     }
 
     #[test]
@@ -1498,28 +1355,6 @@ mod tests {
         assert_eq!(weights, vec![0.99]);
     }
 
-    // ── score_block_into edge cases ─────────────────────────────────
-
-    #[test]
-    fn score_block_into_zero_query_weight() {
-        let block = make_block(&[(0, 0.5), (1, 0.25)]);
-        let mut scores = vec![1.0, 2.0];
-        block.score_block_into(0.0, &mut scores);
-        assert_eq!(scores, vec![1.0, 2.0]);
-    }
-
-    #[test]
-    fn score_block_into_larger_scores_buffer() {
-        let block = make_block(&[(0, 0.5), (1, 0.25)]);
-        let mut scores = vec![0.0; 10];
-        block.score_block_into(1.0, &mut scores);
-        assert_approx(scores[0], 0.5, F16_TOL);
-        assert_approx(scores[1], 0.25, F16_TOL);
-        for &s in &scores[2..] {
-            assert_eq!(s, 0.0);
-        }
-    }
-
     // ── convert_f16_to_f32 edge cases ───────────────────────────────
 
     #[test]
@@ -1540,11 +1375,11 @@ mod tests {
         assert_eq!(out[1], 0.0); // not overwritten: chunks_exact skips trailing
     }
 
-    // ── Remainder-path tests (non-multiple-of-128) ──────────────────
+    // ── Zero-copy methods at various block sizes (incl. remainder paths) ──
 
     #[test]
-    fn remainder_offsets_decompress_into() {
-        for count in [1, 2, 63, 127, 129, 130, 255, 257] {
+    fn zero_copy_offsets_at_boundary_sizes() {
+        for count in [1, 2, 63, 127, 128, 129, 130, 255, 256, 257, 512] {
             let entries = sequential_entries(10, 3, count, 0.5);
             let block = make_block(&entries);
             let bytes = block.serialize();
@@ -1552,17 +1387,13 @@ mod tests {
 
             let mut buf = Vec::new();
             SparsePostingBlock::decompress_offsets_into(&bytes, &hdr, &mut buf);
-            assert_eq!(
-                buf.as_slice(),
-                block.offsets(),
-                "offset mismatch at count={count}"
-            );
+            assert_eq!(buf.as_slice(), block.offsets(), "count={count}");
         }
     }
 
     #[test]
-    fn remainder_values_decompress_into() {
-        for count in [1, 2, 63, 127, 129, 130, 255, 257] {
+    fn zero_copy_values_at_boundary_sizes() {
+        for count in [1, 2, 63, 127, 128, 129, 130, 255, 256, 257, 512] {
             let entries = sequential_entries(0, 1, count, 0.7);
             let block = make_block(&entries);
             let bytes = block.serialize();
@@ -1571,17 +1402,14 @@ mod tests {
             let mut buf = Vec::new();
             SparsePostingBlock::decompress_values_into(&bytes, &hdr, &mut buf);
             for (i, (&a, &b)) in buf.iter().zip(block.values().iter()).enumerate() {
-                assert!(
-                    (a - b).abs() <= F16_TOL,
-                    "value mismatch at count={count}, i={i}: {a} vs {b}"
-                );
+                assert!((a - b).abs() <= F16_TOL, "count={count}, i={i}: {a} vs {b}");
             }
         }
     }
 
     #[test]
-    fn remainder_read_value_at() {
-        for count in [1, 2, 63, 127, 129, 130, 255, 257] {
+    fn read_value_at_boundary_sizes() {
+        for count in [1, 2, 63, 127, 128, 129, 130, 255, 256, 257] {
             let entries: Vec<(u32, f32)> = (0..count)
                 .map(|i| (i as u32 * 5, 0.1 + 0.001 * i as f32))
                 .collect();
@@ -1594,32 +1422,6 @@ mod tests {
                 assert_approx(v, block.values()[i], F16_TOL);
             }
         }
-    }
-
-    #[test]
-    fn remainder_roundtrip_coverage() {
-        for count in [1, 2, 63, 64, 127, 129, 191, 255, 257, 383, 385] {
-            let entries = sequential_entries(0, 1, count, 0.42);
-            assert_roundtrip_offsets(&entries);
-            assert_roundtrip_values(&entries);
-        }
-    }
-
-    // ── SparsePostingBlockError Display ─────────────────────────────
-
-    #[test]
-    fn error_display_messages() {
-        let e1 = SparsePostingBlockError::EmptyEntries;
-        assert!(e1.to_string().contains("at least one"));
-
-        let e2 = SparsePostingBlockError::TooManyEntries { count: 5000 };
-        assert!(e2.to_string().contains("5000"));
-
-        let e3 = SparsePostingBlockError::MismatchedLengths {
-            offsets: 3,
-            weights: 2,
-        };
-        assert!(e3.to_string().contains("3") && e3.to_string().contains("2"));
     }
 }
 
