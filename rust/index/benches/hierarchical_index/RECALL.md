@@ -61,7 +61,9 @@ To the best of my understanding the geometry of the wikipedia-en dataset (and ot
 - Empirically I have found that for a given query, the distance between the query and any candidate centroid is much larger than the distance between any two candidate centroids. (See table below)
 
 ```text
-This table shows that dist_near and dist_far (the upper and lower bounds on the distance from a replicated vector to the closest and farthest centroid candidate) are much larger than the distance between those two centroids.
+This table shows that dist_near and dist_far (the upper and lower bounds on the distance from a
+replicated vector to the closest and farthest centroid candidate) are much larger than the distance 
+between those two centroids.
 
 Total entries: 4.61M (4.61M valid) | Unique vectors: 3.00M (0 orphaned) | Avg replication: 1.54x | % w/ replica: 35.5%
   Replicated vectors: 1.07M | Avg copies: 2.51 | Distribution: 2x=673927 3x=236419 4x=155825
@@ -81,6 +83,8 @@ Total entries: 4.61M (4.61M valid) | Unique vectors: 3.00M (0 orphaned) | Avg re
 - This is not practical to set manually.
 
 ```
+Calculations for the p50 candidates:
+
 0.1112 * write_rng_factor = (0.6065+0.5778) / 2
 0.1112 * write_rng_factor = 0.59215
 write_rng_factor = 0.59215 / 0.1112
@@ -102,6 +106,5 @@ write_rng_factor = 5.454
 So why is it that for a given query, the distance between the query and any candidate centroid is much larger than the distance between any two candidate centroids?
 
 Opus says:
-```
-Typical vector-to-centroid distance is ~0.6 L2, while adjacent centroid pairs are only ~0.12 apart. This is expected: two adjacent centroids differ in a few dimensions, while a vector deviates from its centroid across all 1024 dimensions. In L2, the centroid-centroid axis contributes ~0.06 of the 0.6 total distance; the other 1023 orthogonal dimensions contribute the rest.
-```
+> Typical vector-to-centroid distance is ~0.6 L2, while adjacent centroid pairs are only ~0.12 apart. This is expected: two adjacent centroids differ in a few dimensions, while a vector deviates from its centroid across all 1024 dimensions. In L2, the centroid-centroid axis contributes ~0.06 of the 0.6 total distance; the other 1023 orthogonal dimensions contribute the rest.
+
