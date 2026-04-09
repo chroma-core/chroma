@@ -303,10 +303,6 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             .filter(|id| !self.embeddings.contains_key(id))
             .collect::<Vec<_>>();
 
-        reader
-            .load_data_for_keys(missing_ids.iter().map(|id| (String::new(), *id)))
-            .await;
-
         for id in missing_ids {
             if let Some(record) = reader
                 .get("", id)
