@@ -17,8 +17,9 @@ pub use migrations::MIGRATION_DIRS;
 use std::time::Duration;
 
 use chroma_config::spanner::{SpannerChannelConfig, SpannerConfig, SpannerSessionPoolConfig};
-use chroma_config::ADMIN_RPC_TIMEOUT_SECS;
 use google_cloud_gax::conn::Environment;
+use google_cloud_gax::grpc::Code;
+use google_cloud_gax::retry::RetrySetting;
 use google_cloud_spanner::admin::client::Client as AdminClient;
 use google_cloud_spanner::admin::AdminClientConfig;
 use google_cloud_spanner::client::{ChannelConfig, Client, ClientConfig};
@@ -48,14 +49,37 @@ fn to_channel_config(cfg: &SpannerChannelConfig) -> ChannelConfig {
 }
 
 fn apply_admin_channel_config(config: &mut AdminClientConfig, cfg: &SpannerChannelConfig) {
-    // Admin RPCs such as CreateDatabase and UpdateDatabaseDdl routinely run for minutes, so they
-    // need a much larger deadline than the online data-plane RPC timeout.
-    config.timeout = Duration::from_secs(ADMIN_RPC_TIMEOUT_SECS);
+    config.timeout = Duration::from_secs(cfg.admin_rpc_timeout_secs);
     config.connect_timeout = Duration::from_secs(cfg.connect_timeout_secs);
     config.http2_keep_alive_interval =
         Some(Duration::from_secs(cfg.http2_keep_alive_interval_secs));
     config.keep_alive_timeout = Some(Duration::from_secs(cfg.keep_alive_timeout_secs));
     config.keep_alive_while_idle = Some(cfg.keep_alive_while_idle);
+}
+
+/// Fixed poll interval for DDL wait operations.
+const DDL_WAIT_POLL_INTERVAL_MS: u64 = 10_000;
+
+/// Builds a `RetrySetting` for polling a long-running DDL operation.
+///
+/// The setting uses a fixed poll interval of `DDL_WAIT_POLL_INTERVAL_MS` and a `take` count that
+/// gives the waiter an overall retry budget of roughly `admin_rpc_timeout_secs`.  Only the
+/// synthetic `DeadlineExceeded` status emitted by the long-running-operation waiter when the
+/// operation is still in progress is retried.
+pub fn ddl_wait_retry_setting(admin_rpc_timeout_secs: u64) -> RetrySetting {
+    let poll_interval_secs = DDL_WAIT_POLL_INTERVAL_MS / 1000;
+    let take = if poll_interval_secs == 0 {
+        0
+    } else {
+        (admin_rpc_timeout_secs / poll_interval_secs) as usize
+    };
+    RetrySetting {
+        from_millis: DDL_WAIT_POLL_INTERVAL_MS,
+        max_delay: Some(Duration::from_millis(DDL_WAIT_POLL_INTERVAL_MS)),
+        factor: 1,
+        take,
+        codes: vec![Code::DeadlineExceeded],
+    }
 }
 
 /// Errors that can occur during migration execution.
@@ -150,7 +174,7 @@ pub async fn run_migrations(
             };
             let admin_client_config = AdminClientConfig {
                 environment: Environment::Emulator(emulator.grpc_endpoint()),
-                timeout: Duration::from_secs(ADMIN_RPC_TIMEOUT_SECS),
+                timeout: Duration::from_secs(emulator.channel.admin_rpc_timeout_secs),
                 connect_timeout: Duration::from_secs(emulator.channel.connect_timeout_secs),
                 http2_keep_alive_interval: Some(Duration::from_secs(
                     emulator.channel.http2_keep_alive_interval_secs,
@@ -197,7 +221,9 @@ pub async fn run_migrations(
         .await
         .map_err(|e| RunMigrationsError::CreateAdminClientError(e.to_string()))?;
 
-    let mut runner = MigrationRunner::new(client, admin_client, database_path);
+    let admin_rpc_timeout_secs = spanner_config.channel().admin_rpc_timeout_secs;
+    let mut runner =
+        MigrationRunner::new(client, admin_client, database_path, admin_rpc_timeout_secs);
     if let Some(topology) = topology_name {
         runner = runner.with_topology(topology.to_string());
     }
@@ -239,12 +265,13 @@ mod tests {
     #[test]
     fn admin_timeout_is_not_coupled_to_data_rpc_timeout() {
         let channel_config = SpannerChannelConfig {
+            num_channels: 4,
             timeout_secs: 30,
             connect_timeout_secs: 7,
             http2_keep_alive_interval_secs: 11,
             keep_alive_timeout_secs: 13,
             keep_alive_while_idle: false,
-            ..Default::default()
+            admin_rpc_timeout_secs: 30 * 60,
         };
         let mut admin_client_config = AdminClientConfig::default();
 
@@ -252,7 +279,7 @@ mod tests {
 
         assert_eq!(
             admin_client_config.timeout,
-            Duration::from_secs(ADMIN_RPC_TIMEOUT_SECS)
+            Duration::from_secs(channel_config.admin_rpc_timeout_secs)
         );
         assert_eq!(admin_client_config.connect_timeout, Duration::from_secs(7));
         assert_eq!(

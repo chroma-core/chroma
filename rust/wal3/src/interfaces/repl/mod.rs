@@ -251,6 +251,7 @@ mod tests {
             http2_keep_alive_interval_secs: 11,
             keep_alive_timeout_secs: 13,
             keep_alive_while_idle: false,
+            admin_rpc_timeout_secs: 30 * 60,
         };
 
         let channel_config = to_channel_config(&cfg);

@@ -3679,7 +3679,6 @@ mod tests {
     use crate::state_hash_table::Value;
 
     use chroma_config::spanner::SpannerEmulatorConfig;
-    use chroma_config::ADMIN_RPC_TIMEOUT_SECS;
     use chroma_storage::s3_client_for_test_with_new_bucket;
     use chroma_types::Topology;
     use chroma_types::{are_update_metadatas_close_to_equal, Operation, OperationRecord};
@@ -4943,7 +4942,7 @@ mod tests {
         let dtor = Box::pin(async move {
             let admin_client_config = AdminClientConfig {
                 environment: Environment::Emulator(dtor_emulator.grpc_endpoint()),
-                timeout: Duration::from_secs(ADMIN_RPC_TIMEOUT_SECS),
+                timeout: Duration::from_secs(dtor_emulator.channel.admin_rpc_timeout_secs),
                 connect_timeout: Duration::from_secs(dtor_emulator.channel.connect_timeout_secs),
                 http2_keep_alive_interval: Some(Duration::from_secs(
                     dtor_emulator.channel.http2_keep_alive_interval_secs,

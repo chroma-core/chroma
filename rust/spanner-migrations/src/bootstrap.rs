@@ -22,7 +22,7 @@ pub async fn bootstrap_emulator(
     // Configure client to connect to emulator
     let admin_client_config = AdminClientConfig {
         environment: Environment::Emulator(emulator.grpc_endpoint().to_string()),
-        timeout: Duration::from_secs(super::ADMIN_RPC_TIMEOUT_SECS),
+        timeout: Duration::from_secs(emulator.channel.admin_rpc_timeout_secs),
         connect_timeout: Duration::from_secs(emulator.channel.connect_timeout_secs),
         http2_keep_alive_interval: Some(Duration::from_secs(
             emulator.channel.http2_keep_alive_interval_secs,

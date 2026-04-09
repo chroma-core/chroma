@@ -12,7 +12,7 @@ use std::time::Duration;
 use serial_test::serial;
 
 use chroma_config::spanner::{SpannerChannelConfig, SpannerSessionPoolConfig};
-use chroma_config::{registry::Registry, Configurable, ADMIN_RPC_TIMEOUT_SECS};
+use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::DatabaseUuid;
 use google_cloud_gax::conn::Environment;
@@ -26,6 +26,7 @@ use google_cloud_spanner::row::Row;
 use google_cloud_spanner::session::SessionConfig;
 use google_cloud_spanner::statement::Statement;
 use google_cloud_spanner::transaction_rw::ReadWriteTransaction;
+use spanner_migrations::ddl_wait_retry_setting;
 use thiserror::Error;
 use tracing::instrument;
 use tracing::Instrument;
@@ -55,11 +56,9 @@ fn to_channel_config(cfg: &SpannerChannelConfig) -> ChannelConfig {
 }
 
 fn admin_client_config(environment: Environment, cfg: &SpannerChannelConfig) -> AdminClientConfig {
-    // DDL operations can run for minutes, so they need a larger deadline than the data-plane RPC
-    // timeout used by regular Spanner traffic.
     AdminClientConfig {
         environment,
-        timeout: Duration::from_secs(ADMIN_RPC_TIMEOUT_SECS),
+        timeout: Duration::from_secs(cfg.admin_rpc_timeout_secs),
         connect_timeout: Duration::from_secs(cfg.connect_timeout_secs),
         http2_keep_alive_interval: Some(Duration::from_secs(cfg.http2_keep_alive_interval_secs)),
         keep_alive_timeout: Some(Duration::from_secs(cfg.keep_alive_timeout_secs)),
@@ -2097,6 +2096,9 @@ impl SpannerBackend {
             }
         };
 
+        let ddl_retry =
+            ddl_wait_retry_setting(self.spanner_config.channel().admin_rpc_timeout_secs);
+
         // Step 3: Drop all indexes first, then tables
         // Try multiple passes to handle dependencies
         for _pass in 0..5 {
@@ -2118,7 +2120,7 @@ impl SpannerBackend {
                     .await
                 {
                     Ok(mut operation) => {
-                        if let Err(e) = operation.wait(None).await {
+                        if let Err(e) = operation.wait(Some(ddl_retry.clone())).await {
                             tracing::debug!("Failed to execute DDL: {}", e);
                             remaining_indexes.push((table_name.clone(), index_name.clone()));
                         } else {
@@ -2155,7 +2157,7 @@ impl SpannerBackend {
                     .await
                 {
                     Ok(mut operation) => {
-                        if let Err(e) = operation.wait(None).await {
+                        if let Err(e) = operation.wait(Some(ddl_retry.clone())).await {
                             tracing::debug!("Failed to execute DDL: {}", e);
                             remaining_tables.insert(table_name.clone());
                         } else {
@@ -2347,6 +2349,7 @@ pub mod tests {
             http2_keep_alive_interval_secs: 11,
             keep_alive_timeout_secs: 13,
             keep_alive_while_idle: false,
+            admin_rpc_timeout_secs: 30 * 60,
         };
         let admin_client_config = admin_client_config(
             Environment::Emulator("localhost:9010".to_string()),
@@ -2355,7 +2358,7 @@ pub mod tests {
 
         assert_eq!(
             admin_client_config.timeout,
-            Duration::from_secs(ADMIN_RPC_TIMEOUT_SECS)
+            Duration::from_secs(channel_config.admin_rpc_timeout_secs)
         );
         assert_eq!(admin_client_config.connect_timeout, Duration::from_secs(7));
         assert_eq!(

@@ -5,7 +5,7 @@ pub mod spanner;
 
 pub use spanner::{
     SpannerChannelConfig, SpannerConfig, SpannerEmulatorConfig, SpannerGcpConfig,
-    SpannerSessionPoolConfig, ADMIN_RPC_TIMEOUT_SECS,
+    SpannerSessionPoolConfig,
 };
 
 use async_trait::async_trait;
