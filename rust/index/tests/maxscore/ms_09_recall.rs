@@ -5,6 +5,10 @@ fn all_mask() -> SignedRoaringBitmap {
     SignedRoaringBitmap::Exclude(Default::default())
 }
 
+/// f16 quantization tolerance: scores within this range of the boundary
+/// are considered ties that quantization could have swapped.
+const F16_TOLERANCE: f32 = 5e-3;
+
 #[tokio::test]
 async fn recall_500_docs_10_dims() {
     let docs: Vec<(u32, Vec<(u32, f32)>)> = (0..500)
@@ -25,17 +29,13 @@ async fn recall_500_docs_10_dims() {
     let results = reader.query(query.clone(), k, mask.clone()).await.unwrap();
     let brute = common::brute_force_topk(&docs, &query, k as usize, &mask);
 
-    let result_offsets: std::collections::HashSet<u32> =
-        results.iter().map(|r| r.offset).collect();
-    let brute_offsets: std::collections::HashSet<u32> =
-        brute.iter().map(|(o, _)| *o).collect();
-
-    let overlap = result_offsets.intersection(&brute_offsets).count();
-    let recall = overlap as f64 / k as f64;
+    let offsets: Vec<u32> = results.iter().map(|r| r.offset).collect();
+    let scores: Vec<f32> = results.iter().map(|r| r.score).collect();
+    let recall = common::tie_aware_recall(&offsets, &scores, &brute, F16_TOLERANCE);
 
     assert!(
-        recall >= 0.9,
-        "recall {recall} too low (expected >= 0.9), maxscore={result_offsets:?}, brute={brute_offsets:?}"
+        recall >= 1.0,
+        "tie-aware recall {recall} < 1.0, maxscore={offsets:?}, brute={brute:?}"
     );
 }
 
@@ -58,16 +58,12 @@ async fn recall_varied_query_weights() {
     let results = reader.query(query.clone(), k, mask.clone()).await.unwrap();
     let brute = common::brute_force_topk(&docs, &query, k as usize, &mask);
 
-    let result_offsets: std::collections::HashSet<u32> =
-        results.iter().map(|r| r.offset).collect();
-    let brute_offsets: std::collections::HashSet<u32> =
-        brute.iter().map(|(o, _)| *o).collect();
-
-    let overlap = result_offsets.intersection(&brute_offsets).count();
-    let recall = overlap as f64 / k as f64;
+    let offsets: Vec<u32> = results.iter().map(|r| r.offset).collect();
+    let scores: Vec<f32> = results.iter().map(|r| r.score).collect();
+    let recall = common::tie_aware_recall(&offsets, &scores, &brute, F16_TOLERANCE);
 
     assert!(
-        recall >= 0.8,
-        "recall {recall} too low with varied weights"
+        recall >= 1.0,
+        "tie-aware recall {recall} < 1.0 with varied weights"
     );
 }

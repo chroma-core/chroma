@@ -56,10 +56,7 @@ use chroma_benchmark::datasets::wikipedia_splade::{SparseDocument, SparseQuery, 
 use chroma_blockstore::arrow::provider::BlockfileReaderOptions;
 use chroma_blockstore::test_arrow_blockfile_provider;
 use chroma_blockstore::{provider::BlockfileProvider, BlockfileWriterOptions};
-use chroma_index::sparse::{
-    reader::{Score, SparseReader},
-    writer::SparseWriter,
-};
+use chroma_index::sparse::{reader::SparseReader, types::Score, writer::SparseWriter};
 use chroma_types::SignedRoaringBitmap;
 use clap::Parser;
 use futures::{StreamExt, TryStreamExt};

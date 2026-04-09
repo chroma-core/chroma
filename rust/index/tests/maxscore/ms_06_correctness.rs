@@ -30,13 +30,13 @@ async fn maxscore_matches_brute_force_simple() {
 
 #[tokio::test]
 async fn maxscore_k_larger_than_docs() {
-    let docs = vec![
-        (0u32, vec![(1u32, 0.5)]),
-        (1, vec![(1, 0.3)]),
-    ];
+    let docs = vec![(0u32, vec![(1u32, 0.5)]), (1, vec![(1, 0.3)])];
 
     let (_dir, _provider, reader) = common::build_index(docs).await;
-    let results = reader.query(vec![(1u32, 1.0)], 100, all_mask()).await.unwrap();
+    let results = reader
+        .query(vec![(1u32, 1.0)], 100, all_mask())
+        .await
+        .unwrap();
     assert_eq!(results.len(), 2);
 }
 
@@ -44,7 +44,10 @@ async fn maxscore_k_larger_than_docs() {
 async fn maxscore_k_zero() {
     let docs = vec![(0u32, vec![(1u32, 0.5)])];
     let (_dir, _provider, reader) = common::build_index(docs).await;
-    let results = reader.query(vec![(1u32, 1.0)], 0, all_mask()).await.unwrap();
+    let results = reader
+        .query(vec![(1u32, 1.0)], 0, all_mask())
+        .await
+        .unwrap();
     assert!(results.is_empty());
 }
 
@@ -52,7 +55,10 @@ async fn maxscore_k_zero() {
 async fn maxscore_missing_query_dim() {
     let docs = vec![(0u32, vec![(1u32, 0.5)])];
     let (_dir, _provider, reader) = common::build_index(docs).await;
-    let results = reader.query(vec![(999u32, 1.0)], 10, all_mask()).await.unwrap();
+    let results = reader
+        .query(vec![(999u32, 1.0)], 10, all_mask())
+        .await
+        .unwrap();
     assert!(results.is_empty());
 }
 
@@ -76,8 +82,11 @@ async fn maxscore_multi_dim_many_docs() {
     let brute = common::brute_force_topk(&docs, &query, 10, &mask);
 
     assert_eq!(results.len(), 10);
-    for (r, b) in results.iter().zip(brute.iter()) {
-        assert_eq!(r.offset, b.0, "offset mismatch: maxscore={} brute={}", r.offset, b.0);
-        common::assert_approx(r.score, b.1, 5e-3);
-    }
+    let offsets: Vec<u32> = results.iter().map(|r| r.offset).collect();
+    let scores: Vec<f32> = results.iter().map(|r| r.score).collect();
+    let recall = common::tie_aware_recall(&offsets, &scores, &brute, 5e-3);
+    assert!(
+        recall >= 1.0,
+        "tie-aware recall {recall} < 1.0, maxscore={offsets:?}, brute={brute:?}"
+    );
 }

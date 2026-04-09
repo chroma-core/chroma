@@ -105,6 +105,9 @@ async fn multi_block_dimension_roundtrip() {
     for block_idx in 0..expected_blocks {
         let expected_last_offset = (block_idx as u32 + 1) * block_size - 1;
         assert_eq!(max_offsets[block_idx], expected_last_offset);
-        assert!(max_weights[block_idx] > 0.0, "block {block_idx} max_weight should be positive");
+        assert!(
+            max_weights[block_idx] > 0.0,
+            "block {block_idx} max_weight should be positive"
+        );
     }
 }

@@ -1,4 +1,3 @@
-use std::collections::BinaryHeap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -6,12 +5,14 @@ use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
     Directory, DirectoryBlock, SignedRoaringBitmap, SparsePostingBlock, DIRECTORY_PREFIX,
+    MAX_BLOCK_ENTRIES,
 };
 use dashmap::DashMap;
+use futures::StreamExt;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::sparse::types::{decode_u32, encode_u32};
+use crate::sparse::types::{decode_u32, encode_u32, Score, TopKHeap};
 
 // ── Two-phase re-scoring ────────────────────────────────────────────
 
@@ -39,22 +40,12 @@ pub async fn rescore_and_select(
     let doc_ids: Vec<u32> = candidates.iter().map(|s| s.offset).collect();
     let exact_scores = rescorer.rescore_batch(&doc_ids, query).await;
 
-    let mut heap: BinaryHeap<Score> = BinaryHeap::with_capacity(k);
+    let mut heap = TopKHeap::new(k);
     for (i, &score) in exact_scores.iter().enumerate() {
-        if heap.len() < k || score > heap.peek().map(|s| s.score).unwrap_or(f32::MIN) {
-            heap.push(Score {
-                score,
-                offset: doc_ids[i],
-            });
-            if heap.len() > k {
-                heap.pop();
-            }
-        }
+        heap.push(score, doc_ids[i]);
     }
 
-    let mut results: Vec<Score> = heap.into_vec();
-    results.sort_by(|a, b| b.score.total_cmp(&a.score).then(a.offset.cmp(&b.offset)));
-    results
+    heap.into_sorted_vec()
 }
 
 const DEFAULT_BLOCK_SIZE: u32 = 1024;
@@ -72,34 +63,6 @@ impl ChromaError for BlockSparseError {
         match self {
             BlockSparseError::Blockfile(err) => err.code(),
         }
-    }
-}
-
-// ── Score type ──────────────────────────────────────────────────────
-
-/// A (score, offset) pair with reversed ordering so that `BinaryHeap`
-/// acts as a min-heap: the *lowest* score sits at `peek()`, making it
-/// cheap to maintain a top-k set.
-#[derive(Debug, PartialEq)]
-pub struct Score {
-    pub score: f32,
-    pub offset: u32,
-}
-
-impl Eq for Score {}
-
-impl Ord for Score {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.score
-            .total_cmp(&other.score)
-            .then(self.offset.cmp(&other.offset))
-            .reverse()
-    }
-}
-
-impl PartialOrd for Score {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
     }
 }
 
@@ -146,7 +109,14 @@ impl<'me> BlockSparseWriter<'me> {
     }
 
     pub fn with_block_size(mut self, block_size: u32) -> Self {
-        self.block_size = block_size;
+        if block_size > MAX_BLOCK_ENTRIES as u32 {
+            tracing::warn!(
+                requested = block_size,
+                max = MAX_BLOCK_ENTRIES,
+                "block_size exceeds MAX_BLOCK_ENTRIES, clamping"
+            );
+        }
+        self.block_size = block_size.min(MAX_BLOCK_ENTRIES as u32);
         self
     }
 
@@ -190,6 +160,12 @@ impl<'me> BlockSparseWriter<'me> {
         // blockfile's ordered_mutations requirement since all "d"-prefixed
         // directory keys sort after the plain base64 posting keys for
         // realistic dimension IDs.
+        debug_assert!(
+            encoded_dims
+                .iter()
+                .all(|(enc, _)| enc.as_str() < DIRECTORY_PREFIX),
+            "encoded dimension prefix >= DIRECTORY_PREFIX; ordered_mutations invariant broken"
+        );
         struct DirWork {
             prefix: String,
             directory: Option<Directory>,
@@ -199,14 +175,14 @@ impl<'me> BlockSparseWriter<'me> {
 
         // ── Pass 1: posting blocks ─────────────────────────────────────
         for (encoded_dim, dimension_id) in &encoded_dims {
-            let delta_updates = self.delta.remove(dimension_id);
-
-            if delta_updates.is_none() {
+            let Some((_, updates)) = self.delta.remove(dimension_id) else {
                 continue;
-            }
+            };
 
-            let (_, updates) = delta_updates.unwrap();
-
+            // NOTE: This is a full read-modify-write — all existing entries for
+            // the dimension are loaded, merged with deltas, and rewritten. This
+            // is O(n) per dimension regardless of delta size. A future optimization
+            // could do in-place block patching for small deltas.
             let mut entries = std::collections::HashMap::new();
             let mut old_block_count = 0u32;
             let mut old_dir_part_count = 0u32;
@@ -385,7 +361,7 @@ impl PostingCursor {
 
             while self.pos < offsets.len() {
                 let off = offsets[self.pos];
-                if passes_mask(off, mask) {
+                if mask.contains(off) {
                     return Some((off, values[self.pos]));
                 }
                 self.pos += 1;
@@ -491,7 +467,7 @@ impl PostingCursor {
                 if doc > window_end {
                     return;
                 }
-                if passes_mask(doc, mask) {
+                if mask.contains(doc) {
                     let idx = (doc - window_start) as usize;
                     bitmap[idx >> 6] |= 1u64 << (idx & 63);
                     accum[idx] += vals[self.pos] * query_weight;
@@ -560,13 +536,6 @@ impl PostingCursor {
     }
 }
 
-fn passes_mask(offset: u32, mask: &SignedRoaringBitmap) -> bool {
-    match mask {
-        SignedRoaringBitmap::Include(rbm) => rbm.contains(offset),
-        SignedRoaringBitmap::Exclude(rbm) => !rbm.contains(offset),
-    }
-}
-
 // ── BlockSparseReader ───────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -625,17 +594,24 @@ impl<'me> BlockSparseReader<'me> {
         Ok(parts.len())
     }
 
+    /// Return all dimension IDs stored in the blockfile.
+    ///
+    /// Scans only directory entries (prefix "d"...) which are much fewer
+    /// than posting blocks. A key-only scan API on BlockfileReader would
+    /// avoid deserializing even the directory values.
     pub async fn get_all_dimension_ids(&self) -> Result<Vec<u32>, BlockSparseError> {
-        let all: Vec<(&str, u32, SparsePostingBlock)> =
-            self.posting_reader.get_range(.., ..).await?.collect();
+        let dir_entries: Vec<(&str, u32, SparsePostingBlock)> = self
+            .posting_reader
+            .get_range(DIRECTORY_PREFIX.., ..)
+            .await?
+            .collect();
 
-        let mut dims: Vec<u32> = all
+        let mut dims: Vec<u32> = dir_entries
             .iter()
             .filter_map(|(prefix, _, _)| {
-                if prefix.starts_with(DIRECTORY_PREFIX) {
-                    return None;
-                }
-                decode_u32(prefix).ok()
+                prefix
+                    .strip_prefix(DIRECTORY_PREFIX)
+                    .and_then(|rest| decode_u32(rest).ok())
             })
             .collect();
         dims.sort_unstable();
@@ -673,12 +649,19 @@ impl<'me> BlockSparseReader<'me> {
         let collected: Vec<(u32, f32)> = query_vector.into_iter().collect();
         let encoded_dims: Vec<String> = collected.iter().map(|(d, _)| encode_u32(*d)).collect();
 
+        // Open cursors for all query dimensions in parallel.
+        let cursor_results: Vec<Result<Option<PostingCursor>, BlockSparseError>> =
+            futures::stream::iter(encoded_dims.iter().map(|enc| self.open_cursor(enc)))
+                .buffer_unordered(encoded_dims.len())
+                .collect()
+                .await;
+
         let mut terms: Vec<TermState> = Vec::new();
-        for (idx, &(_, query_weight)) in collected.iter().enumerate() {
-            let encoded = &encoded_dims[idx];
-            let Some(mut cursor) = self.open_cursor(encoded).await? else {
+        for (idx, result) in cursor_results.into_iter().enumerate() {
+            let Some(mut cursor) = result? else {
                 continue;
             };
+            let query_weight = collected[idx].1;
             cursor.advance(0, &mask);
             let max_score = query_weight * cursor.dimension_max();
             terms.push(TermState {
@@ -696,8 +679,8 @@ impl<'me> BlockSparseReader<'me> {
         terms.sort_by(|a, b| a.max_score.total_cmp(&b.max_score));
 
         let k_usize = k as usize;
-        let mut threshold = f32::MIN;
-        let mut heap: BinaryHeap<Score> = BinaryHeap::with_capacity(k_usize);
+        let mut heap = TopKHeap::new(k_usize);
+        let mut threshold = heap.threshold();
 
         const WINDOW_WIDTH: u32 = 4096;
         const BITMAP_WORDS: usize = (WINDOW_WIDTH as usize).div_ceil(64);
@@ -805,16 +788,7 @@ impl<'me> BlockSparseReader<'me> {
 
             // Phase 3: extract to heap and reset accumulator
             for (ci, &doc) in cand_docs.iter().enumerate() {
-                let score = cand_scores[ci];
-                if score > threshold || heap.len() < k_usize {
-                    heap.push(Score { score, offset: doc });
-                    if heap.len() > k_usize {
-                        heap.pop();
-                    }
-                    if heap.len() == k_usize {
-                        threshold = heap.peek().map(|s| s.score).unwrap_or(f32::MIN);
-                    }
-                }
+                threshold = heap.push(cand_scores[ci], doc);
             }
 
             // Zero accum slots + clear bitmap using the bitmap itself
@@ -834,16 +808,13 @@ impl<'me> BlockSparseReader<'me> {
             }
         }
 
-        let mut results: Vec<Score> = heap.into_vec();
-        results.sort_by(|a, b| b.score.total_cmp(&a.score).then(a.offset.cmp(&b.offset)));
-        Ok(results)
+        Ok(heap.into_sorted_vec())
     }
 }
 
 struct TermState {
     cursor: PostingCursor,
     query_weight: f32,
-    #[allow(dead_code)]
     max_score: f32,
     window_score: f32,
 }
@@ -870,39 +841,6 @@ fn filter_competitive(cand_docs: &mut Vec<u32>, cand_scores: &mut Vec<f32>, cuto
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn score_min_heap_ordering() {
-        let mut heap = BinaryHeap::new();
-        heap.push(Score {
-            score: 3.0,
-            offset: 1,
-        });
-        heap.push(Score {
-            score: 1.0,
-            offset: 2,
-        });
-        heap.push(Score {
-            score: 2.0,
-            offset: 3,
-        });
-        assert_eq!(heap.peek().unwrap().score, 1.0);
-        heap.pop();
-        assert_eq!(heap.peek().unwrap().score, 2.0);
-    }
-
-    #[test]
-    fn score_tiebreak_by_offset() {
-        let a = Score {
-            score: 1.0,
-            offset: 10,
-        };
-        let b = Score {
-            score: 1.0,
-            offset: 20,
-        };
-        assert!(a > b); // reversed: higher offset = "lower" priority
-    }
 
     #[test]
     fn filter_competitive_removes_below_cutoff() {

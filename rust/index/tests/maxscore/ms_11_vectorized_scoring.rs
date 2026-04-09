@@ -8,12 +8,8 @@ fn all_mask() -> SignedRoaringBitmap {
 
 #[test]
 fn drain_essential_multi_block() {
-    let b1 = SparsePostingBlock::from_sorted_entries(&[
-        (0, 0.5), (1, 0.25), (2, 0.75),
-    ]).unwrap();
-    let b2 = SparsePostingBlock::from_sorted_entries(&[
-        (3, 0.1), (4, 0.9),
-    ]).unwrap();
+    let b1 = SparsePostingBlock::from_sorted_entries(&[(0, 0.5), (1, 0.25), (2, 0.75)]).unwrap();
+    let b2 = SparsePostingBlock::from_sorted_entries(&[(3, 0.1), (4, 0.9)]).unwrap();
 
     let mut cursor = PostingCursor::from_blocks(vec![b1, b2]);
     let mask = all_mask();
@@ -32,9 +28,9 @@ fn drain_essential_multi_block() {
 
 #[test]
 fn drain_essential_window_bounds() {
-    let block = SparsePostingBlock::from_sorted_entries(&[
-        (0, 0.1), (5, 0.5), (10, 0.9), (15, 0.3),
-    ]).unwrap();
+    let block =
+        SparsePostingBlock::from_sorted_entries(&[(0, 0.1), (5, 0.5), (10, 0.9), (15, 0.3)])
+            .unwrap();
     let mut cursor = PostingCursor::from_blocks(vec![block]);
     let mask = all_mask();
 
@@ -51,8 +47,13 @@ fn drain_essential_window_bounds() {
 #[test]
 fn score_candidates_partial_match() {
     let block = SparsePostingBlock::from_sorted_entries(&[
-        (0, 0.5), (2, 0.3), (4, 0.7), (6, 0.1), (8, 0.9),
-    ]).unwrap();
+        (0, 0.5),
+        (2, 0.3),
+        (4, 0.7),
+        (6, 0.1),
+        (8, 0.9),
+    ])
+    .unwrap();
     let mut cursor = PostingCursor::from_blocks(vec![block]);
 
     let cand_docs = vec![2, 6, 8];
@@ -60,16 +61,14 @@ fn score_candidates_partial_match() {
 
     cursor.score_candidates(0, 10, 2.0, &cand_docs, &mut cand_scores);
 
-    common::assert_approx(cand_scores[0], 0.6, 1e-3);  // 0.3 * 2.0
-    common::assert_approx(cand_scores[1], 0.2, 1e-3);  // 0.1 * 2.0
-    common::assert_approx(cand_scores[2], 1.8, 1e-3);  // 0.9 * 2.0
+    common::assert_approx(cand_scores[0], 0.6, 1e-3); // 0.3 * 2.0
+    common::assert_approx(cand_scores[1], 0.2, 1e-3); // 0.1 * 2.0
+    common::assert_approx(cand_scores[2], 1.8, 1e-3); // 0.9 * 2.0
 }
 
 #[test]
 fn score_candidates_no_matches() {
-    let block = SparsePostingBlock::from_sorted_entries(&[
-        (0, 0.5), (2, 0.3),
-    ]).unwrap();
+    let block = SparsePostingBlock::from_sorted_entries(&[(0, 0.5), (2, 0.3)]).unwrap();
     let mut cursor = PostingCursor::from_blocks(vec![block]);
 
     let cand_docs = vec![1, 3, 5];
@@ -82,12 +81,8 @@ fn score_candidates_no_matches() {
 
 #[test]
 fn multiple_terms_accumulate() {
-    let b_dim1 = SparsePostingBlock::from_sorted_entries(&[
-        (0, 0.5), (1, 0.3),
-    ]).unwrap();
-    let b_dim2 = SparsePostingBlock::from_sorted_entries(&[
-        (0, 0.2), (1, 0.7),
-    ]).unwrap();
+    let b_dim1 = SparsePostingBlock::from_sorted_entries(&[(0, 0.5), (1, 0.3)]).unwrap();
+    let b_dim2 = SparsePostingBlock::from_sorted_entries(&[(0, 0.2), (1, 0.7)]).unwrap();
 
     let mut cursor1 = PostingCursor::from_blocks(vec![b_dim1]);
     let mut cursor2 = PostingCursor::from_blocks(vec![b_dim2]);
@@ -99,6 +94,6 @@ fn multiple_terms_accumulate() {
     cursor1.drain_essential(0, 1, 1.0, &mut accum, &mut bitmap, &mask);
     cursor2.drain_essential(0, 1, 1.0, &mut accum, &mut bitmap, &mask);
 
-    common::assert_approx(accum[0], 0.7, 1e-3);  // 0.5 + 0.2
-    common::assert_approx(accum[1], 1.0, 1e-3);  // 0.3 + 0.7
+    common::assert_approx(accum[0], 0.7, 1e-3); // 0.5 + 0.2
+    common::assert_approx(accum[1], 1.0, 1e-3); // 0.3 + 0.7
 }
