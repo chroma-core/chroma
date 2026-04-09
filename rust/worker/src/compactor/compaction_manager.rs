@@ -107,6 +107,7 @@ pub(crate) struct CompactionManagerContext {
     collections_for_fragment_fetch: HashSet<CollectionUuid>,
     bloom_filter_manager: Option<BloomFilterManager>,
     shard_size: Option<u64>,
+    sharding_enabled_tenant_patterns: Vec<String>,
 }
 
 pub(crate) struct CompactionManager {
@@ -162,6 +163,7 @@ impl CompactionManager {
         collections_for_fragment_fetch: HashSet<CollectionUuid>,
         bloom_filter_manager: Option<BloomFilterManager>,
         shard_size: Option<u64>,
+        sharding_enabled_tenant_patterns: Vec<String>,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (compact_awaiter_tx, compact_awaiter_rx) =
             mpsc::channel::<CompactionTask>(compaction_manager_queue_size);
@@ -201,6 +203,7 @@ impl CompactionManager {
                 collections_for_fragment_fetch,
                 bloom_filter_manager,
                 shard_size,
+                sharding_enabled_tenant_patterns,
             },
             on_next_memberlist_signal: None,
             compact_awaiter_channel: compact_awaiter_tx,
@@ -231,6 +234,7 @@ impl CompactionManager {
                 .compact(
                     job.collection_id,
                     job.database_name.clone(),
+                    job.tenant_id.clone(),
                     false,
                     HashSet::new(),
                 )
@@ -257,15 +261,40 @@ impl CompactionManager {
         collection_ids: &[CollectionUuid],
         segment_scopes: &HashSet<chroma_types::SegmentScope>,
     ) {
-        // TODO(tanujnay112): Implement this for MCMR by accepting a database/topo name on this method.
-        let _ = collection_ids
+        let options = chroma_sysdb::types::GetCollectionsOptions {
+            collection_ids: Some(collection_ids.to_vec()),
+            ..Default::default()
+        };
+        let collections = match self.context.sysdb.get_collections(options).await {
+            Ok(collections) => collections,
+            Err(e) => {
+                // TODO(tanujnay112): Propagate error up and then handle it there.
+                tracing::error!("Failed to get collections in rebuild: {}", e);
+                return;
+            }
+        };
+        let _ = collections
             .iter()
-            .map(|id| {
-                let database_name =
-                    chroma_types::DatabaseName::new("default").expect("default should be valid");
-                self.context
-                    .clone()
-                    .compact(*id, database_name, true, segment_scopes.clone())
+            .filter_map(|collection| {
+                match chroma_types::DatabaseName::new(collection.database.clone()) {
+                    Some(database_name) => Some(
+                        self.context.clone().compact(
+                            collection.collection_id,
+                            database_name,
+                            collection.tenant.clone(),
+                            true,
+                            segment_scopes.clone(),
+                        )
+                    ),
+                    None => {
+                        tracing::error!(
+                            "Invalid database name '{}' for collection {} (must be at least 3 characters)",
+                            collection.database,
+                            collection.collection_id
+                        );
+                        None
+                    }
+                }
             })
             .collect::<FuturesUnordered<_>>()
             .collect::<Vec<_>>()
@@ -435,6 +464,7 @@ impl CompactionManagerContext {
         self,
         collection_id: CollectionUuid,
         database_name: chroma_types::DatabaseName,
+        tenant_id: String,
         is_rebuild: bool,
         apply_segment_scopes: HashSet<chroma_types::SegmentScope>,
     ) -> Result<CompactionResponse, Box<dyn ChromaError>> {
@@ -452,6 +482,12 @@ impl CompactionManagerContext {
         let is_function_disabled = self.disabled_function_collections.contains(&collection_id);
         let fragment_fetcher = self.fragment_fetcher_for_collection(collection_id);
         let bloom_filter_manager = self.bloom_filter_manager_for_collection(collection_id);
+        let shard_size =
+            if tenant_matches_patterns(&tenant_id, &self.sharding_enabled_tenant_patterns) {
+                self.shard_size
+            } else {
+                None
+            };
 
         let compact_result = Box::pin(compact(
             self.system.clone(),
@@ -472,7 +508,7 @@ impl CompactionManagerContext {
             is_function_disabled,
             fragment_fetcher,
             bloom_filter_manager,
-            self.shard_size,
+            shard_size,
             #[cfg(test)]
             None,
         ))
@@ -686,8 +722,21 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             collections_for_fragment_fetch,
             Some(bloom_filter_manager),
             config.compactor.shard_size,
+            config.compactor.sharding_enabled_tenant_patterns.clone(),
         )
     }
+}
+
+fn tenant_matches_patterns(tenant_id: &str, patterns: &[String]) -> bool {
+    for pattern in patterns {
+        if pattern == "*" {
+            return true;
+        }
+        if pattern == tenant_id {
+            return true;
+        }
+    }
+    false
 }
 
 async fn compact_awaiter_loop(
@@ -1245,6 +1294,7 @@ mod tests {
             HashSet::new(), // collections_for_fragment_fetch
             None,           // bloom_filter_manager
             None,           // shard_size
+            Vec::new(),     // sharding_enabled_tenant_patterns
         )
         .expect("Failed to create compaction manager in test");
 
