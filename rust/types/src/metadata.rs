@@ -499,6 +499,9 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for UpdateMetadataValue {
                 Ok(UpdateMetadataValue::Int(*value))
             }
             Some(chroma_proto::update_metadata_value::Value::FloatValue(value)) => {
+                if !value.is_finite() {
+                    return Err(UpdateMetadataValueConversionError::InvalidValue);
+                }
                 Ok(UpdateMetadataValue::Float(*value))
             }
             Some(chroma_proto::update_metadata_value::Value::StringValue(value)) => {
@@ -518,6 +521,9 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for UpdateMetadataValue {
                 Ok(UpdateMetadataValue::IntArray(value.values.clone()))
             }
             Some(chroma_proto::update_metadata_value::Value::DoubleListValue(value)) => {
+                if value.values.iter().any(|v| !v.is_finite()) {
+                    return Err(UpdateMetadataValueConversionError::InvalidValue);
+                }
                 Ok(UpdateMetadataValue::FloatArray(value.values.clone()))
             }
             Some(chroma_proto::update_metadata_value::Value::StringListValue(value)) => {
@@ -1054,6 +1060,9 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for MetadataValue {
                 Ok(MetadataValue::Int(*value))
             }
             Some(chroma_proto::update_metadata_value::Value::FloatValue(value)) => {
+                if !value.is_finite() {
+                    return Err(MetadataValueConversionError::InvalidValue);
+                }
                 Ok(MetadataValue::Float(*value))
             }
             Some(chroma_proto::update_metadata_value::Value::StringValue(value)) => {
@@ -1073,6 +1082,9 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for MetadataValue {
                 Ok(MetadataValue::IntArray(value.values.clone()))
             }
             Some(chroma_proto::update_metadata_value::Value::DoubleListValue(value)) => {
+                if value.values.iter().any(|v| !v.is_finite()) {
+                    return Err(MetadataValueConversionError::InvalidValue);
+                }
                 Ok(MetadataValue::FloatArray(value.values.clone()))
             }
             Some(chroma_proto::update_metadata_value::Value::StringListValue(value)) => {
@@ -3036,5 +3048,71 @@ mod tests {
                 children: vec![foo.clone(), baz.clone(), foo.clone()]
             })
         );
+    }
+
+    #[test]
+    fn test_reject_nan_metadata_float_via_grpc() {
+        for bad_value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let proto = chroma_proto::UpdateMetadataValue {
+                value: Some(chroma_proto::update_metadata_value::Value::FloatValue(
+                    bad_value,
+                )),
+            };
+
+            let result = UpdateMetadataValue::try_from(&proto);
+            assert!(
+                result.is_err(),
+                "should reject {bad_value} in UpdateMetadataValue"
+            );
+
+            let result = MetadataValue::try_from(&proto);
+            assert!(
+                result.is_err(),
+                "should reject {bad_value} in MetadataValue"
+            );
+        }
+
+        // Valid floats should still work.
+        let proto = chroma_proto::UpdateMetadataValue {
+            value: Some(chroma_proto::update_metadata_value::Value::FloatValue(1.5)),
+        };
+        assert!(UpdateMetadataValue::try_from(&proto).is_ok());
+        assert!(MetadataValue::try_from(&proto).is_ok());
+    }
+
+    #[test]
+    fn test_reject_nan_metadata_float_array_via_grpc() {
+        for bad_value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let proto = chroma_proto::UpdateMetadataValue {
+                value: Some(chroma_proto::update_metadata_value::Value::DoubleListValue(
+                    chroma_proto::DoubleListValue {
+                        values: vec![1.0, bad_value, 3.0],
+                    },
+                )),
+            };
+
+            let result = UpdateMetadataValue::try_from(&proto);
+            assert!(
+                result.is_err(),
+                "should reject {bad_value} in UpdateMetadataValue float array"
+            );
+
+            let result = MetadataValue::try_from(&proto);
+            assert!(
+                result.is_err(),
+                "should reject {bad_value} in MetadataValue float array"
+            );
+        }
+
+        // Valid float arrays should still work.
+        let proto = chroma_proto::UpdateMetadataValue {
+            value: Some(chroma_proto::update_metadata_value::Value::DoubleListValue(
+                chroma_proto::DoubleListValue {
+                    values: vec![1.0, 2.0, 3.0],
+                },
+            )),
+        };
+        assert!(UpdateMetadataValue::try_from(&proto).is_ok());
+        assert!(MetadataValue::try_from(&proto).is_ok());
     }
 }
