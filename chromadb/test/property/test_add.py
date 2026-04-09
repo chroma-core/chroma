@@ -197,6 +197,7 @@ def _test_add(
         if should_wait_for_compaction:
             records_since_compaction_wait += len(batch[0])
             if records_since_compaction_wait >= min_records_between_compaction_waits:
+                print(f"waiting {records_since_compaction_wait} >= {min_records_between_compaction_waits}")
                 current_version = wait_for_version_increase(
                     client, collection.name, current_version
                 )
