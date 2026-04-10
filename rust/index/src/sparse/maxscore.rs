@@ -671,12 +671,36 @@ struct TermState<'a> {
     window_score: f32,
 }
 
-// ── Budget pruning (scalar; SIMD added in PR #4) ────────────────────
+// ── Budget pruning ──────────────────────────────────────────────────
 
 /// Remove candidates whose score <= cutoff. Both parallel arrays are
-/// compacted in-place.
+/// compacted in-place. Dispatches to SIMD on supported architectures.
 fn filter_competitive(cand_docs: &mut Vec<u32>, cand_scores: &mut Vec<f32>, cutoff: f32) {
     debug_assert_eq!(cand_docs.len(), cand_scores.len());
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("sse2") {
+            // SAFETY: SSE2 feature detected at runtime; both slices have
+            // equal length (debug_assert above), and write <= read index
+            // guarantees no out-of-bounds writes.
+            unsafe { filter_competitive_sse2(cand_docs, cand_scores, cutoff) };
+            return;
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        // SAFETY: NEON is always available on aarch64. Same index invariants.
+        unsafe { filter_competitive_neon(cand_docs, cand_scores, cutoff) };
+        return;
+    }
+
+    #[allow(unreachable_code)]
+    filter_competitive_scalar(cand_docs, cand_scores, cutoff);
+}
+
+fn filter_competitive_scalar(cand_docs: &mut Vec<u32>, cand_scores: &mut Vec<f32>, cutoff: f32) {
     let n = cand_docs.len();
     let mut write = 0;
     for i in 0..n {
@@ -686,6 +710,116 @@ fn filter_competitive(cand_docs: &mut Vec<u32>, cand_scores: &mut Vec<f32>, cuto
             write += 1;
         }
     }
+    cand_docs.truncate(write);
+    cand_scores.truncate(write);
+}
+
+/// SSE2: 4-wide `_mm_cmpgt_ps` + `_mm_movemask_ps` for branchless comparison,
+/// then scatter surviving elements.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+unsafe fn filter_competitive_sse2(
+    cand_docs: &mut Vec<u32>,
+    cand_scores: &mut Vec<f32>,
+    cutoff: f32,
+) {
+    use std::arch::x86_64::*;
+
+    let n = cand_docs.len();
+    let chunks = n / 4;
+    let mut write = 0;
+
+    let vcutoff = _mm_set1_ps(cutoff);
+
+    // SAFETY: `base + bit` is in 0..n for all iterations. `write <= base + bit`
+    // because we only advance write when an element passes, so writes never
+    // overtake reads.
+    for c in 0..chunks {
+        let base = c * 4;
+        let vs = _mm_loadu_ps(cand_scores.as_ptr().add(base));
+        let cmp = _mm_cmpgt_ps(vs, vcutoff);
+        let mask = _mm_movemask_ps(cmp) as u32;
+
+        for bit in 0..4u32 {
+            if mask & (1 << bit) != 0 {
+                *cand_docs.get_unchecked_mut(write) = *cand_docs.get_unchecked(base + bit as usize);
+                *cand_scores.get_unchecked_mut(write) =
+                    *cand_scores.get_unchecked(base + bit as usize);
+                write += 1;
+            }
+        }
+    }
+
+    // Scalar remainder
+    for i in (chunks * 4)..n {
+        if *cand_scores.get_unchecked(i) > cutoff {
+            *cand_docs.get_unchecked_mut(write) = *cand_docs.get_unchecked(i);
+            *cand_scores.get_unchecked_mut(write) = *cand_scores.get_unchecked(i);
+            write += 1;
+        }
+    }
+
+    cand_docs.truncate(write);
+    cand_scores.truncate(write);
+}
+
+/// NEON: 4-wide `vcgtq_f32` comparison, extract per-lane masks, scatter survivors.
+#[cfg(target_arch = "aarch64")]
+unsafe fn filter_competitive_neon(
+    cand_docs: &mut Vec<u32>,
+    cand_scores: &mut Vec<f32>,
+    cutoff: f32,
+) {
+    use std::arch::aarch64::*;
+
+    let n = cand_docs.len();
+    let chunks = n / 4;
+    let mut write = 0;
+
+    let vcutoff = vdupq_n_f32(cutoff);
+
+    // SAFETY: same index invariants as SSE2 — write <= read, all indices in 0..n.
+    for c in 0..chunks {
+        let base = c * 4;
+        let vs = vld1q_f32(cand_scores.as_ptr().add(base));
+        let cmp = vcgtq_f32(vs, vcutoff);
+
+        let m0 = vgetq_lane_u32(cmp, 0);
+        let m1 = vgetq_lane_u32(cmp, 1);
+        let m2 = vgetq_lane_u32(cmp, 2);
+        let m3 = vgetq_lane_u32(cmp, 3);
+
+        if m0 != 0 {
+            *cand_docs.get_unchecked_mut(write) = *cand_docs.get_unchecked(base);
+            *cand_scores.get_unchecked_mut(write) = *cand_scores.get_unchecked(base);
+            write += 1;
+        }
+        if m1 != 0 {
+            *cand_docs.get_unchecked_mut(write) = *cand_docs.get_unchecked(base + 1);
+            *cand_scores.get_unchecked_mut(write) = *cand_scores.get_unchecked(base + 1);
+            write += 1;
+        }
+        if m2 != 0 {
+            *cand_docs.get_unchecked_mut(write) = *cand_docs.get_unchecked(base + 2);
+            *cand_scores.get_unchecked_mut(write) = *cand_scores.get_unchecked(base + 2);
+            write += 1;
+        }
+        if m3 != 0 {
+            *cand_docs.get_unchecked_mut(write) = *cand_docs.get_unchecked(base + 3);
+            *cand_scores.get_unchecked_mut(write) = *cand_scores.get_unchecked(base + 3);
+            write += 1;
+        }
+    }
+
+    // Scalar remainder
+    for i in (chunks * 4)..n {
+        if *cand_scores.get_unchecked(i) > cutoff {
+            *cand_docs.get_unchecked_mut(write) = *cand_docs.get_unchecked(i);
+            *cand_scores.get_unchecked_mut(write) = *cand_scores.get_unchecked(i);
+            write += 1;
+        }
+    }
+
     cand_docs.truncate(write);
     cand_scores.truncate(write);
 }
@@ -708,6 +842,43 @@ mod tests {
         let mut docs: Vec<u32> = vec![];
         let mut scores: Vec<f32> = vec![];
         filter_competitive(&mut docs, &mut scores, 0.0);
+        assert!(docs.is_empty());
+    }
+
+    #[test]
+    fn filter_competitive_simd_matches_scalar() {
+        // Test at various sizes including remainder paths (not multiple of 4).
+        for n in [1, 3, 4, 5, 7, 8, 9, 15, 16, 17, 100] {
+            let docs: Vec<u32> = (0..n as u32).collect();
+            let scores: Vec<f32> = (0..n).map(|i| 0.1 * (i as f32 + 1.0)).collect();
+            let cutoff = 0.5;
+
+            let mut scalar_docs = docs.clone();
+            let mut scalar_scores = scores.clone();
+            filter_competitive_scalar(&mut scalar_docs, &mut scalar_scores, cutoff);
+
+            let mut simd_docs = docs.clone();
+            let mut simd_scores = scores.clone();
+            filter_competitive(&mut simd_docs, &mut simd_scores, cutoff);
+
+            assert_eq!(scalar_docs, simd_docs, "docs mismatch at n={n}");
+            assert_eq!(scalar_scores, simd_scores, "scores mismatch at n={n}");
+        }
+    }
+
+    #[test]
+    fn filter_competitive_all_pass() {
+        let mut docs = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let mut scores = vec![1.0; 8];
+        filter_competitive(&mut docs, &mut scores, 0.0);
+        assert_eq!(docs.len(), 8);
+    }
+
+    #[test]
+    fn filter_competitive_none_pass() {
+        let mut docs = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let mut scores = vec![0.1; 8];
+        filter_competitive(&mut docs, &mut scores, 1.0);
         assert!(docs.is_empty());
     }
 
