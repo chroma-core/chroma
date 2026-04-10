@@ -7,6 +7,9 @@ edition = "2021"
 name = "log_service"
 path = "src/bin/log.rs"
 
+[features]
+faults = []
+
 [dependencies]
 arrow = { workspace = true }
 async-trait = { workspace = true }
