@@ -149,7 +149,7 @@ fn default_show_updates() -> bool {
     true
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SampleAppsConfig {
     #[serde(default = "default_show_updates")]
     pub show_updates: bool,
@@ -166,7 +166,7 @@ impl Default for SampleAppsConfig {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CliConfig {
     pub current_profile: String,
     pub sample_apps: SampleAppsConfig,
@@ -314,24 +314,6 @@ pub fn write_config(config: &CliConfig) -> Result<(), CliError> {
     Ok(())
 }
 
-pub fn get_profile(name: String) -> Result<Profile, CliError> {
-    let profiles = read_profiles()?;
-    if !profiles.contains_key(&name) {
-        Err(ProfileError::ProfileNotFound(name).into())
-    } else {
-        Ok(profiles[&name].clone())
-    }
-}
-
-pub fn get_current_profile() -> Result<(String, Profile), CliError> {
-    let config = read_config()?;
-    let profile_name = config.current_profile.clone();
-    let profile = get_profile(config.current_profile).map_err(|e| match e {
-        CliError::Profile(ProfileError::ProfileNotFound(_)) => ProfileError::NoActiveProfile.into(),
-        _ => e,
-    })?;
-    Ok((profile_name, profile))
-}
 
 pub fn find_available_port(min: u16, max: u16) -> Result<u16, CliError> {
     let mut rng = rand::thread_rng();

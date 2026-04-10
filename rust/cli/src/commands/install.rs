@@ -1,9 +1,8 @@
+use crate::config_store::{self, ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::ui_utils::read_secret;
 use crate::utils::UtilsError::UserInputFailed;
-use crate::utils::{
-    get_current_profile, read_config, write_config, CliConfig, CliError, Profile, SELECTION_LIMIT,
-};
+use crate::utils::{CliConfig, CliError, Profile, SELECTION_LIMIT};
 use clap::Parser;
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -470,11 +469,12 @@ fn get_app_env_variables(
     app_config: &SampleAppConfig,
     local: bool,
     db_name: Option<String>,
+    store: &dyn ConfigStore,
     term: &mut dyn Terminal,
 ) -> Result<SampleAppEnvVariables, CliError> {
     let mut env_variables = match local {
         false => {
-            let (_, current_profile) = get_current_profile()?;
+            let (_, current_profile) = config_store::get_current_profile(store)?;
             SampleAppEnvVariables::cloud(
                 current_profile,
                 db_name.ok_or(InstallError::DatabaseRequired)?,
@@ -534,8 +534,12 @@ fn display_run_instructions(app_config: SampleAppConfig, term: &mut dyn Terminal
     ));
 }
 
-async fn install_sample_app(args: InstallArgs, term: &mut dyn Terminal) -> Result<(), CliError> {
-    let mut cli_config = read_config()?;
+async fn install_sample_app(
+    args: InstallArgs,
+    store: &dyn ConfigStore,
+    term: &mut dyn Terminal,
+) -> Result<(), CliError> {
+    let mut cli_config = store.read_config()?;
     let apps = download_github_file::<Vec<AppListing>>("sample_apps/listings.json")
         .await
         .map_err(|_| InstallError::ListingsDownloadFailed)?;
@@ -559,7 +563,7 @@ async fn install_sample_app(args: InstallArgs, term: &mut dyn Terminal) -> Resul
     if !args.local && args.db.is_none() {
         return Err(InstallError::DatabaseRequired.into());
     }
-    let env_variables = get_app_env_variables(&app_config, args.local, args.db, term)?;
+    let env_variables = get_app_env_variables(&app_config, args.local, args.db, store, term)?;
     write_env_file(env_variables, format!("./{}/.env", app_name))
         .map_err(|_| InstallError::EnvFileWriteFailed)?;
 
@@ -568,7 +572,7 @@ async fn install_sample_app(args: InstallArgs, term: &mut dyn Terminal) -> Resul
         .sample_apps
         .installed
         .insert(app_name, app_version);
-    write_config(&cli_config)?;
+    store.write_config(&cli_config)?;
 
     // Output run instructions
     display_run_instructions(app_config, term);
@@ -577,8 +581,9 @@ async fn install_sample_app(args: InstallArgs, term: &mut dyn Terminal) -> Resul
 }
 
 pub fn install(args: InstallArgs) -> Result<(), CliError> {
+    let store = FileConfigStore;
     let mut term = SystemTerminal;
     let runtime = tokio::runtime::Runtime::new().map_err(|_| InstallError::RuntimeError)?;
-    runtime.block_on(async { install_sample_app(args, &mut term).await })?;
+    runtime.block_on(async { install_sample_app(args, &store, &mut term).await })?;
     Ok(())
 }

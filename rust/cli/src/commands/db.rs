@@ -1,8 +1,9 @@
 use crate::client::admin_client::get_admin_client;
+use crate::config_store::{self, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::ui_utils::copy_to_clipboard;
 use crate::utils::{
-    get_current_profile, CliError, Profile, CHROMA_API_KEY_ENV_VAR, CHROMA_DATABASE_ENV_VAR,
+    CliError, Profile, CHROMA_API_KEY_ENV_VAR, CHROMA_DATABASE_ENV_VAR,
     CHROMA_TENANT_ENV_VAR, SELECTION_LIMIT,
 };
 use chroma_types::Database;
@@ -488,7 +489,8 @@ pub async fn list(
 }
 
 pub fn db_command(command: DbCommand) -> Result<(), CliError> {
-    let (profile_name, current_profile) = get_current_profile()?;
+    let store = FileConfigStore;
+    let (profile_name, current_profile) = config_store::get_current_profile(&store)?;
     let mut term = SystemTerminal;
 
     let runtime = tokio::runtime::Runtime::new().map_err(|_| DbError::RuntimeError)?;

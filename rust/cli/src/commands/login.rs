@@ -4,11 +4,11 @@ use crate::client::dashboard_client::{
 };
 use crate::commands::db::DbError;
 use crate::commands::login::LoginError::BrowserAuthFailed;
+use crate::config_store::{ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::ui_utils::validate_uri;
 use crate::utils::{
-    read_config, read_profiles, write_config, write_profiles, CliError, Profile, Profiles,
-    UtilsError, CHROMA_DIR, CREDENTIALS_FILE,
+    CliError, Profile, Profiles, UtilsError, CHROMA_DIR, CREDENTIALS_FILE,
 };
 use clap::Parser;
 use colored::Colorize;
@@ -182,7 +182,11 @@ async fn browser_auth(
     }
 }
 
-pub async fn browser_login(args: LoginArgs, term: &mut dyn Terminal) -> Result<(), CliError> {
+pub async fn browser_login(
+    args: LoginArgs,
+    store: &dyn ConfigStore,
+    term: &mut dyn Terminal,
+) -> Result<(), CliError> {
     let dashboard_client = get_dashboard_client(args.dev);
 
     let session_id = browser_auth(&dashboard_client, term)
@@ -210,7 +214,7 @@ pub async fn browser_login(args: LoginArgs, term: &mut dyn Terminal) -> Result<(
         }
     };
 
-    let mut profiles = read_profiles()?;
+    let mut profiles = store.read_profiles()?;
     let mut profile_name = match args.profile {
         Some(name) => name,
         None => get_profile_from_team(&team, &profiles, term)?,
@@ -220,13 +224,13 @@ pub async fn browser_login(args: LoginArgs, term: &mut dyn Terminal) -> Result<(
 
     let set_current = profiles.is_empty();
     profiles.insert(profile_name.clone(), profile);
-    write_profiles(&profiles)?;
+    store.write_profiles(&profiles)?;
 
-    let mut config = read_config()?;
+    let mut config = store.read_config()?;
 
     if set_current {
         config.current_profile = profile_name.clone();
-        write_config(&config)?;
+        store.write_config(&config)?;
     }
 
     term.println(&login_success_message(&team.name, &profile_name));
@@ -240,13 +244,17 @@ pub async fn browser_login(args: LoginArgs, term: &mut dyn Terminal) -> Result<(
     Ok(())
 }
 
-pub async fn headless_login(args: LoginArgs, term: &mut dyn Terminal) -> Result<(), CliError> {
+pub async fn headless_login(
+    args: LoginArgs,
+    store: &dyn ConfigStore,
+    term: &mut dyn Terminal,
+) -> Result<(), CliError> {
     let api_key = args.api_key.unwrap_or_default();
 
     let mut profile_name = args.profile.unwrap_or_default();
     profile_name = validate_profile_name(profile_name)?;
 
-    let mut profiles = read_profiles()?;
+    let mut profiles = store.read_profiles()?;
 
     if profiles.contains_key(&profile_name) {
         return Err(LoginError::ProfileAlreadyExists(profile_name).into());
@@ -263,13 +271,13 @@ pub async fn headless_login(args: LoginArgs, term: &mut dyn Terminal) -> Result<
 
     let set_current = profiles.is_empty();
     profiles.insert(profile_name.clone(), profile);
-    write_profiles(&profiles)?;
+    store.write_profiles(&profiles)?;
 
-    let mut config = read_config()?;
+    let mut config = store.read_config()?;
 
     if set_current {
         config.current_profile = profile_name.clone();
-        write_config(&config)?;
+        store.write_config(&config)?;
     }
 
     if !config.current_profile.eq(&profile_name) {
@@ -282,12 +290,13 @@ pub async fn headless_login(args: LoginArgs, term: &mut dyn Terminal) -> Result<
 }
 
 pub fn login(args: LoginArgs) -> Result<(), CliError> {
+    let store = FileConfigStore;
     let mut term = SystemTerminal;
     let runtime = tokio::runtime::Runtime::new().map_err(|_| DbError::RuntimeError)?;
     runtime.block_on(async {
         match (&args.api_key, &args.profile) {
-            (Some(_), Some(_)) => headless_login(args, &mut term).await,
-            _ => browser_login(args, &mut term).await,
+            (Some(_), Some(_)) => headless_login(args, &store, &mut term).await,
+            _ => browser_login(args, &store, &mut term).await,
         }
     })?;
     Ok(())
