@@ -333,6 +333,47 @@ impl Block {
         }
     }
 
+    /// Get the raw serialized bytes for a given key, skipping deserialization.
+    /// Returns `None` if the key is not found or the value type does not
+    /// support raw byte access.
+    pub fn get_raw<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+        &'me self,
+        prefix: &str,
+        key: K,
+    ) -> Option<&'me [u8]> {
+        match self.binary_search_by::<K, _>(|(p, k)| {
+            p.cmp(prefix).then_with(|| {
+                k.partial_cmp(&key)
+                    .expect("Array values should be comparable.")
+            })
+        }) {
+            Ok(index) => V::get_raw_bytes(self.data.column(2), index),
+            Err(_) => None,
+        }
+    }
+
+    /// Get raw serialized bytes for all entries under a prefix, skipping
+    /// deserialization. Entries whose value type returns `None` from
+    /// `get_raw_bytes` are excluded.
+    pub fn get_prefix_raw<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+        &'me self,
+        prefix: &str,
+    ) -> Vec<(K, &'me [u8])> {
+        let offset = self.find_smallest_index_of_prefix::<K>(prefix);
+        if offset >= self.len() {
+            return Vec::new();
+        }
+        let cap = self.find_smallest_index_of_next_prefix::<K>(prefix);
+        let length = cap - offset;
+
+        let keys = K::get_range(self.data.column(1), offset, length);
+        let col = self.data.column(2);
+        keys.into_iter()
+            .enumerate()
+            .filter_map(|(i, k)| V::get_raw_bytes(col, offset + i).map(|bytes| (k, bytes)))
+            .collect()
+    }
+
     /// Get all the values for a given prefix & key range in the block
     ///
     /// The prefix and key of the returning value must be contained by the prefix range and key range respectively
