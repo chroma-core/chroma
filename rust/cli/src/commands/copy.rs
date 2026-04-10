@@ -218,7 +218,10 @@ async fn copy_collections(
         return Err(CopyError::NoCollections.into());
     }
 
-    term.println(&format!("{}", start_copy_prompt(collections.len()).bold().blue()));
+    term.println(&format!(
+        "{}",
+        start_copy_prompt(collections.len()).bold().blue()
+    ));
 
     term.println("Verifying collections...");
     // Verify that collections don't exist on target

@@ -2,8 +2,8 @@ use crate::client::admin_client::get_admin_client;
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::ui_utils::copy_to_clipboard;
 use crate::utils::{
-    get_current_profile, CliError, Profile, CHROMA_API_KEY_ENV_VAR,
-    CHROMA_DATABASE_ENV_VAR, CHROMA_TENANT_ENV_VAR, SELECTION_LIMIT,
+    get_current_profile, CliError, Profile, CHROMA_API_KEY_ENV_VAR, CHROMA_DATABASE_ENV_VAR,
+    CHROMA_TENANT_ENV_VAR, SELECTION_LIMIT,
 };
 use chroma_types::Database;
 use clap::{Args, Subcommand, ValueEnum};
@@ -497,9 +497,7 @@ pub fn db_command(command: DbCommand) -> Result<(), CliError> {
             DbCommand::Connect(args) => connect(args, current_profile, &mut term).await,
             DbCommand::Create(args) => create(args, current_profile, &mut term).await,
             DbCommand::Delete(args) => delete(args, current_profile, &mut term).await,
-            DbCommand::List(args) => {
-                list(args, profile_name, current_profile, &mut term).await
-            }
+            DbCommand::List(args) => list(args, profile_name, current_profile, &mut term).await,
         }
     })?;
     Ok(())
