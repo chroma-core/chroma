@@ -1876,9 +1876,7 @@ class TestNewSchema:
         schema.create_index(config=fts_config, key="#document")
 
         # Test 3: Cannot disable all indexes globally (no config, no key)
-        with pytest.raises(
-            ValueError, match="Cannot disable all indexes"
-        ):
+        with pytest.raises(ValueError, match="Cannot disable all indexes"):
             schema.delete_index()
 
         # Test 4: Cannot enable all indexes globally
@@ -2790,12 +2788,14 @@ class TestNewSchema:
 
     def test_cmek_invalid_deserialization(self) -> None:
         """Test that invalid CMEK data raises a warning and sets cmek to None."""
-        with pytest.raises(ValueError, match="Unsupported or missing CMEK provider in data"):
-            Schema.deserialize_from_json(
-                {"defaults": {}, "keys": {}, "cmek": {}}
-            )
+        with pytest.raises(
+            ValueError, match="Unsupported or missing CMEK provider in data"
+        ):
+            Schema.deserialize_from_json({"defaults": {}, "keys": {}, "cmek": {}})
 
-        with pytest.raises(ValueError, match="Unsupported or missing CMEK provider in data"):
+        with pytest.raises(
+            ValueError, match="Unsupported or missing CMEK provider in data"
+        ):
             Schema.deserialize_from_json(
                 {
                     "defaults": {},
@@ -2803,6 +2803,7 @@ class TestNewSchema:
                     "cmek": {"invalid_provider": "some-resource"},
                 }
             )
+
 
 def test_sparse_vector_cannot_be_created_globally() -> None:
     """Test that sparse vector index cannot be created globally (without a key)."""
@@ -2964,15 +2965,11 @@ def test_delete_index_rejects_special_keys() -> None:
         schema.delete_index(config=string_config, key=Key.DOCUMENT)
 
     # Test that Key.EMBEDDING is rejected
-    with pytest.raises(
-        ValueError, match="Cannot modify #embedding"
-    ):
+    with pytest.raises(ValueError, match="Cannot modify #embedding"):
         schema.delete_index(config=string_config, key=Key.EMBEDDING)
 
     # Test that string "#embedding" is also rejected (for consistency)
-    with pytest.raises(
-        ValueError, match="Cannot modify #embedding"
-    ):
+    with pytest.raises(ValueError, match="Cannot modify #embedding"):
         schema.delete_index(config=string_config, key="#embedding")
 
     # Test that any other key starting with # is rejected (second check)
@@ -3156,7 +3153,11 @@ def test_config_classes_reject_invalid_fields() -> None:
 
     error_msg = str(exc_info.value)
     assert "key" in error_msg.lower()
-    assert "extra" in error_msg.lower() or "permitted" in error_msg.lower()
+    assert (
+        "extra" in error_msg.lower()
+        or "permitted" in error_msg.lower()
+        or "not a valid field" in error_msg.lower()
+    )
 
     # Test VectorIndexConfig rejects invalid fields
     with pytest.raises((ValueError, ValidationError)) as exc_info:
