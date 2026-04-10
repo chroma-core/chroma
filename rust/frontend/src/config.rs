@@ -77,6 +77,8 @@ pub struct FrontendConfig {
     pub min_records_for_invocation: u64,
     #[serde(default = "Default::default")]
     pub tenants_with_quantization_enabled: Vec<String>,
+    #[serde(default = "Default::default")]
+    pub tenants_with_maxscore_enabled: Vec<String>,
     #[serde(default = "default_enable_log_scouting")]
     pub enable_log_scouting: bool,
 }
@@ -101,6 +103,7 @@ impl FrontendConfig {
             enable_schema: default_enable_schema(),
             min_records_for_invocation: default_min_records_for_invocation(),
             tenants_with_quantization_enabled: vec![],
+            tenants_with_maxscore_enabled: vec![],
             enable_log_scouting: false,
         }
     }
