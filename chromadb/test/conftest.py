@@ -48,22 +48,39 @@ logger = logging.getLogger(__name__)
 
 VALID_PRESETS = ["fast", "normal", "slow"]
 CURRENT_PRESET = os.getenv("PROPERTY_TESTING_PRESET", "fast")
+HYPOTHESIS_CI_REPRODUCE_ONLY = (
+    os.getenv("CHROMA_HYPOTHESIS_CI_REPRODUCE_ONLY") == "1"
+)
 
 if CURRENT_PRESET not in VALID_PRESETS:
     raise ValueError(
         f"Invalid property testing preset: {CURRENT_PRESET}. Must be one of {VALID_PRESETS}."
     )
 
-hypothesis.settings.register_profile(
-    "base",
-    deadline=90000,
-    suppress_health_check=[
+base_hypothesis_settings: dict[str, Any] = {
+    "deadline": 90000,
+    "suppress_health_check": [
         hypothesis.HealthCheck.data_too_large,
         hypothesis.HealthCheck.large_base_example,
         hypothesis.HealthCheck.function_scoped_fixture,
     ],
-    verbosity=hypothesis.Verbosity.verbose,
-)
+    "verbosity": hypothesis.Verbosity.verbose,
+}
+
+if HYPOTHESIS_CI_REPRODUCE_ONLY:
+    disabled_phases = {hypothesis.Phase.shrink}
+    explain_phase = getattr(hypothesis.Phase, "explain", None)
+    if explain_phase is not None:
+        disabled_phases.add(explain_phase)
+
+    base_hypothesis_settings.update(
+        phases=tuple(
+            phase for phase in hypothesis.Phase if phase not in disabled_phases
+        ),
+        print_blob=True,
+    )
+
+hypothesis.settings.register_profile("base", **base_hypothesis_settings)
 
 hypothesis.settings.register_profile(
     "fast", hypothesis.settings.get_profile("base"), max_examples=50

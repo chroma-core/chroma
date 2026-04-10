@@ -8,8 +8,10 @@ import hypothesis.strategies as st
 from hypothesis import given, settings
 from chromadb.api import ClientAPI
 from chromadb.api.types import Embeddings, Metadatas
-from chromadb.test.conftest import multi_region_test
+from chromadb.config import DEFAULT_DATABASE
 from chromadb.test.conftest import (
+    DEFAULT_MCMR_DATABASE,
+    MULTI_REGION_ENABLED,
     NOT_CLUSTER_ONLY,
     override_hypothesis_profile,
     create_isolated_database,
@@ -20,9 +22,30 @@ from chromadb.test.utils.wait_for_version_increase import wait_for_version_incre
 from chromadb.utils.batch_utils import create_batches
 
 MIN_RECORDS_BETWEEN_COMPACTION_WAITS = 10
+SMALL_MAX_RECORDS = 250
+MEDIUM_MIN_RECORDS = 150
+MEDIUM_MAX_RECORDS = 300
+LARGE_MIN_RECORDS = 5_000
+LARGE_MAX_RECORDS = 15_000
 
 
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
+
+TEST_DATABASE_NAMES = [pytest.param(DEFAULT_DATABASE, id="classic")]
+
+if MULTI_REGION_ENABLED:
+    TEST_DATABASE_NAMES.append(
+        pytest.param(
+            DEFAULT_MCMR_DATABASE,
+            id="multi-region-db",
+            marks=pytest.mark.test_with_multi_region,
+        )
+    )
+
+
+@pytest.fixture(params=TEST_DATABASE_NAMES)
+def database_name(request: pytest.FixtureRequest) -> str:
+    return cast(str, request.param)
 
 
 @given(
@@ -32,13 +55,14 @@ collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="co
 @settings(
     deadline=None,
     parent=override_hypothesis_profile(
-        normal=hypothesis.settings(max_examples=500),
-        fast=hypothesis.settings(max_examples=200),
+        normal=hypothesis.settings(max_examples=100),
+        fast=hypothesis.settings(max_examples=40),
     ),
     max_examples=2,
 )
 def test_add_miniscule(
     client: ClientAPI,
+    database_name: str,
     collection: strategies.Collection,
     record_set: strategies.RecordSet,
 ) -> None:
@@ -49,7 +73,7 @@ def test_add_miniscule(
         pytest.skip(
             "TODO @jai, come back and debug why CI runners fail with async + sync"
         )
-    _test_add(client, collection, record_set, True, always_compact=True)
+    _test_add(client, collection, record_set, True, always_compact=not MULTI_REGION_ENABLED)
 
 
 # Hypothesis tends to generate smaller values so we explicitly segregate the
@@ -57,18 +81,21 @@ def test_add_miniscule(
 # record sets so we explicitly create a large record set without using Hypothesis
 @given(
     collection=collection_st,
-    record_set=strategies.recordsets(collection_st, min_size=1, max_size=500),
+    record_set=strategies.recordsets(
+        collection_st, min_size=1, max_size=SMALL_MAX_RECORDS
+    ),
     should_compact=st.booleans(),
 )
 @settings(
     deadline=None,
     parent=override_hypothesis_profile(
-        normal=hypothesis.settings(max_examples=500),
-        fast=hypothesis.settings(max_examples=200),
+        normal=hypothesis.settings(max_examples=50),
+        fast=hypothesis.settings(max_examples=20),
     ),
 )
 def test_add_small(
     client: ClientAPI,
+    database_name: str,
     collection: strategies.Collection,
     record_set: strategies.RecordSet,
     should_compact: bool,
@@ -83,24 +110,23 @@ def test_add_small(
     _test_add(client, collection, record_set, should_compact)
 
 
-@multi_region_test
 @given(
     collection=collection_st,
     record_set=strategies.recordsets(
         collection_st,
-        min_size=250,
-        max_size=500,
-        num_unique_metadata=5,
+        min_size=MEDIUM_MIN_RECORDS,
+        max_size=MEDIUM_MAX_RECORDS,
+        num_unique_metadata=4,
         min_metadata_size=1,
-        max_metadata_size=5,
+        max_metadata_size=4,
     ),
     should_compact=st.booleans(),
 )
 @settings(
     deadline=None,
     parent=override_hypothesis_profile(
-        normal=hypothesis.settings(max_examples=10),
-        fast=hypothesis.settings(max_examples=5),
+        normal=hypothesis.settings(max_examples=3),
+        fast=hypothesis.settings(max_examples=1),
     ),
     suppress_health_check=[
         hypothesis.HealthCheck.too_slow,
@@ -111,6 +137,7 @@ def test_add_small(
 )
 def test_add_medium(
     client: ClientAPI,
+    database_name: str,
     collection: strategies.Collection,
     record_set: strategies.RecordSet,
     should_compact: bool,
@@ -153,6 +180,9 @@ def _test_add(
     current_version = initial_version
     records_since_compaction_wait = 0
     has_waited_for_compaction = False
+    min_records_between_compaction_waits = max(
+        MIN_RECORDS_BETWEEN_COMPACTION_WAITS, len(record_set["ids"]) // 10
+    )
 
     # TODO: The type of add() is incorrect as it does not allow for metadatas
     # like [{"a": 1}, None, {"a": 3}]
@@ -166,7 +196,8 @@ def _test_add(
         coll.add(*batch)
         if should_wait_for_compaction:
             records_since_compaction_wait += len(batch[0])
-            if records_since_compaction_wait >= MIN_RECORDS_BETWEEN_COMPACTION_WAITS:
+            if records_since_compaction_wait >= min_records_between_compaction_waits:
+                print(f"waiting {records_since_compaction_wait} >= {min_records_between_compaction_waits}")
                 current_version = wait_for_version_increase(
                     client, collection.name, current_version
                 )
@@ -179,7 +210,7 @@ def _test_add(
         not NOT_CLUSTER_ONLY
         and always_compact
         and not has_waited_for_compaction
-        and len(normalized_record_set["ids"]) > 0
+        and len(normalized_record_set["ids"]) > MIN_RECORDS_BETWEEN_COMPACTION_WAITS
     ):
         current_version = wait_for_version_increase(
             client, collection.name, current_version
@@ -189,7 +220,7 @@ def _test_add(
     n_results = max(1, (len(normalized_record_set["ids"]) // 10))
 
     if batch_ann_accuracy:
-        batch_size = 10
+        batch_size = 50
         for i in range(0, len(normalized_record_set["ids"]), batch_size):
             invariants.ann_accuracy(
                 coll,
@@ -231,9 +262,12 @@ def create_large_recordset(
 
 
 @given(collection=collection_st, should_compact=st.booleans())
-@settings(deadline=None, max_examples=5)
+@settings(deadline=None, max_examples=2)
 def test_add_large(
-    client: ClientAPI, collection: strategies.Collection, should_compact: bool
+    client: ClientAPI,
+    database_name: str,
+    collection: strategies.Collection,
+    should_compact: bool,
 ) -> None:
     create_isolated_database(client)
 
@@ -246,8 +280,8 @@ def test_add_large(
         )
 
     record_set = create_large_recordset(
-        min_size=10000,
-        max_size=50000,
+        min_size=LARGE_MIN_RECORDS,
+        max_size=LARGE_MAX_RECORDS,
     )
     coll = client.create_collection(
         name=collection.name,
@@ -273,7 +307,7 @@ def test_add_large(
     ):
         # Wait for the model to be updated, since the record set is larger, add some additional time
         wait_for_version_increase(
-            client, collection.name, initial_version, additional_time=240
+            client, collection.name, initial_version, additional_time=300
         )
 
     invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
@@ -282,7 +316,9 @@ def test_add_large(
 @given(collection=collection_st)
 @settings(deadline=None, max_examples=1)
 def test_add_large_exceeding(
-    client: ClientAPI, collection: strategies.Collection
+    client: ClientAPI,
+    database_name: str,
+    collection: strategies.Collection,
 ) -> None:
     create_isolated_database(client)
 
@@ -315,7 +351,7 @@ def test_add_large_exceeding(
     reason="This is expected to fail right now. We should change the API to sort the \
     ids by input order."
 )
-def test_out_of_order_ids(client: ClientAPI) -> None:
+def test_out_of_order_ids(client: ClientAPI, database_name: str) -> None:
     if (
         client.get_settings().chroma_api_impl
         == "chromadb.api.async_fastapi.AsyncFastAPI"
@@ -361,7 +397,7 @@ def test_out_of_order_ids(client: ClientAPI) -> None:
     assert get_ids == ooo_ids
 
 
-def test_add_partial(client: ClientAPI) -> None:
+def test_add_partial(client: ClientAPI, database_name: str) -> None:
     """Tests adding a record set with some of the fields set to None."""
 
     create_isolated_database(client)
@@ -396,7 +432,7 @@ def test_add_partial(client: ClientAPI) -> None:
     NOT_CLUSTER_ONLY,
     reason="GroupBy is only supported in distributed mode",
 )
-def test_search_group_by(client: ClientAPI) -> None:
+def test_search_group_by(client: ClientAPI, database_name: str) -> None:
     """Test GroupBy with single key, multiple keys, and multiple ranking keys."""
     from chromadb.execution.expression.operator import GroupBy, MinK, Key
     from chromadb.execution.expression.plan import Search

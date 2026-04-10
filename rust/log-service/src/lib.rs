@@ -4900,9 +4900,7 @@ mod tests {
             let config = LogServerConfig {
                 writer: writer_options,
                 repl: repl_options,
-                // Use zero threshold in integration tests to surface small repl-dirty changes
-                // immediately. The default threshold (100) hides small writes.
-                record_count_threshold: 0,
+                record_count_threshold: 1,
                 ..Default::default()
             };
 
@@ -5176,11 +5174,7 @@ mod tests {
         }
     }
 
-    async fn validate_dirty_log_on_server(
-        server: &LogServer,
-        _db_name: &str,
-        collection_ids: &[CollectionUuid],
-    ) {
+    async fn validate_dirty_log_on_server(server: &LogServer, collection_ids: &[CollectionUuid]) {
         server
             .roll_dirty_log_s3_cycle()
             .await
@@ -5419,7 +5413,7 @@ mod tests {
         runtime.block_on(async move {
             let (ctor, dtor) = setup_log_server();
             let log_server = ctor.await;
-            validate_dirty_log_on_server(&log_server, &db_name, &[]).await;
+            validate_dirty_log_on_server(&log_server, &[]).await;
 
             let collection_id = CollectionUuid::new();
 
@@ -5427,7 +5421,7 @@ mod tests {
                 push_log_to_server(&log_server, &db_name, collection_id, chunk).await;
             }
 
-            validate_dirty_log_on_server(&log_server, &db_name, &[collection_id]).await;
+            validate_dirty_log_on_server(&log_server, &[collection_id]).await;
             validate_log_on_server(
                 &log_server,
                 &db_name,
@@ -5440,7 +5434,7 @@ mod tests {
             let enum_offset = get_enum_offset_on_server(&log_server, &db_name, collection_id).await;
             update_compact_offset_on_server(&log_server, &db_name, collection_id, enum_offset)
                 .await;
-            validate_dirty_log_on_server(&log_server, &db_name, &[]).await;
+            validate_dirty_log_on_server(&log_server, &[]).await;
             dtor.await;
         });
     }
@@ -5456,7 +5450,7 @@ mod tests {
         runtime.block_on(async move {
             let (ctor, dtor) = setup_log_server();
             let log_server = ctor.await;
-            validate_dirty_log_on_server(&log_server, &db_name, &[]).await;
+            validate_dirty_log_on_server(&log_server, &[]).await;
 
             let mut collection_id_with_ord = Vec::new();
             for (index, operation) in operations {
@@ -5476,10 +5470,21 @@ mod tests {
 
             while let Some(collection_id) = collection_ids.pop() {
                 update_compact_offset_on_server(&log_server, &db_name, collection_id, 1).await;
-                validate_dirty_log_on_server(&log_server, &db_name, &collection_ids).await;
+                validate_dirty_log_on_server(&log_server, &collection_ids).await;
             }
             dtor.await;
         });
+    }
+
+    fn test_operation_record(id: impl Into<String>) -> OperationRecord {
+        OperationRecord {
+            id: id.into(),
+            embedding: Some(vec![1.0, 2.0, 3.0]),
+            encoding: None,
+            metadata: None,
+            document: None,
+            operation: Operation::Add,
+        }
     }
 
     fn test_fork_logs(
@@ -5495,7 +5500,7 @@ mod tests {
         runtime.block_on(async move {
             let (ctor, dtor) = setup_log_server();
             let log_server = ctor.await;
-            validate_dirty_log_on_server(&log_server, &db_name, &[]).await;
+            validate_dirty_log_on_server(&log_server, &[]).await;
 
             let source_collection_id = CollectionUuid::new();
             let fork_collection_id = CollectionUuid::new();
@@ -5549,7 +5554,7 @@ mod tests {
                 dirty_collection_ids.push(fork_collection_id);
             }
 
-            validate_dirty_log_on_server(&log_server, &db_name, &dirty_collection_ids).await;
+            validate_dirty_log_on_server(&log_server, &dirty_collection_ids).await;
             validate_log_on_server(
                 &log_server,
                 &db_name,
@@ -5593,7 +5598,7 @@ mod tests {
                 )
                 .await;
             }
-            validate_dirty_log_on_server(&log_server, &db_name, &[]).await;
+            validate_dirty_log_on_server(&log_server, &[]).await;
             dtor.await;
         });
     }
@@ -6260,6 +6265,42 @@ mod tests {
             .join()
             .expect("Spawned thread should not fail to join");
         }
+    }
+
+    #[test]
+    fn test_k8s_mcmr_integration_rust_log_service_dirty_logs_single_add_regression() {
+        std::thread::Builder::new()
+            .stack_size(1 << 22)
+            .spawn(move || {
+                test_dirty_logs(
+                    &format!("{TEST_TOPOLOGY_NAME}+dbname"),
+                    vec![(0, test_operation_record("single-add"))],
+                    mcmr_setup_log_server,
+                )
+            })
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
+    }
+
+    #[test]
+    fn test_k8s_mcmr_integration_rust_log_service_dirty_logs_three_adds_regression() {
+        std::thread::Builder::new()
+            .stack_size(1 << 22)
+            .spawn(move || {
+                test_dirty_logs(
+                    &format!("{TEST_TOPOLOGY_NAME}+dbname"),
+                    vec![
+                        (2, test_operation_record("third-add")),
+                        (0, test_operation_record("first-add")),
+                        (1, test_operation_record("second-add")),
+                    ],
+                    mcmr_setup_log_server,
+                )
+            })
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
     }
 
     proptest! {

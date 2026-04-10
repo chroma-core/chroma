@@ -11,6 +11,7 @@ use std::time::Duration;
 #[cfg(test)]
 use serial_test::serial;
 
+use backon::{ConstantBuilder, Retryable};
 use chroma_config::spanner::{SpannerChannelConfig, SpannerSessionPoolConfig};
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
@@ -339,81 +340,107 @@ impl SpannerBackend {
         &self,
         req: CreateDatabaseRequest,
     ) -> Result<CreateDatabaseResponse, SysDbError> {
+        let backoff = ConstantBuilder::default()
+            .with_delay(Duration::from_millis(100))
+            .with_max_times(4);
+        let db_name_for_log = req.name.clone().into_string();
+
         // Use a read-write transaction to atomically check tenant, check database, and insert
-        let result = self
-            .client
-            .read_write_transaction::<(), SysDbError, _>(|tx| {
-                let tenant_id = req.tenant_id.clone();
-                let db_id = req.id.to_string();
-                let db_name = req.name.clone().into_string();
-                Box::pin(async move {
-                    // Check if tenant exists within the same transaction
-                    let mut tenant_check_stmt = Statement::new(
-                        "SELECT id FROM tenants WHERE id = @id AND is_deleted = FALSE",
-                    );
-                    tenant_check_stmt.add_param("id", &tenant_id);
+        let result = (|| {
+            let db = self.clone();
+            let req = req.clone();
 
-                    let mut tenant_iter = tx
-                        .query(tenant_check_stmt)
-                        .instrument(tracing::debug_span!("check_tenant_exists"))
-                        .await?;
-                    if tenant_iter.next().await?.is_none() {
-                        return Err(SysDbError::NotFound(format!(
-                            "tenant '{}' not found",
-                            tenant_id
-                        )));
-                    }
+            async move {
+                db.client
+                    .read_write_transaction::<(), SysDbError, _>(|tx| {
+                        let tenant_id = req.tenant_id.clone();
+                        let db_id = req.id.to_string();
+                        let db_name = req.name.clone().into_string();
+                        Box::pin(async move {
+                            // Check if tenant exists within the same transaction
+                            let mut tenant_check_stmt = Statement::new(
+                                "SELECT id FROM tenants WHERE id = @id AND is_deleted = FALSE",
+                            );
+                            tenant_check_stmt.add_param("id", &tenant_id);
 
-                    // Check if database with this (name, tenant_id) combination already exists
-                    let mut name_check_stmt = Statement::new(
-                        "SELECT id FROM databases WHERE name = @name AND tenant_id = @tenant_id AND is_deleted = FALSE",
-                    );
-                    name_check_stmt.add_param("name", &db_name);
-                    name_check_stmt.add_param("tenant_id", &tenant_id);
+                            let mut tenant_iter = tx
+                                .query(tenant_check_stmt)
+                                .instrument(tracing::debug_span!("check_tenant_exists"))
+                                .await?;
+                            if tenant_iter.next().await?.is_none() {
+                                return Err(SysDbError::NotFound(format!(
+                                    "tenant '{}' not found",
+                                    tenant_id
+                                )));
+                            }
 
-                    let mut name_iter = tx.query(name_check_stmt).instrument(tracing::debug_span!("check_database_name_exists")).await?;
-                    if name_iter.next().await?.is_some() {
-                        return Err(SysDbError::AlreadyExists(format!(
-                            "database with name '{}' already exists for tenant '{}'",
-                            db_name, tenant_id
-                        )));
-                    }
+                            // Check if database with this (name, tenant_id) combination already exists
+                            let mut name_check_stmt = Statement::new(
+                                "SELECT id FROM databases WHERE name = @name AND tenant_id = @tenant_id AND is_deleted = FALSE",
+                            );
+                            name_check_stmt.add_param("name", &db_name);
+                            name_check_stmt.add_param("tenant_id", &tenant_id);
 
-                    // Check if database with this ID already exists
-                    let mut check_stmt = Statement::new(
-                        "SELECT id FROM databases WHERE id = @id AND is_deleted = FALSE",
-                    );
-                    check_stmt.add_param("id", &db_id);
+                            let mut name_iter = tx.query(name_check_stmt).instrument(tracing::debug_span!("check_database_name_exists")).await?;
+                            if name_iter.next().await?.is_some() {
+                                return Err(SysDbError::AlreadyExists(format!(
+                                    "database with name '{}' already exists for tenant '{}'",
+                                    db_name, tenant_id
+                                )));
+                            }
 
-                    let mut iter = tx
-                        .query(check_stmt)
-                        .instrument(tracing::debug_span!("check_database_exists"))
-                        .await?;
-                    if iter.next().await?.is_some() {
-                        return Err(SysDbError::AlreadyExists(format!(
-                            "database with id '{}' already exists",
-                            db_id
-                        )));
-                    }
+                            // Check if database with this ID already exists
+                            let mut check_stmt = Statement::new(
+                                "SELECT id FROM databases WHERE id = @id AND is_deleted = FALSE",
+                            );
+                            check_stmt.add_param("id", &db_id);
 
-                    // Insert the new database
-                    let mut insert_stmt = Statement::new(
-                        "INSERT INTO databases (id, name, tenant_id, is_deleted, created_at, updated_at) VALUES (@id, @name, @tenant_id, @is_deleted, PENDING_COMMIT_TIMESTAMP(), PENDING_COMMIT_TIMESTAMP())",
-                    );
-                    insert_stmt.add_param("id", &db_id);
-                    insert_stmt.add_param("name", &db_name);
-                    insert_stmt.add_param("tenant_id", &tenant_id);
-                    insert_stmt.add_param("is_deleted", &false);
+                            let mut iter = tx
+                                .query(check_stmt)
+                                .instrument(tracing::debug_span!("check_database_exists"))
+                                .await?;
+                            if iter.next().await?.is_some() {
+                                return Err(SysDbError::AlreadyExists(format!(
+                                    "database with id '{}' already exists",
+                                    db_id
+                                )));
+                            }
 
-                    tx.update(insert_stmt)
-                        .instrument(tracing::info_span!("insert_database"))
-                        .await?;
-                    tracing::info!("Created database: {} for tenant: {}", db_name, tenant_id);
+                            // Insert the new database
+                            let mut insert_stmt = Statement::new(
+                                "INSERT INTO databases (id, name, tenant_id, is_deleted, created_at, updated_at) VALUES (@id, @name, @tenant_id, @is_deleted, PENDING_COMMIT_TIMESTAMP(), PENDING_COMMIT_TIMESTAMP())",
+                            );
+                            insert_stmt.add_param("id", &db_id);
+                            insert_stmt.add_param("name", &db_name);
+                            insert_stmt.add_param("tenant_id", &tenant_id);
+                            insert_stmt.add_param("is_deleted", &false);
 
-                    Ok(())
-                })
-            })
-            .await;
+                            tx.update(insert_stmt)
+                                .instrument(tracing::info_span!("insert_database"))
+                                .await?;
+                            tracing::info!(
+                                "Created database: {} for tenant: {}",
+                                db_name,
+                                tenant_id
+                            );
+
+                            Ok(())
+                        })
+                    })
+                    .await
+            }
+        })
+        .retry(backoff)
+        .when(|e: &SysDbError| e.is_retryable_spanner_status())
+        .notify(|e: &SysDbError, dur| {
+            tracing::warn!(
+                database_name = %db_name_for_log,
+                delay_ms = dur.as_millis(),
+                error = %e,
+                "Spanner aborted or cancelled create database transaction; retrying"
+            );
+        })
+        .await;
 
         match result {
             Ok((_, _)) => Ok(CreateDatabaseResponse {}),
@@ -846,7 +873,7 @@ impl SpannerBackend {
         let filter = req.filter;
 
         // Use local region for reads
-        let region = self.local_region();
+        let region = self.local_region().clone();
 
         // Build dynamic query based on which filters are provided
         let mut where_clauses: Vec<String> = Vec::new();
@@ -946,76 +973,104 @@ impl SpannerBackend {
             pagination = pagination,
         );
 
-        let mut stmt = Statement::new(&query);
-        stmt.add_param("region", &region.to_string());
-
-        // Bind parameters based on which filters are set
-        if let Some(ref ids) = ids_str {
-            stmt.add_param("collection_ids", ids);
-        }
-        if let Some(ref name) = filter.name {
-            stmt.add_param("name", name);
-        }
-        if let Some(ref tenant_id) = filter.tenant_id {
-            stmt.add_param("tenant_id", tenant_id);
-        }
-        if let Some(ref database_name) = filter.database_name {
-            stmt.add_param("database_name", &database_name.as_ref());
-        }
-
         tracing::debug!("Get collection query is: {}", query);
 
-        let mut tx = self.client.single().await?;
-        let mut result_set = tx
-            .query(stmt)
-            .instrument(tracing::info_span!("get_collections query"))
-            .await?;
+        let backoff = ConstantBuilder::default()
+            .with_delay(Duration::from_millis(250))
+            .with_max_times(4);
 
-        // Collect all rows, grouped by collection_id, preserving query order (created_at ASC)
-        let mut collection_order: Vec<String> = Vec::new();
-        let mut rows_by_collection: std::collections::HashMap<String, Vec<Row>> =
-            std::collections::HashMap::new();
+        (|| {
+            let db = self.clone();
+            let query = query.clone();
+            let region = region.clone();
+            let ids_str = ids_str.clone();
+            let filter = filter.clone();
 
-        while let Some(row) = result_set.next().await? {
-            let collection_id: String = row
-                .column_by_name("collection_id")
-                .map_err(SysDbError::FailedToReadColumn)?;
+            async move {
+                let mut stmt = Statement::new(&query);
+                stmt.add_param("region", &region.to_string());
 
-            if !rows_by_collection.contains_key(&collection_id) {
-                collection_order.push(collection_id.clone());
-            }
-            rows_by_collection
-                .entry(collection_id)
-                .or_default()
-                .push(row);
-        }
-
-        // Convert each group of rows to a Collection, preserving the query order
-        let mut collections = Vec::new();
-        let mut soft_deleted_ids = std::collections::HashSet::new();
-        for collection_id in collection_order {
-            if let Some(rows) = rows_by_collection.remove(&collection_id) {
-                let is_deleted: bool = rows[0]
-                    .column_by_name("is_deleted")
-                    .map_err(SysDbError::FailedToReadColumn)?;
-                let collection = Collection::try_from(SpannerRows { rows })?;
-                if is_deleted {
-                    tracing::debug!(
-                        "Adding collection {} to soft_deleted_ids",
-                        collection.collection_id
-                    );
-                    soft_deleted_ids.insert(collection.collection_id);
+                // Bind parameters based on which filters are set
+                if let Some(ref ids) = ids_str {
+                    stmt.add_param("collection_ids", ids);
                 }
-                collections.push(collection);
+                if let Some(ref name) = filter.name {
+                    stmt.add_param("name", name);
+                }
+                if let Some(ref tenant_id) = filter.tenant_id {
+                    stmt.add_param("tenant_id", tenant_id);
+                }
+                if let Some(ref database_name) = filter.database_name {
+                    stmt.add_param("database_name", &database_name.as_ref());
+                }
+
+                let mut tx = db.client.single().await?;
+                let mut result_set = tx
+                    .query(stmt)
+                    .instrument(tracing::info_span!("get_collections query"))
+                    .await?;
+
+                // Collect all rows, grouped by collection_id, preserving query order (created_at ASC)
+                let mut collection_order: Vec<String> = Vec::new();
+                let mut rows_by_collection: std::collections::HashMap<String, Vec<Row>> =
+                    std::collections::HashMap::new();
+
+                while let Some(row) = result_set.next().await? {
+                    let collection_id: String = row
+                        .column_by_name("collection_id")
+                        .map_err(SysDbError::FailedToReadColumn)?;
+
+                    if !rows_by_collection.contains_key(&collection_id) {
+                        collection_order.push(collection_id.clone());
+                    }
+                    rows_by_collection
+                        .entry(collection_id)
+                        .or_default()
+                        .push(row);
+                }
+
+                // Convert each group of rows to a Collection, preserving the query order
+                let mut collections = Vec::new();
+                let mut soft_deleted_ids = std::collections::HashSet::new();
+                for collection_id in collection_order {
+                    if let Some(rows) = rows_by_collection.remove(&collection_id) {
+                        let is_deleted: bool = rows[0]
+                            .column_by_name("is_deleted")
+                            .map_err(SysDbError::FailedToReadColumn)?;
+                        let collection = Collection::try_from(SpannerRows { rows })?;
+                        if is_deleted {
+                            tracing::debug!(
+                                "Adding collection {} to soft_deleted_ids",
+                                collection.collection_id
+                            );
+                            soft_deleted_ids.insert(collection.collection_id);
+                        }
+                        collections.push(collection);
+                    }
+                }
+
+                tracing::debug!("Final soft_deleted_ids: {:?}", soft_deleted_ids);
+
+                Ok(GetCollectionsResponse {
+                    collections,
+                    soft_deleted_ids,
+                })
             }
-        }
-
-        tracing::debug!("Final soft_deleted_ids: {:?}", soft_deleted_ids);
-
-        Ok(GetCollectionsResponse {
-            collections,
-            soft_deleted_ids,
         })
+        .retry(backoff)
+        .when(|e: &SysDbError| e.is_retryable_spanner_status())
+        .notify(|e: &SysDbError, dur| {
+            tracing::warn!(
+                tenant_id = ?filter.tenant_id,
+                database_name = ?filter.database_name,
+                collection_name = ?filter.name,
+                ids_count = ?filter.ids.as_ref().map(Vec::len),
+                delay_ms = dur.as_millis(),
+                error = %e,
+                "Spanner aborted or cancelled get_collections query; retrying"
+            );
+        })
+        .await
     }
 
     /// Count collections for a tenant, optionally filtered by database.
@@ -1850,100 +1905,130 @@ impl SpannerBackend {
         };
 
         let region = self.local_region();
+        let num_active_versions = new_version_file
+            .version_history
+            .as_ref()
+            .map_or(0, |vh| vh.versions.len() as i32);
+        let backoff = ConstantBuilder::default()
+            .with_delay(Duration::from_millis(250))
+            .with_max_times(4);
 
-        let result = self
-        .client
-        .read_write_transaction::<(), SysDbError, _>(|tx| {
+        let result = (|| {
             let collection_id = collection_id.clone();
             let tenant_id = tenant_id.clone();
-            let total_records_post_compaction = req.total_records_post_compaction;
-            let size_bytes_post_compaction = req.size_bytes_post_compaction;
             let schema_str = req.schema_str.clone();
             let region = region.clone();
-            let log_position = req.log_position;
-            let num_active_versions = new_version_file
-                .version_history
-                .as_ref()
-                .map_or(0, |vh| vh.versions.len() as i32);
             let version_file_path = version_file_path.clone();
-            let db = self.clone();
             let flush_segment_compaction_infos = flush_segment_compaction_infos.clone();
-
             let old_version_file_name = old_version_file_name.clone();
-            Box::pin({
-                async move {
-                    // Update tenant's last compaction time first (before collection update)
-                    // This mimics Go's UpdateTenantLastCompactionTime
-                    let update_tenant_req = UpdateTenantRequest {
-                        tenant_id: tenant_id.clone(),
-                        last_compaction_time: latest_version_ts,
-                    };
-                    db.update_tenant(tx, update_tenant_req).await?;
+            let db = self.clone();
 
-                    let update_segment_req = UpdateSegmentRequest {
-                        collection_id: collection_id_uuid,
-                        flush_segment_compactions: flush_segment_compaction_infos.clone(),
-                    };
-                    db.update_segments(tx, update_segment_req).await?;
+            async move {
+                db.client
+                    .read_write_transaction::<(), SysDbError, _>(|tx| {
+                        let collection_id = collection_id.clone();
+                        let tenant_id = tenant_id.clone();
+                        let schema_str = schema_str.clone();
+                        let region = region.clone();
+                        let version_file_path = version_file_path.clone();
+                        let flush_segment_compaction_infos =
+                            flush_segment_compaction_infos.clone();
+                        let old_version_file_name = old_version_file_name.clone();
+                        let db = db.clone();
+                        let log_position = req.log_position;
+                        let total_records_post_compaction = req.total_records_post_compaction;
+                        let size_bytes_post_compaction = req.size_bytes_post_compaction;
 
-                    // Update collection with compaction results using CAS operation
-                    // This mimics Go's UpdateLogPositionAndVersionInfo with CAS semantics
-                    // TODO Need to see if updated_at time should be the commit timestamp o the versionfile updated_at timestamp
-                    // In go they're the same
-                    let mut update_stmt = Statement::new(
-                        "UPDATE collection_compaction_cursors SET
-                            last_compacted_offset = @log_position,
-                            version = @new_version,
-                            version_file_name = @version_file_name,
-                            total_records_post_compaction = @total_records_post_compaction,
-                            size_bytes_post_compaction = @size_bytes_post_compaction,
-                            last_compaction_time_secs = TIMESTAMP_SECONDS(@last_compaction_time_ts),
-                            updated_at = PENDING_COMMIT_TIMESTAMP(),
-                            num_versions = @num_active_versions,
-                            compaction_failure_count = 0,
-                            index_schema = COALESCE(PARSE_JSON(@schema_str), index_schema)
-                            WHERE collection_id = @collection_id AND (version = @current_version OR version IS NULL) AND region = @region AND (version_file_name = @old_version_file_name OR version_file_name IS NULL)",
-                    );
-                    update_stmt.add_param("collection_id", &collection_id);
-                    update_stmt.add_param("new_version", &(new_version as i64));
-                    update_stmt.add_param("log_position", &log_position);
-                    update_stmt.add_param(
-                        "total_records_post_compaction",
-                        &(total_records_post_compaction as i64),
-                    );
-                    update_stmt.add_param(
-                        "size_bytes_post_compaction",
-                        &(size_bytes_post_compaction as i64),
-                    );
-                    update_stmt.add_param("last_compaction_time_ts", &latest_version_ts);
-                    update_stmt.add_param("current_version", &(existing_version as i64));
-                    update_stmt
-                        .add_param("num_active_versions", &(num_active_versions as i64));
-                    update_stmt.add_param("version_file_name", &version_file_path);
-                    update_stmt.add_param("schema_str", &schema_str);
-                    update_stmt.add_param("region", &region.to_string());
-                    update_stmt.add_param("old_version_file_name", &old_version_file_name);
-                    let rows_affected = tx
-                        .update(update_stmt)
-                        .instrument(tracing::info_span!(
-                            "flush_compaction update query",
-                            collection_id = %collection_id,
-                            version_file_path = %version_file_path,
-                            region = %region,
-                        ))
-                        .await?;
+                        Box::pin({
+                            async move {
+                                // Update tenant's last compaction time first (before collection update)
+                                // This mimics Go's UpdateTenantLastCompactionTime
+                                let update_tenant_req = UpdateTenantRequest {
+                                    tenant_id: tenant_id.clone(),
+                                    last_compaction_time: latest_version_ts,
+                                };
+                                db.update_tenant(tx, update_tenant_req).await?;
 
-                    if rows_affected == 0 {
-                        // CAS operation failed - collection was updated by another transaction
-                        // This invokes a retry if this transaction in the Go code but that's
-                        // unnecessary here. If you failed to update the collection cursor
-                        // at the right version, your compaction should fail.
-                        return Err(SysDbError::CollectionEntryIsStale);
-                    }
+                                let update_segment_req = UpdateSegmentRequest {
+                                    collection_id: collection_id_uuid,
+                                    flush_segment_compactions: flush_segment_compaction_infos
+                                        .clone(),
+                                };
+                                db.update_segments(tx, update_segment_req).await?;
 
-                    Ok(())
-                }
-            })
+                                // Update collection with compaction results using CAS operation
+                                // This mimics Go's UpdateLogPositionAndVersionInfo with CAS semantics
+                                // TODO Need to see if updated_at time should be the commit timestamp o the versionfile updated_at timestamp
+                                // In go they're the same
+                                let mut update_stmt = Statement::new(
+                                    "UPDATE collection_compaction_cursors SET
+                                        last_compacted_offset = @log_position,
+                                        version = @new_version,
+                                        version_file_name = @version_file_name,
+                                        total_records_post_compaction = @total_records_post_compaction,
+                                        size_bytes_post_compaction = @size_bytes_post_compaction,
+                                        last_compaction_time_secs = TIMESTAMP_SECONDS(@last_compaction_time_ts),
+                                        updated_at = PENDING_COMMIT_TIMESTAMP(),
+                                        num_versions = @num_active_versions,
+                                        compaction_failure_count = 0,
+                                        index_schema = COALESCE(PARSE_JSON(@schema_str), index_schema)
+                                        WHERE collection_id = @collection_id AND (version = @current_version OR version IS NULL) AND region = @region AND (version_file_name = @old_version_file_name OR version_file_name IS NULL)",
+                                );
+                                update_stmt.add_param("collection_id", &collection_id);
+                                update_stmt.add_param("new_version", &(new_version as i64));
+                                update_stmt.add_param("log_position", &log_position);
+                                update_stmt.add_param(
+                                    "total_records_post_compaction",
+                                    &(total_records_post_compaction as i64),
+                                );
+                                update_stmt.add_param(
+                                    "size_bytes_post_compaction",
+                                    &(size_bytes_post_compaction as i64),
+                                );
+                                update_stmt
+                                    .add_param("last_compaction_time_ts", &latest_version_ts);
+                                update_stmt.add_param("current_version", &(existing_version as i64));
+                                update_stmt
+                                    .add_param("num_active_versions", &(num_active_versions as i64));
+                                update_stmt.add_param("version_file_name", &version_file_path);
+                                update_stmt.add_param("schema_str", &schema_str);
+                                update_stmt.add_param("region", &region.to_string());
+                                update_stmt
+                                    .add_param("old_version_file_name", &old_version_file_name);
+                                let rows_affected = tx
+                                    .update(update_stmt)
+                                    .instrument(tracing::info_span!(
+                                        "flush_compaction update query",
+                                        collection_id = %collection_id,
+                                        version_file_path = %version_file_path,
+                                        region = %region,
+                                    ))
+                                    .await?;
+
+                                if rows_affected == 0 {
+                                    // CAS operation failed - collection was updated by another transaction
+                                    // This invokes a retry if this transaction in the Go code but that's
+                                    // unnecessary here. If you failed to update the collection cursor
+                                    // at the right version, your compaction should fail.
+                                    return Err(SysDbError::CollectionEntryIsStale);
+                                }
+
+                                Ok(())
+                            }
+                        })
+                    })
+                    .await
+            }
+        })
+        .retry(backoff)
+        .when(|e: &SysDbError| e.is_retryable_spanner_status())
+        .notify(|e: &SysDbError, dur| {
+            tracing::warn!(
+                collection_id = %collection_id,
+                delay_ms = dur.as_millis(),
+                error = %e,
+                "Spanner aborted or cancelled flush collection compaction transaction; retrying"
+            );
         })
         .await;
 
