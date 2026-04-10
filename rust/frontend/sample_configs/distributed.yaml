@@ -47,7 +47,11 @@ executor:
       - tier: 0
         capacity: 4
         patterns:
-          - tenant_id: "premium_tenant"
+          - all_of:
+              - tenant_id: "premium_tenant"
+              - collection_size:
+                  min: 1000001
+                  max: 18446744073709551615
       - tier: 1
         capacity: 5
         patterns:
