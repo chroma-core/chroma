@@ -268,12 +268,15 @@ impl CompactionManager {
         let collections = match self.context.sysdb.get_collections(options).await {
             Ok(collections) => collections,
             Err(e) => {
-                // TODO(tanujnay112): Propagate error up and then handle it there.
-                tracing::error!("Failed to get collections in rebuild: {}", e);
+                tracing::error!(
+                    "Rebuild failed at sysdb.get_collections for collection IDs {:?}: {}",
+                    collection_ids,
+                    e
+                );
                 return;
             }
         };
-        let _ = collections
+        let results = collections
             .iter()
             .filter_map(|collection| {
                 match chroma_types::DatabaseName::new(collection.database.clone()) {
@@ -299,6 +302,25 @@ impl CompactionManager {
             .collect::<FuturesUnordered<_>>()
             .collect::<Vec<_>>()
             .await;
+
+        // Log results
+        for (result, collection) in results.into_iter().zip(collections.iter()) {
+            match result {
+                Ok(_) => {
+                    tracing::info!(
+                        "Rebuild succeeded for collection {}",
+                        collection.collection_id
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "Rebuild failed for collection {}: {}",
+                        collection.collection_id,
+                        e
+                    );
+                }
+            }
+        }
     }
 
     #[instrument(name = "CompactionManager::purge_dirty_log", skip(ctx))]
