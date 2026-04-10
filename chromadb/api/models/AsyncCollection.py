@@ -264,12 +264,15 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         name: Optional[str] = None,
         metadata: Optional[CollectionMetadata] = None,
         configuration: Optional[UpdateCollectionConfiguration] = None,
+        description: Optional[str] = None,
     ) -> None:
-        """Modify the collection name or metadata
+        """Modify the collection name, metadata, configuration, or description.
 
         Args:
             name: The updated name for the collection. Optional.
             metadata: The updated metadata for the collection. Optional.
+            configuration: The updated configuration for the collection. Optional.
+            description: The updated description for the collection. Optional.
 
         Returns:
             None
@@ -285,11 +288,14 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             new_name=name,
             new_metadata=metadata,
             new_configuration=configuration,
+            new_description=description,
             tenant=self.tenant,
             database=self.database,
         )
 
-        self._update_model_after_modify_success(name, metadata, configuration)
+        self._update_model_after_modify_success(
+            name, metadata, configuration, description
+        )
 
     async def fork(
         self,
