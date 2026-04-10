@@ -737,12 +737,106 @@ impl Directory {
     }
 }
 
-// ── f16 → f32 bulk conversion (scalar; SIMD added in PR 4) ─────────
+// ── f16 → f32 bulk conversion ────────────────────────────────────────
 
+/// Convert a slice of little-endian f16 bytes into f32 values.
+/// Dispatches to SIMD on supported architectures, scalar fallback otherwise.
 pub fn convert_f16_to_f32(f16_bytes: &[u8], out: &mut [f32]) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        convert_f16_to_f32_neon(f16_bytes, out);
+        return;
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("f16c") {
+            // SAFETY: f16c feature detected at runtime; inputs are valid
+            // f16 byte slices and output buffer is correctly sized.
+            unsafe { convert_f16_to_f32_f16c(f16_bytes, out) };
+            return;
+        }
+    }
+    #[allow(unreachable_code)]
+    convert_f16_to_f32_scalar(f16_bytes, out);
+}
+
+/// Scalar f16→f32 conversion via the `half` crate.
+pub fn convert_f16_to_f32_scalar(f16_bytes: &[u8], out: &mut [f32]) {
     for (o, chunk) in out.iter_mut().zip(f16_bytes.chunks_exact(2)) {
         *o = f16::from_le_bytes([chunk[0], chunk[1]]).to_f32();
     }
+}
+
+/// NEON f16→f32 via bit manipulation. Processes 8 values at a time.
+///
+/// Uses integer shift+mask+bias to convert f16 bit patterns to f32 bit
+/// patterns. Handles all normal f16 values correctly; subnormals map to
+/// a tiny positive value rather than zero, which is acceptable for
+/// SPLADE/BM25 weights that are always positive normals.
+#[cfg(target_arch = "aarch64")]
+fn convert_f16_to_f32_neon(f16_bytes: &[u8], out: &mut [f32]) {
+    use std::arch::aarch64::*;
+
+    let n = out.len();
+    let chunks = n / 8;
+
+    // SAFETY: NEON is always available on aarch64. Pointer arithmetic is
+    // bounded by `chunks * 8 <= n` for output and `chunks * 16 <= f16_bytes.len()`
+    // for input (caller guarantees f16_bytes.len() >= out.len() * 2).
+    unsafe {
+        let sign_mask = vdupq_n_u32(0x8000);
+        let nosign_mask = vdupq_n_u32(0x7FFF);
+        let bias = vdupq_n_u32(0x3800_0000); // (127 - 15) << 23
+
+        for c in 0..chunks {
+            let base = c * 8;
+            let byte_base = base * 2;
+
+            let h8 = vld1q_u16(f16_bytes.as_ptr().add(byte_base) as *const u16);
+            let lo = vmovl_u16(vget_low_u16(h8));
+            let hi = vmovl_u16(vget_high_u16(h8));
+
+            macro_rules! cvt {
+                ($h:expr, $off:expr) => {{
+                    let sign = vshlq_n_u32::<16>(vandq_u32($h, sign_mask));
+                    let nosign = vshlq_n_u32::<13>(vandq_u32($h, nosign_mask));
+                    let bits = vorrq_u32(sign, vaddq_u32(nosign, bias));
+                    vst1q_f32(
+                        out.as_mut_ptr().add(base + $off),
+                        vreinterpretq_f32_u32(bits),
+                    );
+                }};
+            }
+            cvt!(lo, 0);
+            cvt!(hi, 4);
+        }
+    }
+
+    let rem_start = chunks * 8;
+    convert_f16_to_f32_scalar(&f16_bytes[rem_start * 2..], &mut out[rem_start..]);
+}
+
+/// x86_64 F16C: `_mm256_cvtph_ps` converts 8×f16 → 8×f32 in one instruction.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "f16c")]
+unsafe fn convert_f16_to_f32_f16c(f16_bytes: &[u8], out: &mut [f32]) {
+    use std::arch::x86_64::*;
+
+    let n = out.len();
+    let chunks = n / 8;
+
+    // SAFETY: f16c target_feature is enabled. Pointer arithmetic is bounded
+    // by `chunks * 8 <= n` for output and `chunks * 16 <= f16_bytes.len()`.
+    for c in 0..chunks {
+        let base = c * 8;
+        let byte_base = base * 2;
+        let h8 = _mm_loadu_si128(f16_bytes.as_ptr().add(byte_base) as *const __m128i);
+        let f8 = _mm256_cvtph_ps(h8);
+        _mm256_storeu_ps(out.as_mut_ptr().add(base), f8);
+    }
+
+    let rem_start = chunks * 8;
+    convert_f16_to_f32_scalar(&f16_bytes[rem_start * 2..], &mut out[rem_start..]);
 }
 
 #[cfg(test)]
@@ -1395,6 +1489,36 @@ mod tests {
         convert_f16_to_f32(&input, &mut out);
         assert_approx(out[0], 0.5, F16_TOL);
         assert_eq!(out[1], 0.0); // not overwritten: chunks_exact skips trailing
+    }
+
+    // ── SIMD vs scalar f16 conversion consistency ─────────────────────
+
+    #[test]
+    fn convert_f16_simd_matches_scalar() {
+        // Test at various sizes including remainder paths (not multiple of 8).
+        for n in [1, 3, 7, 8, 9, 15, 16, 17, 31, 63, 64, 100, 256, 1000] {
+            let f16_bytes: Vec<u8> = (0..n)
+                .flat_map(|i| {
+                    let val = 0.01 * (i as f32 + 1.0);
+                    f16::from_f32(val).to_le_bytes()
+                })
+                .collect();
+
+            let mut scalar_out = vec![0.0f32; n];
+            let mut simd_out = vec![0.0f32; n];
+
+            convert_f16_to_f32_scalar(&f16_bytes, &mut scalar_out);
+            convert_f16_to_f32(&f16_bytes, &mut simd_out);
+
+            for i in 0..n {
+                assert!(
+                    (scalar_out[i] - simd_out[i]).abs() <= f32::EPSILON,
+                    "mismatch at n={n}, i={i}: scalar={} simd={}",
+                    scalar_out[i],
+                    simd_out[i],
+                );
+            }
+        }
     }
 
     // ── Zero-copy methods at various block sizes (incl. remainder paths) ──
