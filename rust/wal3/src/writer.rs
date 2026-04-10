@@ -1583,11 +1583,43 @@ mod tests {
 
     struct TestFragmentConsumer;
 
+    struct TestFragmentUploader;
+
+    #[async_trait::async_trait]
+    impl crate::FragmentUploader<(FragmentSeqNo, LogPosition)> for TestFragmentUploader {
+        async fn upload_parquet(
+            &self,
+            _pointer: &(FragmentSeqNo, LogPosition),
+            _messages: Vec<Vec<u8>>,
+            _cmek: Option<Cmek>,
+            _epoch_micros: u64,
+        ) -> Result<crate::interfaces::UploadResult, Error> {
+            unreachable!("upload_parquet is not used in this test")
+        }
+
+        async fn preferred_storage(&self) -> chroma_storage::Storage {
+            unreachable!("preferred_storage is not used in this test")
+        }
+
+        async fn preferred_prefix(&self) -> String {
+            unreachable!("preferred_prefix is not used in this test")
+        }
+
+        async fn preferred_storage_wrapper(&self) -> &crate::StorageWrapper {
+            unreachable!("preferred_storage_wrapper is not used in this test")
+        }
+
+        async fn storages(&self) -> &[crate::StorageWrapper] {
+            unreachable!("storages is not used in this test")
+        }
+    }
+
     #[async_trait::async_trait]
     impl crate::FragmentManagerFactory for TestFragmentFactory {
         type FragmentPointer = (FragmentSeqNo, LogPosition);
         type Publisher = TestFragmentPublisher;
         type Consumer = TestFragmentConsumer;
+        type Uploader = TestFragmentUploader;
 
         async fn make_publisher(&self) -> Result<Self::Publisher, Error> {
             Ok(TestFragmentPublisher)
@@ -1597,8 +1629,16 @@ mod tests {
             Ok(TestFragmentConsumer)
         }
 
+        async fn make_fragment_uploader(&self) -> Result<Self::Uploader, Error> {
+            Ok(TestFragmentUploader)
+        }
+
         async fn preferred_storage(&self) -> chroma_storage::Storage {
             unreachable!("preferred_storage is not used in this test")
+        }
+
+        fn write_options(&self) -> LogWriterOptions {
+            LogWriterOptions::default()
         }
     }
 

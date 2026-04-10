@@ -78,6 +78,15 @@ impl ReplicatedFragmentManagerFactory {
             read_repair_semaphore,
         }
     }
+
+    fn build_fragment_uploader(&self) -> ReplicatedFragmentUploader {
+        ReplicatedFragmentUploader::new(
+            self.repl.clone(),
+            self.write.clone(),
+            self.preferred,
+            Arc::clone(&self.storages),
+        )
+    }
 }
 
 #[async_trait::async_trait]
@@ -85,18 +94,14 @@ impl FragmentManagerFactory for ReplicatedFragmentManagerFactory {
     type FragmentPointer = FragmentUuid;
     type Publisher = BatchManager<FragmentUuid, fragment_manager::ReplicatedFragmentUploader>;
     type Consumer = fragment_manager::FragmentReader;
+    type Uploader = fragment_manager::ReplicatedFragmentUploader;
 
     async fn preferred_storage(&self) -> Storage {
         self.storages[self.preferred].storage.clone()
     }
 
     async fn make_publisher(&self) -> Result<Self::Publisher, Error> {
-        let fragment_uploader = ReplicatedFragmentUploader::new(
-            self.repl.clone(),
-            self.write.clone(),
-            self.preferred,
-            Arc::clone(&self.storages),
-        );
+        let fragment_uploader = self.build_fragment_uploader();
         BatchManager::new(self.write.clone(), fragment_uploader)
             .ok_or_else(|| Error::internal(file!(), line!()))
     }
@@ -109,6 +114,14 @@ impl FragmentManagerFactory for ReplicatedFragmentManagerFactory {
             storages,
             Arc::clone(&self.read_repair_semaphore),
         ))
+    }
+
+    async fn make_fragment_uploader(&self) -> Result<Self::Uploader, Error> {
+        Ok(self.build_fragment_uploader())
+    }
+
+    fn write_options(&self) -> LogWriterOptions {
+        self.write.clone()
     }
 }
 
