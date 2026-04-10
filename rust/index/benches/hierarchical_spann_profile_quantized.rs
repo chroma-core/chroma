@@ -10,19 +10,24 @@ mod optimal_gt;
 
 use std::collections::{BTreeMap, HashSet};
 use std::io::Write as _;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rayon::prelude::*;
 
+use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider};
+use chroma_cache::new_cache_for_test;
 use chroma_distance::DistanceFunction;
+use chroma_storage::{local::LocalStorage, Storage};
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 
 use datasets::{format_count, recall_at_k, Dataset, DatasetType, MetricType, Query};
 use hierarchical_index::writer::{
-    format_task_tables, HierarchicalSpannConfig, HierarchicalSpannWriter, LeafMissDiagnostic,
-    LeafTraits, NavigationMode, ReadBeamPolicy, SearchTimings, WriterStatsSnapshot,
+    format_task_tables, HierarchicalSpannConfig, HierarchicalSpannWriter,
+    HierarchicalSpannIds, LeafMissDiagnostic, LeafTraits, NavigationMode, ReadBeamPolicy,
+    SearchTimings, WriterStatsSnapshot,
 };
 
 // =============================================================================
@@ -184,6 +189,15 @@ struct Args {
     /// Print legend explaining all table columns
     #[arg(long)]
     print_legend: bool,
+
+    /// Directory for checkpoint blockfiles and metadata.
+    /// Defaults to target/hierarchical_cache/save/<dataset>.
+    #[arg(long)]
+    save_dir: Option<String>,
+
+    /// Resume from the last committed checkpoint in --save-dir
+    #[arg(long)]
+    resume: bool,
 
     #[arg(hide = true, allow_hyphen_values = true)]
     _extra: Vec<String>,
@@ -408,6 +422,75 @@ fn group_queries_by_checkpoint(queries: Vec<Query>) -> BTreeMap<u64, Vec<Query>>
 }
 
 // =============================================================================
+// Checkpoint Persistence
+// =============================================================================
+
+const BLOCK_SIZE_BYTES: usize = 3 * 1024 * 1024;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct CheckpointMeta {
+    checkpoint_idx: usize,
+    total_vectors: usize,
+    posting_list_id: String,
+    scalar_metadata_id: String,
+    vector_data_id: String,
+    list_data_id: String,
+}
+
+impl CheckpointMeta {
+    fn from_ids(checkpoint_idx: usize, total_vectors: usize, ids: &HierarchicalSpannIds) -> Self {
+        Self {
+            checkpoint_idx,
+            total_vectors,
+            posting_list_id: ids.posting_list_id.to_string(),
+            scalar_metadata_id: ids.scalar_metadata_id.to_string(),
+            vector_data_id: ids.vector_data_id.to_string(),
+            list_data_id: ids.list_data_id.to_string(),
+        }
+    }
+
+    fn to_ids(&self) -> HierarchicalSpannIds {
+        HierarchicalSpannIds {
+            posting_list_id: self.posting_list_id.parse().expect("invalid posting_list_id UUID"),
+            scalar_metadata_id: self.scalar_metadata_id.parse().expect("invalid scalar_metadata_id UUID"),
+            vector_data_id: self.vector_data_id.parse().expect("invalid vector_data_id UUID"),
+            list_data_id: self.list_data_id.parse().expect("invalid list_data_id UUID"),
+        }
+    }
+}
+
+fn save_checkpoint_meta(
+    save_dir: &Path,
+    checkpoint_idx: usize,
+    total_vectors: usize,
+    ids: &HierarchicalSpannIds,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let meta = CheckpointMeta::from_ids(checkpoint_idx, total_vectors, ids);
+    let json = serde_json::to_string_pretty(&meta)?;
+    let path = save_dir.join("checkpoint.json");
+    std::fs::write(&path, json)?;
+    Ok(())
+}
+
+fn load_checkpoint_meta(
+    save_dir: &Path,
+) -> Result<CheckpointMeta, Box<dyn std::error::Error + Send + Sync>> {
+    let path = save_dir.join("checkpoint.json");
+    let json = std::fs::read_to_string(&path)?;
+    let meta: CheckpointMeta = serde_json::from_str(&json)?;
+    Ok(meta)
+}
+
+fn make_blockfile_provider(storage_path: &Path) -> BlockfileProvider {
+    let storage = Storage::Local(LocalStorage::new(storage_path.to_str().unwrap()));
+    let block_cache = new_cache_for_test();
+    let sparse_index_cache = new_cache_for_test();
+    let arrow_blockfile_provider =
+        ArrowBlockfileProvider::new(storage, BLOCK_SIZE_BYTES, block_cache, sparse_index_cache, 16);
+    BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider)
+}
+
+// =============================================================================
 // Main
 // =============================================================================
 
@@ -566,15 +649,77 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         );
     }
 
-    let writer = HierarchicalSpannWriter::new(dimension, distance_fn.clone(), config);
+    let save_dir: PathBuf = args
+        .save_dir
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(format!(
+                "target/hierarchical_cache/save/{}",
+                dataset.name()
+            ))
+        });
+    std::fs::create_dir_all(&save_dir)?;
+    let data_dir = save_dir.join("data");
 
+    let mut start_checkpoint = 0usize;
     let mut total_vectors = 0usize;
     let mut all_indexed_vectors: Vec<(u32, Arc<[f32]>)> = Vec::new();
+
+    let writer = if args.resume {
+        let meta = load_checkpoint_meta(&save_dir)?;
+        start_checkpoint = meta.checkpoint_idx + 1;
+        total_vectors = meta.total_vectors;
+        let ids = meta.to_ids();
+
+        println!("  Resuming from checkpoint {} ({} vectors)", start_checkpoint, format_count(total_vectors));
+
+        let provider = make_blockfile_provider(&data_dir);
+        let w = HierarchicalSpannWriter::open(
+            &provider,
+            ids,
+            distance_fn.clone(),
+            config.clone(),
+        )
+        .await
+        .map_err(|e| format!("failed to open index for resume: {e}"))?;
+
+        let load_start = Instant::now();
+        w.load_all_postings()
+            .await
+            .map_err(|e| format!("failed to load postings: {e}"))?;
+        println!("  Loaded all postings in {}", format_duration(load_start.elapsed()));
+
+        let reload_start = Instant::now();
+        let progress = ProgressBar::new(total_vectors as u64);
+        progress.set_style(
+            ProgressStyle::default_bar()
+                .template("[Resume Load] {wide_bar} {pos}/{len} [{elapsed_precise}<{eta_precise}]")
+                .unwrap(),
+        );
+        let prev_vectors = dataset.load_range(0, total_vectors)?;
+        for (id, emb) in &prev_vectors {
+            w.insert_embedding(*id, emb.clone());
+            progress.inc(1);
+        }
+        progress.finish_and_clear();
+        all_indexed_vectors = prev_vectors;
+        println!(
+            "  Reloaded {} embeddings in {}",
+            format_count(total_vectors),
+            format_duration(reload_start.elapsed()),
+        );
+
+        w
+    } else {
+        HierarchicalSpannWriter::new(dimension, distance_fn.clone(), config.clone())
+    };
+
     let total_start = Instant::now();
     let mut prev_snapshot = WriterStatsSnapshot::default();
     let mut all_snapshots: Vec<WriterStatsSnapshot> = Vec::new();
 
-    for checkpoint_idx in 0..num_checkpoints {
+    for checkpoint_idx in start_checkpoint..num_checkpoints {
         let offset = checkpoint_idx * batch_size;
         let limit = batch_size.min(data_len.saturating_sub(offset));
 
@@ -701,6 +846,34 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         delta.wall_nanos = (index_time + balance_time).as_nanos() as u64;
         prev_snapshot = writer.stats.snapshot();
         all_snapshots.push(delta);
+
+        // --- Commit to disk ---
+        let commit_start = Instant::now();
+        let new_data_dir = save_dir.join("data_new");
+        if new_data_dir.exists() {
+            std::fs::remove_dir_all(&new_data_dir)?;
+        }
+        std::fs::create_dir_all(&new_data_dir)?;
+        let provider = make_blockfile_provider(&new_data_dir);
+        let flusher = writer
+            .commit(&provider)
+            .await
+            .map_err(|e| format!("commit failed: {e}"))?;
+        let ids = flusher
+            .flush()
+            .await
+            .map_err(|e| format!("flush failed: {e}"))?;
+        if data_dir.exists() {
+            std::fs::remove_dir_all(&data_dir)?;
+        }
+        std::fs::rename(&new_data_dir, &data_dir)?;
+        save_checkpoint_meta(&save_dir, checkpoint_idx, total_vectors, &ids)?;
+        let commit_time = commit_start.elapsed();
+        println!(
+            "  Committed checkpoint to {} ({})",
+            data_dir.display(),
+            format_duration(commit_time),
+        );
     }
 
     println!("\n=== Build Summary ===");

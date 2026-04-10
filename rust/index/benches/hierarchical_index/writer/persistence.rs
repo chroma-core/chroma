@@ -83,7 +83,7 @@ impl HierarchicalSpannFlusher {
 impl HierarchicalSpannWriter {
     /// Commit all in-memory state to blockfiles and return a flusher.
     pub async fn commit(
-        self,
+        &self,
         blockfile_provider: &BlockfileProvider,
     ) -> Result<HierarchicalSpannFlusher, Box<dyn ChromaError>> {
         let pl_options = BlockfileWriterOptions::new("".to_string()).ordered_mutations();
@@ -418,6 +418,22 @@ impl HierarchicalSpannWriter {
             posting_list_reader,
             vector_data_reader,
         })
+    }
+
+    /// Eagerly load all leaf posting data from the persisted blockfile.
+    /// Call after `open()` to fully materialize the index in memory before
+    /// continuing to add vectors.
+    pub async fn load_all_postings(&self) -> Result<(), Box<dyn ChromaError>> {
+        let leaf_ids: Vec<NodeId> = self
+            .nodes
+            .iter()
+            .filter(|e| matches!(e.value(), TreeNode::Leaf(_)))
+            .map(|e| *e.key())
+            .collect();
+        for id in leaf_ids {
+            self.load(id).await?;
+        }
+        Ok(())
     }
 
     /// Lazily load a leaf node's posting data (ids, codes, versions) from the

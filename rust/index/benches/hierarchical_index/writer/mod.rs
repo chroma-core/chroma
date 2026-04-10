@@ -176,6 +176,7 @@ mod diagnostics;
 pub mod persistence;
 
 pub use super::instrumentation::*;
+pub use persistence::HierarchicalSpannIds;
 
 #[derive(Clone, Debug)]
 pub struct ReadBeamPolicy {
@@ -365,6 +366,11 @@ impl HierarchicalSpannWriter {
 
     pub(super) fn root_id(&self) -> NodeId {
         self.root_id.load(Ordering::Relaxed)
+    }
+
+    /// Insert a raw embedding into the in-memory map (for populating after resume).
+    pub fn insert_embedding(&self, id: u32, embedding: Arc<[f32]>) {
+        self.embeddings.insert(id, embedding);
     }
 
     // =========================================================================
