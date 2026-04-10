@@ -1,10 +1,11 @@
 import asyncio
 from typing import Any, Callable, Generator, cast, Dict, Tuple
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 import chromadb
 from chromadb.config import Settings, System
 from chromadb.api import ClientAPI
 import chromadb.server.fastapi
+from chromadb.api.async_fastapi import AsyncFastAPI
 from chromadb.api.fastapi import FastAPI
 import pytest
 import tempfile
@@ -151,6 +152,27 @@ def test_fastapi_uses_http_limits_from_settings() -> None:
     assert limits.max_keepalive_connections == 16
     assert captured["timeout"] is None
     assert captured["verify"] is True
+
+
+def test_async_fastapi_heartbeat_uses_heartbeat_path() -> None:
+    settings = Settings(
+        chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPI",
+        chroma_server_host="localhost",
+        chroma_server_http_port=9000,
+    )
+    system = System(settings)
+
+    with patch.object(AsyncFastAPI, "require", side_effect=[MagicMock(), MagicMock()]):
+        api = AsyncFastAPI(system)
+
+    with patch.object(
+        AsyncFastAPI,
+        "_make_request",
+        new=AsyncMock(return_value={"nanosecond heartbeat": 123}),
+    ) as mock_make_request:
+        assert asyncio.run(api.heartbeat()) == 123
+
+    mock_make_request.assert_awaited_once_with("get", "/heartbeat")
 
 
 def test_persistent_client_close() -> None:
