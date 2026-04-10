@@ -25,7 +25,7 @@ Leaf selection, and thus recall, can be improved by either improving our leaf sc
 
 ### Leaf scoring 
 I've tried two different leaf scoring approaches (outside of the normal centroid distance approach), neither of which have helped.
-- Radius correction scoring: Account for the radius of the leaf to provide and upper and lower bound to the distance from the query to any vector in the leaf. This didn't work becuase the leaf radius is almost always the same size or larger than the distance from the query to the centroid of the leaf, resulting in all leaves being scored the same.
+- Radius correction scoring: Account for the radius of the leaf to provide and upper and lower bound to the distance from the query to any vector in the leaf. This didn't work becuase the leaf radius is almost always the same size or larger than the distance from the query to the centroid of the leaf, resulting in all leaves being scored the same. See ["High-dimensional cluster geometry" section in README.md](../README.md#high-dimensional-cluster-geometry) for more details.
 - Representative codes: Store a few representative codes per leaf, to provide information about the shape of the leaf cluster. This didn't work because the representative codes are quantized and introduce too much noise to be useful. I also suspect that most clusters are close to spherical, so the codes don't add information.
 
 Not yet tried (details above):
@@ -108,3 +108,4 @@ So why is it that for a given query, the distance between the query and any cand
 Opus says:
 > Typical vector-to-centroid distance is ~0.6 L2, while adjacent centroid pairs are only ~0.12 apart. This is expected: two adjacent centroids differ in a few dimensions, while a vector deviates from its centroid across all 1024 dimensions. In L2, the centroid-centroid axis contributes ~0.06 of the 0.6 total distance; the other 1023 orthogonal dimensions contribute the rest.
 
+Sicheng suggested this is because averaged centroids are closer to other vectors in the cluster than if we were to choose a representative vector as the centroid, as the paper does. 

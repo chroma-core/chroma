@@ -20,7 +20,7 @@ use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 
 use datasets::{format_count, recall_at_k, Dataset, DatasetType, MetricType, Query};
-use hierarchical_index::writer_quantized::{
+use hierarchical_index::writer::{
     format_task_tables, HierarchicalSpannConfig, HierarchicalSpannWriter, LeafMissDiagnostic,
     LeafTraits, NavigationMode, ReadBeamPolicy, SearchTimings, WriterStatsSnapshot,
 };
@@ -66,7 +66,7 @@ struct Args {
     merge_threshold: usize,
 
     /// Dynamic beam tau for write path (add/reassign/merge navigate)
-    #[arg(long, default_value = "1.0")]
+    #[arg(long, default_value = "2.0")]
     write_beam_tau: f64,
 
     /// Per-level write taus overriding the global write tau, comma-separated.
@@ -125,7 +125,7 @@ struct Args {
     synthetic_size: usize,
 
     /// Default beam tau for search
-    #[arg(long, default_value = "1.0")]
+    #[arg(long, default_value = "2.0")]
     beam_tau: f64,
 
     /// Per-level read taus overriding the global recall tau, comma-separated.
@@ -154,7 +154,7 @@ struct Args {
     fp_npa: bool,
 
     /// Tau values for recall sweep, comma-separated
-    #[arg(long, default_value = "0.1,0.5,1")]
+    #[arg(long, default_value = "1.1,1.5,2.0")]
     recall_tau_values: String,
 
     /// Centroid rerank factors to sweep during recall
@@ -172,14 +172,6 @@ struct Args {
     /// Run deferred balancing in parallel across subtrees
     #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
     parallel_balancing: bool,
-
-    /// Use p90-radius-corrected leaf scoring during search navigation
-    #[arg(long)]
-    radius_corrected_nav: bool,
-
-    /// Number of representative codes per leaf for leaf reranking (0 = off)
-    #[arg(long, default_value = "0")]
-    leaf_rerank_reps: usize,
 
     /// Print leaf-miss diagnostic: rank distribution of missed GT-containing leaves
     #[arg(long)]
@@ -233,7 +225,9 @@ fn format_mb(mb: f64) -> String {
     }
 }
 
-fn parse_level_taus(input: Option<&str>) -> Result<Vec<Option<f64>>, Box<dyn std::error::Error + Send + Sync>> {
+fn parse_level_taus(
+    input: Option<&str>,
+) -> Result<Vec<Option<f64>>, Box<dyn std::error::Error + Send + Sync>> {
     let Some(input) = input else {
         return Ok(Vec::new());
     };
@@ -251,7 +245,9 @@ fn parse_level_taus(input: Option<&str>) -> Result<Vec<Option<f64>>, Box<dyn std
         .collect()
 }
 
-fn parse_level_f64s(input: Option<&str>) -> Result<Vec<f64>, Box<dyn std::error::Error + Send + Sync>> {
+fn parse_level_f64s(
+    input: Option<&str>,
+) -> Result<Vec<f64>, Box<dyn std::error::Error + Send + Sync>> {
     let Some(input) = input else {
         return Ok(Vec::new());
     };
@@ -264,7 +260,10 @@ fn parse_level_f64s(input: Option<&str>) -> Result<Vec<f64>, Box<dyn std::error:
 
 fn format_level_taus(taus: &[Option<f64>]) -> String {
     taus.iter()
-        .map(|tau| tau.map(|t| format!("{:.2}", t)).unwrap_or_else(|| "_".to_string()))
+        .map(|tau| {
+            tau.map(|t| format!("{:.2}", t))
+                .unwrap_or_else(|| "_".to_string())
+        })
         .collect::<Vec<_>>()
         .join(",")
 }
@@ -293,7 +292,12 @@ fn compute_ground_truth(
         .collect()
 }
 
-fn gt_cache_path(dataset_name: &str, metric: &str, num_vectors: usize, num_queries: usize) -> std::path::PathBuf {
+fn gt_cache_path(
+    dataset_name: &str,
+    metric: &str,
+    num_vectors: usize,
+    num_queries: usize,
+) -> std::path::PathBuf {
     std::path::PathBuf::from(format!(
         "target/hierarchical_cache/gt_{}_{}_{}_q{}.bin",
         dataset_name, metric, num_vectors, num_queries,
@@ -349,19 +353,25 @@ fn load_ground_truth(path: &std::path::Path) -> Option<Vec<Query>> {
     let data = std::fs::read(path).ok()?;
     let mut pos = 0usize;
     let r32 = |p: &mut usize| -> Option<u32> {
-        if *p + 4 > data.len() { return None; }
+        if *p + 4 > data.len() {
+            return None;
+        }
         let v = u32::from_le_bytes(data[*p..*p + 4].try_into().ok()?);
         *p += 4;
         Some(v)
     };
     let r64 = |p: &mut usize| -> Option<u64> {
-        if *p + 8 > data.len() { return None; }
+        if *p + 8 > data.len() {
+            return None;
+        }
         let v = u64::from_le_bytes(data[*p..*p + 8].try_into().ok()?);
         *p += 8;
         Some(v)
     };
     let rf32 = |p: &mut usize| -> Option<f32> {
-        if *p + 4 > data.len() { return None; }
+        if *p + 4 > data.len() {
+            return None;
+        }
         let v = f32::from_le_bytes(data[*p..*p + 4].try_into().ok()?);
         *p += 4;
         Some(v)
@@ -380,7 +390,11 @@ fn load_ground_truth(path: &std::path::Path) -> Option<Vec<Query>> {
             neighbors.push(r32(&mut pos)?);
         }
         let max_vector_id = r64(&mut pos)?;
-        queries.push(Query { vector, neighbors, max_vector_id });
+        queries.push(Query {
+            vector,
+            neighbors,
+            max_vector_id,
+        });
     }
     Some(queries)
 }
@@ -406,9 +420,7 @@ async fn main() {
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let args = Args::parse_from(
-        std::env::args().filter(|a| a != "--bench"),
-    );
+    let args = Args::parse_from(std::env::args().filter(|a| a != "--bench"));
 
     let write_level_taus = parse_level_taus(args.write_level_taus.as_deref())?;
     let write_level_min_pcts = parse_level_f64s(args.write_level_min_pcts.as_deref())?;
@@ -425,9 +437,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         DatasetType::WikipediaEn => Box::new(datasets::wikipedia::Wikipedia::load().await?),
         DatasetType::Sift => Box::new(datasets::sift::Sift::load().await?),
         DatasetType::Deep10m => Box::new(datasets::deep::Deep10M::load().await?),
-        DatasetType::Synthetic => {
-            Box::new(datasets::synthetic::Synthetic::load(args.dim, args.synthetic_size)?)
-        }
+        DatasetType::Synthetic => Box::new(datasets::synthetic::Synthetic::load(
+            args.dim,
+            args.synthetic_size,
+        )?),
     };
 
     let data_len = dataset.data_len();
@@ -451,7 +464,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "fp" => NavigationMode::Fp,
         "1bit" => NavigationMode::OneBit,
         "4bit" => NavigationMode::FourBit,
-        other => panic!("invalid {} value '{}': must be fp, 1bit, or 4bit", flag, other),
+        other => panic!(
+            "invalid {} value '{}': must be fp, 1bit, or 4bit",
+            flag, other
+        ),
     };
     let write_nav = parse_nav(&args.write_navigation, "--write-navigation");
     let read_navs: Vec<NavigationMode> = args
@@ -481,7 +497,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         read_navigation: read_nav,
         fp_npa: args.fp_npa,
         deferred_balance: args.deferred_balance,
-        representative_count: args.leaf_rerank_reps,
     };
 
     println!("=== 1-Bit Quantized Hierarchical SPANN Writer Benchmark ===");
@@ -528,24 +543,27 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         );
     }
     println!(
-        "  Quantization: 1-bit | Write nav: {:?} | Read nav: {} | NPA: {} | Radius nav: {} | Leaf reps: {}",
+        "  Quantization: 1-bit | Write nav: {:?} | Read nav: {} | NPA: {}",
         write_nav,
         args.read_navigation.join(","),
         if args.fp_npa { "f32" } else { "1x4" },
-        if args.radius_corrected_nav { "p90" } else { "off" },
-        if args.leaf_rerank_reps > 0 { format!("{}", args.leaf_rerank_reps) } else { "off".to_string() },
     );
     println!("  Threads: {}", args.threads);
     println!();
 
     let all_queries = dataset.queries(distance_fn.clone())?;
-    let query_vectors: Vec<Vec<f32>> =
-        all_queries.iter().take(100).map(|q| q.vector.clone()).collect();
+    let query_vectors: Vec<Vec<f32>> = all_queries
+        .iter()
+        .take(100)
+        .map(|q| q.vector.clone())
+        .collect();
     let queries_by_checkpoint = group_queries_by_checkpoint(all_queries);
 
     let sample_queries_as_gt = query_vectors.is_empty() && args.brute_force_gt;
     if sample_queries_as_gt {
-        println!("  No precomputed queries; will sample 100 data vectors as queries for brute-force GT.");
+        println!(
+            "  No precomputed queries; will sample 100 data vectors as queries for brute-force GT."
+        );
     }
 
     let writer = HierarchicalSpannWriter::new(dimension, distance_fn.clone(), config);
@@ -590,16 +608,17 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         let num_threads = args.threads;
         let early_balance_size = 100_000usize;
-        let needs_early_balance = args.deferred_balance
-            && batch_size > early_balance_size
-            && total_vectors < 1_000_000;
+        let needs_early_balance =
+            args.deferred_balance && batch_size > early_balance_size && total_vectors < 1_000_000;
 
         let sub_batches: Vec<&[(u32, Arc<[f32]>)]> = if needs_early_balance {
             let mut subs = Vec::new();
             let mut remaining = &batch_vectors[..];
             let mut running_total = total_vectors;
             while !remaining.is_empty() && running_total < 1_000_000 {
-                let take = early_balance_size.min(remaining.len()).min(1_000_000 - running_total);
+                let take = early_balance_size
+                    .min(remaining.len())
+                    .min(1_000_000 - running_total);
                 subs.push(&remaining[..take]);
                 remaining = &remaining[take..];
                 running_total += take;
@@ -677,7 +696,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 format_duration(load_time),
             );
         }
-
 
         let mut delta = writer.stats.snapshot_delta(&prev_snapshot);
         delta.wall_nanos = (index_time + balance_time).as_nanos() as u64;
@@ -768,14 +786,24 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let num_queries = checkpoint_queries.len();
 
         let level_counts = writer.level_node_counts();
-        let level_widths: Vec<usize> = level_counts.iter().skip(1).take(num_levels).copied().collect();
+        let level_widths: Vec<usize> = level_counts
+            .iter()
+            .skip(1)
+            .take(num_levels)
+            .copied()
+            .collect();
 
         let mut beam_col_headers: Vec<String> = Vec::new();
         for lvl in 1..=num_levels {
             let total_at_level = level_counts.get(lvl).copied().unwrap_or(0);
             beam_col_headers.push(format!("L{} beam ({})", lvl, format_count(total_at_level)));
         }
-        let beam_col_width = beam_col_headers.iter().map(|h| h.len()).max().unwrap_or(12).max(12);
+        let beam_col_width = beam_col_headers
+            .iter()
+            .map(|h| h.len())
+            .max()
+            .unwrap_or(12)
+            .max(12);
 
         let mut header = format!(
             "  | {:>4} | {:>6} | {:>6} | {:>6} |",
@@ -796,12 +824,15 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             "lat_nav", "lat_quant", "lat_dist", "lat_sort", "lat_rerank", "lat_dist / vec",
         ));
 
-        let mut separator = format!(
-            "  |{:-^6}|{:-^8}|{:-^8}|{:-^8}|",
-            "", "", "", "",
-        );
+        let mut separator = format!("  |{:-^6}|{:-^8}|{:-^8}|{:-^8}|", "", "", "", "",);
         for _ in 1..=num_levels {
-            separator.push_str(&format!("{:-^w$}|{:-^10}|{:-^9}|", "", "", "", w = beam_col_width + 2));
+            separator.push_str(&format!(
+                "{:-^w$}|{:-^10}|{:-^9}|",
+                "",
+                "",
+                "",
+                w = beam_col_width + 2
+            ));
         }
         separator.push_str(&format!(
             "{:-^12}|{:-^17}|{:-^9}|{:-^9}|{:-^9}|{:-^10}|{:-^12}|{:-^17}|{:-^17}|{:-^17}|{:-^17}|{:-^17}|{:-^16}|",
@@ -881,9 +912,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             args.read_navigation.join(","),
             args.brute_force_gt,
         );
-        if !read_level_taus.is_empty()
-            || !read_level_min_pcts.is_empty()
-        {
+        if !read_level_taus.is_empty() || !read_level_min_pcts.is_empty() {
             println!(
                 "  Read beam schedule: taus=[{}] min_pcts=[{}] leaf_min={} leaf_max={}",
                 format_level_taus(&read_level_taus),
@@ -924,7 +953,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             for &tau in &tau_values {
                 for &rr_c in &args.recall_rerank_centroids {
                     for &rr_v in &args.recall_rerank_vectors {
-                        let mut read_policy = ReadBeamPolicy::with_level_overrides(
+                        let read_policy = ReadBeamPolicy::with_level_overrides(
                             Some(tau),
                             beam_min,
                             beam_max,
@@ -932,9 +961,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             read_level_min_pcts.clone(),
                             level_widths.clone(),
                         );
-                        read_policy.radius_corrected = args.radius_corrected_nav;
-                        read_policy.leaf_rerank_reps = args.leaf_rerank_reps;
-
                         struct QueryResult {
                             r100: f64,
                             nanos: u64,
@@ -947,41 +973,64 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         }
 
                         let results: Vec<QueryResult> = recall_pool.install(|| {
-                            checkpoint_queries.par_iter().map(|gt| {
-                                let t0 = Instant::now();
-                                let (results, scanned, _leaves_scanned, timings) = writer
-                                    .search_with_policy(&gt.vector, k, rr_c, rr_v, recall_nav, &read_policy);
-                                let nanos = t0.elapsed().as_nanos() as u64;
+                            checkpoint_queries
+                                .par_iter()
+                                .map(|gt| {
+                                    let t0 = Instant::now();
+                                    let (results, scanned, _leaves_scanned, timings) = writer
+                                        .search_with_policy(
+                                            &gt.vector,
+                                            k,
+                                            rr_c,
+                                            rr_v,
+                                            recall_nav,
+                                            &read_policy,
+                                        );
+                                    let nanos = t0.elapsed().as_nanos() as u64;
 
-                                let result_ids: Vec<u32> = results.iter().map(|(id, _)| *id).collect();
-                                let r100 = recall_at_k(&result_ids, &gt.neighbors, 100);
+                                    let result_ids: Vec<u32> =
+                                        results.iter().map(|(id, _)| *id).collect();
+                                    let r100 = recall_at_k(&result_ids, &gt.neighbors, 100);
 
-                                let gt_100: HashSet<u32> =
-                                    gt.neighbors.iter().take(100).copied().collect();
-                                let level_recall = writer.diagnose_level_recall_with_policy(
-                                    &gt.vector,
-                                    &gt_100,
-                                    rr_c,
-                                    recall_nav,
-                                    &read_policy,
-                                );
+                                    let gt_100: HashSet<u32> =
+                                        gt.neighbors.iter().take(100).copied().collect();
+                                    let level_recall = writer.diagnose_level_recall_with_policy(
+                                        &gt.vector,
+                                        &gt_100,
+                                        rr_c,
+                                        recall_nav,
+                                        &read_policy,
+                                    );
 
-                                let mut level_r100 = vec![0.0f64; num_levels];
-                                let mut level_beam = vec![0u64; num_levels];
-                                let mut level_candidates = vec![0u64; num_levels];
-                                for lr in &level_recall {
-                                    if lr.level <= num_levels {
-                                        level_r100[lr.level - 1] = lr.reachable_100;
-                                        level_beam[lr.level - 1] = lr.beam_size as u64;
-                                        level_candidates[lr.level - 1] = lr.total_candidates as u64;
+                                    let mut level_r100 = vec![0.0f64; num_levels];
+                                    let mut level_beam = vec![0u64; num_levels];
+                                    let mut level_candidates = vec![0u64; num_levels];
+                                    for lr in &level_recall {
+                                        if lr.level <= num_levels {
+                                            level_r100[lr.level - 1] = lr.reachable_100;
+                                            level_beam[lr.level - 1] = lr.beam_size as u64;
+                                            level_candidates[lr.level - 1] =
+                                                lr.total_candidates as u64;
+                                        }
                                     }
-                                }
 
-                                let last_beam = level_beam.last().copied().unwrap_or(0) as usize;
-                                let optimal_r100 = writer.optimal_leaf_recall(&gt_100, last_beam);
+                                    let last_beam =
+                                        level_beam.last().copied().unwrap_or(0) as usize;
+                                    let optimal_r100 =
+                                        writer.optimal_leaf_recall(&gt_100, last_beam);
 
-                                QueryResult { r100, nanos, scanned, level_r100, level_beam, level_candidates, timings, optimal_r100 }
-                            }).collect()
+                                    QueryResult {
+                                        r100,
+                                        nanos,
+                                        scanned,
+                                        level_r100,
+                                        level_beam,
+                                        level_candidates,
+                                        timings,
+                                        optimal_r100,
+                                    }
+                                })
+                                .collect()
                         });
 
                         let mut total_r100 = 0.0f64;
@@ -1020,10 +1069,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
                         let mut row = format!(
                             "  | {:>4} | {:>6.2} | {:>5}x | {:>5}x |",
-                            nav_label,
-                            tau,
-                            rr_c,
-                            rr_v,
+                            nav_label, tau, rr_c, rr_v,
                         );
                         let dim = dimension;
                         let mut total_mb = 0.0f64;
@@ -1037,7 +1083,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             } else {
                                 let mut level_sum = (avg_candidates as f64 * dim as f64) / 8.0;
                                 if rr_c > 1 {
-                                    level_sum += ((avg_candidates.min(avg_beam * rr_c as u64) as f64) * dim as f64) * 4.0;
+                                    level_sum += ((avg_candidates.min(avg_beam * rr_c as u64)
+                                        as f64)
+                                        * dim as f64)
+                                        * 4.0;
                                 }
                                 level_sum
                             };
@@ -1045,7 +1094,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             total_mb += level_mb;
                             row.push_str(&format!(
                                 " {:>width$} | {:>7.2}% | {:>7} |",
-                                format!("{}/{}", format_count(avg_beam as usize), format_count(avg_candidates as usize)),
+                                format!(
+                                    "{}/{}",
+                                    format_count(avg_beam as usize),
+                                    format_count(avg_candidates as usize)
+                                ),
                                 avg_lr,
                                 format_mb(level_mb),
                                 width = beam_col_width,
@@ -1058,7 +1111,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         total_mb += scan_mb;
 
                         let avg_lat_secs = avg_lat as f64 / 1_000_000_000.0;
-                        let mb_per_sec = if avg_lat_secs > 0.0 { total_mb / avg_lat_secs } else { 0.0 };
+                        let mb_per_sec = if avg_lat_secs > 0.0 {
+                            total_mb / avg_lat_secs
+                        } else {
+                            0.0
+                        };
 
                         let nq = num_queries as u64;
                         let avg_nav = total_nav_nanos / nq;
@@ -1066,7 +1123,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         let avg_dq = total_dq_nanos / nq;
                         let avg_sort = total_sort_nanos / nq;
                         let avg_rr = total_rr_nanos / nq;
-                        let pct = |v: u64| if avg_lat > 0 { v as f64 / avg_lat as f64 * 100.0 } else { 0.0 };
+                        let pct = |v: u64| {
+                            if avg_lat > 0 {
+                                v as f64 / avg_lat as f64 * 100.0
+                            } else {
+                                0.0
+                            }
+                        };
 
                         let dist_per_vec_ns = if avg_scanned > 0 {
                             avg_dq as f64 / avg_scanned as f64
@@ -1100,107 +1163,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let recall_time = recall_start.elapsed();
         println!("  Recall duration: {}", format_duration(recall_time));
 
-        if args.radius_corrected_nav {
-            let diag_tau = tau_values[0];
-            let diag_rr_c = args.recall_rerank_centroids[0];
-            let diag_nav = read_navs[0];
-
-            let mut policy_rc = ReadBeamPolicy::with_level_overrides(
-                Some(diag_tau),
-                beam_min,
-                beam_max,
-                read_level_taus.clone(),
-                read_level_min_pcts.clone(),
-                level_widths.clone(),
-            );
-            policy_rc.radius_corrected = true;
-            policy_rc.leaf_rerank_reps = args.leaf_rerank_reps;
-
-            let mut policy_no_rc = ReadBeamPolicy::with_level_overrides(
-                Some(diag_tau),
-                beam_min,
-                beam_max,
-                read_level_taus.clone(),
-                read_level_min_pcts.clone(),
-                level_widths.clone(),
-            );
-            policy_no_rc.radius_corrected = false;
-            policy_no_rc.leaf_rerank_reps = args.leaf_rerank_reps;
-
-            println!("\n--- Radius Correction Diagnostic (tau={:.2}, rr_c={}x, nav={:?}) ---",
-                diag_tau, diag_rr_c, diag_nav);
-
-            struct RcDiag {
-                leaf_r100_rc: f64,
-                leaf_r100_no_rc: f64,
-                leaf_beam_rc: usize,
-                leaf_beam_no_rc: usize,
-            }
-
-            let diags: Vec<RcDiag> = recall_pool.install(|| {
-                checkpoint_queries.par_iter().map(|gt| {
-                    let gt_100: HashSet<u32> =
-                        gt.neighbors.iter().take(100).copied().collect();
-
-                    let lr_rc = writer.diagnose_level_recall_with_policy(
-                        &gt.vector, &gt_100, diag_rr_c, diag_nav, &policy_rc,
-                    );
-                    let lr_no = writer.diagnose_level_recall_with_policy(
-                        &gt.vector, &gt_100, diag_rr_c, diag_nav, &policy_no_rc,
-                    );
-
-                    let last_rc = lr_rc.last().map(|l| (l.reachable_100, l.beam_size)).unwrap_or((0.0, 0));
-                    let last_no = lr_no.last().map(|l| (l.reachable_100, l.beam_size)).unwrap_or((0.0, 0));
-
-                    RcDiag {
-                        leaf_r100_rc: last_rc.0,
-                        leaf_r100_no_rc: last_no.0,
-                        leaf_beam_rc: last_rc.1,
-                        leaf_beam_no_rc: last_no.1,
-                    }
-                }).collect()
-            });
-
-            let n = diags.len() as f64;
-            let avg_rc = diags.iter().map(|d| d.leaf_r100_rc).sum::<f64>() / n;
-            let avg_no = diags.iter().map(|d| d.leaf_r100_no_rc).sum::<f64>() / n;
-            let avg_beam_rc = diags.iter().map(|d| d.leaf_beam_rc).sum::<usize>() as f64 / n;
-            let avg_beam_no = diags.iter().map(|d| d.leaf_beam_no_rc).sum::<usize>() as f64 / n;
-
-            let mut improved = 0usize;
-            let mut degraded = 0usize;
-            let mut unchanged = 0usize;
-            for d in &diags {
-                let delta = d.leaf_r100_rc - d.leaf_r100_no_rc;
-                if delta > 0.005 {
-                    improved += 1;
-                } else if delta < -0.005 {
-                    degraded += 1;
-                } else {
-                    unchanged += 1;
-                }
-            }
-
-            println!("  Leaf R@100 with rc:    {:.2}%  (avg beam: {:.1})", avg_rc * 100.0, avg_beam_rc);
-            println!("  Leaf R@100 without rc: {:.2}%  (avg beam: {:.1})", avg_no * 100.0, avg_beam_no);
-            println!("  Delta:                 {:+.2}%", (avg_rc - avg_no) * 100.0);
-            println!("  Per-query: {} improved, {} degraded, {} unchanged (threshold: 0.5%)", improved, degraded, unchanged);
-
-            let mut deltas: Vec<f64> = diags.iter().map(|d| d.leaf_r100_rc - d.leaf_r100_no_rc).collect();
-            deltas.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            let p10 = deltas[(0.1 * (deltas.len() - 1) as f64) as usize];
-            let p50 = deltas[(0.5 * (deltas.len() - 1) as f64) as usize];
-            let p90 = deltas[(0.9 * (deltas.len() - 1) as f64) as usize];
-            println!("  Delta distribution: p10={:+.2}%, p50={:+.2}%, p90={:+.2}%",
-                p10 * 100.0, p50 * 100.0, p90 * 100.0);
-        }
-
         if args.leaf_miss_diagnostic || args.geometry_diagnostic {
             let diag_tau = tau_values[0];
             let diag_rr_c = args.recall_rerank_centroids[0];
             let diag_nav = read_navs[0];
 
-            let mut policy = ReadBeamPolicy::with_level_overrides(
+            let policy = ReadBeamPolicy::with_level_overrides(
                 Some(diag_tau),
                 beam_min,
                 beam_max,
@@ -1208,78 +1176,105 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 read_level_min_pcts.clone(),
                 level_widths.clone(),
             );
-            policy.radius_corrected = args.radius_corrected_nav;
-            policy.leaf_rerank_reps = args.leaf_rerank_reps;
-
             let diags: Vec<LeafMissDiagnostic> = recall_pool.install(|| {
-                checkpoint_queries.par_iter().map(|gt| {
-                    let gt_100: HashSet<u32> = gt.neighbors.iter().take(100).copied().collect();
-                    writer.diagnose_leaf_miss_ranks(&gt.vector, &gt_100, diag_rr_c, diag_nav, &policy)
-                }).collect()
+                checkpoint_queries
+                    .par_iter()
+                    .map(|gt| {
+                        let gt_100: HashSet<u32> = gt.neighbors.iter().take(100).copied().collect();
+                        writer.diagnose_leaf_miss_ranks(
+                            &gt.vector, &gt_100, diag_rr_c, diag_nav, &policy,
+                        )
+                    })
+                    .collect()
             });
 
-          if args.leaf_miss_diagnostic {
-            println!("\n--- Leaf Miss Diagnostic (tau={:.2}, rr_c={}x, nav={:?}) ---",
-                diag_tau, diag_rr_c, diag_nav);
-
-            let n = diags.len() as f64;
-            let avg_beam: f64 = diags.iter().map(|d| d.beam_size as f64).sum::<f64>() / n;
-            let avg_total: f64 = diags.iter().map(|d| d.total_leaves as f64).sum::<f64>() / n;
-            let avg_missed: f64 = diags.iter().map(|d| d.missed_gt_ranks.len() as f64).sum::<f64>() / n;
-            let total_missed: usize = diags.iter().map(|d| d.missed_gt_ranks.len()).sum();
-
-            println!("  Avg beam: {:.1} / {:.0} leaves", avg_beam, avg_total);
-            println!("  Avg missed GT vectors: {:.1} / 100 ({} total across {} queries)",
-                avg_missed, total_missed, diags.len());
-
-            if total_missed > 0 {
-                let mut all_ranks: Vec<usize> = diags.iter()
-                    .flat_map(|d| d.missed_gt_ranks.iter().map(|&(_, rank)| rank))
-                    .collect();
-                all_ranks.sort_unstable();
-
-                let pct = |idx: f64| all_ranks[(idx * (all_ranks.len() - 1) as f64) as usize];
-                println!("  Missed leaf rank distribution (1-indexed):");
-                println!("    min={}, p10={}, p25={}, p50={}, p75={}, p90={}, max={}",
-                    all_ranks[0],
-                    pct(0.10), pct(0.25), pct(0.50), pct(0.75), pct(0.90),
-                    all_ranks[all_ranks.len() - 1],
+            if args.leaf_miss_diagnostic {
+                println!(
+                    "\n--- Leaf Miss Diagnostic (tau={:.2}, rr_c={}x, nav={:?}) ---",
+                    diag_tau, diag_rr_c, diag_nav
                 );
 
-                let expansions = [5, 10, 20, 50, 100];
-                println!("  Recovery by beam expansion:");
-                for &extra in &expansions {
-                    let mut recovered = 0usize;
-                    for d in &diags {
-                        for &(_, rank) in &d.missed_gt_ranks {
-                            if rank <= d.beam_size + extra {
-                                recovered += 1;
+                let n = diags.len() as f64;
+                let avg_beam: f64 = diags.iter().map(|d| d.beam_size as f64).sum::<f64>() / n;
+                let avg_total: f64 = diags.iter().map(|d| d.total_leaves as f64).sum::<f64>() / n;
+                let avg_missed: f64 = diags
+                    .iter()
+                    .map(|d| d.missed_gt_ranks.len() as f64)
+                    .sum::<f64>()
+                    / n;
+                let total_missed: usize = diags.iter().map(|d| d.missed_gt_ranks.len()).sum();
+
+                println!("  Avg beam: {:.1} / {:.0} leaves", avg_beam, avg_total);
+                println!(
+                    "  Avg missed GT vectors: {:.1} / 100 ({} total across {} queries)",
+                    avg_missed,
+                    total_missed,
+                    diags.len()
+                );
+
+                if total_missed > 0 {
+                    let mut all_ranks: Vec<usize> = diags
+                        .iter()
+                        .flat_map(|d| d.missed_gt_ranks.iter().map(|&(_, rank)| rank))
+                        .collect();
+                    all_ranks.sort_unstable();
+
+                    let pct = |idx: f64| all_ranks[(idx * (all_ranks.len() - 1) as f64) as usize];
+                    println!("  Missed leaf rank distribution (1-indexed):");
+                    println!(
+                        "    min={}, p10={}, p25={}, p50={}, p75={}, p90={}, max={}",
+                        all_ranks[0],
+                        pct(0.10),
+                        pct(0.25),
+                        pct(0.50),
+                        pct(0.75),
+                        pct(0.90),
+                        all_ranks[all_ranks.len() - 1],
+                    );
+
+                    let expansions = [5, 10, 20, 50, 100];
+                    println!("  Recovery by beam expansion:");
+                    for &extra in &expansions {
+                        let mut recovered = 0usize;
+                        for d in &diags {
+                            for &(_, rank) in &d.missed_gt_ranks {
+                                if rank <= d.beam_size + extra {
+                                    recovered += 1;
+                                }
                             }
                         }
+                        let pct_recovered = if total_missed > 0 {
+                            recovered as f64 / total_missed as f64 * 100.0
+                        } else {
+                            0.0
+                        };
+                        println!(
+                            "    +{:>3} leaves: {:>4} / {} missed recovered ({:.1}%)",
+                            extra, recovered, total_missed, pct_recovered
+                        );
                     }
-                    let pct_recovered = if total_missed > 0 { recovered as f64 / total_missed as f64 * 100.0 } else { 0.0 };
-                    println!("    +{:>3} leaves: {:>4} / {} missed recovered ({:.1}%)",
-                        extra, recovered, total_missed, pct_recovered);
-                }
 
-                let mut per_query: Vec<(usize, usize, Vec<usize>)> = diags.iter().enumerate()
-                    .filter(|(_, d)| !d.missed_gt_ranks.is_empty())
-                    .map(|(qi, d)| {
-                        let ranks: Vec<usize> = d.missed_gt_ranks.iter().map(|&(_, r)| r).collect();
-                        (qi, d.beam_size, ranks)
-                    })
-                    .collect();
-                per_query.sort_by(|a, b| b.2.len().cmp(&a.2.len()));
+                    let mut per_query: Vec<(usize, usize, Vec<usize>)> = diags
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, d)| !d.missed_gt_ranks.is_empty())
+                        .map(|(qi, d)| {
+                            let ranks: Vec<usize> =
+                                d.missed_gt_ranks.iter().map(|&(_, r)| r).collect();
+                            (qi, d.beam_size, ranks)
+                        })
+                        .collect();
+                    per_query.sort_by(|a, b| b.2.len().cmp(&a.2.len()));
 
-                let show = per_query.len().min(10);
-                println!("  Top {} queries by missed GT count:", show);
-                for entry in per_query.iter().take(show) {
-                    let qi = entry.0;
-                    let beam = entry.1;
-                    let ranks = &entry.2;
-                    let near = ranks.iter().filter(|r| **r <= beam + 20).count();
-                    let far = ranks.iter().filter(|r| **r > beam * 2).count();
-                    println!("    q{:>3}: {} missed, beam={}, near-miss(+20)={}, far-miss(>2x beam)={}, ranks={:?}",
+                    let show = per_query.len().min(10);
+                    println!("  Top {} queries by missed GT count:", show);
+                    for entry in per_query.iter().take(show) {
+                        let qi = entry.0;
+                        let beam = entry.1;
+                        let ranks = &entry.2;
+                        let near = ranks.iter().filter(|r| **r <= beam + 20).count();
+                        let far = ranks.iter().filter(|r| **r > beam * 2).count();
+                        println!("    q{:>3}: {} missed, beam={}, near-miss(+20)={}, far-miss(>2x beam)={}, ranks={:?}",
                         qi, ranks.len(), beam, near, far,
                         if ranks.len() <= 20 { ranks.clone() } else {
                             let mut trunc = ranks[..10].to_vec();
@@ -1287,221 +1282,286 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             trunc.extend_from_slice(&ranks[ranks.len()-5..]);
                             trunc
                         });
-                }
-            }
-
-            // Leaf traits comparison: selected-with-GT vs selected-no-GT vs missed-with-GT.
-            let all_sel_gt: Vec<&LeafTraits> = diags.iter().flat_map(|d| d.selected_with_gt.iter()).collect();
-            let all_sel_no: Vec<&LeafTraits> = diags.iter().flat_map(|d| d.selected_no_gt.iter()).collect();
-            let all_miss: Vec<&LeafTraits> = diags.iter().flat_map(|d| d.missed_with_gt.iter()).collect();
-
-            struct TraitSummary {
-                label: &'static str,
-                n: usize,
-                score: [f64; 7],
-                rank: [f64; 7],
-                leaf_size: [f64; 7],
-                p90_rad: [f64; 5],
-                gt_count: [f64; 4],
-                min_gt_d: [f64; 7],
-                score_gt: [f64; 5],
-            }
-
-            fn compute_trait_summary(label: &'static str, traits: &[&LeafTraits]) -> Option<TraitSummary> {
-                if traits.is_empty() {
-                    return None;
-                }
-                let fp = |v: &[f32], p: f64| v[(p * (v.len() - 1) as f64) as usize] as f64;
-                let up = |v: &[usize], p: f64| v[(p * (v.len() - 1) as f64) as usize] as f64;
-                let favg = |v: &[f32]| v.iter().map(|x| *x as f64).sum::<f64>() / v.len() as f64;
-                let uavg = |v: &[usize]| v.iter().sum::<usize>() as f64 / v.len() as f64;
-
-                let mut scores: Vec<f32> = traits.iter().map(|t| t.score).collect();
-                scores.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                let mut sizes: Vec<usize> = traits.iter().map(|t| t.leaf_size).collect();
-                sizes.sort_unstable();
-                let mut radii: Vec<f32> = traits.iter().map(|t| t.p90_radius).collect();
-                radii.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                let mut ranks: Vec<usize> = traits.iter().map(|t| t.rank).collect();
-                ranks.sort_unstable();
-
-                let score = [scores[0] as f64, fp(&scores, 0.25), fp(&scores, 0.5), favg(&scores),
-                    fp(&scores, 0.75), fp(&scores, 0.9), *scores.last().unwrap() as f64];
-                let rank = [ranks[0] as f64, up(&ranks, 0.25), up(&ranks, 0.5), uavg(&ranks),
-                    up(&ranks, 0.75), up(&ranks, 0.9), *ranks.last().unwrap() as f64];
-                let leaf_size = [sizes[0] as f64, up(&sizes, 0.25), up(&sizes, 0.5), uavg(&sizes),
-                    up(&sizes, 0.75), up(&sizes, 0.9), *sizes.last().unwrap() as f64];
-                let p90_rad = [radii[0] as f64, fp(&radii, 0.25), fp(&radii, 0.5), favg(&radii),
-                    *radii.last().unwrap() as f64];
-
-                let gt_only: Vec<&LeafTraits> = traits.iter().filter(|t| t.gt_count > 0).copied().collect();
-                let mut gt_counts: Vec<usize> = traits.iter().map(|t| t.gt_count).collect();
-                gt_counts.sort_unstable();
-                let gt_count = [gt_counts[0] as f64, up(&gt_counts, 0.5), uavg(&gt_counts),
-                    *gt_counts.last().unwrap() as f64];
-
-                let mut min_gt_d = [0.0f64; 7];
-                let mut score_gt = [0.0f64; 5];
-                if !gt_only.is_empty() {
-                    let mut gt_dists: Vec<f32> = gt_only.iter().map(|t| t.min_gt_dist).collect();
-                    gt_dists.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                    min_gt_d = [gt_dists[0] as f64, fp(&gt_dists, 0.25), fp(&gt_dists, 0.5),
-                        favg(&gt_dists), fp(&gt_dists, 0.75), fp(&gt_dists, 0.9), *gt_dists.last().unwrap() as f64];
-
-                    let mut ratios: Vec<f32> = gt_only.iter()
-                        .filter(|t| t.min_gt_dist > 1e-10)
-                        .map(|t| t.score / t.min_gt_dist)
-                        .collect();
-                    if !ratios.is_empty() {
-                        ratios.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                        score_gt = [ratios[0] as f64, fp(&ratios, 0.25), fp(&ratios, 0.5),
-                            favg(&ratios), *ratios.last().unwrap() as f64];
                     }
                 }
 
-                Some(TraitSummary { label, n: traits.len(), score, rank, leaf_size, p90_rad, gt_count, min_gt_d, score_gt })
-            }
+                // Leaf traits comparison: selected-with-GT vs selected-no-GT vs missed-with-GT.
+                let all_sel_gt: Vec<&LeafTraits> = diags
+                    .iter()
+                    .flat_map(|d| d.selected_with_gt.iter())
+                    .collect();
+                let all_sel_no: Vec<&LeafTraits> =
+                    diags.iter().flat_map(|d| d.selected_no_gt.iter()).collect();
+                let all_miss: Vec<&LeafTraits> =
+                    diags.iter().flat_map(|d| d.missed_with_gt.iter()).collect();
 
-            let summaries: Vec<TraitSummary> = [
-                ("Sel+GT (TP)", &all_sel_gt),
-                ("Sel+noGT (FP)", &all_sel_no),
-                ("Miss+GT (FN)", &all_miss),
-            ].iter().filter_map(|(label, data)| compute_trait_summary(label, data)).collect();
-
-            if !summaries.is_empty() {
-                println!("\n  --- Leaf Traits Comparison ---");
-                let w = 16;
-                print!("  {:14}", "metric");
-                for s in &summaries {
-                    print!("  {:>w$}", format!("{} ({})", s.label, s.n), w = w);
+                struct TraitSummary {
+                    label: &'static str,
+                    n: usize,
+                    score: [f64; 7],
+                    rank: [f64; 7],
+                    leaf_size: [f64; 7],
+                    gt_count: [f64; 4],
+                    min_gt_d: [f64; 7],
+                    score_gt: [f64; 5],
                 }
-                println!();
-                print!("  {:14}", "--------------");
-                for _ in &summaries {
-                    print!("  {:>w$}", "----------------", w = w);
-                }
-                println!();
 
-                let row_f4 = |label: &str, idx: usize, summaries: &[TraitSummary], getter: fn(&TraitSummary) -> &[f64]| {
-                    print!("  {:14}", label);
-                    for s in summaries {
-                        let v = getter(s);
-                        if idx < v.len() {
-                            print!("  {:>w$.4}", v[idx], w = w);
-                        } else {
-                            print!("  {:>w$}", "", w = w);
+                fn compute_trait_summary(
+                    label: &'static str,
+                    traits: &[&LeafTraits],
+                ) -> Option<TraitSummary> {
+                    if traits.is_empty() {
+                        return None;
+                    }
+                    let fp = |v: &[f32], p: f64| v[(p * (v.len() - 1) as f64) as usize] as f64;
+                    let up = |v: &[usize], p: f64| v[(p * (v.len() - 1) as f64) as usize] as f64;
+                    let favg =
+                        |v: &[f32]| v.iter().map(|x| *x as f64).sum::<f64>() / v.len() as f64;
+                    let uavg = |v: &[usize]| v.iter().sum::<usize>() as f64 / v.len() as f64;
+
+                    let mut scores: Vec<f32> = traits.iter().map(|t| t.score).collect();
+                    scores.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    let mut sizes: Vec<usize> = traits.iter().map(|t| t.leaf_size).collect();
+                    sizes.sort_unstable();
+                    let mut ranks: Vec<usize> = traits.iter().map(|t| t.rank).collect();
+                    ranks.sort_unstable();
+
+                    let score = [
+                        scores[0] as f64,
+                        fp(&scores, 0.25),
+                        fp(&scores, 0.5),
+                        favg(&scores),
+                        fp(&scores, 0.75),
+                        fp(&scores, 0.9),
+                        *scores.last().unwrap() as f64,
+                    ];
+                    let rank = [
+                        ranks[0] as f64,
+                        up(&ranks, 0.25),
+                        up(&ranks, 0.5),
+                        uavg(&ranks),
+                        up(&ranks, 0.75),
+                        up(&ranks, 0.9),
+                        *ranks.last().unwrap() as f64,
+                    ];
+                    let leaf_size = [
+                        sizes[0] as f64,
+                        up(&sizes, 0.25),
+                        up(&sizes, 0.5),
+                        uavg(&sizes),
+                        up(&sizes, 0.75),
+                        up(&sizes, 0.9),
+                        *sizes.last().unwrap() as f64,
+                    ];
+
+                    let gt_only: Vec<&LeafTraits> =
+                        traits.iter().filter(|t| t.gt_count > 0).copied().collect();
+                    let mut gt_counts: Vec<usize> = traits.iter().map(|t| t.gt_count).collect();
+                    gt_counts.sort_unstable();
+                    let gt_count = [
+                        gt_counts[0] as f64,
+                        up(&gt_counts, 0.5),
+                        uavg(&gt_counts),
+                        *gt_counts.last().unwrap() as f64,
+                    ];
+
+                    let mut min_gt_d = [0.0f64; 7];
+                    let mut score_gt = [0.0f64; 5];
+                    if !gt_only.is_empty() {
+                        let mut gt_dists: Vec<f32> =
+                            gt_only.iter().map(|t| t.min_gt_dist).collect();
+                        gt_dists.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                        min_gt_d = [
+                            gt_dists[0] as f64,
+                            fp(&gt_dists, 0.25),
+                            fp(&gt_dists, 0.5),
+                            favg(&gt_dists),
+                            fp(&gt_dists, 0.75),
+                            fp(&gt_dists, 0.9),
+                            *gt_dists.last().unwrap() as f64,
+                        ];
+
+                        let mut ratios: Vec<f32> = gt_only
+                            .iter()
+                            .filter(|t| t.min_gt_dist > 1e-10)
+                            .map(|t| t.score / t.min_gt_dist)
+                            .collect();
+                        if !ratios.is_empty() {
+                            ratios.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                            score_gt = [
+                                ratios[0] as f64,
+                                fp(&ratios, 0.25),
+                                fp(&ratios, 0.5),
+                                favg(&ratios),
+                                *ratios.last().unwrap() as f64,
+                            ];
                         }
                     }
-                    println!();
-                };
 
-                let row_f0 = |label: &str, idx: usize, summaries: &[TraitSummary], getter: fn(&TraitSummary) -> &[f64]| {
-                    print!("  {:14}", label);
-                    for s in summaries {
-                        let v = getter(s);
-                        if idx < v.len() {
-                            print!("  {:>w$.0}", v[idx], w = w);
-                        } else {
-                            print!("  {:>w$}", "", w = w);
-                        }
-                    }
-                    println!();
-                };
-
-                let stats7 = ["min", "p25", "p50", "avg", "p75", "p90", "max"];
-
-                println!("  -- score (centroid dist) --");
-                for (i, &lbl) in stats7.iter().enumerate() {
-                    row_f4(lbl, i, &summaries, |s| &s.score);
-                }
-
-                println!("  -- rank --");
-                for (i, &lbl) in stats7.iter().enumerate() {
-                    row_f0(lbl, i, &summaries, |s| &s.rank);
-                }
-
-                println!("  -- leaf_size --");
-                for (i, &lbl) in stats7.iter().enumerate() {
-                    row_f0(lbl, i, &summaries, |s| &s.leaf_size);
-                }
-
-                let stats5a = ["min", "p25", "p50", "avg", "max"];
-                println!("  -- p90_radius --");
-                for (i, &lbl) in stats5a.iter().enumerate() {
-                    row_f4(lbl, i, &summaries, |s| &s.p90_rad);
-                }
-
-                let stats4 = ["min", "p50", "avg", "max"];
-                println!("  -- gt_count --");
-                for (i, &lbl) in stats4.iter().enumerate() {
-                    row_f0(lbl, i, &summaries, |s| &s.gt_count);
-                }
-
-                println!("  -- min_gt_dist --");
-                for (i, &lbl) in stats7.iter().enumerate() {
-                    row_f4(lbl, i, &summaries, |s| &s.min_gt_d);
-                }
-
-                let stats5b = ["min", "p25", "p50", "avg", "max"];
-                println!("  -- score(centroid dist)/gt_dist -- (< 1 means centroid is closer to the query than the GT vector");
-                for (i, &lbl) in stats5b.iter().enumerate() {
-                    row_f4(lbl, i, &summaries, |s| &s.score_gt);
-                }
-            }
-          } // end if args.leaf_miss_diagnostic
-
-          if args.geometry_diagnostic {
-            println!("\n  --- Search Geometry (tau={:.2}, rr_c={}x, nav={:?}) ---",
-                diag_tau, diag_rr_c, diag_nav);
-
-            let pf = |v: &[f32], p: f64| -> f32 {
-                if v.is_empty() { return 0.0; }
-                v[(p * (v.len() - 1) as f64) as usize]
-            };
-
-            let mut cluster_radii: Vec<f32> = diags.iter().map(|d| {
-                let mut r = d.beam_cluster_radii.clone();
-                r.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                if r.is_empty() { 0.0 } else { r[r.len() / 2] }
-            }).collect();
-            cluster_radii.sort_by(|a, b| a.partial_cmp(b).unwrap());
-
-            let mut search_radii: Vec<f32> = diags.iter().map(|d| d.search_radius).collect();
-            search_radii.sort_by(|a, b| a.partial_cmp(b).unwrap());
-
-            let mut beam_radii: Vec<f32> = diags.iter().map(|d| d.beam_radius).collect();
-            beam_radii.sort_by(|a, b| a.partial_cmp(b).unwrap());
-
-            let mut gt_radii: Vec<f32> = diags.iter().map(|d| {
-                d.gt_distances.iter().cloned().fold(0.0f32, f32::max)
-            }).collect();
-            gt_radii.sort_by(|a, b| a.partial_cmp(b).unwrap());
-
-            println!("  {:32}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}",
-                "metric", "min", "p25", "p50", "p75", "p90", "max");
-            println!("  {:32}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}",
-                "--------------------------------", "-------", "-------", "-------",
-                "-------", "-------", "-------");
-
-            for (label, vals) in [
-                ("cluster radius (beam med p90)", &cluster_radii),
-                ("search radius (d1*(1+tau))", &search_radii),
-                ("beam radius (farthest sel.)", &beam_radii),
-                ("GT radius (max gt dist)", &gt_radii),
-            ] {
-                if !vals.is_empty() {
-                    println!("  {:32}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}",
+                    Some(TraitSummary {
                         label,
-                        pf(vals, 0.0),
-                        pf(vals, 0.25),
-                        pf(vals, 0.50),
-                        pf(vals, 0.75),
-                        pf(vals, 0.90),
-                        pf(vals, 1.0),
-                    );
+                        n: traits.len(),
+                        score,
+                        rank,
+                        leaf_size,
+                        gt_count,
+                        min_gt_d,
+                        score_gt,
+                    })
                 }
-            }
-          } // end if args.geometry_diagnostic
+
+                let summaries: Vec<TraitSummary> = [
+                    ("Sel+GT (TP)", &all_sel_gt),
+                    ("Sel+noGT (FP)", &all_sel_no),
+                    ("Miss+GT (FN)", &all_miss),
+                ]
+                .iter()
+                .filter_map(|(label, data)| compute_trait_summary(label, data))
+                .collect();
+
+                if !summaries.is_empty() {
+                    println!("\n  --- Leaf Traits Comparison ---");
+                    let w = 16;
+                    print!("  {:14}", "metric");
+                    for s in &summaries {
+                        print!("  {:>w$}", format!("{} ({})", s.label, s.n), w = w);
+                    }
+                    println!();
+                    print!("  {:14}", "--------------");
+                    for _ in &summaries {
+                        print!("  {:>w$}", "----------------", w = w);
+                    }
+                    println!();
+
+                    let row_f4 =
+                        |label: &str,
+                         idx: usize,
+                         summaries: &[TraitSummary],
+                         getter: fn(&TraitSummary) -> &[f64]| {
+                            print!("  {:14}", label);
+                            for s in summaries {
+                                let v = getter(s);
+                                if idx < v.len() {
+                                    print!("  {:>w$.4}", v[idx], w = w);
+                                } else {
+                                    print!("  {:>w$}", "", w = w);
+                                }
+                            }
+                            println!();
+                        };
+
+                    let row_f0 =
+                        |label: &str,
+                         idx: usize,
+                         summaries: &[TraitSummary],
+                         getter: fn(&TraitSummary) -> &[f64]| {
+                            print!("  {:14}", label);
+                            for s in summaries {
+                                let v = getter(s);
+                                if idx < v.len() {
+                                    print!("  {:>w$.0}", v[idx], w = w);
+                                } else {
+                                    print!("  {:>w$}", "", w = w);
+                                }
+                            }
+                            println!();
+                        };
+
+                    let stats7 = ["min", "p25", "p50", "avg", "p75", "p90", "max"];
+
+                    println!("  -- score (centroid dist) --");
+                    for (i, &lbl) in stats7.iter().enumerate() {
+                        row_f4(lbl, i, &summaries, |s| &s.score);
+                    }
+
+                    println!("  -- rank --");
+                    for (i, &lbl) in stats7.iter().enumerate() {
+                        row_f0(lbl, i, &summaries, |s| &s.rank);
+                    }
+
+                    println!("  -- leaf_size --");
+                    for (i, &lbl) in stats7.iter().enumerate() {
+                        row_f0(lbl, i, &summaries, |s| &s.leaf_size);
+                    }
+
+                    let stats4 = ["min", "p50", "avg", "max"];
+                    println!("  -- gt_count --");
+                    for (i, &lbl) in stats4.iter().enumerate() {
+                        row_f0(lbl, i, &summaries, |s| &s.gt_count);
+                    }
+
+                    println!("  -- min_gt_dist --");
+                    for (i, &lbl) in stats7.iter().enumerate() {
+                        row_f4(lbl, i, &summaries, |s| &s.min_gt_d);
+                    }
+
+                    let stats5b = ["min", "p25", "p50", "avg", "max"];
+                    println!("  -- score(centroid dist)/gt_dist -- (< 1 means centroid is closer to the query than the GT vector");
+                    for (i, &lbl) in stats5b.iter().enumerate() {
+                        row_f4(lbl, i, &summaries, |s| &s.score_gt);
+                    }
+                }
+            } // end if args.leaf_miss_diagnostic
+
+            if args.geometry_diagnostic {
+                println!(
+                    "\n  --- Search Geometry (tau={:.2}, rr_c={}x, nav={:?}) ---",
+                    diag_tau, diag_rr_c, diag_nav
+                );
+
+                let pf = |v: &[f32], p: f64| -> f32 {
+                    if v.is_empty() {
+                        return 0.0;
+                    }
+                    v[(p * (v.len() - 1) as f64) as usize]
+                };
+
+                let mut search_radii: Vec<f32> = diags.iter().map(|d| d.search_radius).collect();
+                search_radii.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+                let mut beam_radii: Vec<f32> = diags.iter().map(|d| d.beam_radius).collect();
+                beam_radii.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+                let mut gt_radii: Vec<f32> = diags
+                    .iter()
+                    .map(|d| d.gt_distances.iter().cloned().fold(0.0f32, f32::max))
+                    .collect();
+                gt_radii.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+                println!(
+                    "  {:32}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}",
+                    "metric", "min", "p25", "p50", "p75", "p90", "max"
+                );
+                println!(
+                    "  {:32}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}",
+                    "--------------------------------",
+                    "-------",
+                    "-------",
+                    "-------",
+                    "-------",
+                    "-------",
+                    "-------"
+                );
+
+                for (label, vals) in [
+                    ("search radius (d1*(1+tau))", &search_radii),
+                    ("beam radius (farthest sel.)", &beam_radii),
+                    ("GT radius (max gt dist)", &gt_radii),
+                ] {
+                    if !vals.is_empty() {
+                        println!(
+                            "  {:32}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}",
+                            label,
+                            pf(vals, 0.0),
+                            pf(vals, 0.25),
+                            pf(vals, 0.50),
+                            pf(vals, 0.75),
+                            pf(vals, 0.90),
+                            pf(vals, 1.0),
+                        );
+                    }
+                }
+            } // end if args.geometry_diagnostic
         }
     }
 
@@ -1514,17 +1574,27 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("navigate   - beam search the tree to find nearest leaf nodes");
         println!("split      - 2-means split of an oversized leaf (SPANN utils::split)");
         println!("merge      - merge a small leaf into its nearest neighbor");
-        println!("reassign   - re-route a vector after split/merge (navigate + register + balance)");
+        println!(
+            "reassign   - re-route a vector after split/merge (navigate + register + balance)"
+        );
         println!("scrub      - remove stale version entries from a leaf");
         println!("scrub_rm   - number of stale entries removed by scrub");
         println!("wall       - wall-clock time for the checkpoint");
         println!();
         println!("--- Task Breakdowns (concurrency diagnostics) ---");
-        println!("navigate.missing_node  - navigate saw a child_id in a parent's children list but the");
-        println!("                     node was missing from the DashMap (removed by concurrent split)");
-        println!("add.missing_nodes     - add() failed to register in any navigated cluster (all gone)");
+        println!(
+            "navigate.missing_node  - navigate saw a child_id in a parent's children list but the"
+        );
+        println!(
+            "                     node was missing from the DashMap (removed by concurrent split)"
+        );
+        println!(
+            "add.missing_nodes     - add() failed to register in any navigated cluster (all gone)"
+        );
         println!("                     and fell back to inserting in the root node");
-        println!("register.missing_node - register_in_leaf target was gone (split by balance cascade),");
+        println!(
+            "register.missing_node - register_in_leaf target was gone (split by balance cascade),"
+        );
         println!("                     fell back to reassign");
         println!();
         println!("--- Recall Table ---");
@@ -1544,7 +1614,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("lat_quant       - time building QuantizedQuery per leaf (residual, norms)");
         println!("lat_dist        - time scoring vectors against quantized query (includes version checks)");
         println!("lat_sort        - time deduplicating + sorting all scored vectors");
-        println!("lat_rerank      - time reranking top candidates with f32 embeddings (0 when rr_v=1)");
+        println!(
+            "lat_rerank      - time reranking top candidates with f32 embeddings (0 when rr_v=1)"
+        );
     }
 
     Ok(())

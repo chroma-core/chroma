@@ -384,3 +384,25 @@ inter-centroid dist (between replica leaves)
 Index quality (always printed)
 
 GT clusters (p100, p95, p90) -- how many clusters GT vectors spread across
+
+## Future improvements
+- replication:
+  - Experiment with internal node replication
+  - Experiment with outward replication as a full replacement for the RNG rule
+- Better clustering
+  - Revisit our measure of optimal clustering `--compute-optimal-gt`. It looks broken currently. It would be very valuable to know how well our clustering compares to the optimal clustering.
+  - Neighborhood aware split: split on the neighborhood of the centroid, not on size.
+    - Or other forms of unbalanced clustering
+- Leaf selection
+  - try more scoring strategies from [Leaf selection](#leaf-selection) above
+- Query performance
+  - Find a way to always choose the optimal beam width for each level.
+  - Tau values are dataset dependent. in high dimensional datasets vectors are closer together, so tau must be smaller for the same recall
+  - centroids as residuals of parent or of center? Possible: compounding residual error through levels. would save us from quantizing data vector against each node as a query
+- Build time
+  - Thread scaling (esp of balancing)
+  - Batch distance computations during split, merge, npa step (recreate the function from the paper)
+  - 4 bit quantized NPA 
+  - Deferred replication (not at insert time)
+- Space efficiency
+  - u8 versions, instead of u32
