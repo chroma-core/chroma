@@ -15,8 +15,8 @@ fn make_view_cursor(entries_per_block: &[&[(u32, f32)]]) -> (Vec<Vec<u8>>, Posti
         .map(|e| SparsePostingBlock::from_sorted_entries(e).unwrap())
         .collect();
 
-    let dir_max_offsets: Vec<u32> = blocks.iter().map(|b| b.max_offset).collect();
-    let dir_max_weights: Vec<f32> = blocks.iter().map(|b| b.max_weight).collect();
+    let dir_max_offsets: Vec<u32> = blocks.iter().map(|b| b.header.max_offset).collect();
+    let dir_max_weights: Vec<f32> = blocks.iter().map(|b| b.header.max_weight).collect();
 
     let raw_bytes: Vec<Vec<u8>> = blocks.iter().map(|b| b.serialize()).collect();
 
