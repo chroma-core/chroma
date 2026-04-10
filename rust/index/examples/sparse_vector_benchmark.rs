@@ -58,7 +58,7 @@ use chroma_blockstore::arrow::provider::BlockfileReaderOptions;
 use chroma_blockstore::test_arrow_blockfile_provider;
 use chroma_blockstore::{provider::BlockfileProvider, BlockfileWriterOptions};
 use chroma_index::sparse::{
-    maxscore::{BlockSparseReader, BlockSparseWriter, SPARSE_POSTING_BLOCK_SIZE_BYTES},
+    maxscore::{MaxScoreReader, MaxScoreWriter, SPARSE_POSTING_BLOCK_SIZE_BYTES},
     reader::SparseReader,
     types::Score,
     writer::SparseWriter,
@@ -624,13 +624,13 @@ async fn build_block_maxscore_index(
                 ))
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to create posting reader: {:?}", e))?;
-            Some(BlockSparseReader::new(posting_reader))
+            Some(MaxScoreReader::new(posting_reader))
         } else {
             None
         };
 
         let writer =
-            BlockSparseWriter::new(posting_writer.clone(), old_reader).with_block_size(block_size);
+            MaxScoreWriter::new(posting_writer.clone(), old_reader).with_block_size(block_size);
 
         let num_partitions = std::thread::available_parallelism()
             .map(|n| n.get())
@@ -734,7 +734,7 @@ async fn search_with_block_maxscore(
         .await
         .map_err(|e| anyhow::anyhow!("Failed to open posting reader: {:?}", e))?;
 
-    let reader = BlockSparseReader::new(posting_reader);
+    let reader = MaxScoreReader::new(posting_reader);
     let mut results = Vec::new();
 
     let pb = if show_progress {
