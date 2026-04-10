@@ -26,7 +26,13 @@ const DIRECTORY_ENTRY_SIZE: usize = 8; // u32 max_offset + f32 max_weight
 ///
 /// - Posting blocks: prefix = `encode_u32(dim)`, key = `0, 1, 2, …`
 /// - Directory parts: prefix = `DIRECTORY_PREFIX.to_owned() + &encode_u32(dim)`, key = `0, 1, 2, …`
-pub const DIRECTORY_PREFIX: &str = "d";
+///
+/// `DIRECTORY_PREFIX` must sort after ALL base64-encoded u32 prefixes
+/// (`A-Za-z0-9+/=`). With little-endian `encode_u32`, some dimension IDs
+/// produce base64 strings that sort after lowercase letters (e.g., dim
+/// 25000 → `"qGEAAA=="`), so `~` (ASCII 126) is used to guarantee
+/// directory prefixes always sort last.
+pub const DIRECTORY_PREFIX: &str = "~";
 
 // ── Error type ──────────────────────────────────────────────────────
 
@@ -1265,7 +1271,7 @@ mod tests {
 
     #[test]
     fn directory_prefix_constant() {
-        assert_eq!(DIRECTORY_PREFIX, "d");
+        assert_eq!(DIRECTORY_PREFIX, "~");
     }
 
     // ── len/is_empty coverage ───────────────────────────────────────
