@@ -20,8 +20,9 @@ use chroma_storage::config::StorageConfig;
 use chroma_storage::Storage;
 use chroma_tracing::OtelFilter;
 use chroma_tracing::OtelFilterLevel;
+#[cfg(feature = "faults")]
+use chroma_types::chroma_proto::fault_injection_service_server::FaultInjectionServiceServer;
 use chroma_types::chroma_proto::{
-    fault_injection_service_server::FaultInjectionServiceServer,
     garbage_collect_phase2_request::LogToCollect, log_service_server::LogService,
     purge_from_cache_request::EntryToEvict, CollectionInfo, GarbageCollectPhase2Request,
     GarbageCollectPhase2Response, GetAllCollectionInfoToCompactRequest,
@@ -65,7 +66,8 @@ use wal3::{
 };
 #[cfg(feature = "faults")]
 use wal3::{
-    FaultInjectingFragmentManagerFactory, FragmentUploadFault, FRAGMENT_UPLOAD_FAULT_LABEL,
+    fragment_upload_replica_fault_label, FaultInjectingFragmentManagerFactory, FragmentUploadFault,
+    FRAGMENT_UPLOAD_FAULT_LABEL,
 };
 
 mod scrub;
@@ -140,6 +142,16 @@ impl FragmentUploadFaultInjector for LogServiceFragmentUploadFaultInjector {
     fn fault_for_upload(&self) -> Option<FragmentUploadFault> {
         self.faults
             .action_for_label(FRAGMENT_UPLOAD_FAULT_LABEL)
+            .map(|action| match action {
+                chroma_faults::FaultActionKind::Unavailable => FragmentUploadFault::Unavailable,
+                chroma_faults::FaultActionKind::Delay(delay) => FragmentUploadFault::Delay(delay),
+            })
+    }
+
+    fn fault_for_replica_upload(&self, replica_idx: usize) -> Option<FragmentUploadFault> {
+        let label = fragment_upload_replica_fault_label(replica_idx)?;
+        self.faults
+            .action_for_label(label)
             .map(|action| match action {
                 chroma_faults::FaultActionKind::Unavailable => FragmentUploadFault::Unavailable,
                 chroma_faults::FaultActionKind::Delay(delay) => FragmentUploadFault::Delay(delay),
@@ -442,6 +454,8 @@ impl<'a> FactoryCreationContext<'a> {
             region_names,
             self.collection_id.0,
         );
+        let fragment_factory = fragment_factory
+            .with_fault_injector(self.fragment_upload_fault_injector.as_ref().map(Arc::clone));
         let fragment_factory = maybe_wrap_fragment_manager_factory(
             fragment_factory,
             self.fragment_upload_fault_injector.as_ref().map(Arc::clone),
@@ -703,6 +717,8 @@ async fn get_log_from_handle_with_mutex_held<'a>(
             region_names,
             collection_id.0,
         );
+        let fragment_publisher_factory = fragment_publisher_factory
+            .with_fault_injector(fragment_upload_fault_injector.as_ref().map(Arc::clone));
         let fragment_publisher_factory = maybe_wrap_fragment_manager_factory(
             fragment_publisher_factory,
             fragment_upload_fault_injector.as_ref().map(Arc::clone),
@@ -1164,6 +1180,7 @@ pub struct LogServer {
     config: LogServerConfig,
     open_logs: Arc<StateHashTable<LogKey, LogStub>>,
     dirty_log: Option<Arc<dyn LogWriterTrait>>,
+    #[cfg_attr(not(feature = "faults"), allow(unused))]
     faults: Arc<FaultRegistry>,
     rolling_up_s3: tokio::sync::Mutex<()>,
     rolling_up_repl: tokio::sync::Mutex<()>,
@@ -3229,18 +3246,35 @@ impl LogServerWrapper {
         let background_server = Arc::clone(&wrapper.log_server);
         let background =
             tokio::task::spawn(async move { background_server.background_task().await });
-        let server = Server::builder()
-            .max_concurrent_streams(Some(max_concurrent_streams))
-            .layer(chroma_tracing::GrpcServerTraceLayer)
-            .add_service(health_service)
-            .add_service(FaultInjectionServiceServer::from_arc(
-                wrapper.log_server.faults.clone(),
-            ))
-            .add_service(
-                chroma_types::chroma_proto::log_service_server::LogServiceServer::new(wrapper)
-                    .max_decoding_message_size(max_decoding_message_size)
-                    .max_encoding_message_size(max_encoding_message_size),
-            );
+        #[cfg(feature = "faults")]
+        let server = {
+            tracing::info!("fault injection enabled");
+            Server::builder()
+                .max_concurrent_streams(Some(max_concurrent_streams))
+                .layer(chroma_tracing::GrpcServerTraceLayer)
+                .add_service(health_service)
+                .add_service(FaultInjectionServiceServer::from_arc(
+                    wrapper.log_server.faults.clone(),
+                ))
+                .add_service(
+                    chroma_types::chroma_proto::log_service_server::LogServiceServer::new(wrapper)
+                        .max_decoding_message_size(max_decoding_message_size)
+                        .max_encoding_message_size(max_encoding_message_size),
+                )
+        };
+        #[cfg(not(feature = "faults"))]
+        let server = {
+            tracing::info!("fault injection not enabled");
+            Server::builder()
+                .max_concurrent_streams(Some(max_concurrent_streams))
+                .layer(chroma_tracing::GrpcServerTraceLayer)
+                .add_service(health_service)
+                .add_service(
+                    chroma_types::chroma_proto::log_service_server::LogServiceServer::new(wrapper)
+                        .max_decoding_message_size(max_decoding_message_size)
+                        .max_encoding_message_size(max_encoding_message_size),
+                )
+        };
 
         let server = server.serve_with_shutdown(addr, async {
             let mut sigterm = match signal(SignalKind::terminate()) {
@@ -3812,6 +3846,31 @@ mod tests {
     #[test]
     fn unsafe_constants() {
         assert!(STABLE_PREFIX.is_valid());
+    }
+
+    #[cfg(feature = "faults")]
+    #[test]
+    fn fragment_upload_fault_injection_targets_hard_coded_replicas() {
+        let faults = Arc::new(FaultRegistry::new());
+        let injector = LogServiceFragmentUploadFaultInjector::new(Arc::clone(&faults));
+
+        faults.inject(
+            chroma_faults::FaultSelectorKind::Label(
+                fragment_upload_replica_fault_label(1)
+                    .expect("replica 1 label should exist")
+                    .to_string(),
+            ),
+            chroma_faults::FaultActionKind::Unavailable,
+        );
+
+        assert_eq!(injector.fault_for_upload(), None);
+        assert_eq!(injector.fault_for_replica_upload(0), None);
+        assert_eq!(
+            injector.fault_for_replica_upload(1),
+            Some(FragmentUploadFault::Unavailable)
+        );
+        assert_eq!(injector.fault_for_replica_upload(2), None);
+        assert_eq!(injector.fault_for_replica_upload(3), None);
     }
 
     #[test]
@@ -5436,6 +5495,7 @@ mod tests {
         let spanner = Arc::new(topology_config.config.spanner.clone());
         let config = log_server.config.clone();
         let repl_options = topology_config.config.repl.clone();
+        let fragment_upload_fault_injector = log_server.fragment_upload_fault_injector();
         Box::pin(async move {
             let (fragment_publisher_factory, manifest_publisher_factory) = create_repl_factories(
                 config.writer.clone(),
@@ -5446,6 +5506,8 @@ mod tests {
                 region_names,
                 collection_id.0,
             );
+            let fragment_publisher_factory = fragment_publisher_factory
+                .with_fault_injector(fragment_upload_fault_injector.as_ref().map(Arc::clone));
             let gc = wal3::GarbageCollector::<
                 FragmentUuid,
                 ReplicatedFragmentManagerFactory,

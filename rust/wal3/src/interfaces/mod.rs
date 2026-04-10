@@ -90,6 +90,19 @@ pub trait FragmentManagerFactory {
 
 /// The label used by downstream services to target wal3 fragment uploads with fault injection.
 pub const FRAGMENT_UPLOAD_FAULT_LABEL: &str = "wal3.fragment_upload";
+/// The hard-coded fault labels used to target replicated wal3 fragment uploads by replica index.
+pub const FRAGMENT_UPLOAD_REPLICA_FAULT_LABELS: [&str; 3] = [
+    "wal3.fragment_upload.0",
+    "wal3.fragment_upload.1",
+    "wal3.fragment_upload.2",
+];
+
+/// Returns the fault label for a specific replicated wal3 fragment upload replica index.
+pub fn fragment_upload_replica_fault_label(replica_idx: usize) -> Option<&'static str> {
+    FRAGMENT_UPLOAD_REPLICA_FAULT_LABELS
+        .get(replica_idx)
+        .copied()
+}
 
 /// Faults that can be injected immediately before a fragment upload begins.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -101,6 +114,10 @@ pub enum FragmentUploadFault {
 /// Supplies optional upload faults to wal3 without coupling the crate to a specific registry.
 pub trait FragmentUploadFaultInjector: Send + Sync + 'static {
     fn fault_for_upload(&self) -> Option<FragmentUploadFault>;
+
+    fn fault_for_replica_upload(&self, _replica_idx: usize) -> Option<FragmentUploadFault> {
+        None
+    }
 }
 
 impl FragmentUploadFaultInjector for () {
@@ -173,15 +190,27 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentUploader<FP>
         cmek: Option<Cmek>,
         epoch_micros: u64,
     ) -> Result<UploadResult, Error> {
+        let fragment_identifier = pointer.identifier();
         match self
             .fault_injector
             .as_ref()
             .and_then(|fault_injector| fault_injector.fault_for_upload())
         {
             Some(FragmentUploadFault::Delay(delay)) => {
+                tracing::warn!(
+                    fault_label = FRAGMENT_UPLOAD_FAULT_LABEL,
+                    fragment_identifier = %fragment_identifier,
+                    delay_seconds = delay.as_secs_f64(),
+                    "injecting wal3 upload delay fault"
+                );
                 tokio::time::sleep(delay).await;
             }
             Some(FragmentUploadFault::Unavailable) => {
+                tracing::warn!(
+                    fault_label = FRAGMENT_UPLOAD_FAULT_LABEL,
+                    fragment_identifier = %fragment_identifier,
+                    "injecting wal3 upload unavailable fault"
+                );
                 return Err(Error::TonicError(tonic::Status::unavailable(format!(
                     "fault injected for {}",
                     FRAGMENT_UPLOAD_FAULT_LABEL
@@ -1058,6 +1087,23 @@ mod tests {
 
     #[derive(Clone)]
     struct InjectUnavailable;
+
+    #[test]
+    fn fragment_upload_replica_fault_labels_are_hard_coded() {
+        assert_eq!(
+            fragment_upload_replica_fault_label(0),
+            Some("wal3.fragment_upload.0")
+        );
+        assert_eq!(
+            fragment_upload_replica_fault_label(1),
+            Some("wal3.fragment_upload.1")
+        );
+        assert_eq!(
+            fragment_upload_replica_fault_label(2),
+            Some("wal3.fragment_upload.2")
+        );
+        assert_eq!(fragment_upload_replica_fault_label(3), None);
+    }
 
     impl FragmentUploadFaultInjector for InjectUnavailable {
         fn fault_for_upload(&self) -> Option<FragmentUploadFault> {

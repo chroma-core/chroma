@@ -12,7 +12,10 @@ mod manifest_manager;
 use crate::{Error, FragmentUuid, LogWriterOptions, Manifest};
 
 use super::batch_manager::BatchManager;
-use super::{FragmentManagerFactory, ManifestManagerFactory};
+use super::{
+    FragmentManagerFactory, FragmentUploadFaultInjector,
+    ManifestManagerFactory,
+};
 
 pub use fragment_manager::{FragmentReader, ReplicatedFragmentUploader};
 pub use fragment_manager::{ReplicatedFragmentOptions, StorageWrapper};
@@ -40,6 +43,7 @@ pub fn create_repl_factories(
         preferred,
         storages,
         read_repair_semaphore,
+        fault_injector: None,
     };
     let local_region = regions[preferred].clone();
     let manifest_manager_factory = ReplicatedManifestManagerFactory {
@@ -58,6 +62,7 @@ pub struct ReplicatedFragmentManagerFactory {
     preferred: usize,
     storages: Arc<Vec<StorageWrapper>>,
     read_repair_semaphore: Arc<Semaphore>,
+    fault_injector: Option<Arc<dyn FragmentUploadFaultInjector>>,
 }
 
 impl ReplicatedFragmentManagerFactory {
@@ -76,7 +81,16 @@ impl ReplicatedFragmentManagerFactory {
             preferred,
             storages,
             read_repair_semaphore,
+            fault_injector: None,
         }
+    }
+
+    pub fn with_fault_injector(
+        mut self,
+        fault_injector: Option<Arc<dyn FragmentUploadFaultInjector>>,
+    ) -> Self {
+        self.fault_injector = fault_injector;
+        self
     }
 
     fn build_fragment_uploader(&self) -> ReplicatedFragmentUploader {
@@ -86,6 +100,7 @@ impl ReplicatedFragmentManagerFactory {
             self.preferred,
             Arc::clone(&self.storages),
         )
+        .with_fault_injector(self.fault_injector.as_ref().map(Arc::clone))
     }
 }
 

@@ -160,6 +160,7 @@ fn stored_fault_to_proto(fault: &StoredFault) -> FaultEntry {
 
 #[async_trait]
 impl FaultInjectionService for FaultRegistry {
+    #[tracing::instrument(skip(self, request))]
     async fn inject_faults(
         &self,
         request: Request<InjectFaultsRequest>,
@@ -173,10 +174,12 @@ impl FaultInjectionService for FaultRegistry {
             .action
             .ok_or_else(|| invalid_argument("inject_faults requires an action"))
             .and_then(action_from_proto)?;
+        tracing::warn!(selector = ?selector, action = ?action, "inject fault configured");
         self.inject(selector, action);
         Ok(Response::new(InjectFaultsResponse {}))
     }
 
+    #[tracing::instrument(skip(self, _request))]
     async fn list_faults(
         &self,
         _request: Request<ListFaultsRequest>,
@@ -189,15 +192,22 @@ impl FaultInjectionService for FaultRegistry {
         Ok(Response::new(ListFaultsResponse { faults }))
     }
 
+    #[tracing::instrument(skip(self, request))]
     async fn clear_faults(
         &self,
         request: Request<ClearFaultsRequest>,
     ) -> Result<Response<ClearFaultsResponse>, Status> {
         let request = request.into_inner();
-        let cleared_count = match request.selector {
-            Some(selector) => self.clear_selector(&selector_from_proto(selector)?),
+        let selector = request.selector.map(selector_from_proto).transpose()?;
+        let cleared_count = match selector.as_ref() {
+            Some(selector) => self.clear_selector(selector),
             None => self.clear_all(),
         };
+        tracing::warn!(
+            selector = ?selector,
+            cleared_count,
+            "inject fault cleared"
+        );
         Ok(Response::new(ClearFaultsResponse {
             cleared_count: cleared_count as u64,
         }))

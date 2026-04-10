@@ -1749,9 +1749,11 @@ dependencies = [
  "async-trait",
  "chroma-config",
  "chroma-types",
+ "clap",
  "parking_lot",
  "tokio",
  "tonic 0.14.5",
+ "tracing",
 ]
 
 [[package]]
