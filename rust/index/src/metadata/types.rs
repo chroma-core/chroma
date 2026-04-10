@@ -8,7 +8,8 @@ use futures::TryStreamExt;
 use thiserror::Error;
 use uuid::Uuid;
 
-use core::ops::BitOr;
+use core::ops::{BitOr, BitOrAssign};
+use regex::Regex;
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -665,6 +666,38 @@ impl<'me> MetadataIndexReader<'me> {
                 _ => Err(MetadataIndexError::InvalidKeyType),
             },
             _ => Err(MetadataIndexError::InvalidKeyType),
+        }
+    }
+
+    /// Scan all string values for `metadata_key` and return a bitmap of offset
+    /// IDs whose value matches `regex`. Non-string metadata fields are skipped.
+    /// The caller is responsible for compiling and validating the regex.
+    pub async fn regex_scan(
+        &'me self,
+        metadata_key: &str,
+        regex: &Regex,
+    ) -> Result<RoaringBitmap, MetadataIndexError> {
+        match self {
+            MetadataIndexReader::StringMetadataIndexReader(blockfile_reader) => {
+                blockfile_reader
+                    .get_range_stream(metadata_key..=metadata_key, ..)
+                    .try_fold(
+                        RoaringBitmap::new(),
+                        move |mut acc, (_, string_value, bitmap)| {
+                            let matches = regex.is_match(string_value);
+                            async move {
+                                if matches {
+                                    acc.bitor_assign(&bitmap);
+                                }
+                                Ok(acc)
+                            }
+                        },
+                    )
+                    .await
+                    .map_err(MetadataIndexError::BlockfileError)
+            }
+            // Regex only applies to string-valued metadata.
+            _ => Ok(RoaringBitmap::new()),
         }
     }
 

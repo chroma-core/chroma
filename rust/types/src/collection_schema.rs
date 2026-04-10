@@ -2219,10 +2219,15 @@ impl Schema {
                 Ok(())
             }
             Where::Metadata(expression) => {
+                // Regex comparisons only apply to string metadata; skip index validation.
+                if matches!(expression.comparison, MetadataComparison::Regex(_)) {
+                    return Ok(());
+                }
                 let value_type = match &expression.comparison {
                     MetadataComparison::Primitive(_, value) => value.value_type(),
                     MetadataComparison::Set(_, set_value) => set_value.value_type(),
                     MetadataComparison::ArrayContains(_, value) => value.value_type(),
+                    MetadataComparison::Regex(_) => unreachable!(),
                 };
                 let is_enabled = self
                     .is_metadata_type_index_enabled(expression.key.as_str(), value_type)

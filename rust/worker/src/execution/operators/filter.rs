@@ -450,6 +450,49 @@ impl MetadataProvider<'_> {
             MetadataProvider::Log(metadata_log_reader) => metadata_log_reader.get(key, val, op),
         }
     }
+
+    pub(crate) async fn filter_by_metadata_regex(
+        &self,
+        key: &str,
+        pattern: &str,
+    ) -> Result<RoaringBitmap, FilterError> {
+        let chroma_regex = ChromaRegex::try_from(pattern.to_string())?;
+        let regex = chroma_regex.regex()?;
+        match self {
+            MetadataProvider::CompactData(metadata_segment_reader, _, _) => {
+                if let Some(reader) = metadata_segment_reader.string_metadata_index_reader.as_ref()
+                {
+                    reader
+                        .regex_scan(key, &regex)
+                        .instrument(tracing::trace_span!(
+                            parent: Span::current(),
+                            "Filter by metadata regex"
+                        ))
+                        .await
+                        .map_err(FilterError::Index)
+                } else {
+                    Ok(RoaringBitmap::new())
+                }
+            }
+            MetadataProvider::Log(metadata_log_reader) => {
+                if let Some(btree) = metadata_log_reader.compact_metadata.get(key) {
+                    Ok(btree
+                        .iter()
+                        .filter_map(|(val, bitmap)| {
+                            if let MetadataValue::Str(s) = val {
+                                if regex.is_match(s) {
+                                    return Some(bitmap.clone());
+                                }
+                            }
+                            None
+                        })
+                        .fold(RoaringBitmap::new(), BitOr::bitor))
+                } else {
+                    Ok(RoaringBitmap::new())
+                }
+            }
+        }
+    }
 }
 
 pub(crate) trait RoaringMetadataFilter<'me> {
@@ -555,6 +598,12 @@ impl<'me> RoaringMetadataFilter<'me> for MetadataExpression {
                     ContainsOperator::Contains => SignedRoaringBitmap::Include(bitmap),
                     ContainsOperator::NotContains => SignedRoaringBitmap::Exclude(bitmap),
                 }
+            }
+            MetadataComparison::Regex(pattern) => {
+                let bitmap = metadata_provider
+                    .filter_by_metadata_regex(&self.key, pattern)
+                    .await?;
+                SignedRoaringBitmap::Include(bitmap)
             }
         };
         Ok(result)

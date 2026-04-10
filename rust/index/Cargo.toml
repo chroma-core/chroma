@@ -40,6 +40,8 @@ dashmap = { workspace = true }
 usearch = { workspace = true, optional = true }
 faer = { workspace = true }
 
+regex = { workspace = true }
+
 chroma-error = { workspace = true }
 chroma-types = { workspace = true }
 chroma-blockstore = { workspace = true }
@@ -55,7 +57,6 @@ clap = { workspace = true }
 anyhow = { workspace = true }
 sprs = { workspace = true }
 chroma-benchmark = { workspace = true }
-regex = { workspace = true }
 rayon = { workspace = true }
 criterion = { workspace = true }
 proptest = { workspace = true }
