@@ -131,6 +131,7 @@ impl Bindings {
             enable_schema,
             min_records_for_invocation: default_min_records_for_invocation(),
             tenants_with_quantization_enabled: vec![],
+            tenants_with_maxscore_enabled: vec![],
             enable_log_scouting: false,
         };
 

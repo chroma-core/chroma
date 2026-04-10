@@ -1721,7 +1721,16 @@ class VectorIndexConfig(BaseModel):
 class SparseVectorIndexConfig(BaseModel):
     """Configuration for sparse vector index."""
 
-    model_config = {"arbitrary_types_allowed": True, "extra": "forbid"}
+    model_config = {"arbitrary_types_allowed": True}
+
+    _validate_extra_fields = _create_extra_fields_validator(
+        [
+            "embedding_function",
+            "source_key",
+            "bm25",
+            "algorithm",
+        ]
+    )
 
     # TODO(Sanket): Change this to the appropriate sparse ef and use a default here.
     embedding_function: Optional[Any] = None

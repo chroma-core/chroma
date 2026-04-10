@@ -86,6 +86,7 @@ pub use chroma_types::SetOperator;
 pub use chroma_types::Space;
 pub use chroma_types::SpannConfiguration;
 pub use chroma_types::SpannIndexConfig;
+pub use chroma_types::SparseIndexAlgorithm;
 pub use chroma_types::SparseVector;
 pub use chroma_types::SparseVectorIndexConfig;
 pub use chroma_types::SparseVectorIndexType;

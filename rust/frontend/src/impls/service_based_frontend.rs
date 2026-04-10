@@ -45,11 +45,11 @@ use chroma_types::{
     ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord,
     Quantization, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse, Schema,
     SchemaError, SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
-    UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
-    UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
-    UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsError,
-    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
-    Where,
+    SparseIndexAlgorithm, UpdateCollectionError, UpdateCollectionRecordsError,
+    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
+    UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse,
+    UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse,
+    VectorIndexConfiguration, Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -85,6 +85,7 @@ pub struct ServiceBasedFrontend {
     retries_builder: ExponentialBuilder,
     min_records_for_invocation: u64,
     tenants_with_quantization_enabled: Vec<String>,
+    tenants_with_maxscore_enabled: Vec<String>,
     enable_log_scouting: bool,
 }
 
@@ -101,6 +102,7 @@ impl ServiceBasedFrontend {
         enable_schema: bool,
         min_records_for_invocation: u64,
         tenants_with_quantization_enabled: Vec<String>,
+        tenants_with_maxscore_enabled: Vec<String>,
         enable_log_scouting: bool,
     ) -> Self {
         let meter = global::meter("chroma");
@@ -149,6 +151,7 @@ impl ServiceBasedFrontend {
             retries_builder,
             min_records_for_invocation,
             tenants_with_quantization_enabled,
+            tenants_with_maxscore_enabled,
             enable_log_scouting,
         }
     }
@@ -638,6 +641,14 @@ impl ServiceBasedFrontend {
             .any(|t| t == "*" || t == tenant_id)
     }
 
+    /// Check if MaxScore sparse index should be enabled for the given tenant.
+    /// Returns true if the list contains "*" (all tenants) or the exact tenant_id.
+    fn should_enable_maxscore_for_tenant(&self, tenant_id: &str) -> bool {
+        self.tenants_with_maxscore_enabled
+            .iter()
+            .any(|t| t == "*" || t == tenant_id)
+    }
+
     pub fn get_default_knn_index(&self) -> KnnIndex {
         self.default_knn_index
     }
@@ -1063,6 +1074,13 @@ impl ServiceBasedFrontend {
         if let Some(ref mut schema) = reconciled_schema {
             if self.should_enable_quantization_for_tenant(&tenant_id) {
                 schema.quantize(Quantization::FourBitRabitQWithUSearch);
+            }
+        }
+
+        // Enable MaxScore sparse index for tenants in the config list
+        if let Some(ref mut schema) = reconciled_schema {
+            if self.should_enable_maxscore_for_tenant(&tenant_id) {
+                schema.set_sparse_algorithm(SparseIndexAlgorithm::MaxScore);
             }
         }
 
@@ -2741,6 +2759,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             config.enable_schema,
             config.min_records_for_invocation,
             config.tenants_with_quantization_enabled.clone(),
+            config.tenants_with_maxscore_enabled.clone(),
             config.enable_log_scouting,
         ))
     }
