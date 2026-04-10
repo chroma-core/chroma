@@ -14,3 +14,5 @@ mod ms_11_vectorized_scoring;
 mod ms_12_cursor_view;
 mod ms_13_cursor_lazy;
 mod ms_14_three_batch_pipeline;
+mod ms_15_multi_window;
+mod ms_16_lazy_partial_load;
