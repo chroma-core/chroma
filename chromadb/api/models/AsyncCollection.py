@@ -29,6 +29,7 @@ from chromadb.execution.expression.plan import Search
 
 if TYPE_CHECKING:
     from chromadb.api import AsyncServerAPI  # noqa: F401
+    from chromadb.execution.expression.operator import Where as WhereExpression
 
 
 class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
@@ -512,7 +513,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
     async def delete(
         self,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = None,
+        where: Optional[Union[Where, "WhereExpression"]] = None,
         where_document: Optional[WhereDocument] = None,
         limit: Optional[int] = None,
     ) -> DeleteResult:
@@ -520,8 +521,11 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
         Args:
             ids: The ids of the embeddings to delete
-            where: A Where type dict used to filter the delection by. E.g. `{"$and": [{"color" : "red"}, {"price": {"$gte": 4.20}}]}`. Optional.
-            where_document: A WhereDocument type dict used to filter the deletion by the document content. E.g. `{"$contains": "hello"}`. Optional.
+            where: Metadata filter. Accepts a dict or a Where DSL expression
+                (e.g. ``Key("field") == value``). DSL expressions can include
+                ``Key.DOCUMENT`` conditions, which replace ``where_document``.
+            where_document: Document content filter. Cannot be used together
+                with a Where DSL expression.
             limit: Maximum number of records to delete. Can only be used with where or where_document filters.
 
         Returns:
@@ -530,6 +534,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         Raises:
             ValueError: If you don't provide either ids, where, or where_document
             ValueError: If limit is specified without a where or where_document clause.
+            ValueError: If both a Where DSL expression and where_document are provided.
         """
         delete_request = self._validate_and_prepare_delete_request(
             ids, where, where_document, limit=limit
