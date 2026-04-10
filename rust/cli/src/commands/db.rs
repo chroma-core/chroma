@@ -1,14 +1,13 @@
 use crate::client::admin_client::get_admin_client;
+use crate::terminal::{SystemTerminal, Terminal};
 use crate::ui_utils::copy_to_clipboard;
 use crate::utils::{
-    get_current_profile, CliError, Profile, UtilsError, CHROMA_API_KEY_ENV_VAR,
-    CHROMA_DATABASE_ENV_VAR, CHROMA_TENANT_ENV_VAR, SELECTION_LIMIT,
+    get_current_profile, CliError, Profile, CHROMA_API_KEY_ENV_VAR, CHROMA_DATABASE_ENV_VAR,
+    CHROMA_TENANT_ENV_VAR, SELECTION_LIMIT,
 };
 use chroma_types::Database;
 use clap::{Args, Subcommand, ValueEnum};
 use colored::Colorize;
-use dialoguer::theme::ColorfulTheme;
-use dialoguer::{Input, Select};
 use std::error::Error;
 use std::path::Path;
 use std::{fmt, fs};
@@ -244,11 +243,8 @@ fn get_js_connection(tenant_id: String, db_name: String, api_key: String) -> Str
     )
 }
 
-fn prompt_db_name() -> Result<String, CliError> {
-    let input = Input::with_theme(&ColorfulTheme::default())
-        .interact_text()
-        .map_err(|_| UtilsError::UserInputFailed)?;
-    Ok(input)
+fn prompt_db_name(term: &mut dyn Terminal) -> Result<String, CliError> {
+    term.prompt_input()
 }
 
 fn validate_db_name(db_name: &str) -> Result<String, CliError> {
@@ -266,57 +262,51 @@ fn validate_db_name(db_name: &str) -> Result<String, CliError> {
     Ok(db_name.to_string())
 }
 
-fn select_db(dbs: &[Database]) -> Result<String, CliError> {
+fn select_db(dbs: &[Database], term: &mut dyn Terminal) -> Result<String, CliError> {
     let db_names: Vec<String> = dbs.iter().map(|db| db.name.clone()).collect();
-    let selection = Select::with_theme(&ColorfulTheme::default())
-        .items(&db_names)
-        .default(0)
-        .interact()
-        .map_err(|_| UtilsError::UserInputFailed)?;
+    let selection = term.prompt_select(&db_names)?;
     let name = db_names[selection].clone();
-    println!("{}\n", name);
+    term.println(&format!("{}\n", name));
     Ok(name)
 }
 
-pub fn get_db_name(dbs: &[Database], prompt: &str) -> Result<String, CliError> {
+pub fn get_db_name(
+    dbs: &[Database],
+    prompt: &str,
+    term: &mut dyn Terminal,
+) -> Result<String, CliError> {
     if dbs.is_empty() {
         return Err(CliError::Db(DbError::NoDBs));
     }
 
-    println!("{}", prompt.blue().bold());
+    term.println(&format!("{}", prompt.blue().bold()));
     let name = match dbs.len() {
-        0..=SELECTION_LIMIT => select_db(dbs),
-        _ => prompt_db_name(),
+        0..=SELECTION_LIMIT => select_db(dbs, term),
+        _ => prompt_db_name(term),
     }?;
 
     validate_db_name(name.as_str())
 }
 
-fn select_language() -> Result<Language, CliError> {
+fn select_language(term: &mut dyn Terminal) -> Result<Language, CliError> {
     let languages: Vec<Language> = Language::iter().collect();
     let options: Vec<String> = languages
         .iter()
         .map(|language| format!("{} {}", ">".yellow(), capitalize(&language.to_string())))
         .collect();
 
-    println!("{}", select_language_message().blue().bold());
-    let selection = Select::with_theme(&ColorfulTheme::default())
-        .items(&options)
-        .default(0)
-        .interact()
-        .map_err(|_| CliError::Utils(UtilsError::UserInputFailed))?;
+    term.println(&format!("{}", select_language_message().blue().bold()));
+    let selection = term.prompt_select(&options)?;
 
     let language = languages[selection].clone();
-    println!("{}", language.to_string().green());
+    term.println(&format!("{}", language.to_string().green()));
 
     Ok(language)
 }
 
-fn confirm_db_deletion(name: &str) -> Result<bool, CliError> {
-    println!("{}", db_delete_confirm_message());
-    let confirm: String = Input::with_theme(&ColorfulTheme::default())
-        .interact_text()
-        .map_err(|_| UtilsError::UserInputFailed)?;
+fn confirm_db_deletion(name: &str, term: &mut dyn Terminal) -> Result<bool, CliError> {
+    term.println(&db_delete_confirm_message());
+    let confirm = term.prompt_input()?;
     Ok(confirm.eq(name))
 }
 
@@ -362,13 +352,17 @@ fn create_env_connection(current_profile: Profile, db_name: String) -> Result<()
     Ok(())
 }
 
-pub async fn connect(args: ConnectArgs, current_profile: Profile) -> Result<(), CliError> {
+pub async fn connect(
+    args: ConnectArgs,
+    current_profile: Profile,
+    term: &mut dyn Terminal,
+) -> Result<(), CliError> {
     let admin_client = get_admin_client(Some(&current_profile), args.db_args.dev);
     let dbs = admin_client.list_databases().await?;
 
     let name = match args.name {
         Some(name) => validate_db_name(&name),
-        None => get_db_name(&dbs, &connect_db_name_prompt()),
+        None => get_db_name(&dbs, &connect_db_name_prompt(), term),
     }?;
 
     if !dbs.iter().any(|db| db.name == name) {
@@ -379,20 +373,26 @@ pub async fn connect(args: ConnectArgs, current_profile: Profile) -> Result<(), 
         if create_env_connection(current_profile, name).is_err() {
             return Err(DbError::EnvFile.into());
         }
-        println!("{}", env_file_created_message());
+        term.println(&env_file_created_message());
         return Ok(());
     }
 
     if args.env_vars {
-        println!("{}={}", CHROMA_API_KEY_ENV_VAR, current_profile.api_key);
-        println!("{}={}", CHROMA_TENANT_ENV_VAR, current_profile.tenant_id);
-        println!("{}={}", CHROMA_DATABASE_ENV_VAR, name);
+        term.println(&format!(
+            "{}={}",
+            CHROMA_API_KEY_ENV_VAR, current_profile.api_key
+        ));
+        term.println(&format!(
+            "{}={}",
+            CHROMA_TENANT_ENV_VAR, current_profile.tenant_id
+        ));
+        term.println(&format!("{}={}", CHROMA_DATABASE_ENV_VAR, name));
         return Ok(());
     }
 
     let language = match args.language {
         Some(language) => language,
-        None => select_language()?,
+        None => select_language(term)?,
     };
 
     let connection_string = language.get_connection(
@@ -400,58 +400,66 @@ pub async fn connect(args: ConnectArgs, current_profile: Profile) -> Result<(), 
         name,
         admin_client.api_key.unwrap_or("".to_string()),
     );
-    println!("{}", connection_string);
+    term.println(&connection_string);
 
     copy_to_clipboard(&connection_string)?;
 
     Ok(())
 }
 
-pub async fn create(args: CreateArgs, current_profile: Profile) -> Result<(), CliError> {
+pub async fn create(
+    args: CreateArgs,
+    current_profile: Profile,
+    term: &mut dyn Terminal,
+) -> Result<(), CliError> {
     let admin_client = get_admin_client(Some(&current_profile), args.db_args.dev);
     let dbs = admin_client.list_databases().await?;
 
     let mut name = match args.name {
         Some(name) => name,
         None => {
-            println!("{}", create_db_name_prompt());
-            prompt_db_name()?
+            term.println(&create_db_name_prompt());
+            prompt_db_name(term)?
         }
     };
     name = validate_db_name(&name)?;
 
     if dbs.iter().any(|db| db.name == name) {
-        println!("{}", create_db_already_exists_message(&name));
+        term.println(&create_db_already_exists_message(&name));
         return Ok(());
     }
 
-    println!("{}", creating_db_message(&name));
+    term.println(&creating_db_message(&name));
 
     admin_client.create_database(name.clone()).await?;
 
-    println!("{}", create_db_success_message(&name));
+    term.println(&create_db_success_message(&name));
 
     Ok(())
 }
 
-pub async fn delete(args: DeleteArgs, current_profile: Profile) -> Result<(), CliError> {
+pub async fn delete(
+    args: DeleteArgs,
+    current_profile: Profile,
+    term: &mut dyn Terminal,
+) -> Result<(), CliError> {
     let admin_client = get_admin_client(Some(&current_profile), args.db_args.dev);
     let dbs = admin_client.list_databases().await?;
 
     let name = match args.name {
         Some(name) => validate_db_name(&name),
-        None => get_db_name(&dbs, &delete_db_name_prompt()),
+        None => get_db_name(&dbs, &delete_db_name_prompt(), term),
     }?;
 
     if !dbs.iter().any(|db| db.name == name) {
         return Err(CliError::Db(DbError::DbNotFound(name)));
     }
 
-    if args.force || confirm_db_deletion(&name)? {
+    if args.force || confirm_db_deletion(&name, term)? {
         admin_client.delete_database(name.clone()).await?;
-        println!("{}", db_delete_success_message(&name));
+        term.println(&db_delete_success_message(&name));
     } else {
-        println!("{}", db_delete_cancelled())
+        term.println(&db_delete_cancelled())
     }
 
     Ok(())
@@ -461,18 +469,19 @@ pub async fn list(
     args: ListArgs,
     profile_name: String,
     current_profile: Profile,
+    term: &mut dyn Terminal,
 ) -> Result<(), CliError> {
     let admin_client = get_admin_client(Some(&current_profile), args.db_args.dev);
     let dbs = admin_client.list_databases().await?;
 
     if dbs.is_empty() {
-        println!("{}", no_dbs_message(&profile_name));
+        term.println(&no_dbs_message(&profile_name));
         return Ok(());
     }
 
-    println!("{}", list_dbs_message(&dbs));
+    term.println(&list_dbs_message(&dbs));
     for db in dbs {
-        println!("{} {}", ">".yellow(), db.name);
+        term.println(&format!("{} {}", ">".yellow(), db.name));
     }
 
     Ok(())
@@ -480,14 +489,15 @@ pub async fn list(
 
 pub fn db_command(command: DbCommand) -> Result<(), CliError> {
     let (profile_name, current_profile) = get_current_profile()?;
+    let mut term = SystemTerminal;
 
     let runtime = tokio::runtime::Runtime::new().map_err(|_| DbError::RuntimeError)?;
     runtime.block_on(async {
         match command {
-            DbCommand::Connect(args) => connect(args, current_profile).await,
-            DbCommand::Create(args) => create(args, current_profile).await,
-            DbCommand::Delete(args) => delete(args, current_profile).await,
-            DbCommand::List(args) => list(args, profile_name, current_profile).await,
+            DbCommand::Connect(args) => connect(args, current_profile, &mut term).await,
+            DbCommand::Create(args) => create(args, current_profile, &mut term).await,
+            DbCommand::Delete(args) => delete(args, current_profile, &mut term).await,
+            DbCommand::List(args) => list(args, profile_name, current_profile, &mut term).await,
         }
     })?;
     Ok(())

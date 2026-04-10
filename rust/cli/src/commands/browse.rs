@@ -2,6 +2,7 @@ use crate::client::admin_client::AdminClient;
 use crate::client::chroma_client::ChromaClient;
 use crate::commands::db::get_db_name;
 use crate::commands::install::InstallError;
+use crate::terminal::{SystemTerminal, Terminal};
 use crate::tui::collection_browser::CollectionBrowser;
 use crate::ui_utils::Theme;
 use crate::utils::{
@@ -76,6 +77,7 @@ async fn parse_local_args(
 pub async fn get_cloud_client(
     db_name: Option<String>,
     collection_name: &str,
+    term: &mut dyn Terminal,
 ) -> Result<ChromaClient, CliError> {
     let profile = get_current_profile()?;
     let admin_client = AdminClient::from_profile(AddressBook::cloud().frontend_url, &profile.1);
@@ -93,7 +95,7 @@ pub async fn get_cloud_client(
             databases[0].name.clone(),
         )),
         _ => {
-            let input_name = get_db_name(&databases, &input_db_prompt(collection_name))?;
+            let input_name = get_db_name(&databases, &input_db_prompt(collection_name), term)?;
             let _verified = admin_client.get_database(input_name.clone()).await?;
             Ok(ChromaClient::with_admin_client(admin_client, input_name))
         }
@@ -106,12 +108,13 @@ fn local_setup(args: BrowseArgs) -> bool {
 }
 
 pub fn browse(args: BrowseArgs) -> Result<(), CliError> {
+    let mut term = SystemTerminal;
     let runtime = tokio::runtime::Runtime::new().map_err(|_| InstallError::RuntimeError)?;
     runtime.block_on(async {
         let (client, _handle) = match local_setup(args.clone()) {
             true => parse_local_args(args.clone()).await,
             false => Ok((
-                get_cloud_client(args.db_name, &args.collection_name).await?,
+                get_cloud_client(args.db_name, &args.collection_name, &mut term).await?,
                 None,
             )),
         }?;

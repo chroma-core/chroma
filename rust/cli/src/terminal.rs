@@ -1,10 +1,12 @@
 use crate::utils::{CliError, UtilsError};
 use dialoguer::theme::ColorfulTheme;
-use dialoguer::Input;
+use dialoguer::{Confirm, Input, Select};
 
 pub trait Terminal {
     fn println(&mut self, msg: &str);
     fn prompt_input(&mut self) -> Result<String, CliError>;
+    fn prompt_select(&mut self, items: &[String]) -> Result<usize, CliError>;
+    fn prompt_confirm(&mut self, prompt: &str) -> Result<bool, CliError>;
 }
 
 pub struct SystemTerminal;
@@ -19,6 +21,23 @@ impl Terminal for SystemTerminal {
             .interact_text()
             .map_err(|_| UtilsError::UserInputFailed)?;
         Ok(input)
+    }
+
+    fn prompt_select(&mut self, items: &[String]) -> Result<usize, CliError> {
+        let selection = Select::with_theme(&ColorfulTheme::default())
+            .items(items)
+            .default(0)
+            .interact()
+            .map_err(|_| UtilsError::UserInputFailed)?;
+        Ok(selection)
+    }
+
+    fn prompt_confirm(&mut self, prompt: &str) -> Result<bool, CliError> {
+        let confirmed = Confirm::new()
+            .with_prompt(prompt)
+            .interact()
+            .map_err(|_| UtilsError::UserInputFailed)?;
+        Ok(confirmed)
     }
 }
 
@@ -46,6 +65,16 @@ pub mod test_terminal {
             self.inputs = inputs.into_iter().map(|s| s.to_string()).collect();
             self
         }
+
+        fn next_input(&mut self) -> Result<String, CliError> {
+            if self.input_index < self.inputs.len() {
+                let input = self.inputs[self.input_index].clone();
+                self.input_index += 1;
+                Ok(input)
+            } else {
+                Err(UtilsError::UserInputFailed.into())
+            }
+        }
     }
 
     impl Terminal for TestTerminal {
@@ -54,13 +83,19 @@ pub mod test_terminal {
         }
 
         fn prompt_input(&mut self) -> Result<String, CliError> {
-            if self.input_index < self.inputs.len() {
-                let input = self.inputs[self.input_index].clone();
-                self.input_index += 1;
-                Ok(input)
-            } else {
-                Err(UtilsError::UserInputFailed.into())
-            }
+            self.next_input()
+        }
+
+        fn prompt_select(&mut self, _items: &[String]) -> Result<usize, CliError> {
+            let input = self.next_input()?;
+            input
+                .parse::<usize>()
+                .map_err(|_| UtilsError::UserInputFailed.into())
+        }
+
+        fn prompt_confirm(&mut self, _prompt: &str) -> Result<bool, CliError> {
+            let input = self.next_input()?;
+            Ok(input.to_lowercase() == "y" || input.to_lowercase() == "yes")
         }
     }
 }

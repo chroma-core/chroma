@@ -1,3 +1,4 @@
+use crate::terminal::{SystemTerminal, Terminal};
 use crate::ui_utils::read_secret;
 use crate::utils::UtilsError::UserInputFailed;
 use crate::utils::{
@@ -5,8 +6,6 @@ use crate::utils::{
 };
 use clap::Parser;
 use colored::Colorize;
-use dialoguer::theme::ColorfulTheme;
-use dialoguer::{Input, Select};
 use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::header::USER_AGENT;
 use reqwest::Client;
@@ -233,7 +232,11 @@ async fn download_github_file<T: DeserializeOwned>(name: &str) -> Result<T, Box<
     Ok(file)
 }
 
-async fn download_sample_app(name: &String, path: &String) -> Result<(), Box<dyn Error>> {
+async fn download_sample_app(
+    name: &String,
+    path: &String,
+    term: &mut dyn Terminal,
+) -> Result<(), Box<dyn Error>> {
     let url = format!(
         "https://api.github.com/repos/chroma-core/chroma/contents/sample_apps/{}",
         name,
@@ -243,7 +246,11 @@ async fn download_sample_app(name: &String, path: &String) -> Result<(), Box<dyn
 
     let client = Client::new();
 
-    println!("{} {}", "Downloading sample app".bold(), name.bold());
+    term.println(&format!(
+        "{} {}",
+        "Downloading sample app".bold(),
+        name.bold()
+    ));
 
     let progress = ProgressBar::new_spinner();
     progress.set_style(
@@ -258,7 +265,7 @@ async fn download_sample_app(name: &String, path: &String) -> Result<(), Box<dyn
 
     progress.finish();
 
-    println!("\n{}", "Download complete!".bold());
+    term.println(&format!("\n{}", "Download complete!".bold()));
 
     Ok(())
 }
@@ -325,16 +332,16 @@ fn extract_zip_file(
     Ok(())
 }
 
-fn select_app(apps: &[AppListing], cli_config: &CliConfig) -> Result<String, CliError> {
+fn select_app(
+    apps: &[AppListing],
+    cli_config: &CliConfig,
+    term: &mut dyn Terminal,
+) -> Result<String, CliError> {
     let display_names: Vec<String> = get_display_app_names(apps, cli_config)?;
     let app_names = apps.iter().map(|a| &a.name).collect::<Vec<_>>();
-    let selection = Select::with_theme(&ColorfulTheme::default())
-        .items(&display_names)
-        .default(0)
-        .interact()
-        .map_err(|_| UserInputFailed)?;
+    let selection = term.prompt_select(&display_names)?;
     let name = app_names[selection].clone();
-    println!("{}\n", name);
+    term.println(&format!("{}\n", name));
     Ok(name)
 }
 
@@ -379,16 +386,12 @@ fn prompt_app_name(
     apps: &[AppListing],
     prompt: &str,
     cli_config: &CliConfig,
+    term: &mut dyn Terminal,
 ) -> Result<String, CliError> {
-    println!("{}", prompt.blue().bold());
+    term.println(&format!("{}", prompt.blue().bold()));
     let name = match apps.len() {
-        0..=SELECTION_LIMIT => select_app(apps, cli_config),
-        _ => {
-            let input = Input::with_theme(&ColorfulTheme::default())
-                .interact_text()
-                .map_err(|_| UserInputFailed)?;
-            Ok(input)
-        }
+        0..=SELECTION_LIMIT => select_app(apps, cli_config, term),
+        _ => term.prompt_input(),
     }?;
     Ok(name)
 }
@@ -397,10 +400,11 @@ async fn get_app(
     apps: &[AppListing],
     name: Option<String>,
     cli_config: &CliConfig,
+    term: &mut dyn Terminal,
 ) -> Result<(String, String), CliError> {
     let app_name = match name {
         Some(app_name) => Ok(app_name),
-        None => prompt_app_name(apps, &prompt_app_name_message(), cli_config),
+        None => prompt_app_name(apps, &prompt_app_name_message(), cli_config, term),
     }?;
 
     let app = apps
@@ -420,11 +424,15 @@ async fn get_app(
     Ok((app_name, app.version.clone()))
 }
 
-fn show_apps(apps: &[AppListing], cli_config: &CliConfig) -> Result<(), CliError> {
+fn show_apps(
+    apps: &[AppListing],
+    cli_config: &CliConfig,
+    term: &mut dyn Terminal,
+) -> Result<(), CliError> {
     let app_listings = get_display_app_names(apps, cli_config)?;
-    println!("{}", show_apps_message().blue().bold());
+    term.println(&format!("{}", show_apps_message().blue().bold()));
     app_listings.iter().for_each(|listing| {
-        println!("{} {}", ">".yellow(), listing,);
+        term.println(&format!("{} {}", ">".yellow(), listing));
     });
     Ok(())
 }
@@ -462,6 +470,7 @@ fn get_app_env_variables(
     app_config: &SampleAppConfig,
     local: bool,
     db_name: Option<String>,
+    term: &mut dyn Terminal,
 ) -> Result<SampleAppEnvVariables, CliError> {
     let mut env_variables = match local {
         false => {
@@ -488,17 +497,17 @@ fn get_app_env_variables(
             env_variables.0.insert(env_var.name.clone(), "".to_string());
         });
 
-    println!(
+    term.println(&format!(
         "{}",
         prompt_env_variables_message(&app_config.required_env_variables)
             .blue()
             .bold()
-    );
-    let selection = Select::with_theme(&ColorfulTheme::default())
-        .items(&["Set with the installer", "Manually set later in .env"])
-        .default(0)
-        .interact()
-        .map_err(|_| UserInputFailed)?;
+    ));
+    let items = vec![
+        "Set with the installer".to_string(),
+        "Manually set later in .env".to_string(),
+    ];
+    let selection = term.prompt_select(&items)?;
 
     if selection == 0 {
         for env_var in app_config.required_env_variables.clone() {
@@ -511,34 +520,34 @@ fn get_app_env_variables(
     Ok(env_variables)
 }
 
-fn display_run_instructions(app_config: SampleAppConfig) {
+fn display_run_instructions(app_config: SampleAppConfig, term: &mut dyn Terminal) {
     let instructions = app_config
         .startup_commands
         .iter()
         .map(|(key, value)| format!("{}\n{}", key.underline(), value))
         .collect::<Vec<String>>()
         .join("\n\n");
-    println!(
+    term.println(&format!(
         "\n\n{}\n{}",
         "Installation completed!".bold().blue(),
         instructions
-    );
+    ));
 }
 
-async fn install_sample_app(args: InstallArgs) -> Result<(), CliError> {
+async fn install_sample_app(args: InstallArgs, term: &mut dyn Terminal) -> Result<(), CliError> {
     let mut cli_config = read_config()?;
     let apps = download_github_file::<Vec<AppListing>>("sample_apps/listings.json")
         .await
         .map_err(|_| InstallError::ListingsDownloadFailed)?;
     if args.list {
-        show_apps(&apps, &cli_config)?;
+        show_apps(&apps, &cli_config, term)?;
         return Ok(());
     }
 
-    let (app_name, app_version) = get_app(&apps, args.name, &cli_config).await?;
+    let (app_name, app_version) = get_app(&apps, args.name, &cli_config, term).await?;
 
     // Download files
-    download_sample_app(&app_name, &".".to_string())
+    download_sample_app(&app_name, &".".to_string(), term)
         .await
         .map_err(|_| InstallError::GithubDownloadFailed)?;
 
@@ -550,7 +559,7 @@ async fn install_sample_app(args: InstallArgs) -> Result<(), CliError> {
     if !args.local && args.db.is_none() {
         return Err(InstallError::DatabaseRequired.into());
     }
-    let env_variables = get_app_env_variables(&app_config, args.local, args.db)?;
+    let env_variables = get_app_env_variables(&app_config, args.local, args.db, term)?;
     write_env_file(env_variables, format!("./{}/.env", app_name))
         .map_err(|_| InstallError::EnvFileWriteFailed)?;
 
@@ -562,13 +571,14 @@ async fn install_sample_app(args: InstallArgs) -> Result<(), CliError> {
     write_config(&cli_config)?;
 
     // Output run instructions
-    display_run_instructions(app_config);
+    display_run_instructions(app_config, term);
 
     Ok(())
 }
 
 pub fn install(args: InstallArgs) -> Result<(), CliError> {
+    let mut term = SystemTerminal;
     let runtime = tokio::runtime::Runtime::new().map_err(|_| InstallError::RuntimeError)?;
-    runtime.block_on(async { install_sample_app(args).await })?;
+    runtime.block_on(async { install_sample_app(args, &mut term).await })?;
     Ok(())
 }
