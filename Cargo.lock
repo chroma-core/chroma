@@ -1743,6 +1743,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "chroma-faults"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chroma-config",
+ "chroma-types",
+ "parking_lot",
+ "tokio",
+ "tonic 0.14.5",
+]
+
+[[package]]
 name = "chroma-frontend"
 version = "1.0.0"
 dependencies = [
@@ -1902,6 +1914,7 @@ dependencies = [
  "chroma-cache",
  "chroma-config",
  "chroma-error",
+ "chroma-faults",
  "chroma-log",
  "chroma-storage",
  "chroma-tracing",
