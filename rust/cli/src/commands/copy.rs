@@ -4,6 +4,7 @@ use crate::client::collection::CollectionAPIError;
 use crate::commands::browse::BrowseError;
 use crate::commands::db::get_db_name;
 use crate::commands::install::InstallError;
+use crate::terminal::{SystemTerminal, Terminal};
 use crate::utils::{
     get_current_profile, parse_host, parse_local, parse_path, AddressBook, CliError, Environment,
     ErrorResponse, Profile, UtilsError,
@@ -11,8 +12,6 @@ use crate::utils::{
 use chroma_types::{CollectionConfiguration, IncludeList};
 use clap::Parser;
 use crossterm::style::Stylize;
-use dialoguer::theme::ColorfulTheme;
-use dialoguer::Select;
 use futures::{stream, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -95,6 +94,7 @@ async fn get_cloud_client(
     profile: Profile,
     db_name: Option<String>,
     from: bool,
+    term: &mut dyn Terminal,
 ) -> Result<ChromaClient, CliError> {
     let host = AddressBook::cloud().frontend_url;
     let admin_client = AdminClient::from_profile(host, &profile);
@@ -112,7 +112,7 @@ async fn get_cloud_client(
             databases[0].name.clone(),
         )),
         _ => {
-            let input_name = get_db_name(&databases, &select_db_prompt(from))?;
+            let input_name = get_db_name(&databases, &select_db_prompt(from), term)?;
             let _verified = admin_client.get_database(input_name.clone()).await?;
             Ok(ChromaClient::with_admin_client(admin_client, input_name))
         }
@@ -143,9 +143,10 @@ async fn get_chroma_clients(
     source: Environment,
     target: Environment,
     profile: Profile,
+    term: &mut dyn Terminal,
 ) -> Result<(ChromaClient, ChromaClient, Option<JoinHandle<()>>), CliError> {
     let (local_client, handle) = get_local_client(&args.host, &args.path).await?;
-    let cloud_client = get_cloud_client(profile, args.db.clone(), args.from_cloud).await?;
+    let cloud_client = get_cloud_client(profile, args.db.clone(), args.from_cloud, term).await?;
 
     match (source, target) {
         (Environment::Cloud, Environment::Local) => Ok((cloud_client, local_client, handle)),
@@ -154,7 +155,10 @@ async fn get_chroma_clients(
     }
 }
 
-fn get_target_and_destination(args: &CopyArgs) -> Result<(Environment, Environment), CliError> {
+fn get_target_and_destination(
+    args: &CopyArgs,
+    term: &mut dyn Terminal,
+) -> Result<(Environment, Environment), CliError> {
     let (source, target) = match (
         args.from_cloud,
         args.from_local,
@@ -167,18 +171,16 @@ fn get_target_and_destination(args: &CopyArgs) -> Result<(Environment, Environme
         (_, _, _, true) => (Environment::Cloud, Environment::Local),
         _ => {
             let prompt = select_chroma_server_prompt().bold().blue();
-            println!("{}", prompt);
-            let options = vec![Environment::Cloud, Environment::Local];
-            let selection = Select::with_theme(&ColorfulTheme::default())
-                .items(&options)
-                .default(0)
-                .interact()
-                .map_err(|_| UtilsError::UserInputFailed)?;
-            let selected_option = &options[selection];
-            println!("{}\n", selected_option);
-            match selected_option {
-                Environment::Cloud => (Environment::Cloud, Environment::Local),
-                Environment::Local => (Environment::Local, Environment::Cloud),
+            term.println(&format!("{}", prompt));
+            let options = vec![
+                Environment::Cloud.to_string(),
+                Environment::Local.to_string(),
+            ];
+            let selection = term.prompt_select(&options)?;
+            term.println(&format!("{}\n", &options[selection]));
+            match selection {
+                0 => (Environment::Cloud, Environment::Local),
+                _ => (Environment::Local, Environment::Cloud),
             }
         }
     };
@@ -193,6 +195,7 @@ async fn copy_collections(
     all: bool,
     step: u32,
     concurrent: u32,
+    term: &mut dyn Terminal,
 ) -> Result<(), CliError> {
     let collections = if all {
         source
@@ -215,9 +218,9 @@ async fn copy_collections(
         return Err(CopyError::NoCollections.into());
     }
 
-    println!("{}", start_copy_prompt(collections.len()).bold().blue());
+    term.println(&format!("{}", start_copy_prompt(collections.len()).bold().blue()));
 
-    println!("Verifying collections...");
+    term.println("Verifying collections...");
     // Verify that collections don't exist on target
     for collection in collections.clone() {
         if target.get_collection(collection.name.clone()).await.is_ok() {
@@ -244,7 +247,7 @@ async fn copy_collections(
             .await
             .map_err(|_| ChromaClientError::CreateCollection(collection.name.clone()))?;
 
-        println!("Copying collection: {}", collection.name);
+        term.println(&format!("Copying collection: {}", collection.name));
 
         let collection_progress = ProgressBar::new(size as u64);
         collection_progress.set_style(
@@ -316,12 +319,13 @@ async fn copy_collections(
         collection_progress.finish();
     }
 
-    println!("Copy Completed!");
+    term.println("Copy Completed!");
 
     Ok(())
 }
 
 pub fn copy(args: CopyArgs) -> Result<(), CliError> {
+    let mut term = SystemTerminal;
     let runtime = tokio::runtime::Runtime::new().map_err(|_| InstallError::RuntimeError)?;
     runtime.block_on(async {
         if !args.all && args.collections.is_empty() {
@@ -329,9 +333,9 @@ pub fn copy(args: CopyArgs) -> Result<(), CliError> {
         }
 
         let (_, profile) = get_current_profile()?;
-        let (source, target) = get_target_and_destination(&args)?;
+        let (source, target) = get_target_and_destination(&args, &mut term)?;
         let (source_client, target_client, _handle) =
-            get_chroma_clients(&args, source, target, profile).await?;
+            get_chroma_clients(&args, source, target, profile, &mut term).await?;
         copy_collections(
             source_client,
             target_client,
@@ -339,6 +343,7 @@ pub fn copy(args: CopyArgs) -> Result<(), CliError> {
             args.all,
             args.batch,
             args.concurrent,
+            &mut term,
         )
         .await?;
         Ok::<(), CliError>(())
