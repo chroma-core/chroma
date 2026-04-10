@@ -23,9 +23,10 @@ fn make_view_cursor(entries_per_block: &[&[(u32, f32)]]) -> (Vec<Vec<u8>>, Posti
     let raw_refs: Vec<&[u8]> = raw_bytes.iter().map(|v| v.as_slice()).collect();
     let cursor = PostingCursor::open(raw_refs, dir_max_offsets, dir_max_weights);
 
-    // Safety: we return owned raw_bytes alongside the cursor so the
-    // references remain valid. The caller must keep raw_bytes alive.
-    let cursor: PostingCursor<'static> = unsafe { std::mem::transmute(cursor) };
+    // SAFETY: The cursor borrows from raw_bytes which is returned alongside
+    // it. The caller must keep raw_bytes alive for the cursor's lifetime.
+    let cursor: PostingCursor<'static> =
+        unsafe { std::mem::transmute::<PostingCursor<'_>, PostingCursor<'static>>(cursor) };
     (raw_bytes, cursor)
 }
 

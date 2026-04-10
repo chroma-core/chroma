@@ -7,7 +7,7 @@ use chroma_types::{
     DIRECTORY_PREFIX, MAX_BLOCK_ENTRIES,
 };
 use dashmap::DashMap;
-use futures::StreamExt;
+
 use std::iter;
 use thiserror::Error;
 use uuid::Uuid;
@@ -17,6 +17,11 @@ use crate::sparse::types::{decode_u32, encode_u32, Score, TopKHeap};
 const DEFAULT_BLOCK_SIZE: u32 = 1024;
 
 pub const SPARSE_POSTING_BLOCK_SIZE_BYTES: usize = 1024 * 1024;
+
+/// Dimensions with at most this many Arrow blocks use a View cursor
+/// (loaded eagerly into cache). Larger dimensions use Lazy cursors
+/// whose blocks are loaded on demand in Batch 2/3.
+const MAX_VIEW_BLOCKS: usize = 2;
 
 #[derive(Debug, Error)]
 pub enum MaxScoreError {
@@ -519,7 +524,7 @@ impl<'me> MaxScoreReader<'me> {
                 .posting_reader
                 .count_blocks_for_prefix(&meta.encoded_dim);
 
-            if block_count <= 2 {
+            if block_count <= MAX_VIEW_BLOCKS {
                 self.posting_reader
                     .load_blocks_for_prefixes(iter::once(meta.encoded_dim.as_str()))
                     .await;

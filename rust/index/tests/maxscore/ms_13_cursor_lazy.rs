@@ -1,7 +1,7 @@
 use crate::common;
 use chroma_index::sparse::maxscore::PostingCursor;
 use chroma_index::sparse::types::encode_u32;
-use chroma_types::{DirectoryBlock, SignedRoaringBitmap, SparsePostingBlock};
+use chroma_types::SignedRoaringBitmap;
 
 fn all_mask() -> SignedRoaringBitmap {
     SignedRoaringBitmap::Exclude(Default::default())
@@ -19,14 +19,13 @@ async fn lazy_cursor_advance_matches_eager() {
     let (_tmp, _prov, reader) = common::build_index(vectors).await;
     let encoded_dim = encode_u32(1);
 
-    let dir_block: SparsePostingBlock = reader
-        .posting_reader()
-        .get(&encoded_dim, u32::MAX)
+    let dir = reader
+        .get_directory(&encoded_dim)
         .await
         .unwrap()
-        .unwrap();
-    let dir = DirectoryBlock::from_block(dir_block).unwrap();
-    let (dir_max_offsets, dir_max_weights) = dir.entries();
+        .expect("directory should exist");
+    let dir_max_offsets = dir.max_offsets().to_vec();
+    let dir_max_weights = dir.max_weights().to_vec();
 
     // Load data blocks into cache
     reader
@@ -71,14 +70,13 @@ async fn lazy_cursor_get_value() {
     let (_tmp, _prov, reader) = common::build_index(vectors).await;
     let encoded_dim = encode_u32(1);
 
-    let dir_block: SparsePostingBlock = reader
-        .posting_reader()
-        .get(&encoded_dim, u32::MAX)
+    let dir = reader
+        .get_directory(&encoded_dim)
         .await
         .unwrap()
-        .unwrap();
-    let dir = DirectoryBlock::from_block(dir_block).unwrap();
-    let (offsets, weights) = dir.entries();
+        .expect("directory should exist");
+    let offsets = dir.max_offsets().to_vec();
+    let weights = dir.max_weights().to_vec();
 
     reader
         .posting_reader()
@@ -106,14 +104,13 @@ async fn lazy_cursor_drain_essential() {
     let (_tmp, _prov, reader) = common::build_index(vectors).await;
     let encoded_dim = encode_u32(1);
 
-    let dir_block: SparsePostingBlock = reader
-        .posting_reader()
-        .get(&encoded_dim, u32::MAX)
+    let dir = reader
+        .get_directory(&encoded_dim)
         .await
         .unwrap()
-        .unwrap();
-    let dir = DirectoryBlock::from_block(dir_block).unwrap();
-    let (offsets, weights) = dir.entries();
+        .expect("directory should exist");
+    let offsets = dir.max_offsets().to_vec();
+    let weights = dir.max_weights().to_vec();
 
     reader
         .posting_reader()
