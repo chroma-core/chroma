@@ -31,7 +31,7 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
         try:
             from InstructorEmbedding import INSTRUCTOR
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The InstructorEmbedding python package is not installed. Please install it with `pip install InstructorEmbedding`"
             )
 
@@ -53,7 +53,7 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
         """
         # Instructor only works with text documents
         if not all(isinstance(item, str) for item in input):
-            raise ValueError("Instructor only supports text documents, not images")
+            raise InvalidArgumentError("Instructor only supports text documents, not images")
 
         if self.instruction is None:
             embeddings = self._model.encode(input, convert_to_numpy=True)
@@ -99,6 +99,7 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
+from chromadb.errors import InvalidArgumentError
         # model_name is also used as the identifier for model path if stored locally.
         # Users should be able to change the path if needed, so we should not validate that.
         # e.g. moving file path from /v1/my-model.bin to /v2/my-model.bin

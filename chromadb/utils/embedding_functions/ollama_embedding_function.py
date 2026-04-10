@@ -31,7 +31,7 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
         try:
             from ollama import Client
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The ollama python package is not installed. Please install it with `pip install ollama`"
             )
 
@@ -99,9 +99,10 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
         if "model_name" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The model name cannot be changed after the embedding function has been initialized."
             )
+from chromadb.errors import InvalidArgumentError
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:

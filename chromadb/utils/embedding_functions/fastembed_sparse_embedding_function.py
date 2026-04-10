@@ -45,7 +45,7 @@ class FastembedSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         try:
             from fastembed import SparseTextEmbedding
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The fastembed python package is not installed. Please install it with `pip install fastembed`"
             )
 
@@ -59,7 +59,7 @@ class FastembedSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         self.lazy_load = lazy_load
         for key, value in kwargs.items():
             if not isinstance(value, (str, int, float, bool, list, dict, tuple)):
-                raise ValueError(f"Keyword argument {key} is not a primitive type")
+                raise InvalidArgumentError(f"Keyword argument {key} is not a primitive type")
         self.kwargs = kwargs
         self._model = SparseTextEmbedding(
             model_name, cache_dir, threads, cuda, device_ids, lazy_load, **kwargs
@@ -77,7 +77,7 @@ class FastembedSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         try:
             from fastembed import SparseTextEmbedding
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The fastembed python package is not installed. Please install it with `pip install fastembed`"
             )
         model = cast(SparseTextEmbedding, self._model)
@@ -90,7 +90,7 @@ class FastembedSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
                 list(input),
             )
         else:
-            raise ValueError(f"Invalid task: {self.task}")
+            raise InvalidArgumentError(f"Invalid task: {self.task}")
 
         sparse_vectors: SparseVectors = []
 
@@ -107,7 +107,7 @@ class FastembedSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         try:
             from fastembed import SparseTextEmbedding
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The fastembed python package is not installed. Please install it with `pip install fastembed`"
             )
         model = cast(SparseTextEmbedding, self._model)
@@ -122,7 +122,7 @@ class FastembedSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
                     list(input),
                 )
             else:
-                raise ValueError(f"Invalid task: {task}")
+                raise InvalidArgumentError(f"Invalid task: {task}")
 
             sparse_vectors: SparseVectors = []
 
@@ -186,6 +186,7 @@ class FastembedSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
+from chromadb.errors import InvalidArgumentError
         # model_name is also used as the identifier for model path if stored locally.
         # Users should be able to change the path if needed, so we should not validate that.
         # e.g. moving file path from /v1/my-model.bin to /v2/my-model.bin

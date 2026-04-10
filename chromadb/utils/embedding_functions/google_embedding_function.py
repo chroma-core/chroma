@@ -42,7 +42,7 @@ class GoogleGeminiEmbeddingFunction(EmbeddingFunction[Documents]):
         try:
             import google.genai as genai
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The google-genai python package is not installed. Please install it with `pip install google-genai`"
             )
 
@@ -55,11 +55,11 @@ class GoogleGeminiEmbeddingFunction(EmbeddingFunction[Documents]):
         self.location = location
         self.api_key = os.getenv(self.api_key_env_var) if self.api_key_env_var else None
         if self.api_key and self.vertexai:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "Vertex AI and API key are mutually exclusive in the client initializer."
             )
         if not self.api_key and not self.vertexai:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"The {self.api_key_env_var} environment variable must be set if vertexai is not enabled."
             )
 
@@ -78,11 +78,11 @@ class GoogleGeminiEmbeddingFunction(EmbeddingFunction[Documents]):
             Embeddings for the documents.
         """
         if not input:
-            raise ValueError("Input documents cannot be empty")
+            raise InvalidArgumentError("Input documents cannot be empty")
         if not isinstance(input, (list, tuple)):
-            raise ValueError("Input must be a list or tuple of documents")
+            raise InvalidArgumentError("Input must be a list or tuple of documents")
         if not all(isinstance(doc, str) for doc in input):
-            raise ValueError("All input documents must be strings")
+            raise InvalidArgumentError("All input documents must be strings")
 
         from google.genai.types import EmbedContentConfig
 
@@ -98,16 +98,16 @@ class GoogleGeminiEmbeddingFunction(EmbeddingFunction[Documents]):
                 config=config,
             )
         except Exception as e:
-            raise ValueError(f"Failed to generate embeddings: {str(e)}") from e
+            raise InvalidArgumentError(f"Failed to generate embeddings: {str(e)}") from e
 
         # Validate response structure
         if not hasattr(response, "embeddings") or not response.embeddings:
-            raise ValueError("No embeddings returned from the API")
+            raise InvalidArgumentError("No embeddings returned from the API")
 
         embeddings_list = []
         for ce in response.embeddings:
             if not hasattr(ce, "values"):
-                raise ValueError("Malformed embedding response: missing 'values'")
+                raise InvalidArgumentError("Malformed embedding response: missing 'values'")
             embeddings_list.append(np.array(ce.values, dtype=np.float32))
 
         return cast(Embeddings, embeddings_list)
@@ -133,7 +133,7 @@ class GoogleGeminiEmbeddingFunction(EmbeddingFunction[Documents]):
         location = config.get("location")
 
         if model_name is None:
-            raise ValueError("The model name is required.")
+            raise InvalidArgumentError("The model name is required.")
 
         return GoogleGeminiEmbeddingFunction(
             model_name=model_name,
@@ -163,23 +163,23 @@ class GoogleGeminiEmbeddingFunction(EmbeddingFunction[Documents]):
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
         if "model_name" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The model name cannot be changed after the embedding function has been initialized."
             )
         if "dimension" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The dimension cannot be changed after the embedding function has been initialized."
             )
         if "vertexai" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The vertexai cannot be changed after the embedding function has been initialized."
             )
         if "project" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The project cannot be changed after the embedding function has been initialized."
             )
         if "location" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The location cannot be changed after the embedding function has been initialized."
             )
 
@@ -229,7 +229,7 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
         try:
             import google.generativeai as genai
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The Google Generative AI python package is not installed. Please install it with `pip install google-generativeai`"
             )
 
@@ -246,7 +246,7 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
 
         self.api_key = api_key or os.getenv(self.api_key_env_var)
         if not self.api_key:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"The {self.api_key_env_var} environment variable is not set."
             )
 
@@ -268,7 +268,7 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
             Embeddings for the documents.
         """
         if not all(isinstance(item, str) for item in input):
-            raise ValueError(
+            raise InvalidArgumentError(
                 "Google Generative AI only supports text documents, not images"
             )
 
@@ -329,15 +329,15 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
         if "model_name" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The model name cannot be changed after the embedding function has been initialized."
             )
         if "task_type" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The task type cannot be changed after the embedding function has been initialized."
             )
         if "dimension" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The dimension cannot be changed after the embedding function has been initialized."
             )
 
@@ -376,7 +376,7 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
         try:
             import google.generativeai as palm
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The Google Generative AI python package is not installed. Please install it with `pip install google-generativeai`"
             )
 
@@ -393,7 +393,7 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
 
         self.api_key = api_key or os.getenv(self.api_key_env_var)
         if not self.api_key:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"The {self.api_key_env_var} environment variable is not set."
             )
 
@@ -414,7 +414,7 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
         """
         # Google PaLM only works with text documents
         if not all(isinstance(item, str) for item in input):
-            raise ValueError("Google PaLM only supports text documents, not images")
+            raise InvalidArgumentError("Google PaLM only supports text documents, not images")
 
         return [
             np.array(
@@ -455,7 +455,7 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
         if "model_name" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The model name cannot be changed after the embedding function has been initialized."
             )
 
@@ -501,7 +501,7 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
             import vertexai
             from vertexai.language_models import TextEmbeddingModel
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The vertexai python package is not installed. Please install it with `pip install google-cloud-aiplatform`"
             )
 
@@ -518,7 +518,7 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
 
         self.api_key = api_key or os.getenv(self.api_key_env_var)
         if not self.api_key:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"The {self.api_key_env_var} environment variable is not set."
             )
 
@@ -541,7 +541,7 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
         """
         # Google Vertex only works with text documents
         if not all(isinstance(item, str) for item in input):
-            raise ValueError("Google Vertex only supports text documents, not images")
+            raise InvalidArgumentError("Google Vertex only supports text documents, not images")
 
         embeddings_list: List[npt.NDArray[np.float32]] = []
         for text in input:
@@ -597,17 +597,18 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
         if "model_name" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The model name cannot be changed after the embedding function has been initialized."
             )
         if "project_id" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The project ID cannot be changed after the embedding function has been initialized."
             )
         if "region" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The region cannot be changed after the embedding function has been initialized."
             )
+from chromadb.errors import InvalidArgumentError
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:
