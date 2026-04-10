@@ -70,6 +70,8 @@ use crate::state_hash_table::StateHashTable;
 
 /// The gRPC metadata key for the backoff reason.
 const BACKOFF_REASON_MD_KEY: &str = "backoff-reason";
+/// The gRPC metadata key for the current enumeration offset.
+const ENUMERATION_OFFSET_MD_KEY: &str = "enumeration-offset";
 
 /// Construct a `tonic::Status` with a `backoff-reason` metadata entry.
 ///
@@ -79,12 +81,22 @@ fn status_with_backoff_reason(
     code: tonic::Code,
     message: impl Into<String>,
     reason: &str,
+    enumeration_offset: Option<u64>,
 ) -> Status {
     let mut metadata = tonic::metadata::MetadataMap::new();
     metadata.insert(
         BACKOFF_REASON_MD_KEY,
         reason.parse().expect("valid ascii metadata value"),
     );
+    if let Some(enumeration_offset) = enumeration_offset {
+        metadata.insert(
+            ENUMERATION_OFFSET_MD_KEY,
+            enumeration_offset
+                .to_string()
+                .parse()
+                .expect("valid ascii metadata value"),
+        );
+    }
     Status::with_metadata(code, message, metadata)
 }
 
@@ -1216,7 +1228,11 @@ impl LogServer {
     }
 
     #[allow(clippy::result_large_err)]
-    async fn check_for_backpressure(&self, collection_id: CollectionUuid) -> Result<(), Status> {
+    async fn check_for_backpressure(
+        &self,
+        database_name: &DatabaseName,
+        collection_id: CollectionUuid,
+    ) -> Result<(), Status> {
         let backpressure = {
             let backpressure = self.backpressure.lock();
             Arc::clone(&backpressure)
@@ -1229,10 +1245,32 @@ impl LogServer {
                 let cache_key = cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR);
                 cache.remove(&cache_key).await;
             }
+            let enumeration_offset = self
+                .scout_logs(Request::new(ScoutLogsRequest {
+                    collection_id: collection_id.to_string(),
+                    database_name: database_name.clone().into_string(),
+                }))
+                .await
+                .map(|response| {
+                    response
+                        .into_inner()
+                        .first_uninserted_record_offset
+                        .saturating_sub(1) as u64
+                })
+                .map_err(|err| {
+                    tracing::warn!(
+                        collection_id = %collection_id,
+                        error = %err,
+                        "Failed to fetch enumeration offset while reporting backpressure"
+                    );
+                    err
+                })
+                .ok();
             return Err(status_with_backoff_reason(
                 tonic::Code::ResourceExhausted,
                 "log needs compaction; too full",
                 "compaction",
+                enumeration_offset,
             ));
         }
         Ok(())
@@ -2055,7 +2093,8 @@ impl LogServer {
         if push_logs.records.is_empty() {
             return Err(Status::invalid_argument("Too few records"));
         }
-        self.check_for_backpressure(collection_id).await?;
+        self.check_for_backpressure(&database_name, collection_id)
+            .await?;
 
         // Extract CMEK from request
         let cmek = push_logs
@@ -2118,6 +2157,7 @@ impl LogServer {
                     tonic::Code::ResourceExhausted,
                     err.to_string(),
                     "batching",
+                    None,
                 ));
             }
             Err(err) => {
@@ -2498,12 +2538,13 @@ impl LogServer {
         let source_collection_id = Uuid::parse_str(&request.source_collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-        self.check_for_backpressure(source_collection_id).await?;
+        let database_name = DatabaseName::new(&request.database_name)
+            .ok_or_else(|| Status::invalid_argument("Database name invalid"))?;
+        self.check_for_backpressure(&database_name, source_collection_id)
+            .await?;
         let target_collection_id = Uuid::parse_str(&request.target_collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-        let database_name = DatabaseName::new(&request.database_name)
-            .ok_or_else(|| Status::invalid_argument("Database name invalid"))?;
         let topology_name = database_name
             .topology()
             .map(|t| TopologyName::new(&t))

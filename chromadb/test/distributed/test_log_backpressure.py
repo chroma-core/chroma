@@ -8,6 +8,7 @@ import time
 import numpy as np
 
 from chromadb.api import ClientAPI
+from chromadb.errors import ChromaError
 from chromadb.proto.logservice_pb2 import SealLogRequest, MigrateLogRequest
 from chromadb.proto.logservice_pb2_grpc import LogServiceStub
 from chromadb.test.conftest import (
@@ -49,6 +50,17 @@ def test_log_backpressure(
         except Exception as x:
             print(f"Caught exception:\n{x}")
             if 'log needs compaction before accepting more writes; please backoff exponentially and retry' in str(x):
+                assert isinstance(x, ChromaError)
+                assert x.indexing_status is not None
+                status = collection.get_indexing_status()
+                assert x.indexing_status["num_indexed_ops"] == status.num_indexed_ops
+                assert x.indexing_status["num_unindexed_ops"] == status.num_unindexed_ops
+                assert x.indexing_status["total_ops"] == status.total_ops
+                assert math.isclose(
+                    x.indexing_status["op_indexing_progress"],
+                    status.op_indexing_progress,
+                    rel_tol=1e-6,
+                )
                 excepted = True
                 break
     assert excepted, "Expected an exception to be thrown."
