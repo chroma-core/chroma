@@ -243,6 +243,7 @@ type SparseVectorIndexConfig struct {
 	EmbeddingFunction *EmbeddingFunctionConfiguration `json:"embedding_function,omitempty"`
 	SourceKey         *string                         `json:"source_key,omitempty"`
 	Bm25              *bool                           `json:"bm25,omitempty"`
+	Algorithm         *string                         `json:"algorithm,omitempty"`
 }
 
 type ValueTypes struct {
