@@ -6,9 +6,8 @@ use chroma_types::{
     Directory, DirectoryBlock, SignedRoaringBitmap, SparsePostingBlock, DIRECTORY_PREFIX,
     MAX_BLOCK_ENTRIES,
 };
-use std::iter;
 use dashmap::DashMap;
-use futures::StreamExt;
+use std::iter;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -17,6 +16,11 @@ use crate::sparse::types::{decode_u32, encode_u32, Score, TopKHeap};
 const DEFAULT_BLOCK_SIZE: u32 = 1024;
 
 pub const SPARSE_POSTING_BLOCK_SIZE_BYTES: usize = 1024 * 1024;
+
+/// Dimensions with at most this many Arrow blocks use a View cursor
+/// (loaded eagerly into cache). Larger dimensions use Lazy cursors
+/// whose blocks are loaded on demand in Batch 2/3.
+const MAX_VIEW_BLOCKS: usize = 2;
 
 #[derive(Debug, Error)]
 pub enum MaxScoreError {
@@ -421,10 +425,11 @@ impl<'me> MaxScoreReader<'me> {
         // large dimensions use Lazy cursors populated in Batch 2.
         let mut terms: Vec<TermState<'me>> = Vec::new();
         for meta in metas {
-            let block_count =
-                self.posting_reader.count_blocks_for_prefix(&meta.encoded_dim);
+            let block_count = self
+                .posting_reader
+                .count_blocks_for_prefix(&meta.encoded_dim);
 
-            if block_count <= 2 {
+            if block_count <= MAX_VIEW_BLOCKS {
                 self.posting_reader
                     .load_blocks_for_prefixes(iter::once(meta.encoded_dim.as_str()))
                     .await;
@@ -454,8 +459,7 @@ impl<'me> MaxScoreReader<'me> {
                     window_score: meta.max_score,
                 });
             } else {
-                let cursor =
-                    PostingCursor::open_lazy(meta.dir_max_offsets, meta.dir_max_weights);
+                let cursor = PostingCursor::open_lazy(meta.dir_max_offsets, meta.dir_max_weights);
                 terms.push(TermState {
                     cursor,
                     encoded_dim: meta.encoded_dim,
@@ -490,8 +494,7 @@ impl<'me> MaxScoreReader<'me> {
                 for t in terms[essential_idx..].iter_mut() {
                     if t.cursor.is_lazy() {
                         let dim = t.encoded_dim.clone();
-                        t.cursor
-                            .populate_all_from_cache(&self.posting_reader, &dim);
+                        t.cursor.populate_all_from_cache(&self.posting_reader, &dim);
                     }
                 }
             }
@@ -600,8 +603,7 @@ impl<'me> MaxScoreReader<'me> {
                     for t in terms.iter_mut() {
                         if t.cursor.is_lazy() {
                             let dim = t.encoded_dim.clone();
-                            t.cursor
-                                .populate_all_from_cache(&self.posting_reader, &dim);
+                            t.cursor.populate_all_from_cache(&self.posting_reader, &dim);
                         }
                     }
                 }

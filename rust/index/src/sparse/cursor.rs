@@ -50,15 +50,15 @@ pub struct PostingCursor<'view> {
 impl<'view> PostingCursor<'view> {
     // ── Constructors ────────────────────────────────────────────────
 
-    /// Create an eager cursor from fully deserialized posting blocks.
-    pub fn from_blocks(blocks: Vec<SparsePostingBlock>) -> Self {
-        let dir_max_offsets: Vec<u32> = blocks.iter().map(|b| b.max_offset).collect();
-        let dir_max_weights: Vec<f32> = blocks.iter().map(|b| b.max_weight).collect();
+    fn new_with_source(
+        source: CursorSource<'view>,
+        dir_max_offsets: Vec<u32>,
+        dir_max_weights: Vec<f32>,
+    ) -> Self {
         let dim_max = dir_max_weights.iter().copied().fold(0.0f32, f32::max);
-        let block_count = blocks.len();
-
+        let block_count = dir_max_offsets.len();
         PostingCursor {
-            source: CursorSource::Eager { blocks },
+            source,
             dir_max_offsets,
             dir_max_weights,
             dim_max,
@@ -72,6 +72,17 @@ impl<'view> PostingCursor<'view> {
             lookup_offset_buf: Vec::new(),
             lookup_buf_block_idx: usize::MAX,
         }
+    }
+
+    /// Create an eager cursor from fully deserialized posting blocks.
+    pub fn from_blocks(blocks: Vec<SparsePostingBlock>) -> Self {
+        let dir_max_offsets: Vec<u32> = blocks.iter().map(|b| b.max_offset).collect();
+        let dir_max_weights: Vec<f32> = blocks.iter().map(|b| b.max_weight).collect();
+        Self::new_with_source(
+            CursorSource::Eager { blocks },
+            dir_max_offsets,
+            dir_max_weights,
+        )
     }
 
     /// Create a view cursor from raw serialized byte slices already in
@@ -83,24 +94,11 @@ impl<'view> PostingCursor<'view> {
     ) -> Self {
         debug_assert_eq!(raw_blocks.len(), dir_max_offsets.len());
         debug_assert_eq!(raw_blocks.len(), dir_max_weights.len());
-        let dim_max = dir_max_weights.iter().copied().fold(0.0f32, f32::max);
-        let block_count = raw_blocks.len();
-
-        PostingCursor {
-            source: CursorSource::View { raw_blocks },
+        Self::new_with_source(
+            CursorSource::View { raw_blocks },
             dir_max_offsets,
             dir_max_weights,
-            dim_max,
-            block_count,
-            block_idx: 0,
-            pos: 0,
-            offset_buf: Vec::new(),
-            value_buf: Vec::new(),
-            buf_block_idx: usize::MAX,
-            drain_buf_block_idx: usize::MAX,
-            lookup_offset_buf: Vec::new(),
-            lookup_buf_block_idx: usize::MAX,
-        }
+        )
     }
 
     /// Create a lazy cursor with unloaded data blocks. The directory
@@ -108,26 +106,14 @@ impl<'view> PostingCursor<'view> {
     /// are populated via [`populate_from_cache`] / [`populate_all_from_cache`].
     pub fn open_lazy(dir_max_offsets: Vec<u32>, dir_max_weights: Vec<f32>) -> Self {
         debug_assert_eq!(dir_max_offsets.len(), dir_max_weights.len());
-        let dim_max = dir_max_weights.iter().copied().fold(0.0f32, f32::max);
         let block_count = dir_max_offsets.len();
-
-        PostingCursor {
-            source: CursorSource::Lazy {
+        Self::new_with_source(
+            CursorSource::Lazy {
                 raw_blocks: vec![None; block_count],
             },
             dir_max_offsets,
             dir_max_weights,
-            dim_max,
-            block_count,
-            block_idx: 0,
-            pos: 0,
-            offset_buf: Vec::new(),
-            value_buf: Vec::new(),
-            buf_block_idx: usize::MAX,
-            drain_buf_block_idx: usize::MAX,
-            lookup_offset_buf: Vec::new(),
-            lookup_buf_block_idx: usize::MAX,
-        }
+        )
     }
 
     // ── Lazy population ──────────────────────────────────────────────
@@ -196,6 +182,17 @@ impl<'view> PostingCursor<'view> {
 
     // ── Internal: buffer management ──────────────────────────────────
 
+    /// Get the raw serialized bytes for a block by index. Returns `None`
+    /// for Eager sources (caller handles those separately) or for Lazy
+    /// blocks that haven't been populated yet.
+    fn get_raw_block(&self, idx: usize) -> Option<&'view [u8]> {
+        match &self.source {
+            CursorSource::Eager { .. } => None,
+            CursorSource::View { raw_blocks } => Some(raw_blocks[idx]),
+            CursorSource::Lazy { raw_blocks } => raw_blocks[idx],
+        }
+    }
+
     /// Ensure `offset_buf` and `value_buf` contain the fully decompressed
     /// data for block `idx`. If drain already decompressed offsets for
     /// this block, only values are decompressed. Returns `false` if the
@@ -204,33 +201,20 @@ impl<'view> PostingCursor<'view> {
         if self.buf_block_idx == idx {
             return true;
         }
-        match &self.source {
-            CursorSource::Eager { .. } => true,
-            CursorSource::View { raw_blocks } => {
-                let raw = raw_blocks[idx];
-                let hdr = SparsePostingBlock::peek_header(raw);
-                if self.drain_buf_block_idx != idx {
-                    SparsePostingBlock::decompress_offsets_into(raw, &hdr, &mut self.offset_buf);
-                }
-                SparsePostingBlock::decompress_values_into(raw, &hdr, &mut self.value_buf);
-                self.buf_block_idx = idx;
-                self.drain_buf_block_idx = idx;
-                true
-            }
-            CursorSource::Lazy { raw_blocks } => {
-                let Some(raw) = raw_blocks[idx] else {
-                    return false;
-                };
-                let hdr = SparsePostingBlock::peek_header(raw);
-                if self.drain_buf_block_idx != idx {
-                    SparsePostingBlock::decompress_offsets_into(raw, &hdr, &mut self.offset_buf);
-                }
-                SparsePostingBlock::decompress_values_into(raw, &hdr, &mut self.value_buf);
-                self.buf_block_idx = idx;
-                self.drain_buf_block_idx = idx;
-                true
-            }
+        if matches!(self.source, CursorSource::Eager { .. }) {
+            return true;
         }
+        let Some(raw) = self.get_raw_block(idx) else {
+            return false;
+        };
+        let hdr = SparsePostingBlock::peek_header(raw).expect("valid block header");
+        if self.drain_buf_block_idx != idx {
+            SparsePostingBlock::decompress_offsets_into(raw, &hdr, &mut self.offset_buf);
+        }
+        SparsePostingBlock::decompress_values_into(raw, &hdr, &mut self.value_buf);
+        self.buf_block_idx = idx;
+        self.drain_buf_block_idx = idx;
+        true
     }
 
     /// Ensure `lookup_offset_buf` contains offsets for block `idx`.
@@ -240,25 +224,16 @@ impl<'view> PostingCursor<'view> {
         if self.lookup_buf_block_idx == idx {
             return true;
         }
-        match &self.source {
-            CursorSource::Eager { .. } => true,
-            CursorSource::View { raw_blocks } => {
-                let raw = raw_blocks[idx];
-                let hdr = SparsePostingBlock::peek_header(raw);
-                SparsePostingBlock::decompress_offsets_into(raw, &hdr, &mut self.lookup_offset_buf);
-                self.lookup_buf_block_idx = idx;
-                true
-            }
-            CursorSource::Lazy { raw_blocks } => {
-                let Some(raw) = raw_blocks[idx] else {
-                    return false;
-                };
-                let hdr = SparsePostingBlock::peek_header(raw);
-                SparsePostingBlock::decompress_offsets_into(raw, &hdr, &mut self.lookup_offset_buf);
-                self.lookup_buf_block_idx = idx;
-                true
-            }
+        if matches!(self.source, CursorSource::Eager { .. }) {
+            return true;
         }
+        let Some(raw) = self.get_raw_block(idx) else {
+            return false;
+        };
+        let hdr = SparsePostingBlock::peek_header(raw).expect("valid block header");
+        SparsePostingBlock::decompress_offsets_into(raw, &hdr, &mut self.lookup_offset_buf);
+        self.lookup_buf_block_idx = idx;
+        true
     }
 
     // ── Public API ──────────────────────────────────────────────────
@@ -275,9 +250,10 @@ impl<'view> PostingCursor<'view> {
             return None;
         }
         let (offsets, values) = match &self.source {
-            CursorSource::Eager { blocks } => {
-                (blocks[self.block_idx].offsets(), blocks[self.block_idx].values())
-            }
+            CursorSource::Eager { blocks } => (
+                blocks[self.block_idx].offsets(),
+                blocks[self.block_idx].values(),
+            ),
             CursorSource::View { .. } | CursorSource::Lazy { .. } => {
                 (&self.offset_buf[..], &self.value_buf[..])
             }
@@ -304,9 +280,10 @@ impl<'view> PostingCursor<'view> {
             }
 
             let (offsets, values) = match &self.source {
-                CursorSource::Eager { blocks } => {
-                    (blocks[self.block_idx].offsets(), blocks[self.block_idx].values())
-                }
+                CursorSource::Eager { blocks } => (
+                    blocks[self.block_idx].offsets(),
+                    blocks[self.block_idx].values(),
+                ),
                 CursorSource::View { .. } | CursorSource::Lazy { .. } => {
                     (&self.offset_buf[..], &self.value_buf[..])
                 }
@@ -319,7 +296,7 @@ impl<'view> PostingCursor<'view> {
 
             while self.pos < offsets.len() {
                 let off = offsets[self.pos];
-                if passes_mask(off, mask) {
+                if mask.contains(off) {
                     return Some((off, values[self.pos]));
                 }
                 self.pos += 1;
@@ -379,7 +356,7 @@ impl<'view> PostingCursor<'view> {
                     CursorSource::Lazy { raw_blocks } => raw_blocks[bi]?,
                     CursorSource::Eager { .. } => unreachable!(),
                 };
-                let hdr = SparsePostingBlock::peek_header(raw);
+                let hdr = SparsePostingBlock::peek_header(raw).expect("valid block header");
                 Some(SparsePostingBlock::read_value_at(raw, &hdr, idx))
             }
             Err(_) => None,
@@ -502,7 +479,7 @@ impl<'view> PostingCursor<'view> {
                         if doc > window_end {
                             return;
                         }
-                        if passes_mask(doc, mask) {
+                        if mask.contains(doc) {
                             let idx = (doc - window_start) as usize;
                             bitmap[idx >> 6] |= 1u64 << (idx & 63);
                             accum[idx] += vals[self.pos] * query_weight;
@@ -510,49 +487,13 @@ impl<'view> PostingCursor<'view> {
                         self.pos += 1;
                     }
                 }
-                CursorSource::View { raw_blocks } => {
-                    let raw = raw_blocks[self.block_idx];
-                    let hdr = SparsePostingBlock::peek_header(raw);
-                    if self.drain_buf_block_idx != self.block_idx {
-                        SparsePostingBlock::decompress_offsets_into(
-                            raw,
-                            &hdr,
-                            &mut self.offset_buf,
-                        );
-                        self.drain_buf_block_idx = self.block_idx;
-                        self.buf_block_idx = usize::MAX;
-                    }
-                    let wb = SparsePostingBlock::raw_weight_bytes(raw, &hdr);
-
-                    if self
-                        .offset_buf
-                        .get(self.pos)
-                        .is_some_and(|&o| o < window_start)
-                    {
-                        self.pos = self.offset_buf.partition_point(|&o| o < window_start);
-                    }
-                    while self.pos < self.offset_buf.len() {
-                        let doc = self.offset_buf[self.pos];
-                        if doc > window_end {
-                            return;
-                        }
-                        if passes_mask(doc, mask) {
-                            let idx = (doc - window_start) as usize;
-                            bitmap[idx >> 6] |= 1u64 << (idx & 63);
-                            let bp = self.pos * 2;
-                            let w = f16::from_le_bytes([wb[bp], wb[bp + 1]]).to_f32();
-                            accum[idx] += w * query_weight;
-                        }
-                        self.pos += 1;
-                    }
-                }
-                CursorSource::Lazy { raw_blocks } => {
-                    let Some(raw) = raw_blocks[self.block_idx] else {
+                _ => {
+                    let Some(raw) = self.get_raw_block(self.block_idx) else {
                         self.block_idx += 1;
                         self.pos = 0;
                         continue;
                     };
-                    let hdr = SparsePostingBlock::peek_header(raw);
+                    let hdr = SparsePostingBlock::peek_header(raw).expect("valid block header");
                     if self.drain_buf_block_idx != self.block_idx {
                         SparsePostingBlock::decompress_offsets_into(
                             raw,
@@ -576,7 +517,7 @@ impl<'view> PostingCursor<'view> {
                         if doc > window_end {
                             return;
                         }
-                        if passes_mask(doc, mask) {
+                        if mask.contains(doc) {
                             let idx = (doc - window_start) as usize;
                             bitmap[idx >> 6] |= 1u64 << (idx & 63);
                             let bp = self.pos * 2;
@@ -651,58 +592,13 @@ impl<'view> PostingCursor<'view> {
                         self.pos = 0;
                     }
                 }
-                CursorSource::View { raw_blocks } => {
-                    let raw = raw_blocks[self.block_idx];
-                    let hdr = SparsePostingBlock::peek_header(raw);
-                    if self.drain_buf_block_idx != self.block_idx {
-                        SparsePostingBlock::decompress_offsets_into(
-                            raw,
-                            &hdr,
-                            &mut self.offset_buf,
-                        );
-                        self.drain_buf_block_idx = self.block_idx;
-                        self.buf_block_idx = usize::MAX;
-                    }
-                    let wb = SparsePostingBlock::raw_weight_bytes(raw, &hdr);
-
-                    if self
-                        .offset_buf
-                        .get(self.pos)
-                        .is_some_and(|&o| o < window_start)
-                    {
-                        self.pos = self.offset_buf.partition_point(|&o| o < window_start);
-                    }
-
-                    while self.pos < self.offset_buf.len() && ci < cand_docs.len() {
-                        let doc = self.offset_buf[self.pos];
-                        if doc > window_end {
-                            return;
-                        }
-                        let cand = cand_docs[ci];
-                        if doc < cand {
-                            self.pos += 1;
-                        } else if doc > cand {
-                            ci += 1;
-                        } else {
-                            let bp = self.pos * 2;
-                            let w = f16::from_le_bytes([wb[bp], wb[bp + 1]]).to_f32();
-                            cand_scores[ci] += query_weight * w;
-                            self.pos += 1;
-                            ci += 1;
-                        }
-                    }
-                    if self.pos >= self.offset_buf.len() {
-                        self.block_idx += 1;
-                        self.pos = 0;
-                    }
-                }
-                CursorSource::Lazy { raw_blocks } => {
-                    let Some(raw) = raw_blocks[self.block_idx] else {
+                _ => {
+                    let Some(raw) = self.get_raw_block(self.block_idx) else {
                         self.block_idx += 1;
                         self.pos = 0;
                         continue;
                     };
-                    let hdr = SparsePostingBlock::peek_header(raw);
+                    let hdr = SparsePostingBlock::peek_header(raw).expect("valid block header");
                     if self.drain_buf_block_idx != self.block_idx {
                         SparsePostingBlock::decompress_offsets_into(
                             raw,
@@ -747,12 +643,5 @@ impl<'view> PostingCursor<'view> {
                 }
             }
         }
-    }
-}
-
-fn passes_mask(offset: u32, mask: &SignedRoaringBitmap) -> bool {
-    match mask {
-        SignedRoaringBitmap::Include(rbm) => rbm.contains(offset),
-        SignedRoaringBitmap::Exclude(rbm) => !rbm.contains(offset),
     }
 }

@@ -177,9 +177,7 @@ impl<
     pub fn get_raw_from_cache(&self, prefix: &str, key: K) -> Option<&[u8]> {
         match self {
             BlockfileReader::MemoryBlockfileReader(_) => None,
-            BlockfileReader::ArrowBlockfileReader(reader) => {
-                reader.get_raw_from_cache(prefix, key)
-            }
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_raw_from_cache(prefix, key),
         }
     }
 
@@ -188,9 +186,7 @@ impl<
     pub fn count_blocks_for_prefix(&self, prefix: &str) -> usize {
         match self {
             BlockfileReader::MemoryBlockfileReader(_) => 0,
-            BlockfileReader::ArrowBlockfileReader(reader) => {
-                reader.count_blocks_for_prefix(prefix)
-            }
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.count_blocks_for_prefix(prefix),
         }
     }
 }

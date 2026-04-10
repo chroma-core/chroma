@@ -50,10 +50,7 @@ async fn three_batch_single_dimension() {
 
 #[tokio::test]
 async fn three_batch_k_larger_than_results() {
-    let vectors = vec![
-        (0u32, vec![(1u32, 0.5f32)]),
-        (1, vec![(1, 0.3)]),
-    ];
+    let vectors = vec![(0u32, vec![(1u32, 0.5f32)]), (1, vec![(1, 0.3)])];
 
     let (_tmp, _prov, reader) = common::build_index(vectors.clone()).await;
     let query = vec![(1u32, 1.0f32)];
@@ -69,7 +66,10 @@ async fn three_batch_empty_query() {
     let vectors = vec![(0u32, vec![(1u32, 0.5f32)])];
     let (_tmp, _prov, reader) = common::build_index(vectors).await;
 
-    let results = reader.query(Vec::<(u32, f32)>::new(), 10, all_mask()).await.unwrap();
+    let results = reader
+        .query(Vec::<(u32, f32)>::new(), 10, all_mask())
+        .await
+        .unwrap();
     assert!(results.is_empty());
 }
 
@@ -78,16 +78,16 @@ async fn three_batch_k_zero() {
     let vectors = vec![(0u32, vec![(1u32, 0.5f32)])];
     let (_tmp, _prov, reader) = common::build_index(vectors).await;
 
-    let results = reader.query(vec![(1u32, 1.0f32)], 0, all_mask()).await.unwrap();
+    let results = reader
+        .query(vec![(1u32, 1.0f32)], 0, all_mask())
+        .await
+        .unwrap();
     assert!(results.is_empty());
 }
 
 #[tokio::test]
 async fn three_batch_no_matching_dimension() {
-    let vectors = vec![
-        (0u32, vec![(1u32, 0.5f32)]),
-        (1, vec![(2, 0.3)]),
-    ];
+    let vectors = vec![(0u32, vec![(1u32, 0.5f32)]), (1, vec![(2, 0.3)])];
 
     let (_tmp, _prov, reader) = common::build_index(vectors).await;
     let query = vec![(999u32, 1.0f32)];
@@ -126,7 +126,10 @@ async fn three_batch_with_mask() {
 async fn three_batch_multi_block_per_dim() {
     let mut vectors = Vec::new();
     for i in 0..200u32 {
-        vectors.push((i, vec![(1u32, 0.01 * (i as f32 + 1.0)), (2, 0.005 * i as f32)]));
+        vectors.push((
+            i,
+            vec![(1u32, 0.01 * (i as f32 + 1.0)), (2, 0.005 * i as f32)],
+        ));
     }
 
     let (_tmp, _prov, reader) =
