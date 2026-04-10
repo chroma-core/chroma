@@ -211,6 +211,7 @@ fn stored_fault_to_proto(fault: &StoredFault) -> FaultEntry {
 
 #[async_trait]
 impl FaultInjectionService for FaultRegistry {
+    #[tracing::instrument(skip(self, request))]
     async fn inject_faults(
         &self,
         request: Request<InjectFaultsRequest>,
@@ -224,10 +225,12 @@ impl FaultInjectionService for FaultRegistry {
             .action
             .ok_or_else(|| invalid_argument("inject_faults requires an action"))
             .and_then(action_from_proto)?;
+        tracing::warn!(selector = ?selector, action = ?action, "inject fault configured");
         let id = self.inject(selector, action);
         Ok(Response::new(InjectFaultsResponse { id: id.to_string() }))
     }
 
+    #[tracing::instrument(skip(self, _request))]
     async fn list_faults(
         &self,
         _request: Request<ListFaultsRequest>,
@@ -240,6 +243,7 @@ impl FaultInjectionService for FaultRegistry {
         Ok(Response::new(ListFaultsResponse { faults }))
     }
 
+    #[tracing::instrument(skip(self, request))]
     async fn clear_faults(
         &self,
         request: Request<ClearFaultsRequest>,
@@ -248,16 +252,21 @@ impl FaultInjectionService for FaultRegistry {
         let fault_id: Option<FaultId> = request.id.as_deref().map(TryInto::try_into).transpose()?;
         let selector: Option<FaultSelectorKind> =
             request.selector.map(TryInto::try_into).transpose()?;
-        let cleared_count = match (fault_id, selector) {
+        let cleared_count = match (&fault_id, &selector) {
             (Some(_), Some(_)) => {
                 return Err(invalid_argument(
                     "clear_faults requires exactly one of id or selector, not both",
                 ));
             }
-            (Some(id), None) => self.clear_id(Some(&id)),
-            (None, Some(ref sel)) => self.clear_selector(sel),
+            (Some(id), None) => self.clear_id(Some(id)),
+            (None, Some(sel)) => self.clear_selector(sel),
             (None, None) => self.clear_all(),
         };
+        tracing::warn!(
+            selector = ?selector,
+            cleared_count,
+            "inject fault cleared"
+        );
         Ok(Response::new(ClearFaultsResponse {
             cleared_count: cleared_count as u64,
         }))

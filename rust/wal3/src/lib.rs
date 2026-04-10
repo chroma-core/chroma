@@ -34,10 +34,11 @@ pub use interfaces::s3::{
     S3FragmentPuller, S3FragmentUploader, S3ManifestManagerFactory,
 };
 pub use interfaces::{
-    BatchManager, FaultInjectingFragmentManagerFactory, FragmentConsumer, FragmentManagerFactory,
-    FragmentPointer, FragmentPublisher, FragmentUploadFault, FragmentUploadFaultInjector,
-    FragmentUploader, ManifestConsumer, ManifestManagerFactory, ManifestPublisher, ManifestWitness,
-    PositionWitness, FRAGMENT_UPLOAD_FAULT_LABEL,
+    fragment_upload_replica_fault_label, BatchManager, FaultInjectingFragmentManagerFactory,
+    FragmentConsumer, FragmentManagerFactory, FragmentPointer, FragmentPublisher,
+    FragmentUploadFault, FragmentUploadFaultInjector, FragmentUploader, ManifestConsumer,
+    ManifestManagerFactory, ManifestPublisher, ManifestWitness, PositionWitness,
+    FRAGMENT_UPLOAD_FAULT_LABEL, FRAGMENT_UPLOAD_REPLICA_FAULT_LABELS,
 };
 pub use manifest::{
     unprefixed_snapshot_path, Manifest, ManifestAndWitness, ManifestBounds,

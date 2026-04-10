@@ -1,6 +1,9 @@
 target "rust-log-service" {
   dockerfile = "rust/Dockerfile"
   target = "log_service"
+  args = {
+    LOG_SERVICE_CARGO_FEATURES = "faults"
+  }
   tags = [ "rust-log-service:ci" ]
 }
 

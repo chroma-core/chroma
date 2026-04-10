@@ -10,7 +10,10 @@ use chroma_storage::{PutOptions, Storage, StorageError};
 use chroma_types::Cmek;
 
 use crate::interfaces::batch_manager::upload_parquet;
-use crate::interfaces::{FragmentConsumer, FragmentUploader, UploadResult};
+use crate::interfaces::{
+    fragment_upload_replica_fault_label, FragmentConsumer, FragmentUploadFault,
+    FragmentUploadFaultInjector, FragmentUploader, UploadResult,
+};
 use crate::{Error, Fragment, FragmentIdentifier, FragmentUuid, LogPosition, LogWriterOptions};
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -119,6 +122,7 @@ pub struct ReplicatedFragmentUploader {
     preferred: usize,
     storages: Arc<Vec<StorageWrapper>>,
     bookkeeping: Arc<Mutex<BookKeeping>>,
+    fault_injector: Option<Arc<dyn FragmentUploadFaultInjector>>,
 }
 
 impl ReplicatedFragmentUploader {
@@ -140,7 +144,16 @@ impl ReplicatedFragmentUploader {
             preferred,
             storages,
             bookkeeping,
+            fault_injector: None,
         }
+    }
+
+    pub fn with_fault_injector(
+        mut self,
+        fault_injector: Option<Arc<dyn FragmentUploadFaultInjector>>,
+    ) -> Self {
+        self.fault_injector = fault_injector;
+        self
     }
 
     fn compute_mask(&self) -> Result<Vec<bool>, Error> {
@@ -288,12 +301,44 @@ impl FragmentUploader<FragmentUuid> for ReplicatedFragmentUploader {
             if should_try {
                 let options = self.writer.clone();
                 let prefix = storage.prefix.clone();
+                let region = storage.region.clone();
                 let storage = storage.storage.clone();
                 let fragment_identifier = (*pointer).into();
                 let log_position = None;
                 let messages = messages.clone();
                 let cmek = cmek.clone();
+                let fault_injector = self.fault_injector.as_ref().map(Arc::clone);
                 futures.push(async move {
+                    if let Some(fault) = fault_injector
+                        .as_ref()
+                        .and_then(|fault_injector| fault_injector.fault_for_replica_upload(idx))
+                    {
+                        let fault_label = fragment_upload_replica_fault_label(idx)
+                            .unwrap_or("wal3.fragment_upload.<unknown>");
+                        match fault {
+                            FragmentUploadFault::Delay(delay) => {
+                                tracing::warn!(
+                                    fault_label,
+                                    replica_idx = idx,
+                                    region = %region,
+                                    delay_seconds = delay.as_secs_f64(),
+                                    "injecting wal3 replicated upload delay fault"
+                                );
+                                tokio::time::sleep(delay).await;
+                            }
+                            FragmentUploadFault::Unavailable => {
+                                tracing::warn!(
+                                    fault_label,
+                                    replica_idx = idx,
+                                    region = %region,
+                                    "injecting wal3 replicated upload unavailable fault"
+                                );
+                                return Err(Error::TonicError(tonic::Status::unavailable(
+                                    format!("fault injected for {fault_label}"),
+                                )));
+                            }
+                        }
+                    }
                     upload_parquet(
                         &options,
                         &storage,
@@ -409,6 +454,17 @@ impl FragmentReader {
         if !self.options.enable_read_repair || missing_storage_indices.is_empty() {
             return;
         }
+
+        let missing_regions = missing_storage_indices
+            .iter()
+            .map(|idx| self.storages[*idx].region.as_str())
+            .collect::<Vec<_>>();
+        tracing::warn!(
+            path,
+            missing_regions = ?missing_regions,
+            missing_replica_count = missing_regions.len(),
+            "read repair triggered"
+        );
 
         for idx in missing_storage_indices {
             // Try to acquire a permit without blocking. If unavailable, skip this repair.
@@ -1474,8 +1530,16 @@ mod tests {
         }
     }
 
+    fn make_storage_wrapper_with_region(
+        storage: chroma_storage::Storage,
+        prefix: &str,
+        region: &str,
+    ) -> StorageWrapper {
+        StorageWrapper::new(region.to_string(), storage, prefix.to_string())
+    }
+
     fn make_storage_wrapper(storage: chroma_storage::Storage, prefix: &str) -> StorageWrapper {
-        StorageWrapper::new("test-region".to_string(), storage, prefix.to_string())
+        make_storage_wrapper_with_region(storage, prefix, "test-region")
     }
 
     // Single replica successfully uploads.
@@ -1515,8 +1579,8 @@ mod tests {
     async fn test_k8s_mcmr_integration_replicated_uploader_two_replicas_both_succeed() {
         let storage1 = s3_client_for_test_with_new_bucket().await;
         let storage2 = s3_client_for_test_with_new_bucket().await;
-        let wrapper1 = make_storage_wrapper(storage1, "prefix1");
-        let wrapper2 = make_storage_wrapper(storage2, "prefix2");
+        let wrapper1 = make_storage_wrapper_with_region(storage1, "prefix1", "region-0");
+        let wrapper2 = make_storage_wrapper_with_region(storage2, "prefix2", "region-1");
         let storages = Arc::new(vec![wrapper1, wrapper2]);
         let uploader = ReplicatedFragmentUploader::new(
             make_test_options(2),

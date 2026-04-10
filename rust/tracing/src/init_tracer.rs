@@ -78,6 +78,7 @@ pub fn init_global_filter_layer(
         "chroma_cache",
         "chroma_distance",
         "chroma_error",
+        "chroma_fault",
         "chroma_frontend",
         "chroma_index",
         "chroma_log",
