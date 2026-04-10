@@ -15,6 +15,9 @@ use chroma_index::fulltext::types::{
 use chroma_index::metadata::types::{
     MetadataIndexError, MetadataIndexFlusher, MetadataIndexReader, MetadataIndexWriter,
 };
+use chroma_index::sparse::maxscore::{
+    MaxScoreFlusher, MaxScoreReader, MaxScoreWriter, SPARSE_POSTING_BLOCK_SIZE_BYTES,
+};
 use chroma_index::sparse::reader::SparseReader;
 use chroma_index::sparse::types::DEFAULT_BLOCK_SIZE;
 use chroma_index::sparse::writer::SparseFlusher;
@@ -28,6 +31,8 @@ use chroma_types::F32_METADATA;
 use chroma_types::FULL_TEXT_PLS;
 use chroma_types::SPARSE_MAX;
 use chroma_types::SPARSE_OFFSET_VALUE;
+use chroma_types::SPARSE_POSTING;
+use chroma_types::SparsePostingBlock;
 use chroma_types::STRING_METADATA;
 use chroma_types::U32_METADATA;
 use chroma_types::{
@@ -50,6 +55,7 @@ pub struct MetadataSegmentWriterShard<'me> {
     pub(crate) f32_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) u32_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) sparse_index_writer: Option<SparseWriter<'me>>,
+    pub(crate) maxscore_index_writer: Option<MaxScoreWriter<'me>>,
     pub id: SegmentUuid,
 }
 
@@ -85,6 +91,7 @@ impl<'me> MetadataSegmentWriter<'me> {
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
         cmek: Option<Cmek>,
+        schema: Option<&Schema>,
     ) -> Result<Self, MetadataSegmentWriterError> {
         let segment_shards = segment
             .get_shards()
@@ -106,6 +113,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                     shard,
                     blockfile_provider,
                     cmek.clone(),
+                    schema,
                 )
             })
             .collect();
@@ -146,6 +154,7 @@ impl<'me> MetadataSegmentWriter<'me> {
             &new_shard_segment,
             blockfile_provider,
             cmek,
+            collection.schema.as_ref(),
         )
         .await?;
 
@@ -299,6 +308,7 @@ impl<'me> MetadataSegmentWriterShard<'me> {
         segment: &SegmentShard,
         blockfile_provider: &BlockfileProvider,
         cmek: Option<Cmek>,
+        schema: Option<&Schema>,
     ) -> Result<MetadataSegmentWriterShard<'me>, MetadataSegmentError> {
         if segment.r#type != SegmentType::BlockfileMetadata {
             return Err(MetadataSegmentError::InvalidSegmentType);
@@ -547,11 +557,52 @@ impl<'me> MetadataSegmentWriterShard<'me> {
         let u32_metadata_index_writer =
             MetadataIndexWriter::new_u32(u32_metadata_writer, u32_metadata_index_reader);
 
+        // ── Sparse index writer: 3-way branch ───────────────────────
+        //
+        // 1. SPARSE_POSTING in file_path → fork MaxScore index
+        // 2. SPARSE_MAX in file_path     → fork existing WAND index
+        // 3. Neither (fresh collection)  → check schema to decide
+        let posting_file_path = segment.file_path.get(SPARSE_POSTING);
         let max_file_path = segment.file_path.get(SPARSE_MAX);
         let offset_value_file_path = segment.file_path.get(SPARSE_OFFSET_VALUE);
-        let sparse_index_writer = if let (Some(max_file_path), Some(offset_value_file_path)) =
+
+        let (sparse_index_writer, maxscore_index_writer) = if let Some(posting_file_path) =
+            posting_file_path
+        {
+            // ── Fork path: MaxScore index ──────────────────────────
+            let (posting_prefix, posting_uuid) =
+                Segment::extract_prefix_and_id(posting_file_path).map_err(|_| {
+                    MetadataSegmentError::UuidParseError(posting_file_path.to_string())
+                })?;
+            let posting_reader = blockfile_provider
+                .read::<u32, SparsePostingBlock>(BlockfileReaderOptions::new(
+                    posting_uuid,
+                    posting_prefix.to_string(),
+                ))
+                .await
+                .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
+            let posting_writer = {
+                let mut options = BlockfileWriterOptions::new(posting_prefix.to_string())
+                    .fork(posting_uuid)
+                    .ordered_mutations()
+                    .max_block_size_bytes(SPARSE_POSTING_BLOCK_SIZE_BYTES);
+                if let Some(cmek) = &cmek {
+                    options = options.with_cmek(cmek.clone());
+                }
+                blockfile_provider
+                    .write::<u32, SparsePostingBlock>(options)
+                    .await
+                    .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
+            };
+            let old_reader = MaxScoreReader::new(posting_reader);
+            (
+                None,
+                Some(MaxScoreWriter::new(posting_writer, Some(old_reader))),
+            )
+        } else if let (Some(max_file_path), Some(offset_value_file_path)) =
             (max_file_path, offset_value_file_path)
         {
+            // ── Fork path: existing WAND index (unchanged) ─────────
             let (max_prefix, max_uuid) = Segment::extract_prefix_and_id(max_file_path)
                 .map_err(|_| MetadataSegmentError::UuidParseError(max_file_path.to_string()))?;
             let max_reader = blockfile_provider
@@ -595,13 +646,32 @@ impl<'me> MetadataSegmentWriterShard<'me> {
                     .await
                     .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
             };
-            Some(SparseWriter::new(
-                DEFAULT_BLOCK_SIZE,
-                max_writer,
-                offset_value_writer,
-                Some(SparseReader::new(max_reader, offset_value_reader)),
-            ))
+            (
+                Some(SparseWriter::new(
+                    DEFAULT_BLOCK_SIZE,
+                    max_writer,
+                    offset_value_writer,
+                    Some(SparseReader::new(max_reader, offset_value_reader)),
+                )),
+                None,
+            )
+        } else if schema.is_some_and(|s| s.is_maxscore_enabled()) {
+            // ── Fresh collection: MaxScore index ───────────────────
+            let posting_writer = {
+                let mut options = BlockfileWriterOptions::new(prefix_path.clone())
+                    .ordered_mutations()
+                    .max_block_size_bytes(SPARSE_POSTING_BLOCK_SIZE_BYTES);
+                if let Some(cmek) = &cmek {
+                    options = options.with_cmek(cmek.clone());
+                }
+                blockfile_provider
+                    .write::<u32, SparsePostingBlock>(options)
+                    .await
+                    .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
+            };
+            (None, Some(MaxScoreWriter::new(posting_writer, None)))
         } else {
+            // ── Fresh collection: WAND index (default) ─────────────
             let max_writer = {
                 let mut options =
                     BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations();
@@ -624,12 +694,15 @@ impl<'me> MetadataSegmentWriterShard<'me> {
                     .await
                     .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
             };
-            Some(SparseWriter::new(
-                DEFAULT_BLOCK_SIZE,
-                max_writer,
-                offset_value_writer,
+            (
+                Some(SparseWriter::new(
+                    DEFAULT_BLOCK_SIZE,
+                    max_writer,
+                    offset_value_writer,
+                    None,
+                )),
                 None,
-            ))
+            )
         };
 
         Ok(MetadataSegmentWriterShard {
@@ -639,6 +712,7 @@ impl<'me> MetadataSegmentWriterShard<'me> {
             f32_metadata_index_writer: Some(f32_metadata_index_writer),
             u32_metadata_index_writer: Some(u32_metadata_index_writer),
             sparse_index_writer,
+            maxscore_index_writer,
             id: segment.id,
         })
     }
@@ -707,12 +781,14 @@ impl<'me> MetadataSegmentWriterShard<'me> {
                 }
             }
             MetadataValue::SparseVector(offset_value) => {
-                match &self.sparse_index_writer {
-                    Some(writer) => {
-                        writer.set(offset_id, offset_value.iter()).await;
-                        Ok(())
-                    }
-                    None => panic!("Invariant violation. sparse index writer should be set for metadata segment"),
+                if let Some(writer) = &self.maxscore_index_writer {
+                    writer.set(offset_id, offset_value.iter()).await;
+                    Ok(())
+                } else if let Some(writer) = &self.sparse_index_writer {
+                    writer.set(offset_id, offset_value.iter()).await;
+                    Ok(())
+                } else {
+                    panic!("Invariant violation. sparse index writer should be set for metadata segment")
                 }
             },
             // Array types: explode the array and index each element separately
@@ -839,12 +915,16 @@ impl<'me> MetadataSegmentWriterShard<'me> {
                     None => panic!("Invariant violation. bool metadata index writer should be set for metadata segment"),
                 }
             }
-            MetadataValue::SparseVector(offset_value) => match &self.sparse_index_writer {
-                Some(writer) => {
+            MetadataValue::SparseVector(offset_value) => {
+                if let Some(writer) = &self.maxscore_index_writer {
                     writer.delete(offset_id, offset_value.indices.iter().cloned()).await;
                     Ok(())
+                } else if let Some(writer) = &self.sparse_index_writer {
+                    writer.delete(offset_id, offset_value.indices.iter().cloned()).await;
+                    Ok(())
+                } else {
+                    panic!("Invariant violation. sparse index writer should be set for metadata segment")
                 }
-                    None => panic!("Invariant violation. sparse index writer should be set for metadata segment"),
             },
             // Array types: delete each element from the inverted index
             MetadataValue::StringArray(values) => {
@@ -1333,12 +1413,22 @@ impl<'me> MetadataSegmentWriterShard<'me> {
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
 
-        let sparse_index_flusher = match self.sparse_index_writer {
-            Some(sparse_index_writer) => match Box::pin(sparse_index_writer.commit()).await {
-                Ok(flusher) => flusher,
+        let (sparse_index_flusher, maxscore_index_flusher) = match (
+            self.sparse_index_writer,
+            self.maxscore_index_writer,
+        ) {
+            (Some(w), None) => match Box::pin(w.commit()).await {
+                Ok(flusher) => (Some(flusher), None),
                 Err(e) => return Err(Box::new(e)),
             },
-            None => return Err(Box::new(MetadataSegmentError::NoWriter)),
+            (None, Some(w)) => match w.commit().await {
+                Ok(flusher) => (None, Some(flusher)),
+                Err(e) => return Err(Box::new(e)),
+            },
+            (None, None) => return Err(Box::new(MetadataSegmentError::NoWriter)),
+            (Some(_), Some(_)) => {
+                unreachable!("both sparse_index_writer and maxscore_index_writer are set")
+            }
         };
 
         Ok(MetadataSegmentFlusherShard {
@@ -1349,6 +1439,7 @@ impl<'me> MetadataSegmentWriterShard<'me> {
             f32_metadata_index_flusher: f32_metadata_flusher,
             u32_metadata_index_flusher: u32_metadata_flusher,
             sparse_index_flusher,
+            maxscore_index_flusher,
         })
     }
 }
@@ -1385,7 +1476,8 @@ pub struct MetadataSegmentFlusherShard {
     pub(crate) bool_metadata_index_flusher: MetadataIndexFlusher,
     pub(crate) f32_metadata_index_flusher: MetadataIndexFlusher,
     pub(crate) u32_metadata_index_flusher: MetadataIndexFlusher,
-    pub(crate) sparse_index_flusher: SparseFlusher,
+    pub(crate) sparse_index_flusher: Option<SparseFlusher>,
+    pub(crate) maxscore_index_flusher: Option<MaxScoreFlusher>,
 }
 
 impl Debug for MetadataSegmentFlusherShard {
@@ -1467,23 +1559,37 @@ impl MetadataSegmentFlusherShard {
             )],
         );
 
-        let max_id = self.sparse_index_flusher.max_id();
-        let offset_value_id = self.sparse_index_flusher.offset_value_id();
-        match Box::pin(self.sparse_index_flusher.flush()).await {
-            Ok(_) => {}
-            Err(e) => return Err(Box::new(e)),
+        if let Some(sparse_flusher) = self.sparse_index_flusher {
+            let max_id = sparse_flusher.max_id();
+            let offset_value_id = sparse_flusher.offset_value_id();
+            match Box::pin(sparse_flusher.flush()).await {
+                Ok(_) => {}
+                Err(e) => return Err(Box::new(e)),
+            }
+            flushed.insert(
+                SPARSE_MAX.to_string(),
+                vec![ChromaSegmentFlusher::flush_key(&prefix_path, &max_id)],
+            );
+            flushed.insert(
+                SPARSE_OFFSET_VALUE.to_string(),
+                vec![ChromaSegmentFlusher::flush_key(
+                    &prefix_path,
+                    &offset_value_id,
+                )],
+            );
         }
-        flushed.insert(
-            SPARSE_MAX.to_string(),
-            vec![ChromaSegmentFlusher::flush_key(&prefix_path, &max_id)],
-        );
-        flushed.insert(
-            SPARSE_OFFSET_VALUE.to_string(),
-            vec![ChromaSegmentFlusher::flush_key(
-                &prefix_path,
-                &offset_value_id,
-            )],
-        );
+
+        if let Some(maxscore_flusher) = self.maxscore_index_flusher {
+            let posting_id = maxscore_flusher.id();
+            match maxscore_flusher.flush().await {
+                Ok(_) => {}
+                Err(e) => return Err(Box::new(e)),
+            }
+            flushed.insert(
+                SPARSE_POSTING.to_string(),
+                vec![ChromaSegmentFlusher::flush_key(&prefix_path, &posting_id)],
+            );
+        }
 
         Ok(flushed)
     }
@@ -1496,6 +1602,7 @@ pub struct MetadataSegmentReaderShard<'me> {
     pub f32_metadata_index_reader: Option<MetadataIndexReader<'me>>,
     pub u32_metadata_index_reader: Option<MetadataIndexReader<'me>>,
     pub sparse_index_reader: Option<SparseReader<'me>>,
+    pub maxscore_index_reader: Option<MaxScoreReader<'me>>,
 }
 
 impl MetadataSegmentReaderShard<'_> {
@@ -1553,6 +1660,14 @@ impl MetadataSegmentReaderShard<'_> {
             Self::load_index_reader(segment, SPARSE_OFFSET_VALUE, blockfile_provider)
                 .instrument(Span::current());
 
+        let sparse_posting_future =
+            Self::load_index_reader::<u32, SparsePostingBlock>(
+                segment,
+                SPARSE_POSTING,
+                blockfile_provider,
+            )
+            .instrument(Span::current());
+
         let (
             pls_reader,
             string_metadata_reader,
@@ -1561,6 +1676,7 @@ impl MetadataSegmentReaderShard<'_> {
             u32_metadata_reader,
             sparse_max_reader,
             sparse_offset_value_reader,
+            sparse_posting_reader,
         ) = tokio::join!(
             pls_future,
             string_metadata_future,
@@ -1569,6 +1685,7 @@ impl MetadataSegmentReaderShard<'_> {
             u32_metadata_future,
             sparse_max_future,
             sparse_offset_value_future,
+            sparse_posting_future,
         );
 
         // Handle results and create index readers
@@ -1591,17 +1708,22 @@ impl MetadataSegmentReaderShard<'_> {
         let f32_metadata_reader = f32_metadata_reader?;
         let f32_metadata_index_reader = f32_metadata_reader.map(MetadataIndexReader::new_f32);
 
-        let sparse_index_reader =
-            if let (Some(sparse_max_reader), Some(sparse_offset_value_reader)) =
-                (sparse_max_reader?, sparse_offset_value_reader?)
-            {
-                Some(SparseReader::new(
-                    sparse_max_reader,
-                    sparse_offset_value_reader,
-                ))
-            } else {
-                None
-            };
+        let sparse_posting_reader = sparse_posting_reader?;
+        let maxscore_index_reader = sparse_posting_reader.map(MaxScoreReader::new);
+
+        // Only create old WAND reader if MaxScore reader is absent
+        let sparse_index_reader = if maxscore_index_reader.is_some() {
+            None
+        } else if let (Some(sparse_max_reader), Some(sparse_offset_value_reader)) =
+            (sparse_max_reader?, sparse_offset_value_reader?)
+        {
+            Some(SparseReader::new(
+                sparse_max_reader,
+                sparse_offset_value_reader,
+            ))
+        } else {
+            None
+        };
 
         Ok(MetadataSegmentReaderShard {
             full_text_index_reader,
@@ -1610,6 +1732,7 @@ impl MetadataSegmentReaderShard<'_> {
             f32_metadata_index_reader,
             u32_metadata_index_reader,
             sparse_index_reader,
+            maxscore_index_reader,
         })
     }
 }
@@ -1720,6 +1843,7 @@ mod test {
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
+                None,
                 None,
             )
             .await
@@ -1878,6 +2002,7 @@ mod test {
             &metadata_segment_shard,
             &blockfile_provider,
             None,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1985,6 +2110,7 @@ mod test {
             &database_id,
             &metadata_segment_shard,
             &blockfile_provider,
+            None,
             None,
         )
         .await
@@ -2098,6 +2224,7 @@ mod test {
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
+                None,
                 None,
             )
             .await
@@ -2259,6 +2386,7 @@ mod test {
             &metadata_segment_shard,
             &blockfile_provider,
             None,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -2407,6 +2535,7 @@ mod test {
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -2539,6 +2668,7 @@ mod test {
             &database_id,
             &metadata_segment_shard,
             &blockfile_provider,
+            None,
             None,
         )
         .await
@@ -2684,6 +2814,7 @@ mod test {
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -2805,6 +2936,7 @@ mod test {
             &database_id,
             &metadata_segment_shard,
             &blockfile_provider,
+            None,
             None,
         )
         .await
@@ -2948,6 +3080,7 @@ mod test {
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
+                None,
                 None,
             )
             .await
@@ -3260,6 +3393,7 @@ mod test {
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -3422,6 +3556,7 @@ mod test {
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
+                None,
             )
             .await
             .expect("Error creating metadata writer");
@@ -3472,6 +3607,7 @@ mod test {
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
+                None,
                 None,
             )
             .await
@@ -3556,6 +3692,7 @@ mod test {
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
+                None,
                 None,
             )
             .await
@@ -3676,6 +3813,7 @@ mod test {
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
+                None,
                 None,
             )
             .await
@@ -3891,6 +4029,7 @@ mod test {
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
+                None,
                 None,
             )
             .await
