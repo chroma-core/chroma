@@ -1,5 +1,5 @@
 import httpx
-from typing import Optional, Sequence
+from typing import Optional, Sequence, cast
 from uuid import UUID
 from overrides import override
 
@@ -103,7 +103,44 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         database: str = DEFAULT_DATABASE,
     ) -> "AsyncClient":
         """Create a client from an existing system. This is useful for testing and debugging."""
-        return await AsyncClient.create(tenant, database, system.settings)
+        self = cls.__new__(cls)
+        self._identifier = SharedSystemClient._populate_data_from_system(system)
+        SharedSystemClient._increment_refcount(self._identifier)
+
+        try:
+            self.tenant = tenant
+            self.database = database
+
+            self._server = self._system.instance(AsyncServerAPI)
+
+            user_identity = await self.get_user_identity()
+
+            maybe_tenant, maybe_database = maybe_set_tenant_and_database(
+                user_identity,
+                overwrite_singleton_tenant_database_access_from_auth=system.settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
+                user_provided_tenant=tenant,
+                user_provided_database=database,
+            )
+            if maybe_tenant:
+                self.tenant = maybe_tenant
+            if maybe_database:
+                self.database = maybe_database
+
+            self._admin_client = AsyncAdminClient.from_system(self._system)
+            await self._validate_tenant_database(
+                tenant=self.tenant, database=self.database
+            )
+
+            self._submit_client_start_event()
+
+            return self
+        except Exception:
+            if hasattr(self, "_admin_client"):
+                SharedSystemClient._release_system(
+                    cast("AsyncAdminClient", self._admin_client)._identifier
+                )
+            SharedSystemClient._release_system(self._identifier)
+            raise
 
     @classmethod
     @override
