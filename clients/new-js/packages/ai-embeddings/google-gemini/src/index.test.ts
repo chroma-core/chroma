@@ -12,10 +12,10 @@ describe("GoogleGeminiEmbeddingFunction", () => {
   } else {
     it(defaultParametersTest, () => {
       const embedder = new GoogleGeminiEmbeddingFunction();
-      expect(embedder.name).toBe("google-generative-ai");
+      expect(embedder.name).toBe("google-gemini");
 
       const config = embedder.getConfig();
-      expect(config.model_name).toBe("text-embedding-004");
+      expect(config.model_name).toBe("gemini-embedding-001");
       expect(config.api_key_env_var).toBe("GEMINI_API_KEY");
       expect(config.task_type).toBeUndefined();
     });
