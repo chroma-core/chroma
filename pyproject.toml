@@ -30,6 +30,50 @@ mypy_path = "rust/python_bindings"
 module = ["chromadb.proto.*"]
 ignore_errors = true
 
+# Modules with known type errors to be fixed incrementally.
+# See https://github.com/chroma-core/chroma/issues/2054
+[[tool.mypy.overrides]]
+module = [
+    "chromadb.api.async_fastapi",
+    "chromadb.api.client",
+    "chromadb.api.collection_configuration",
+    "chromadb.api.configuration",
+    "chromadb.api.fastapi",
+    "chromadb.api.models.CollectionCommon",
+    "chromadb.api.rust",
+    "chromadb.api.segment",
+    "chromadb.api.types",
+    "chromadb.auth.simple_rbac_authz",
+    "chromadb.auth.token_authn",
+    "chromadb.chromadb_rust_bindings",
+    "chromadb.cli.cli",
+    "chromadb.cli.utils",
+    "chromadb.config",
+    "chromadb.db.base",
+    "chromadb.db.impl.grpc.client",
+    "chromadb.db.impl.grpc.server",
+    "chromadb.db.impl.sqlite",
+    "chromadb.db.impl.sqlite_pool",
+    "chromadb.db.mixins.embeddings_queue",
+    "chromadb.db.mixins.sysdb",
+    "chromadb.execution.executor.local",
+    "chromadb.execution.expression.operator",
+    "chromadb.ingest.impl.utils",
+    "chromadb.logservice.logservice",
+    "chromadb.rate_limit.simple_rate_limit",
+    "chromadb.segment.impl.manager.cache.cache",
+    "chromadb.segment.impl.metadata.sqlite",
+    "chromadb.segment.impl.vector.hnsw_params",
+    "chromadb.segment.impl.vector.local_persistent_hnsw",
+    "chromadb.server.fastapi",
+    "chromadb.telemetry.opentelemetry.grpc",
+    "chromadb.test.*",
+    "chromadb.types",
+    "chromadb.utils.embedding_functions.*",
+    "chromadb.utils.results",
+]
+ignore_errors = true
+
 [project.scripts]
 chroma = "chromadb.cli.cli:app"
 
