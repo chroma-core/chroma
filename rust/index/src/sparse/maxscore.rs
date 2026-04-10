@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
@@ -13,40 +12,6 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::sparse::types::{decode_u32, encode_u32, Score, TopKHeap};
-
-// ── Two-phase re-scoring ────────────────────────────────────────────
-
-/// Batch-oriented rescorer for two-phase retrieval. MaxScore generates
-/// an oversampled candidate set with approximate (quantized) scores;
-/// the rescorer computes exact scores so the caller can pick the true
-/// top-k.
-#[async_trait]
-pub trait SparseRescorer: Send + Sync {
-    async fn rescore_batch(&self, doc_ids: &[u32], query: &[(u32, f32)]) -> Vec<f32>;
-}
-
-/// Re-score an oversampled candidate set and return the final top-k
-/// by exact score.
-pub async fn rescore_and_select(
-    candidates: Vec<Score>,
-    k: usize,
-    query: &[(u32, f32)],
-    rescorer: &dyn SparseRescorer,
-) -> Vec<Score> {
-    if candidates.is_empty() || k == 0 {
-        return vec![];
-    }
-
-    let doc_ids: Vec<u32> = candidates.iter().map(|s| s.offset).collect();
-    let exact_scores = rescorer.rescore_batch(&doc_ids, query).await;
-
-    let mut heap = TopKHeap::new(k);
-    for (i, &score) in exact_scores.iter().enumerate() {
-        heap.push(score, doc_ids[i]);
-    }
-
-    heap.into_sorted_vec()
-}
 
 const DEFAULT_BLOCK_SIZE: u32 = 1024;
 
