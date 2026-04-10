@@ -593,6 +593,14 @@ export type SpannIndexConfig = {
 };
 
 /**
+ * Sparse vector index algorithm.
+ *
+ * Controls which posting list format and query engine are used for
+ * sparse vector search within a collection.
+ */
+export type SparseIndexAlgorithm = 'wand' | 'max_score';
+
+/**
  * Represents a sparse vector using parallel arrays for indices and values.
  *
  * On deserialization: accepts both old format `{"indices": [...], "values": [...]}`
@@ -616,6 +624,13 @@ export type SparseVector = {
 };
 
 export type SparseVectorIndexConfig = {
+    /**
+     * Sparse index algorithm (cloud-only, tenant-gated).
+     * Omitted from JSON when set to the default (Wand) so that old
+     * servers/clients that do not know about this field can still
+     * deserialize the schema.
+     */
+    algorithm?: SparseIndexAlgorithm;
     /**
      * Whether this embedding is BM25
      */
