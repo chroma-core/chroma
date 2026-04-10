@@ -6,9 +6,7 @@ use crate::config_store::{self, ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::tui::collection_browser::CollectionBrowser;
 use crate::ui_utils::Theme;
-use crate::utils::{
-    parse_host, parse_local, parse_path, AddressBook, CliError, LocalChromaArgs,
-};
+use crate::utils::{parse_host, parse_local, parse_path, AddressBook, CliError, LocalChromaArgs};
 use clap::Parser;
 use crossterm::style::Stylize;
 use thiserror::Error;

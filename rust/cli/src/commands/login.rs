@@ -7,9 +7,7 @@ use crate::commands::login::LoginError::BrowserAuthFailed;
 use crate::config_store::{ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::ui_utils::validate_uri;
-use crate::utils::{
-    CliError, Profile, Profiles, UtilsError, CHROMA_DIR, CREDENTIALS_FILE,
-};
+use crate::utils::{CliError, Profile, Profiles, UtilsError, CHROMA_DIR, CREDENTIALS_FILE};
 use clap::Parser;
 use colored::Colorize;
 use std::error::Error;

@@ -314,7 +314,6 @@ pub fn write_config(config: &CliConfig) -> Result<(), CliError> {
     Ok(())
 }
 
-
 pub fn find_available_port(min: u16, max: u16) -> Result<u16, CliError> {
     let mut rng = rand::thread_rng();
 

@@ -664,10 +664,8 @@ mod tests {
 
     #[test]
     fn test_command_list_with_profiles() {
-        let store = InMemoryConfigStore::new(
-            make_profiles(&["prod", "staging"]),
-            make_config("prod"),
-        );
+        let store =
+            InMemoryConfigStore::new(make_profiles(&["prod", "staging"]), make_config("prod"));
         let mut term = TestTerminal::new();
 
         run_profile_command(ProfileCommand::List, &store, &mut term).unwrap();

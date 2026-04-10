@@ -3,8 +3,8 @@ use crate::config_store::{self, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::ui_utils::copy_to_clipboard;
 use crate::utils::{
-    CliError, Profile, CHROMA_API_KEY_ENV_VAR, CHROMA_DATABASE_ENV_VAR,
-    CHROMA_TENANT_ENV_VAR, SELECTION_LIMIT,
+    CliError, Profile, CHROMA_API_KEY_ENV_VAR, CHROMA_DATABASE_ENV_VAR, CHROMA_TENANT_ENV_VAR,
+    SELECTION_LIMIT,
 };
 use chroma_types::Database;
 use clap::{Args, Subcommand, ValueEnum};

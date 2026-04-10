@@ -7,8 +7,8 @@ use crate::commands::install::InstallError;
 use crate::config_store::{self, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::utils::{
-    parse_host, parse_local, parse_path, AddressBook, CliError, Environment,
-    ErrorResponse, Profile, UtilsError,
+    parse_host, parse_local, parse_path, AddressBook, CliError, Environment, ErrorResponse,
+    Profile, UtilsError,
 };
 use chroma_types::{CollectionConfiguration, IncludeList};
 use clap::Parser;
