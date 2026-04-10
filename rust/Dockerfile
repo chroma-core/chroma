@@ -75,7 +75,7 @@ ENV RUST_BACKTRACE=${ADDRESS_SANITIZER:+'full'}${ADDRESS_SANITIZER:-'0'}
 RUN if [ "$ADDRESS_SANITIZER" = "1" ]; then apt-get update \
   && apt-get install -y build-essential llvm; \
   fi
-RUN apt-get update && apt-get install -y dumb-init libssl-dev ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y dumb-init libssl-dev ca-certificates curl && rm -rf /var/lib/apt/lists/*
 
 FROM runner AS cli
 
