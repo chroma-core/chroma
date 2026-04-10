@@ -18,27 +18,27 @@ const DEFAULT_BLOCK_SIZE: u32 = 1024;
 pub const SPARSE_POSTING_BLOCK_SIZE_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Error)]
-pub enum BlockSparseError {
+pub enum MaxScoreError {
     #[error(transparent)]
     Blockfile(#[from] Box<dyn ChromaError>),
 }
 
-impl ChromaError for BlockSparseError {
+impl ChromaError for MaxScoreError {
     fn code(&self) -> ErrorCodes {
         match self {
-            BlockSparseError::Blockfile(err) => err.code(),
+            MaxScoreError::Blockfile(err) => err.code(),
         }
     }
 }
 
-// ── BlockSparseFlusher ──────────────────────────────────────────────
+// ── MaxScoreFlusher ──────────────────────────────────────────────
 
-pub struct BlockSparseFlusher {
+pub struct MaxScoreFlusher {
     posting_flusher: BlockfileFlusher,
 }
 
-impl BlockSparseFlusher {
-    pub async fn flush(self) -> Result<(), BlockSparseError> {
+impl MaxScoreFlusher {
+    pub async fn flush(self) -> Result<(), MaxScoreError> {
         self.posting_flusher
             .flush::<u32, SparsePostingBlock>()
             .await?;
@@ -50,21 +50,18 @@ impl BlockSparseFlusher {
     }
 }
 
-// ── BlockSparseWriter ───────────────────────────────────────────────
+// ── MaxScoreWriter ───────────────────────────────────────────────
 
 #[derive(Clone)]
-pub struct BlockSparseWriter<'me> {
+pub struct MaxScoreWriter<'me> {
     block_size: u32,
     delta: Arc<DashMap<u32, DashMap<u32, Option<f32>>>>,
     posting_writer: BlockfileWriter,
-    old_reader: Option<BlockSparseReader<'me>>,
+    old_reader: Option<MaxScoreReader<'me>>,
 }
 
-impl<'me> BlockSparseWriter<'me> {
-    pub fn new(
-        posting_writer: BlockfileWriter,
-        old_reader: Option<BlockSparseReader<'me>>,
-    ) -> Self {
+impl<'me> MaxScoreWriter<'me> {
+    pub fn new(posting_writer: BlockfileWriter, old_reader: Option<MaxScoreReader<'me>>) -> Self {
         Self {
             block_size: DEFAULT_BLOCK_SIZE,
             delta: Default::default(),
@@ -103,7 +100,7 @@ impl<'me> BlockSparseWriter<'me> {
         }
     }
 
-    pub async fn commit(self) -> Result<BlockSparseFlusher, BlockSparseError> {
+    pub async fn commit(self) -> Result<MaxScoreFlusher, MaxScoreError> {
         let mut all_dim_ids: Vec<u32> = self.delta.iter().map(|e| *e.key()).collect();
 
         if let Some(ref reader) = self.old_reader {
@@ -254,7 +251,7 @@ impl<'me> BlockSparseWriter<'me> {
             .commit::<u32, SparsePostingBlock>()
             .await?;
 
-        Ok(BlockSparseFlusher {
+        Ok(MaxScoreFlusher {
             posting_flusher: flusher,
         })
     }
@@ -501,14 +498,14 @@ impl PostingCursor {
     }
 }
 
-// ── BlockSparseReader ───────────────────────────────────────────────
+// ── MaxScoreReader ───────────────────────────────────────────────
 
 #[derive(Clone)]
-pub struct BlockSparseReader<'me> {
+pub struct MaxScoreReader<'me> {
     posting_reader: BlockfileReader<'me, u32, SparsePostingBlock>,
 }
 
-impl<'me> BlockSparseReader<'me> {
+impl<'me> MaxScoreReader<'me> {
     pub fn new(posting_reader: BlockfileReader<'me, u32, SparsePostingBlock>) -> Self {
         Self { posting_reader }
     }
@@ -524,7 +521,7 @@ impl<'me> BlockSparseReader<'me> {
     pub async fn get_posting_blocks(
         &self,
         encoded_dim: &str,
-    ) -> Result<Vec<SparsePostingBlock>, BlockSparseError> {
+    ) -> Result<Vec<SparsePostingBlock>, MaxScoreError> {
         let blocks: Vec<(u32, SparsePostingBlock)> =
             self.posting_reader.get_prefix(encoded_dim).await?.collect();
         Ok(blocks.into_iter().map(|(_, b)| b).collect())
@@ -534,7 +531,7 @@ impl<'me> BlockSparseReader<'me> {
     pub async fn get_directory(
         &self,
         encoded_dim: &str,
-    ) -> Result<Option<Directory>, BlockSparseError> {
+    ) -> Result<Option<Directory>, MaxScoreError> {
         let dir_prefix = format!("{}{}", DIRECTORY_PREFIX, encoded_dim);
         let parts: Vec<(u32, SparsePostingBlock)> =
             self.posting_reader.get_prefix(&dir_prefix).await?.collect();
@@ -549,10 +546,7 @@ impl<'me> BlockSparseReader<'me> {
     }
 
     /// Count the number of directory parts stored for a dimension.
-    pub async fn count_directory_parts(
-        &self,
-        encoded_dim: &str,
-    ) -> Result<usize, BlockSparseError> {
+    pub async fn count_directory_parts(&self, encoded_dim: &str) -> Result<usize, MaxScoreError> {
         let dir_prefix = format!("{}{}", DIRECTORY_PREFIX, encoded_dim);
         let parts: Vec<(u32, SparsePostingBlock)> =
             self.posting_reader.get_prefix(&dir_prefix).await?.collect();
@@ -564,7 +558,7 @@ impl<'me> BlockSparseReader<'me> {
     /// Scans only directory entries (prefix "d"...) which are much fewer
     /// than posting blocks. A key-only scan API on BlockfileReader would
     /// avoid deserializing even the directory values.
-    pub async fn get_all_dimension_ids(&self) -> Result<Vec<u32>, BlockSparseError> {
+    pub async fn get_all_dimension_ids(&self) -> Result<Vec<u32>, MaxScoreError> {
         let dir_entries: Vec<(&str, u32, SparsePostingBlock)> = self
             .posting_reader
             .get_range(DIRECTORY_PREFIX.., ..)
@@ -589,7 +583,7 @@ impl<'me> BlockSparseReader<'me> {
     pub async fn open_cursor(
         &'me self,
         encoded_dim: &str,
-    ) -> Result<Option<PostingCursor>, BlockSparseError> {
+    ) -> Result<Option<PostingCursor>, MaxScoreError> {
         let blocks = self.get_posting_blocks(encoded_dim).await?;
         if blocks.is_empty() {
             return Ok(None);
@@ -606,7 +600,7 @@ impl<'me> BlockSparseReader<'me> {
         query_vector: impl IntoIterator<Item = (u32, f32)>,
         k: u32,
         mask: SignedRoaringBitmap,
-    ) -> Result<Vec<Score>, BlockSparseError> {
+    ) -> Result<Vec<Score>, MaxScoreError> {
         if k == 0 {
             return Ok(vec![]);
         }
@@ -615,7 +609,7 @@ impl<'me> BlockSparseReader<'me> {
         let encoded_dims: Vec<String> = collected.iter().map(|(d, _)| encode_u32(*d)).collect();
 
         // Open cursors for all query dimensions in parallel.
-        let cursor_results: Vec<Result<Option<PostingCursor>, BlockSparseError>> =
+        let cursor_results: Vec<Result<Option<PostingCursor>, MaxScoreError>> =
             futures::stream::iter(encoded_dims.iter().map(|enc| self.open_cursor(enc)))
                 .buffer_unordered(encoded_dims.len())
                 .collect()
