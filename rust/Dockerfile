@@ -3,6 +3,7 @@ FROM rust:1.92.0 AS builder
 ARG RELEASE_MODE=
 ARG PROTOC_VERSION=31.1
 ARG ENABLE_AVX512=
+ARG LOG_SERVICE_CARGO_FEATURES=
 
 # ADDRESS_SANITIZER is an optional build argument to enable Address Sanitizer.
 ARG ADDRESS_SANITIZER
@@ -57,7 +58,11 @@ RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
   echo "Building without AVX512 optimizations"; \
   fi && \
   build_target=$( [ "${ADDRESS_SANITIZER}" = "1" ] && echo '--target x86_64-unknown-linux-gnu' || echo '' ) && \
-  if [ "$RELEASE_MODE" = "1" ]; then cargo build ${build_target} --workspace $(printf -- '--exclude %s ' $EXCLUDED_PACKAGES) --release; else cargo build ${build_target} --workspace $(printf -- '--exclude %s ' $EXCLUDED_PACKAGES); fi && \
+  release_flag=$( [ "$RELEASE_MODE" = "1" ] && echo '--release' || echo '' ) && \
+  cargo build ${build_target} --workspace $(printf -- '--exclude %s ' $EXCLUDED_PACKAGES) ${release_flag} && \
+  if [ -n "$LOG_SERVICE_CARGO_FEATURES" ]; then \
+  cargo build ${build_target} -p chroma-log-service --bin log_service --features "$LOG_SERVICE_CARGO_FEATURES" ${release_flag}; \
+  fi && \
   build_dir=$( [ "$RELEASE_MODE" = "1" ] && echo release || echo debug ) && \
   build_dir=$( [ "${ADDRESS_SANITIZER}" = "1" ] && echo "x86_64-unknown-linux-gnu/${build_dir}" || echo "${build_dir}" ) && \
   for bin in chroma garbage_collector_service chroma-load log_service heap_tender_service query_service compaction_service sysdb_service spanner_migration; do \

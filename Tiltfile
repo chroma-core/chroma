@@ -30,7 +30,8 @@ else:
     '.',
     only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
     dockerfile='./rust/Dockerfile',
-    target='log_service'
+    target='log_service',
+    build_args={'LOG_SERVICE_CARGO_FEATURES': 'faults'}
   )
 
 if config.tilt_subcommand == "ci":
@@ -320,7 +321,7 @@ k8s_resource('rust-sysdb-service:deployment:chroma', resource_deps = ['k8s_setup
 k8s_resource('rust-frontend-service:deployment:chroma', resource_deps=['sysdb:deployment:chroma', 'rust-log-service:statefulset:chroma'], labels=["chroma"], port_forwards='8000:8000')
 k8s_resource('query-service:statefulset:chroma', resource_deps=['sysdb:deployment:chroma'], labels=["chroma"], port_forwards='50053:50051')
 k8s_resource('compaction-service:statefulset:chroma', resource_deps=['sysdb:deployment:chroma'], labels=["chroma"], port_forwards="50057:50051")
-k8s_resource('garbage-collector:statefulset:chroma', resource_deps=['k8s_setup', 'minio-deployment'], labels=["chroma"], port_forwards='50055:50055')
+k8s_resource('garbage-collector:statefulset:chroma', resource_deps=['k8s_setup', 'minio-deployment', 'rust-log-service:statefulset:chroma'], labels=["chroma"], port_forwards='50055:50055')
 
 # Production Chroma 2
 k8s_resource('postgres:deployment:chroma2', resource_deps=['k8s_setup2', 'postgres:deployment:chroma'], labels=["infrastructure2"], port_forwards='6432:5432')
@@ -333,7 +334,7 @@ k8s_resource('rust-sysdb-service:deployment:chroma2', resource_deps=['k8s_setup2
 k8s_resource('rust-frontend-service:deployment:chroma2', resource_deps=['sysdb:deployment:chroma2', 'rust-log-service:statefulset:chroma2', 'rust-frontend-service:deployment:chroma'], labels=["chroma2"], port_forwards='8001:8000')
 k8s_resource('query-service:statefulset:chroma2', resource_deps=['sysdb:deployment:chroma2', 'query-service:statefulset:chroma'], labels=["chroma2"], port_forwards='60053:50051')
 k8s_resource('compaction-service:statefulset:chroma2', resource_deps=['sysdb:deployment:chroma2', 'compaction-service:statefulset:chroma'], labels=["chroma2"])
-k8s_resource('garbage-collector:statefulset:chroma2', resource_deps=['k8s_setup2', 'minio-deployment', 'garbage-collector:statefulset:chroma'], labels=["chroma2"], port_forwards='60055:50055')
+k8s_resource('garbage-collector:statefulset:chroma2', resource_deps=['k8s_setup2', 'minio-deployment', 'rust-log-service:statefulset:chroma2', 'garbage-collector:statefulset:chroma'], labels=["chroma2"], port_forwards='60055:50055')
 
 # Observability
 k8s_resource('jaeger', resource_deps=['k8s_setup'], labels=["observability"])
