@@ -5,7 +5,7 @@ use chroma_blockstore::{
     arrow::provider::BlockfileReaderOptions, test_arrow_blockfile_provider, BlockfileWriterOptions,
 };
 use chroma_index::sparse::maxscore::{
-    BlockSparseReader, BlockSparseWriter, SPARSE_POSTING_BLOCK_SIZE_BYTES,
+    MaxScoreReader, MaxScoreWriter, SPARSE_POSTING_BLOCK_SIZE_BYTES,
 };
 use chroma_index::sparse::types::encode_u32;
 use chroma_types::SparsePostingBlock;
@@ -33,7 +33,7 @@ pub async fn build_index(
 ) -> (
     tempfile::TempDir,
     BlockfileProvider,
-    BlockSparseReader<'static>,
+    MaxScoreReader<'static>,
 ) {
     build_index_with_block_size(vectors, None).await
 }
@@ -44,7 +44,7 @@ pub async fn build_index_with_block_size(
 ) -> (
     tempfile::TempDir,
     BlockfileProvider,
-    BlockSparseReader<'static>,
+    MaxScoreReader<'static>,
 ) {
     let (temp_dir, provider) = test_arrow_blockfile_provider(SPARSE_POSTING_BLOCK_SIZE_BYTES);
 
@@ -57,7 +57,7 @@ pub async fn build_index_with_block_size(
         .await
         .unwrap();
 
-    let mut writer = BlockSparseWriter::new(posting_writer, None);
+    let mut writer = MaxScoreWriter::new(posting_writer, None);
     if let Some(bs) = block_size {
         writer = writer.with_block_size(bs);
     }
@@ -75,12 +75,12 @@ pub async fn build_index_with_block_size(
         .await
         .unwrap();
 
-    let reader = BlockSparseReader::new(posting_reader);
+    let reader = MaxScoreReader::new(posting_reader);
     // SAFETY: The reader borrows from the BlockfileProvider's block cache.
     // Both the provider and TempDir (which owns the backing storage) are
     // returned alongside the reader and must outlive it in the caller.
-    let reader: BlockSparseReader<'static> =
-        unsafe { std::mem::transmute::<BlockSparseReader<'_>, BlockSparseReader<'static>>(reader) };
+    let reader: MaxScoreReader<'static> =
+        unsafe { std::mem::transmute::<MaxScoreReader<'_>, MaxScoreReader<'static>>(reader) };
 
     (temp_dir, provider, reader)
 }
@@ -88,8 +88,8 @@ pub async fn build_index_with_block_size(
 /// Fork the index to create a new writer for incremental updates.
 pub async fn fork_writer<'a>(
     provider: &BlockfileProvider,
-    reader: &'a BlockSparseReader<'a>,
-) -> BlockSparseWriter<'a> {
+    reader: &'a MaxScoreReader<'a>,
+) -> MaxScoreWriter<'a> {
     let posting_writer = provider
         .write::<u32, SparsePostingBlock>(
             BlockfileWriterOptions::new("".to_string())
@@ -100,14 +100,14 @@ pub async fn fork_writer<'a>(
         .await
         .unwrap();
 
-    BlockSparseWriter::new(posting_writer, Some(reader.clone()))
+    MaxScoreWriter::new(posting_writer, Some(reader.clone()))
 }
 
 /// Commit a writer and return a new 'static reader.
 pub async fn commit_writer(
     provider: &BlockfileProvider,
-    writer: BlockSparseWriter<'_>,
-) -> BlockSparseReader<'static> {
+    writer: MaxScoreWriter<'_>,
+) -> MaxScoreReader<'static> {
     let flusher = writer.commit().await.unwrap();
     let posting_id = flusher.id();
     flusher.flush().await.unwrap();
@@ -117,10 +117,10 @@ pub async fn commit_writer(
         .await
         .unwrap();
 
-    let reader = BlockSparseReader::new(posting_reader);
+    let reader = MaxScoreReader::new(posting_reader);
     // SAFETY: The reader borrows from the BlockfileProvider's block cache.
     // The caller must ensure the provider outlives the returned reader.
-    unsafe { std::mem::transmute::<BlockSparseReader<'_>, BlockSparseReader<'static>>(reader) }
+    unsafe { std::mem::transmute::<MaxScoreReader<'_>, MaxScoreReader<'static>>(reader) }
 }
 
 /// Brute-force top-k scoring for reference comparisons.
@@ -156,13 +156,13 @@ pub fn brute_force_topk(
 }
 
 /// Count total blocks for a dimension.
-pub async fn count_blocks(reader: &BlockSparseReader<'_>, dim: u32) -> usize {
+pub async fn count_blocks(reader: &MaxScoreReader<'_>, dim: u32) -> usize {
     let blocks = reader.get_posting_blocks(&encode_u32(dim)).await.unwrap();
     blocks.len()
 }
 
 /// Get all entries for a dimension from a reader.
-pub async fn get_all_entries(reader: &BlockSparseReader<'_>, dim: u32) -> Vec<(u32, f32)> {
+pub async fn get_all_entries(reader: &MaxScoreReader<'_>, dim: u32) -> Vec<(u32, f32)> {
     let blocks = reader.get_posting_blocks(&encode_u32(dim)).await.unwrap();
     blocks
         .into_iter()
