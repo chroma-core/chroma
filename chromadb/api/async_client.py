@@ -103,6 +103,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         database: str = DEFAULT_DATABASE,
     ) -> "AsyncClient":
         """Create a client from an existing system. This is useful for testing and debugging."""
+        SharedSystemClient._populate_data_from_system(system)
         return await AsyncClient.create(tenant, database, system.settings)
 
     @classmethod
