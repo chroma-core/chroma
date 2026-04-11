@@ -9,7 +9,6 @@ from chromadb.db.impl.sqlite import SqliteDB
 from chromadb.segment.impl.vector.batch import Batch
 from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 from chromadb.segment.impl.vector.local_hnsw import (
-    DEFAULT_CAPACITY,
     LocalHnswSegment,
 )
 from chromadb.segment.impl.vector.brute_force_index import BruteForceIndex
@@ -214,13 +213,13 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                             )
                         )
                         * self._params.resize_factor,
-                        DEFAULT_CAPACITY,
+                        self._params.initial_capacity,
                     )
                 ),
             )
         else:
             index.init_index(
-                max_elements=DEFAULT_CAPACITY,
+                max_elements=self._params.initial_capacity,
                 ef_construction=self._params.construction_ef,
                 M=self._params.M,
                 is_persistent_index=True,
