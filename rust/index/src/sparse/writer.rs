@@ -692,7 +692,7 @@ mod tests {
 
         // Use the small test block size (16KB) so we can span multiple blocks
         // without needing millions of entries.
-        let (_temp_dir, provider) = test_arrow_blockfile_provider(16 * 1024);
+        let (_temp_dir, provider) = test_arrow_blockfile_provider(1024);
 
         let num_offsets: u32 = 2000;
         let sparse_block_size: u32 = 2;
