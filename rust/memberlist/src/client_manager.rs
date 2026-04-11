@@ -42,6 +42,7 @@ use tower::ServiceBuilder;
 #[derive(Debug, Clone)]
 pub struct ClientAssigner<T> {
     node_name_to_client: Arc<RwLock<HashMap<String, T>>>,
+    member_id_to_node_name: Arc<RwLock<HashMap<String, String>>>,
     assignment_policy: Box<dyn AssignmentPolicy>,
     replication_factor: usize,
     /// Tier configuration: index is tier level, value is member count for that tier.
@@ -78,6 +79,7 @@ where
     ) -> Self {
         Self {
             node_name_to_client: Arc::new(RwLock::new(HashMap::new())),
+            member_id_to_node_name: Arc::new(RwLock::new(HashMap::new())),
             assignment_policy,
             replication_factor,
             tiers,
@@ -196,6 +198,10 @@ where
 
     pub fn is_empty(&self) -> bool {
         self.node_name_to_client.read().is_empty()
+    }
+
+    pub fn node_name_for_member_id(&self, member_id: &str) -> Option<String> {
+        self.member_id_to_node_name.read().get(member_id).cloned()
     }
 }
 
@@ -372,6 +378,17 @@ where
         // development, we may have multiple query services running on the same node.
         // In order to handle this, we append the member_id to the node name to make it unique.
         // This is purely for local development purposes.
+
+        // Populate member_id → member_node_name mapping
+        {
+            let mut member_id_to_node_name_guard =
+                self.client_assigner.member_id_to_node_name.write();
+            member_id_to_node_name_guard.clear();
+            for member in new_members.iter() {
+                member_id_to_node_name_guard
+                    .insert(member.member_id.clone(), member.member_node_name.clone());
+            }
+        }
 
         // Determine if all members share a node
         let mut all_same_node = true;
