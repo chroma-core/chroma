@@ -616,7 +616,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         });
 
         let block_iters: Vec<_> = futures::stream::iter(block_futures)
-            .buffer_unordered(self.block_manager.max_concurrent_block_loads())
+            .buffered(self.block_manager.max_concurrent_block_loads())
             .try_collect()
             .await?;
 
@@ -691,7 +691,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
 
         let blocks: Vec<&Block> = if !block_futures_is_empty {
             futures::stream::iter(block_futures)
-                .buffer_unordered(self.block_manager.max_concurrent_block_loads())
+                .buffered(self.block_manager.max_concurrent_block_loads())
                 .try_collect()
                 .await?
         } else {
