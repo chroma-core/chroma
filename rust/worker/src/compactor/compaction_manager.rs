@@ -389,8 +389,10 @@ impl CompactionManager {
                     CompactionResponse::Success { job_id, .. } => {
                         if job_id != &resp.job_id {
                             tracing::event!(Level::ERROR, name = "mismatched job ids in result", lhs =? *job_id, rhs =? resp.job_id);
+                            self.scheduler.fail_job(resp.job_id).await;
+                        } else {
+                            self.scheduler.succeed_job(resp.job_id);
                         }
-                        self.scheduler.succeed_job(resp.job_id);
                     }
                     CompactionResponse::RequireCompactionOffsetRepair {
                         job_id: collection_id,
