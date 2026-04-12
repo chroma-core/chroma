@@ -4,10 +4,11 @@ use crate::client::collection::CollectionAPIError;
 use crate::commands::browse::BrowseError;
 use crate::commands::db::get_db_name;
 use crate::commands::install::InstallError;
+use crate::config_store::{self, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::utils::{
-    get_current_profile, parse_host, parse_local, parse_path, AddressBook, CliError, Environment,
-    ErrorResponse, Profile, UtilsError,
+    parse_host, parse_local, parse_path, AddressBook, CliError, Environment, ErrorResponse,
+    Profile, UtilsError,
 };
 use chroma_types::{CollectionConfiguration, IncludeList};
 use clap::Parser;
@@ -335,7 +336,8 @@ pub fn copy(args: CopyArgs) -> Result<(), CliError> {
             return Err(CopyError::NoCollections.into());
         }
 
-        let (_, profile) = get_current_profile()?;
+        let store = FileConfigStore;
+        let (_, profile) = config_store::get_current_profile(&store)?;
         let (source, target) = get_target_and_destination(&args, &mut term)?;
         let (source_client, target_client, _handle) =
             get_chroma_clients(&args, source, target, profile, &mut term).await?;

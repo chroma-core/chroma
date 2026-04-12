@@ -2,13 +2,11 @@ use crate::client::admin_client::AdminClient;
 use crate::client::chroma_client::ChromaClient;
 use crate::commands::db::get_db_name;
 use crate::commands::install::InstallError;
+use crate::config_store::{self, ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::tui::collection_browser::CollectionBrowser;
 use crate::ui_utils::Theme;
-use crate::utils::{
-    get_current_profile, parse_host, parse_local, parse_path, read_config, write_config,
-    AddressBook, CliError, LocalChromaArgs,
-};
+use crate::utils::{parse_host, parse_local, parse_path, AddressBook, CliError, LocalChromaArgs};
 use clap::Parser;
 use crossterm::style::Stylize;
 use thiserror::Error;
@@ -77,10 +75,11 @@ async fn parse_local_args(
 pub async fn get_cloud_client(
     db_name: Option<String>,
     collection_name: &str,
+    store: &dyn ConfigStore,
     term: &mut dyn Terminal,
 ) -> Result<ChromaClient, CliError> {
-    let profile = get_current_profile()?;
-    let admin_client = AdminClient::from_profile(AddressBook::cloud().frontend_url, &profile.1);
+    let (_, profile) = config_store::get_current_profile(store)?;
+    let admin_client = AdminClient::from_profile(AddressBook::cloud().frontend_url, &profile);
 
     if let Some(db_name) = db_name {
         let _verified = admin_client.get_database(db_name.clone()).await?;
@@ -108,13 +107,14 @@ fn local_setup(args: BrowseArgs) -> bool {
 }
 
 pub fn browse(args: BrowseArgs) -> Result<(), CliError> {
+    let store = FileConfigStore;
     let mut term = SystemTerminal;
     let runtime = tokio::runtime::Runtime::new().map_err(|_| InstallError::RuntimeError)?;
     runtime.block_on(async {
         let (client, _handle) = match local_setup(args.clone()) {
             true => parse_local_args(args.clone()).await,
             false => Ok((
-                get_cloud_client(args.db_name, &args.collection_name, &mut term).await?,
+                get_cloud_client(args.db_name, &args.collection_name, &store, &mut term).await?,
                 None,
             )),
         }?;
@@ -124,12 +124,12 @@ pub fn browse(args: BrowseArgs) -> Result<(), CliError> {
             .await
             .map_err(|_| BrowseError::CollectionNotFound(args.collection_name))?;
 
-        let mut config = read_config()?;
+        let mut config = store.read_config()?;
 
         if let Some(theme) = args.theme {
             if config.theme != theme {
                 config.theme = theme;
-                write_config(&config)?;
+                store.write_config(&config)?;
             }
         }
 

@@ -1,7 +1,6 @@
+use crate::config_store::{ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
-use crate::utils::{
-    read_config, read_profiles, write_config, write_profiles, CliConfig, CliError, Profiles,
-};
+use crate::utils::{CliConfig, CliError, Profiles};
 use clap::{Args, Subcommand};
 use colored::Colorize;
 use thiserror::Error;
@@ -238,36 +237,46 @@ fn use_profile(
     Ok(())
 }
 
-pub fn profile_command(command: ProfileCommand) -> Result<(), CliError> {
-    let mut profiles = read_profiles()?;
-    let mut config = read_config()?;
-    let mut term = SystemTerminal;
+pub fn run_profile_command(
+    command: ProfileCommand,
+    store: &dyn ConfigStore,
+    term: &mut dyn Terminal,
+) -> Result<(), CliError> {
+    let mut profiles = store.read_profiles()?;
+    let mut config = store.read_config()?;
 
     match command {
         ProfileCommand::Delete(args) => {
-            delete_profile(args, &mut profiles, &mut config, &mut term)?;
-            write_profiles(&profiles)?;
-            write_config(&config)?;
+            delete_profile(args, &mut profiles, &mut config, term)?;
+            store.write_profiles(&profiles)?;
+            store.write_config(&config)?;
         }
-        ProfileCommand::List => list_profiles(&profiles, &config, &mut term)?,
+        ProfileCommand::List => list_profiles(&profiles, &config, term)?,
         ProfileCommand::Rename(args) => {
-            rename(args, &mut profiles, &mut config, &mut term)?;
-            write_profiles(&profiles)?;
-            write_config(&config)?;
+            rename(args, &mut profiles, &mut config, term)?;
+            store.write_profiles(&profiles)?;
+            store.write_config(&config)?;
         }
-        ProfileCommand::Show => show(&config, &mut term)?,
+        ProfileCommand::Show => show(&config, term)?,
         ProfileCommand::Use(args) => {
-            use_profile(args, &profiles, &mut config, &mut term)?;
-            write_config(&config)?;
+            use_profile(args, &profiles, &mut config, term)?;
+            store.write_config(&config)?;
         }
     }
 
     Ok(())
 }
 
+pub fn profile_command(command: ProfileCommand) -> Result<(), CliError> {
+    let store = FileConfigStore;
+    let mut term = SystemTerminal;
+    run_profile_command(command, &store, &mut term)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config_store::test_config_store::InMemoryConfigStore;
     use crate::terminal::test_terminal::TestTerminal;
     use crate::utils::Profile;
     use std::collections::HashMap;
@@ -291,7 +300,7 @@ mod tests {
         profiles
     }
 
-    // ── show ──
+    // ── inner function tests ──
 
     #[test]
     fn test_show_displays_current_profile() {
@@ -315,8 +324,6 @@ mod tests {
         assert_eq!(term.output.len(), 1);
         assert!(term.output[0].contains("No profile set currently"));
     }
-
-    // ── list ──
 
     #[test]
     fn test_list_empty_profiles() {
@@ -342,8 +349,6 @@ mod tests {
         assert!(term.output[1].contains("default"));
         assert!(term.output[1].contains("(current)"));
     }
-
-    // ── use ──
 
     #[test]
     fn test_use_profile_switches_current() {
@@ -382,8 +387,6 @@ mod tests {
 
         assert!(result.is_err());
     }
-
-    // ── delete ──
 
     #[test]
     fn test_delete_non_current_profile() {
@@ -490,8 +493,6 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // ── rename ──
-
     #[test]
     fn test_rename_profile() {
         let mut profiles = make_profiles(&["old-name"]);
@@ -550,5 +551,127 @@ mod tests {
         );
 
         assert!(result.is_err());
+    }
+
+    // ── end-to-end profile_command tests ──
+
+    #[test]
+    fn test_command_show_persists_nothing() {
+        let store = InMemoryConfigStore::new(make_profiles(&["a"]), make_config("a"));
+        let mut term = TestTerminal::new();
+
+        run_profile_command(ProfileCommand::Show, &store, &mut term).unwrap();
+
+        assert!(term.output[0].contains("a"));
+        // Store unchanged
+        assert_eq!(store.config().current_profile, "a");
+        assert!(store.profiles().contains_key("a"));
+    }
+
+    #[test]
+    fn test_command_use_persists_config() {
+        let store = InMemoryConfigStore::new(make_profiles(&["a", "b"]), make_config("a"));
+        let mut term = TestTerminal::new();
+
+        run_profile_command(
+            ProfileCommand::Use(UseArgs {
+                name: "b".to_string(),
+            }),
+            &store,
+            &mut term,
+        )
+        .unwrap();
+
+        assert_eq!(store.config().current_profile, "b");
+    }
+
+    #[test]
+    fn test_command_delete_persists_removal() {
+        let store = InMemoryConfigStore::new(make_profiles(&["a", "b"]), make_config("a"));
+        let mut term = TestTerminal::new();
+
+        run_profile_command(
+            ProfileCommand::Delete(DeleteArgs {
+                name: "b".to_string(),
+                force: false,
+            }),
+            &store,
+            &mut term,
+        )
+        .unwrap();
+
+        assert!(!store.profiles().contains_key("b"));
+        assert!(store.profiles().contains_key("a"));
+    }
+
+    #[test]
+    fn test_command_delete_current_with_force_persists() {
+        let store = InMemoryConfigStore::new(make_profiles(&["a"]), make_config("a"));
+        let mut term = TestTerminal::new();
+
+        run_profile_command(
+            ProfileCommand::Delete(DeleteArgs {
+                name: "a".to_string(),
+                force: true,
+            }),
+            &store,
+            &mut term,
+        )
+        .unwrap();
+
+        assert!(!store.profiles().contains_key("a"));
+        assert_eq!(store.config().current_profile, "");
+    }
+
+    #[test]
+    fn test_command_delete_denied_persists_nothing() {
+        let store = InMemoryConfigStore::new(make_profiles(&["a"]), make_config("a"));
+        let mut term = TestTerminal::new().with_inputs(vec!["n"]);
+
+        run_profile_command(
+            ProfileCommand::Delete(DeleteArgs {
+                name: "a".to_string(),
+                force: false,
+            }),
+            &store,
+            &mut term,
+        )
+        .unwrap();
+
+        // Store unchanged — deletion was cancelled
+        assert!(store.profiles().contains_key("a"));
+        assert_eq!(store.config().current_profile, "a");
+    }
+
+    #[test]
+    fn test_command_rename_persists() {
+        let store = InMemoryConfigStore::new(make_profiles(&["old"]), make_config("old"));
+        let mut term = TestTerminal::new();
+
+        run_profile_command(
+            ProfileCommand::Rename(RenameArgs {
+                name: "old".to_string(),
+                new_name: "new".to_string(),
+            }),
+            &store,
+            &mut term,
+        )
+        .unwrap();
+
+        assert!(store.profiles().contains_key("new"));
+        assert_eq!(store.config().current_profile, "new");
+    }
+
+    #[test]
+    fn test_command_list_with_profiles() {
+        let store =
+            InMemoryConfigStore::new(make_profiles(&["prod", "staging"]), make_config("prod"));
+        let mut term = TestTerminal::new();
+
+        run_profile_command(ProfileCommand::List, &store, &mut term).unwrap();
+
+        assert!(term.output[0].contains("Available profiles:"));
+        assert!(term.output[1].contains("prod"));
+        assert!(term.output[1].contains("(current)"));
     }
 }
