@@ -223,7 +223,8 @@
               "integrations/embedding-models/cloudflare-workers-ai",
               "integrations/embedding-models/amazon-bedrock",
               "integrations/embedding-models/baseten",
-              "integrations/embedding-models/chroma-cloud-qwen"
+              "integrations/embedding-models/chroma-cloud-qwen",
+              "integrations/embedding-models/superlinked"
             ]
           },
           {
@@ -231,7 +232,8 @@
             "pages": [
               "integrations/embedding-models/chroma-bm25",
               "integrations/embedding-models/chroma-cloud-splade",
-              "integrations/embedding-models/hugging-face"
+              "integrations/embedding-models/hugging-face",
+              "integrations/embedding-models/superlinked"
             ]
           },
           {
