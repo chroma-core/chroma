@@ -1,5 +1,5 @@
 use crate::client::admin_client::get_admin_client;
-use crate::config_store::{self, FileConfigStore};
+use crate::config_store::{ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::ui_utils::copy_to_clipboard;
 use crate::utils::{
@@ -490,7 +490,7 @@ pub async fn list(
 
 pub fn db_command(command: DbCommand) -> Result<(), CliError> {
     let store = FileConfigStore::default();
-    let (profile_name, current_profile) = config_store::get_current_profile(&store)?;
+    let (profile_name, current_profile) = store.get_current_profile()?;
     let mut term = SystemTerminal;
 
     let runtime = tokio::runtime::Runtime::new().map_err(|_| DbError::RuntimeError)?;

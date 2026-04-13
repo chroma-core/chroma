@@ -2,7 +2,7 @@ use crate::client::admin_client::AdminClient;
 use crate::client::chroma_client::ChromaClient;
 use crate::commands::db::get_db_name;
 use crate::commands::install::InstallError;
-use crate::config_store::{self, ConfigStore, FileConfigStore};
+use crate::config_store::{ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::tui::collection_browser::CollectionBrowser;
 use crate::ui_utils::Theme;
@@ -78,7 +78,7 @@ pub async fn get_cloud_client(
     store: &dyn ConfigStore,
     term: &mut dyn Terminal,
 ) -> Result<ChromaClient, CliError> {
-    let profile = config_store::get_current_profile(store)?;
+    let profile = store.get_current_profile()?;
     let admin_client = AdminClient::from_profile(AddressBook::cloud().frontend_url, &profile.1);
 
     if let Some(db_name) = db_name {

@@ -198,10 +198,8 @@ fn rename(
 
     let is_current = rename_profile_name.eq(&config.current_profile);
 
-    profiles.insert(
-        new_name.clone(),
-        profiles.get(&rename_profile_name).unwrap().clone(),
-    );
+    let profile = profiles.remove(&rename_profile_name).unwrap();
+    profiles.insert(new_name.clone(), profile);
 
     if is_current {
         config.current_profile = new_name.clone();
@@ -276,6 +274,7 @@ fn run_profile_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config_store::test_config_store::InMemoryConfigStore;
     use crate::terminal::test_terminal::TestTerminal;
     use crate::utils::Profile;
     use std::collections::HashMap;
@@ -558,5 +557,111 @@ mod tests {
         );
 
         assert!(result.is_err());
+    }
+
+    // ── full command tests (ConfigStore + Terminal) ──
+
+    #[test]
+    fn test_command_use_persists_to_store() {
+        let store = InMemoryConfigStore::new(make_profiles(&["a", "b"]), make_config("a"));
+        let mut term = TestTerminal::new();
+
+        run_profile_command(
+            ProfileCommand::Use(UseArgs {
+                name: "b".to_string(),
+            }),
+            &store,
+            &mut term,
+        )
+        .unwrap();
+
+        let config = store.read_config().unwrap();
+        assert_eq!(config.current_profile, "b");
+    }
+
+    #[test]
+    fn test_command_delete_persists_to_store() {
+        let store = InMemoryConfigStore::new(make_profiles(&["a", "b"]), make_config("a"));
+        let mut term = TestTerminal::new();
+
+        run_profile_command(
+            ProfileCommand::Delete(DeleteArgs {
+                name: "b".to_string(),
+                force: false,
+            }),
+            &store,
+            &mut term,
+        )
+        .unwrap();
+
+        let profiles = store.read_profiles().unwrap();
+        assert!(!profiles.contains_key("b"));
+        assert!(profiles.contains_key("a"));
+    }
+
+    #[test]
+    fn test_command_delete_current_profile_clears_config() {
+        let store = InMemoryConfigStore::new(make_profiles(&["a"]), make_config("a"));
+        let mut term = TestTerminal::new().with_inputs(vec!["y"]);
+
+        run_profile_command(
+            ProfileCommand::Delete(DeleteArgs {
+                name: "a".to_string(),
+                force: false,
+            }),
+            &store,
+            &mut term,
+        )
+        .unwrap();
+
+        let config = store.read_config().unwrap();
+        assert_eq!(config.current_profile, "");
+        let profiles = store.read_profiles().unwrap();
+        assert!(profiles.is_empty());
+    }
+
+    #[test]
+    fn test_command_rename_persists_to_store() {
+        let store = InMemoryConfigStore::new(make_profiles(&["old"]), make_config("old"));
+        let mut term = TestTerminal::new();
+
+        run_profile_command(
+            ProfileCommand::Rename(RenameArgs {
+                name: "old".to_string(),
+                new_name: "new".to_string(),
+            }),
+            &store,
+            &mut term,
+        )
+        .unwrap();
+
+        let profiles = store.read_profiles().unwrap();
+        assert!(profiles.contains_key("new"));
+        assert!(!profiles.contains_key("old"));
+        let config = store.read_config().unwrap();
+        assert_eq!(config.current_profile, "new");
+    }
+
+    #[test]
+    fn test_command_show_reads_from_store() {
+        let store = InMemoryConfigStore::new(make_profiles(&["prod"]), make_config("prod"));
+        let mut term = TestTerminal::new();
+
+        run_profile_command(ProfileCommand::Show, &store, &mut term).unwrap();
+
+        assert!(term.output[0].contains("prod"));
+    }
+
+    #[test]
+    fn test_command_list_reads_from_store() {
+        let store = InMemoryConfigStore::new(make_profiles(&["dev", "prod"]), make_config("prod"));
+        let mut term = TestTerminal::new();
+
+        run_profile_command(ProfileCommand::List, &store, &mut term).unwrap();
+
+        assert!(term.output[0].contains("Available profiles:"));
+        let all_output = term.output.join("\n");
+        assert!(all_output.contains("prod"));
+        assert!(all_output.contains("dev"));
     }
 }

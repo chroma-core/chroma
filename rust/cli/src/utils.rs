@@ -28,8 +28,6 @@ use thiserror::Error;
 use tokio::spawn;
 use tokio::task::JoinHandle;
 
-pub const CHROMA_DIR: &str = ".chroma";
-pub const CREDENTIALS_FILE: &str = "credentials";
 pub const SELECTION_LIMIT: usize = 5;
 pub const CHROMA_API_KEY_ENV_VAR: &str = "CHROMA_API_KEY";
 pub const CHROMA_TENANT_ENV_VAR: &str = "CHROMA_TENANT";

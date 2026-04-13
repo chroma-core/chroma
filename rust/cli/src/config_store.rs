@@ -8,6 +8,29 @@ pub trait ConfigStore {
     fn write_profiles(&self, profiles: &Profiles) -> Result<(), CliError>;
     fn read_config(&self) -> Result<CliConfig, CliError>;
     fn write_config(&self, config: &CliConfig) -> Result<(), CliError>;
+
+    fn get_profile(&self, name: String) -> Result<Profile, CliError> {
+        let profiles = self.read_profiles()?;
+        if !profiles.contains_key(&name) {
+            Err(ProfileError::ProfileNotFound(name).into())
+        } else {
+            Ok(profiles[&name].clone())
+        }
+    }
+
+    fn get_current_profile(&self) -> Result<(String, Profile), CliError> {
+        let config = self.read_config()?;
+        let profile_name = config.current_profile.clone();
+        let profile = self
+            .get_profile(config.current_profile)
+            .map_err(|e| match e {
+                CliError::Profile(ProfileError::ProfileNotFound(_)) => {
+                    ProfileError::NoActiveProfile.into()
+                }
+                _ => e,
+            })?;
+        Ok((profile_name, profile))
+    }
 }
 
 pub struct FileConfigStore {
@@ -103,25 +126,6 @@ impl ConfigStore for FileConfigStore {
         fs::write(config_path, json_str).map_err(|_| UtilsError::ConfigFileWriteFailed)?;
         Ok(())
     }
-}
-
-pub fn get_profile(store: &dyn ConfigStore, name: String) -> Result<Profile, CliError> {
-    let profiles = store.read_profiles()?;
-    if !profiles.contains_key(&name) {
-        Err(ProfileError::ProfileNotFound(name).into())
-    } else {
-        Ok(profiles[&name].clone())
-    }
-}
-
-pub fn get_current_profile(store: &dyn ConfigStore) -> Result<(String, Profile), CliError> {
-    let config = store.read_config()?;
-    let profile_name = config.current_profile.clone();
-    let profile = get_profile(store, config.current_profile).map_err(|e| match e {
-        CliError::Profile(ProfileError::ProfileNotFound(_)) => ProfileError::NoActiveProfile.into(),
-        _ => e,
-    })?;
-    Ok((profile_name, profile))
 }
 
 #[cfg(test)]

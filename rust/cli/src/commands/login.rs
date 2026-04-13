@@ -7,7 +7,7 @@ use crate::commands::login::LoginError::BrowserAuthFailed;
 use crate::config_store::{ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::ui_utils::validate_uri;
-use crate::utils::{CliError, Profile, Profiles, UtilsError, CHROMA_DIR, CREDENTIALS_FILE};
+use crate::utils::{CliError, Profile, Profiles, UtilsError};
 use clap::Parser;
 use colored::Colorize;
 use std::error::Error;
@@ -59,8 +59,8 @@ fn login_success_message(team_name: &str, profile_name: &str) -> String {
         "{} {}\nCredentials saved to ~/{}/{} under the profile {}\n",
         "Login successful for team".green().bold(),
         team_name.green().bold(),
-        CHROMA_DIR,
-        CREDENTIALS_FILE,
+        ".chroma",
+        "credentials",
         profile_name
     )
 }

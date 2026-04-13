@@ -1,4 +1,4 @@
-use crate::config_store::{self, ConfigStore, FileConfigStore};
+use crate::config_store::{ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::ui_utils::read_secret;
 use crate::utils::UtilsError::UserInputFailed;
@@ -474,7 +474,7 @@ fn get_app_env_variables(
 ) -> Result<SampleAppEnvVariables, CliError> {
     let mut env_variables = match local {
         false => {
-            let (_, current_profile) = config_store::get_current_profile(store)?;
+            let (_, current_profile) = store.get_current_profile()?;
             SampleAppEnvVariables::cloud(
                 current_profile,
                 db_name.ok_or(InstallError::DatabaseRequired)?,

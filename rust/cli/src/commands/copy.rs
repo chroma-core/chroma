@@ -4,7 +4,7 @@ use crate::client::collection::CollectionAPIError;
 use crate::commands::browse::BrowseError;
 use crate::commands::db::get_db_name;
 use crate::commands::install::InstallError;
-use crate::config_store::{self, FileConfigStore};
+use crate::config_store::{ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::utils::{
     parse_host, parse_local, parse_path, AddressBook, CliError, Environment, ErrorResponse,
@@ -337,7 +337,7 @@ pub fn copy(args: CopyArgs) -> Result<(), CliError> {
         }
 
         let store = FileConfigStore::default();
-        let (_, profile) = config_store::get_current_profile(&store)?;
+        let (_, profile) = store.get_current_profile()?;
         let (source, target) = get_target_and_destination(&args, &mut term)?;
         let (source_client, target_client, _handle) =
             get_chroma_clients(&args, source, target, profile, &mut term).await?;
