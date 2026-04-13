@@ -54,13 +54,12 @@ fn profile_name_input_prompt(profile_name: &str) -> String {
     )
 }
 
-fn login_success_message(team_name: &str, profile_name: &str) -> String {
+fn login_success_message(team_name: &str, profile_name: &str, config_dir: &str) -> String {
     format!(
-        "{} {}\nCredentials saved to ~/{}/{} under the profile {}\n",
+        "{} {}\nCredentials saved to {} under the profile {}\n",
         "Login successful for team".green().bold(),
         team_name.green().bold(),
-        ".chroma",
-        "credentials",
+        config_dir,
         profile_name
     )
 }
@@ -231,7 +230,7 @@ pub async fn browser_login(
         store.write_config(&config)?;
     }
 
-    term.println(&login_success_message(&team.name, &profile_name));
+    term.println(&login_success_message(&team.name, &profile_name, &store.config_dir()));
 
     if !config.current_profile.eq(&profile_name) {
         term.println(&set_profile_message(&profile_name));

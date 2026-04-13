@@ -8,6 +8,7 @@ pub trait ConfigStore {
     fn write_profiles(&self, profiles: &Profiles) -> Result<(), CliError>;
     fn read_config(&self) -> Result<CliConfig, CliError>;
     fn write_config(&self, config: &CliConfig) -> Result<(), CliError>;
+    fn config_dir(&self) -> String;
 
     fn get_profile(&self, name: String) -> Result<Profile, CliError> {
         let profiles = self.read_profiles()?;
@@ -94,6 +95,10 @@ impl Default for FileConfigStore {
 }
 
 impl ConfigStore for FileConfigStore {
+    fn config_dir(&self) -> String {
+        format!("~/{}", self.chroma_dir)
+    }
+
     fn read_profiles(&self) -> Result<Profiles, CliError> {
         let credentials_path = self.get_credentials_file_path()?;
         let contents =
@@ -149,6 +154,10 @@ pub mod test_config_store {
     }
 
     impl ConfigStore for InMemoryConfigStore {
+        fn config_dir(&self) -> String {
+            "memory".to_string()
+        }
+
         fn read_profiles(&self) -> Result<Profiles, CliError> {
             Ok(self.profiles.borrow().clone())
         }
