@@ -243,14 +243,12 @@ impl Display for Environment {
 
 pub type Profiles = HashMap<String, Profile>;
 
-
 pub fn get_address_book(dev: bool) -> AddressBook {
     match dev {
         true => Environment::Local.address_book(),
         false => Environment::Cloud.address_book(),
     }
 }
-
 
 pub fn find_available_port(min: u16, max: u16) -> Result<u16, CliError> {
     let mut rng = rand::thread_rng();

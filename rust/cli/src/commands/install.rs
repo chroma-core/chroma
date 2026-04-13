@@ -1,6 +1,6 @@
+use crate::config_store::{self, ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::ui_utils::read_secret;
-use crate::config_store::{self, ConfigStore, FileConfigStore};
 use crate::utils::UtilsError::UserInputFailed;
 use crate::utils::{CliConfig, CliError, Profile, SELECTION_LIMIT};
 use clap::Parser;

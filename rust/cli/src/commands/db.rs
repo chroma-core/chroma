@@ -1,7 +1,7 @@
 use crate::client::admin_client::get_admin_client;
+use crate::config_store::{self, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::ui_utils::copy_to_clipboard;
-use crate::config_store::{self, FileConfigStore};
 use crate::utils::{
     CliError, Profile, CHROMA_API_KEY_ENV_VAR, CHROMA_DATABASE_ENV_VAR, CHROMA_TENANT_ENV_VAR,
     SELECTION_LIMIT,

@@ -82,8 +82,7 @@ impl ConfigStore for FileConfigStore {
 
     fn write_profiles(&self, profiles: &Profiles) -> Result<(), CliError> {
         let credentials_path = self.get_credentials_file_path()?;
-        let toml_str =
-            toml::to_string(profiles).map_err(|_| UtilsError::CredsFileParseFailed)?;
+        let toml_str = toml::to_string(profiles).map_err(|_| UtilsError::CredsFileParseFailed)?;
         fs::write(credentials_path, toml_str).map_err(|_| UtilsError::CredsFileWriteFailed)?;
         Ok(())
     }
