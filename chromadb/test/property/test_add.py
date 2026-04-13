@@ -48,7 +48,6 @@ collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="co
 )
 def test_add_miniscule(
     client: ClientAPI,
-    database_name: str,
     collection: strategies.Collection,
     record_set: strategies.RecordSet,
 ) -> None:
@@ -82,7 +81,6 @@ def test_add_miniscule(
 )
 def test_add_small(
     client: ClientAPI,
-    database_name: str,
     collection: strategies.Collection,
     record_set: strategies.RecordSet,
     should_compact: bool,
@@ -125,7 +123,6 @@ def test_add_small(
 )
 def test_add_medium(
     client: ClientAPI,
-    database_name: str,
     collection: strategies.Collection,
     record_set: strategies.RecordSet,
     should_compact: bool,
@@ -254,7 +251,6 @@ def create_large_recordset(
 @settings(deadline=None, max_examples=2)
 def test_add_large(
     client: ClientAPI,
-    database_name: str,
     collection: strategies.Collection,
     should_compact: bool,
 ) -> None:
@@ -306,7 +302,6 @@ def test_add_large(
 @settings(deadline=None, max_examples=1)
 def test_add_large_exceeding(
     client: ClientAPI,
-    database_name: str,
     collection: strategies.Collection,
 ) -> None:
     create_isolated_database(client)
@@ -340,7 +335,7 @@ def test_add_large_exceeding(
     reason="This is expected to fail right now. We should change the API to sort the \
     ids by input order."
 )
-def test_out_of_order_ids(client: ClientAPI, database_name: str) -> None:
+def test_out_of_order_ids(client: ClientAPI) -> None:
     if (
         client.get_settings().chroma_api_impl
         == "chromadb.api.async_fastapi.AsyncFastAPI"
@@ -386,7 +381,7 @@ def test_out_of_order_ids(client: ClientAPI, database_name: str) -> None:
     assert get_ids == ooo_ids
 
 
-def test_add_partial(client: ClientAPI, database_name: str) -> None:
+def test_add_partial(client: ClientAPI) -> None:
     """Tests adding a record set with some of the fields set to None."""
 
     create_isolated_database(client)
@@ -421,7 +416,7 @@ def test_add_partial(client: ClientAPI, database_name: str) -> None:
     NOT_CLUSTER_ONLY,
     reason="GroupBy is only supported in distributed mode",
 )
-def test_search_group_by(client: ClientAPI, database_name: str) -> None:
+def test_search_group_by(client: ClientAPI) -> None:
     """Test GroupBy with single key, multiple keys, and multiple ranking keys."""
     from chromadb.execution.expression.operator import GroupBy, MinK, Key
     from chromadb.execution.expression.plan import Search

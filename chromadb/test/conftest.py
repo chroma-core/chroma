@@ -48,9 +48,7 @@ logger = logging.getLogger(__name__)
 
 VALID_PRESETS = ["fast", "normal", "slow"]
 CURRENT_PRESET = os.getenv("PROPERTY_TESTING_PRESET", "fast")
-HYPOTHESIS_CI_REPRODUCE_ONLY = (
-    os.getenv("CHROMA_HYPOTHESIS_CI_REPRODUCE_ONLY") == "1"
-)
+HYPOTHESIS_CI_REPRODUCE_ONLY = os.getenv("CHROMA_HYPOTHESIS_CI_REPRODUCE_ONLY") == "1"
 
 if CURRENT_PRESET not in VALID_PRESETS:
     raise ValueError(
@@ -466,9 +464,9 @@ def fastapi_server_basic_auth_valid_cred_single_user() -> Generator[System, None
             yield item
 
 
-def fastapi_server_basic_auth_valid_cred_multiple_users() -> (
-    Generator[System, None, None]
-):
+def fastapi_server_basic_auth_valid_cred_multiple_users() -> Generator[
+    System, None, None
+]:
     creds = {
         "user": "$2y$10$kY9hn.Wlfcj7n1Cnjmy1kuIhEFIVBsfbNWLQ5ahoKmdc2HLA4oP6i",
         "user2": "$2y$10$CymQ63tic/DRj8dD82915eoM4ke3d6RaNKU4dj4IVJlHyea0yeGDS",
@@ -561,9 +559,9 @@ users:
                 yield item
 
 
-def fastapi_fixture_admin_and_singleton_tenant_db_user() -> (
-    Generator[System, None, None]
-):
+def fastapi_fixture_admin_and_singleton_tenant_db_user() -> Generator[
+    System, None, None
+]:
     # Check if we should connect to existing server instead of spawning a new one
     if os.getenv("CHROMA_SERVER_HOST") and not NOT_CLUSTER_ONLY:
         # Connect to existing Tilt instance using the same pattern as basic_http_client
@@ -794,16 +792,16 @@ def system_fixtures_auth() -> List[Callable[[], Generator[System, None, None]]]:
     return fixtures
 
 
-def system_fixtures_authn_rbac_authz() -> (
-    List[Callable[[], Generator[System, None, None]]]
-):
+def system_fixtures_authn_rbac_authz() -> List[
+    Callable[[], Generator[System, None, None]]
+]:
     fixtures = [fastapi_server_basic_authn_rbac_authz]
     return fixtures
 
 
-def system_fixtures_root_and_singleton_tenant_db_user() -> (
-    List[Callable[[], Generator[System, None, None]]]
-):
+def system_fixtures_root_and_singleton_tenant_db_user() -> List[
+    Callable[[], Generator[System, None, None]]
+]:
     fixtures = [fastapi_fixture_admin_and_singleton_tenant_db_user]
     return fixtures
 
@@ -1000,20 +998,27 @@ def client(system: System, database_name: str) -> Generator[ClientAPI, None, Non
     client.clear_system_cache()
 
 
-TEST_DATABASE_NAMES = [pytest.param(DEFAULT_DATABASE, id="classic")]
-
-if MULTI_REGION_ENABLED:
-    TEST_DATABASE_NAMES.append(
-        pytest.param(
-            DEFAULT_MCMR_DATABASE,
-            id="multi-region-db",
-            marks=pytest.mark.test_with_multi_region,
-        )
-    )
-
-@pytest.fixture(params=TEST_DATABASE_NAMES)
+@pytest.fixture
 def database_name(request: pytest.FixtureRequest) -> str:
     return cast(str, request.param)
+
+
+def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
+    """Parameterize database_name based on whether the test opted in to multi-region."""
+    if "database_name" in metafunc.fixturenames:
+        params = [pytest.param(DEFAULT_DATABASE, id="classic")]
+        if MULTI_REGION_ENABLED and metafunc.definition.get_closest_marker(
+            "test_with_multi_region"
+        ):
+            params.append(
+                pytest.param(
+                    DEFAULT_MCMR_DATABASE,
+                    id="multi-region-db",
+                    marks=pytest.mark.test_with_multi_region,
+                )
+            )
+        metafunc.parametrize("database_name", params, indirect=True)
+
 
 def multi_region_test(test_func: Callable[..., Any]) -> Any:
     """Opt-in decorator for multi-region testing.
@@ -1110,8 +1115,7 @@ class ProducerFn(Protocol):
         collection_id: UUID,
         embeddings: Iterator[OperationRecord],
         n: int,
-    ) -> Tuple[Sequence[OperationRecord], Sequence[SeqId]]:
-        ...
+    ) -> Tuple[Sequence[OperationRecord], Sequence[SeqId]]: ...
 
 
 def produce_n_single(
