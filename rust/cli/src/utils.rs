@@ -73,10 +73,6 @@ pub enum UtilsError {
     HomeDirNotFound,
     #[error("Failed to create .chroma directory")]
     ChromaDirCreateFailed,
-    #[error("Failed to create credentials file")]
-    CredsFileCreateFailed,
-    #[error("Failed to create config file")]
-    ConfigFileCreateFailed,
     #[error("Failed to read credentials file")]
     CredsFileReadFailed,
     #[error("Failed to parse credentials file")]

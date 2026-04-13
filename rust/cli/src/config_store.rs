@@ -64,23 +64,12 @@ impl FileConfigStore {
 
     fn get_credentials_file_path(&self) -> Result<PathBuf, CliError> {
         let chroma_dir = self.get_chroma_dir()?;
-        let credentials_path = chroma_dir.join(&self.credentials_file);
-        if !credentials_path.exists() {
-            fs::write(&credentials_path, "").map_err(|_| UtilsError::CredsFileCreateFailed)?;
-        }
-        Ok(credentials_path)
+        Ok(chroma_dir.join(&self.credentials_file))
     }
 
     fn get_config_file_path(&self) -> Result<PathBuf, CliError> {
         let chroma_dir = self.get_chroma_dir()?;
-        let config_path = chroma_dir.join(&self.config_file);
-        if !config_path.exists() {
-            let default_config = CliConfig::default();
-            let json_str = serde_json::to_string_pretty(&default_config)
-                .map_err(|_| UtilsError::ConfigFileCreateFailed)?;
-            fs::write(&config_path, json_str).map_err(|_| UtilsError::ConfigFileCreateFailed)?;
-        }
-        Ok(config_path)
+        Ok(chroma_dir.join(&self.config_file))
     }
 }
 
@@ -101,6 +90,9 @@ impl ConfigStore for FileConfigStore {
 
     fn read_profiles(&self) -> Result<Profiles, CliError> {
         let credentials_path = self.get_credentials_file_path()?;
+        if !credentials_path.exists() {
+            return Ok(Profiles::new());
+        }
         let contents =
             fs::read_to_string(credentials_path).map_err(|_| UtilsError::CredsFileReadFailed)?;
         let profiles: Profiles =
@@ -117,6 +109,9 @@ impl ConfigStore for FileConfigStore {
 
     fn read_config(&self) -> Result<CliConfig, CliError> {
         let config_path = self.get_config_file_path()?;
+        if !config_path.exists() {
+            return Ok(CliConfig::default());
+        }
         let contents =
             fs::read_to_string(&config_path).map_err(|_| UtilsError::ConfigFileReadFailed)?;
         let config: CliConfig =
