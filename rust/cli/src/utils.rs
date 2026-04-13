@@ -161,22 +161,12 @@ impl Default for SampleAppsConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct CliConfig {
     pub current_profile: String,
     pub sample_apps: SampleAppsConfig,
     #[serde(default)]
     pub theme: Theme,
-}
-
-impl Default for CliConfig {
-    fn default() -> Self {
-        Self {
-            current_profile: String::new(),
-            sample_apps: SampleAppsConfig::default(),
-            theme: Theme::default(),
-        }
-    }
 }
 
 #[derive(Debug, Deserialize)]
