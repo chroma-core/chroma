@@ -13,8 +13,10 @@ from chromadb.test.conftest import (
     DEFAULT_MCMR_DATABASE,
     MULTI_REGION_ENABLED,
     NOT_CLUSTER_ONLY,
+    database_name,
     override_hypothesis_profile,
     create_isolated_database,
+    multi_region_test,
 )
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
@@ -30,22 +32,6 @@ LARGE_MAX_RECORDS = 15_000
 
 
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
-
-TEST_DATABASE_NAMES = [pytest.param(DEFAULT_DATABASE, id="classic")]
-
-if MULTI_REGION_ENABLED:
-    TEST_DATABASE_NAMES.append(
-        pytest.param(
-            DEFAULT_MCMR_DATABASE,
-            id="multi-region-db",
-            marks=pytest.mark.test_with_multi_region,
-        )
-    )
-
-
-@pytest.fixture(params=TEST_DATABASE_NAMES)
-def database_name(request: pytest.FixtureRequest) -> str:
-    return cast(str, request.param)
 
 
 @given(
@@ -79,6 +65,7 @@ def test_add_miniscule(
 # Hypothesis tends to generate smaller values so we explicitly segregate the
 # the tests into tiers, Small, Medium. Hypothesis struggles to generate large
 # record sets so we explicitly create a large record set without using Hypothesis
+@multi_region_test
 @given(
     collection=collection_st,
     record_set=strategies.recordsets(
@@ -110,6 +97,7 @@ def test_add_small(
     _test_add(client, collection, record_set, should_compact)
 
 
+@multi_region_test
 @given(
     collection=collection_st,
     record_set=strategies.recordsets(
@@ -261,6 +249,7 @@ def create_large_recordset(
     return record_set
 
 
+@multi_region_test
 @given(collection=collection_st, should_compact=st.booleans())
 @settings(deadline=None, max_examples=2)
 def test_add_large(

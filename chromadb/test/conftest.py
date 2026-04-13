@@ -1000,14 +1000,20 @@ def client(system: System, database_name: str) -> Generator[ClientAPI, None, Non
     client.clear_system_cache()
 
 
-@pytest.fixture()
-def database_name(request: pytest.FixtureRequest) -> str:
-    # Check if test has the test_with_multi_region mark
-    has_mark = request.node.get_closest_marker("test_with_multi_region")
-    if has_mark and MULTI_REGION_ENABLED:
-        return DEFAULT_MCMR_DATABASE
-    return DEFAULT_DATABASE
+TEST_DATABASE_NAMES = [pytest.param(DEFAULT_DATABASE, id="classic")]
 
+if MULTI_REGION_ENABLED:
+    TEST_DATABASE_NAMES.append(
+        pytest.param(
+            DEFAULT_MCMR_DATABASE,
+            id="multi-region-db",
+            marks=pytest.mark.test_with_multi_region,
+        )
+    )
+
+@pytest.fixture(params=TEST_DATABASE_NAMES)
+def database_name(request: pytest.FixtureRequest) -> str:
+    return cast(str, request.param)
 
 def multi_region_test(test_func: Callable[..., Any]) -> Any:
     """Opt-in decorator for multi-region testing.
@@ -1028,7 +1034,7 @@ def pytest_itemcollected(item: pytest.Item) -> None:
         for marker in item.iter_markers():
             if marker.name == "test_with_multi_region":
                 # Add multi-region suffix to test node ID
-                suffix = "[mcmr]" if MULTI_REGION_ENABLED else "[single-region]"
+                suffix = "[multi-region]" if MULTI_REGION_ENABLED else "[single-region]"
                 item._nodeid = f"{item._nodeid}{suffix}"
                 break
         else:
