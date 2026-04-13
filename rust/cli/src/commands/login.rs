@@ -230,7 +230,11 @@ pub async fn browser_login(
         store.write_config(&config)?;
     }
 
-    term.println(&login_success_message(&team.name, &profile_name, &store.config_dir()));
+    term.println(&login_success_message(
+        &team.name,
+        &profile_name,
+        &store.config_dir(),
+    ));
 
     if !config.current_profile.eq(&profile_name) {
         term.println(&set_profile_message(&profile_name));
