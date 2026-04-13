@@ -20,11 +20,9 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::error::Error;
 use std::fmt::Display;
-use std::fs;
 use std::net::TcpListener;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::spawn;
@@ -32,7 +30,6 @@ use tokio::task::JoinHandle;
 
 pub const CHROMA_DIR: &str = ".chroma";
 pub const CREDENTIALS_FILE: &str = "credentials";
-const CONFIG_FILE: &str = "config.json";
 pub const SELECTION_LIMIT: usize = 5;
 pub const CHROMA_API_KEY_ENV_VAR: &str = "CHROMA_API_KEY";
 pub const CHROMA_TENANT_ENV_VAR: &str = "CHROMA_TENANT";
@@ -149,7 +146,7 @@ fn default_show_updates() -> bool {
     true
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SampleAppsConfig {
     #[serde(default = "default_show_updates")]
     pub show_updates: bool,
@@ -166,12 +163,22 @@ impl Default for SampleAppsConfig {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CliConfig {
     pub current_profile: String,
     pub sample_apps: SampleAppsConfig,
     #[serde(default)]
     pub theme: Theme,
+}
+
+impl Default for CliConfig {
+    fn default() -> Self {
+        Self {
+            current_profile: String::new(),
+            sample_apps: SampleAppsConfig::default(),
+            theme: Theme::default(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -236,43 +243,6 @@ impl Display for Environment {
 
 pub type Profiles = HashMap<String, Profile>;
 
-fn get_chroma_dir() -> Result<PathBuf, CliError> {
-    let home_dir = dirs::home_dir().ok_or(UtilsError::HomeDirNotFound)?;
-    let chroma_dir = home_dir.join(CHROMA_DIR);
-    if !chroma_dir.exists() {
-        fs::create_dir_all(&chroma_dir).map_err(|_| UtilsError::ChromaDirCreateFailed)?;
-    };
-    Ok(chroma_dir)
-}
-
-fn get_credentials_file_path() -> Result<PathBuf, CliError> {
-    let chroma_dir = get_chroma_dir()?;
-    let credentials_path = chroma_dir.join(CREDENTIALS_FILE);
-    if !credentials_path.exists() {
-        fs::write(&credentials_path, "").map_err(|_| UtilsError::CredsFileCreateFailed)?;
-    }
-    Ok(credentials_path)
-}
-
-fn create_config_file(config_path: &PathBuf) -> Result<(), Box<dyn Error>> {
-    let default_config = CliConfig {
-        current_profile: String::new(),
-        sample_apps: SampleAppsConfig::default(),
-        theme: Theme::default(),
-    };
-    let json_str = serde_json::to_string_pretty(&default_config)?;
-    fs::write(config_path, json_str)?;
-    Ok(())
-}
-
-fn get_config_file_path() -> Result<PathBuf, CliError> {
-    let chroma_dir = get_chroma_dir()?;
-    let config_path = chroma_dir.join(CONFIG_FILE);
-    if !config_path.exists() {
-        create_config_file(&config_path).map_err(|_| UtilsError::ConfigFileCreateFailed)?;
-    }
-    Ok(config_path)
-}
 
 pub fn get_address_book(dev: bool) -> AddressBook {
     match dev {
@@ -281,57 +251,6 @@ pub fn get_address_book(dev: bool) -> AddressBook {
     }
 }
 
-pub fn read_profiles() -> Result<Profiles, CliError> {
-    let credentials_path = get_credentials_file_path()?;
-    let contents =
-        fs::read_to_string(credentials_path).map_err(|_| UtilsError::CredsFileReadFailed)?;
-    let profiles: Profiles =
-        toml::from_str(&contents).map_err(|_| UtilsError::CredsFileParseFailed)?;
-    Ok(profiles)
-}
-
-pub fn write_profiles(profiles: &Profiles) -> Result<(), CliError> {
-    let credentials_path = get_credentials_file_path()?;
-    let toml_str = toml::to_string(profiles).map_err(|_| UtilsError::CredsFileParseFailed)?;
-    fs::write(credentials_path, toml_str).map_err(|_| UtilsError::CredsFileWriteFailed)?;
-    Ok(())
-}
-
-pub fn read_config() -> Result<CliConfig, CliError> {
-    let config_path = get_config_file_path()?;
-    let contents =
-        fs::read_to_string(&config_path).map_err(|_| UtilsError::ConfigFileReadFailed)?;
-    let config: CliConfig =
-        serde_json::from_str(&contents).map_err(|_| UtilsError::ConfigFileParseFailed)?;
-    Ok(config)
-}
-
-pub fn write_config(config: &CliConfig) -> Result<(), CliError> {
-    let config_path = get_config_file_path()?;
-    let json_str =
-        serde_json::to_string_pretty(config).map_err(|_| UtilsError::ConfigFileParseFailed)?;
-    fs::write(config_path, json_str).map_err(|_| UtilsError::ConfigFileWriteFailed)?;
-    Ok(())
-}
-
-pub fn get_profile(name: String) -> Result<Profile, CliError> {
-    let profiles = read_profiles()?;
-    if !profiles.contains_key(&name) {
-        Err(ProfileError::ProfileNotFound(name).into())
-    } else {
-        Ok(profiles[&name].clone())
-    }
-}
-
-pub fn get_current_profile() -> Result<(String, Profile), CliError> {
-    let config = read_config()?;
-    let profile_name = config.current_profile.clone();
-    let profile = get_profile(config.current_profile).map_err(|e| match e {
-        CliError::Profile(ProfileError::ProfileNotFound(_)) => ProfileError::NoActiveProfile.into(),
-        _ => e,
-    })?;
-    Ok((profile_name, profile))
-}
 
 pub fn find_available_port(min: u16, max: u16) -> Result<u16, CliError> {
     let mut rng = rand::thread_rng();

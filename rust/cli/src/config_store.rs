@@ -1,0 +1,167 @@
+use crate::commands::profile::ProfileError;
+use crate::utils::{CliConfig, CliError, Profile, Profiles, UtilsError};
+use std::fs;
+use std::path::PathBuf;
+
+pub trait ConfigStore {
+    fn read_profiles(&self) -> Result<Profiles, CliError>;
+    fn write_profiles(&self, profiles: &Profiles) -> Result<(), CliError>;
+    fn read_config(&self) -> Result<CliConfig, CliError>;
+    fn write_config(&self, config: &CliConfig) -> Result<(), CliError>;
+}
+
+pub struct FileConfigStore {
+    chroma_dir: String,
+    credentials_file: String,
+    config_file: String,
+}
+
+impl FileConfigStore {
+    fn default_chroma_dir() -> String {
+        ".chroma".to_string()
+    }
+
+    fn default_credentials_file() -> String {
+        "credentials".to_string()
+    }
+
+    fn default_config_file() -> String {
+        "config.json".to_string()
+    }
+
+    fn get_chroma_dir(&self) -> Result<PathBuf, CliError> {
+        let home_dir = dirs::home_dir().ok_or(UtilsError::HomeDirNotFound)?;
+        let chroma_dir = home_dir.join(&self.chroma_dir);
+        if !chroma_dir.exists() {
+            fs::create_dir_all(&chroma_dir).map_err(|_| UtilsError::ChromaDirCreateFailed)?;
+        }
+        Ok(chroma_dir)
+    }
+
+    fn get_credentials_file_path(&self) -> Result<PathBuf, CliError> {
+        let chroma_dir = self.get_chroma_dir()?;
+        let credentials_path = chroma_dir.join(&self.credentials_file);
+        if !credentials_path.exists() {
+            fs::write(&credentials_path, "").map_err(|_| UtilsError::CredsFileCreateFailed)?;
+        }
+        Ok(credentials_path)
+    }
+
+    fn get_config_file_path(&self) -> Result<PathBuf, CliError> {
+        let chroma_dir = self.get_chroma_dir()?;
+        let config_path = chroma_dir.join(&self.config_file);
+        if !config_path.exists() {
+            let default_config = CliConfig::default();
+            let json_str = serde_json::to_string_pretty(&default_config)
+                .map_err(|_| UtilsError::ConfigFileCreateFailed)?;
+            fs::write(&config_path, json_str).map_err(|_| UtilsError::ConfigFileCreateFailed)?;
+        }
+        Ok(config_path)
+    }
+}
+
+impl Default for FileConfigStore {
+    fn default() -> Self {
+        Self {
+            chroma_dir: Self::default_chroma_dir(),
+            credentials_file: Self::default_credentials_file(),
+            config_file: Self::default_config_file(),
+        }
+    }
+}
+
+impl ConfigStore for FileConfigStore {
+    fn read_profiles(&self) -> Result<Profiles, CliError> {
+        let credentials_path = self.get_credentials_file_path()?;
+        let contents =
+            fs::read_to_string(credentials_path).map_err(|_| UtilsError::CredsFileReadFailed)?;
+        let profiles: Profiles =
+            toml::from_str(&contents).map_err(|_| UtilsError::CredsFileParseFailed)?;
+        Ok(profiles)
+    }
+
+    fn write_profiles(&self, profiles: &Profiles) -> Result<(), CliError> {
+        let credentials_path = self.get_credentials_file_path()?;
+        let toml_str =
+            toml::to_string(profiles).map_err(|_| UtilsError::CredsFileParseFailed)?;
+        fs::write(credentials_path, toml_str).map_err(|_| UtilsError::CredsFileWriteFailed)?;
+        Ok(())
+    }
+
+    fn read_config(&self) -> Result<CliConfig, CliError> {
+        let config_path = self.get_config_file_path()?;
+        let contents =
+            fs::read_to_string(&config_path).map_err(|_| UtilsError::ConfigFileReadFailed)?;
+        let config: CliConfig =
+            serde_json::from_str(&contents).map_err(|_| UtilsError::ConfigFileParseFailed)?;
+        Ok(config)
+    }
+
+    fn write_config(&self, config: &CliConfig) -> Result<(), CliError> {
+        let config_path = self.get_config_file_path()?;
+        let json_str =
+            serde_json::to_string_pretty(config).map_err(|_| UtilsError::ConfigFileParseFailed)?;
+        fs::write(config_path, json_str).map_err(|_| UtilsError::ConfigFileWriteFailed)?;
+        Ok(())
+    }
+}
+
+pub fn get_profile(store: &dyn ConfigStore, name: String) -> Result<Profile, CliError> {
+    let profiles = store.read_profiles()?;
+    if !profiles.contains_key(&name) {
+        Err(ProfileError::ProfileNotFound(name).into())
+    } else {
+        Ok(profiles[&name].clone())
+    }
+}
+
+pub fn get_current_profile(store: &dyn ConfigStore) -> Result<(String, Profile), CliError> {
+    let config = store.read_config()?;
+    let profile_name = config.current_profile.clone();
+    let profile = get_profile(store, config.current_profile).map_err(|e| match e {
+        CliError::Profile(ProfileError::ProfileNotFound(_)) => ProfileError::NoActiveProfile.into(),
+        _ => e,
+    })?;
+    Ok((profile_name, profile))
+}
+
+#[cfg(test)]
+pub mod test_config_store {
+    use super::ConfigStore;
+    use crate::utils::{CliConfig, CliError, Profiles};
+    use std::cell::RefCell;
+
+    pub struct InMemoryConfigStore {
+        profiles: RefCell<Profiles>,
+        config: RefCell<CliConfig>,
+    }
+
+    impl InMemoryConfigStore {
+        pub fn new(profiles: Profiles, config: CliConfig) -> Self {
+            Self {
+                profiles: RefCell::new(profiles),
+                config: RefCell::new(config),
+            }
+        }
+    }
+
+    impl ConfigStore for InMemoryConfigStore {
+        fn read_profiles(&self) -> Result<Profiles, CliError> {
+            Ok(self.profiles.borrow().clone())
+        }
+
+        fn write_profiles(&self, profiles: &Profiles) -> Result<(), CliError> {
+            *self.profiles.borrow_mut() = profiles.clone();
+            Ok(())
+        }
+
+        fn read_config(&self) -> Result<CliConfig, CliError> {
+            Ok(self.config.borrow().clone())
+        }
+
+        fn write_config(&self, config: &CliConfig) -> Result<(), CliError> {
+            *self.config.borrow_mut() = config.clone();
+            Ok(())
+        }
+    }
+}

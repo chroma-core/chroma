@@ -1,7 +1,6 @@
+use crate::config_store::{ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
-use crate::utils::{
-    read_config, read_profiles, write_config, write_profiles, CliConfig, CliError, Profiles,
-};
+use crate::utils::{CliConfig, CliError, Profiles};
 use clap::{Args, Subcommand};
 use colored::Colorize;
 use thiserror::Error;
@@ -239,26 +238,35 @@ fn use_profile(
 }
 
 pub fn profile_command(command: ProfileCommand) -> Result<(), CliError> {
-    let mut profiles = read_profiles()?;
-    let mut config = read_config()?;
+    let store = FileConfigStore::default();
     let mut term = SystemTerminal;
+    run_profile_command(command, &store, &mut term)
+}
+
+fn run_profile_command(
+    command: ProfileCommand,
+    store: &dyn ConfigStore,
+    term: &mut dyn Terminal,
+) -> Result<(), CliError> {
+    let mut profiles = store.read_profiles()?;
+    let mut config = store.read_config()?;
 
     match command {
         ProfileCommand::Delete(args) => {
-            delete_profile(args, &mut profiles, &mut config, &mut term)?;
-            write_profiles(&profiles)?;
-            write_config(&config)?;
+            delete_profile(args, &mut profiles, &mut config, term)?;
+            store.write_profiles(&profiles)?;
+            store.write_config(&config)?;
         }
-        ProfileCommand::List => list_profiles(&profiles, &config, &mut term)?,
+        ProfileCommand::List => list_profiles(&profiles, &config, term)?,
         ProfileCommand::Rename(args) => {
-            rename(args, &mut profiles, &mut config, &mut term)?;
-            write_profiles(&profiles)?;
-            write_config(&config)?;
+            rename(args, &mut profiles, &mut config, term)?;
+            store.write_profiles(&profiles)?;
+            store.write_config(&config)?;
         }
-        ProfileCommand::Show => show(&config, &mut term)?,
+        ProfileCommand::Show => show(&config, term)?,
         ProfileCommand::Use(args) => {
-            use_profile(args, &profiles, &mut config, &mut term)?;
-            write_config(&config)?;
+            use_profile(args, &profiles, &mut config, term)?;
+            store.write_config(&config)?;
         }
     }
 
