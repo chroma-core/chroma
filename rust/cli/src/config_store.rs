@@ -21,6 +21,9 @@ pub trait ConfigStore {
 
     fn get_current_profile(&self) -> Result<(String, Profile), CliError> {
         let config = self.read_config()?;
+        if config.current_profile.is_empty() {
+            return Err(ProfileError::NoActiveProfile.into());
+        }
         let profile_name = config.current_profile.clone();
         let profile = self
             .get_profile(config.current_profile)
@@ -56,6 +59,9 @@ impl FileConfigStore {
     fn get_chroma_dir(&self) -> Result<PathBuf, CliError> {
         let home_dir = dirs::home_dir().ok_or(UtilsError::HomeDirNotFound)?;
         let chroma_dir = home_dir.join(&self.chroma_dir);
+        if chroma_dir.exists() && !chroma_dir.is_dir() {
+            return Err(UtilsError::ChromaDirNotADirectory.into());
+        }
         if !chroma_dir.exists() {
             fs::create_dir_all(&chroma_dir).map_err(|_| UtilsError::ChromaDirCreateFailed)?;
         }
