@@ -480,3 +480,542 @@ pub fn db_command(command: DbCommand) -> Result<(), CliError> {
     })?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::terminal::test_terminal::TestTerminal;
+    use chroma::client::Database;
+
+    fn make_dbs(names: &[&str]) -> Vec<Database> {
+        names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| Database {
+                id: format!("id-{}", i),
+                name: name.to_string(),
+            })
+            .collect()
+    }
+
+    // ── validate_db_name ──
+
+    #[test]
+    fn test_validate_db_name_valid() {
+        assert_eq!(validate_db_name("my-db_01").unwrap(), "my-db_01");
+    }
+
+    #[test]
+    fn test_validate_db_name_empty() {
+        let err = validate_db_name("").unwrap_err();
+        assert!(matches!(err, CliError::Db(DbError::EmptyDbName)));
+    }
+
+    #[test]
+    fn test_validate_db_name_special_chars() {
+        assert!(validate_db_name("my db").is_err());
+        assert!(validate_db_name("my.db").is_err());
+        assert!(validate_db_name("my/db").is_err());
+    }
+
+    // ── get_db_name ──
+
+    #[test]
+    fn test_get_db_name_empty_list() {
+        let dbs = make_dbs(&[]);
+        let mut term = TestTerminal::new();
+        let err = get_db_name(&dbs, "pick a db", &mut term).unwrap_err();
+        assert!(matches!(err, CliError::Db(DbError::NoDBs)));
+    }
+
+    #[test]
+    fn test_get_db_name_selection_mode() {
+        let dbs = make_dbs(&["alpha", "beta", "gamma"]);
+        // prompt_select receives index "1" -> selects "beta"
+        let mut term = TestTerminal::new().with_inputs(vec!["1"]);
+        let name = get_db_name(&dbs, "pick a db", &mut term).unwrap();
+        assert_eq!(name, "beta");
+    }
+
+    #[test]
+    fn test_get_db_name_input_mode() {
+        let dbs = make_dbs(&["a", "b", "c", "d", "e", "f"]); // > SELECTION_LIMIT
+        let mut term = TestTerminal::new().with_inputs(vec!["my-db"]);
+        let name = get_db_name(&dbs, "pick a db", &mut term).unwrap();
+        assert_eq!(name, "my-db");
+    }
+
+    // ── select_db ──
+
+    #[test]
+    fn test_select_db() {
+        let dbs = make_dbs(&["first", "second"]);
+        let mut term = TestTerminal::new().with_inputs(vec!["0"]);
+        let name = select_db(&dbs, &mut term).unwrap();
+        assert_eq!(name, "first");
+    }
+
+    // ── select_language ──
+
+    #[test]
+    fn test_select_language() {
+        let mut term = TestTerminal::new().with_inputs(vec!["0"]);
+        let lang = select_language(&mut term).unwrap();
+        assert!(matches!(lang, Language::Python));
+
+        let mut term = TestTerminal::new().with_inputs(vec!["1"]);
+        let lang = select_language(&mut term).unwrap();
+        assert!(matches!(lang, Language::JavaScript));
+    }
+
+    // ── confirm_db_deletion ──
+
+    #[test]
+    fn test_confirm_db_deletion_confirmed() {
+        let mut term = TestTerminal::new().with_inputs(vec!["my-db"]);
+        assert!(confirm_db_deletion("my-db", &mut term).unwrap());
+    }
+
+    #[test]
+    fn test_confirm_db_deletion_denied() {
+        let mut term = TestTerminal::new().with_inputs(vec!["wrong-name"]);
+        assert!(!confirm_db_deletion("my-db", &mut term).unwrap());
+    }
+
+    // ── mock server tests ──
+
+    mod mock_server {
+        use super::*;
+        use chroma::client::ChromaHttpClientOptions;
+        use httpmock::MockServer;
+
+        fn mock_client(server: &MockServer) -> ChromaHttpClient {
+            ChromaHttpClient::new(ChromaHttpClientOptions {
+                endpoint: server.base_url().parse().unwrap(),
+                tenant_id: Some("test-tenant".to_string()),
+                database_name: Some("default_database".to_string()),
+                ..Default::default()
+            })
+        }
+
+        fn mock_list_databases(server: &MockServer, dbs: &[&str]) {
+            let body: Vec<serde_json::Value> = dbs
+                .iter()
+                .enumerate()
+                .map(|(i, name)| {
+                    serde_json::json!({"id": format!("id-{}", i), "name": name})
+                })
+                .collect();
+            server.mock(|when, then| {
+                when.method("GET")
+                    .path("/api/v2/tenants/test-tenant/databases");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(serde_json::json!(body));
+            });
+        }
+
+        // ── list ──
+
+        #[tokio::test]
+        async fn test_list_shows_dbs() {
+            let server = MockServer::start();
+            let client = mock_client(&server);
+            mock_list_databases(&server, &["db1", "db2"]);
+
+            let mut term = TestTerminal::new();
+            list("my-profile".to_string(), &client, &mut term)
+                .await
+                .unwrap();
+
+            let output = term.output.join("\n");
+            assert!(output.contains("db1"));
+            assert!(output.contains("db2"));
+            assert!(output.contains("2"));
+        }
+
+        #[tokio::test]
+        async fn test_list_empty_dbs() {
+            let server = MockServer::start();
+            let client = mock_client(&server);
+            mock_list_databases(&server, &[]);
+
+            let mut term = TestTerminal::new();
+            list("my-profile".to_string(), &client, &mut term)
+                .await
+                .unwrap();
+
+            let output = term.output.join("\n");
+            assert!(output.contains("0 DBs"));
+        }
+
+        // ── create ──
+
+        #[tokio::test]
+        async fn test_create_db_success() {
+            let server = MockServer::start();
+            let client = mock_client(&server);
+            mock_list_databases(&server, &[]);
+            server.mock(|when, then| {
+                when.method("POST")
+                    .path("/api/v2/tenants/test-tenant/databases");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(serde_json::json!({}));
+            });
+
+            let mut term = TestTerminal::new();
+            create(CreateArgs { name: Some("new-db".to_string()) }, &client, &mut term)
+                .await
+                .unwrap();
+
+            let output = term.output.join("\n");
+            assert!(output.contains("new-db"));
+            assert!(output.contains("created successfully"));
+        }
+
+        #[tokio::test]
+        async fn test_create_db_already_exists() {
+            let server = MockServer::start();
+            let client = mock_client(&server);
+            mock_list_databases(&server, &["existing-db"]);
+
+            let mut term = TestTerminal::new();
+            create(
+                CreateArgs { name: Some("existing-db".to_string()) },
+                &client,
+                &mut term,
+            )
+            .await
+            .unwrap();
+
+            let output = term.output.join("\n");
+            assert!(output.contains("already exists"));
+        }
+
+        #[tokio::test]
+        async fn test_create_db_prompted_name() {
+            let server = MockServer::start();
+            let client = mock_client(&server);
+            mock_list_databases(&server, &[]);
+            server.mock(|when, then| {
+                when.method("POST")
+                    .path("/api/v2/tenants/test-tenant/databases");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(serde_json::json!({}));
+            });
+
+            let mut term = TestTerminal::new().with_inputs(vec!["prompted-db"]);
+            create(CreateArgs { name: None }, &client, &mut term)
+                .await
+                .unwrap();
+
+            let output = term.output.join("\n");
+            assert!(output.contains("prompted-db"));
+        }
+
+        // ── delete ──
+
+        #[tokio::test]
+        async fn test_delete_db_confirmed() {
+            let server = MockServer::start();
+            let client = mock_client(&server);
+            mock_list_databases(&server, &["target-db"]);
+            server.mock(|when, then| {
+                when.method("DELETE")
+                    .path("/api/v2/tenants/test-tenant/databases/target-db");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(serde_json::json!({}));
+            });
+
+            let mut term = TestTerminal::new().with_inputs(vec!["target-db"]);
+            delete(
+                DeleteArgs { name: Some("target-db".to_string()), force: false },
+                &client,
+                &mut term,
+            )
+            .await
+            .unwrap();
+
+            let output = term.output.join("\n");
+            assert!(output.contains("Deleted"));
+        }
+
+        #[tokio::test]
+        async fn test_delete_db_cancelled() {
+            let server = MockServer::start();
+            let client = mock_client(&server);
+            mock_list_databases(&server, &["target-db"]);
+
+            let mut term = TestTerminal::new().with_inputs(vec!["wrong-name"]);
+            delete(
+                DeleteArgs { name: Some("target-db".to_string()), force: false },
+                &client,
+                &mut term,
+            )
+            .await
+            .unwrap();
+
+            let output = term.output.join("\n");
+            assert!(output.contains("cancelled"));
+        }
+
+        #[tokio::test]
+        async fn test_delete_db_force() {
+            let server = MockServer::start();
+            let client = mock_client(&server);
+            mock_list_databases(&server, &["target-db"]);
+            server.mock(|when, then| {
+                when.method("DELETE")
+                    .path("/api/v2/tenants/test-tenant/databases/target-db");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(serde_json::json!({}));
+            });
+
+            let mut term = TestTerminal::new();
+            delete(
+                DeleteArgs { name: Some("target-db".to_string()), force: true },
+                &client,
+                &mut term,
+            )
+            .await
+            .unwrap();
+
+            let output = term.output.join("\n");
+            assert!(output.contains("Deleted"));
+        }
+
+        #[tokio::test]
+        async fn test_delete_db_not_found() {
+            let server = MockServer::start();
+            let client = mock_client(&server);
+            mock_list_databases(&server, &["other-db"]);
+
+            let mut term = TestTerminal::new();
+            let err = delete(
+                DeleteArgs { name: Some("missing-db".to_string()), force: true },
+                &client,
+                &mut term,
+            )
+            .await
+            .unwrap_err();
+
+            assert!(matches!(err, CliError::Db(DbError::DbNotFound(_))));
+        }
+
+        // ── connect ──
+
+        #[tokio::test]
+        async fn test_connect_env_vars() {
+            let server = MockServer::start();
+            let client = mock_client(&server);
+            mock_list_databases(&server, &["my-db"]);
+
+            let profile = Profile::new("test-key".to_string(), "test-tenant".to_string());
+            let mut term = TestTerminal::new();
+            connect(
+                ConnectArgs {
+                    name: Some("my-db".to_string()),
+                    language: None,
+                    env_file: false,
+                    env_vars: true,
+                },
+                profile,
+                &client,
+                &mut term,
+            )
+            .await
+            .unwrap();
+
+            let output = term.output.join("\n");
+            assert!(output.contains("CHROMA_API_KEY=test-key"));
+            assert!(output.contains("CHROMA_TENANT=test-tenant"));
+            assert!(output.contains("CHROMA_DATABASE=my-db"));
+        }
+
+        #[tokio::test]
+        async fn test_connect_language_snippet() {
+            let server = MockServer::start();
+            let client = mock_client(&server);
+            mock_list_databases(&server, &["my-db"]);
+
+            let profile = Profile::new("test-key".to_string(), "test-tenant".to_string());
+            let mut term = TestTerminal::new();
+            connect(
+                ConnectArgs {
+                    name: Some("my-db".to_string()),
+                    language: Some(Language::Python),
+                    env_file: false,
+                    env_vars: false,
+                },
+                profile,
+                &client,
+                &mut term,
+            )
+            .await
+            .unwrap();
+
+            let output = term.output.join("\n");
+            assert!(output.contains("chromadb"));
+            assert!(output.contains("test-key"));
+        }
+
+        #[tokio::test]
+        async fn test_connect_db_not_found() {
+            let server = MockServer::start();
+            let client = mock_client(&server);
+            mock_list_databases(&server, &["other-db"]);
+
+            let profile = Profile::new("key".to_string(), "tenant".to_string());
+            let mut term = TestTerminal::new();
+            let err = connect(
+                ConnectArgs {
+                    name: Some("missing".to_string()),
+                    language: None,
+                    env_file: false,
+                    env_vars: true,
+                },
+                profile,
+                &client,
+                &mut term,
+            )
+            .await
+            .unwrap_err();
+
+            assert!(matches!(err, CliError::Db(DbError::DbNotFound(_))));
+        }
+    }
+
+    // ── integration tests ──
+
+    mod integration {
+        use super::*;
+        use chroma::client::ChromaHttpClientOptions;
+        use uuid::Uuid;
+
+        fn local_client() -> ChromaHttpClient {
+            ChromaHttpClient::new(ChromaHttpClientOptions {
+                endpoint: "http://localhost:8000".parse().unwrap(),
+                tenant_id: Some("default_tenant".to_string()),
+                database_name: Some("default_database".to_string()),
+                ..Default::default()
+            })
+        }
+
+        fn unique_db_name() -> String {
+            format!("test_db_{}", Uuid::new_v4().to_string().replace('-', "_"))
+        }
+
+        #[tokio::test]
+        async fn test_k8s_integration_db_create_and_list() {
+            let client = local_client();
+            let db_name = unique_db_name();
+            let mut term = TestTerminal::new();
+
+            create(CreateArgs { name: Some(db_name.clone()) }, &client, &mut term)
+                .await
+                .unwrap();
+
+            let mut term = TestTerminal::new();
+            list("default".to_string(), &client, &mut term).await.unwrap();
+            let output = term.output.join("\n");
+            assert!(output.contains(&db_name));
+
+            // Cleanup
+            client.delete_database(&db_name).await.unwrap();
+        }
+
+        #[tokio::test]
+        async fn test_k8s_integration_db_create_already_exists() {
+            let client = local_client();
+            let db_name = unique_db_name();
+            let mut term = TestTerminal::new();
+
+            create(CreateArgs { name: Some(db_name.clone()) }, &client, &mut term)
+                .await
+                .unwrap();
+
+            let mut term = TestTerminal::new();
+            create(CreateArgs { name: Some(db_name.clone()) }, &client, &mut term)
+                .await
+                .unwrap();
+            let output = term.output.join("\n");
+            assert!(output.contains("already exists"));
+
+            // Cleanup
+            client.delete_database(&db_name).await.unwrap();
+        }
+
+        #[tokio::test]
+        async fn test_k8s_integration_db_delete() {
+            let client = local_client();
+            let db_name = unique_db_name();
+
+            client.create_database(&db_name).await.unwrap();
+
+            let mut term = TestTerminal::new();
+            delete(
+                DeleteArgs { name: Some(db_name.clone()), force: true },
+                &client,
+                &mut term,
+            )
+            .await
+            .unwrap();
+
+            let dbs = client.list_databases().await.unwrap();
+            assert!(!dbs.iter().any(|db| db.name == db_name));
+        }
+
+        #[tokio::test]
+        async fn test_k8s_integration_db_delete_not_found() {
+            let client = local_client();
+            let mut term = TestTerminal::new();
+
+            let err = delete(
+                DeleteArgs {
+                    name: Some("nonexistent_db_12345".to_string()),
+                    force: true,
+                },
+                &client,
+                &mut term,
+            )
+            .await
+            .unwrap_err();
+
+            assert!(matches!(err, CliError::Db(DbError::DbNotFound(_))));
+        }
+
+        #[tokio::test]
+        async fn test_k8s_integration_db_connect_env_vars() {
+            let client = local_client();
+            let db_name = unique_db_name();
+
+            client.create_database(&db_name).await.unwrap();
+
+            let profile = Profile::new("test-key".to_string(), "default_tenant".to_string());
+            let mut term = TestTerminal::new();
+            connect(
+                ConnectArgs {
+                    name: Some(db_name.clone()),
+                    language: None,
+                    env_file: false,
+                    env_vars: true,
+                },
+                profile,
+                &client,
+                &mut term,
+            )
+            .await
+            .unwrap();
+
+            let output = term.output.join("\n");
+            assert!(output.contains(&format!("CHROMA_DATABASE={}", db_name)));
+
+            // Cleanup
+            client.delete_database(&db_name).await.unwrap();
+        }
+    }
+}

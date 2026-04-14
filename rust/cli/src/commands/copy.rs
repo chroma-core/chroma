@@ -327,6 +327,84 @@ async fn copy_collections(
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::terminal::test_terminal::TestTerminal;
+
+    fn default_args() -> CopyArgs {
+        CopyArgs {
+            all: false,
+            collections: vec![],
+            from_local: false,
+            from_cloud: false,
+            to_local: false,
+            to_cloud: false,
+            db: None,
+            host: None,
+            path: None,
+            batch: 100,
+            concurrent: 5,
+        }
+    }
+
+    #[test]
+    fn test_get_target_and_destination_from_cloud() {
+        let mut args = default_args();
+        args.from_cloud = true;
+        let mut term = TestTerminal::new();
+        let (source, target) = get_target_and_destination(&args, &mut term).unwrap();
+        assert!(matches!(source, Environment::Cloud));
+        assert!(matches!(target, Environment::Local));
+    }
+
+    #[test]
+    fn test_get_target_and_destination_from_local() {
+        let mut args = default_args();
+        args.from_local = true;
+        let mut term = TestTerminal::new();
+        let (source, target) = get_target_and_destination(&args, &mut term).unwrap();
+        assert!(matches!(source, Environment::Local));
+        assert!(matches!(target, Environment::Cloud));
+    }
+
+    #[test]
+    fn test_get_target_and_destination_to_cloud() {
+        let mut args = default_args();
+        args.to_cloud = true;
+        let mut term = TestTerminal::new();
+        let (source, target) = get_target_and_destination(&args, &mut term).unwrap();
+        assert!(matches!(source, Environment::Local));
+        assert!(matches!(target, Environment::Cloud));
+    }
+
+    #[test]
+    fn test_get_target_and_destination_to_local() {
+        let mut args = default_args();
+        args.to_local = true;
+        let mut term = TestTerminal::new();
+        let (source, target) = get_target_and_destination(&args, &mut term).unwrap();
+        assert!(matches!(source, Environment::Cloud));
+        assert!(matches!(target, Environment::Local));
+    }
+
+    #[test]
+    fn test_get_target_and_destination_interactive() {
+        let args = default_args();
+        // Select index 0 = Cloud (source), so target = Local
+        let mut term = TestTerminal::new().with_inputs(vec!["0"]);
+        let (source, target) = get_target_and_destination(&args, &mut term).unwrap();
+        assert!(matches!(source, Environment::Cloud));
+        assert!(matches!(target, Environment::Local));
+
+        // Select index 1 = Local (source), so target = Cloud
+        let mut term = TestTerminal::new().with_inputs(vec!["1"]);
+        let (source, target) = get_target_and_destination(&args, &mut term).unwrap();
+        assert!(matches!(source, Environment::Local));
+        assert!(matches!(target, Environment::Cloud));
+    }
+}
+
 pub fn copy(args: CopyArgs) -> Result<(), CliError> {
     let mut term = SystemTerminal;
     let runtime = tokio::runtime::Runtime::new().map_err(|_| InstallError::RuntimeError)?;

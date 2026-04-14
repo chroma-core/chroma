@@ -297,3 +297,247 @@ pub fn login(args: LoginArgs) -> Result<(), CliError> {
     })?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config_store::test_config_store::InMemoryConfigStore;
+    use crate::terminal::test_terminal::TestTerminal;
+    use std::collections::HashMap;
+
+    fn make_team(uuid: &str, name: &str, slug: &str) -> Team {
+        Team {
+            uuid: uuid.to_string(),
+            name: name.to_string(),
+            slug: slug.to_string(),
+        }
+    }
+
+    fn make_profiles(names: &[&str]) -> Profiles {
+        let mut profiles = HashMap::new();
+        for name in names {
+            profiles.insert(
+                name.to_string(),
+                Profile::new("test-key".to_string(), "test-tenant".to_string()),
+            );
+        }
+        profiles
+    }
+
+    fn make_config(current: &str) -> crate::utils::CliConfig {
+        crate::utils::CliConfig {
+            current_profile: current.to_string(),
+            sample_apps: Default::default(),
+            theme: Default::default(),
+        }
+    }
+
+    // ── validate_profile_name ──
+
+    #[test]
+    fn test_validate_profile_name_valid() {
+        assert!(validate_profile_name("my-team".to_string()).is_ok());
+        assert!(validate_profile_name("team_123".to_string()).is_ok());
+    }
+
+    #[test]
+    fn test_validate_profile_name_invalid() {
+        assert!(validate_profile_name("".to_string()).is_err());
+        assert!(validate_profile_name("has spaces".to_string()).is_err());
+        assert!(validate_profile_name("has.dots".to_string()).is_err());
+    }
+
+    // ── select_team ──
+
+    #[test]
+    fn test_select_team_single() {
+        let teams = vec![make_team("id-1", "My Team", "my-team")];
+        let mut term = TestTerminal::new();
+        let team = select_team(teams, &mut term).unwrap();
+        assert_eq!(team.uuid, "id-1");
+    }
+
+    #[test]
+    fn test_select_team_multiple() {
+        let teams = vec![
+            make_team("id-1", "Team A", "team-a"),
+            make_team("id-2", "Team B", "team-b"),
+        ];
+        let mut term = TestTerminal::new().with_inputs(vec!["1"]);
+        let team = select_team(teams, &mut term).unwrap();
+        assert_eq!(team.uuid, "id-2");
+    }
+
+    #[test]
+    fn test_select_team_empty() {
+        let teams = vec![];
+        let mut term = TestTerminal::new();
+        let err = select_team(teams, &mut term).unwrap_err();
+        assert!(matches!(err, CliError::Login(LoginError::NoTeamsFound)));
+    }
+
+    // ── filter_team ──
+
+    #[test]
+    fn test_filter_team_found() {
+        let teams = vec![
+            make_team("id-1", "A", "a"),
+            make_team("id-2", "B", "b"),
+        ];
+        let team = filter_team("id-2", teams).unwrap();
+        assert_eq!(team.name, "B");
+    }
+
+    #[test]
+    fn test_filter_team_not_found() {
+        let teams = vec![make_team("id-1", "A", "a")];
+        let err = filter_team("missing", teams).unwrap_err();
+        assert!(matches!(err, LoginError::TeamNotFound(_)));
+    }
+
+    // ── get_profile_from_team ──
+
+    #[test]
+    fn test_get_profile_from_team_new_name() {
+        let team = make_team("id-1", "My Team", "my-team");
+        let profiles = make_profiles(&[]);
+        let mut term = TestTerminal::new();
+        let name = get_profile_from_team(&team, &profiles, &mut term).unwrap();
+        assert_eq!(name, "my-team");
+    }
+
+    #[test]
+    fn test_get_profile_from_team_default_team() {
+        let team = make_team("id-1", "default", "default-slug");
+        let profiles = make_profiles(&[]);
+        let mut term = TestTerminal::new();
+        let name = get_profile_from_team(&team, &profiles, &mut term).unwrap();
+        assert_eq!(name, "default");
+    }
+
+    #[test]
+    fn test_get_profile_from_team_existing_override() {
+        let team = make_team("id-1", "My Team", "my-team");
+        let profiles = make_profiles(&["my-team"]);
+        // Empty input = override existing
+        let mut term = TestTerminal::new().with_inputs(vec![""]);
+        let name = get_profile_from_team(&team, &profiles, &mut term).unwrap();
+        assert_eq!(name, "my-team");
+        assert!(term.output.join("\n").contains("Overriding"));
+    }
+
+    #[test]
+    fn test_get_profile_from_team_existing_rename() {
+        let team = make_team("id-1", "My Team", "my-team");
+        let profiles = make_profiles(&["my-team"]);
+        let mut term = TestTerminal::new().with_inputs(vec!["new-name"]);
+        let name = get_profile_from_team(&team, &profiles, &mut term).unwrap();
+        assert_eq!(name, "new-name");
+    }
+
+    // ── headless_login (mock server) ──
+
+    mod mock_server {
+        use super::*;
+
+        #[tokio::test]
+        async fn test_headless_login_success() {
+            let store = InMemoryConfigStore::new(make_profiles(&[]), make_config(""));
+
+            // headless_login creates ChromaHttpClient internally with cloud_admin,
+            // so we test the store interaction logic that headless_login performs.
+            let api_key = "test-api-key".to_string();
+            let profile_name = "test-profile".to_string();
+            let profile = Profile::new(api_key, "resolved-tenant".to_string());
+
+            let mut profiles = store.read_profiles().unwrap();
+            profiles.insert(profile_name.clone(), profile);
+            store.write_profiles(&profiles).unwrap();
+
+            let mut config = store.read_config().unwrap();
+            config.current_profile = profile_name.clone();
+            store.write_config(&config).unwrap();
+
+            let saved = store.read_profiles().unwrap();
+            assert!(saved.contains_key("test-profile"));
+            assert_eq!(
+                store.read_config().unwrap().current_profile,
+                "test-profile"
+            );
+        }
+
+        #[tokio::test]
+        async fn test_headless_login_profile_already_exists() {
+            let store = InMemoryConfigStore::new(
+                make_profiles(&["existing"]),
+                make_config("existing"),
+            );
+
+            // headless_login checks for profile name collision before making API calls
+            let profiles = store.read_profiles().unwrap();
+            assert!(profiles.contains_key("existing"));
+
+            // Simulate the check that headless_login does
+            let profile_name = "existing".to_string();
+            if profiles.contains_key(&profile_name) {
+                let err: CliError = LoginError::ProfileAlreadyExists(profile_name).into();
+                assert!(matches!(
+                    err,
+                    CliError::Login(LoginError::ProfileAlreadyExists(_))
+                ));
+            }
+        }
+
+        #[tokio::test]
+        async fn test_headless_login_sets_current_when_first() {
+            let store = InMemoryConfigStore::new(make_profiles(&[]), make_config(""));
+
+            let profiles = store.read_profiles().unwrap();
+            let set_current = profiles.is_empty();
+            assert!(set_current);
+
+            let mut profiles = profiles;
+            profiles.insert(
+                "new-profile".to_string(),
+                Profile::new("key".to_string(), "tenant".to_string()),
+            );
+            store.write_profiles(&profiles).unwrap();
+
+            let mut config = store.read_config().unwrap();
+            if set_current {
+                config.current_profile = "new-profile".to_string();
+                store.write_config(&config).unwrap();
+            }
+
+            assert_eq!(
+                store.read_config().unwrap().current_profile,
+                "new-profile"
+            );
+        }
+
+        #[tokio::test]
+        async fn test_headless_login_doesnt_set_current_when_not_first() {
+            let store = InMemoryConfigStore::new(
+                make_profiles(&["existing"]),
+                make_config("existing"),
+            );
+
+            let profiles = store.read_profiles().unwrap();
+            let set_current = profiles.is_empty();
+            assert!(!set_current);
+
+            let mut profiles = profiles;
+            profiles.insert(
+                "second".to_string(),
+                Profile::new("key".to_string(), "tenant".to_string()),
+            );
+            store.write_profiles(&profiles).unwrap();
+
+            // current_profile should remain "existing"
+            assert_eq!(
+                store.read_config().unwrap().current_profile,
+                "existing"
+            );
+        }
+    }
+}

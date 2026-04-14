@@ -587,3 +587,90 @@ pub fn install(args: InstallArgs) -> Result<(), CliError> {
     runtime.block_on(async { install_sample_app(args, &store, &mut term).await })?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Read;
+
+    // ── SampleAppEnvVariables ──
+
+    #[test]
+    fn test_sample_app_env_variables_local() {
+        let env = SampleAppEnvVariables::local(None);
+        assert_eq!(env.0.get("CHROMA_HOST").unwrap(), "http://localhost:8000");
+        assert_eq!(env.0.get("CHROMA_TENANT").unwrap(), "default_tenant");
+        assert_eq!(env.0.get("CHROMA_DATABASE").unwrap(), "default_database");
+    }
+
+    #[test]
+    fn test_sample_app_env_variables_local_with_db() {
+        let env = SampleAppEnvVariables::local(Some("my-db".to_string()));
+        assert_eq!(env.0.get("CHROMA_DATABASE").unwrap(), "my-db");
+    }
+
+    #[test]
+    fn test_sample_app_env_variables_cloud() {
+        let profile = Profile::new("my-key".to_string(), "my-tenant".to_string());
+        let env = SampleAppEnvVariables::cloud(profile, "prod-db".to_string());
+        assert_eq!(
+            env.0.get("CHROMA_HOST").unwrap(),
+            "https://api.trychroma.com"
+        );
+        assert_eq!(env.0.get("CHROMA_TENANT").unwrap(), "my-tenant");
+        assert_eq!(env.0.get("CHROMA_DATABASE").unwrap(), "prod-db");
+        assert_eq!(env.0.get("CHROMA_API_KEY").unwrap(), "my-key");
+    }
+
+    // ── write_env_file ──
+
+    #[test]
+    fn test_write_env_file() {
+        let dir = std::env::temp_dir().join(format!("chroma_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file_path = dir.join(".env");
+
+        let mut vars = HashMap::new();
+        vars.insert("B_VAR".to_string(), "b_val".to_string());
+        vars.insert("A_VAR".to_string(), "a_val".to_string());
+        let env = SampleAppEnvVariables(vars);
+
+        write_env_file(env, file_path.to_string_lossy().to_string()).unwrap();
+
+        let mut contents = String::new();
+        std::fs::File::open(&file_path)
+            .unwrap()
+            .read_to_string(&mut contents)
+            .unwrap();
+
+        // Sorted: A_VAR before B_VAR
+        let lines: Vec<&str> = contents.lines().collect();
+        assert_eq!(lines[0], "A_VAR=a_val");
+        assert_eq!(lines[1], "B_VAR=b_val");
+
+        // Cleanup
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // ── get_display_app_names ──
+
+    #[test]
+    fn test_get_display_app_names_basic() {
+        let apps = vec![AppListing {
+            name: "my-app".to_string(),
+            description: "A cool app".to_string(),
+            version: "0.1.0".to_string(),
+            cli_version: "0.1.0".to_string(),
+        }];
+        let config = CliConfig {
+            current_profile: "".to_string(),
+            sample_apps: Default::default(),
+            theme: Default::default(),
+        };
+
+        let names = get_display_app_names(&apps, &config).unwrap();
+        assert_eq!(names.len(), 1);
+        assert!(names[0].contains("my-app"));
+        assert!(names[0].contains("A cool app"));
+    }
+}
