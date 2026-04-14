@@ -1,8 +1,8 @@
-use crate::client::collection::Collection;
 use crate::tui::collection_browser::app_state::AppState;
 use crate::tui::collection_browser::query_editor::Mode;
 use crate::tui::collection_browser::{Record, Screen};
-use chroma_types::{GetResponse, IncludeList};
+use chroma::ChromaCollection;
+use chroma_types::{GetResponse, IncludeList, RawWhereFields};
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
 use futures::StreamExt;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -60,14 +60,14 @@ pub enum Action {
 }
 
 pub struct EventsHandler {
-    collection: Collection,
+    collection: ChromaCollection,
     events: EventStream,
     tx: UnboundedSender<Action>,
     rx: UnboundedReceiver<Action>,
 }
 
 impl EventsHandler {
-    pub fn new(collection: Collection) -> Self {
+    pub fn new(collection: ChromaCollection) -> Self {
         let (tx, rx) = unbounded_channel::<Action>();
         Self {
             collection,
@@ -117,10 +117,9 @@ impl EventsHandler {
                 .get(
                     None,
                     None,
-                    None,
-                    Some(IncludeList::default_get()),
                     Some(limit),
                     Some(offset),
+                    Some(IncludeList::default_get()),
                 )
                 .await;
 
@@ -165,14 +164,20 @@ impl EventsHandler {
         let collection = self.collection.clone();
 
         tokio::spawn(async move {
+            let combined_where = RawWhereFields::from_json_str(
+                metadata.as_deref(),
+                where_document.as_deref(),
+            )
+            .ok()
+            .and_then(|raw| raw.parse().ok().flatten());
+
             let records_response = collection
                 .get(
                     ids,
-                    metadata.as_deref(),
-                    where_document.as_deref(),
+                    combined_where,
+                    None,
+                    None,
                     Some(IncludeList::default_get()),
-                    None,
-                    None,
                 )
                 .await;
 

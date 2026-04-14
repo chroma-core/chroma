@@ -1,4 +1,3 @@
-use crate::client::admin_client::get_admin_client;
 use crate::client::dashboard_client::{
     get_dashboard_client, DashboardClient, DashboardClientError, Team,
 };
@@ -7,7 +6,7 @@ use crate::commands::login::LoginError::BrowserAuthFailed;
 use crate::config_store::{ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::ui_utils::validate_uri;
-use crate::utils::{CliError, Profile, Profiles, UtilsError};
+use crate::utils::{get_chroma_client, CliError, Profile, Profiles, UtilsError};
 use clap::Parser;
 use colored::Colorize;
 use std::error::Error;
@@ -194,11 +193,11 @@ pub async fn browser_login(
 
     let (api_key, team) = match args.api_key {
         Some(api_key) => {
-            let admin_client = get_admin_client(
+            let client = get_chroma_client(
                 Some(&Profile::new(api_key.clone(), "default".to_string())),
                 args.dev,
             );
-            let team_id = admin_client.get_tenant_id().await?;
+            let team_id = client.get_tenant_id().await?;
             let team = filter_team(&team_id, teams)?;
             (api_key, team)
         }
@@ -261,12 +260,12 @@ pub async fn headless_login(
         return Err(LoginError::ProfileAlreadyExists(profile_name).into());
     }
 
-    let admin_client = get_admin_client(
+    let client = get_chroma_client(
         Some(&Profile::new(api_key.clone(), profile_name.clone())),
         args.dev,
     );
 
-    let team_id = admin_client.get_tenant_id().await?;
+    let team_id = client.get_tenant_id().await?;
 
     let profile = Profile::new(api_key, team_id.clone());
 

@@ -1,16 +1,14 @@
-use crate::client::admin_client::AdminClient;
-use crate::client::chroma_client::{ChromaClient, ChromaClientError};
-use crate::client::collection::CollectionAPIError;
 use crate::commands::browse::BrowseError;
 use crate::commands::db::get_db_name;
 use crate::commands::install::InstallError;
 use crate::config_store::{ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::utils::{
-    parse_host, parse_local, parse_path, AddressBook, CliError, Environment, ErrorResponse,
-    Profile, UtilsError,
+    cloud_client, parse_host, parse_local, parse_path, AddressBook, CliError, Environment,
+    ErrorResponse, Profile, UtilsError,
 };
-use chroma_types::{CollectionConfiguration, IncludeList};
+use chroma::ChromaHttpClient;
+use chroma_types::IncludeList;
 use clap::Parser;
 use crossterm::style::Stylize;
 use futures::{stream, StreamExt};
@@ -96,26 +94,34 @@ async fn get_cloud_client(
     db_name: Option<String>,
     from: bool,
     term: &mut dyn Terminal,
-) -> Result<ChromaClient, CliError> {
+) -> Result<ChromaHttpClient, CliError> {
     let host = AddressBook::cloud().frontend_url;
-    let admin_client = AdminClient::from_profile(host, &profile);
+    let client = cloud_client(&host, &profile);
 
     if let Some(db_name) = db_name {
-        let _verified = admin_client.get_database(db_name.clone()).await?;
-        return Ok(ChromaClient::with_admin_client(admin_client, db_name));
+        let dbs = client.list_databases().await?;
+        if !dbs.iter().any(|db| db.name == db_name) {
+            return Err(CliError::Db(crate::commands::db::DbError::DbNotFound(db_name)));
+        }
+        client.set_database_name(db_name);
+        return Ok(client);
     }
 
-    let databases = admin_client.list_databases().await?;
+    let databases = client.list_databases().await?;
     match databases.len() {
         0 => Err(BrowseError::NoDBs.into()),
-        1 => Ok(ChromaClient::with_admin_client(
-            admin_client,
-            databases[0].name.clone(),
-        )),
+        1 => {
+            client.set_database_name(&databases[0].name);
+            Ok(client)
+        }
         _ => {
             let input_name = get_db_name(&databases, &select_db_prompt(from), term)?;
-            let _verified = admin_client.get_database(input_name.clone()).await?;
-            Ok(ChromaClient::with_admin_client(admin_client, input_name))
+            let dbs = &databases;
+            if !dbs.iter().any(|db| db.name == input_name) {
+                return Err(CliError::Db(crate::commands::db::DbError::DbNotFound(input_name)));
+            }
+            client.set_database_name(input_name);
+            Ok(client)
         }
     }
 }
@@ -123,8 +129,8 @@ async fn get_cloud_client(
 async fn get_local_client(
     host: &Option<String>,
     path: &Option<String>,
-) -> Result<(ChromaClient, Option<JoinHandle<()>>), CliError> {
-    let (admin_client, handle) = if host.is_some() {
+) -> Result<(ChromaHttpClient, Option<JoinHandle<()>>), CliError> {
+    let (client, handle) = if host.is_some() {
         (parse_host(host.clone().unwrap_or_default()).await?, None)
     } else if path.is_some() {
         let (client, handle) = parse_path(path.clone().unwrap_or_default()).await?;
@@ -134,9 +140,7 @@ async fn get_local_client(
         (client, None)
     };
 
-    let chroma_client =
-        ChromaClient::with_admin_client(admin_client, String::from("default_database"));
-    Ok((chroma_client, handle))
+    Ok((client, handle))
 }
 
 async fn get_chroma_clients(
@@ -145,7 +149,7 @@ async fn get_chroma_clients(
     target: Environment,
     profile: Profile,
     term: &mut dyn Terminal,
-) -> Result<(ChromaClient, ChromaClient, Option<JoinHandle<()>>), CliError> {
+) -> Result<(ChromaHttpClient, ChromaHttpClient, Option<JoinHandle<()>>), CliError> {
     let (local_client, handle) = get_local_client(&args.host, &args.path).await?;
     let cloud_client = get_cloud_client(profile, args.db.clone(), args.from_cloud, term).await?;
 
@@ -190,8 +194,8 @@ fn get_target_and_destination(
 }
 
 async fn copy_collections(
-    source: ChromaClient,
-    target: ChromaClient,
+    source: ChromaHttpClient,
+    target: ChromaHttpClient,
     collections: Vec<String>,
     all: bool,
     step: u32,
@@ -199,17 +203,11 @@ async fn copy_collections(
     term: &mut dyn Terminal,
 ) -> Result<(), CliError> {
     let collections = if all {
-        source
-            .list_collections()
-            .await
-            .map_err(|_| ChromaClientError::ListCollections)?
+        source.list_collections(10000, None).await?
     } else {
         let mut source_collections = vec![];
         for collection in collections {
-            let source_collection = source
-                .get_collection(collection.clone())
-                .await
-                .map_err(|_| ChromaClientError::CollectionGet(collection))?;
+            let source_collection = source.get_collection(&collection).await?;
             source_collections.push(source_collection);
         }
         source_collections
@@ -227,31 +225,26 @@ async fn copy_collections(
     term.println("Verifying collections...");
     // Verify that collections don't exist on target
     for collection in collections.clone() {
-        if target.get_collection(collection.name.clone()).await.is_ok() {
-            return Err(CopyError::CollectionAlreadyExists(collection.name.clone()).into());
+        if target.get_collection(collection.name()).await.is_ok() {
+            return Err(CopyError::CollectionAlreadyExists(collection.name().to_string()).into());
         }
     }
 
     for collection in collections {
-        let size = collection
-            .count()
-            .await
-            .map_err(|_| CollectionAPIError::Count(collection.name.clone()))?;
+        let size = collection.count().await?;
 
         let offsets: Vec<u32> = (0..size).step_by(step as usize).collect();
         let records_added = Arc::new(AtomicUsize::new(0));
 
         let target_collection = target
             .create_collection(
-                collection.name.clone(),
-                collection.metadata.clone(),
-                Some(CollectionConfiguration::from(collection.config.clone())),
-                collection.schema.clone(),
+                collection.name(),
+                collection.schema().clone(),
+                collection.metadata().clone(),
             )
-            .await
-            .map_err(|_| ChromaClientError::CreateCollection(collection.name.clone()))?;
+            .await?;
 
-        term.println(&format!("Copying collection: {}", collection.name));
+        term.println(&format!("Copying collection: {}", collection.name()));
 
         let collection_progress = ProgressBar::new(size as u64);
         collection_progress.set_style(
@@ -272,13 +265,11 @@ async fn copy_collections(
                     .get(
                         None,
                         None,
-                        None,
-                        Some(IncludeList::all()),
                         Some(step),
                         Some(offset),
+                        Some(IncludeList::all()),
                     )
-                    .await
-                    .map_err(|_| ChromaClientError::CollectionGet(collection.name.clone()))?;
+                    .await?;
 
                 if records.ids.is_empty() {
                     return Ok::<(), CliError>(());
@@ -289,9 +280,7 @@ async fn copy_collections(
                 target_collection
                     .add(
                         records.ids,
-                        records
-                            .embeddings
-                            .ok_or_else(|| CollectionAPIError::Add(collection.name.clone()))?,
+                        records.embeddings.unwrap_or_default(),
                         records.documents,
                         records.uris,
                         records.metadatas,
@@ -304,7 +293,7 @@ async fn copy_collections(
                                 .message;
                             return CliError::Utils(UtilsError::Quota(msg));
                         }
-                        CliError::Collection(CollectionAPIError::Add(collection.name.clone()))
+                        CliError::ChromaClient(e)
                     })?;
 
                 let current_added =

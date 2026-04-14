@@ -1,12 +1,11 @@
-use crate::client::admin_client::AdminClient;
-use crate::client::chroma_client::ChromaClient;
 use crate::commands::db::get_db_name;
 use crate::commands::install::InstallError;
 use crate::config_store::{ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::tui::collection_browser::CollectionBrowser;
 use crate::ui_utils::Theme;
-use crate::utils::{parse_host, parse_local, parse_path, AddressBook, CliError, LocalChromaArgs};
+use crate::utils::{cloud_client, parse_host, parse_local, parse_path, AddressBook, CliError, LocalChromaArgs};
+use chroma::ChromaHttpClient;
 use clap::Parser;
 use crossterm::style::Stylize;
 use thiserror::Error;
@@ -47,9 +46,9 @@ fn input_db_prompt(collection_name: &str) -> String {
 
 async fn parse_local_args(
     args: BrowseArgs,
-) -> Result<(ChromaClient, Option<JoinHandle<()>>), CliError> {
+) -> Result<(ChromaHttpClient, Option<JoinHandle<()>>), CliError> {
     let local_args = args.local_chroma_args;
-    let (admin_client, handle) = if local_args.host.is_some() {
+    let (client, handle) = if local_args.host.is_some() {
         (parse_host(local_args.host.unwrap()).await?, None)
     } else if local_args.path.is_some() {
         let (client, handle) = parse_path(local_args.path.unwrap()).await?;
@@ -62,14 +61,18 @@ async fn parse_local_args(
     };
 
     if let Some(db_name) = args.db_name.clone() {
-        let _verified = admin_client.get_database(db_name).await?;
+        // Verify the DB exists by checking list_databases
+        let dbs = client.list_databases().await?;
+        if !dbs.iter().any(|db| db.name == db_name) {
+            return Err(CliError::Db(crate::commands::db::DbError::DbNotFound(db_name)));
+        }
     }
 
-    let chroma_client = ChromaClient::with_admin_client(
-        admin_client,
-        args.db_name.unwrap_or(String::from("default_database")),
-    );
-    Ok((chroma_client, handle))
+    if let Some(db_name) = args.db_name {
+        client.set_database_name(db_name);
+    }
+
+    Ok((client, handle))
 }
 
 pub async fn get_cloud_client(
@@ -77,26 +80,35 @@ pub async fn get_cloud_client(
     collection_name: &str,
     store: &dyn ConfigStore,
     term: &mut dyn Terminal,
-) -> Result<ChromaClient, CliError> {
+) -> Result<ChromaHttpClient, CliError> {
     let profile = store.get_current_profile()?;
-    let admin_client = AdminClient::from_profile(AddressBook::cloud().frontend_url, &profile.1);
+    let client = cloud_client(&AddressBook::cloud().frontend_url, &profile.1);
 
     if let Some(db_name) = db_name {
-        let _verified = admin_client.get_database(db_name.clone()).await?;
-        return Ok(ChromaClient::with_admin_client(admin_client, db_name));
+        // Verify the DB exists
+        let dbs = client.list_databases().await?;
+        if !dbs.iter().any(|db| db.name == db_name) {
+            return Err(CliError::Db(crate::commands::db::DbError::DbNotFound(db_name)));
+        }
+        client.set_database_name(db_name);
+        return Ok(client);
     }
 
-    let databases = admin_client.list_databases().await?;
+    let databases = client.list_databases().await?;
     match databases.len() {
         0 => Err(BrowseError::NoDBs.into()),
-        1 => Ok(ChromaClient::with_admin_client(
-            admin_client,
-            databases[0].name.clone(),
-        )),
+        1 => {
+            client.set_database_name(&databases[0].name);
+            Ok(client)
+        }
         _ => {
             let input_name = get_db_name(&databases, &input_db_prompt(collection_name), term)?;
-            let _verified = admin_client.get_database(input_name.clone()).await?;
-            Ok(ChromaClient::with_admin_client(admin_client, input_name))
+            // Verify the DB exists
+            if !databases.iter().any(|db| db.name == input_name) {
+                return Err(CliError::Db(crate::commands::db::DbError::DbNotFound(input_name)));
+            }
+            client.set_database_name(input_name);
+            Ok(client)
         }
     }
 }

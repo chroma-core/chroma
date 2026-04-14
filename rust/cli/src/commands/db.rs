@@ -1,12 +1,11 @@
-use crate::client::admin_client::get_admin_client;
 use crate::config_store::{ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::ui_utils::copy_to_clipboard;
 use crate::utils::{
-    CliError, Profile, CHROMA_API_KEY_ENV_VAR, CHROMA_DATABASE_ENV_VAR, CHROMA_TENANT_ENV_VAR,
-    SELECTION_LIMIT,
+    get_chroma_client, CliError, Profile, CHROMA_API_KEY_ENV_VAR, CHROMA_DATABASE_ENV_VAR,
+    CHROMA_TENANT_ENV_VAR, SELECTION_LIMIT,
 };
-use chroma_types::Database;
+use chroma::client::Database;
 use clap::{Args, Subcommand, ValueEnum};
 use colored::Colorize;
 use std::error::Error;
@@ -358,8 +357,8 @@ pub async fn connect(
     current_profile: Profile,
     term: &mut dyn Terminal,
 ) -> Result<(), CliError> {
-    let admin_client = get_admin_client(Some(&current_profile), args.db_args.dev);
-    let dbs = admin_client.list_databases().await?;
+    let client = get_chroma_client(Some(&current_profile), args.db_args.dev);
+    let dbs = client.list_databases().await?;
 
     let name = match args.name {
         Some(name) => validate_db_name(&name),
@@ -371,7 +370,7 @@ pub async fn connect(
     }
 
     if args.env_file {
-        if create_env_connection(current_profile, name).is_err() {
+        if create_env_connection(current_profile.clone(), name).is_err() {
             return Err(DbError::EnvFile.into());
         }
         term.println(&env_file_created_message());
@@ -396,11 +395,8 @@ pub async fn connect(
         None => select_language(term)?,
     };
 
-    let connection_string = language.get_connection(
-        current_profile.tenant_id,
-        name,
-        admin_client.api_key.unwrap_or("".to_string()),
-    );
+    let connection_string =
+        language.get_connection(current_profile.tenant_id, name, current_profile.api_key);
     term.println(&connection_string);
 
     copy_to_clipboard(&connection_string)?;
@@ -413,8 +409,8 @@ pub async fn create(
     current_profile: Profile,
     term: &mut dyn Terminal,
 ) -> Result<(), CliError> {
-    let admin_client = get_admin_client(Some(&current_profile), args.db_args.dev);
-    let dbs = admin_client.list_databases().await?;
+    let client = get_chroma_client(Some(&current_profile), args.db_args.dev);
+    let dbs = client.list_databases().await?;
 
     let mut name = match args.name {
         Some(name) => name,
@@ -432,7 +428,7 @@ pub async fn create(
 
     term.println(&creating_db_message(&name));
 
-    admin_client.create_database(name.clone()).await?;
+    client.create_database(name.clone()).await?;
 
     term.println(&create_db_success_message(&name));
 
@@ -444,8 +440,8 @@ pub async fn delete(
     current_profile: Profile,
     term: &mut dyn Terminal,
 ) -> Result<(), CliError> {
-    let admin_client = get_admin_client(Some(&current_profile), args.db_args.dev);
-    let dbs = admin_client.list_databases().await?;
+    let client = get_chroma_client(Some(&current_profile), args.db_args.dev);
+    let dbs = client.list_databases().await?;
 
     let name = match args.name {
         Some(name) => validate_db_name(&name),
@@ -457,7 +453,7 @@ pub async fn delete(
     }
 
     if args.force || confirm_db_deletion(&name, term)? {
-        admin_client.delete_database(name.clone()).await?;
+        client.delete_database(name.clone()).await?;
         term.println(&db_delete_success_message(&name));
     } else {
         term.println(&db_delete_cancelled())
@@ -472,8 +468,8 @@ pub async fn list(
     current_profile: Profile,
     term: &mut dyn Terminal,
 ) -> Result<(), CliError> {
-    let admin_client = get_admin_client(Some(&current_profile), args.db_args.dev);
-    let dbs = admin_client.list_databases().await?;
+    let client = get_chroma_client(Some(&current_profile), args.db_args.dev);
+    let dbs = client.list_databases().await?;
 
     if dbs.is_empty() {
         term.println(&no_dbs_message(&profile_name));

@@ -1,6 +1,3 @@
-use crate::client::admin_client::{AdminClient, AdminClientError};
-use crate::client::chroma_client::ChromaClientError;
-use crate::client::collection::CollectionAPIError;
 use crate::client::dashboard_client::DashboardClientError;
 use crate::commands::browse::BrowseError;
 use crate::commands::copy::CopyError;
@@ -13,6 +10,8 @@ use crate::commands::update::UpdateError;
 use crate::commands::vacuum::VacuumError;
 use crate::commands::webpage::WebPageError;
 use crate::ui_utils::Theme;
+use chroma::client::{ChromaAuthMethod, ChromaHttpClientError, ChromaHttpClientOptions};
+use chroma::ChromaHttpClient;
 use chroma_frontend::config::FrontendServerConfig;
 use chroma_frontend::frontend_service_entrypoint_with_config;
 use clap::Parser;
@@ -44,7 +43,7 @@ pub enum CliError {
     #[error("Failed to vacuum Chroma")]
     Vacuum(#[from] VacuumError),
     #[error("{0}")]
-    Client(#[from] ChromaClientError),
+    ChromaClient(#[from] ChromaHttpClientError),
     #[error("{0}")]
     Db(#[from] DbError),
     #[error("{0}")]
@@ -56,13 +55,9 @@ pub enum CliError {
     #[error("{0}")]
     Install(#[from] InstallError),
     #[error("{0}")]
-    AdminClient(#[from] AdminClientError),
-    #[error("{0}")]
     Browse(#[from] BrowseError),
     #[error("{0}")]
     Copy(#[from] CopyError),
-    #[error("{0}")]
-    Collection(#[from] CollectionAPIError),
     #[error("{0}")]
     WebPage(#[from] WebPageError),
 }
@@ -236,6 +231,39 @@ pub fn get_address_book(dev: bool) -> AddressBook {
     }
 }
 
+pub fn cloud_client(host: &str, profile: &Profile) -> ChromaHttpClient {
+    let options = ChromaHttpClientOptions {
+        endpoint: host.parse().expect("valid URL"),
+        auth_method: ChromaAuthMethod::cloud_api_key(&profile.api_key)
+            .expect("valid API key header"),
+        tenant_id: Some(profile.tenant_id.clone()),
+        ..Default::default()
+    };
+    ChromaHttpClient::new(options)
+}
+
+pub fn local_client(host: &str) -> ChromaHttpClient {
+    let options = ChromaHttpClientOptions {
+        endpoint: host.parse().expect("valid URL"),
+        tenant_id: Some("default_tenant".to_string()),
+        database_name: Some("default_database".to_string()),
+        ..Default::default()
+    };
+    ChromaHttpClient::new(options)
+}
+
+pub fn local_client_default() -> ChromaHttpClient {
+    local_client(&AddressBook::local().frontend_url)
+}
+
+pub fn get_chroma_client(profile: Option<&Profile>, dev: bool) -> ChromaHttpClient {
+    let address_book = get_address_book(dev);
+    match profile {
+        Some(profile) => cloud_client(&address_book.frontend_url, profile),
+        None => local_client_default(),
+    }
+}
+
 pub fn find_available_port(min: u16, max: u16) -> Result<u16, CliError> {
     let mut rng = rand::thread_rng();
 
@@ -251,28 +279,28 @@ pub fn find_available_port(min: u16, max: u16) -> Result<u16, CliError> {
     Err(UtilsError::PortSearch.into())
 }
 
-pub async fn parse_host(host: String) -> Result<AdminClient, CliError> {
-    let admin_client = AdminClient::local(host);
-    admin_client.healthcheck().await?;
-    Ok(admin_client)
+pub async fn parse_host(host: String) -> Result<ChromaHttpClient, CliError> {
+    let client = local_client(&host);
+    client.heartbeat().await?;
+    Ok(client)
 }
 
 pub async fn standup_local_chroma(
     config: FrontendServerConfig,
-) -> Result<(AdminClient, JoinHandle<()>), CliError> {
+) -> Result<(ChromaHttpClient, JoinHandle<()>), CliError> {
     let host = format!("http://localhost:{}", config.port);
     let handle = spawn(async move {
         frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), &config, true).await;
     });
-    let admin_client = AdminClient::local(host);
-    admin_client
-        .healthcheck()
+    let client = local_client(&host);
+    client
+        .heartbeat()
         .await
         .map_err(|_| UtilsError::LocalConnect)?;
-    Ok((admin_client, handle))
+    Ok((client, handle))
 }
 
-pub async fn parse_path(path: String) -> Result<(AdminClient, JoinHandle<()>), CliError> {
+pub async fn parse_path(path: String) -> Result<(ChromaHttpClient, JoinHandle<()>), CliError> {
     if !is_chroma_path(&path) {
         return Err(UtilsError::NotChromaPath.into());
     }
@@ -282,7 +310,7 @@ pub async fn parse_path(path: String) -> Result<(AdminClient, JoinHandle<()>), C
     standup_local_chroma(config).await
 }
 
-pub async fn parse_local() -> Result<AdminClient, CliError> {
+pub async fn parse_local() -> Result<ChromaHttpClient, CliError> {
     let default_host = AddressBook::local().frontend_url;
     parse_host(default_host).await
 }

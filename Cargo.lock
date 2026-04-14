@@ -1666,10 +1666,8 @@ name = "chroma-cli"
 version = "1.4.3"
 dependencies = [
  "arboard",
- "axum 0.8.8",
  "bytes",
  "chroma",
- "chroma-api-types",
  "chroma-config",
  "chroma-frontend",
  "chroma-log",

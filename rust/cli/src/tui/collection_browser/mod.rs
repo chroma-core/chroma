@@ -1,8 +1,8 @@
-use crate::client::collection::Collection;
 use crate::tui::collection_browser::app_state::AppState;
 use crate::tui::collection_browser::app_ui::AppUI;
 use crate::tui::collection_browser::events::{Action, EventsHandler};
 use crate::ui_utils::Theme;
+use chroma::ChromaCollection;
 use chroma_types::Metadata;
 use ratatui::DefaultTerminal;
 use thiserror::Error;
@@ -47,8 +47,8 @@ pub struct CollectionBrowser {
 }
 
 impl CollectionBrowser {
-    pub fn new(collection: Collection, theme: Theme) -> Self {
-        let app_state = AppState::new(collection.name.clone());
+    pub fn new(collection: ChromaCollection, theme: Theme) -> Self {
+        let app_state = AppState::new(collection.name().to_string());
         let ui = AppUI::new(theme);
         let events_handler = EventsHandler::new(collection);
         let terminal = ratatui::init();
