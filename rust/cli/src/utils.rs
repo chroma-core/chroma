@@ -6,6 +6,7 @@ use crate::commands::install::InstallError;
 use crate::commands::login::LoginError;
 use crate::commands::profile::ProfileError;
 use crate::commands::run::RunError;
+use crate::commands::skills::SkillsError;
 use crate::commands::update::UpdateError;
 use crate::commands::vacuum::VacuumError;
 use crate::commands::webpage::WebPageError;
@@ -39,6 +40,8 @@ pub enum CliError {
     Profile(#[from] ProfileError),
     #[error("{0}")]
     Run(#[from] RunError),
+    #[error("{0}")]
+    Skills(#[from] SkillsError),
     #[error("Failed to vacuum Chroma")]
     Vacuum(#[from] VacuumError),
     #[error("{0}")]

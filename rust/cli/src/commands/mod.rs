@@ -5,6 +5,7 @@ pub mod install;
 pub mod login;
 pub mod profile;
 pub mod run;
+pub mod skills;
 pub mod update;
 pub mod vacuum;
 pub mod webpage;
