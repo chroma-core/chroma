@@ -1,12 +1,10 @@
-use crate::client::dashboard_client::{
-    get_dashboard_client, DashboardClient, DashboardClientError, Team,
-};
+use crate::client::dashboard_client::{DashboardClient, DashboardClientError, Team};
 use crate::commands::db::DbError;
 use crate::commands::login::LoginError::BrowserAuthFailed;
 use crate::config_store::{ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::ui_utils::validate_uri;
-use crate::utils::{get_chroma_client, CliError, Profile, Profiles, UtilsError};
+use crate::utils::{cloud_client, CliError, Profile, Profiles, UtilsError};
 use clap::Parser;
 use colored::Colorize;
 use std::error::Error;
@@ -20,8 +18,6 @@ pub struct LoginArgs {
     profile: Option<String>,
     #[clap(long = "api-key", help = "API key")]
     api_key: Option<String>,
-    #[clap(long, hide = true, help = "Flag to use during development")]
-    dev: bool,
 }
 
 #[derive(Debug, Error)]
@@ -180,12 +176,11 @@ async fn browser_auth(
 
 pub async fn browser_login(
     args: LoginArgs,
+    dashboard_client: &DashboardClient,
     store: &dyn ConfigStore,
     term: &mut dyn Terminal,
 ) -> Result<(), CliError> {
-    let dashboard_client = get_dashboard_client(args.dev);
-
-    let session_id = browser_auth(&dashboard_client, term)
+    let session_id = browser_auth(dashboard_client, term)
         .await
         .map_err(|_| BrowserAuthFailed)?;
 
@@ -193,10 +188,7 @@ pub async fn browser_login(
 
     let (api_key, team) = match args.api_key {
         Some(api_key) => {
-            let client = get_chroma_client(
-                Some(&Profile::new(api_key.clone(), "default".to_string())),
-                args.dev,
-            );
+            let client = cloud_client(&Profile::new(api_key.clone(), "default".to_string()))?;
             let team_id = client.get_tenant_id().await?;
             let team = filter_team(&team_id, teams)?;
             (api_key, team)
@@ -260,10 +252,7 @@ pub async fn headless_login(
         return Err(LoginError::ProfileAlreadyExists(profile_name).into());
     }
 
-    let client = get_chroma_client(
-        Some(&Profile::new(api_key.clone(), profile_name.clone())),
-        args.dev,
-    );
+    let client = cloud_client(&Profile::new(api_key.clone(), profile_name.clone()))?;
 
     let team_id = client.get_tenant_id().await?;
 
@@ -291,12 +280,13 @@ pub async fn headless_login(
 
 pub fn login(args: LoginArgs) -> Result<(), CliError> {
     let store = FileConfigStore::default();
+    let dashboard_client = DashboardClient::default();
     let mut term = SystemTerminal;
     let runtime = tokio::runtime::Runtime::new().map_err(|_| DbError::RuntimeError)?;
     runtime.block_on(async {
         match (&args.api_key, &args.profile) {
             (Some(_), Some(_)) => headless_login(args, &store, &mut term).await,
-            _ => browser_login(args, &store, &mut term).await,
+            _ => browser_login(args, &dashboard_client, &store, &mut term).await,
         }
     })?;
     Ok(())

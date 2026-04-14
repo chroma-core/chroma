@@ -4,8 +4,7 @@ use crate::commands::install::InstallError;
 use crate::config_store::{ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::utils::{
-    cloud_client, parse_host, parse_local, parse_path, AddressBook, CliError, Environment,
-    ErrorResponse, Profile, UtilsError,
+    cloud_client, parse_host, parse_local, parse_path, CliError, ErrorResponse, Profile, UtilsError,
 };
 use chroma::ChromaHttpClient;
 use chroma_types::operator::Key;
@@ -14,10 +13,26 @@ use clap::Parser;
 use crossterm::style::Stylize;
 use futures::{stream, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
+use std::fmt::{self, Display};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::task::JoinHandle;
+
+#[derive(Debug)]
+enum Environment {
+    Local,
+    Cloud,
+}
+
+impl Display for Environment {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Environment::Local => write!(f, "Local"),
+            Environment::Cloud => write!(f, "Cloud"),
+        }
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum CopyError {
@@ -96,13 +111,14 @@ async fn get_cloud_client(
     from: bool,
     term: &mut dyn Terminal,
 ) -> Result<ChromaHttpClient, CliError> {
-    let host = AddressBook::cloud().frontend_url;
-    let client = cloud_client(&host, &profile);
+    let client = cloud_client(&profile)?;
 
     if let Some(db_name) = db_name {
         let dbs = client.list_databases().await?;
         if !dbs.iter().any(|db| db.name == db_name) {
-            return Err(CliError::Db(crate::commands::db::DbError::DbNotFound(db_name)));
+            return Err(CliError::Db(crate::commands::db::DbError::DbNotFound(
+                db_name,
+            )));
         }
         client.set_database_name(db_name);
         return Ok(client);
@@ -119,7 +135,9 @@ async fn get_cloud_client(
             let input_name = get_db_name(&databases, &select_db_prompt(from), term)?;
             let dbs = &databases;
             if !dbs.iter().any(|db| db.name == input_name) {
-                return Err(CliError::Db(crate::commands::db::DbError::DbNotFound(input_name)));
+                return Err(CliError::Db(crate::commands::db::DbError::DbNotFound(
+                    input_name,
+                )));
             }
             client.set_database_name(input_name);
             Ok(client)
@@ -262,9 +280,11 @@ async fn copy_collections(
             let collection_progress = collection_progress.clone();
 
             async move {
-                let search = SearchPayload::default()
-                    .limit(Some(step), offset)
-                    .select([Key::Document, Key::Embedding, Key::Metadata]);
+                let search = SearchPayload::default().limit(Some(step), offset).select([
+                    Key::Document,
+                    Key::Embedding,
+                    Key::Metadata,
+                ]);
 
                 let response = collection.search(vec![search]).await?;
 
@@ -282,18 +302,12 @@ async fn copy_collections(
                     .flatten()
                     .unwrap_or_default()
                     .into_iter()
-                    .filter_map(|e| e)
+                    .flatten()
                     .collect();
                 let metadatas = response.metadatas.into_iter().next().flatten();
 
                 target_collection
-                    .add(
-                        ids,
-                        embeddings,
-                        documents,
-                        None,
-                        metadatas,
-                    )
+                    .add(ids, embeddings, documents, None, metadatas)
                     .await
                     .map_err(|e| {
                         if e.to_string().to_lowercase().contains("quota") {

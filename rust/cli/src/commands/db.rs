@@ -2,10 +2,11 @@ use crate::config_store::{ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::ui_utils::copy_to_clipboard;
 use crate::utils::{
-    get_chroma_client, CliError, Profile, CHROMA_API_KEY_ENV_VAR, CHROMA_DATABASE_ENV_VAR,
+    cloud_client, CliError, Profile, CHROMA_API_KEY_ENV_VAR, CHROMA_DATABASE_ENV_VAR,
     CHROMA_TENANT_ENV_VAR, SELECTION_LIMIT,
 };
 use chroma::client::Database;
+use chroma::ChromaHttpClient;
 use clap::{Args, Subcommand, ValueEnum};
 use colored::Colorize;
 use std::error::Error;
@@ -59,23 +60,13 @@ impl fmt::Display for Language {
 }
 
 #[derive(Args, Debug)]
-pub struct DbArgs {
-    #[clap(long, hide = true, help = "Flag to use during development")]
-    dev: bool,
-}
-
-#[derive(Args, Debug)]
 pub struct CreateArgs {
-    #[clap(flatten)]
-    db_args: DbArgs,
     #[clap(index = 1, help = "The name of the DB to create")]
     name: Option<String>,
 }
 
 #[derive(Args, Debug)]
 pub struct DeleteArgs {
-    #[clap(flatten)]
-    db_args: DbArgs,
     #[clap(index = 1, help = "The name of the DB to delete")]
     name: Option<String>,
     #[clap(
@@ -89,8 +80,6 @@ pub struct DeleteArgs {
 
 #[derive(Args, Debug)]
 pub struct ConnectArgs {
-    #[clap(flatten)]
-    db_args: DbArgs,
     #[clap(index = 1, help = "The name of the DB to get a connection snippet for")]
     name: Option<String>,
     #[clap(
@@ -105,10 +94,7 @@ pub struct ConnectArgs {
 }
 
 #[derive(Args, Debug)]
-pub struct ListArgs {
-    #[clap(flatten)]
-    db_args: DbArgs,
-}
+pub struct ListArgs {}
 
 #[derive(Subcommand, Debug)]
 pub enum DbCommand {
@@ -355,9 +341,9 @@ fn create_env_connection(current_profile: Profile, db_name: String) -> Result<()
 pub async fn connect(
     args: ConnectArgs,
     current_profile: Profile,
+    client: &ChromaHttpClient,
     term: &mut dyn Terminal,
 ) -> Result<(), CliError> {
-    let client = get_chroma_client(Some(&current_profile), args.db_args.dev);
     let dbs = client.list_databases().await?;
 
     let name = match args.name {
@@ -406,10 +392,9 @@ pub async fn connect(
 
 pub async fn create(
     args: CreateArgs,
-    current_profile: Profile,
+    client: &ChromaHttpClient,
     term: &mut dyn Terminal,
 ) -> Result<(), CliError> {
-    let client = get_chroma_client(Some(&current_profile), args.db_args.dev);
     let dbs = client.list_databases().await?;
 
     let mut name = match args.name {
@@ -437,10 +422,9 @@ pub async fn create(
 
 pub async fn delete(
     args: DeleteArgs,
-    current_profile: Profile,
+    client: &ChromaHttpClient,
     term: &mut dyn Terminal,
 ) -> Result<(), CliError> {
-    let client = get_chroma_client(Some(&current_profile), args.db_args.dev);
     let dbs = client.list_databases().await?;
 
     let name = match args.name {
@@ -463,12 +447,10 @@ pub async fn delete(
 }
 
 pub async fn list(
-    args: ListArgs,
     profile_name: String,
-    current_profile: Profile,
+    client: &ChromaHttpClient,
     term: &mut dyn Terminal,
 ) -> Result<(), CliError> {
-    let client = get_chroma_client(Some(&current_profile), args.db_args.dev);
     let dbs = client.list_databases().await?;
 
     if dbs.is_empty() {
@@ -487,15 +469,16 @@ pub async fn list(
 pub fn db_command(command: DbCommand) -> Result<(), CliError> {
     let store = FileConfigStore::default();
     let (profile_name, current_profile) = store.get_current_profile()?;
+    let client = cloud_client(&current_profile)?;
     let mut term = SystemTerminal;
 
     let runtime = tokio::runtime::Runtime::new().map_err(|_| DbError::RuntimeError)?;
     runtime.block_on(async {
         match command {
-            DbCommand::Connect(args) => connect(args, current_profile, &mut term).await,
-            DbCommand::Create(args) => create(args, current_profile, &mut term).await,
-            DbCommand::Delete(args) => delete(args, current_profile, &mut term).await,
-            DbCommand::List(args) => list(args, profile_name, current_profile, &mut term).await,
+            DbCommand::Connect(args) => connect(args, current_profile, &client, &mut term).await,
+            DbCommand::Create(args) => create(args, &client, &mut term).await,
+            DbCommand::Delete(args) => delete(args, &client, &mut term).await,
+            DbCommand::List(_) => list(profile_name, &client, &mut term).await,
         }
     })?;
     Ok(())

@@ -163,15 +163,12 @@ impl EventsHandler {
         let collection = self.collection.clone();
 
         tokio::spawn(async move {
-            let combined_where = RawWhereFields::from_json_str(
-                metadata.as_deref(),
-                where_document.as_deref(),
-            )
-            .ok()
-            .and_then(|raw| raw.parse().ok().flatten());
+            let combined_where =
+                RawWhereFields::from_json_str(metadata.as_deref(), where_document.as_deref())
+                    .ok()
+                    .and_then(|raw| raw.parse().ok().flatten());
 
-            let mut search = SearchPayload::default()
-                .select([Key::Document, Key::Metadata]);
+            let mut search = SearchPayload::default().select([Key::Document, Key::Metadata]);
 
             if let Some(ids) = ids {
                 search.filter.query_ids = Some(ids);

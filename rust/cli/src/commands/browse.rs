@@ -4,7 +4,7 @@ use crate::config_store::{ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::tui::collection_browser::CollectionBrowser;
 use crate::ui_utils::Theme;
-use crate::utils::{cloud_client, parse_host, parse_local, parse_path, AddressBook, CliError, LocalChromaArgs};
+use crate::utils::{cloud_client, parse_host, parse_local, parse_path, CliError, LocalChromaArgs};
 use chroma::ChromaHttpClient;
 use clap::Parser;
 use crossterm::style::Stylize;
@@ -64,7 +64,9 @@ async fn parse_local_args(
         // Verify the DB exists by checking list_databases
         let dbs = client.list_databases().await?;
         if !dbs.iter().any(|db| db.name == db_name) {
-            return Err(CliError::Db(crate::commands::db::DbError::DbNotFound(db_name)));
+            return Err(CliError::Db(crate::commands::db::DbError::DbNotFound(
+                db_name,
+            )));
         }
     }
 
@@ -82,13 +84,15 @@ pub async fn get_cloud_client(
     term: &mut dyn Terminal,
 ) -> Result<ChromaHttpClient, CliError> {
     let profile = store.get_current_profile()?;
-    let client = cloud_client(&AddressBook::cloud().frontend_url, &profile.1);
+    let client = cloud_client(&profile.1)?;
 
     if let Some(db_name) = db_name {
         // Verify the DB exists
         let dbs = client.list_databases().await?;
         if !dbs.iter().any(|db| db.name == db_name) {
-            return Err(CliError::Db(crate::commands::db::DbError::DbNotFound(db_name)));
+            return Err(CliError::Db(crate::commands::db::DbError::DbNotFound(
+                db_name,
+            )));
         }
         client.set_database_name(db_name);
         return Ok(client);
@@ -105,7 +109,9 @@ pub async fn get_cloud_client(
             let input_name = get_db_name(&databases, &input_db_prompt(collection_name), term)?;
             // Verify the DB exists
             if !databases.iter().any(|db| db.name == input_name) {
-                return Err(CliError::Db(crate::commands::db::DbError::DbNotFound(input_name)));
+                return Err(CliError::Db(crate::commands::db::DbError::DbNotFound(
+                    input_name,
+                )));
             }
             client.set_database_name(input_name);
             Ok(client)
