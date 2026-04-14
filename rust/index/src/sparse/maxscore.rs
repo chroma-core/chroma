@@ -3,8 +3,8 @@ use std::sync::Arc;
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
-    Directory, DirectoryBlock, SignedRoaringBitmap, SparsePostingBlock, DIRECTORY_PREFIX,
-    MAX_BLOCK_ENTRIES,
+    Directory, DirectoryBlock, SignedRoaringBitmap, SparsePostingBlock, SparsePostingBlockError,
+    DIRECTORY_PREFIX, MAX_BLOCK_ENTRIES,
 };
 use dashmap::DashMap;
 use futures::StreamExt;
@@ -21,12 +21,15 @@ pub const SPARSE_POSTING_BLOCK_SIZE_BYTES: usize = 1024 * 1024;
 pub enum MaxScoreError {
     #[error(transparent)]
     Blockfile(#[from] Box<dyn ChromaError>),
+    #[error("posting block error: {0}")]
+    PostingBlock(#[from] SparsePostingBlockError),
 }
 
 impl ChromaError for MaxScoreError {
     fn code(&self) -> ErrorCodes {
         match self {
             MaxScoreError::Blockfile(err) => err.code(),
+            MaxScoreError::PostingBlock(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -141,82 +144,173 @@ impl<'me> MaxScoreWriter<'me> {
                 continue;
             };
 
-            // NOTE: This is a full read-modify-write — all existing entries for
-            // the dimension are loaded, merged with deltas, and rewritten. This
-            // is O(n) per dimension regardless of delta size. A future optimization
-            // could do in-place block patching for small deltas.
-            let mut entries = std::collections::HashMap::new();
-            let mut old_block_count = 0u32;
-            let mut old_dir_part_count = 0u32;
-            if let Some(ref reader) = self.old_reader {
-                let blocks = reader.get_posting_blocks(encoded_dim).await?;
-                old_block_count = blocks.len() as u32;
-                old_dir_part_count = reader.count_directory_parts(encoded_dim).await? as u32;
-                for block in blocks {
+            let dir_prefix = format!("{}{}", DIRECTORY_PREFIX, encoded_dim);
+
+            // ── Suffix-rewrite optimization ────────────────────────────
+            //
+            // When an old reader exists AND a directory is available, we
+            // only need to load and rewrite posting blocks from the first
+            // affected block onward. Blocks before the smallest affected
+            // offset are guaranteed unchanged and are carried over by the
+            // forked blockfile.
+            //
+            // Fallback: if there is no old reader or no directory, we do
+            // a full write (same as a fresh dimension).
+            let old_directory = if let Some(ref reader) = self.old_reader {
+                reader.get_directory(encoded_dim).await?
+            } else {
+                None
+            };
+
+            if let Some(ref directory) = old_directory {
+                let old_block_count = directory.num_blocks() as u32;
+                let old_dir_part_count = if let Some(ref reader) = self.old_reader {
+                    reader.count_directory_parts(encoded_dim).await? as u32
+                } else {
+                    0
+                };
+
+                // Find the smallest offset touched by any delta.
+                // Safety: `updates` is guaranteed non-empty because we only
+                // reach this path when `self.delta.remove(dimension_id)`
+                // returns `Some`, and entries are never inserted empty.
+                let Some(min_affected_offset) = updates.iter().map(|e| *e.key()).min() else {
+                    continue;
+                };
+
+                // Find the first block whose max_offset >= min_affected_offset.
+                // All blocks before this index are untouched.
+                let first_affected = directory
+                    .max_offsets()
+                    .partition_point(|&max_off| max_off < min_affected_offset)
+                    as u32;
+
+                // Load only the suffix of posting blocks.
+                let suffix_blocks = if let Some(ref reader) = self.old_reader {
+                    reader
+                        .get_posting_blocks_from(encoded_dim, first_affected)
+                        .await?
+                } else {
+                    vec![]
+                };
+
+                // Decompress suffix blocks into entries.
+                let mut entries = std::collections::HashMap::new();
+                for block in suffix_blocks {
                     for (off, val) in block.offsets().iter().zip(block.values().iter()) {
                         entries.insert(*off, *val);
                     }
                 }
-            }
 
-            for entry in updates.into_iter() {
-                let (off, update) = entry;
-                match update {
-                    Some(val) => {
-                        entries.insert(off, val);
-                    }
-                    None => {
-                        entries.remove(&off);
+                // Apply deltas.
+                for entry in updates.into_iter() {
+                    let (off, update) = entry;
+                    match update {
+                        Some(val) => {
+                            entries.insert(off, val);
+                        }
+                        None => {
+                            entries.remove(&off);
+                        }
                     }
                 }
-            }
 
-            let dir_prefix = format!("{}{}", DIRECTORY_PREFIX, encoded_dim);
+                // Carry forward directory entries for untouched prefix blocks.
+                let prefix_max_offsets = &directory.max_offsets()[..first_affected as usize];
+                let prefix_max_weights = &directory.max_weights()[..first_affected as usize];
 
-            if entries.is_empty() {
-                for seq in 0..old_block_count {
-                    self.posting_writer
-                        .delete::<_, SparsePostingBlock>(encoded_dim, seq)
-                        .await?;
+                if entries.is_empty() && first_affected == 0 {
+                    // All entries deleted — remove all posting blocks.
+                    for seq in 0..old_block_count {
+                        self.posting_writer
+                            .delete::<_, SparsePostingBlock>(encoded_dim, seq)
+                            .await?;
+                    }
+                    dir_work.push(DirWork {
+                        prefix: dir_prefix,
+                        directory: None,
+                        old_part_count: old_dir_part_count,
+                    });
+                    continue;
                 }
+
+                // Sort suffix entries and re-chunk.
+                let mut sorted_suffix: Vec<(u32, f32)> = entries.into_iter().collect();
+                sorted_suffix.sort_unstable_by_key(|(off, _)| *off);
+
+                let mut dir_max_offsets: Vec<u32> = prefix_max_offsets.to_vec();
+                let mut dir_max_weights: Vec<f32> = prefix_max_weights.to_vec();
+
+                if sorted_suffix.is_empty() {
+                    // Suffix is now empty (all suffix entries deleted), but
+                    // prefix blocks remain. Delete old suffix blocks.
+                    for seq in first_affected..old_block_count {
+                        self.posting_writer
+                            .delete::<_, SparsePostingBlock>(encoded_dim, seq)
+                            .await?;
+                    }
+                } else {
+                    let new_suffix_block_count =
+                        sorted_suffix.chunks(self.block_size as usize).len() as u32;
+                    for (i, chunk) in sorted_suffix.chunks(self.block_size as usize).enumerate() {
+                        let block = SparsePostingBlock::from_sorted_entries(chunk)?;
+                        dir_max_offsets.push(block.max_offset);
+                        dir_max_weights.push(block.max_weight);
+                        let seq = first_affected + i as u32;
+                        self.posting_writer.set(encoded_dim, seq, block).await?;
+                    }
+
+                    // Delete trailing old blocks beyond the new suffix.
+                    let new_total = first_affected + new_suffix_block_count;
+                    for seq in new_total..old_block_count {
+                        self.posting_writer
+                            .delete::<_, SparsePostingBlock>(encoded_dim, seq)
+                            .await?;
+                    }
+                }
+
+                let directory = Directory::new(dir_max_offsets, dir_max_weights)?;
                 dir_work.push(DirWork {
                     prefix: dir_prefix,
-                    directory: None,
+                    directory: Some(directory),
                     old_part_count: old_dir_part_count,
                 });
-                continue;
+            } else {
+                // ── Fresh dimension (no old reader or no directory) ─────
+                // Full write path: all entries come from deltas only.
+                let mut entries: Vec<(u32, f32)> = Vec::new();
+                for entry in updates.into_iter() {
+                    let (off, update) = entry;
+                    if let Some(val) = update {
+                        entries.push((off, val));
+                    }
+                }
+
+                if entries.is_empty() {
+                    continue;
+                }
+
+                entries.sort_unstable_by_key(|(off, _)| *off);
+
+                let mut dir_max_offsets = Vec::new();
+                let mut dir_max_weights = Vec::new();
+
+                for (seq, chunk) in entries.chunks(self.block_size as usize).enumerate() {
+                    let block = SparsePostingBlock::from_sorted_entries(chunk)?;
+                    dir_max_offsets.push(block.max_offset);
+                    dir_max_weights.push(block.max_weight);
+                    self.posting_writer
+                        .set(encoded_dim, seq as u32, block)
+                        .await?;
+                }
+
+                let directory = Directory::new(dir_max_offsets, dir_max_weights)?;
+                dir_work.push(DirWork {
+                    prefix: dir_prefix,
+                    directory: Some(directory),
+                    old_part_count: 0,
+                });
             }
-
-            let mut sorted: Vec<(u32, f32)> = entries.into_iter().collect();
-            sorted.sort_unstable_by_key(|(off, _)| *off);
-
-            let mut dir_max_offsets = Vec::new();
-            let mut dir_max_weights = Vec::new();
-
-            let new_block_count = sorted.chunks(self.block_size as usize).len() as u32;
-            for (seq, chunk) in sorted.chunks(self.block_size as usize).enumerate() {
-                let block = SparsePostingBlock::from_sorted_entries(chunk)
-                    .expect("chunk is non-empty and <= block_size");
-                dir_max_offsets.push(block.max_offset);
-                dir_max_weights.push(block.max_weight);
-                self.posting_writer
-                    .set(encoded_dim, seq as u32, block)
-                    .await?;
-            }
-
-            for seq in new_block_count..old_block_count {
-                self.posting_writer
-                    .delete::<_, SparsePostingBlock>(encoded_dim, seq)
-                    .await?;
-            }
-
-            let directory = Directory::new(dir_max_offsets, dir_max_weights)
-                .expect("directory: offsets/weights aligned by construction");
-            dir_work.push(DirWork {
-                prefix: dir_prefix,
-                directory: Some(directory),
-                old_part_count: old_dir_part_count,
-            });
         }
 
         // ── Pass 2: directory parts (all dir prefixes sort after posting
@@ -527,6 +621,23 @@ impl<'me> MaxScoreReader<'me> {
         Ok(blocks.into_iter().map(|(_, b)| b).collect())
     }
 
+    /// Load posting blocks for a dimension starting from `start_seq` onward.
+    ///
+    /// Used by the suffix-rewrite optimization in `MaxScoreWriter::commit()`
+    /// to avoid loading blocks before the first affected offset.
+    pub async fn get_posting_blocks_from(
+        &self,
+        encoded_dim: &str,
+        start_seq: u32,
+    ) -> Result<Vec<SparsePostingBlock>, MaxScoreError> {
+        let blocks: Vec<(&str, u32, SparsePostingBlock)> = self
+            .posting_reader
+            .get_range(encoded_dim..=encoded_dim, start_seq..)
+            .await?
+            .collect();
+        Ok(blocks.into_iter().map(|(_, _, b)| b).collect())
+    }
+
     /// Load the full directory for a dimension from its directory parts.
     pub async fn get_directory(
         &self,
@@ -608,10 +719,14 @@ impl<'me> MaxScoreReader<'me> {
         let collected: Vec<(u32, f32)> = query_vector.into_iter().collect();
         let encoded_dims: Vec<String> = collected.iter().map(|(d, _)| encode_u32(*d)).collect();
 
-        // Open cursors for all query dimensions in parallel.
+        // Open cursors for all query dimensions concurrently, preserving
+        // insertion order so that cursor_results[i] corresponds to
+        // collected[i]'s query weight. (`buffered` yields in submission
+        // order; `buffer_unordered` would yield in completion order,
+        // mismatching cursors with query weights.)
         let cursor_results: Vec<Result<Option<PostingCursor>, MaxScoreError>> =
             futures::stream::iter(encoded_dims.iter().map(|enc| self.open_cursor(enc)))
-                .buffer_unordered(encoded_dims.len())
+                .buffered(encoded_dims.len())
                 .collect()
                 .await;
 

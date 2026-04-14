@@ -90,6 +90,15 @@ pub async fn fork_writer<'a>(
     provider: &BlockfileProvider,
     reader: &'a MaxScoreReader<'a>,
 ) -> MaxScoreWriter<'a> {
+    fork_writer_with_block_size(provider, reader, None).await
+}
+
+/// Fork the index with an optional custom block size.
+pub async fn fork_writer_with_block_size<'a>(
+    provider: &BlockfileProvider,
+    reader: &'a MaxScoreReader<'a>,
+    block_size: Option<u32>,
+) -> MaxScoreWriter<'a> {
     let posting_writer = provider
         .write::<u32, SparsePostingBlock>(
             BlockfileWriterOptions::new("".to_string())
@@ -100,7 +109,11 @@ pub async fn fork_writer<'a>(
         .await
         .unwrap();
 
-    MaxScoreWriter::new(posting_writer, Some(reader.clone()))
+    let mut writer = MaxScoreWriter::new(posting_writer, Some(reader.clone()));
+    if let Some(bs) = block_size {
+        writer = writer.with_block_size(bs);
+    }
+    writer
 }
 
 /// Commit a writer and return a new 'static reader.
