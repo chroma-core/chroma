@@ -1,7 +1,6 @@
 # Add up to 200k records until the log-is-full message is seen.
 
 import grpc
-import math
 import random
 import time
 
@@ -52,14 +51,17 @@ def test_log_backpressure(
             if 'log needs compaction before accepting more writes; please backoff exponentially and retry' in str(x):
                 assert isinstance(x, ChromaError)
                 assert x.indexing_status is not None
-                status = collection.get_indexing_status()
-                assert x.indexing_status["num_indexed_ops"] == status.num_indexed_ops
-                assert x.indexing_status["num_unindexed_ops"] == status.num_unindexed_ops
-                assert x.indexing_status["total_ops"] == status.total_ops
-                assert math.isclose(
-                    x.indexing_status["op_indexing_progress"],
-                    status.op_indexing_progress,
-                    rel_tol=1e-6,
+                # The 429 includes a point-in-time snapshot; a live status poll can race
+                # with compaction and observe newer values.
+                indexing_status = x.indexing_status
+                assert indexing_status["num_indexed_ops"] >= 0
+                assert indexing_status["num_unindexed_ops"] >= 0
+                assert indexing_status["total_ops"] >= 0
+                assert 0.0 <= indexing_status["op_indexing_progress"] <= 1.0
+                assert (
+                    indexing_status["num_indexed_ops"]
+                    + indexing_status["num_unindexed_ops"]
+                    == indexing_status["total_ops"]
                 )
                 excepted = True
                 break
