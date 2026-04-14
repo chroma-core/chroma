@@ -66,7 +66,9 @@ impl Operator<SparseIndexKnnInput, SparseIndexKnnOutput> for SparseIndexKnn {
         ))
         .await?;
 
-        let Some(sparse_reader) = metadata_segement_reader.sparse_index_reader else {
+        let Some(chroma_segment::blockfile_metadata::SparseIndexReader::Wand(sparse_reader)) =
+            metadata_segement_reader.sparse_index_reader
+        else {
             return Ok(SparseIndexKnnOutput {
                 records: Vec::new(),
             });

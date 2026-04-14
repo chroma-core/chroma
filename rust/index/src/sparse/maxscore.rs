@@ -414,13 +414,27 @@ impl<'me> MaxScoreReader<'me> {
             .map(|d| (d, part_count)))
     }
 
-    /// Count total posting entries for a dimension.
+    /// Estimate total posting entries for a dimension.
     ///
-    /// Used by the IDF operator to compute document frequency.
-    /// O(n_blocks) — loads all blocks and sums their lengths.
+    /// Used by the IDF operator to compute document frequency. Loads only
+    /// the directory (usually cached) and the first posting block to learn
+    /// the block size, then returns `num_blocks * block_size`. This
+    /// overestimates by at most `block_size - 1` on the last block, which
+    /// is negligible for the IDF formula.
     pub async fn count_postings(&self, encoded_dim: &str) -> Result<usize, MaxScoreError> {
-        let blocks = self.get_posting_blocks(encoded_dim).await?;
-        Ok(blocks.iter().map(|b| b.len()).sum())
+        let Some(dir) = self.get_directory(encoded_dim).await? else {
+            return Ok(0);
+        };
+        let num_blocks = dir.num_blocks();
+        if num_blocks == 0 {
+            return Ok(0);
+        }
+        let first_block = self.posting_reader.get(encoded_dim, 0u32).await?;
+        let block_size = first_block.map(|b| b.len()).unwrap_or(0);
+        if block_size == 0 {
+            return Ok(0);
+        }
+        Ok(num_blocks * block_size)
     }
 
     /// Return all dimension IDs stored in the blockfile.

@@ -141,7 +141,10 @@ impl Operator<IdfInput, IdfOutput> for Idf {
         let logs =
             materialize_logs(&record_segment_reader, input.logs.clone(), None, &plan).await?;
 
-        if let Some(sparse_index_reader) = metadata_segment_reader.sparse_index_reader.as_ref() {
+        if let Some(chroma_segment::blockfile_metadata::SparseIndexReader::Wand(
+            sparse_index_reader,
+        )) = metadata_segment_reader.sparse_index_reader.as_ref()
+        {
             let encoded_dimensions = self
                 .query
                 .indices
