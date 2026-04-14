@@ -262,6 +262,37 @@ impl ChromaHttpClientOptions {
         })
     }
 
+    /// Constructs client options for Chroma Cloud admin operations.
+    ///
+    /// Configures the client to connect to `https://api.trychroma.com` with the provided
+    /// API key. No database is selected, making this suitable for admin operations like
+    /// listing, creating, or deleting databases.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the API key contains invalid HTTP header characters.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma::client::ChromaHttpClientOptions;
+    ///
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let options = ChromaHttpClientOptions::cloud_admin("my-api-key")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn cloud_admin(
+        api_key: impl Into<String>,
+    ) -> Result<Self, ChromaHttpClientOptionsError> {
+        let api_key = api_key.into();
+        Ok(ChromaHttpClientOptions {
+            auth_method: ChromaAuthMethod::cloud_api_key(&api_key)?,
+            endpoint: DEFAULT_CLOUD_ENDPOINT.parse().expect("valid URL"),
+            ..Default::default()
+        })
+    }
+
     /// Constructs HTTP headers from the authentication method.
     pub(crate) fn headers(&self) -> HeaderMap {
         let mut headers = HeaderMap::new();

@@ -4,12 +4,11 @@ use crate::config_store::{ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::tui::collection_browser::CollectionBrowser;
 use crate::ui_utils::Theme;
-use crate::utils::{cloud_client, parse_host, parse_local, parse_path, CliError, LocalChromaArgs};
+use crate::utils::{cloud_client, CliError, LocalChromaArgs};
 use chroma::ChromaHttpClient;
 use clap::Parser;
 use crossterm::style::Stylize;
 use thiserror::Error;
-use tokio::task::JoinHandle;
 
 #[derive(Parser, Debug, Clone)]
 pub struct BrowseArgs {
@@ -27,8 +26,6 @@ pub struct BrowseArgs {
 
 #[derive(Debug, Error)]
 pub enum BrowseError {
-    #[error("Failed to start a local Chroma server")]
-    ServerStart,
     #[error("No DBs found for current profile")]
     NoDBs,
     #[error("Collection {0} not found")]
@@ -42,39 +39,6 @@ fn input_db_prompt(collection_name: &str) -> String {
         .bold()
         .blue()
         .to_string()
-}
-
-async fn parse_local_args(
-    args: BrowseArgs,
-) -> Result<(ChromaHttpClient, Option<JoinHandle<()>>), CliError> {
-    let local_args = args.local_chroma_args;
-    let (client, handle) = if local_args.host.is_some() {
-        (parse_host(local_args.host.unwrap()).await?, None)
-    } else if local_args.path.is_some() {
-        let (client, handle) = parse_path(local_args.path.unwrap()).await?;
-        (client, Some(handle))
-    } else if args.local {
-        let client = parse_local().await?;
-        (client, None)
-    } else {
-        return Err(BrowseError::ServerStart.into());
-    };
-
-    if let Some(db_name) = args.db_name.clone() {
-        // Verify the DB exists by checking list_databases
-        let dbs = client.list_databases().await?;
-        if !dbs.iter().any(|db| db.name == db_name) {
-            return Err(CliError::Db(crate::commands::db::DbError::DbNotFound(
-                db_name,
-            )));
-        }
-    }
-
-    if let Some(db_name) = args.db_name {
-        client.set_database_name(db_name);
-    }
-
-    Ok((client, handle))
 }
 
 pub async fn get_cloud_client(
@@ -119,9 +83,8 @@ pub async fn get_cloud_client(
     }
 }
 
-fn local_setup(args: BrowseArgs) -> bool {
-    let local_args = args.local_chroma_args;
-    args.local || local_args.host.is_some() || local_args.path.is_some()
+fn is_local(args: &BrowseArgs) -> bool {
+    args.local || args.local_chroma_args.host.is_some() || args.local_chroma_args.path.is_some()
 }
 
 pub fn browse(args: BrowseArgs) -> Result<(), CliError> {
@@ -129,13 +92,24 @@ pub fn browse(args: BrowseArgs) -> Result<(), CliError> {
     let mut term = SystemTerminal;
     let runtime = tokio::runtime::Runtime::new().map_err(|_| InstallError::RuntimeError)?;
     runtime.block_on(async {
-        let (client, _handle) = match local_setup(args.clone()) {
-            true => parse_local_args(args.clone()).await,
-            false => Ok((
-                get_cloud_client(args.db_name, &args.collection_name, &store, &mut term).await?,
-                None,
-            )),
-        }?;
+        let (client, _handle) = if is_local(&args) {
+            let (client, handle) = args.local_chroma_args.clone().connect().await?;
+            if let Some(db_name) = &args.db_name {
+                let dbs = client.list_databases().await?;
+                if !dbs.iter().any(|db| &db.name == db_name) {
+                    return Err(CliError::Db(crate::commands::db::DbError::DbNotFound(
+                        db_name.clone(),
+                    )));
+                }
+                client.set_database_name(db_name);
+            }
+            (client, handle)
+        } else {
+            let client =
+                get_cloud_client(args.db_name.clone(), &args.collection_name, &store, &mut term)
+                    .await?;
+            (client, None)
+        };
 
         let collection = client
             .get_collection(args.collection_name.clone())

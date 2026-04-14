@@ -17,7 +17,6 @@ use chroma_frontend::frontend_service_entrypoint_with_config;
 use clap::Parser;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::HashMap;
 use std::net::TcpListener;
 use std::path::Path;
@@ -111,6 +110,21 @@ pub struct LocalChromaArgs {
     pub host: Option<String>,
 }
 
+impl LocalChromaArgs {
+    pub async fn connect(self) -> Result<(ChromaHttpClient, Option<JoinHandle<()>>), CliError> {
+        if let Some(host) = self.host {
+            let client = parse_host(host).await?;
+            Ok((client, None))
+        } else if let Some(path) = self.path {
+            let (client, handle) = parse_path(path).await?;
+            Ok((client, Some(handle)))
+        } else {
+            let client = parse_local().await?;
+            Ok((client, None))
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ErrorResponse {
     pub(crate) message: String,
@@ -168,10 +182,9 @@ pub struct CliConfig {
 pub type Profiles = HashMap<String, Profile>;
 
 pub fn cloud_client(profile: &Profile) -> Result<ChromaHttpClient, CliError> {
-    let mut options = ChromaHttpClientOptions::cloud(&profile.api_key, "default_database")
+    let mut options = ChromaHttpClientOptions::cloud_admin(&profile.api_key)
         .map_err(|_| UtilsError::InvalidApiKey)?;
     options.tenant_id = Some(profile.tenant_id.clone());
-    options.database_name = None;
     Ok(ChromaHttpClient::new(options))
 }
 
@@ -255,16 +268,4 @@ pub fn is_chroma_path<P: AsRef<Path>>(dir: P) -> bool {
     let config = FrontendServerConfig::single_node_default();
     let db_path = dir.as_ref().join(config.sqlite_filename);
     db_path.is_file()
-}
-
-pub fn parse_value(s: &str) -> Value {
-    if let Ok(n) = s.parse::<i64>() {
-        Value::Number(n.into())
-    } else if let Ok(f) = s.parse::<f64>() {
-        Value::Number(serde_json::Number::from_f64(f).unwrap())
-    } else if let Ok(b) = s.parse::<bool>() {
-        Value::Bool(b)
-    } else {
-        Value::String(s.to_string())
-    }
 }

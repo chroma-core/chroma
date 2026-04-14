@@ -4,7 +4,6 @@ use crate::tui::collection_browser::{Record, Screen};
 use chroma::ChromaCollection;
 use chroma_types::operator::Key;
 use chroma_types::plan::SearchPayload;
-use chroma_types::RawWhereFields;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
 use futures::StreamExt;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -163,17 +162,16 @@ impl EventsHandler {
         let collection = self.collection.clone();
 
         tokio::spawn(async move {
-            let combined_where =
-                RawWhereFields::from_json_str(metadata.as_deref(), where_document.as_deref())
-                    .ok()
-                    .and_then(|raw| raw.parse().ok().flatten());
-
             let mut search = SearchPayload::default().select([Key::Document, Key::Metadata]);
 
             if let Some(ids) = ids {
                 search.filter.query_ids = Some(ids);
             }
-            if let Some(w) = combined_where {
+            let r#where = [where_document, metadata]
+                .into_iter()
+                .flatten()
+                .reduce(|a, b| a & b);
+            if let Some(w) = r#where {
                 search = search.r#where(w);
             }
 

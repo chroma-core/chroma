@@ -1,12 +1,12 @@
 use crate::tui::collection_browser::app_ui::ColorPalette;
 use crate::tui::collection_browser::input::{InputBox, ToggleButton, ToggleState};
-use crate::utils::parse_value;
+use chroma_types::operator::Key;
+use chroma_types::Where;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::Text;
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
-use serde_json::{Map, Value};
 use tui_input::Input;
 
 #[derive(Debug, Clone)]
@@ -19,21 +19,6 @@ pub enum MetadataOperator {
     GreaterThan,
     In,
     NotIn,
-}
-
-impl MetadataOperator {
-    pub fn for_query(&self) -> String {
-        match self {
-            MetadataOperator::Equal => "$eq".to_string(),
-            MetadataOperator::NotEqual => "$ne".to_string(),
-            MetadataOperator::GreaterThan => "$gt".to_string(),
-            MetadataOperator::GreaterThanOrEqual => "$gte".to_string(),
-            MetadataOperator::LessThan => "$lt".to_string(),
-            MetadataOperator::LessThanOrEqual => "$lte".to_string(),
-            MetadataOperator::In => "$in".to_string(),
-            MetadataOperator::NotIn => "$nin".to_string(),
-        }
-    }
 }
 
 impl std::fmt::Display for MetadataOperator {
@@ -203,7 +188,7 @@ impl QueryEditorState {
         Some(ids)
     }
 
-    pub fn where_document(&self) -> Option<String> {
+    pub fn where_document(&self) -> Option<Where> {
         let where_document_input = self.inputs.iter().find_map(|i| {
             if let InputType::WhereDocument(input_state) = i {
                 Some(input_state.value())
@@ -215,15 +200,10 @@ impl QueryEditorState {
         if where_document_input.is_empty() {
             return None;
         }
-        let mut map = Map::new();
-        map.insert(
-            "$contains".to_string(),
-            Value::String(where_document_input.trim().to_string()),
-        );
-        Some(serde_json::to_string(&Value::Object(map)).unwrap_or_default())
+        Some(Key::Document.contains(where_document_input.trim()))
     }
 
-    pub fn metadata(&self) -> Option<String> {
+    pub fn metadata(&self) -> Option<Where> {
         let metadata_key_input = self.inputs.iter().find_map(|i| {
             if let InputType::MetadataKey(input_state) = i {
                 Some(input_state.value())
@@ -252,19 +232,27 @@ impl QueryEditorState {
             }
         })?;
 
-        let mut operator_map = Map::new();
-        operator_map.insert(
-            metadata_operator.for_query(),
-            // Value::String(metadata_value_input.trim().to_string()),
-            parse_value(metadata_value_input.trim()),
-        );
+        let key = Key::field(metadata_key_input.trim());
+        let value = metadata_value_input.trim().to_string();
 
-        let mut map = Map::new();
-        map.insert(
-            metadata_key_input.trim().to_string(),
-            Value::Object(operator_map),
-        );
-        Some(serde_json::to_string(&Value::Object(map)).unwrap_or_default())
+        let r#where = match metadata_operator {
+            MetadataOperator::Equal => key.eq(value),
+            MetadataOperator::NotEqual => key.ne(value),
+            MetadataOperator::GreaterThan => key.gt(value),
+            MetadataOperator::GreaterThanOrEqual => key.gte(value),
+            MetadataOperator::LessThan => key.lt(value),
+            MetadataOperator::LessThanOrEqual => key.lte(value),
+            MetadataOperator::In => {
+                let values: Vec<String> = value.split(',').map(|s| s.trim().to_string()).collect();
+                key.is_in(values)
+            }
+            MetadataOperator::NotIn => {
+                let values: Vec<String> = value.split(',').map(|s| s.trim().to_string()).collect();
+                key.not_in(values)
+            }
+        };
+
+        Some(r#where)
     }
 }
 
