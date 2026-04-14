@@ -689,7 +689,7 @@ impl ServiceBasedFrontend {
         collection: &Collection,
         error: &PushLogsError,
     ) -> Option<IndexStatusResponse> {
-        let num_indexed_ops = u64::try_from(collection.log_position).ok()?;
+        let num_indexed_ops = u64::try_from(collection.log_position).unwrap_or(0);
         let total_ops = error.enumeration_offset()?;
         Some(Self::build_indexing_status(num_indexed_ops, total_ops))
     }
@@ -3024,5 +3024,24 @@ mod tests {
         assert_eq!(status.num_unindexed_ops, 0);
         assert_eq!(status.total_ops, 0);
         assert_eq!(status.op_indexing_progress, 1.0);
+    }
+
+    #[test]
+    fn test_backoff_compaction_indexing_status_defaults_negative_log_position_to_zero() {
+        let collection = Collection {
+            log_position: -1,
+            ..Collection::default()
+        };
+        let error = PushLogsError::BackoffCompaction {
+            enumeration_offset: Some(42),
+        };
+
+        let status = ServiceBasedFrontend::indexing_status_for_push_logs_error(&collection, &error)
+            .expect("backoff compaction errors should include indexing status");
+
+        assert_eq!(status.num_indexed_ops, 0);
+        assert_eq!(status.num_unindexed_ops, 42);
+        assert_eq!(status.total_ops, 42);
+        assert_eq!(status.op_indexing_progress, 0.0);
     }
 }
