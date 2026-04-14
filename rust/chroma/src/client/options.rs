@@ -282,9 +282,7 @@ impl ChromaHttpClientOptions {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn cloud_admin(
-        api_key: impl Into<String>,
-    ) -> Result<Self, ChromaHttpClientOptionsError> {
+    pub fn cloud_admin(api_key: impl Into<String>) -> Result<Self, ChromaHttpClientOptionsError> {
         let api_key = api_key.into();
         Ok(ChromaHttpClientOptions {
             auth_method: ChromaAuthMethod::cloud_api_key(&api_key)?,
