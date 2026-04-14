@@ -1752,6 +1752,7 @@ dependencies = [
  "parking_lot",
  "tokio",
  "tonic 0.14.5",
+ "uuid",
 ]
 
 [[package]]

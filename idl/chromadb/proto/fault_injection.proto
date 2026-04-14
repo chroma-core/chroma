@@ -42,12 +42,13 @@ message InjectFaultsRequest {
 }
 
 message InjectFaultsResponse {
-  // empty
+  string id = 1;
 }
 
 message FaultEntry {
   FaultSelector selector = 1;
   FaultAction action = 2;
+  string id = 3;
 }
 
 message ListFaultsRequest {
@@ -60,6 +61,7 @@ message ListFaultsResponse {
 
 message ClearFaultsRequest {
   FaultSelector selector = 1;
+  optional string id = 2;
 }
 
 message ClearFaultsResponse {

@@ -13,6 +13,32 @@ use chroma_types::chroma_proto::{
 };
 use parking_lot::RwLock;
 use tonic::{Request, Response, Status};
+use uuid::Uuid;
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub struct FaultId(Uuid);
+
+impl FaultId {
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
+impl std::fmt::Display for FaultId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl TryFrom<&str> for FaultId {
+    type Error = Status;
+
+    fn try_from(id: &str) -> Result<Self, Self::Error> {
+        id.try_into()
+            .map(Self)
+            .map_err(|_| invalid_argument("fault id must be a UUID"))
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FaultSelectorKind {
@@ -28,6 +54,7 @@ pub enum FaultActionKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredFault {
+    pub id: FaultId,
     pub selector: FaultSelectorKind,
     pub action: FaultActionKind,
 }
@@ -47,11 +74,14 @@ impl FaultRegistry {
         Self::default()
     }
 
-    pub fn inject(&self, selector: FaultSelectorKind, action: FaultActionKind) {
-        self.inner
-            .faults
-            .write()
-            .push(StoredFault { selector, action });
+    pub fn inject(&self, selector: FaultSelectorKind, action: FaultActionKind) -> FaultId {
+        let id = FaultId::new();
+        self.inner.faults.write().push(StoredFault {
+            id,
+            selector,
+            action,
+        });
+        id
     }
 
     pub fn list(&self) -> Vec<StoredFault> {
@@ -70,6 +100,18 @@ impl FaultRegistry {
         let before = faults.len();
         faults.retain(|fault| &fault.selector != selector);
         before - faults.len()
+    }
+
+    pub fn clear_id(&self, id: Option<&FaultId>) -> usize {
+        match id {
+            Some(id) => {
+                let mut faults = self.inner.faults.write();
+                let before = faults.len();
+                faults.retain(|fault| &fault.id != id);
+                before - faults.len()
+            }
+            None => self.clear_all(),
+        }
     }
 
     pub fn action_for_file_line(&self, file: &str, line: u32) -> Option<FaultActionKind> {
@@ -113,9 +155,7 @@ impl TryFrom<FaultSelector> for FaultSelectorKind {
 
     fn try_from(selector: FaultSelector) -> Result<Self, Self::Error> {
         match selector.by {
-            Some(By::FileLine(SelectFileLine { file, line })) => {
-                Ok(Self::FileLine { file, line })
-            }
+            Some(By::FileLine(SelectFileLine { file, line })) => Ok(Self::FileLine { file, line }),
             Some(By::Label(SelectLabel { label })) => Ok(Self::Label(label)),
             None => Err(invalid_argument("fault selector must specify a target")),
         }
@@ -159,6 +199,7 @@ fn stored_fault_to_proto(fault: &StoredFault) -> FaultEntry {
     FaultEntry {
         selector: Some(selector_to_proto(&fault.selector)),
         action: Some(action_to_proto(&fault.action)),
+        id: fault.id.to_string(),
     }
 }
 
@@ -177,8 +218,8 @@ impl FaultInjectionService for FaultRegistry {
             .action
             .ok_or_else(|| invalid_argument("inject_faults requires an action"))
             .and_then(action_from_proto)?;
-        self.inject(selector, action);
-        Ok(Response::new(InjectFaultsResponse {}))
+        let id = self.inject(selector, action);
+        Ok(Response::new(InjectFaultsResponse { id: id.to_string() }))
     }
 
     async fn list_faults(
@@ -198,10 +239,12 @@ impl FaultInjectionService for FaultRegistry {
         request: Request<ClearFaultsRequest>,
     ) -> Result<Response<ClearFaultsResponse>, Status> {
         let request = request.into_inner();
-        let cleared_count = match request.selector {
-            Some(selector) => self.clear_selector(&selector.try_into()?),
-            None => self.clear_all(),
-        };
+        let fault_id: Option<FaultId> = request
+            .id
+            .as_deref()
+            .map(TryInto::try_into)
+            .transpose()?;
+        let cleared_count = self.clear_id(fault_id.as_ref());
         Ok(Response::new(ClearFaultsResponse {
             cleared_count: cleared_count as u64,
         }))
@@ -242,16 +285,22 @@ mod tests {
         }
     }
 
+    fn parse_fault_id(id: &str) -> FaultId {
+        id.try_into().expect("fault id should be a UUID")
+    }
+
     #[tokio::test]
     async fn inject_and_list_label_fault() {
         let registry = FaultRegistry::new();
-        registry
+        let inject_response = registry
             .inject_faults(Request::new(InjectFaultsRequest {
                 selector: Some(label_selector("slow-path")),
                 action: Some(unavailable_action()),
             }))
             .await
-            .expect("inject should succeed");
+            .expect("inject should succeed")
+            .into_inner();
+        let fault_id = parse_fault_id(&inject_response.id);
 
         let response = registry
             .list_faults(Request::new(ListFaultsRequest {}))
@@ -265,18 +314,21 @@ mod tests {
             Some(label_selector("slow-path"))
         );
         assert_eq!(response.faults[0].action, Some(unavailable_action()));
+        assert_eq!(response.faults[0].id, fault_id.to_string());
     }
 
     #[tokio::test]
     async fn inject_and_list_file_line_fault() {
         let registry = FaultRegistry::new();
-        registry
+        let inject_response = registry
             .inject_faults(Request::new(InjectFaultsRequest {
                 selector: Some(file_line_selector("src/lib.rs", 42)),
                 action: Some(delay_action(7)),
             }))
             .await
-            .expect("inject should succeed");
+            .expect("inject should succeed")
+            .into_inner();
+        let fault_id = parse_fault_id(&inject_response.id);
 
         let response = registry
             .list_faults(Request::new(ListFaultsRequest {}))
@@ -290,6 +342,7 @@ mod tests {
             Some(file_line_selector("src/lib.rs", 42))
         );
         assert_eq!(response.faults[0].action, Some(delay_action(7)));
+        assert_eq!(response.faults[0].id, fault_id.to_string());
     }
 
     #[tokio::test]
@@ -323,7 +376,10 @@ mod tests {
         );
 
         let response = registry
-            .clear_faults(Request::new(ClearFaultsRequest { selector: None }))
+            .clear_faults(Request::new(ClearFaultsRequest {
+                selector: None,
+                id: None,
+            }))
             .await
             .expect("clear should succeed")
             .into_inner();
@@ -333,7 +389,47 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn clear_selector_removes_all_matching_faults() {
+    async fn clear_id_removes_only_matching_fault() {
+        let registry = FaultRegistry::new();
+        let first = registry
+            .inject_faults(Request::new(InjectFaultsRequest {
+                selector: Some(label_selector("drop-one")),
+                action: Some(unavailable_action()),
+            }))
+            .await
+            .expect("inject should succeed")
+            .into_inner();
+        let second = registry
+            .inject_faults(Request::new(InjectFaultsRequest {
+                selector: Some(label_selector("drop-one")),
+                action: Some(delay_action(5)),
+            }))
+            .await
+            .expect("inject should succeed")
+            .into_inner();
+
+        let response = registry
+            .clear_faults(Request::new(ClearFaultsRequest {
+                selector: None,
+                id: Some(second.id.clone()),
+            }))
+            .await
+            .expect("clear should succeed")
+            .into_inner();
+
+        assert_eq!(response.cleared_count, 1);
+        assert_eq!(
+            registry.action_for_label("drop-one"),
+            Some(FaultActionKind::Unavailable)
+        );
+
+        let faults = registry.list();
+        assert_eq!(faults.len(), 1);
+        assert_eq!(faults[0].id, parse_fault_id(&first.id));
+    }
+
+    #[tokio::test]
+    async fn clear_without_id_clears_all_faults() {
         let registry = FaultRegistry::new();
         registry.inject(
             FaultSelectorKind::Label("keep".to_string()),
@@ -351,18 +447,14 @@ mod tests {
         let response = registry
             .clear_faults(Request::new(ClearFaultsRequest {
                 selector: Some(label_selector("drop")),
+                id: None,
             }))
             .await
             .expect("clear should succeed")
             .into_inner();
 
-        assert_eq!(response.cleared_count, 2);
-        assert_eq!(registry.list().len(), 1);
-        assert_eq!(
-            registry.action_for_label("keep"),
-            Some(FaultActionKind::Unavailable)
-        );
-        assert_eq!(registry.action_for_label("drop"), None);
+        assert_eq!(response.cleared_count, 3);
+        assert!(registry.list().is_empty());
     }
 
     #[tokio::test]
@@ -378,12 +470,17 @@ mod tests {
             .expect_err("inject should fail");
         assert_eq!(inject_error.code(), tonic::Code::InvalidArgument);
 
-        let clear_error = registry
+        let clear_by_invalid_id_error = registry
             .clear_faults(Request::new(ClearFaultsRequest {
-                selector: Some(FaultSelector { by: None }),
+                selector: None,
+                id: Some("not-a-uuid".to_string()),
             }))
             .await
             .expect_err("clear should fail");
-        assert_eq!(clear_error.code(), tonic::Code::InvalidArgument);
+        assert_eq!(
+            clear_by_invalid_id_error.code(),
+            tonic::Code::InvalidArgument
+        );
+
     }
 }
