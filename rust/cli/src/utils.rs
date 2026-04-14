@@ -110,19 +110,55 @@ pub struct LocalChromaArgs {
     pub host: Option<String>,
 }
 
-impl LocalChromaArgs {
-    pub async fn connect(self) -> Result<(ChromaHttpClient, Option<JoinHandle<()>>), CliError> {
-        if let Some(host) = self.host {
-            let client = parse_host(host).await?;
-            Ok((client, None))
-        } else if let Some(path) = self.path {
-            let (client, handle) = parse_path(path).await?;
-            Ok((client, Some(handle)))
-        } else {
-            let client = parse_local().await?;
-            Ok((client, None))
+pub async fn connect_local(
+    args: LocalChromaArgs,
+) -> Result<(ChromaHttpClient, Option<JoinHandle<()>>), CliError> {
+    if let Some(host) = args.host {
+        let client = local_client(&host)?;
+        client.heartbeat().await?;
+        Ok((client, None))
+    } else if let Some(path) = args.path {
+        let config = FrontendServerConfig::single_node_default();
+        let db_path = Path::new(&path).join(config.sqlite_filename);
+        if !db_path.is_file() {
+            return Err(UtilsError::NotChromaPath.into());
+        }
+
+        let port = find_available_port(8000, 9000)?;
+        let mut config = FrontendServerConfig::single_node_default();
+        config.persist_path = path;
+        config.port = port;
+
+        let host = format!("http://localhost:{}", config.port);
+        let handle = spawn(async move {
+            frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), &config, true)
+                .await;
+        });
+        let client = local_client(&host)?;
+        client
+            .heartbeat()
+            .await
+            .map_err(|_| UtilsError::LocalConnect)?;
+        Ok((client, Some(handle)))
+    } else {
+        let client = local_client_default()?;
+        client
+            .heartbeat()
+            .await
+            .map_err(|_| UtilsError::LocalConnect)?;
+        Ok((client, None))
+    }
+}
+
+fn find_available_port(min: u16, max: u16) -> Result<u16, CliError> {
+    let mut rng = rand::thread_rng();
+    for _ in 0..100 {
+        let port = rng.gen_range(min..=max);
+        if TcpListener::bind(format!("127.0.0.1:{}", port)).is_ok() {
+            return Ok(port);
         }
     }
+    Err(UtilsError::PortSearch.into())
 }
 
 #[derive(Debug, Deserialize)]
@@ -207,65 +243,4 @@ pub fn local_client_default() -> Result<ChromaHttpClient, CliError> {
         ..Default::default()
     };
     Ok(ChromaHttpClient::new(options))
-}
-
-pub fn find_available_port(min: u16, max: u16) -> Result<u16, CliError> {
-    let mut rng = rand::thread_rng();
-
-    for _ in 0..100 {
-        let port = rng.gen_range(min..=max);
-        let addr = format!("127.0.0.1:{}", port);
-
-        if TcpListener::bind(&addr).is_ok() {
-            return Ok(port);
-        }
-    }
-
-    Err(UtilsError::PortSearch.into())
-}
-
-pub async fn parse_host(host: String) -> Result<ChromaHttpClient, CliError> {
-    let client = local_client(&host)?;
-    client.heartbeat().await?;
-    Ok(client)
-}
-
-pub async fn standup_local_chroma(
-    config: FrontendServerConfig,
-) -> Result<(ChromaHttpClient, JoinHandle<()>), CliError> {
-    let host = format!("http://localhost:{}", config.port);
-    let handle = spawn(async move {
-        frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), &config, true).await;
-    });
-    let client = local_client(&host)?;
-    client
-        .heartbeat()
-        .await
-        .map_err(|_| UtilsError::LocalConnect)?;
-    Ok((client, handle))
-}
-
-pub async fn parse_path(path: String) -> Result<(ChromaHttpClient, JoinHandle<()>), CliError> {
-    if !is_chroma_path(&path) {
-        return Err(UtilsError::NotChromaPath.into());
-    }
-    let mut config = FrontendServerConfig::single_node_default();
-    config.persist_path = path;
-    config.port = find_available_port(8000, 9000)?;
-    standup_local_chroma(config).await
-}
-
-pub async fn parse_local() -> Result<ChromaHttpClient, CliError> {
-    let client = local_client_default()?;
-    client
-        .heartbeat()
-        .await
-        .map_err(|_| UtilsError::LocalConnect)?;
-    Ok(client)
-}
-
-pub fn is_chroma_path<P: AsRef<Path>>(dir: P) -> bool {
-    let config = FrontendServerConfig::single_node_default();
-    let db_path = dir.as_ref().join(config.sqlite_filename);
-    db_path.is_file()
 }

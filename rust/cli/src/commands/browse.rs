@@ -4,7 +4,7 @@ use crate::config_store::{ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::tui::collection_browser::CollectionBrowser;
 use crate::ui_utils::Theme;
-use crate::utils::{cloud_client, CliError, LocalChromaArgs};
+use crate::utils::{cloud_client, connect_local, CliError, LocalChromaArgs};
 use chroma::ChromaHttpClient;
 use clap::Parser;
 use crossterm::style::Stylize;
@@ -93,7 +93,7 @@ pub fn browse(args: BrowseArgs) -> Result<(), CliError> {
     let runtime = tokio::runtime::Runtime::new().map_err(|_| InstallError::RuntimeError)?;
     runtime.block_on(async {
         let (client, _handle) = if is_local(&args) {
-            let (client, handle) = args.local_chroma_args.clone().connect().await?;
+            let (client, handle) = connect_local(args.local_chroma_args.clone()).await?;
             if let Some(db_name) = &args.db_name {
                 let dbs = client.list_databases().await?;
                 if !dbs.iter().any(|db| &db.name == db_name) {
@@ -105,9 +105,13 @@ pub fn browse(args: BrowseArgs) -> Result<(), CliError> {
             }
             (client, handle)
         } else {
-            let client =
-                get_cloud_client(args.db_name.clone(), &args.collection_name, &store, &mut term)
-                    .await?;
+            let client = get_cloud_client(
+                args.db_name.clone(),
+                &args.collection_name,
+                &store,
+                &mut term,
+            )
+            .await?;
             (client, None)
         };
 

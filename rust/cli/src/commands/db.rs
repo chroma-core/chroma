@@ -93,9 +93,6 @@ pub struct ConnectArgs {
     env_vars: bool,
 }
 
-#[derive(Args, Debug)]
-pub struct ListArgs {}
-
 #[derive(Subcommand, Debug)]
 pub enum DbCommand {
     #[command(about = "Generate a connection snippet to a DB")]
@@ -105,7 +102,7 @@ pub enum DbCommand {
     #[command(about = "Delete a DB")]
     Delete(DeleteArgs),
     #[command(about = "List all available DBs")]
-    List(ListArgs),
+    List,
 }
 
 fn capitalize(s: &str) -> String {
@@ -478,7 +475,7 @@ pub fn db_command(command: DbCommand) -> Result<(), CliError> {
             DbCommand::Connect(args) => connect(args, current_profile, &client, &mut term).await,
             DbCommand::Create(args) => create(args, &client, &mut term).await,
             DbCommand::Delete(args) => delete(args, &client, &mut term).await,
-            DbCommand::List(_) => list(profile_name, &client, &mut term).await,
+            DbCommand::List => list(profile_name, &client, &mut term).await,
         }
     })?;
     Ok(())

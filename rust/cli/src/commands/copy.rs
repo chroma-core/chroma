@@ -3,7 +3,9 @@ use crate::commands::db::get_db_name;
 use crate::commands::install::InstallError;
 use crate::config_store::{ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
-use crate::utils::{cloud_client, CliError, ErrorResponse, LocalChromaArgs, Profile, UtilsError};
+use crate::utils::{
+    cloud_client, connect_local, CliError, ErrorResponse, LocalChromaArgs, Profile, UtilsError,
+};
 use chroma::ChromaHttpClient;
 use chroma_types::operator::Key;
 use chroma_types::plan::SearchPayload;
@@ -154,7 +156,7 @@ async fn get_chroma_clients(
         host: args.host.clone(),
         path: args.path.clone(),
     };
-    let (local_client, handle) = local_args.connect().await?;
+    let (local_client, handle) = connect_local(local_args).await?;
     let cloud_client = get_cloud_client(profile, args.db.clone(), args.from_cloud, term).await?;
 
     match (source, target) {
