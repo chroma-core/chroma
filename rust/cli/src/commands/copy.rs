@@ -8,7 +8,8 @@ use crate::utils::{
     ErrorResponse, Profile, UtilsError,
 };
 use chroma::ChromaHttpClient;
-use chroma_types::IncludeList;
+use chroma_types::operator::Key;
+use chroma_types::plan::SearchPayload;
 use clap::Parser;
 use crossterm::style::Stylize;
 use futures::{stream, StreamExt};
@@ -261,29 +262,37 @@ async fn copy_collections(
             let collection_progress = collection_progress.clone();
 
             async move {
-                let records = collection
-                    .get(
-                        None,
-                        None,
-                        Some(step),
-                        Some(offset),
-                        Some(IncludeList::all()),
-                    )
-                    .await?;
+                let search = SearchPayload::default()
+                    .limit(Some(step), offset)
+                    .select([Key::Document, Key::Embedding, Key::Metadata]);
 
-                if records.ids.is_empty() {
+                let response = collection.search(vec![search]).await?;
+
+                let ids = response.ids.into_iter().next().unwrap_or_default();
+                if ids.is_empty() {
                     return Ok::<(), CliError>(());
                 }
 
-                let num_records = records.ids.len();
+                let num_records = ids.len();
+                let documents = response.documents.into_iter().next().flatten();
+                let embeddings: Vec<Vec<f32>> = response
+                    .embeddings
+                    .into_iter()
+                    .next()
+                    .flatten()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|e| e)
+                    .collect();
+                let metadatas = response.metadatas.into_iter().next().flatten();
 
                 target_collection
                     .add(
-                        records.ids,
-                        records.embeddings.unwrap_or_default(),
-                        records.documents,
-                        records.uris,
-                        records.metadatas,
+                        ids,
+                        embeddings,
+                        documents,
+                        None,
+                        metadatas,
                     )
                     .await
                     .map_err(|e| {
