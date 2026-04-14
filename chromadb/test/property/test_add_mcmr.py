@@ -158,6 +158,9 @@ def _test_add(
     current_version1 = cast(int, coll1.get_model()["version"])
     current_version2 = cast(int, coll2.get_model()["version"])
     records_since_compaction_wait = 0
+    min_records_between_compaction_waits = max(
+        MIN_RECORDS_BETWEEN_COMPACTION_WAITS, len(record_set["ids"]) // 10
+    )
 
     # TODO: The type of add() is incorrect as it does not allow for metadatas
     # like [{"a": 1}, None, {"a": 3}]
@@ -177,7 +180,7 @@ def _test_add(
             coll2.add(*batch)
         if should_wait_for_compaction:
             records_since_compaction_wait += len(batch[0])
-            if records_since_compaction_wait >= MIN_RECORDS_BETWEEN_COMPACTION_WAITS:
+            if records_since_compaction_wait >= min_records_between_compaction_waits:
                 current_version1 = wait_for_version_increase(
                     client1, collection.name, current_version1
                 )
