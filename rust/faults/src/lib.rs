@@ -108,13 +108,17 @@ fn invalid_argument(message: &'static str) -> Status {
     Status::invalid_argument(message)
 }
 
-fn selector_from_proto(selector: FaultSelector) -> Result<FaultSelectorKind, Status> {
-    match selector.by {
-        Some(By::FileLine(SelectFileLine { file, line })) => {
-            Ok(FaultSelectorKind::FileLine { file, line })
+impl TryFrom<FaultSelector> for FaultSelectorKind {
+    type Error = Status;
+
+    fn try_from(selector: FaultSelector) -> Result<Self, Self::Error> {
+        match selector.by {
+            Some(By::FileLine(SelectFileLine { file, line })) => {
+                Ok(Self::FileLine { file, line })
+            }
+            Some(By::Label(SelectLabel { label })) => Ok(Self::Label(label)),
+            None => Err(invalid_argument("fault selector must specify a target")),
         }
-        Some(By::Label(SelectLabel { label })) => Ok(FaultSelectorKind::Label(label)),
-        None => Err(invalid_argument("fault selector must specify a target")),
     }
 }
 
@@ -168,7 +172,7 @@ impl FaultInjectionService for FaultRegistry {
         let selector = request
             .selector
             .ok_or_else(|| invalid_argument("inject_faults requires a selector"))
-            .and_then(selector_from_proto)?;
+            .and_then(|selector| selector.try_into())?;
         let action = request
             .action
             .ok_or_else(|| invalid_argument("inject_faults requires an action"))
@@ -195,7 +199,7 @@ impl FaultInjectionService for FaultRegistry {
     ) -> Result<Response<ClearFaultsResponse>, Status> {
         let request = request.into_inner();
         let cleared_count = match request.selector {
-            Some(selector) => self.clear_selector(&selector_from_proto(selector)?),
+            Some(selector) => self.clear_selector(&selector.try_into()?),
             None => self.clear_all(),
         };
         Ok(Response::new(ClearFaultsResponse {
