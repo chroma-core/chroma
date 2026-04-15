@@ -144,6 +144,8 @@ fn spanner_client_error_code(
     }
 }
 
+type TopologyStorageWrappers = (Arc<Vec<StorageWrapper>>, Vec<String>, usize);
+
 async fn connect_spanner(spanner: &SpannerConfig) -> Result<SpannerClient, Error> {
     let database_path = spanner.database_path().clone();
     let session_config = to_session_config(spanner.session_pool());
@@ -377,7 +379,7 @@ fn build_storage_wrappers_for_topology(
     preferred_region: &RegionName,
     regions: Vec<ProviderRegion<RegionalStorage>>,
     prefix: &str,
-) -> Result<(Arc<Vec<StorageWrapper>>, Vec<String>, usize), Error> {
+) -> Result<TopologyStorageWrappers, Error> {
     let mut storage_wrappers = vec![];
     let mut region_names = vec![];
     for region in regions.into_iter() {
