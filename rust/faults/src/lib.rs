@@ -239,11 +239,7 @@ impl FaultInjectionService for FaultRegistry {
         request: Request<ClearFaultsRequest>,
     ) -> Result<Response<ClearFaultsResponse>, Status> {
         let request = request.into_inner();
-        let fault_id: Option<FaultId> = request
-            .id
-            .as_deref()
-            .map(TryInto::try_into)
-            .transpose()?;
+        let fault_id: Option<FaultId> = request.id.as_deref().map(TryInto::try_into).transpose()?;
         let cleared_count = self.clear_id(fault_id.as_ref());
         Ok(Response::new(ClearFaultsResponse {
             cleared_count: cleared_count as u64,
@@ -481,6 +477,5 @@ mod tests {
             clear_by_invalid_id_error.code(),
             tonic::Code::InvalidArgument
         );
-
     }
 }
