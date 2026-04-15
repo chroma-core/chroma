@@ -3,6 +3,14 @@ use std::collections::HashSet;
 use chroma_types::{CollectionUuid, DatabaseName, JobId, SegmentScope};
 use tokio::sync::oneshot;
 
+#[derive(Clone, Debug)]
+pub struct RebuildInfo {
+    /// Segment scopes to rebuild. If empty, rebuilds all segments (metadata + vector).
+    pub segment_scopes: HashSet<SegmentScope>,
+    /// Optional shard index to rebuild. If not specified, defaults to shard 0.
+    pub shard_index: Option<u32>,
+}
+
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub(crate) struct CompactionJob {
     pub(crate) collection_id: CollectionUuid,
@@ -23,6 +31,8 @@ pub struct RebuildMessage {
     pub collection_ids: Vec<CollectionUuid>,
     /// Segment scopes to rebuild. If empty, rebuilds all segments (metadata + vector).
     pub segment_scopes: HashSet<SegmentScope>,
+    /// Optional shard index to rebuild. If not specified, defaults to shard 0.
+    pub shard_index: Option<u32>,
 }
 
 #[derive(Debug)]

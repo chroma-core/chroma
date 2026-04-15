@@ -1247,7 +1247,7 @@ impl VectorSegmentWriter {
                 chroma_types::SegmentType::HnswDistributed => {
                     let writer = DistributedHNSWSegmentWriter::from_segment(
                         collection,
-                        vector_segment,
+                        segment_shard,
                         dimension,
                         hnsw_provider.clone(),
                         cmek.clone(),

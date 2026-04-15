@@ -393,7 +393,13 @@ impl ApplyLogsOrchestrator {
         // During selective rebuild, non-rebuilt segments are skipped (no apply/commit/flush),
         // so they won't appear in flush_results. Include their original file paths from sysdb
         // so the version file and sysdb registration contain all segments.
-        if !self.context.apply_segment_scopes.is_empty() {
+        if self
+            .context
+            .rebuild_info
+            .as_ref()
+            .map(|info| !info.segment_scopes.is_empty())
+            .unwrap_or(false)
+        {
             let flushed_ids: std::collections::HashSet<_> =
                 flush_results.iter().map(|f| f.segment_id).collect();
             for original in &collection_info.original_segment_flush_infos {
@@ -479,7 +485,8 @@ impl Orchestrator for ApplyLogsOrchestrator {
         };
 
         if let Some(shard_size) = self.context.shard_size {
-            if shard_size != 0 {
+            // No sealing required during rebuild operations
+            if shard_size != 0 && !self.context.is_rebuild() {
                 // Get the writers
                 let writers = match self.context.get_segment_writers() {
                     Ok(writers) => writers,

@@ -760,7 +760,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
         }
 
         let writers = CompactWriters {
-            record_reader: record_reader.filter(|_| !self.output_context.is_rebuild),
+            record_reader: record_reader.filter(|_| !self.output_context.is_rebuild()),
             metadata_writer,
             record_writer,
             vector_writer,
@@ -842,7 +842,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
             completion_offset: collection_info.pulled_log_offset as u64, // Use the completion offset from input collection
             output_record_segment: message.record_segment.clone(),
             blockfile_provider: self.output_context.blockfile_provider.clone(),
-            is_rebuild: self.output_context.is_rebuild,
+            is_rebuild: self.output_context.is_rebuild(),
             is_for_backfill: self.is_for_backfill,
             bloom_filter_manager: self.output_context.bloom_filter_manager.clone(),
         };

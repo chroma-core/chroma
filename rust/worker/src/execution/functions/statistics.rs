@@ -1393,8 +1393,7 @@ mod tests {
             system.clone(),
             collection_id,
             database_name,
-            false,
-            std::collections::HashSet::new(),
+            None, // No rebuild
             50,
             10,
             1000,

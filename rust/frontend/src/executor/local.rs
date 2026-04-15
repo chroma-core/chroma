@@ -230,7 +230,7 @@ impl LocalExecutor {
             .as_ref()
             .map(|schema| {
                 schema.get_internal_hnsw_config_with_legacy_fallback(
-                    &plan.scan.collection_and_segments.vector_segment,
+                    &plan.scan.collection_and_segments.vector_segment.metadata,
                 )
             })
             .transpose()

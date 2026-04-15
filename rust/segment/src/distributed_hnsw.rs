@@ -10,7 +10,7 @@ use chroma_index::hnsw_provider::{
 use chroma_index::IndexUuid;
 use chroma_types::{
     Cmek, Collection, HnswParametersFromSegmentError, MaterializedLogOperation, Schema,
-    SchemaError, Segment, SegmentUuid,
+    SchemaError, Segment, SegmentShard, SegmentUuid,
 };
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -99,7 +99,7 @@ impl DistributedHNSWSegmentWriter {
 
     pub async fn from_segment(
         collection: &Collection,
-        segment: &Segment,
+        segment: &SegmentShard,
         dimensionality: usize,
         hnsw_index_provider: HnswIndexProvider,
         cmek: Option<Cmek>,
@@ -112,7 +112,7 @@ impl DistributedHNSWSegmentWriter {
                 .map_err(DistributedHNSWSegmentFromSegmentError::InvalidSchema)?
         };
         let hnsw_configuration = schema
-            .get_internal_hnsw_config_with_legacy_fallback(segment)
+            .get_internal_hnsw_config_with_legacy_fallback(&segment.metadata)
             .map_err(DistributedHNSWSegmentFromSegmentError::InvalidHnswConfiguration)?
             .ok_or(DistributedHNSWSegmentFromSegmentError::MissingHnswConfiguration)?;
 
@@ -120,20 +120,19 @@ impl DistributedHNSWSegmentWriter {
         // ideally, an explicit state would be better. When we implement distributed HNSW segments,
         // we can introduce a state in the segment metadata for this
         if !segment.file_path.is_empty() {
-            // Check if its in the providers cache, if not load the index from the files
-            let index_path = match &segment.file_path.get(HNSW_INDEX) {
+            let index_path = match segment.file_path.get(HNSW_INDEX) {
                 None => {
                     return Err(Box::new(
                         DistributedHNSWSegmentFromSegmentError::NoHnswFileFound,
                     ));
                 }
-                Some(files) => {
-                    if files.is_empty() {
+                Some(path) => {
+                    if path.is_empty() {
                         return Err(Box::new(
                             DistributedHNSWSegmentFromSegmentError::NoHnswFileFound,
                         ));
                     } else {
-                        &files[0]
+                        path
                     }
                 }
             };
@@ -341,15 +340,11 @@ impl DistributedHNSWSegmentReader {
             })
         })?;
         let hnsw_configuration = schema
-            .get_internal_hnsw_config_with_legacy_fallback(segment)
+            .get_internal_hnsw_config_with_legacy_fallback(&segment.metadata)
             .map_err(DistributedHNSWSegmentFromSegmentError::InvalidHnswConfiguration)?
             .ok_or(DistributedHNSWSegmentFromSegmentError::MissingHnswConfiguration)?;
 
-        // TODO: this is hacky, we use the presence of files to determine if we need to load or create the index
-        // ideally, an explicit state would be better. When we implement distributed HNSW segments,
-        // we can introduce a state in the segment metadata for this
         if !segment.file_path.is_empty() {
-            // Check if its in the providers cache, if not load the index from the files
             let index_path = match &segment.file_path.get(HNSW_INDEX) {
                 None => {
                     return Err(Box::new(
@@ -476,7 +471,7 @@ pub mod test {
         let hnsw_params = collection
             .schema
             .as_ref()
-            .map(|schema| schema.get_internal_hnsw_config_with_legacy_fallback(&segment))
+            .map(|schema| schema.get_internal_hnsw_config_with_legacy_fallback(&segment.metadata))
             .transpose()
             .unwrap()
             .flatten()
