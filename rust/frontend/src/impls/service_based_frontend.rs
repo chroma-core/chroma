@@ -20,11 +20,11 @@ use chroma_sysdb::{DatabaseOrTopology, GetCollectionsOptions, SysDb};
 use chroma_system::System;
 use chroma_types::{
     operator::{
-        CountResult, Filter, GetResult, KnnBatch, KnnBatchResult, KnnProjection,
-        KnnProjectionOutput, Limit, Projection, ProjectionOutput, Scan, SearchPayloadResult,
-        SearchResult,
+        Aggregate, CountResult, Filter, GetResult, GroupBy, Key, KnnBatch, KnnBatchResult,
+        KnnProjection, KnnProjectionOutput, Limit, Projection, ProjectionOutput, Scan,
+        SearchPayloadResult, SearchRecord, SearchResult, Select,
     },
-    plan::{Count, Get, Knn, Search},
+    plan::{Count, Get, Knn, Search, SearchPayload},
     AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
     AttachFunctionRequest, AttachFunctionResponse, Cmek, Collection, CollectionAndSegments,
     CollectionUuid, CountCollectionsError, CountCollectionsRequest, CountCollectionsResponse,
@@ -490,7 +490,116 @@ impl ServiceBasedFrontend {
         })
     }
 
-    async fn fan_out_search(&self, plan: Search) -> Result<SearchResult, ExecutorError> {
+    /// Applies group-by logic on already-merged `SearchRecord`s.
+    ///
+    /// This mirrors the worker-side `RankedGroupBy` operator but works on
+    /// `SearchRecord` (which carries optional metadata + score) rather than
+    /// on `RecordMeasure` + segment readers.
+    fn apply_group_by(records: &mut Vec<SearchRecord>, group_by: &GroupBy) {
+        let aggregate = match &group_by.aggregate {
+            Some(agg) if group_by.is_active() && !records.is_empty() => agg,
+            _ => return,
+        };
+
+        let extract_key =
+            |r: &SearchRecord, keys: &[Key]| -> Vec<Option<chroma_types::MetadataValue>> {
+                keys.iter()
+                    .map(|k| match k {
+                        Key::MetadataField(field) => {
+                            r.metadata.as_ref().and_then(|m| m.get(field).cloned())
+                        }
+                        Key::Score => r
+                            .score
+                            .map(|s| chroma_types::MetadataValue::Float(s as f64)),
+                        _ => None,
+                    })
+                    .collect()
+            };
+
+        let group_keys = &group_by.keys;
+        records.sort_by_cached_key(|r| extract_key(r, group_keys));
+
+        let grouped: Vec<Vec<SearchRecord>> = {
+            let mut groups: Vec<Vec<SearchRecord>> = Vec::new();
+            let mut current_key: Option<Vec<Option<chroma_types::MetadataValue>>> = None;
+            for record in records.drain(..) {
+                let key = extract_key(&record, group_keys);
+                if current_key.as_ref() == Some(&key) {
+                    groups.last_mut().unwrap().push(record);
+                } else {
+                    current_key = Some(key);
+                    groups.push(vec![record]);
+                }
+            }
+            groups
+        };
+
+        for mut group in grouped {
+            match aggregate {
+                Aggregate::MinK { keys, k } => {
+                    group.sort_by_cached_key(|r| extract_key(r, keys));
+                    records.extend(group.into_iter().take(*k as usize));
+                }
+                Aggregate::MaxK { keys, k } => {
+                    group.sort_by_cached_key(|r| std::cmp::Reverse(extract_key(r, keys)));
+                    records.extend(group.into_iter().take(*k as usize));
+                }
+            }
+        }
+    }
+
+    /// After cross-shard merge, re-applies group-by on payloads that had it,
+    /// strips extra metadata/score fields that were added solely for grouping,
+    /// and applies the original offset/limit.
+    fn reapply_group_by(
+        payloads: &[SearchPayload],
+        merged_payloads: &mut [SearchPayloadResult],
+        original_selects: &[Select],
+        original_limits: &[Limit],
+    ) {
+        for (i, (payload_result, orig_limit)) in merged_payloads
+            .iter_mut()
+            .zip(original_limits.iter())
+            .enumerate()
+        {
+            let group_by = &payloads[i].group_by;
+            if group_by.is_active() {
+                Self::apply_group_by(&mut payload_result.records, group_by);
+                let orig_select = &original_selects[i];
+                let keeps_all_metadata = orig_select.keys.contains(&Key::Metadata);
+                if !keeps_all_metadata {
+                    let group_meta_keys = group_by.metadata_keys();
+                    for record in &mut payload_result.records {
+                        if let Some(meta) = &mut record.metadata {
+                            for k in &group_meta_keys {
+                                if !orig_select.keys.contains(k) {
+                                    if let Key::MetadataField(field) = k {
+                                        meta.remove(field);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if !orig_select.keys.contains(&Key::Score) {
+                    for record in &mut payload_result.records {
+                        record.score = None;
+                    }
+                }
+            }
+            payload_result.records.sort_by(|a, b| {
+                a.score
+                    .partial_cmp(&b.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            let offset = orig_limit.offset as usize;
+            let limit = orig_limit.limit.unwrap_or(u32::MAX) as usize;
+            let records = std::mem::take(&mut payload_result.records);
+            payload_result.records = records.into_iter().skip(offset).take(limit).collect();
+        }
+    }
+
+    async fn fan_out_search(&self, mut plan: Search) -> Result<SearchResult, ExecutorError> {
         let num_shards = plan
             .scan
             .collection_and_segments
@@ -533,11 +642,28 @@ impl ServiceBasedFrontend {
             ))
             .await;
         }
+        let any_group_by = plan.payloads.iter().any(|p| p.group_by.is_active());
+
+        // When any payload uses group_by, save the original selects and
+        // augment them with metadata keys needed for frontend re-grouping.
+        let original_selects = if any_group_by {
+            let selects: Vec<Select> = plan.payloads.iter().map(|p| p.select.clone()).collect();
+            for payload in &mut plan.payloads {
+                if payload.group_by.is_active() {
+                    for k in payload.group_by.metadata_keys() {
+                        payload.select.keys.insert(k);
+                    }
+                    payload.select.keys.insert(Key::Score);
+                }
+            }
+            Some(selects)
+        } else {
+            None
+        };
+
         // Each shard only sees a subset of records, so we push
         // offset=0, limit=offset+limit per payload to every shard and
-        // apply the real offset/limit after merging. When a payload's
-        // limit is None (unbounded) and offset is 0, this is a no-op:
-        // None.map(..) stays None, and skip(0) is identity.
+        // apply the real offset/limit after merging.
         let original_limits: Vec<Limit> = plan.payloads.iter().map(|p| p.limit.clone()).collect();
         let futs: Vec<_> = (0..num_shards)
             .map(|shard_index| {
@@ -611,16 +737,27 @@ impl ServiceBasedFrontend {
                 }
             }
         }
-        for (payload_result, orig_limit) in merged_payloads.iter_mut().zip(original_limits.iter()) {
-            payload_result.records.sort_by(|a, b| {
-                a.score
-                    .partial_cmp(&b.score)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
-            let offset = orig_limit.offset as usize;
-            let limit = orig_limit.limit.unwrap_or(u32::MAX) as usize;
-            let records = std::mem::take(&mut payload_result.records);
-            payload_result.records = records.into_iter().skip(offset).take(limit).collect();
+        if let Some(original_selects) = &original_selects {
+            Self::reapply_group_by(
+                &plan.payloads,
+                &mut merged_payloads,
+                original_selects,
+                &original_limits,
+            );
+        } else {
+            for (payload_result, orig_limit) in
+                merged_payloads.iter_mut().zip(original_limits.iter())
+            {
+                payload_result.records.sort_by(|a, b| {
+                    a.score
+                        .partial_cmp(&b.score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                let offset = orig_limit.offset as usize;
+                let limit = orig_limit.limit.unwrap_or(u32::MAX) as usize;
+                let records = std::mem::take(&mut payload_result.records);
+                payload_result.records = records.into_iter().skip(offset).take(limit).collect();
+            }
         }
         Ok(SearchResult {
             results: merged_payloads,
@@ -2976,5 +3113,351 @@ mod tests {
         assert_eq!(status.num_unindexed_ops, 0);
         assert_eq!(status.total_ops, 0);
         assert_eq!(status.op_indexing_progress, 1.0);
+    }
+
+    mod group_by_tests {
+        use super::*;
+        use chroma_types::MetadataValue;
+
+        fn make_record(
+            id: &str,
+            score: Option<f32>,
+            meta: Vec<(&str, MetadataValue)>,
+        ) -> SearchRecord {
+            let metadata = if meta.is_empty() {
+                None
+            } else {
+                Some(meta.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
+            };
+            SearchRecord {
+                id: id.to_string(),
+                document: None,
+                embedding: None,
+                metadata,
+                score,
+            }
+        }
+
+        fn make_payload_with_group_by(
+            group_key: &str,
+            agg: Aggregate,
+            limit: Option<u32>,
+            select_keys: Vec<Key>,
+        ) -> SearchPayload {
+            SearchPayload {
+                filter: Filter::default(),
+                rank: Default::default(),
+                group_by: GroupBy {
+                    keys: vec![Key::MetadataField(group_key.into())],
+                    aggregate: Some(agg),
+                },
+                limit: Limit { offset: 0, limit },
+                select: Select {
+                    keys: select_keys.into_iter().collect(),
+                },
+            }
+        }
+
+        // ---- Tests for GroupBy::metadata_keys() ----
+
+        #[test]
+        fn test_metadata_keys_includes_group_and_aggregate() {
+            let gb = GroupBy {
+                keys: vec![Key::MetadataField("category".into()), Key::Score],
+                aggregate: Some(Aggregate::MinK {
+                    keys: vec![Key::Score, Key::MetadataField("priority".into())],
+                    k: 2,
+                }),
+            };
+            let keys = gb.metadata_keys();
+            assert_eq!(keys.len(), 2);
+            assert!(keys.contains(&Key::MetadataField("category".into())));
+            assert!(keys.contains(&Key::MetadataField("priority".into())));
+        }
+
+        #[test]
+        fn test_metadata_keys_deduplicates() {
+            let gb = GroupBy {
+                keys: vec![Key::MetadataField("color".into())],
+                aggregate: Some(Aggregate::MinK {
+                    keys: vec![Key::MetadataField("color".into())],
+                    k: 1,
+                }),
+            };
+            assert_eq!(gb.metadata_keys().len(), 1);
+        }
+
+        // ---- Tests for reapply_group_by ----
+
+        #[test]
+        fn test_post_merge_applies_group_by_on_cross_shard_records() {
+            let payloads = vec![make_payload_with_group_by(
+                "color",
+                Aggregate::MinK {
+                    keys: vec![Key::Score],
+                    k: 1,
+                },
+                Some(10),
+                vec![Key::Score],
+            )];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record(
+                        "s0_red",
+                        Some(0.5),
+                        vec![("color", MetadataValue::Str("red".into()))],
+                    ),
+                    make_record(
+                        "s0_blue",
+                        Some(0.3),
+                        vec![("color", MetadataValue::Str("blue".into()))],
+                    ),
+                    make_record(
+                        "s1_red",
+                        Some(0.2),
+                        vec![("color", MetadataValue::Str("red".into()))],
+                    ),
+                    make_record(
+                        "s1_blue",
+                        Some(0.8),
+                        vec![("color", MetadataValue::Str("blue".into()))],
+                    ),
+                ],
+            }];
+            let orig_selects = vec![Select {
+                keys: [Key::Score].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::reapply_group_by(
+                &payloads,
+                &mut merged,
+                &orig_selects,
+                &orig_limits,
+            );
+
+            assert_eq!(
+                merged[0].records.len(),
+                2,
+                "should keep exactly 1 per group"
+            );
+            assert_eq!(merged[0].records[0].id, "s1_red"); // 0.2
+            assert_eq!(merged[0].records[1].id, "s0_blue"); // 0.3
+        }
+
+        #[test]
+        fn test_post_merge_strips_extra_metadata_and_score() {
+            let payloads = vec![make_payload_with_group_by(
+                "color",
+                Aggregate::MinK {
+                    keys: vec![Key::Score],
+                    k: 1,
+                },
+                Some(10),
+                vec![Key::Document],
+            )];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![make_record(
+                    "a",
+                    Some(0.1),
+                    vec![("color", MetadataValue::Str("red".into()))],
+                )],
+            }];
+            let orig_selects = vec![Select {
+                keys: [Key::Document].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::reapply_group_by(
+                &payloads,
+                &mut merged,
+                &orig_selects,
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records.len(), 1);
+            assert!(merged[0].records[0].score.is_none());
+            let meta = merged[0].records[0].metadata.as_ref();
+            assert!(
+                meta.is_none() || !meta.unwrap().contains_key("color"),
+                "extra group-by metadata key should be stripped"
+            );
+        }
+
+        #[test]
+        fn test_post_merge_preserves_score_if_originally_selected() {
+            let payloads = vec![make_payload_with_group_by(
+                "color",
+                Aggregate::MinK {
+                    keys: vec![Key::Score],
+                    k: 1,
+                },
+                Some(10),
+                vec![Key::Score, Key::Document],
+            )];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![make_record(
+                    "a",
+                    Some(0.1),
+                    vec![("color", MetadataValue::Str("red".into()))],
+                )],
+            }];
+            let orig_selects = vec![Select {
+                keys: [Key::Score, Key::Document].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::reapply_group_by(
+                &payloads,
+                &mut merged,
+                &orig_selects,
+                &orig_limits,
+            );
+
+            assert!(merged[0].records[0].score.is_some());
+        }
+
+        #[test]
+        fn test_post_merge_applies_original_offset_limit() {
+            let payloads = vec![make_payload_with_group_by(
+                "cat",
+                Aggregate::MinK {
+                    keys: vec![Key::Score],
+                    k: 1,
+                },
+                Some(1),
+                vec![Key::Score],
+            )];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record(
+                        "a",
+                        Some(0.1),
+                        vec![("cat", MetadataValue::Str("x".into()))],
+                    ),
+                    make_record(
+                        "b",
+                        Some(0.2),
+                        vec![("cat", MetadataValue::Str("y".into()))],
+                    ),
+                    make_record(
+                        "c",
+                        Some(0.3),
+                        vec![("cat", MetadataValue::Str("z".into()))],
+                    ),
+                ],
+            }];
+            let orig_selects = vec![Select {
+                keys: [Key::Score].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 1,
+                limit: Some(1),
+            }];
+
+            ServiceBasedFrontend::reapply_group_by(
+                &payloads,
+                &mut merged,
+                &orig_selects,
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records.len(), 1);
+            assert_eq!(merged[0].records[0].id, "b");
+        }
+
+        #[test]
+        fn test_post_merge_no_group_by_payload_unchanged() {
+            let payloads = vec![SearchPayload {
+                filter: Filter::default(),
+                rank: Default::default(),
+                group_by: GroupBy::default(),
+                limit: Limit {
+                    offset: 0,
+                    limit: Some(2),
+                },
+                select: Select {
+                    keys: [Key::Score].into_iter().collect(),
+                },
+            }];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record("c", Some(0.3), vec![]),
+                    make_record("a", Some(0.1), vec![]),
+                    make_record("b", Some(0.2), vec![]),
+                ],
+            }];
+            let orig_selects = vec![Select {
+                keys: [Key::Score].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(2),
+            }];
+
+            ServiceBasedFrontend::reapply_group_by(
+                &payloads,
+                &mut merged,
+                &orig_selects,
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records.len(), 2);
+            assert_eq!(merged[0].records[0].id, "a");
+            assert_eq!(merged[0].records[1].id, "b");
+        }
+
+        #[test]
+        fn test_post_merge_max_k_keeps_highest() {
+            let payloads = vec![make_payload_with_group_by(
+                "cat",
+                Aggregate::MaxK {
+                    keys: vec![Key::Score],
+                    k: 1,
+                },
+                Some(10),
+                vec![Key::Score],
+            )];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record(
+                        "lo",
+                        Some(0.1),
+                        vec![("cat", MetadataValue::Str("g".into()))],
+                    ),
+                    make_record(
+                        "hi",
+                        Some(0.9),
+                        vec![("cat", MetadataValue::Str("g".into()))],
+                    ),
+                ],
+            }];
+            let orig_selects = vec![Select {
+                keys: [Key::Score].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::reapply_group_by(
+                &payloads,
+                &mut merged,
+                &orig_selects,
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records.len(), 1);
+            assert_eq!(merged[0].records[0].id, "hi");
+        }
     }
 }
