@@ -615,7 +615,7 @@ mod tests {
     #[derive(Debug)]
     struct MockIoDispatchUser {
         pub dispatcher: ComponentHandle<Dispatcher>,
-        counter: Arc<AtomicUsize>, // We expect to recieve DISPATCH_COUNT messages
+        counter: Arc<AtomicUsize>, // We expect to receive DISPATCH_COUNT messages
         sent_tasks: Arc<Mutex<HashSet<Uuid>>>,
         received_tasks: Arc<Mutex<HashSet<Uuid>>>,
     }
@@ -683,7 +683,7 @@ mod tests {
     #[derive(Debug)]
     struct MockDispatchUser {
         pub dispatcher: ComponentHandle<Dispatcher>,
-        counter: Arc<AtomicUsize>, // We expect to recieve DISPATCH_COUNT messages
+        counter: Arc<AtomicUsize>, // We expect to receive DISPATCH_COUNT messages
         sent_tasks: Arc<Mutex<HashSet<Uuid>>>,
         received_tasks: Arc<Mutex<HashSet<Uuid>>>,
     }

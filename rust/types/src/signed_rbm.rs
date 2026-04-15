@@ -13,7 +13,7 @@ use roaring::RoaringBitmap;
 ///
 /// `{$and: [{<k0>: {$gt: <v0>}}, {<k1>: {$ne: <v1>}}]}`
 ///
-/// The naive way is to evaluate the `$gt` and `$ne` seperately and take the conjunction, but this requires
+/// The naive way is to evaluate the `$gt` and `$ne` separately and take the conjunction, but this requires
 /// us to know the full set of existing ids because it is needed to evaluate `$ne`.
 /// However, we can first evaluate `$gt` and then exclude the offset ids for records with metadata `k1=v1`.
 /// This behavior is captured in the `BitAnd::bitand` operator of `SignedRoaringBitmap`:
