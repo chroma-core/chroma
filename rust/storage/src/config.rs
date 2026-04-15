@@ -104,6 +104,10 @@ pub struct S3StorageConfig {
     pub upload_part_size_bytes: usize,
     #[serde(default = "S3StorageConfig::default_download_part_size_bytes")]
     pub download_part_size_bytes: usize,
+    #[serde(default = "S3StorageConfig::default_retry_token_bucket_capacity")]
+    pub retry_token_bucket_capacity: usize,
+    #[serde(default = "S3StorageConfig::default_retry_token_refill_rate")]
+    pub retry_token_refill_rate: f32,
 }
 
 impl S3StorageConfig {
@@ -147,6 +151,14 @@ impl S3StorageConfig {
     fn default_download_part_size_bytes() -> usize {
         8 * 1024 * 1024
     }
+
+    fn default_retry_token_bucket_capacity() -> usize {
+        5000
+    }
+
+    fn default_retry_token_refill_rate() -> f32 {
+        1000.0
+    }
 }
 
 impl Default for S3StorageConfig {
@@ -163,6 +175,8 @@ impl Default for S3StorageConfig {
             stall_upload_enabled: S3StorageConfig::default_stall_upload_enabled(),
             upload_part_size_bytes: S3StorageConfig::default_upload_part_size_bytes(),
             download_part_size_bytes: S3StorageConfig::default_download_part_size_bytes(),
+            retry_token_bucket_capacity: S3StorageConfig::default_retry_token_bucket_capacity(),
+            retry_token_refill_rate: S3StorageConfig::default_retry_token_refill_rate(),
         }
     }
 }

@@ -17,6 +17,7 @@ use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
 use aws_config::timeout::TimeoutConfigBuilder;
 use aws_sdk_s3;
+use aws_sdk_s3::config::retry::{RetryPartition, TokenBucket};
 use aws_sdk_s3::config::StalledStreamProtectionConfig;
 use aws_sdk_s3::error::ProvideErrorMetadata;
 use aws_sdk_s3::error::SdkError;
@@ -1194,6 +1195,15 @@ impl Configurable<StorageConfig> for S3Storage {
                 let retry_config =
                     RetryConfig::standard().with_max_attempts(s3_config.request_retry_count);
 
+                let retry_partition = RetryPartition::custom("chroma-s3")
+                    .token_bucket(
+                        TokenBucket::builder()
+                            .capacity(s3_config.retry_token_bucket_capacity)
+                            .refill_rate(s3_config.retry_token_refill_rate)
+                            .build(),
+                    )
+                    .build();
+
                 let client = match &s3_config.credentials {
                     super::config::S3CredentialsConfig::Minio
                     | super::config::S3CredentialsConfig::Localhost => {
@@ -1228,14 +1238,14 @@ impl Configurable<StorageConfig> for S3Storage {
                         aws_sdk_s3::Client::from_conf(config)
                     }
                     super::config::S3CredentialsConfig::AWS => {
-                        let config = aws_config::load_from_env().await;
-                        let config = config
-                            .to_builder()
+                        let sdk_config = aws_config::load_from_env().await;
+                        let config = aws_sdk_s3::config::Builder::from(&sdk_config)
                             .timeout_config(timeout_config)
                             .stalled_stream_protection(stalled_config)
                             .retry_config(retry_config)
+                            .retry_partition(retry_partition)
                             .build();
-                        aws_sdk_s3::Client::new(&config)
+                        aws_sdk_s3::Client::from_conf(config)
                     }
                     super::config::S3CredentialsConfig::Explicit {
                         access_key_id,
@@ -1258,7 +1268,8 @@ impl Configurable<StorageConfig> for S3Storage {
                             .region(aws_sdk_s3::config::Region::new(region.clone()))
                             .timeout_config(timeout_config)
                             .stalled_stream_protection(stalled_config)
-                            .retry_config(retry_config);
+                            .retry_config(retry_config)
+                            .retry_partition(retry_partition);
 
                         if let Some(url) = custom_endpoint {
                             config_builder =
