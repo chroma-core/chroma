@@ -51,6 +51,7 @@ use parking_lot::Mutex;
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use tokio::signal::unix::{signal, SignalKind};
+use tokio::sync::OnceCell;
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{Instrument, Level};
 use uuid::Uuid;
@@ -61,8 +62,8 @@ use wal3::{
     Fragment, FragmentManagerFactory, FragmentUploadFaultInjector, GarbageCollectionOptions,
     Limits, LogPosition, LogReader, LogReaderOptions, LogReaderTrait, LogWriter, LogWriterOptions,
     LogWriterTrait, Manifest, ManifestAndWitness, MarkDirty as MarkDirtyTrait,
-    ReplicatedFragmentOptions, Snapshot, SnapshotCache, SnapshotPointer, StorageWrapper,
-    INTRINSIC_CURSOR,
+    ReplicatedFragmentManagerFactory, ReplicatedFragmentOptions, ReplicatedManifestManagerFactory,
+    Snapshot, SnapshotCache, SnapshotPointer, StorageWrapper, INTRINSIC_CURSOR,
 };
 #[cfg(feature = "faults")]
 use wal3::{
@@ -97,6 +98,10 @@ fn status_with_backoff_reason(
     Status::with_metadata(code, message, metadata)
 }
 
+fn status_from_chroma_error(err: impl ChromaError + std::fmt::Display) -> Status {
+    Status::new(err.code().into(), err.to_string())
+}
+
 /// Converts a SpannerSessionPoolConfig to the library's SessionConfig.
 fn to_session_config(cfg: &SpannerSessionPoolConfig) -> SessionConfig {
     let mut config = SessionConfig::default();
@@ -115,6 +120,101 @@ fn to_channel_config(cfg: &SpannerChannelConfig) -> ChannelConfig {
         http2_keep_alive_interval: Some(Duration::from_secs(cfg.http2_keep_alive_interval_secs)),
         keep_alive_timeout: Some(Duration::from_secs(cfg.keep_alive_timeout_secs)),
         keep_alive_while_idle: Some(cfg.keep_alive_while_idle),
+    }
+}
+
+fn spanner_client_error_code(
+    err: &google_cloud_spanner::client::Error,
+) -> chroma_error::ErrorCodes {
+    match err {
+        google_cloud_spanner::client::Error::Connection(_) => chroma_error::ErrorCodes::Unavailable,
+        google_cloud_spanner::client::Error::GRPC(status)
+            if status.code() == tonic::Code::Unavailable =>
+        {
+            chroma_error::ErrorCodes::Unavailable
+        }
+        google_cloud_spanner::client::Error::InvalidSession(
+            google_cloud_spanner::session::SessionError::SessionGetTimeout
+            | google_cloud_spanner::session::SessionError::FailedToCreateSession,
+        ) => chroma_error::ErrorCodes::Unavailable,
+        google_cloud_spanner::client::Error::InvalidSession(
+            google_cloud_spanner::session::SessionError::GRPC(status),
+        ) if status.code() == tonic::Code::Unavailable => chroma_error::ErrorCodes::Unavailable,
+        _ => chroma_error::ErrorCodes::Internal,
+    }
+}
+
+async fn connect_spanner(spanner: &SpannerConfig) -> Result<SpannerClient, Error> {
+    let database_path = spanner.database_path().clone();
+    let session_config = to_session_config(spanner.session_pool());
+    let channel_config = to_channel_config(spanner.channel());
+    let config = match spanner {
+        SpannerConfig::Emulator(e) => SpannerClientConfig {
+            environment: Environment::Emulator(e.grpc_endpoint()),
+            session_config,
+            channel_config,
+            ..Default::default()
+        },
+        SpannerConfig::Gcp(_) => {
+            let mut config = SpannerClientConfig::default()
+                .with_auth()
+                .await
+                .map_err(|e| {
+                    tracing::event!(Level::ERROR, name = "auth error", error =? e);
+                    Error::from(e)
+                })?;
+            config.session_config = session_config;
+            config.channel_config = channel_config;
+            config
+        }
+    };
+    SpannerClient::new(database_path, config)
+        .await
+        .map_err(Error::from)
+}
+
+#[derive(Clone)]
+pub struct LazySpannerClient {
+    spanner_config: Option<SpannerConfig>,
+    client: Arc<OnceCell<Arc<SpannerClient>>>,
+}
+
+impl LazySpannerClient {
+    pub fn from_config(spanner_config: SpannerConfig) -> Self {
+        Self {
+            spanner_config: Some(spanner_config),
+            client: Arc::new(OnceCell::new()),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn from_client_for_test(client: SpannerClient) -> Self {
+        Self {
+            spanner_config: None,
+            client: Arc::new(OnceCell::new_with(Some(Arc::new(client)))),
+        }
+    }
+
+    pub async fn get(&self) -> Result<Arc<SpannerClient>, Error> {
+        let spanner_config = self.spanner_config.clone();
+        let client = self
+            .client
+            .get_or_try_init(|| async move {
+                let spanner_config = spanner_config.ok_or_else(|| {
+                    Error::ConfigValidation("lazy spanner client missing configuration".to_string())
+                })?;
+                Ok::<Arc<SpannerClient>, Error>(Arc::new(connect_spanner(&spanner_config).await?))
+            })
+            .await?;
+        Ok(Arc::clone(client))
+    }
+}
+
+impl std::fmt::Debug for LazySpannerClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LazySpannerClient")
+            .field("initialized", &self.client.initialized())
+            .finish()
     }
 }
 
@@ -267,10 +367,64 @@ impl ChromaError for Error {
             Error::InvalidTopology(_) => chroma_error::ErrorCodes::InvalidArgument,
             Error::MissingTopology(_) => chroma_error::ErrorCodes::Internal,
             Error::PreferredRegionNotInTopology(_) => chroma_error::ErrorCodes::InvalidArgument,
-            Error::SpannerError(_) => chroma_error::ErrorCodes::Internal,
+            Error::SpannerError(err) => spanner_client_error_code(err),
             Error::SpannerAuthError(_) => chroma_error::ErrorCodes::Internal,
         }
     }
+}
+
+fn build_storage_wrappers_for_topology(
+    preferred_region: &RegionName,
+    regions: Vec<ProviderRegion<RegionalStorage>>,
+    prefix: &str,
+) -> Result<(Arc<Vec<StorageWrapper>>, Vec<String>, usize), Error> {
+    let mut storage_wrappers = vec![];
+    let mut region_names = vec![];
+    for region in regions.into_iter() {
+        region_names.push(region.name().to_string());
+        storage_wrappers.push(StorageWrapper::new(
+            region.name().to_string(),
+            region.config.storage.clone(),
+            prefix.to_string(),
+        ));
+    }
+    let preferred_index = storage_wrappers
+        .iter()
+        .position(|r| r.region.as_str() == preferred_region.as_str())
+        .ok_or_else(|| Error::PreferredRegionNotInTopology(preferred_region.to_string()))?;
+    Ok((Arc::new(storage_wrappers), region_names, preferred_index))
+}
+
+async fn create_repl_factories_for_topology(
+    storages: &MultiCloudMultiRegionConfiguration<RegionalStorage, TopologicalStorage>,
+    topology_name: &TopologyName,
+    prefix: &str,
+    collection_id: CollectionUuid,
+    write_options: LogWriterOptions,
+    repl_options: ReplicatedFragmentOptions,
+) -> Result<
+    (
+        ReplicatedFragmentManagerFactory,
+        ReplicatedManifestManagerFactory,
+    ),
+    Error,
+> {
+    let Some((regions, topology)) = storages.lookup_topology(topology_name) else {
+        return Err(Error::MissingTopology(topology_name.to_string()));
+    };
+    let (storage_wrappers, region_names, preferred_index) =
+        build_storage_wrappers_for_topology(&storages.preferred, regions, prefix)?;
+    let spanner = topology.config.spanner.clone();
+    let spanner = spanner.get().await?;
+    Ok(create_repl_factories(
+        write_options,
+        repl_options,
+        preferred_index,
+        storage_wrappers,
+        spanner,
+        region_names,
+        collection_id.0,
+    ))
 }
 
 //////////////////////////////////////// FactoryCreationContext /////////////////////////////////////
@@ -328,22 +482,18 @@ impl<'a> FactoryCreationContext<'a> {
         write_options: &LogWriterOptions,
         read_options: &LogReaderOptions,
     ) -> Result<Arc<dyn LogReaderTrait>, Error> {
-        let Some((regions, topology)) = self.storages.lookup_topology(topology_name) else {
+        let Some((_regions, topology)) = self.storages.lookup_topology(topology_name) else {
             return Err(Error::MissingTopology(topology_name.to_string()));
         };
-        let (storage_wrappers, region_names, preferred_index) =
-            self.build_storage_wrappers(regions)?;
-        let storage_wrappers = Arc::new(storage_wrappers);
-        let spanner = Arc::new(topology.config.spanner.clone());
-        let (fragment_factory, manifest_factory) = create_repl_factories(
+        let (fragment_factory, manifest_factory) = create_repl_factories_for_topology(
+            self.storages,
+            topology_name,
+            &self.prefix,
+            self.collection_id,
             write_options.clone(),
             topology.config.repl.clone(),
-            preferred_index,
-            storage_wrappers,
-            spanner,
-            region_names,
-            self.collection_id.0,
-        );
+        )
+        .await?;
         let fragment_consumer = fragment_factory.make_consumer().await?;
         let manifest_consumer = manifest_factory.make_consumer().await?;
         Ok(Arc::new(LogReader::new(
@@ -382,31 +532,6 @@ impl<'a> FactoryCreationContext<'a> {
         )))
     }
 
-    /// Builds storage wrappers and region names from topology regions.
-    /// Returns (storage_wrappers, region_names, preferred_index).
-    fn build_storage_wrappers(
-        &self,
-        regions: Vec<ProviderRegion<RegionalStorage>>,
-    ) -> Result<(Vec<StorageWrapper>, Vec<String>, usize), Error> {
-        let mut storage_wrappers = vec![];
-        let mut region_names = vec![];
-        for region in regions.into_iter() {
-            region_names.push(region.name().to_string());
-            storage_wrappers.push(StorageWrapper::new(
-                region.name().to_string(),
-                region.config.storage.clone(),
-                self.prefix.clone(),
-            ));
-        }
-        let preferred_index = storage_wrappers
-            .iter()
-            .position(|r| r.region.as_str() == self.storages.preferred.as_str())
-            .ok_or_else(|| {
-                Error::PreferredRegionNotInTopology(self.storages.preferred.to_string())
-            })?;
-        Ok((storage_wrappers, region_names, preferred_index))
-    }
-
     /// Performs a fork/copy operation from a source reader to the target collection.
     ///
     /// This method handles both replicated (Spanner-backed) and S3-only backends.
@@ -438,22 +563,15 @@ impl<'a> FactoryCreationContext<'a> {
         repl_options: &ReplicatedFragmentOptions,
         cmek: Option<Cmek>,
     ) -> Result<(), Error> {
-        let Some((regions, topology)) = self.storages.lookup_topology(topology_name) else {
-            return Err(Error::MissingTopology(topology_name.to_string()));
-        };
-        let (storage_wrappers, region_names, preferred_index) =
-            self.build_storage_wrappers(regions)?;
-        let storage_wrappers = Arc::new(storage_wrappers);
-        let spanner = Arc::new(topology.config.spanner.clone());
-        let (fragment_factory, manifest_factory) = create_repl_factories(
+        let (fragment_factory, manifest_factory) = create_repl_factories_for_topology(
+            self.storages,
+            topology_name,
+            &self.prefix,
+            self.collection_id,
             write_options.clone(),
             repl_options.clone(),
-            preferred_index,
-            storage_wrappers,
-            spanner,
-            region_names,
-            self.collection_id.0,
-        );
+        )
+        .await?;
         let fragment_factory = fragment_factory
             .with_fault_injector(self.fragment_upload_fault_injector.as_ref().map(Arc::clone));
         let fragment_factory = maybe_wrap_fragment_manager_factory(
@@ -685,38 +803,16 @@ async fn get_log_from_handle_with_mutex_held<'a>(
     if let Some(topology) = database.topology() {
         let topology_name =
             TopologyName::new(topology.clone()).map_err(|_| Error::InvalidTopology(topology))?;
-        let Some((regions, topology)) = storages.lookup_topology(&topology_name) else {
-            return Err(Error::MissingTopology(topology_name.to_string()));
-        };
-        let mut storage_wrappers = vec![];
-        let mut region_names = vec![];
-        for region in regions.into_iter() {
-            region_names.push(region.name().to_string());
-            storage_wrappers.push(StorageWrapper::new(
-                region.name().to_string(),
-                region.config.storage.clone(),
-                prefix.to_string(),
-            ));
-        }
-        let Some(preferred_index) = storage_wrappers
-            .iter()
-            .position(|r| r.region.as_str() == storages.preferred.as_str())
-        else {
-            return Err(Error::PreferredRegionNotInTopology(
-                storages.preferred.to_string(),
-            ));
-        };
-        let storage_wrappers = Arc::new(storage_wrappers);
-        let spanner = Arc::new(topology.config.spanner.clone());
-        let (fragment_publisher_factory, manifest_publisher_factory) = create_repl_factories(
-            write_options.clone(),
-            repl_options.clone(),
-            preferred_index,
-            storage_wrappers,
-            spanner,
-            region_names,
-            collection_id.0,
-        );
+        let (fragment_publisher_factory, manifest_publisher_factory) =
+            create_repl_factories_for_topology(
+                storages,
+                &topology_name,
+                prefix,
+                collection_id,
+                write_options.clone(),
+                repl_options.clone(),
+            )
+            .await?;
         let fragment_publisher_factory = fragment_publisher_factory
             .with_fault_injector(fragment_upload_fault_injector.as_ref().map(Arc::clone));
         let fragment_publisher_factory = maybe_wrap_fragment_manager_factory(
@@ -1415,14 +1511,14 @@ impl LogServer {
             None, // Offset updates don't use CMEK
         )
         .await
-        .map_err(|err| Status::unknown(err.to_string()))?;
+        .map_err(status_from_chroma_error)?;
 
         let log_reader = match log.reader(self.config.reader.clone()).await {
             Some(reader) => reader,
             None => self
                 .make_log_reader(topology_name.as_ref(), collection_id)
                 .await
-                .map_err(|err| Status::unknown(err.to_string()))?,
+                .map_err(status_from_chroma_error)?,
         };
 
         let res = log_reader.next_write_timestamp().await;
@@ -1431,7 +1527,7 @@ impl LogServer {
                 "collection {collection_id} not found"
             )));
         }
-        res.map_err(|err| Status::unknown(err.to_string()))?;
+        res.map_err(status_from_chroma_error)?;
         let epoch_us = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .map_err(|_| wal3::Error::internal(file!(), line!()))
@@ -1770,8 +1866,10 @@ impl LogServer {
         Error,
     > {
         let get_dirty_logs_span = tracing::info_span!("get_dirty_logs");
+        let spanner = topology.config.spanner.clone();
+        let spanner = spanner.get().await?;
         let dirty_logs = ReplManifestManager::get_dirty_logs(
-            &topology.config.spanner,
+            &spanner,
             self.storages.preferred.as_str(),
             self.config.record_count_threshold,
             self.config.timeout_us,
@@ -2205,7 +2303,7 @@ impl LogServer {
             }
             Err(err) => {
                 tracing::error!(err = %err, "get_log_from_handle failure");
-                return Err(Status::unknown(err.to_string()));
+                return Err(status_from_chroma_error(err));
             }
         };
         let mut messages = Vec::with_capacity(push_logs.records.len());
@@ -2266,7 +2364,7 @@ impl LogServer {
         let log_reader = self
             .make_log_reader(topology_name.as_ref(), collection_id)
             .await
-            .map_err(|err| Status::unknown(err.to_string()))?;
+            .map_err(status_from_chroma_error)?;
         let (start_position, limit_position) = if topology_name.is_some() {
             match log_reader
                 .manifest_bounds_and_witness()
@@ -2331,7 +2429,7 @@ impl LogServer {
             .make_log_reader(topology_name.as_ref(), collection_id)
             .instrument(tracing::info_span!("make_log_reader", %collection_id))
             .await
-            .map_err(|err| Status::unknown(err.to_string()))?;
+            .map_err(status_from_chroma_error)?;
         let manifest_and_witness = match self
             .manifest_with_head_check(&*log_reader, collection_id)
             .instrument(tracing::info_span!("manifest_with_head_check", %collection_id))
@@ -2629,7 +2727,7 @@ impl LogServer {
         let log_reader = self
             .make_log_reader(topology_name.as_ref(), source_collection_id)
             .await
-            .map_err(|err| Status::unknown(err.to_string()))?;
+            .map_err(status_from_chroma_error)?;
         let cursor = log_reader.load_intrinsic_cursor().await.map_err(|err| {
             Status::new(
                 err.code().into(),
@@ -2664,7 +2762,7 @@ impl LogServer {
         let log_reader = self
             .make_log_reader(topology_name.as_ref(), target_collection_id)
             .await
-            .map_err(|err| Status::unknown(err.to_string()))?;
+            .map_err(status_from_chroma_error)?;
         let new_manifest = log_reader
             .manifest()
             .await
@@ -2811,9 +2909,15 @@ impl LogServer {
                 )));
             };
             let uuids: Vec<_> = collection_ids.iter().map(|id| id.0).collect();
-            ReplManifestManager::purge_dirty_for_collections(&topology.config.spanner, &uuids)
+            let spanner = topology.config.spanner.clone();
+            let spanner = spanner.get().await.map_err(|err| {
+                Status::new(err.code().into(), format!("Failed to purge dirty: {err}"))
+            })?;
+            ReplManifestManager::purge_dirty_for_collections(&spanner, &uuids)
                 .await
-                .map_err(|err| Status::internal(format!("Failed to purge dirty: {err}")))?;
+                .map_err(|err| {
+                    Status::new(err.code().into(), format!("Failed to purge dirty: {err}"))
+                })?;
             Ok(Response::new(PurgeDirtyForCollectionResponse {}))
         } else {
             let dirty_marker_json_blobs = collection_ids
@@ -2938,7 +3042,7 @@ impl LogServer {
         let log_reader = self
             .make_log_reader(topology_name.as_ref(), collection_id)
             .await
-            .map_err(|err| Status::unknown(err.to_string()))?;
+            .map_err(status_from_chroma_error)?;
         let mani = log_reader.manifest().await;
         if let Err(wal3::Error::UninitializedLog) = mani {
             return Ok(Response::new(InspectLogStateResponse {
@@ -2948,7 +3052,7 @@ impl LogServer {
                 json: "{}".to_string(),
             }));
         }
-        let mani = mani.map_err(|err| Status::unknown(err.to_string()))?;
+        let mani = mani.map_err(status_from_chroma_error)?;
 
         let cursor_name = &INTRINSIC_CURSOR;
         let cursor_store = CursorStore::new(
@@ -3002,7 +3106,7 @@ impl LogServer {
             if let Error::Wal3(wal3::Error::GarbageCollectionPrecondition(what)) = err {
                 Status::failed_precondition(format!("retry from the top because of a race: {what}"))
             } else {
-                Status::unknown(err.to_string())
+                status_from_chroma_error(err)
             }
         }
         match gc2.log_to_collect {
@@ -3052,7 +3156,7 @@ impl LogServer {
                     dirty_log
                     .garbage_collect_phase2_update_manifest(&GarbageCollectionOptions::default())
                     .await
-                    .map_err(|err| Status::unknown(err.to_string()))?;
+                    .map_err(status_from_chroma_error)?;
                 } else {
                     tracing::error!("Could not garbage collect dirty log.");
                     return Err(Status::failed_precondition(
@@ -3423,14 +3527,14 @@ pub struct TopologicalStorageConfig {
 
 #[derive(Clone)]
 pub struct TopologicalStorage {
-    pub spanner: SpannerClient,
+    pub spanner: LazySpannerClient,
     pub repl: ReplicatedFragmentOptions,
 }
 
 impl std::fmt::Debug for TopologicalStorage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TopologicalStorage")
-            .field("spanner", &"SpannerClient { ... }")
+            .field("spanner", &self.spanner)
             .finish()
     }
 }
@@ -3666,34 +3770,9 @@ impl Configurable<LogServerConfig> for LogServer {
                     })
                 },
                 |t| async move {
-                    let database_path = t.spanner.database_path().clone();
-                    let session_config = to_session_config(t.spanner.session_pool());
-                    let channel_config = to_channel_config(t.spanner.channel());
-                    let config = match &t.spanner {
-                        SpannerConfig::Emulator(e) => SpannerClientConfig {
-                            environment: Environment::Emulator(e.grpc_endpoint()),
-                            session_config,
-                            channel_config,
-                            ..Default::default()
-                        },
-                        SpannerConfig::Gcp(_) => {
-                            let mut config = SpannerClientConfig::default()
-                                .with_auth()
-                                .await
-                                .map_err(|e| -> Box<dyn ChromaError> {
-                                    tracing::event!(Level::ERROR, name = "auth error", error =? e);
-                                    Box::new(std::convert::Into::<Error>::into(e)) as _
-                                })?;
-                            config.session_config = session_config;
-                            config.channel_config = channel_config;
-                            config
-                        }
-                    };
                     let repl = t.repl.clone();
                     Ok::<TopologicalStorage, Box<dyn ChromaError>>(TopologicalStorage {
-                        spanner: SpannerClient::new(database_path, config).await.map_err(
-                            |e| -> Box<dyn ChromaError> { Box::new(Error::from(e)) as _ },
-                        )?,
+                        spanner: LazySpannerClient::from_config(t.spanner.clone()),
                         repl,
                     })
                 },
@@ -3812,7 +3891,10 @@ mod tests {
 
     use chroma_config::spanner::SpannerEmulatorConfig;
     use chroma_faults::FaultRegistry;
-    use chroma_storage::s3_client_for_test_with_new_bucket;
+    use chroma_storage::{
+        s3_client_for_test_with_new_bucket, s3_config_for_localhost_with_bucket_name,
+    };
+    #[cfg(feature = "faults")]
     use chroma_types::chroma_proto::fault_injection_service_server::FaultInjectionServiceServer;
     use chroma_types::Topology;
     use chroma_types::{are_update_metadatas_close_to_equal, Operation, OperationRecord};
@@ -3823,6 +3905,7 @@ mod tests {
     use opentelemetry::global::meter;
     use proptest::prelude::*;
     use tokio::{runtime::Runtime, sync::mpsc::unbounded_channel, time::sleep};
+    #[cfg(feature = "faults")]
     use tonic::transport::Server;
     use tonic::{Code, IntoRequest};
     use wal3::{
@@ -4955,6 +5038,27 @@ mod tests {
     }
 
     #[test]
+    fn test_spanner_init_failures_map_to_unavailable() {
+        let err = Error::SpannerError(google_cloud_spanner::client::Error::Connection(
+            google_cloud_gax::conn::Error::InvalidEmulatorHOST("bad-endpoint".to_string()),
+        ));
+        assert_eq!(err.code(), chroma_error::ErrorCodes::Unavailable);
+        assert_eq!(status_from_chroma_error(err).code(), Code::Unavailable);
+
+        let err = Error::SpannerError(google_cloud_spanner::client::Error::InvalidSession(
+            google_cloud_spanner::session::SessionError::FailedToCreateSession,
+        ));
+        assert_eq!(err.code(), chroma_error::ErrorCodes::Unavailable);
+        assert_eq!(status_from_chroma_error(err).code(), Code::Unavailable);
+
+        let err = Error::SpannerError(google_cloud_spanner::client::Error::GRPC(
+            Status::unavailable("spanner down"),
+        ));
+        assert_eq!(err.code(), chroma_error::ErrorCodes::Unavailable);
+        assert_eq!(status_from_chroma_error(err).code(), Code::Unavailable);
+    }
+
+    #[test]
     fn cached_parquet_fragment_default() {
         use chroma_cache::Weighted;
 
@@ -5052,7 +5156,7 @@ mod tests {
                 topology_name,
                 vec![region1.clone(), region2.clone()],
                 TopologicalStorage {
-                    spanner,
+                    spanner: LazySpannerClient::from_client_for_test(spanner),
                     repl: repl_options.clone(),
                 },
             );
@@ -5486,11 +5590,15 @@ mod tests {
             .position(|r| r.region.as_str() == log_server.storages.preferred.as_str())
             .expect("preferred region should be in topology");
         let storage_wrappers = Arc::new(storage_wrappers);
-        let spanner = Arc::new(topology_config.config.spanner.clone());
+        let spanner = topology_config.config.spanner.clone();
         let config = log_server.config.clone();
         let repl_options = topology_config.config.repl.clone();
         let fragment_upload_fault_injector = log_server.fragment_upload_fault_injector();
         Box::pin(async move {
+            let spanner = spanner
+                .get()
+                .await
+                .expect("Spanner should be available for test garbage collector");
             let (fragment_publisher_factory, manifest_publisher_factory) = create_repl_factories(
                 config.writer.clone(),
                 repl_options,
@@ -5552,6 +5660,64 @@ mod tests {
             .expect("Garbage collector should be initializable");
             Box::new(gc) as Box<dyn GarbageCollectorTrait>
         })
+    }
+
+    fn unreachable_spanner_config(database: &str) -> SpannerConfig {
+        SpannerConfig::Emulator(SpannerEmulatorConfig {
+            host: "127.0.0.1".to_string(),
+            grpc_port: 1,
+            rest_port: 1,
+            project: "local-project".to_string(),
+            instance: "test-instance".to_string(),
+            database: database.to_string(),
+            session_pool: SpannerSessionPoolConfig {
+                session_get_timeout_secs: 1,
+                max_opened: 1,
+                min_opened: 1,
+            },
+            channel: SpannerChannelConfig {
+                num_channels: 1,
+                connect_timeout_secs: 1,
+                timeout_secs: 1,
+                http2_keep_alive_interval_secs: 1,
+                keep_alive_timeout_secs: 1,
+                keep_alive_while_idle: false,
+                admin_rpc_timeout_secs: 1,
+            },
+        })
+    }
+
+    async fn s3_storage_with_unreachable_topology_config(
+        topology_name: &str,
+        spanner_database: &str,
+    ) -> LogServerConfig {
+        let bucket = format!("log-service-lazy-{}", rand::thread_rng().gen::<u64>());
+        let _storage = chroma_storage::s3::s3_client_for_test_with_bucket_name(&bucket).await;
+        let region = RegionName::new("local").expect("'local' is a valid region name");
+        let topology_name =
+            TopologyName::new(topology_name).expect("topology name should be valid");
+        LogServerConfig {
+            regions_and_topologies: Some(MultiCloudMultiRegionConfiguration {
+                preferred: region.clone(),
+                regions: vec![ProviderRegion::new(
+                    region.clone(),
+                    "local",
+                    "test",
+                    RegionalStorageConfig {
+                        storage: s3_config_for_localhost_with_bucket_name(bucket).await,
+                    },
+                )],
+                topologies: vec![Topology::new(
+                    topology_name,
+                    vec![region],
+                    TopologicalStorageConfig {
+                        spanner: unreachable_spanner_config(spanner_database),
+                        repl: ReplicatedFragmentOptions::default(),
+                    },
+                )],
+            }),
+            ..Default::default()
+        }
     }
 
     async fn garbage_collect_unused_logs(
@@ -6006,6 +6172,48 @@ mod tests {
             .expect("Thread should be spawnable")
             .join()
             .expect("Spawned thread should not fail to join");
+    }
+
+    #[tokio::test]
+    async fn test_log_server_starts_when_repl_spanner_is_unreachable() {
+        let config =
+            s3_storage_with_unreachable_topology_config("unreachable", "lazy-startup-test").await;
+        let registry = chroma_config::registry::Registry::new();
+
+        let server = LogServer::try_from_config(&config, &registry).await;
+
+        assert!(
+            server.is_ok(),
+            "log server should start without contacting spanner at boot"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_repl_scout_logs_returns_unavailable_and_retries_when_spanner_is_unreachable() {
+        let config =
+            s3_storage_with_unreachable_topology_config("unreachable", "lazy-retry-test").await;
+        let registry = chroma_config::registry::Registry::new();
+        let server = LogServer::try_from_config(&config, &registry)
+            .await
+            .expect("log server should start with unreachable spanner");
+        let request = || {
+            Request::new(ScoutLogsRequest {
+                collection_id: CollectionUuid::new().to_string(),
+                database_name: "unreachable+dbname".to_string(),
+            })
+        };
+
+        let err = server
+            .scout_logs(request())
+            .await
+            .expect_err("replicated scout_logs should fail when spanner is down");
+        assert_eq!(err.code(), Code::Unavailable);
+
+        let err = server
+            .scout_logs(request())
+            .await
+            .expect_err("lazy spanner init failure should remain retryable");
+        assert_eq!(err.code(), Code::Unavailable);
     }
 
     proptest! {
@@ -6582,6 +6790,7 @@ mod tests {
             .expect("BACKOFF_REASON_MD_KEY must be a valid ASCII metadata key");
     }
 
+    #[cfg(feature = "faults")]
     #[test]
     fn fault_injection_service_can_be_added_to_server_builder() {
         let _server = Server::builder().add_service(FaultInjectionServiceServer::from_arc(
