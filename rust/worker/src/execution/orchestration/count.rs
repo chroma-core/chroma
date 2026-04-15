@@ -84,6 +84,9 @@ pub struct CountOrchestrator {
     // Read level
     read_level: ReadLevel,
 
+    // Maximum number of WAL entries to read for IndexAndBoundedWal.
+    bounded_wal_limit: u32,
+
     // Bloom filter manager
     bloom_filter_manager: Option<BloomFilterManager>,
 
@@ -107,6 +110,7 @@ impl CountOrchestrator {
         collection_and_segments: CollectionAndSegments,
         fetch_log: FetchLogOperator,
         read_level: ReadLevel,
+        bounded_wal_limit: u32,
         bloom_filter_manager: Option<BloomFilterManager>,
         shard_index: u32,
         num_shards: u32,
@@ -119,6 +123,7 @@ impl CountOrchestrator {
             queue,
             fetch_log,
             read_level,
+            bounded_wal_limit,
             bloom_filter_manager,
             shard_index,
             num_shards,
@@ -168,6 +173,26 @@ impl Orchestrator for CountOrchestrator {
             ReadLevel::IndexAndWal => {
                 let fetch_log_task = wrap(
                     Box::new(self.fetch_log.clone()),
+                    (),
+                    ctx.receiver(),
+                    self.context.task_cancellation_token.clone(),
+                );
+                tasks.push((fetch_log_task, Some(Span::current())));
+            }
+            ReadLevel::IndexAndBoundedWal => {
+                // Bounded WAL read: fetch up to `bounded_wal_limit` log
+                // entries from the compaction frontier. This provides a
+                // consistent prefix of the WAL with bounded query latency —
+                // the operator will read at most K entries regardless of how
+                // far behind compaction is.
+                tracing::info!(
+                    limit = self.bounded_wal_limit,
+                    "Fetching bounded logs for IndexAndBoundedWal"
+                );
+                let mut bounded_fetch_log = self.fetch_log.clone();
+                bounded_fetch_log.maximum_fetch_count = Some(self.bounded_wal_limit);
+                let fetch_log_task = wrap(
+                    Box::new(bounded_fetch_log),
                     (),
                     ctx.receiver(),
                     self.context.task_cancellation_token.clone(),
@@ -273,5 +298,127 @@ impl Handler<TaskResult<CountRecordsOutput, CountRecordsError>> for CountOrchest
             ctx,
         )
         .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chroma_config::{registry::Registry, Configurable};
+    use chroma_log::{
+        in_memory_log::{InMemoryLog, InternalLogRecord},
+        test::{upsert_generator, LogGenerator, TEST_EMBEDDING_DIMENSION},
+        Log,
+    };
+    use chroma_segment::test::TestDistributedSegment;
+    use chroma_system::{Dispatcher, Orchestrator, System};
+    use chroma_types::Chunk;
+
+    use crate::config::RootConfig;
+
+    /// Verifies the semantic behavior of all ReadLevel variants using a
+    /// fixture with 5 compacted + 10 uncompacted records.
+    #[tokio::test]
+    async fn test_read_level_semantics() {
+        // -- Setup: 5 compacted records in segments, 10 more only in the log.
+        const COMPACTED: usize = 5;
+        const UNCOMPACTED: usize = 10;
+        const TOTAL: usize = COMPACTED + UNCOMPACTED;
+
+        let config = RootConfig::default();
+        let system = System::default();
+        let registry = Registry::new();
+        let dispatcher = Dispatcher::try_from_config(&config.query_service.dispatcher, &registry)
+            .await
+            .expect("Should be able to initialize dispatcher");
+        let dispatcher_handle = system.start_component(dispatcher);
+
+        let mut test_segments =
+            TestDistributedSegment::new_with_dimension(TEST_EMBEDDING_DIMENSION).await;
+        let collection_id = test_segments.collection.collection_id;
+
+        let all_records = upsert_generator.generate_vec(0..TOTAL);
+        let compacted_chunk = Chunk::new(all_records[..COMPACTED].to_vec().into());
+        Box::pin(test_segments.compact_log(compacted_chunk, 0)).await;
+        test_segments.collection.log_position = (COMPACTED - 1) as i64;
+
+        let mut in_memory_log = InMemoryLog::new();
+        for record in &all_records {
+            in_memory_log.add_log(
+                collection_id,
+                InternalLogRecord {
+                    collection_id,
+                    log_offset: record.log_offset,
+                    log_ts: record.log_offset + 1,
+                    record: record.clone(),
+                },
+            );
+        }
+        let log = Log::InMemory(in_memory_log);
+
+        // -- Helper closure: run CountOrchestrator with given params.
+        let count = |read_level: ReadLevel, limit: u32| {
+            let system = system.clone();
+            let dh = dispatcher_handle.clone();
+            let ts = &test_segments;
+            let log = log.clone();
+            async move {
+                let orchestrator = CountOrchestrator::new(
+                    ts.blockfile_provider.clone(),
+                    dh,
+                    1000,
+                    ts.into(),
+                    FetchLogOperator {
+                        log_client: log,
+                        batch_size: 100,
+                        start_log_offset_id: COMPACTED as u64,
+                        maximum_fetch_count: None,
+                        collection_uuid: ts.collection.collection_id,
+                        tenant: ts.collection.tenant.clone(),
+                        database_name: chroma_types::DatabaseName::new(
+                            ts.collection.database.clone(),
+                        )
+                        .unwrap(),
+                        fetch_log_concurrency: 10,
+                        fragment_fetcher: None,
+                        log_upper_bound_offset: TOTAL as i64,
+                    },
+                    read_level,
+                    limit,
+                    ts.bloom_filter_manager.clone(),
+                    0,
+                    1,
+                );
+                let (c, _) = orchestrator
+                    .run(system)
+                    .await
+                    .expect("count should succeed");
+                c
+            }
+        };
+
+        // IndexAndWal: full consistency — sees compacted + WAL.
+        assert_eq!(count(ReadLevel::IndexAndWal, 250).await, TOTAL as u32);
+
+        // IndexOnly: skips WAL — sees only compacted.
+        assert_eq!(count(ReadLevel::IndexOnly, 250).await, COMPACTED as u32);
+
+        // Bounded WAL, limit < WAL size: reads partial WAL.
+        assert_eq!(
+            count(ReadLevel::IndexAndBoundedWal, 3).await,
+            (COMPACTED + 3) as u32,
+        );
+
+        // Bounded WAL, limit == WAL size: reads entire WAL.
+        assert_eq!(
+            count(ReadLevel::IndexAndBoundedWal, UNCOMPACTED as u32).await,
+            TOTAL as u32,
+        );
+
+        // Bounded WAL, limit > WAL size: reads all available, same as IndexAndWal.
+        assert_eq!(
+            count(ReadLevel::IndexAndBoundedWal, 100).await,
+            TOTAL as u32,
+        );
     }
 }
