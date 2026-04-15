@@ -80,6 +80,7 @@ export interface Collection {
      * Controls whether to read from the write-ahead log.
      * - ReadLevel.INDEX_AND_WAL: Read from both index and WAL (default)
      * - ReadLevel.INDEX_ONLY: Read only from index, faster but recent writes may not be visible
+     * - ReadLevel.INDEX_AND_BOUNDED_WAL: Read up to a server-configured number of WAL entries
      */
     readLevel?: ReadLevel;
   }): Promise<number>;
@@ -231,6 +232,7 @@ export interface Collection {
        * Controls whether to read from the write-ahead log.
        * - ReadLevel.INDEX_AND_WAL: Read from both index and WAL (default)
        * - ReadLevel.INDEX_ONLY: Read only from index, faster but recent writes may not be visible
+       * - ReadLevel.INDEX_AND_BOUNDED_WAL: Read up to a server-configured number of WAL entries
        */
       readLevel?: ReadLevel;
     },

@@ -23,8 +23,8 @@ const TYPE_SIMPLIFICATIONS: Record<string, string> = {
   "number[][]": "Embeddings",
   "number[]": "Embedding",
   "Record<string, boolean | number | string | SparseVector | null>": "Metadata",
-  "(ReadLevel)[keyof ReadLevel]": '"index_and_wal" | "index_only"',
-  "(typeof ReadLevel)[keyof typeof ReadLevel]": '"index_and_wal" | "index_only"',
+  "(ReadLevel)[keyof ReadLevel]": '"index_and_wal" | "index_only" | "index_and_bounded_wal"',
+  "(typeof ReadLevel)[keyof typeof ReadLevel]": '"index_and_wal" | "index_only" | "index_and_bounded_wal"',
 };
 
 // =============================================================================

@@ -810,10 +810,15 @@ class ReadLevel(str, Enum):
             All committed writes will be visible.
         INDEX_ONLY: Read only from the compacted index, skipping the WAL.
             Faster, but recent writes that haven't been compacted may not be visible.
+        INDEX_AND_BOUNDED_WAL: Read from the index and up to a server-configured
+            number of WAL entries. Provides a consistent prefix of the WAL with
+            bounded query latency: recently committed writes beyond the limit
+            may not be visible.
     """
 
     INDEX_AND_WAL = "index_and_wal"
     INDEX_ONLY = "index_only"
+    INDEX_AND_BOUNDED_WAL = "index_and_bounded_wal"
 
 
 # TODO: make warnings prettier and add link to migration docs

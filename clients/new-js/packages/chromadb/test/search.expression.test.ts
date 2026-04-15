@@ -644,6 +644,16 @@ describe("search expression DSL", () => {
     expect(mockApiClient.post).toHaveBeenCalledTimes(1);
     expect(capturedBody.read_level).toBe("index_and_wal");
 
+    // Test with INDEX_AND_BOUNDED_WAL
+    mockApiClient.post.mockClear();
+    await collection.search(
+      new Search().rank(Knn({ query: [0.1, 0.2], limit: 5 })),
+      { readLevel: ReadLevel.INDEX_AND_BOUNDED_WAL },
+    );
+
+    expect(mockApiClient.post).toHaveBeenCalledTimes(1);
+    expect(capturedBody.read_level).toBe("index_and_bounded_wal");
+
     // Test without readLevel (should be undefined)
     mockApiClient.post.mockClear();
     await collection.search(

@@ -95,6 +95,8 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
                   All committed writes will be visible.
                 - ReadLevel.INDEX_ONLY: Read only from the compacted index, skipping the WAL.
                   Faster, but recent writes that haven't been compacted may not be visible.
+                - ReadLevel.INDEX_AND_BOUNDED_WAL: Read from the index and up to a
+                  server-configured number of WAL entries for bounded query latency.
 
         Returns:
             int: The total number of embeddings added to the database
@@ -349,6 +351,8 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
                   All committed writes will be visible.
                 - ReadLevel.INDEX_ONLY: Read only from the compacted index, skipping the WAL.
                   Faster, but recent writes that haven't been compacted may not be visible.
+                - ReadLevel.INDEX_AND_BOUNDED_WAL: Read from the index and up to a
+                  server-configured number of WAL entries for bounded query latency.
 
         Returns:
             SearchResult: Column-major format response with:

@@ -178,6 +178,8 @@ impl ChromaCollection {
     ///     All committed writes will be visible.
     ///   - [`ReadLevel::IndexOnly`] - Read only from the compacted index, skipping the WAL.
     ///     Faster, but recent writes that haven't been compacted may not be visible.
+    ///   - [`ReadLevel::IndexAndBoundedWal`] - Read from the index and up to a server-configured
+    ///     number of WAL entries for bounded query latency.
     ///
     /// # Example
     ///
@@ -572,6 +574,8 @@ impl ChromaCollection {
     ///     All committed writes will be visible.
     ///   - [`ReadLevel::IndexOnly`] - Read only from the compacted index, skipping the WAL.
     ///     Faster, but recent writes that haven't been compacted may not be visible.
+    ///   - [`ReadLevel::IndexAndBoundedWal`] - Read from the index and up to a server-configured
+    ///     number of WAL entries for bounded query latency.
     ///
     /// # Example
     ///
@@ -1483,12 +1487,22 @@ mod tests {
             // IndexOnly may omit recent WAL writes; just ensure the call succeeds
             // and the response structure matches the requested payload.
             let index_only = collection
-                .search_with_options(vec![search], ReadLevel::IndexOnly)
+                .search_with_options(vec![search.clone()], ReadLevel::IndexOnly)
                 .await
                 .unwrap();
             assert_eq!(index_only.ids.len(), 1);
             assert!(index_only.documents[0].is_some());
             assert!(index_only.scores[0].is_some());
+
+            // IndexAndBoundedWal reads up to a server-configured number of WAL entries;
+            // just ensure the call succeeds and the response structure is valid.
+            let bounded = collection
+                .search_with_options(vec![search], ReadLevel::IndexAndBoundedWal)
+                .await
+                .unwrap();
+            assert_eq!(bounded.ids.len(), 1);
+            assert!(bounded.documents[0].is_some());
+            assert!(bounded.scores[0].is_some());
         })
         .await;
     }
@@ -1524,6 +1538,13 @@ mod tests {
             // INDEX_ONLY may omit recent WAL writes; just ensure the call succeeds
             let count = collection
                 .count_with_options(ReadLevel::IndexOnly)
+                .await
+                .unwrap();
+            assert!(count <= 3);
+
+            // INDEX_AND_BOUNDED_WAL reads up to a configured limit; just ensure the call succeeds
+            let count = collection
+                .count_with_options(ReadLevel::IndexAndBoundedWal)
                 .await
                 .unwrap();
             assert!(count <= 3);
