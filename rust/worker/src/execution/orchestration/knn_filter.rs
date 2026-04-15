@@ -207,6 +207,9 @@ pub struct KnnFilterOrchestrator {
     // Read level for consistency vs performance tradeoff
     read_level: ReadLevel,
 
+    // Maximum number of WAL entries to read for IndexAndBoundedWal.
+    bounded_wal_limit: u32,
+
     // Pipelined operators
     filter: Filter,
 
@@ -232,6 +235,7 @@ impl KnnFilterOrchestrator {
         fetch_log: FetchLogOperator,
         filter: Filter,
         read_level: ReadLevel,
+        bounded_wal_limit: u32,
         bloom_filter_manager: Option<BloomFilterManager>,
         shard_index: u32,
         num_shards: u32,
@@ -246,6 +250,7 @@ impl KnnFilterOrchestrator {
             fetch_log,
             fetched_logs: None,
             read_level,
+            bounded_wal_limit,
             filter,
             bloom_filter_manager,
             shard_index,
@@ -355,6 +360,23 @@ impl Orchestrator for KnnFilterOrchestrator {
                 // Fetch log task for full consistency.
                 let fetch_log_task = wrap(
                     Box::new(self.fetch_log.clone()),
+                    (),
+                    ctx.receiver(),
+                    self.context.task_cancellation_token.clone(),
+                );
+                tasks.push((fetch_log_task, Some(Span::current())));
+            }
+            ReadLevel::IndexAndBoundedWal => {
+                // Bounded WAL read: fetch up to `bounded_wal_limit` log entries.
+                // See the corresponding comment in CountOrchestrator.
+                tracing::info!(
+                    limit = self.bounded_wal_limit,
+                    "Fetching bounded logs for IndexAndBoundedWal"
+                );
+                let mut bounded_fetch_log = self.fetch_log.clone();
+                bounded_fetch_log.maximum_fetch_count = Some(self.bounded_wal_limit);
+                let fetch_log_task = wrap(
+                    Box::new(bounded_fetch_log),
                     (),
                     ctx.receiver(),
                     self.context.task_cancellation_token.clone(),

@@ -558,6 +558,10 @@ pub enum ReadLevel {
     /// Read only from the index, skipping the write-ahead log.
     /// Provides eventual consistency - recent uncommitted writes may not be visible.
     IndexOnly,
+    /// Read from the index and up to a server-configured number of write-ahead
+    /// log entries. Provides a consistent prefix of the WAL with bounded query
+    /// latency: recently committed writes beyond the limit may not be visible.
+    IndexAndBoundedWal,
 }
 
 impl From<chroma_proto::ReadLevel> for ReadLevel {
@@ -565,6 +569,7 @@ impl From<chroma_proto::ReadLevel> for ReadLevel {
         match value {
             chroma_proto::ReadLevel::IndexAndWal => ReadLevel::IndexAndWal,
             chroma_proto::ReadLevel::IndexOnly => ReadLevel::IndexOnly,
+            chroma_proto::ReadLevel::IndexAndBoundedWal => ReadLevel::IndexAndBoundedWal,
         }
     }
 }
@@ -574,6 +579,7 @@ impl From<ReadLevel> for chroma_proto::ReadLevel {
         match value {
             ReadLevel::IndexAndWal => chroma_proto::ReadLevel::IndexAndWal,
             ReadLevel::IndexOnly => chroma_proto::ReadLevel::IndexOnly,
+            ReadLevel::IndexAndBoundedWal => chroma_proto::ReadLevel::IndexAndBoundedWal,
         }
     }
 }

@@ -157,6 +157,13 @@ pub struct QueryServiceConfig {
     #[serde(default = "QueryServiceConfig::default_fetch_log_concurrency")]
     pub fetch_log_concurrency: usize,
 
+    /// The maximum number of WAL entries to read for the `IndexAndBoundedWal`
+    /// read level. Queries will read from the index plus up to this many
+    /// uncompacted log entries, providing a consistent prefix of the WAL with
+    /// bounded query latency.
+    #[serde(default = "QueryServiceConfig::default_bounded_wal_limit")]
+    pub bounded_wal_limit: u32,
+
     /// The configuration for managing SPANN indices within the query service.
     /// SPANN is a hierarchical inverted index that is used for approximate nearest neighbor search.
     #[serde(default)]
@@ -228,6 +235,10 @@ impl QueryServiceConfig {
 
     fn default_fetch_log_concurrency() -> usize {
         10
+    }
+
+    fn default_bounded_wal_limit() -> u32 {
+        250
     }
 
     fn default_grpc_shutdown_grace_period() -> Duration {

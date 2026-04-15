@@ -99,6 +99,7 @@ query_service:
     enabled_collection_ids: ["all"]
     storage_fetch_threshold: 100
   fetch_log_batch_size: 1000
+  bounded_wal_limit: 250
   use_fragment_fetch: false
   fragment_fetcher_cache:
     memory:
