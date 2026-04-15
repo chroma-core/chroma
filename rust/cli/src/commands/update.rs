@@ -1,6 +1,6 @@
+use crate::style;
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::utils::CliError;
-use colored::Colorize;
 use regex::Regex;
 use semver::Version;
 use serde::Deserialize;
@@ -65,7 +65,7 @@ async fn version_check(
     if latest == current_version {
         term.println(&format!(
             "{}",
-            "Your Chroma CLI version is up-to-date!".green()
+            style::success("Your Chroma CLI version is up-to-date!")
         ));
     } else {
         term.println(&format!(
@@ -73,9 +73,9 @@ async fn version_check(
             latest
         ));
         if cfg!(target_os = "windows") {
-            term.println(&format!("{}", WINDOWS_CURL.green()));
+            term.println(&format!("{}", style::success(WINDOWS_CURL)));
         } else {
-            term.println(&format!("{}", UNIX_CURL.green()));
+            term.println(&format!("{}", style::success(UNIX_CURL)));
         }
     }
 

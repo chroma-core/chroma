@@ -1,13 +1,13 @@
 use crate::commands::db::get_db_name;
 use crate::commands::install::InstallError;
 use crate::config_store::{ConfigStore, FileConfigStore};
+use crate::style;
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::tui::collection_browser::CollectionBrowser;
 use crate::ui_utils::Theme;
 use crate::utils::{cloud_client, connect_local, CliError, LocalChromaArgs};
 use chroma::ChromaHttpClient;
 use clap::Parser;
-use crossterm::style::Stylize;
 use thiserror::Error;
 
 #[derive(Parser, Debug, Clone)]
@@ -35,10 +35,10 @@ pub enum BrowseError {
 }
 
 fn input_db_prompt(collection_name: &str) -> String {
-    format!("Which DB has collection {}", collection_name)
-        .bold()
-        .blue()
-        .to_string()
+    format!(
+        "{}",
+        style::prompt_bold(format!("Which DB has collection {}", collection_name))
+    )
 }
 
 pub async fn get_cloud_client(
