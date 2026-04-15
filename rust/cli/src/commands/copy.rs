@@ -6,6 +6,7 @@ use crate::terminal::{SystemTerminal, Terminal};
 use crate::utils::{
     cloud_client, connect_local, CliError, ErrorResponse, LocalChromaArgs, Profile, UtilsError,
 };
+use chroma::client::Database;
 use chroma::ChromaHttpClient;
 use chroma_types::operator::Key;
 use chroma_types::plan::SearchPayload;
@@ -105,6 +106,15 @@ fn start_copy_prompt(collections_num: usize) -> String {
     format!("Copying {} collection(s)", collections_num)
 }
 
+fn verify_db_exists(dbs: &[Database], name: &str) -> Result<(), CliError> {
+    if !dbs.iter().any(|db| db.name == name) {
+        return Err(CliError::Db(crate::commands::db::DbError::DbNotFound(
+            name.to_string(),
+        )));
+    }
+    Ok(())
+}
+
 async fn get_cloud_client(
     profile: Profile,
     db_name: Option<String>,
@@ -115,11 +125,7 @@ async fn get_cloud_client(
 
     if let Some(db_name) = db_name {
         let dbs = client.list_databases().await?;
-        if !dbs.iter().any(|db| db.name == db_name) {
-            return Err(CliError::Db(crate::commands::db::DbError::DbNotFound(
-                db_name,
-            )));
-        }
+        verify_db_exists(&dbs, &db_name)?;
         client.set_database_name(db_name);
         return Ok(client);
     }
@@ -133,12 +139,7 @@ async fn get_cloud_client(
         }
         _ => {
             let input_name = get_db_name(&databases, &select_db_prompt(from), term)?;
-            let dbs = &databases;
-            if !dbs.iter().any(|db| db.name == input_name) {
-                return Err(CliError::Db(crate::commands::db::DbError::DbNotFound(
-                    input_name,
-                )));
-            }
+            verify_db_exists(&databases, &input_name)?;
             client.set_database_name(input_name);
             Ok(client)
         }

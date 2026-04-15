@@ -586,15 +586,16 @@ mod tests {
 
     mod mock_server {
         use super::*;
-        use chroma::client::ChromaHttpClientOptions;
+        use chroma::client::{ChromaAuthMethod, ChromaHttpClientOptions, ChromaRetryOptions};
         use httpmock::MockServer;
 
         fn mock_client(server: &MockServer) -> ChromaHttpClient {
             ChromaHttpClient::new(ChromaHttpClientOptions {
                 endpoint: server.base_url().parse().unwrap(),
+                auth_method: ChromaAuthMethod::None,
+                retry_options: ChromaRetryOptions::default(),
                 tenant_id: Some("test-tenant".to_string()),
                 database_name: Some("default_database".to_string()),
-                ..Default::default()
             })
         }
 
@@ -907,15 +908,16 @@ mod tests {
 
     mod integration {
         use super::*;
-        use chroma::client::ChromaHttpClientOptions;
+        use chroma::client::{ChromaAuthMethod, ChromaHttpClientOptions, ChromaRetryOptions};
         use uuid::Uuid;
 
         fn local_client() -> ChromaHttpClient {
             ChromaHttpClient::new(ChromaHttpClientOptions {
                 endpoint: "http://localhost:8000".parse().unwrap(),
+                auth_method: ChromaAuthMethod::None,
+                retry_options: ChromaRetryOptions::default(),
                 tenant_id: Some("default_tenant".to_string()),
                 database_name: Some("default_database".to_string()),
-                ..Default::default()
             })
         }
 

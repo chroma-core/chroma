@@ -10,12 +10,13 @@ use crate::commands::update::UpdateError;
 use crate::commands::vacuum::VacuumError;
 use crate::commands::webpage::WebPageError;
 use crate::ui_utils::Theme;
-use chroma::client::{ChromaHttpClientError, ChromaHttpClientOptions};
+use chroma::client::{
+    ChromaAuthMethod, ChromaHttpClientError, ChromaHttpClientOptions, ChromaRetryOptions,
+};
 use chroma::ChromaHttpClient;
 use chroma_frontend::config::FrontendServerConfig;
 use chroma_frontend::frontend_service_entrypoint_with_config;
 use clap::Parser;
-use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::TcpListener;
@@ -118,14 +119,13 @@ pub async fn connect_local(
         client.heartbeat().await?;
         Ok((client, None))
     } else if let Some(path) = args.path {
-        let config = FrontendServerConfig::single_node_default();
-        let db_path = Path::new(&path).join(config.sqlite_filename);
+        let mut config = FrontendServerConfig::single_node_default();
+        let db_path = Path::new(&path).join(&config.sqlite_filename);
         if !db_path.is_file() {
             return Err(UtilsError::NotChromaPath.into());
         }
 
-        let port = find_available_port(8000, 9000)?;
-        let mut config = FrontendServerConfig::single_node_default();
+        let port = find_available_port()?;
         config.persist_path = path;
         config.port = port;
 
@@ -150,15 +150,13 @@ pub async fn connect_local(
     }
 }
 
-fn find_available_port(min: u16, max: u16) -> Result<u16, CliError> {
-    let mut rng = rand::thread_rng();
-    for _ in 0..100 {
-        let port = rng.gen_range(min..=max);
-        if TcpListener::bind(format!("127.0.0.1:{}", port)).is_ok() {
-            return Ok(port);
-        }
-    }
-    Err(UtilsError::PortSearch.into())
+fn find_available_port() -> Result<u16, CliError> {
+    let listener = TcpListener::bind("127.0.0.1:0").map_err(|_| UtilsError::PortSearch)?;
+    let port = listener
+        .local_addr()
+        .map_err(|_| UtilsError::PortSearch)?
+        .port();
+    Ok(port)
 }
 
 #[derive(Debug, Deserialize)]
@@ -229,18 +227,21 @@ pub fn local_client(host: &str) -> Result<ChromaHttpClient, CliError> {
         endpoint: host
             .parse()
             .map_err(|_| UtilsError::InvalidUrl(host.to_string()))?,
+        auth_method: ChromaAuthMethod::None,
+        retry_options: ChromaRetryOptions::default(),
         tenant_id: Some("default_tenant".to_string()),
         database_name: Some("default_database".to_string()),
-        ..Default::default()
     };
     Ok(ChromaHttpClient::new(options))
 }
 
 pub fn local_client_default() -> Result<ChromaHttpClient, CliError> {
     let options = ChromaHttpClientOptions {
+        endpoint: ChromaHttpClientOptions::default().endpoint,
+        auth_method: ChromaAuthMethod::None,
+        retry_options: ChromaRetryOptions::default(),
         tenant_id: Some("default_tenant".to_string()),
         database_name: Some("default_database".to_string()),
-        ..Default::default()
     };
     Ok(ChromaHttpClient::new(options))
 }
