@@ -24,6 +24,12 @@ impl FaultId {
     }
 }
 
+impl Default for FaultId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl std::fmt::Display for FaultId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
