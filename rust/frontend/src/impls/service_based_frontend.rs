@@ -3459,5 +3459,417 @@ mod tests {
             assert_eq!(merged[0].records.len(), 1);
             assert_eq!(merged[0].records[0].id, "hi");
         }
+
+        #[test]
+        fn test_post_merge_missing_metadata_null_group() {
+            let payloads = vec![make_payload_with_group_by(
+                "color",
+                Aggregate::MinK {
+                    keys: vec![Key::Score],
+                    k: 1,
+                },
+                Some(10),
+                vec![Key::Score],
+            )];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record(
+                        "red1",
+                        Some(0.5),
+                        vec![("color", MetadataValue::Str("red".into()))],
+                    ),
+                    make_record(
+                        "red2",
+                        Some(0.1),
+                        vec![("color", MetadataValue::Str("red".into()))],
+                    ),
+                    make_record("no_color1", Some(0.3), vec![]),
+                    make_record("no_color2", Some(0.2), vec![]),
+                ],
+            }];
+            let orig_selects = vec![Select {
+                keys: [Key::Score].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::reapply_group_by(
+                &payloads,
+                &mut merged,
+                &orig_selects,
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records.len(), 2, "one per group: red + null");
+            let ids: Vec<&str> = merged[0].records.iter().map(|r| r.id.as_str()).collect();
+            assert!(ids.contains(&"red2"), "red group: lowest score 0.1");
+            assert!(ids.contains(&"no_color2"), "null group: lowest score 0.2");
+        }
+
+        #[test]
+        fn test_post_merge_multiple_group_keys() {
+            let payloads = vec![SearchPayload {
+                filter: Filter::default(),
+                rank: Default::default(),
+                group_by: GroupBy {
+                    keys: vec![
+                        Key::MetadataField("color".into()),
+                        Key::MetadataField("size".into()),
+                    ],
+                    aggregate: Some(Aggregate::MinK {
+                        keys: vec![Key::Score],
+                        k: 1,
+                    }),
+                },
+                limit: Limit {
+                    offset: 0,
+                    limit: Some(10),
+                },
+                select: Select {
+                    keys: [Key::Score].into_iter().collect(),
+                },
+            }];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record(
+                        "rs",
+                        Some(0.1),
+                        vec![
+                            ("color", MetadataValue::Str("red".into())),
+                            ("size", MetadataValue::Str("S".into())),
+                        ],
+                    ),
+                    make_record(
+                        "rs2",
+                        Some(0.5),
+                        vec![
+                            ("color", MetadataValue::Str("red".into())),
+                            ("size", MetadataValue::Str("S".into())),
+                        ],
+                    ),
+                    make_record(
+                        "rl",
+                        Some(0.2),
+                        vec![
+                            ("color", MetadataValue::Str("red".into())),
+                            ("size", MetadataValue::Str("L".into())),
+                        ],
+                    ),
+                    make_record(
+                        "bs",
+                        Some(0.3),
+                        vec![
+                            ("color", MetadataValue::Str("blue".into())),
+                            ("size", MetadataValue::Str("S".into())),
+                        ],
+                    ),
+                ],
+            }];
+            let orig_selects = vec![Select {
+                keys: [Key::Score].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::reapply_group_by(
+                &payloads,
+                &mut merged,
+                &orig_selects,
+                &orig_limits,
+            );
+
+            assert_eq!(
+                merged[0].records.len(),
+                3,
+                "groups: (red,S), (red,L), (blue,S)"
+            );
+            let ids: Vec<&str> = merged[0].records.iter().map(|r| r.id.as_str()).collect();
+            assert!(ids.contains(&"rs"), "(red,S) min score -> rs at 0.1");
+            assert!(ids.contains(&"rl"), "(red,L) only entry");
+            assert!(ids.contains(&"bs"), "(blue,S) only entry");
+            assert!(!ids.contains(&"rs2"), "rs2 dropped by MinK k=1");
+        }
+
+        #[test]
+        fn test_post_merge_mixed_payloads() {
+            let payloads = vec![
+                make_payload_with_group_by(
+                    "color",
+                    Aggregate::MinK {
+                        keys: vec![Key::Score],
+                        k: 1,
+                    },
+                    Some(10),
+                    vec![Key::Score],
+                ),
+                SearchPayload {
+                    filter: Filter::default(),
+                    rank: Default::default(),
+                    group_by: GroupBy::default(),
+                    limit: Limit {
+                        offset: 0,
+                        limit: Some(10),
+                    },
+                    select: Select {
+                        keys: [Key::Score].into_iter().collect(),
+                    },
+                },
+            ];
+            let mut merged = vec![
+                SearchPayloadResult {
+                    records: vec![
+                        make_record(
+                            "r1",
+                            Some(0.5),
+                            vec![("color", MetadataValue::Str("red".into()))],
+                        ),
+                        make_record(
+                            "r2",
+                            Some(0.1),
+                            vec![("color", MetadataValue::Str("red".into()))],
+                        ),
+                    ],
+                },
+                SearchPayloadResult {
+                    records: vec![
+                        make_record("b", Some(0.9), vec![]),
+                        make_record("a", Some(0.1), vec![]),
+                    ],
+                },
+            ];
+            let orig_selects = vec![
+                Select {
+                    keys: [Key::Score].into_iter().collect(),
+                },
+                Select {
+                    keys: [Key::Score].into_iter().collect(),
+                },
+            ];
+            let orig_limits = vec![
+                Limit {
+                    offset: 0,
+                    limit: Some(10),
+                },
+                Limit {
+                    offset: 0,
+                    limit: Some(10),
+                },
+            ];
+
+            ServiceBasedFrontend::reapply_group_by(
+                &payloads,
+                &mut merged,
+                &orig_selects,
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records.len(), 1, "group-by payload: 1 per group");
+            assert_eq!(merged[0].records[0].id, "r2");
+
+            assert_eq!(merged[1].records.len(), 2, "non-group-by payload: all kept");
+            assert_eq!(merged[1].records[0].id, "a", "sorted by score");
+            assert_eq!(merged[1].records[1].id, "b");
+        }
+
+        #[test]
+        fn test_post_merge_aggregate_by_metadata_field() {
+            let payloads = vec![make_payload_with_group_by(
+                "color",
+                Aggregate::MinK {
+                    keys: vec![Key::MetadataField("priority".into())],
+                    k: 1,
+                },
+                Some(10),
+                vec![Key::Score],
+            )];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record(
+                        "r_hi",
+                        Some(0.1),
+                        vec![
+                            ("color", MetadataValue::Str("red".into())),
+                            ("priority", MetadataValue::Int(10)),
+                        ],
+                    ),
+                    make_record(
+                        "r_lo",
+                        Some(0.9),
+                        vec![
+                            ("color", MetadataValue::Str("red".into())),
+                            ("priority", MetadataValue::Int(1)),
+                        ],
+                    ),
+                ],
+            }];
+            let orig_selects = vec![Select {
+                keys: [Key::Score].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::reapply_group_by(
+                &payloads,
+                &mut merged,
+                &orig_selects,
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records.len(), 1);
+            assert_eq!(
+                merged[0].records[0].id, "r_lo",
+                "MinK by priority keeps lowest priority (1)"
+            );
+        }
+
+        #[test]
+        fn test_post_merge_k_greater_than_one() {
+            let payloads = vec![make_payload_with_group_by(
+                "color",
+                Aggregate::MinK {
+                    keys: vec![Key::Score],
+                    k: 2,
+                },
+                Some(10),
+                vec![Key::Score],
+            )];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record(
+                        "r1",
+                        Some(0.1),
+                        vec![("color", MetadataValue::Str("red".into()))],
+                    ),
+                    make_record(
+                        "r2",
+                        Some(0.2),
+                        vec![("color", MetadataValue::Str("red".into()))],
+                    ),
+                    make_record(
+                        "r3",
+                        Some(0.3),
+                        vec![("color", MetadataValue::Str("red".into()))],
+                    ),
+                    make_record(
+                        "b1",
+                        Some(0.4),
+                        vec![("color", MetadataValue::Str("blue".into()))],
+                    ),
+                    make_record(
+                        "b2",
+                        Some(0.5),
+                        vec![("color", MetadataValue::Str("blue".into()))],
+                    ),
+                    make_record(
+                        "b3",
+                        Some(0.6),
+                        vec![("color", MetadataValue::Str("blue".into()))],
+                    ),
+                ],
+            }];
+            let orig_selects = vec![Select {
+                keys: [Key::Score].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::reapply_group_by(
+                &payloads,
+                &mut merged,
+                &orig_selects,
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records.len(), 4, "2 per group, 2 groups");
+            let ids: Vec<&str> = merged[0].records.iter().map(|r| r.id.as_str()).collect();
+            assert!(ids.contains(&"r1"));
+            assert!(ids.contains(&"r2"));
+            assert!(!ids.contains(&"r3"), "r3 dropped by k=2");
+            assert!(ids.contains(&"b1"));
+            assert!(ids.contains(&"b2"));
+            assert!(!ids.contains(&"b3"), "b3 dropped by k=2");
+        }
+
+        #[test]
+        fn test_post_merge_strip_preserves_user_requested_metadata() {
+            let payloads = vec![SearchPayload {
+                filter: Filter::default(),
+                rank: Default::default(),
+                group_by: GroupBy {
+                    keys: vec![Key::MetadataField("category".into())],
+                    aggregate: Some(Aggregate::MinK {
+                        keys: vec![Key::Score],
+                        k: 1,
+                    }),
+                },
+                limit: Limit {
+                    offset: 0,
+                    limit: Some(10),
+                },
+                select: Select {
+                    keys: [
+                        Key::Score,
+                        Key::MetadataField("color".into()),
+                        Key::MetadataField("size".into()),
+                    ]
+                    .into_iter()
+                    .collect(),
+                },
+            }];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![make_record(
+                    "a",
+                    Some(0.1),
+                    vec![
+                        ("category", MetadataValue::Str("X".into())),
+                        ("color", MetadataValue::Str("red".into())),
+                        ("size", MetadataValue::Str("L".into())),
+                    ],
+                )],
+            }];
+            let orig_selects = vec![Select {
+                keys: [
+                    Key::Score,
+                    Key::MetadataField("color".into()),
+                    Key::MetadataField("size".into()),
+                ]
+                .into_iter()
+                .collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::reapply_group_by(
+                &payloads,
+                &mut merged,
+                &orig_selects,
+                &orig_limits,
+            );
+
+            let meta = merged[0].records[0].metadata.as_ref().unwrap();
+            assert!(
+                meta.contains_key("color"),
+                "user-requested metadata preserved"
+            );
+            assert!(
+                meta.contains_key("size"),
+                "user-requested metadata preserved"
+            );
+            assert!(
+                !meta.contains_key("category"),
+                "injected group-by key stripped"
+            );
+            assert!(merged[0].records[0].score.is_some(), "score preserved");
+        }
     }
 }
