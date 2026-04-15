@@ -1,5 +1,8 @@
-use crate::terminal::{
-    FilterableMultiSelectPrompt, FilterableSelectItem, PanelSelectPrompt, SystemTerminal, Terminal,
+use crate::style;
+use crate::terminal::{SystemTerminal, Terminal};
+use crate::ui::{
+    print_command_hint, print_section_header, print_status_line, print_success_banner,
+    print_summary_panel, FilterableMultiSelectPrompt, FilterableSelectItem, PanelSelectPrompt,
 };
 use crate::utils::{CliError, UtilsError};
 use clap::{Parser, Subcommand, ValueEnum};
@@ -640,21 +643,21 @@ pub fn skills(args: SkillsArgs) -> Result<(), CliError> {
 
 async fn list_skills(term: &mut dyn Terminal) -> Result<(), CliError> {
     let registry = fetch_skills_registry().await?;
-    term.println(&format!("{}", "Available Chroma skills:".blue().bold()));
+    print_section_header(term, "Available Chroma skills:");
     for skill in registry.skills {
         term.println(&format!(
             "{} {} - {}",
-            ">".yellow(),
+            style::list_marker(),
             skill.name.bold(),
             skill.description
         ));
     }
     term.println("");
-    term.println(&format!(
-        "{} {}",
-        "Install a skill with:".blue().bold(),
-        "chroma skills install <skill-name>".yellow()
-    ));
+    print_command_hint(
+        term,
+        "Install a skill with:",
+        "chroma skills install <skill-name>",
+    );
     Ok(())
 }
 
@@ -666,50 +669,24 @@ async fn install_skill(args: InstallSkillArgs, term: &mut dyn Terminal) -> Resul
     let mode = resolve_mode(args.mode, term)?;
     let agents = resolve_agents(args.agent, args.all_detected, scope, &context, term)?;
 
-    term.println(&format!(
-        "{} {} into {} [{} / {}]",
-        "Installing".blue().bold(),
-        skill.name.bold(),
-        summarize_agent_ids(&agents).bold(),
-        scope.label(),
-        mode.label()
-    ));
+    print_status_line(
+        term,
+        "Installing",
+        &format!(
+            "{} into {} [{} / {}]",
+            skill.name.bold(),
+            summarize_agent_ids(&agents).bold(),
+            scope.label(),
+            mode.label()
+        ),
+    );
 
     let files = download_skill_files(skill).await?;
     install_skill_files(skill, &files, &agents, scope, mode, &context)?;
 
-    term.println(&format!(
-        "\n{}",
-        format!("Installed {} successfully.", skill.name)
-            .blue()
-            .bold()
-    ));
+    print_success_banner(term, &format!("Installed {} successfully.", skill.name));
 
     Ok(())
-}
-
-fn print_selection_summary(term: &mut dyn Terminal, label: &str, value: &str) {
-    term.println("");
-    let content = value.lines().collect::<Vec<_>>();
-    let widest_line = content
-        .iter()
-        .map(|line| line.chars().count())
-        .max()
-        .unwrap_or(0);
-    let inner_width = widest_line.max(label.chars().count()).max(20);
-    let top_border = format!(
-        "┌─ {} {}┐",
-        label,
-        "─".repeat(inner_width.saturating_sub(label.chars().count() + 1))
-    );
-    let bottom_border = format!("└{}┘", "─".repeat(inner_width + 2));
-
-    term.println(&top_border);
-    for line in value.lines() {
-        let padding = inner_width.saturating_sub(line.chars().count());
-        term.println(&format!("│ {}{} │", line, " ".repeat(padding)));
-    }
-    term.println(&bottom_border);
 }
 
 fn resolve_skill<'a>(
@@ -727,7 +704,7 @@ fn resolve_skill<'a>(
         .iter()
         .find(|skill| skill.name == name)
         .ok_or_else(|| SkillsError::NoSuchSkill(name.clone()))?;
-    print_selection_summary(term, "Skill", &skill.name);
+    print_summary_panel(term, "Skill", &skill.name);
     Ok(skill)
 }
 
@@ -788,7 +765,7 @@ fn resolve_scope(
             _ => InstallScope::Global,
         }
     };
-    print_selection_summary(term, "Installation scope", scope.summary_label());
+    print_summary_panel(term, "Installation scope", scope.summary_label());
     Ok(scope)
 }
 
@@ -822,7 +799,7 @@ fn resolve_mode(
             _ => InstallMode::Copy,
         }
     };
-    print_selection_summary(term, "Installation method", mode.summary_label());
+    print_summary_panel(term, "Installation method", mode.summary_label());
     Ok(mode)
 }
 
@@ -848,7 +825,7 @@ fn resolve_agents(
                 InstallScope::Global => {
                     if !detected.is_empty() {
                         let detected_names = summarize_agent_names(&detected);
-                        print_selection_summary(term, "Detected agents", &detected_names);
+                        print_summary_panel(term, "Detected agents", &detected_names);
                         if prompt_detected_agents_shortcut(term, &detected_names)? {
                             detected
                         } else {
@@ -861,7 +838,7 @@ fn resolve_agents(
             }
         }
     };
-    print_selection_summary(term, "Agents", &summarize_selected_agents(&agents, scope));
+    print_summary_panel(term, "Agents", &summarize_selected_agents(&agents, scope));
     Ok(agents)
 }
 

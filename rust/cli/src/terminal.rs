@@ -1,3 +1,5 @@
+use crate::style;
+use crate::ui::{FilterableMultiSelectPrompt, FilterableSelectItem, PanelSelectPrompt};
 use crate::utils::{CliError, UtilsError};
 use crossterm::cursor::{self, Hide, MoveTo, Show};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -8,34 +10,6 @@ use dialoguer::{Confirm, Input, Select};
 use std::collections::BTreeSet;
 use std::io::{stdout, Write};
 use textwrap::wrap;
-
-#[derive(Debug, Clone)]
-pub struct FilterableSelectItem {
-    pub label: String,
-    pub summary: String,
-}
-
-pub struct PanelSelectPrompt<'a> {
-    pub tag: &'a str,
-    pub title: &'a str,
-    pub context_lines: &'a [String],
-    pub items: &'a [FilterableSelectItem],
-    pub default_selected_index: usize,
-    pub empty_message: &'a str,
-}
-
-pub struct FilterableMultiSelectPrompt<'a> {
-    pub tag: &'a str,
-    pub title: &'a str,
-    pub preface_lines: &'a [String],
-    pub prompt: &'a str,
-    pub included_heading: Option<&'a str>,
-    pub included_items: &'a [FilterableSelectItem],
-    pub selectable_heading: &'a str,
-    pub selectable_items: &'a [FilterableSelectItem],
-    pub default_selected_indices: &'a [usize],
-    pub empty_message: &'a str,
-}
 
 pub trait Terminal {
     fn println(&mut self, msg: &str);
@@ -52,6 +26,19 @@ pub trait Terminal {
 pub struct SystemTerminal;
 const DEFAULT_MAX_VISIBLE_ITEMS: usize = 8;
 const PANEL_MAX_WIDTH: usize = 92;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RawPromptControl {
+    Interrupt,
+    Suspend,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RawPromptControlResult {
+    NotHandled,
+    ContinuePrompt,
+    AbortPrompt,
+}
 
 impl Terminal for SystemTerminal {
     fn println(&mut self, msg: &str) {
@@ -94,17 +81,105 @@ impl Terminal for SystemTerminal {
     }
 }
 
+fn control_action_for_key(key: &crossterm::event::KeyEvent) -> Option<RawPromptControl> {
+    if key.modifiers != KeyModifiers::CONTROL {
+        return None;
+    }
+
+    match key.code {
+        KeyCode::Char('c') => Some(RawPromptControl::Interrupt),
+        KeyCode::Char('z') => Some(RawPromptControl::Suspend),
+        _ => None,
+    }
+}
+
+fn enable_raw_prompt(stdout: &mut std::io::Stdout) -> Result<(), CliError> {
+    terminal::enable_raw_mode().map_err(|_| UtilsError::UserInputFailed)?;
+    stdout
+        .execute(Hide)
+        .map_err(|_| UtilsError::UserInputFailed)?;
+    Ok(())
+}
+
+fn disable_raw_prompt(
+    stdout: &mut std::io::Stdout,
+    origin: (u16, u16),
+    rendered_rows: usize,
+) -> Result<(), CliError> {
+    clear_filterable_multi_select(stdout, origin, rendered_rows)?;
+    stdout
+        .execute(Show)
+        .map_err(|_| UtilsError::UserInputFailed)?;
+    terminal::disable_raw_mode().map_err(|_| UtilsError::UserInputFailed)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn raise_interrupt_signal() {
+    unsafe {
+        libc::raise(libc::SIGINT);
+    }
+}
+
+#[cfg(not(unix))]
+fn raise_interrupt_signal() {}
+
+#[cfg(unix)]
+fn suspend_process() -> Result<(), CliError> {
+    let result = unsafe { libc::raise(libc::SIGTSTP) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(UtilsError::UserInputFailed.into())
+    }
+}
+
+#[cfg(not(unix))]
+fn suspend_process() -> Result<(), CliError> {
+    Err(UtilsError::UserInputFailed.into())
+}
+
+fn handle_raw_prompt_control<F>(
+    stdout: &mut std::io::Stdout,
+    key: &crossterm::event::KeyEvent,
+    origin: &mut (u16, u16),
+    rendered_rows: &mut usize,
+    resolve_origin: F,
+) -> Result<RawPromptControlResult, CliError>
+where
+    F: Fn((u16, u16), (u16, u16)) -> (u16, u16),
+{
+    let Some(action) = control_action_for_key(key) else {
+        return Ok(RawPromptControlResult::NotHandled);
+    };
+
+    disable_raw_prompt(stdout, *origin, *rendered_rows)?;
+
+    match action {
+        RawPromptControl::Interrupt => {
+            raise_interrupt_signal();
+            Ok(RawPromptControlResult::AbortPrompt)
+        }
+        RawPromptControl::Suspend => {
+            suspend_process()?;
+            let cursor_origin = cursor::position().map_err(|_| UtilsError::UserInputFailed)?;
+            let terminal_size = terminal::size().map_err(|_| UtilsError::UserInputFailed)?;
+            *origin = resolve_origin(cursor_origin, terminal_size);
+            *rendered_rows = 0;
+            enable_raw_prompt(stdout)?;
+            Ok(RawPromptControlResult::ContinuePrompt)
+        }
+    }
+}
+
 fn run_filterable_multi_select(
     prompt: &FilterableMultiSelectPrompt<'_>,
 ) -> Result<Vec<usize>, CliError> {
     let mut stdout = stdout();
     let cursor_origin = cursor::position().map_err(|_| UtilsError::UserInputFailed)?;
     let terminal_size = terminal::size().map_err(|_| UtilsError::UserInputFailed)?;
-    let origin = resolve_filterable_prompt_origin(cursor_origin, terminal_size, prompt);
-    terminal::enable_raw_mode().map_err(|_| UtilsError::UserInputFailed)?;
-    stdout
-        .execute(Hide)
-        .map_err(|_| UtilsError::UserInputFailed)?;
+    let mut origin = resolve_filterable_prompt_origin(cursor_origin, terminal_size, prompt);
+    enable_raw_prompt(&mut stdout)?;
     let mut rendered_rows = 0usize;
 
     let result = (|| -> Result<Vec<usize>, CliError> {
@@ -145,6 +220,22 @@ fn run_filterable_multi_select(
                 continue;
             }
 
+            match handle_raw_prompt_control(
+                &mut stdout,
+                &key,
+                &mut origin,
+                &mut rendered_rows,
+                |cursor_origin, terminal_size| {
+                    resolve_filterable_prompt_origin(cursor_origin, terminal_size, prompt)
+                },
+            )? {
+                RawPromptControlResult::NotHandled => {}
+                RawPromptControlResult::ContinuePrompt => continue,
+                RawPromptControlResult::AbortPrompt => {
+                    break Err(UtilsError::UserInputFailed.into());
+                }
+            }
+
             match key.code {
                 KeyCode::Up => {
                     highlighted = highlighted.saturating_sub(1);
@@ -182,9 +273,7 @@ fn run_filterable_multi_select(
         }
     })();
 
-    let _ = clear_filterable_multi_select(&mut stdout, origin, rendered_rows);
-    let _ = stdout.execute(Show);
-    let _ = terminal::disable_raw_mode();
+    let _ = disable_raw_prompt(&mut stdout, origin, rendered_rows);
     result
 }
 
@@ -192,15 +281,12 @@ fn run_panel_select(prompt: &PanelSelectPrompt<'_>) -> Result<usize, CliError> {
     let mut stdout = stdout();
     let cursor_origin = cursor::position().map_err(|_| UtilsError::UserInputFailed)?;
     let terminal_size = terminal::size().map_err(|_| UtilsError::UserInputFailed)?;
-    let origin = resolve_panel_origin(
+    let mut origin = resolve_panel_origin(
         cursor_origin,
         terminal_size,
         preferred_panel_select_rows(prompt),
     );
-    terminal::enable_raw_mode().map_err(|_| UtilsError::UserInputFailed)?;
-    stdout
-        .execute(Hide)
-        .map_err(|_| UtilsError::UserInputFailed)?;
+    enable_raw_prompt(&mut stdout)?;
     let mut rendered_rows = 0usize;
 
     let result = (|| -> Result<usize, CliError> {
@@ -225,6 +311,26 @@ fn run_panel_select(prompt: &PanelSelectPrompt<'_>) -> Result<usize, CliError> {
                 continue;
             }
 
+            match handle_raw_prompt_control(
+                &mut stdout,
+                &key,
+                &mut origin,
+                &mut rendered_rows,
+                |cursor_origin, terminal_size| {
+                    resolve_panel_origin(
+                        cursor_origin,
+                        terminal_size,
+                        preferred_panel_select_rows(prompt),
+                    )
+                },
+            )? {
+                RawPromptControlResult::NotHandled => {}
+                RawPromptControlResult::ContinuePrompt => continue,
+                RawPromptControlResult::AbortPrompt => {
+                    break Err(UtilsError::UserInputFailed.into());
+                }
+            }
+
             match key.code {
                 KeyCode::Up => {
                     highlighted = highlighted.saturating_sub(1);
@@ -241,9 +347,7 @@ fn run_panel_select(prompt: &PanelSelectPrompt<'_>) -> Result<usize, CliError> {
         }
     })();
 
-    let _ = clear_filterable_multi_select(&mut stdout, origin, rendered_rows);
-    let _ = stdout.execute(Show);
-    let _ = terminal::disable_raw_mode();
+    let _ = disable_raw_prompt(&mut stdout, origin, rendered_rows);
     result
 }
 
@@ -705,7 +809,10 @@ fn resolve_panel_origin(
     let desired_rows = desired_rows.min(usize::from(terminal_size.1).max(1));
     let max_origin_y = usize::from(terminal_size.1).saturating_sub(desired_rows) as u16;
     let max_origin_x = usize::from(terminal_size.0).saturating_sub(panel_width) as u16;
-    (cursor_origin.0.min(max_origin_x), cursor_origin.1.min(max_origin_y))
+    (
+        cursor_origin.0.min(max_origin_x),
+        cursor_origin.1.min(max_origin_y),
+    )
 }
 
 fn resolve_panel_width(terminal_cols: usize) -> usize {
@@ -715,14 +822,22 @@ fn resolve_panel_width(terminal_cols: usize) -> usize {
 fn frame_panel_lines(tag: &str, lines: &[String], panel_width: usize) -> Vec<String> {
     let inner_width = panel_width.saturating_sub(4).max(1);
     let mut framed = Vec::with_capacity(lines.len() + 2);
-    framed.push(build_panel_top_border(tag, panel_width));
+    framed.push(format!(
+        "{}",
+        style::panel_border(build_panel_top_border(tag, panel_width))
+    ));
     for line in lines {
         framed.push(format!(
-            "│ {} │",
-            pad_line_to_width(&truncate_line_for_width(line, inner_width), inner_width)
+            "{} {} {}",
+            style::panel_border("│"),
+            pad_line_to_width(&truncate_line_for_width(line, inner_width), inner_width),
+            style::panel_border("│")
         ));
     }
-    framed.push(format!("╰{}╯", "─".repeat(panel_width.saturating_sub(2))));
+    framed.push(format!(
+        "{}",
+        style::panel_border(format!("╰{}╯", "─".repeat(panel_width.saturating_sub(2))))
+    ));
     framed
 }
 
@@ -799,11 +914,12 @@ fn summarize_selection(
 #[cfg(test)]
 pub mod test_terminal {
     use super::{
-        build_filterable_multi_select_lines, build_panel_select_lines,
-        resolve_filterable_prompt_origin, FilterableMultiSelectPrompt, FilterableSelectItem,
-        PanelSelectPrompt, Terminal,
+        build_filterable_multi_select_lines, build_panel_select_lines, control_action_for_key,
+        resolve_filterable_prompt_origin, RawPromptControl, Terminal,
     };
+    use crate::ui::{FilterableMultiSelectPrompt, FilterableSelectItem, PanelSelectPrompt};
     use crate::utils::{CliError, UtilsError};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use std::collections::BTreeSet;
 
     pub struct TestTerminal {
@@ -1010,5 +1126,21 @@ pub mod test_terminal {
             .any(|line| line.contains("Choose install scope")));
         assert!(lines.iter().any(|line| line.contains("Project")));
         assert!(lines.iter().all(|line| line.chars().count() <= 40));
+    }
+
+    #[test]
+    fn raw_prompt_control_keys_include_interrupt_and_suspend() {
+        assert_eq!(
+            control_action_for_key(&KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+            Some(RawPromptControl::Interrupt)
+        );
+        assert_eq!(
+            control_action_for_key(&KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL)),
+            Some(RawPromptControl::Suspend)
+        );
+        assert_eq!(
+            control_action_for_key(&KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE)),
+            None
+        );
     }
 }
