@@ -287,7 +287,9 @@ impl ChromaHttpClientOptions {
         Ok(ChromaHttpClientOptions {
             auth_method: ChromaAuthMethod::cloud_api_key(&api_key)?,
             endpoint: DEFAULT_CLOUD_ENDPOINT.parse().expect("valid URL"),
-            ..Default::default()
+            retry_options: ChromaRetryOptions::default(),
+            tenant_id: None,
+            database_name: None,
         })
     }
 
