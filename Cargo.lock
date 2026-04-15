@@ -1544,7 +1544,7 @@ dependencies = [
 
 [[package]]
 name = "chroma"
-version = "0.13.3"
+version = "0.14.0"
 dependencies = [
  "async-trait",
  "backon",
@@ -1556,7 +1556,7 @@ dependencies = [
  "futures-util",
  "httpmock",
  "murmur3",
- "opentelemetry 0.31.0",
+ "opentelemetry",
  "parking_lot",
  "reqwest 0.13.2",
  "rust-stemmers",
@@ -1571,7 +1571,7 @@ dependencies = [
 
 [[package]]
 name = "chroma-api-types"
-version = "0.13.3"
+version = "0.14.0"
 dependencies = [
  "serde",
  "utoipa",
@@ -1623,7 +1623,7 @@ dependencies = [
  "futures",
  "itertools 0.13.0",
  "num_cpus",
- "opentelemetry 0.27.1",
+ "opentelemetry",
  "parking_lot",
  "proptest",
  "proptest-state-machine",
@@ -1652,7 +1652,7 @@ dependencies = [
  "clap",
  "foyer",
  "mixtrics",
- "opentelemetry 0.27.1",
+ "opentelemetry",
  "parking_lot",
  "serde",
  "serde_yaml",
@@ -1733,7 +1733,7 @@ dependencies = [
 
 [[package]]
 name = "chroma-error"
-version = "0.13.3"
+version = "0.14.0"
 dependencies = [
  "http 1.4.0",
  "sqlx",
@@ -1783,7 +1783,7 @@ dependencies = [
  "lazy_static",
  "mdac",
  "ndarray 0.16.1",
- "opentelemetry 0.27.1",
+ "opentelemetry",
  "parking_lot",
  "proptest",
  "proptest-state-machine",
@@ -1837,7 +1837,7 @@ dependencies = [
  "hnswlib",
  "indicatif",
  "itertools 0.13.0",
- "opentelemetry 0.27.1",
+ "opentelemetry",
  "parking_lot",
  "parquet",
  "proptest",
@@ -1889,7 +1889,7 @@ dependencies = [
  "chroma-types",
  "futures",
  "hyper 1.8.1",
- "opentelemetry 0.27.1",
+ "opentelemetry",
  "proptest",
  "rand 0.8.5",
  "serde",
@@ -1925,7 +1925,7 @@ dependencies = [
  "gcloud-gax",
  "gcloud-googleapis",
  "gcloud-spanner",
- "opentelemetry 0.27.1",
+ "opentelemetry",
  "parking_lot",
  "parquet",
  "proptest",
@@ -1958,7 +1958,7 @@ dependencies = [
  "futures",
  "k8s-openapi",
  "kube",
- "opentelemetry 0.27.1",
+ "opentelemetry",
  "parking_lot",
  "schemars",
  "serde",
@@ -2021,7 +2021,7 @@ dependencies = [
  "faer",
  "fastbloom",
  "futures",
- "opentelemetry 0.27.1",
+ "opentelemetry",
  "proptest",
  "prost 0.14.3",
  "rand 0.8.5",
@@ -2080,7 +2080,7 @@ dependencies = [
  "chroma-types",
  "futures",
  "object_store",
- "opentelemetry 0.27.1",
+ "opentelemetry",
  "rand 0.8.5",
  "rand_xorshift 0.3.0",
  "serde",
@@ -2131,7 +2131,7 @@ dependencies = [
  "chroma-error",
  "futures",
  "libc",
- "opentelemetry 0.27.1",
+ "opentelemetry",
  "parking_lot",
  "rand 0.8.5",
  "serde",
@@ -2153,7 +2153,7 @@ dependencies = [
  "fastrace-opentelemetry",
  "futures",
  "http 1.4.0",
- "opentelemetry 0.27.1",
+ "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "rustls 0.23.37",
@@ -2171,7 +2171,7 @@ dependencies = [
 
 [[package]]
 name = "chroma-types"
-version = "0.13.3"
+version = "0.14.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -3457,7 +3457,7 @@ checksum = "beef82b9b66d159544235a372fd723b86a436f19ea8a28cb58f292951055d3a9"
 dependencies = [
  "fastrace",
  "log",
- "opentelemetry 0.27.1",
+ "opentelemetry",
  "opentelemetry_sdk",
  "pollster",
 ]
@@ -3886,7 +3886,7 @@ dependencies = [
  "humantime",
  "indicatif",
  "itertools 0.13.0",
- "opentelemetry 0.27.1",
+ "opentelemetry",
  "parking_lot",
  "petgraph",
  "proptest",
@@ -5816,7 +5816,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "749ed12bab176c8a42c13a679dd2de12876d5ad4abe7525548e31ae001a9ebbf"
 dependencies = [
  "itertools 0.14.0",
- "opentelemetry 0.27.1",
+ "opentelemetry",
  "parking_lot",
 ]
 
@@ -6416,20 +6416,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "opentelemetry"
-version = "0.31.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b84bcd6ae87133e903af7ef497404dda70c60d0ea14895fc8a5e6722754fc2a0"
-dependencies = [
- "futures-core",
- "futures-sink",
- "js-sys",
- "pin-project-lite",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
 name = "opentelemetry-http"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6438,7 +6424,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "http 1.4.0",
- "opentelemetry 0.27.1",
+ "opentelemetry",
 ]
 
 [[package]]
@@ -6450,7 +6436,7 @@ dependencies = [
  "async-trait",
  "futures-core",
  "http 1.4.0",
- "opentelemetry 0.27.1",
+ "opentelemetry",
  "opentelemetry-http",
  "opentelemetry-proto",
  "opentelemetry_sdk",
@@ -6467,7 +6453,7 @@ version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6e05acbfada5ec79023c85368af14abd0b307c015e9064d249b2a950ef459a6"
 dependencies = [
- "opentelemetry 0.27.1",
+ "opentelemetry",
  "opentelemetry_sdk",
  "prost 0.13.5",
  "tonic 0.12.3",
@@ -6484,7 +6470,7 @@ dependencies = [
  "futures-executor",
  "futures-util",
  "glob",
- "opentelemetry 0.27.1",
+ "opentelemetry",
  "percent-encoding",
  "rand 0.8.5",
  "serde_json",
@@ -7886,7 +7872,7 @@ dependencies = [
  "gcloud-gax",
  "gcloud-googleapis",
  "gcloud-spanner",
- "opentelemetry 0.27.1",
+ "opentelemetry",
  "prost-types",
  "reqwest 0.13.2",
  "serde",
@@ -10118,7 +10104,7 @@ checksum = "97a971f6058498b5c0f1affa23e7ea202057a7301dbff68e968b2d578bcbd053"
 dependencies = [
  "js-sys",
  "once_cell",
- "opentelemetry 0.27.1",
+ "opentelemetry",
  "opentelemetry_sdk",
  "smallvec",
  "tracing",
@@ -10542,7 +10528,7 @@ dependencies = [
  "gcloud-gax",
  "gcloud-spanner",
  "guacamole",
- "opentelemetry 0.27.1",
+ "opentelemetry",
  "parquet",
  "proptest",
  "prost-types",
@@ -11339,7 +11325,7 @@ dependencies = [
  "indicatif",
  "mdac",
  "num_cpus",
- "opentelemetry 0.27.1",
+ "opentelemetry",
  "parking_lot",
  "proptest",
  "proptest-state-machine",
