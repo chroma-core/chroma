@@ -108,40 +108,6 @@ fn display_run_message(config: &FrontendServerConfig, term: &mut dyn Terminal) {
     ));
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::terminal::test_terminal::TestTerminal;
-
-    #[test]
-    fn test_validate_host_available() {
-        // Port 0 asks the OS for any available port, but validate_host
-        // binds to a specific address:port. Use a high random port.
-        // We just verify the function returns a bool without panicking.
-        let result = validate_host(&"127.0.0.1".to_string(), 0);
-        assert!(result);
-    }
-
-    #[test]
-    fn test_validate_host_unavailable() {
-        // Bind a port, then check that validate_host returns false for it
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        assert!(!validate_host(&"127.0.0.1".to_string(), port));
-    }
-
-    #[test]
-    fn test_display_run_message() {
-        let config = FrontendServerConfig::single_node_default();
-        let mut term = TestTerminal::new();
-        display_run_message(&config, &mut term);
-
-        let output = term.output.join("\n");
-        assert!(output.contains("Connect to Chroma at"));
-        assert!(output.contains("Saving data to"));
-    }
-}
-
 pub fn run(args: RunArgs) -> Result<(), CliError> {
     let mut term = SystemTerminal;
 
@@ -175,4 +141,34 @@ pub fn run(args: RunArgs) -> Result<(), CliError> {
         frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), &config, true).await;
     });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::terminal::test_terminal::TestTerminal;
+
+    #[test]
+    fn test_validate_host_available() {
+        let result = validate_host(&"127.0.0.1".to_string(), 0);
+        assert!(result);
+    }
+
+    #[test]
+    fn test_validate_host_unavailable() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        assert!(!validate_host(&"127.0.0.1".to_string(), port));
+    }
+
+    #[test]
+    fn test_display_run_message() {
+        let config = FrontendServerConfig::single_node_default();
+        let mut term = TestTerminal::new();
+        display_run_message(&config, &mut term);
+
+        let output = term.output.join("\n");
+        assert!(output.contains("Connect to Chroma at"));
+        assert!(output.contains("Saving data to"));
+    }
 }

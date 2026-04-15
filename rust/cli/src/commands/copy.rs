@@ -327,6 +327,34 @@ async fn copy_collections(
     Ok(())
 }
 
+pub fn copy(args: CopyArgs) -> Result<(), CliError> {
+    let mut term = SystemTerminal;
+    let runtime = tokio::runtime::Runtime::new().map_err(|_| InstallError::RuntimeError)?;
+    runtime.block_on(async {
+        if !args.all && args.collections.is_empty() {
+            return Err(CopyError::NoCollections.into());
+        }
+
+        let store = FileConfigStore::default();
+        let (_, profile) = store.get_current_profile()?;
+        let (source, target) = get_target_and_destination(&args, &mut term)?;
+        let (source_client, target_client, _handle) =
+            get_chroma_clients(&args, source, target, profile, &mut term).await?;
+        copy_collections(
+            source_client,
+            target_client,
+            args.collections,
+            args.all,
+            args.batch,
+            args.concurrent,
+            &mut term,
+        )
+        .await?;
+        Ok::<(), CliError>(())
+    })?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -403,32 +431,4 @@ mod tests {
         assert!(matches!(source, Environment::Local));
         assert!(matches!(target, Environment::Cloud));
     }
-}
-
-pub fn copy(args: CopyArgs) -> Result<(), CliError> {
-    let mut term = SystemTerminal;
-    let runtime = tokio::runtime::Runtime::new().map_err(|_| InstallError::RuntimeError)?;
-    runtime.block_on(async {
-        if !args.all && args.collections.is_empty() {
-            return Err(CopyError::NoCollections.into());
-        }
-
-        let store = FileConfigStore::default();
-        let (_, profile) = store.get_current_profile()?;
-        let (source, target) = get_target_and_destination(&args, &mut term)?;
-        let (source_client, target_client, _handle) =
-            get_chroma_clients(&args, source, target, profile, &mut term).await?;
-        copy_collections(
-            source_client,
-            target_client,
-            args.collections,
-            args.all,
-            args.batch,
-            args.concurrent,
-            &mut term,
-        )
-        .await?;
-        Ok::<(), CliError>(())
-    })?;
-    Ok(())
 }
