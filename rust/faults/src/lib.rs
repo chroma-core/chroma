@@ -246,7 +246,18 @@ impl FaultInjectionService for FaultRegistry {
     ) -> Result<Response<ClearFaultsResponse>, Status> {
         let request = request.into_inner();
         let fault_id: Option<FaultId> = request.id.as_deref().map(TryInto::try_into).transpose()?;
-        let cleared_count = self.clear_id(fault_id.as_ref());
+        let selector: Option<FaultSelectorKind> =
+            request.selector.map(TryInto::try_into).transpose()?;
+        let cleared_count = match (fault_id, selector) {
+            (Some(_), Some(_)) => {
+                return Err(invalid_argument(
+                    "clear_faults requires exactly one of id or selector, not both",
+                ));
+            }
+            (Some(id), None) => self.clear_id(Some(&id)),
+            (None, Some(ref sel)) => self.clear_selector(sel),
+            (None, None) => self.clear_all(),
+        };
         Ok(Response::new(ClearFaultsResponse {
             cleared_count: cleared_count as u64,
         }))
@@ -431,7 +442,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn clear_without_id_clears_all_faults() {
+    async fn clear_by_selector_removes_only_matching_faults() {
         let registry = FaultRegistry::new();
         registry.inject(
             FaultSelectorKind::Label("keep".to_string()),
@@ -455,8 +466,40 @@ mod tests {
             .expect("clear should succeed")
             .into_inner();
 
-        assert_eq!(response.cleared_count, 3);
-        assert!(registry.list().is_empty());
+        assert_eq!(
+            response.cleared_count, 2,
+            "only faults matching selector 'drop' should be cleared"
+        );
+        let remaining = registry.list();
+        assert_eq!(remaining.len(), 1, "the 'keep' fault should remain");
+        assert_eq!(
+            remaining[0].selector,
+            FaultSelectorKind::Label("keep".to_string())
+        );
+        println!("clear_by_selector_removes_only_matching_faults: remaining={remaining:?}");
+    }
+
+    #[tokio::test]
+    async fn clear_with_both_id_and_selector_returns_invalid_argument() {
+        let registry = FaultRegistry::new();
+        let inject_response = registry
+            .inject_faults(Request::new(InjectFaultsRequest {
+                selector: Some(label_selector("ambiguous")),
+                action: Some(unavailable_action()),
+            }))
+            .await
+            .expect("inject should succeed")
+            .into_inner();
+
+        let err = registry
+            .clear_faults(Request::new(ClearFaultsRequest {
+                selector: Some(label_selector("ambiguous")),
+                id: Some(inject_response.id),
+            }))
+            .await
+            .expect_err("clear should fail when both id and selector are set");
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        println!("clear_with_both_id_and_selector_returns_invalid_argument: error={err}");
     }
 
     #[tokio::test]
