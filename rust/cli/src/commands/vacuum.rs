@@ -1,3 +1,4 @@
+use crate::style;
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::utils::CliError;
 use chroma_config::registry::Registry;
@@ -247,9 +248,7 @@ pub fn vacuum(args: VacuumArgs) -> Result<(), CliError> {
         false => {
             term.println(&format!(
                 "{}",
-                "Are you sure you want to vacuum the database?"
-                    .bold()
-                    .blue()
+                style::accent_bold("Are you sure you want to vacuum the database?")
             ));
             term.prompt_confirm("This will block both reads and writes to the database and may take a while. We recommend shutting down the server before running this command. Continue?")?
         }
@@ -258,7 +257,7 @@ pub fn vacuum(args: VacuumArgs) -> Result<(), CliError> {
     term.println("");
 
     if !proceed {
-        term.println(&format!("{}", "Vacuum cancelled\n".red()));
+        term.println(&format!("{}", style::error("Vacuum cancelled\n")));
         return Ok(());
     }
 
@@ -292,13 +291,11 @@ pub fn vacuum(args: VacuumArgs) -> Result<(), CliError> {
 
     let size_diff = initial_size - post_vacuum_size;
 
-    term.println(&format!("🧼 {}", "Vacuum complete!".green().bold()));
+    term.println(&format!("🧼 {}", style::success_bold("Vacuum complete!")));
     term.println(&format!(
         "Database size reduced by {} (⬇️{:.1}%)",
-        sizeof_fmt(size_diff, None).to_string().green(),
-        (((size_diff as f64) / (initial_size as f64)) * 100.0)
-            .to_string()
-            .green()
+        style::success(sizeof_fmt(size_diff, None)),
+        style::success((((size_diff as f64) / (initial_size as f64)) * 100.0).to_string())
     ));
 
     Ok(())
