@@ -380,10 +380,7 @@ mod tests {
 
     #[test]
     fn test_filter_team_found() {
-        let teams = vec![
-            make_team("id-1", "A", "a"),
-            make_team("id-2", "B", "b"),
-        ];
+        let teams = vec![make_team("id-1", "A", "a"), make_team("id-2", "B", "b")];
         let team = filter_team("id-2", teams).unwrap();
         assert_eq!(team.name, "B");
     }
@@ -460,18 +457,13 @@ mod tests {
 
             let saved = store.read_profiles().unwrap();
             assert!(saved.contains_key("test-profile"));
-            assert_eq!(
-                store.read_config().unwrap().current_profile,
-                "test-profile"
-            );
+            assert_eq!(store.read_config().unwrap().current_profile, "test-profile");
         }
 
         #[tokio::test]
         async fn test_headless_login_profile_already_exists() {
-            let store = InMemoryConfigStore::new(
-                make_profiles(&["existing"]),
-                make_config("existing"),
-            );
+            let store =
+                InMemoryConfigStore::new(make_profiles(&["existing"]), make_config("existing"));
 
             // headless_login checks for profile name collision before making API calls
             let profiles = store.read_profiles().unwrap();
@@ -509,18 +501,13 @@ mod tests {
                 store.write_config(&config).unwrap();
             }
 
-            assert_eq!(
-                store.read_config().unwrap().current_profile,
-                "new-profile"
-            );
+            assert_eq!(store.read_config().unwrap().current_profile, "new-profile");
         }
 
         #[tokio::test]
         async fn test_headless_login_doesnt_set_current_when_not_first() {
-            let store = InMemoryConfigStore::new(
-                make_profiles(&["existing"]),
-                make_config("existing"),
-            );
+            let store =
+                InMemoryConfigStore::new(make_profiles(&["existing"]), make_config("existing"));
 
             let profiles = store.read_profiles().unwrap();
             let set_current = profiles.is_empty();
@@ -534,10 +521,7 @@ mod tests {
             store.write_profiles(&profiles).unwrap();
 
             // current_profile should remain "existing"
-            assert_eq!(
-                store.read_config().unwrap().current_profile,
-                "existing"
-            );
+            assert_eq!(store.read_config().unwrap().current_profile, "existing");
         }
     }
 }
