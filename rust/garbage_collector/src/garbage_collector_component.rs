@@ -1472,8 +1472,6 @@ mod tests {
             log: LogConfig::Grpc(GrpcLogConfig::default()),
             enable_dangerous_option_to_ignore_min_versions_for_wal3: false,
             max_concurrent_list_files_operations_per_collection: 10,
-            heap_prune_buckets_to_read: 10,
-            heap_prune_max_items: 10000,
             max_attached_functions_to_gc_per_run: 100,
         };
         let registry = Registry::new();
