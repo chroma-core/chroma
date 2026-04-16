@@ -478,7 +478,7 @@ export type RawWhereFields = {
     where_document?: unknown;
 };
 
-export type ReadLevel = 'index_and_wal' | 'index_only';
+export type ReadLevel = 'index_and_wal' | 'index_only' | 'index_and_bounded_wal';
 
 /**
  * Schema representation for collection index configurations

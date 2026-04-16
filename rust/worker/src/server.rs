@@ -74,6 +74,7 @@ pub struct WorkerServer {
     // config
     fetch_log_batch_size: u32,
     fetch_log_concurrency: usize,
+    bounded_wal_limit: u32,
     use_fragment_fetch: bool,
     fragment_fetcher: Option<Arc<FragmentFetcher>>,
     collections_for_fragment_fetch: HashSet<CollectionUuid>,
@@ -158,6 +159,7 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
             jemalloc_pprof_server_port: config.jemalloc_pprof_server_port,
             fetch_log_batch_size: config.fetch_log_batch_size,
             fetch_log_concurrency: config.fetch_log_concurrency,
+            bounded_wal_limit: config.bounded_wal_limit,
             use_fragment_fetch: config.use_fragment_fetch,
             fragment_fetcher,
             collections_for_fragment_fetch,
@@ -333,6 +335,7 @@ impl WorkerServer {
             collection_and_segments,
             fetch_log,
             read_level,
+            self.bounded_wal_limit,
             self.bloom_filter_manager_for_collection(collection_id),
             scan.shard_index,
             scan.num_shards,
@@ -473,6 +476,7 @@ impl WorkerServer {
             fetch_log,
             filter.try_into()?,
             ReadLevel::IndexAndWal, // Full consistency for KNN queries
+            self.bounded_wal_limit,
             bloom_filter_manager.clone(),
             scan.shard_index,
             scan.num_shards,
@@ -670,6 +674,7 @@ impl WorkerServer {
             fetch_log,
             search_payload.filter.clone(),
             read_level, // Use the specified read level
+            self.bounded_wal_limit,
             bloom_filter_manager.clone(),
             scan.shard_index,
             scan.num_shards,
@@ -935,6 +940,7 @@ mod tests {
             jemalloc_pprof_server_port: None,
             fetch_log_batch_size: 100,
             fetch_log_concurrency: 10,
+            bounded_wal_limit: 250,
             use_fragment_fetch: false,
             fragment_fetcher: None,
             collections_for_fragment_fetch: HashSet::new(),
@@ -1074,6 +1080,21 @@ mod tests {
         let request = chroma_proto::CountPlan {
             scan: Some(scan_operator),
             read_level: chroma_proto::ReadLevel::IndexOnly as i32,
+        };
+
+        let response = executor.count(request).await;
+        assert!(response.is_ok());
+    }
+
+    #[tokio::test]
+    async fn count_accepts_read_level_index_and_bounded_wal() {
+        let mut executor = QueryExecutorClient::connect(run_server().await)
+            .await
+            .unwrap();
+        let scan_operator = scan();
+        let request = chroma_proto::CountPlan {
+            scan: Some(scan_operator),
+            read_level: chroma_proto::ReadLevel::IndexAndBoundedWal as i32,
         };
 
         let response = executor.count(request).await;
@@ -1392,6 +1413,19 @@ mod tests {
         let scan_operator = scan();
         let mut request = gen_search_request(scan_operator);
         request.read_level = chroma_proto::ReadLevel::IndexOnly as i32;
+
+        let response = executor.search(request).await;
+        assert!(response.is_ok());
+    }
+
+    #[tokio::test]
+    async fn search_accepts_read_level_index_and_bounded_wal() {
+        let mut executor = QueryExecutorClient::connect(run_server().await)
+            .await
+            .unwrap();
+        let scan_operator = scan();
+        let mut request = gen_search_request(scan_operator);
+        request.read_level = chroma_proto::ReadLevel::IndexAndBoundedWal as i32;
 
         let response = executor.search(request).await;
         assert!(response.is_ok());
