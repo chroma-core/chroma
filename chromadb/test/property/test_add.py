@@ -200,7 +200,7 @@ def _test_add(
         not NOT_CLUSTER_ONLY
         and always_compact
         and not has_waited_for_compaction
-        and len(normalized_record_set["ids"]) > min_records_between_compaction_waits
+        and len(normalized_record_set["ids"]) > MIN_RECORDS_BETWEEN_COMPACTION_WAITS
     ):
         print('final wait for compaction')
         current_version = wait_for_version_increase(
