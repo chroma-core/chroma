@@ -1243,7 +1243,7 @@ mod tests {
                 .await
                 .unwrap_err();
             match err {
-                ChromaHttpClientError::ApiError(_, status) => {
+                ChromaHttpClientError::ApiError { status, .. } => {
                     assert_eq!(status, StatusCode::NOT_FOUND);
                 }
                 _ => panic!("Expected ApiError for non-existent collection ID"),
