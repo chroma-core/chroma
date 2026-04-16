@@ -1031,7 +1031,7 @@ mod tests {
     use chroma_log::test::{
         add_delete_net_zero_generator, upsert_generator, TEST_EMBEDDING_DIMENSION,
     };
-    use chroma_types::{DatabaseName, SegmentScope};
+    use chroma_types::{DatabaseName, SegmentScope, SegmentType};
     use std::collections::{HashMap, HashSet};
 
     use crate::{
@@ -3593,6 +3593,209 @@ mod tests {
         )
         .await;
         assert_eq!(old_records, new_records);
+    }
+
+    #[tokio::test]
+    async fn test_seal_with_sharding() {
+        let config = RootConfig::default();
+        let system = System::default();
+        let registry = Registry::new();
+        let dispatcher = Dispatcher::try_from_config(&config.query_service.dispatcher, &registry)
+            .await
+            .expect("Should be able to initialize dispatcher");
+        let dispatcher_handle = system.start_component(dispatcher);
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+
+        // Create test segments with SPANN configuration (dimension 6 for add_delete_generator)
+        let mut test_segments = TestDistributedSegment::new_with_dimension(6).await;
+
+        // Configure collection for SPANN
+        test_segments.collection.config =
+            chroma_types::InternalCollectionConfiguration::default_spann();
+        test_segments.collection.schema = Some(
+            chroma_types::Schema::try_from(&test_segments.collection.config)
+                .expect("Should be able to create schema from config"),
+        );
+
+        // Change vector segment to SPANN type
+        test_segments.vector_segment.r#type = SegmentType::Spann;
+
+        let collection_id = test_segments.collection.collection_id;
+        let database_name =
+            chroma_types::DatabaseName::new(test_segments.collection.database.clone())
+                .expect("database name should be valid");
+
+        // Create collection with SPANN configuration
+        sysdb
+            .create_collection(
+                test_segments.collection.tenant.clone(),
+                database_name.clone(),
+                collection_id,
+                test_segments.collection.name.clone(),
+                vec![
+                    test_segments.record_segment.clone(),
+                    test_segments.metadata_segment.clone(),
+                    test_segments.vector_segment.clone(),
+                ],
+                Some(test_segments.collection.config.clone()),
+                Some(test_segments.collection.schema.clone().unwrap()),
+                None,
+                Some(6),
+                false,
+            )
+            .await
+            .expect("Collection create should be successful");
+
+        let mut in_memory_log = InMemoryLog::new();
+        let mut log_offset = 0i64;
+
+        // Insert records in two batches and compact after each to create 2 shards
+        for batch_num in 0..2 {
+            let start = batch_num * 120;
+            let end = (batch_num + 1) * 120;
+            let batch_logs: Vec<_> = add_delete_generator.generate_vec(start..=end);
+
+            batch_logs.into_iter().for_each(|log| {
+                in_memory_log.add_log(
+                    collection_id,
+                    InternalLogRecord {
+                        collection_id,
+                        log_offset,
+                        log_ts: log_offset + 1,
+                        record: log,
+                    },
+                );
+                log_offset += 1;
+            });
+
+            // Compact after each batch to create one shard at a time
+            let compact_result = Box::pin(compact(
+                system.clone(),
+                collection_id,
+                database_name.clone(),
+                false,          // No rebuild
+                HashSet::new(), // No segment scopes
+                1,              // fetch_log_batch_size
+                10,             // fetch_log_concurrency
+                1000,           // max_compaction_size - reduced to below shard size
+                10,             // max_partition_size
+                Log::InMemory(in_memory_log.clone()),
+                sysdb.clone(),
+                test_segments.blockfile_provider.clone(),
+                test_segments.hnsw_provider.clone(),
+                test_segments.spann_provider.clone(),
+                dispatcher_handle.clone(),
+                false,
+                None,
+                None,
+                Some(150), // Shard size 50 to create 1 shard per batch
+                None,
+            ))
+            .await;
+            assert!(
+                compact_result.is_ok(),
+                "Compaction batch {} failed: {:?}",
+                batch_num,
+                compact_result.err()
+            );
+        }
+
+        let collection = sysdb
+            .get_collection_with_segments(None, collection_id)
+            .await
+            .expect("Should get collection with segments");
+
+        let mut shard_offset_ids: Vec<Vec<u32>> = Vec::new();
+        let mut max_shard_offset_ids: Vec<u32> = Vec::new();
+        for shard in collection
+            .record_segment
+            .get_shards()
+            .expect("Should get shards")
+        {
+            let shard_reader = Box::pin(RecordSegmentReaderShard::from_segment(
+                &shard,
+                &test_segments.blockfile_provider,
+                None,
+            ))
+            .await
+            .expect("Should create shard reader");
+            let offset_stream = shard_reader.get_offset_stream(..);
+            let offset_ids: Vec<u32> = offset_stream
+                .try_collect()
+                .await
+                .expect("Should collect offset ids");
+            shard_offset_ids.push(offset_ids);
+
+            let max_offset_id = shard_reader.get_max_offset_id();
+            max_shard_offset_ids.push(max_offset_id);
+        }
+
+        println!("offset ids: {:?}", shard_offset_ids);
+        println!("max offset ids: {:?}", max_shard_offset_ids);
+
+        assert_eq!(max_shard_offset_ids, vec![190, 10]);
+
+        // Two batches of 121 logs each under add_delete_generator = 242 log entries:
+        //   - 200 add ops (offsets not divisible by 6) producing ids id_1..id_200
+        //   - 42 delete ops (offsets divisible by 6) targeting id_0..id_40, of which 2 are
+        //     no-ops: id_0 is never added, and id_20 is deleted once per batch (offset 120
+        //     appears in both ranges).
+        // Net: 200 adds - 40 effective deletes = 160 live records.
+        // With shard_size = 150, seal must cap the first (existing) shard at exactly 150 and
+        // spill the remaining 10 into a new shard.
+        const SHARD_SIZE: usize = 150;
+        const EXPECTED_TOTAL_LIVE_RECORDS: usize = 160;
+        const EXPECTED_SPILLOVER: usize = EXPECTED_TOTAL_LIVE_RECORDS - SHARD_SIZE;
+
+        assert_eq!(
+            shard_offset_ids.len(),
+            2,
+            "Expected exactly 2 shards after seal; got {}",
+            shard_offset_ids.len()
+        );
+
+        assert_eq!(
+            shard_offset_ids[0].len(),
+            SHARD_SIZE,
+            "Active shard should be capped at shard_size = {SHARD_SIZE}; got {}",
+            shard_offset_ids[0].len()
+        );
+
+        assert_eq!(
+            shard_offset_ids[1].len(),
+            EXPECTED_SPILLOVER,
+            "New shard should contain the spillover of {EXPECTED_SPILLOVER} records; got {}",
+            shard_offset_ids[1].len()
+        );
+
+        let total_live: usize = shard_offset_ids.iter().map(|s| s.len()).sum();
+        assert_eq!(
+            total_live, EXPECTED_TOTAL_LIVE_RECORDS,
+            "Total live records across shards should be {EXPECTED_TOTAL_LIVE_RECORDS}; got {total_live}",
+        );
+
+        for (idx, offsets) in shard_offset_ids.iter().enumerate() {
+            assert!(
+                offsets.len() <= SHARD_SIZE,
+                "Shard {idx} exceeds shard_size cap: {} > {SHARD_SIZE}",
+                offsets.len()
+            );
+            assert!(
+                offsets.windows(2).all(|w| w[0] < w[1]),
+                "Shard {idx} offset ids are not strictly increasing"
+            );
+        }
+
+        // Every offset_id in the new (spillover) shard must be strictly greater than all
+        // offsets that stayed in the active shard in their ORIGINAL (pre-renumbering) space.
+        // Post-split, the new shard renumbers offsets starting from 1, so here we only
+        // assert the new shard's renumbered ids form a contiguous [1, EXPECTED_SPILLOVER]
+        // range as a sanity check.
+        assert_eq!(
+            shard_offset_ids[1],
+            (1u32..=EXPECTED_SPILLOVER as u32).collect::<Vec<_>>(),
+            "New shard should have contiguous renumbered offset ids starting from 1"
+        );
     }
 
     /// Test that rebuilding a collection also rebuilds its attached function's output collection.

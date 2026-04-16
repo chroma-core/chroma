@@ -572,10 +572,14 @@ impl PartitionedMaterializeLogsResult {
         self.shards.iter().any(|s| s.has_backfill())
     }
 
-    pub fn split(&self, pivot_offset_id: u32) -> Option<PartitionedMaterializeLogsResult> {
+    pub fn split(
+        &self,
+        pivot_offset_id: u32,
+        next_new_offset_id: Option<&AtomicU32>,
+    ) -> Option<PartitionedMaterializeLogsResult> {
         let mut new_partitioned = self.clone();
         let active_shard = new_partitioned.shards.last_mut()?;
-        let new_active_shard = active_shard.split(pivot_offset_id);
+        let new_active_shard = active_shard.split(pivot_offset_id, next_new_offset_id);
         new_partitioned.shards.push(new_active_shard);
         Some(new_partitioned)
     }
@@ -631,7 +635,11 @@ impl MaterializeLogsResult {
         }
     }
 
-    pub fn split(&mut self, pivot_offset_id: u32) -> MaterializeLogsResult {
+    pub fn split(
+        &mut self,
+        pivot_offset_id: u32,
+        next_new_offset_id: Option<&AtomicU32>,
+    ) -> MaterializeLogsResult {
         let mut other_mat_logs = self.clone();
         let mut old_visibility = vec![false; self.materialized.total_len()];
         let mut new_visibility = old_visibility.clone();
@@ -653,11 +661,27 @@ impl MaterializeLogsResult {
         self.materialized.set_visibility(old_visibility);
 
         other_mat_logs.materialized.set_visibility(new_visibility);
+
+        match next_new_offset_id {
+            Some(counter) => {
+                for record in other_mat_logs.iter() {
+                    let id = counter.fetch_add(1, Ordering::SeqCst);
+                    record.set_offset_id(id);
+                }
+            }
+            None => {
+                let mut new_offset_id = 1u32;
+                for record in other_mat_logs.iter() {
+                    record.set_offset_id(new_offset_id);
+                    new_offset_id += 1;
+                }
+            }
+        }
+
         other_mat_logs
     }
 }
 
-// IntoIterator is implemented for &'a MaterializeLogsResult rather than MaterializeLogsResult because the iterator needs to hand out values with a lifetime of 'a.
 impl<'log_data> IntoIterator for &'log_data MaterializeLogsResult {
     type Item = BorrowedMaterializedLogRecord<'log_data>;
     type IntoIter = MaterializeLogsResultIter<'log_data>;

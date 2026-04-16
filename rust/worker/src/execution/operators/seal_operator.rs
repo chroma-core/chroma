@@ -1,13 +1,19 @@
-use crate::execution::orchestration::compact::CreateNewShardError;
+use std::collections::BinaryHeap;
+use std::sync::atomic::AtomicU32;
+
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
 use chroma_segment::{
-    bloom_filter::BloomFilterManager, spann_provider::SpannProvider,
-    types::PartitionedMaterializeLogsResult,
+    bloom_filter::BloomFilterManager,
+    spann_provider::SpannProvider,
+    types::{MaterializeLogsResultIter, PartitionedMaterializeLogsResult},
 };
 use chroma_system::Operator;
+use chroma_types::MaterializedLogOperation;
 use thiserror::Error;
+
+use crate::execution::orchestration::compact::CreateNewShardError;
 
 #[derive(Error, Debug)]
 pub enum SealOperatorError {
@@ -27,6 +33,36 @@ impl ChromaError for SealOperatorError {
             }
             _ => chroma_error::ErrorCodes::Internal,
         }
+    }
+}
+
+struct PartitionCursor<'a> {
+    offset_id: u32,
+    partition_idx: usize,
+    iter: MaterializeLogsResultIter<'a>,
+}
+
+impl PartialEq for PartitionCursor<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.offset_id == other.offset_id && self.partition_idx == other.partition_idx
+    }
+}
+
+impl Eq for PartitionCursor<'_> {}
+
+impl PartialOrd for PartitionCursor<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PartitionCursor<'_> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // Reversed for min-heap: smallest offset_id has highest priority
+        other
+            .offset_id
+            .cmp(&self.offset_id)
+            .then_with(|| other.partition_idx.cmp(&self.partition_idx))
     }
 }
 
@@ -136,9 +172,6 @@ impl Operator<SealInput, SealOutput> for SealOperator {
             });
         }
 
-        // TODO(tanujnay112): Change this to actually calculate a good pivot to move
-        let min_offset_to_move = 0;
-
         tracing::info!(
             "Active shard overflow detected: {} + {} > {} with {} excess records. Creating new active shard",
             active_shard_record_count,
@@ -157,8 +190,11 @@ impl Operator<SealInput, SealOutput> for SealOperator {
             )
             .await?;
 
-        let new_shard_outputs =
-            split_materialized_outputs(&input.materialized_outputs, min_offset_to_move)?;
+        // Use count-based split to move exactly the excess records to the new shard
+        let new_shard_outputs = split_materialized_outputs_by_count(
+            &input.materialized_outputs,
+            excess_record_count as usize,
+        )?;
 
         Ok(SealOutput {
             sealed_writers,
@@ -167,18 +203,112 @@ impl Operator<SealInput, SealOutput> for SealOperator {
     }
 }
 
+fn split_materialized_outputs_by_count(
+    outputs: &[PartitionedMaterializeLogsResult],
+    count_to_move: usize,
+) -> Result<Vec<PartitionedMaterializeLogsResult>, SealOperatorError> {
+    // MaterializeLogsResult::split moves AddNew records with offset_id >= pivot to the new
+    // shard. Since AddNew records are assigned monotonically increasing offset_ids, the HIGHEST
+    // offsets move and the lowest stay. To move exactly `count_to_move` records, we therefore
+    // need to identify the pivot as the offset_id of the first AddNew record that should move,
+    // i.e. skip the `count_to_stay` lowest-offset AddNew records, then pivot on the next.
+    //
+    // Algorithm:
+    // 1. Count total AddNew records across all partitions' active shards.
+    // 2. count_to_stay = total_add_new - count_to_move (clamped to 0).
+    // 3. Initialize PQ with first AddNew from each partition, pop `count_to_stay` records
+    //    (smallest offset_ids), and set pivot = next AddNew offset_id.
+
+    let total_add_new: usize = outputs
+        .iter()
+        .filter_map(|p| p.shards.last())
+        .map(|shard| {
+            shard
+                .iter()
+                .filter(|r| r.get_operation() == MaterializedLogOperation::AddNew)
+                .count()
+        })
+        .sum();
+
+    let count_to_stay = total_add_new.saturating_sub(count_to_move);
+
+    let mut pq = BinaryHeap::new();
+
+    for (partition_idx, partition) in outputs.iter().enumerate() {
+        if let Some(active_shard) = partition.shards.last() {
+            let mut iter = active_shard.iter();
+            if let Some(first_record) = next_add_new(&mut iter) {
+                pq.push(PartitionCursor {
+                    offset_id: first_record.get_offset_id(),
+                    partition_idx,
+                    iter,
+                });
+            }
+        }
+    }
+
+    if pq.is_empty() {
+        return Err(SealOperatorError::InvariantViolation(format!(
+            "No movable records in active shards, but count_to_move = {count_to_move}",
+        )));
+    }
+
+    if count_to_stay == 0 {
+        let pivot = pq.peek().map(|c| c.offset_id).unwrap_or(u32::MAX);
+        return split_materialized_outputs(outputs, pivot);
+    }
+
+    let mut records_processed = 0;
+
+    let pivot_offset_id = loop {
+        let Some(mut cursor) = pq.pop() else {
+            return Err(SealOperatorError::InvariantViolation(format!(
+                "Exhausted all records after {records_processed} but needed to keep {count_to_stay}",
+            )));
+        };
+
+        records_processed += 1;
+
+        if records_processed == count_to_stay {
+            let next_from_same = next_add_new(&mut cursor.iter).map(|r| r.get_offset_id());
+            let next_from_pq = pq.peek().map(|c| c.offset_id);
+            break next_from_same
+                .into_iter()
+                .chain(next_from_pq)
+                .min()
+                .unwrap_or(u32::MAX);
+        }
+
+        if let Some(next_record) = next_add_new(&mut cursor.iter) {
+            cursor.offset_id = next_record.get_offset_id();
+            pq.push(cursor);
+        }
+    };
+
+    split_materialized_outputs(outputs, pivot_offset_id)
+}
+
+fn next_add_new<'a>(
+    iter: &mut MaterializeLogsResultIter<'a>,
+) -> Option<chroma_segment::types::BorrowedMaterializedLogRecord<'a>> {
+    iter.find(|r| r.get_operation() == MaterializedLogOperation::AddNew)
+}
+
 fn split_materialized_outputs(
     outputs: &[PartitionedMaterializeLogsResult],
     pivot_offset_id: u32,
 ) -> Result<Vec<PartitionedMaterializeLogsResult>, SealOperatorError> {
     let mut new_shard_results = Vec::new();
+    let next_new_offset_id = AtomicU32::new(1);
 
     for output_partition in outputs {
-        let new_partition = output_partition.split(pivot_offset_id).ok_or_else(|| {
-            SealOperatorError::InvariantViolation(
-                "Failed to split partition: no shards found".to_string(),
-            )
-        })?;
+        let new_partition = output_partition
+            .split(pivot_offset_id, Some(&next_new_offset_id))
+            .ok_or_else(|| {
+                SealOperatorError::InvariantViolation(
+                    "Failed to split partition: no shards found".to_string(),
+                )
+            })?;
         new_shard_results.push(new_partition);
     }
 
