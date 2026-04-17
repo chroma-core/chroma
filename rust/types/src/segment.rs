@@ -127,9 +127,6 @@ impl Segment {
     // INVARIANT: THIS ALWAYS RETURNS AT LEAST ONE SHARD
     pub fn get_shards(&self) -> Result<Vec<SegmentShard>, SegmentShardError> {
         let num_shards = self.num_shards()?;
-        if self.file_path.is_empty() {
-            return Ok(vec![self.new_shard()]);
-        }
 
         // Create a SegmentShard for each shard index, propagating any errors
         let shards: Result<Vec<SegmentShard>, SegmentShardError> = (0..num_shards)
@@ -312,6 +309,8 @@ impl TryFrom<(&Segment, u32)> for SegmentShard {
 
     fn try_from((segment, shard_index): (&Segment, u32)) -> Result<Self, Self::Error> {
         let mut file_path = HashMap::new();
+        // If there are no shards in the filepaths this for loop won't
+        // run and this function will return an empty SegmentShard.
         for (key, paths) in &segment.file_path {
             match paths.get(shard_index as usize) {
                 Some(path) => {
