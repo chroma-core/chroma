@@ -157,7 +157,7 @@ jobs:
           - test-glob: "chromadb/test/api"
           - test-glob: "chromadb/test/property/test_collections_with_database_tenant.py"
           - test-glob: "chromadb/test/property/test_collections_with_database_tenant_overwrite.py"
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: blacksmith-16vcpu-ubuntu-2404
     # OIDC token auth for AWS
     permissions:
       contents: read
