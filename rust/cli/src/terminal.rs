@@ -397,6 +397,7 @@ fn render_panel_select(
     Ok(lines.len())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_filterable_multi_select(
     stdout: &mut std::io::Stdout,
     origin: (u16, u16),
@@ -816,7 +817,7 @@ fn resolve_panel_origin(
 }
 
 fn resolve_panel_width(terminal_cols: usize) -> usize {
-    terminal_cols.min(PANEL_MAX_WIDTH).max(4)
+    terminal_cols.clamp(4, PANEL_MAX_WIDTH)
 }
 
 fn frame_panel_lines(tag: &str, lines: &[String], panel_width: usize) -> Vec<String> {
