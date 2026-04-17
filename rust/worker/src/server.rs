@@ -34,9 +34,9 @@ use crate::{
         operators::{fetch_log::FetchLogOperator, fragment_fetch::FragmentFetcher},
         orchestration::{
             count::CountOrchestrator,
+            filter::FilterOrchestrator,
             get::GetOrchestrator,
             knn::KnnOrchestrator,
-            knn_filter::KnnFilterOrchestrator,
             projection::ProjectionOrchestrator,
             quantized_spann_knn::QuantizedSpannKnnOrchestrator,
             rank::{RankOrchestrator, RankOrchestratorOutput},
@@ -466,7 +466,7 @@ impl WorkerServer {
 
         let bloom_filter_manager = self.bloom_filter_manager_for_collection(collection_id);
         let vector_segment_type = collection_and_segments.vector_segment.r#type;
-        let knn_filter_orchestrator = KnnFilterOrchestrator::new(
+        let filter_orchestrator = FilterOrchestrator::new(
             self.blockfile_provider.clone(),
             dispatcher.clone(),
             self.hnsw_index_provider.clone(),
@@ -482,7 +482,7 @@ impl WorkerServer {
             scan.num_shards,
         );
 
-        let matching_records = match knn_filter_orchestrator.run(system.clone()).await {
+        let matching_records = match filter_orchestrator.run(system.clone()).await {
             Ok(output) => output,
             Err(e) => {
                 return Err(Status::new(e.code().into(), e.to_string()));
@@ -642,7 +642,7 @@ impl WorkerServer {
         }
     }
 
-    async fn orchestrate_search(
+    async fn orchestrate_search_payload(
         &self,
         scan: chroma_proto::ScanOperator,
         payload: chroma_proto::SearchPayload,
@@ -665,7 +665,7 @@ impl WorkerServer {
         }
 
         let bloom_filter_manager = self.bloom_filter_manager_for_collection(collection_id);
-        let knn_filter_orchestrator = KnnFilterOrchestrator::new(
+        let filter_orchestrator = FilterOrchestrator::new(
             self.blockfile_provider.clone(),
             self.clone_dispatcher()?,
             self.hnsw_index_provider.clone(),
@@ -680,7 +680,7 @@ impl WorkerServer {
             scan.num_shards,
         );
 
-        let knn_filter_output = match knn_filter_orchestrator.run(self.system.clone()).await {
+        let filter_orchestrator_output = match filter_orchestrator.run(self.system.clone()).await {
             Ok(output) => output,
             Err(e) => {
                 return Err(Status::new(e.code().into(), e.to_string()));
@@ -691,7 +691,7 @@ impl WorkerServer {
         let mut knn_futures = Vec::with_capacity(knn_queries.len());
 
         for knn_query in knn_queries {
-            let knn_filter_output_clone = knn_filter_output.clone();
+            let filter_orchestrator_output_clone = filter_orchestrator_output.clone();
             let collection_and_segments_clone = collection_and_segments.clone();
             let system_clone = self.system.clone();
             let dispatcher = self.clone_dispatcher()?;
@@ -713,7 +713,7 @@ impl WorkerServer {
                                 dispatcher,
                                 1000,
                                 collection_and_segments_clone,
-                                knn_filter_output_clone,
+                                filter_orchestrator_output_clone,
                                 Knn {
                                     embedding: query,
                                     fetch: knn_query.limit,
@@ -729,7 +729,7 @@ impl WorkerServer {
                                 dispatcher,
                                 1000,
                                 collection_and_segments_clone,
-                                knn_filter_output_clone,
+                                filter_orchestrator_output_clone,
                                 knn_query.limit as usize,
                                 query,
                                 bloom_filter_manager,
@@ -749,7 +749,7 @@ impl WorkerServer {
                                     dispatcher,
                                     1000,
                                     collection_and_segments_clone,
-                                    knn_filter_output_clone,
+                                    filter_orchestrator_output_clone,
                                     knn,
                                     bloom_filter_manager,
                                     shard_index,
@@ -767,7 +767,7 @@ impl WorkerServer {
                             dispatcher,
                             1000,
                             collection_and_segments_clone,
-                            knn_filter_output_clone,
+                            filter_orchestrator_output_clone,
                             query,
                             knn_query.key.to_string(),
                             knn_query.limit,
@@ -796,7 +796,7 @@ impl WorkerServer {
             self.blockfile_provider.clone(),
             self.clone_dispatcher()?,
             1000, // TODO: Make this configurable
-            knn_filter_output,
+            filter_orchestrator_output,
             knn_results,
             search_payload.rank,
             search_payload.group_by,
@@ -826,7 +826,7 @@ impl WorkerServer {
         let futures = search_plan
             .payloads
             .into_iter()
-            .map(|payload| self.orchestrate_search(scan.clone(), payload, read_level));
+            .map(|payload| self.orchestrate_search_payload(scan.clone(), payload, read_level));
 
         let orchestrator_results = stream::iter(futures)
             .buffered(32) // Process up to 32 payloads concurrently

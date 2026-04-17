@@ -18,7 +18,7 @@ use crate::execution::operators::{
     knn_merge::{KnnMergeError, KnnMergeInput, KnnMergeOutput},
 };
 
-use super::knn_filter::{KnnError, KnnFilterOutput};
+use super::filter::{FilterOrchestratorOutput, KnnError};
 
 /// The `KnnOrchestrator` finds the nearest neighbor of a target embedding given the search domain.
 /// When used together with `FilterOrchestrator`, they evaluate a `<collection>.query(...)` query
@@ -107,8 +107,8 @@ pub struct KnnOrchestrator {
     // Collection information
     collection_and_segments: CollectionAndSegments,
 
-    // Output from KnnFilterOrchestrator
-    knn_filter_output: KnnFilterOutput,
+    // Output from FilterOrchestrator
+    filter_orchestrator_output: FilterOrchestratorOutput,
 
     // Knn operator shared between log and segments
     knn: Knn,
@@ -136,13 +136,13 @@ impl KnnOrchestrator {
         dispatcher: ComponentHandle<Dispatcher>,
         queue: usize,
         collection_and_segments: CollectionAndSegments,
-        knn_filter_output: KnnFilterOutput,
+        filter_orchestrator_output: FilterOrchestratorOutput,
         knn: Knn,
         bloom_filter_manager: Option<BloomFilterManager>,
         shard_index: u32,
     ) -> Self {
         let fetch = knn.fetch;
-        let batch_distances = if knn_filter_output.hnsw_reader.is_none() {
+        let batch_distances = if filter_orchestrator_output.hnsw_reader.is_none() {
             vec![Vec::new()]
         } else {
             Vec::new()
@@ -153,7 +153,7 @@ impl KnnOrchestrator {
             blockfile_provider,
             queue,
             collection_and_segments,
-            knn_filter_output,
+            filter_orchestrator_output,
             knn,
             batch_distances,
             merge: Merge { k: fetch },
@@ -200,11 +200,15 @@ impl Orchestrator for KnnOrchestrator {
         let knn_log_task = wrap(
             Box::new(self.knn.clone()),
             KnnLogInput {
-                logs: self.knn_filter_output.logs.clone(),
+                logs: self.filter_orchestrator_output.logs.clone(),
                 blockfile_provider: self.blockfile_provider.clone(),
                 record_segment: self.collection_and_segments.record_segment.clone(),
-                log_offset_ids: self.knn_filter_output.filter_output.log_offset_ids.clone(),
-                distance_function: self.knn_filter_output.distance_function.clone(),
+                log_offset_ids: self
+                    .filter_orchestrator_output
+                    .filter_output
+                    .log_offset_ids
+                    .clone(),
+                distance_function: self.filter_orchestrator_output.distance_function.clone(),
                 bloom_filter_manager: self.bloom_filter_manager.clone(),
                 shard_index: self.shard_index,
             },
@@ -213,17 +217,22 @@ impl Orchestrator for KnnOrchestrator {
         );
         tasks.push((knn_log_task, Some(Span::current())));
 
-        if let Some(hnsw_reader) = self.knn_filter_output.hnsw_reader.as_ref().cloned() {
+        if let Some(hnsw_reader) = self
+            .filter_orchestrator_output
+            .hnsw_reader
+            .as_ref()
+            .cloned()
+        {
             let knn_segment_task = wrap(
                 Box::new(self.knn.clone()),
                 KnnHnswInput {
                     hnsw_reader,
                     compact_offset_ids: self
-                        .knn_filter_output
+                        .filter_orchestrator_output
                         .filter_output
                         .compact_offset_ids
                         .clone(),
-                    distance_function: self.knn_filter_output.distance_function.clone(),
+                    distance_function: self.filter_orchestrator_output.distance_function.clone(),
                 },
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),

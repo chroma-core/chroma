@@ -21,7 +21,7 @@ use crate::execution::{
         ranked_group_by::{RankedGroupByError, RankedGroupByInput, RankedGroupByOutput},
         select::{SelectError, SelectInput, SelectOutput},
     },
-    orchestration::knn_filter::KnnFilterOutput,
+    orchestration::filter::FilterOrchestratorOutput,
 };
 
 #[derive(Error, Debug)]
@@ -113,7 +113,7 @@ pub struct RankOrchestratorOutput {
 ///
 /// When rank expression is None:
 /// ```text
-///     KnnFilterOutput
+///     FilterOrchestratorOutput
 ///            │
 ///            ▼
 ///   ┌──────────────────┐
@@ -136,7 +136,7 @@ pub struct RankOrchestrator {
     queue: usize,
 
     // Input data
-    knn_filter_output: KnnFilterOutput,
+    filter_orchestrator_output: FilterOrchestratorOutput,
     knn_results: Vec<Vec<RecordMeasure>>,
     rank: Rank,
     group_by: GroupBy,
@@ -162,7 +162,7 @@ impl RankOrchestrator {
         blockfile_provider: BlockfileProvider,
         dispatcher: ComponentHandle<Dispatcher>,
         queue: usize,
-        knn_filter_output: KnnFilterOutput,
+        filter_orchestrator_output: FilterOrchestratorOutput,
         knn_results: Vec<Vec<RecordMeasure>>,
         rank: Rank,
         group_by: GroupBy,
@@ -183,7 +183,7 @@ impl RankOrchestrator {
             limit,
             select,
             collection_and_segments,
-            knn_filter_output,
+            filter_orchestrator_output,
             bloom_filter_manager,
             shard_index,
             result_channel: None,
@@ -196,7 +196,7 @@ impl RankOrchestrator {
             Box::new(self.select.clone()),
             SelectInput {
                 records,
-                logs: self.knn_filter_output.logs.clone(),
+                logs: self.filter_orchestrator_output.logs.clone(),
                 blockfile_provider: self.blockfile_provider.clone(),
                 record_segment: self.collection_and_segments.record_segment.clone(),
                 bloom_filter_manager: self.bloom_filter_manager.clone(),
@@ -255,12 +255,16 @@ impl Orchestrator for RankOrchestrator {
             None => wrap(
                 Box::new(self.limit.clone()),
                 LimitInput {
-                    logs: self.knn_filter_output.logs.clone(),
+                    logs: self.filter_orchestrator_output.logs.clone(),
                     blockfile_provider: self.blockfile_provider.clone(),
                     record_segment: self.collection_and_segments.record_segment.clone(),
-                    log_offset_ids: self.knn_filter_output.filter_output.log_offset_ids.clone(),
+                    log_offset_ids: self
+                        .filter_orchestrator_output
+                        .filter_output
+                        .log_offset_ids
+                        .clone(),
                     compact_offset_ids: self
-                        .knn_filter_output
+                        .filter_orchestrator_output
                         .filter_output
                         .compact_offset_ids
                         .clone(),
@@ -341,7 +345,7 @@ impl Handler<TaskResult<RankOutput, RankError>> for RankOrchestrator {
                 Box::new(self.group_by.clone()),
                 RankedGroupByInput {
                     records: output.ranks,
-                    logs: self.knn_filter_output.logs.clone(),
+                    logs: self.filter_orchestrator_output.logs.clone(),
                     blockfile_provider: self.blockfile_provider.clone(),
                     record_segment: self.collection_and_segments.record_segment.clone(),
                     bloom_filter_manager: self.bloom_filter_manager.clone(),
@@ -392,7 +396,7 @@ impl Handler<TaskResult<SelectOutput, SelectError>> for RankOrchestrator {
 
         // Terminate with final result
         let pulled_log_bytes = self
-            .knn_filter_output
+            .filter_orchestrator_output
             .logs
             .iter()
             .map(|(l, _)| l.size_bytes())
