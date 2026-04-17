@@ -1526,6 +1526,16 @@ mod tests {
         dir
     }
 
+    fn normalized_output(term: &TestTerminal) -> String {
+        let stripped: String = term
+            .output
+            .iter()
+            .flat_map(|line| line.chars())
+            .map(|c| if "│┌┐└┘─".contains(c) { ' ' } else { c })
+            .collect();
+        stripped.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
     fn test_context(root: &Path) -> InstallContext {
         let cwd = root.join("cwd");
         let home = root.join("home");
@@ -1747,7 +1757,7 @@ mod tests {
         assert_eq!(agents.len(), universal_count + 1);
         assert!(agents.iter().any(|agent| agent.id == "claude-code"));
         assert!(term.output.iter().any(|line| line.contains("Agents")));
-        assert!(term.output.iter().any(|line| line.contains("Claude Code")));
+        assert!(normalized_output(&term).contains("Claude Code"));
 
         fs::remove_dir_all(root).unwrap();
     }

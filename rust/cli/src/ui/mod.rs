@@ -119,7 +119,7 @@ pub fn print_summary_panel(term: &mut dyn Terminal, label: &str, value: &str) {
 
 fn resolve_summary_panel_width() -> usize {
     terminal::size()
-        .map(|(cols, _)| usize::from(cols).min(SUMMARY_PANEL_MAX_WIDTH).max(5))
+        .map(|(cols, _)| usize::from(cols).clamp(5, SUMMARY_PANEL_MAX_WIDTH))
         .unwrap_or(SUMMARY_PANEL_MAX_WIDTH)
 }
 
