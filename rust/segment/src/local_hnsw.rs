@@ -108,7 +108,7 @@ impl LocalHnswSegmentReader {
         let hnsw_configuration = collection
             .schema
             .as_ref()
-            .map(|schema| schema.get_internal_hnsw_config_with_legacy_fallback(&segment.metadata))
+            .map(|schema| schema.get_internal_hnsw_config_with_legacy_fallback(segment))
             .transpose()?
             .flatten()
             .ok_or(LocalHnswSegmentReaderError::MissingHnswConfiguration)?;
@@ -495,7 +495,7 @@ impl LocalHnswSegmentWriter {
         let hnsw_configuration = collection
             .schema
             .as_ref()
-            .map(|schema| schema.get_internal_hnsw_config_with_legacy_fallback(&segment.metadata))
+            .map(|schema| schema.get_internal_hnsw_config_with_legacy_fallback(segment))
             .transpose()?
             .flatten()
             .ok_or(LocalHnswSegmentWriterError::MissingHnswConfiguration)?;

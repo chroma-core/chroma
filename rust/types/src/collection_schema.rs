@@ -24,7 +24,7 @@ use crate::{
     default_sync_threshold, default_write_nprobe, default_write_rng_epsilon,
     default_write_rng_factor, ConversionError, HnswParametersFromSegmentError,
     InternalHnswConfiguration, InternalSpannConfiguration, InternalUpdateCollectionConfiguration,
-    KnnIndex, Metadata, UpdateCollectionConfiguration, CHROMA_KEY,
+    KnnIndex, Segment, UpdateCollectionConfiguration, CHROMA_KEY,
 };
 
 impl ChromaError for SchemaError {
@@ -1101,11 +1101,11 @@ impl Schema {
 
     pub fn get_internal_hnsw_config_with_legacy_fallback(
         &self,
-        segment_metadata: &Option<Metadata>,
+        segment: &Segment,
     ) -> Result<Option<InternalHnswConfiguration>, HnswParametersFromSegmentError> {
         if let Some(config) = self.get_internal_hnsw_config() {
             let config_from_metadata =
-                InternalHnswConfiguration::from_legacy_segment_metadata(segment_metadata)?;
+                InternalHnswConfiguration::from_legacy_segment_metadata(&segment.metadata)?;
 
             if config == InternalHnswConfiguration::default() && config != config_from_metadata {
                 return Ok(Some(config_from_metadata));

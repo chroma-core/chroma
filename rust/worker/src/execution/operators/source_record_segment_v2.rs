@@ -82,16 +82,32 @@ impl Operator<SourceRecordSegmentV2Input, SourceRecordSegmentV2Output>
     ) -> Result<SourceRecordSegmentV2Output, SourceRecordSegmentV2Error> {
         tracing::trace!("[{}]: {:?}", self.get_name(), input);
 
+        let empty_shard = || MaterializeLogsResult {
+            logs: Chunk::new(Vec::new().into()),
+            materialized: Chunk::new(Vec::new().into()),
+            has_backfill: false,
+        };
+        let build_partition = |materialized: MaterializeLogsResult| {
+            let shards = (0..self.shard_count)
+                .map(|i| {
+                    if i == self.shard_index as usize {
+                        materialized.clone()
+                    } else {
+                        empty_shard()
+                    }
+                })
+                .collect();
+            MaterializeLogOutput {
+                result: PartitionedMaterializeLogsResult { shards },
+                collection_logical_size_delta: 0,
+            }
+        };
+
         let reader = match input.record_segment_reader.as_ref() {
             Some(reader) => reader,
             None => {
                 // Even with no reader, we need to return empty shards for all positions
-                let empty_shard = MaterializeLogsResult {
-                    logs: Chunk::new(Vec::new().into()),
-                    materialized: Chunk::new(Vec::new().into()),
-                    has_backfill: false,
-                };
-                let shards = vec![empty_shard; self.shard_count];
+                let shards = (0..self.shard_count).map(|_| empty_shard()).collect();
                 let output = MaterializeLogOutput {
                     result: PartitionedMaterializeLogsResult { shards },
                     collection_logical_size_delta: 0,
@@ -134,30 +150,9 @@ impl Operator<SourceRecordSegmentV2Input, SourceRecordSegmentV2Output>
 
             if current_partition_logs.len() >= self.max_partition_size {
                 let logs_chunk = Chunk::new(current_partition_logs.into());
-
                 let materialized =
                     materialize_logs_for_rebuild(logs_chunk, current_partition_offsets).await?;
-
-                // Create a vector with empty shards for all positions except shard_index
-                let mut shards = vec![];
-                for i in 0..self.shard_count {
-                    if i == self.shard_index as usize {
-                        shards.push(materialized.clone());
-                    } else {
-                        shards.push(MaterializeLogsResult {
-                            logs: Chunk::new(Vec::new().into()),
-                            materialized: Chunk::new(Vec::new().into()),
-                            has_backfill: false,
-                        });
-                    }
-                }
-
-                let output = MaterializeLogOutput {
-                    result: PartitionedMaterializeLogsResult { shards },
-                    collection_logical_size_delta: 0,
-                };
-
-                partitions.push(output);
+                partitions.push(build_partition(materialized));
                 current_partition_logs = Vec::new();
                 current_partition_offsets = Vec::new();
             }
@@ -165,30 +160,9 @@ impl Operator<SourceRecordSegmentV2Input, SourceRecordSegmentV2Output>
 
         if !current_partition_logs.is_empty() {
             let logs_chunk = Chunk::new(current_partition_logs.into());
-
             let materialized =
                 materialize_logs_for_rebuild(logs_chunk, current_partition_offsets).await?;
-
-            // Create a vector with empty shards for all positions except shard_index
-            let mut shards = vec![];
-            for i in 0..self.shard_count {
-                if i == self.shard_index as usize {
-                    shards.push(materialized.clone());
-                } else {
-                    shards.push(MaterializeLogsResult {
-                        logs: Chunk::new(Vec::new().into()),
-                        materialized: Chunk::new(Vec::new().into()),
-                        has_backfill: false,
-                    });
-                }
-            }
-
-            let output = MaterializeLogOutput {
-                result: PartitionedMaterializeLogsResult { shards },
-                collection_logical_size_delta: 0,
-            };
-
-            partitions.push(output);
+            partitions.push(build_partition(materialized));
         }
 
         Ok(SourceRecordSegmentV2Output {

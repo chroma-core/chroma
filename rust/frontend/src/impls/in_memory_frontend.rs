@@ -651,9 +651,7 @@ impl InMemoryFrontend {
             .schema
             .as_ref()
             .map(|schema| {
-                schema.get_internal_hnsw_config_with_legacy_fallback(
-                    &collection.vector_segment.metadata,
-                )
+                schema.get_internal_hnsw_config_with_legacy_fallback(&collection.vector_segment)
             })
             .transpose()
             .map_err(|e| e.boxed())?

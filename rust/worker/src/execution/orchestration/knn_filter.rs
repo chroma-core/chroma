@@ -487,7 +487,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
                         .and_then(|schema| {
                             schema
                                 .get_internal_hnsw_config_with_legacy_fallback(
-                                    &self.collection_and_segments.vector_segment.metadata,
+                                    &self.collection_and_segments.vector_segment,
                                 )
                                 .map_err(KnnError::from)
                         }),

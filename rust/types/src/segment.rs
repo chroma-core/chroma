@@ -126,32 +126,23 @@ pub struct Segment {
 impl Segment {
     // INVARIANT: THIS ALWAYS RETURNS AT LEAST ONE SHARD
     pub fn get_shards(&self) -> Result<Vec<SegmentShard>, SegmentShardError> {
-        // If there are no file paths, return empty vector
-        if self.file_path.is_empty() {
-            let vec = vec![self.new_shard()];
-            return Ok(vec);
-        }
+        // If there are no file paths, return a single empty shard
+        let mut values_iter = self.file_path.values();
+        let Some(first_paths) = values_iter.next() else {
+            return Ok(vec![self.new_shard()]);
+        };
+        let expected = first_paths.len();
 
         // Check that all file-path keys have the same number of shards
-        let counts: std::collections::HashSet<usize> =
-            self.file_path.values().map(|v| v.len()).collect();
-        if counts.len() > 1 {
-            let first_key = self.file_path.keys().next().unwrap();
-            let expected = self.file_path[first_key].len();
+        if let Some(mismatched) = values_iter.find(|paths| paths.len() != expected) {
             return Err(SegmentShardError::MismatchedShardCounts {
                 key: format!("segment {}", self.id),
-                actual: counts.into_iter().next().unwrap(),
+                actual: mismatched.len(),
                 expected,
             });
         }
 
-        // All paths should have the same number of shards
-        let num_shards = self
-            .file_path
-            .values()
-            .next()
-            .map(|paths| paths.len())
-            .unwrap_or(0);
+        let num_shards = expected;
 
         // Create a SegmentShard for each shard index, propagating any errors
         let shards: Result<Vec<SegmentShard>, SegmentShardError> = (0..num_shards)
@@ -251,6 +242,13 @@ impl Segment {
             if paths.len() > shard_idx {
                 paths[shard_idx].clear();
             }
+        }
+        if self
+            .file_path
+            .values()
+            .all(|paths| paths.iter().all(|p| p.is_empty()))
+        {
+            self.file_path.clear();
         }
     }
 

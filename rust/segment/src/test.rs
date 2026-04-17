@@ -166,16 +166,9 @@ impl TestDistributedSegment {
         .await
         .expect("Should be able to flush record.");
 
-        let vector_shard = self
-            .vector_segment
-            .get_shards()
-            .expect("Should be able to get vector shards")
-            .into_iter()
-            .next()
-            .expect("Should have at least one vector shard");
         let vector_writer = DistributedHNSWSegmentWriter::from_segment(
             &self.collection,
-            &vector_shard,
+            &self.vector_segment,
             self.collection
                 .dimension
                 .expect("Collection dimension should be set") as usize,
