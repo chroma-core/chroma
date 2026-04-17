@@ -126,32 +126,7 @@ pub struct Segment {
 impl Segment {
     // INVARIANT: THIS ALWAYS RETURNS AT LEAST ONE SHARD
     pub fn get_shards(&self) -> Result<Vec<SegmentShard>, SegmentShardError> {
-        // If there are no file paths, return empty vector
-        if self.file_path.is_empty() {
-            let vec = vec![self.new_shard()];
-            return Ok(vec);
-        }
-
-        // Check that all file-path keys have the same number of shards
-        let counts: std::collections::HashSet<usize> =
-            self.file_path.values().map(|v| v.len()).collect();
-        if counts.len() > 1 {
-            let first_key = self.file_path.keys().next().unwrap();
-            let expected = self.file_path[first_key].len();
-            return Err(SegmentShardError::MismatchedShardCounts {
-                key: format!("segment {}", self.id),
-                actual: counts.into_iter().next().unwrap(),
-                expected,
-            });
-        }
-
-        // All paths should have the same number of shards
-        let num_shards = self
-            .file_path
-            .values()
-            .next()
-            .map(|paths| paths.len())
-            .unwrap_or(0);
+        let num_shards = self.num_shards()?;
 
         // Create a SegmentShard for each shard index, propagating any errors
         let shards: Result<Vec<SegmentShard>, SegmentShardError> = (0..num_shards)
@@ -242,6 +217,25 @@ impl Segment {
         Ok(num_shards)
     }
 
+    /// Clears file paths for a specific shard index.
+    /// This is useful during shard-specific rebuilds where we want to regenerate
+    /// only one shard's files while preserving others.
+    pub fn clear_shard_file_paths(&mut self, shard_index: u32) {
+        let shard_idx = shard_index as usize;
+        for (_, paths) in self.file_path.iter_mut() {
+            if paths.len() > shard_idx {
+                paths[shard_idx].clear();
+            }
+        }
+        if self
+            .file_path
+            .values()
+            .all(|paths| paths.iter().all(|p| p.is_empty()))
+        {
+            self.file_path.clear();
+        }
+    }
+
     pub fn extract_prefix_and_id(path: &str) -> Result<(&str, uuid::Uuid), uuid::Error> {
         let (prefix, id) = match path.rfind('/') {
             Some(pos) => (&path[..pos], &path[pos + 1..]),
@@ -315,13 +309,16 @@ impl TryFrom<(&Segment, u32)> for SegmentShard {
 
     fn try_from((segment, shard_index): (&Segment, u32)) -> Result<Self, Self::Error> {
         let mut file_path = HashMap::new();
+        // If there are no shards in the filepaths this for loop won't
+        // run and this function will return an empty SegmentShard.
         for (key, paths) in &segment.file_path {
             match paths.get(shard_index as usize) {
-                Some(path) if path.is_empty() => {
-                    return Err(SegmentShardError::EmptyPathString(key.clone()));
-                }
                 Some(path) => {
-                    file_path.insert(key.clone(), path.clone());
+                    // During rebuild, clear_shard_file_paths sets paths to empty strings
+                    // to signal "create new". Skip these so writers see missing keys instead.
+                    if !path.is_empty() {
+                        file_path.insert(key.clone(), path.clone());
+                    }
                 }
                 None if paths.is_empty() => {
                     return Err(SegmentShardError::EmptyPathVector(key.clone()));
@@ -625,5 +622,87 @@ mod tests {
             err,
             SegmentShardError::MismatchedShardCounts { .. }
         ));
+    }
+
+    #[test]
+    fn test_clear_shard_file_paths() {
+        // Create a segment with 3 shards
+        let mut file_path = HashMap::new();
+        file_path.insert(
+            "metadata".to_string(),
+            vec![
+                "/path/to/shard0/metadata".to_string(),
+                "/path/to/shard1/metadata".to_string(),
+                "/path/to/shard2/metadata".to_string(),
+            ],
+        );
+        file_path.insert(
+            "index".to_string(),
+            vec![
+                "/path/to/shard0/index".to_string(),
+                "/path/to/shard1/index".to_string(),
+                "/path/to/shard2/index".to_string(),
+            ],
+        );
+        file_path.insert(
+            "data".to_string(),
+            vec![
+                "/path/to/shard0/data".to_string(),
+                "/path/to/shard1/data".to_string(),
+                "/path/to/shard2/data".to_string(),
+            ],
+        );
+
+        let mut segment = Segment {
+            id: SegmentUuid(Uuid::nil()),
+            r#type: SegmentType::BlockfileRecord,
+            scope: SegmentScope::RECORD,
+            collection: CollectionUuid(Uuid::nil()),
+            metadata: None,
+            file_path,
+        };
+
+        // Clear only shard 1's file paths
+        segment.clear_shard_file_paths(1);
+
+        // Verify shard 0 and shard 2 are untouched
+        assert_eq!(
+            segment.file_path.get("metadata").unwrap()[0],
+            "/path/to/shard0/metadata"
+        );
+        assert_eq!(
+            segment.file_path.get("metadata").unwrap()[2],
+            "/path/to/shard2/metadata"
+        );
+        assert_eq!(
+            segment.file_path.get("index").unwrap()[0],
+            "/path/to/shard0/index"
+        );
+        assert_eq!(
+            segment.file_path.get("index").unwrap()[2],
+            "/path/to/shard2/index"
+        );
+        assert_eq!(
+            segment.file_path.get("data").unwrap()[0],
+            "/path/to/shard0/data"
+        );
+        assert_eq!(
+            segment.file_path.get("data").unwrap()[2],
+            "/path/to/shard2/data"
+        );
+
+        // Verify shard 1 is cleared (empty string)
+        assert_eq!(segment.file_path.get("metadata").unwrap()[1], "");
+        assert_eq!(segment.file_path.get("index").unwrap()[1], "");
+        assert_eq!(segment.file_path.get("data").unwrap()[1], "");
+
+        // Test clearing a shard index that's out of bounds (should not panic)
+        segment.clear_shard_file_paths(5);
+
+        // Verify nothing changed for the out-of-bounds case
+        assert_eq!(
+            segment.file_path.get("metadata").unwrap()[0],
+            "/path/to/shard0/metadata"
+        );
     }
 }

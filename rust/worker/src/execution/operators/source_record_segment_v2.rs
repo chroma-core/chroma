@@ -2,7 +2,9 @@ use crate::execution::operators::materialize_logs::MaterializeLogOutput;
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::blockfile_record::RecordSegmentReaderShard;
-use chroma_segment::types::{materialize_logs_for_rebuild, PartitionedMaterializeLogsResult};
+use chroma_segment::types::{
+    materialize_logs_for_rebuild, MaterializeLogsResult, PartitionedMaterializeLogsResult,
+};
 use chroma_system::Operator;
 use chroma_types::{Chunk, LogRecord, Operation, OperationRecord};
 use futures::StreamExt;
@@ -26,11 +28,17 @@ use thiserror::Error;
 #[derive(Clone, Debug)]
 pub struct SourceRecordSegmentV2Operator {
     max_partition_size: usize,
+    shard_count: usize,
+    shard_index: u32,
 }
 
 impl SourceRecordSegmentV2Operator {
-    pub fn new(max_partition_size: usize) -> Self {
-        Self { max_partition_size }
+    pub fn new(max_partition_size: usize, shard_count: usize, shard_index: u32) -> Self {
+        Self {
+            max_partition_size,
+            shard_count,
+            shard_index,
+        }
     }
 }
 
@@ -74,11 +82,38 @@ impl Operator<SourceRecordSegmentV2Input, SourceRecordSegmentV2Output>
     ) -> Result<SourceRecordSegmentV2Output, SourceRecordSegmentV2Error> {
         tracing::trace!("[{}]: {:?}", self.get_name(), input);
 
+        let empty_shard = || MaterializeLogsResult {
+            logs: Chunk::new(Vec::new().into()),
+            materialized: Chunk::new(Vec::new().into()),
+            has_backfill: false,
+        };
+        let build_partition = |materialized: MaterializeLogsResult| {
+            let shards = (0..self.shard_count)
+                .map(|i| {
+                    if i == self.shard_index as usize {
+                        materialized.clone()
+                    } else {
+                        empty_shard()
+                    }
+                })
+                .collect();
+            MaterializeLogOutput {
+                result: PartitionedMaterializeLogsResult { shards },
+                collection_logical_size_delta: 0,
+            }
+        };
+
         let reader = match input.record_segment_reader.as_ref() {
             Some(reader) => reader,
             None => {
+                // Even with no reader, we need to return empty shards for all positions
+                let shards = (0..self.shard_count).map(|_| empty_shard()).collect();
+                let output = MaterializeLogOutput {
+                    result: PartitionedMaterializeLogsResult { shards },
+                    collection_logical_size_delta: 0,
+                };
                 return Ok(SourceRecordSegmentV2Output {
-                    partitions: vec![],
+                    partitions: vec![output],
                     total_records: 0,
                 });
             }
@@ -115,18 +150,9 @@ impl Operator<SourceRecordSegmentV2Input, SourceRecordSegmentV2Output>
 
             if current_partition_logs.len() >= self.max_partition_size {
                 let logs_chunk = Chunk::new(current_partition_logs.into());
-
                 let materialized =
                     materialize_logs_for_rebuild(logs_chunk, current_partition_offsets).await?;
-
-                let output = MaterializeLogOutput {
-                    result: PartitionedMaterializeLogsResult {
-                        shards: vec![materialized],
-                    },
-                    collection_logical_size_delta: 0,
-                };
-
-                partitions.push(output);
+                partitions.push(build_partition(materialized));
                 current_partition_logs = Vec::new();
                 current_partition_offsets = Vec::new();
             }
@@ -134,18 +160,9 @@ impl Operator<SourceRecordSegmentV2Input, SourceRecordSegmentV2Output>
 
         if !current_partition_logs.is_empty() {
             let logs_chunk = Chunk::new(current_partition_logs.into());
-
             let materialized =
                 materialize_logs_for_rebuild(logs_chunk, current_partition_offsets).await?;
-
-            let output = MaterializeLogOutput {
-                result: PartitionedMaterializeLogsResult {
-                    shards: vec![materialized],
-                },
-                collection_logical_size_delta: 0,
-            };
-
-            partitions.push(output);
+            partitions.push(build_partition(materialized));
         }
 
         Ok(SourceRecordSegmentV2Output {
@@ -185,17 +202,16 @@ mod tests {
             record_segment_reader: Some(reader),
         };
 
-        let operator = SourceRecordSegmentV2Operator::new(30);
+        let operator = SourceRecordSegmentV2Operator::new(30, 1, 0);
         let output = operator.run(&input).await.expect("Operator should succeed");
 
         assert_eq!(output.total_records, 100);
         assert_eq!(output.partitions.len(), 4); // 30, 30, 30, 10
 
-        // Verify partition sizes
-        assert_eq!(output.partitions[0].result.len(), 30);
-        assert_eq!(output.partitions[1].result.len(), 30);
-        assert_eq!(output.partitions[2].result.len(), 30);
-        assert_eq!(output.partitions[3].result.len(), 10);
+        // Verify that each partition has 1 shard
+        for partition in &output.partitions {
+            assert_eq!(partition.result.shards.len(), 1);
+        }
 
         // Verify operations are correct
         for partition in &output.partitions {
@@ -216,11 +232,11 @@ mod tests {
             record_segment_reader: None,
         };
 
-        let operator = SourceRecordSegmentV2Operator::new(30);
+        let operator = SourceRecordSegmentV2Operator::new(30, 1, 0);
         let output = operator.run(&input).await.expect("Operator should succeed");
 
         assert_eq!(output.total_records, 0);
-        assert_eq!(output.partitions.len(), 0);
+        assert_eq!(output.partitions.len(), 1);
     }
 
     #[tokio::test]
@@ -230,7 +246,7 @@ mod tests {
             record_segment_reader: Some(reader),
         };
 
-        let operator = SourceRecordSegmentV2Operator::new(5);
+        let operator = SourceRecordSegmentV2Operator::new(5, 1, 0);
         let output = operator.run(&input).await.expect("Operator should succeed");
 
         assert_eq!(output.partitions.len(), 2);

@@ -1,12 +1,12 @@
-use std::cell::OnceCell;
-use std::collections::HashSet;
 use std::sync::Arc;
+use std::{cell::OnceCell, collections::HashSet};
 
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::{hnsw_provider::HnswIndexProvider, IndexUuid};
 use chroma_log::Log;
 
+use crate::compactor::RebuildInfo;
 use crate::execution::operators::fragment_fetch::FragmentFetcher;
 use chroma_segment::{
     blockfile_metadata::MetadataSegmentWriter,
@@ -179,9 +179,7 @@ pub struct CompactionContext {
     pub spann_provider: SpannProvider,
     pub dispatcher: ComponentHandle<Dispatcher>,
     pub orchestrator_context: OrchestratorContext,
-    pub is_rebuild: bool,
-    /// Segment scopes to rebuild. If empty, rebuilds all segments (metadata + vector).
-    pub apply_segment_scopes: HashSet<chroma_types::SegmentScope>,
+    pub rebuild_info: Option<RebuildInfo>,
     pub fetch_log_batch_size: u32,
     pub fetch_log_concurrency: usize,
     pub max_compaction_size: usize,
@@ -206,8 +204,7 @@ impl Clone for CompactionContext {
             spann_provider: self.spann_provider.clone(),
             dispatcher: self.dispatcher.clone(),
             orchestrator_context,
-            is_rebuild: self.is_rebuild,
-            apply_segment_scopes: self.apply_segment_scopes.clone(),
+            rebuild_info: self.rebuild_info.clone(),
             fetch_log_batch_size: self.fetch_log_batch_size,
             fetch_log_concurrency: self.fetch_log_concurrency,
             max_compaction_size: self.max_compaction_size,
@@ -226,11 +223,25 @@ impl CompactionContext {
     /// Returns true if the given segment scope should be applied to.
     /// Empty `apply_segment_scopes` means all scopes (backward compatibility).
     pub fn scope_is_active(&self, scope: &chroma_types::SegmentScope) -> bool {
-        self.apply_segment_scopes.is_empty() || self.apply_segment_scopes.contains(scope)
+        match &self.rebuild_info {
+            Some(info) => info.segment_scopes.is_empty() || info.segment_scopes.contains(scope),
+            None => true,
+        }
     }
 
     pub fn is_full_rebuild(&self) -> bool {
-        self.is_rebuild && self.scope_is_active(&chroma_types::SegmentScope::RECORD)
+        self.rebuild_info.is_some() && self.scope_is_active(&chroma_types::SegmentScope::RECORD)
+    }
+
+    pub fn is_rebuild(&self) -> bool {
+        self.rebuild_info.is_some()
+    }
+
+    pub fn rebuild_shard_idx(&self) -> u32 {
+        self.rebuild_info
+            .as_ref()
+            .and_then(|info| info.shard_index)
+            .unwrap_or(0)
     }
 
     /// Create an empty output context for attached function orchestrator
@@ -246,8 +257,7 @@ impl CompactionContext {
             spann_provider: self.spann_provider.clone(),
             dispatcher: self.dispatcher.clone(),
             orchestrator_context,
-            is_rebuild: self.is_rebuild,
-            apply_segment_scopes: self.apply_segment_scopes.clone(),
+            rebuild_info: self.rebuild_info.clone(),
             fetch_log_batch_size: self.fetch_log_batch_size,
             fetch_log_concurrency: self.fetch_log_concurrency,
             max_compaction_size: self.max_compaction_size,
@@ -346,8 +356,7 @@ impl ChromaError for CompactionContextError {
 impl CompactionContext {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        is_rebuild: bool,
-        apply_segment_scopes: HashSet<chroma_types::SegmentScope>,
+        rebuild_info: Option<RebuildInfo>,
         fetch_log_batch_size: u32,
         fetch_log_concurrency: usize,
         max_compaction_size: usize,
@@ -366,8 +375,7 @@ impl CompactionContext {
         let orchestrator_context = OrchestratorContext::new(dispatcher.clone());
         CompactionContext {
             collection_info: OnceCell::new(),
-            is_rebuild,
-            apply_segment_scopes,
+            rebuild_info,
             fetch_log_batch_size,
             fetch_log_concurrency,
             max_compaction_size,
@@ -452,11 +460,18 @@ impl CompactionContext {
         // TODO(tanujnay112): This is awful, we need to find a better way to pass
         // the active collection info around.
         self.collection_info = OnceCell::new();
+        let rebuild_info = if is_getting_compacted_logs {
+            Some(RebuildInfo {
+                segment_scopes: HashSet::new(),
+                shard_index: None,
+            })
+        } else {
+            self.rebuild_info.clone()
+        };
         let log_fetch_orchestrator = LogFetchOrchestrator::new(
             collection_id,
             database_name,
-            self.is_rebuild || is_getting_compacted_logs,
-            self.apply_segment_scopes.clone(),
+            rebuild_info,
             self.fetch_log_batch_size,
             self.fetch_log_concurrency,
             self.max_compaction_size,
@@ -965,8 +980,7 @@ pub async fn compact(
     system: System,
     collection_id: CollectionUuid,
     database_name: chroma_types::DatabaseName,
-    is_rebuild: bool,
-    apply_segment_scopes: HashSet<chroma_types::SegmentScope>,
+    rebuild_info: Option<RebuildInfo>,
     fetch_log_batch_size: u32,
     fetch_log_concurrency: usize,
     max_compaction_size: usize,
@@ -984,8 +998,7 @@ pub async fn compact(
     #[cfg(test)] poison_offset: Option<u32>,
 ) -> Result<CompactionResponse, CompactionError> {
     let mut compaction_context = CompactionContext::new(
-        is_rebuild,
-        apply_segment_scopes,
+        rebuild_info.clone(),
         fetch_log_batch_size,
         fetch_log_concurrency,
         max_compaction_size,
@@ -1018,9 +1031,14 @@ mod tests {
     use chroma_log::test::{
         add_delete_net_zero_generator, upsert_generator, TEST_EMBEDDING_DIMENSION,
     };
-    use chroma_types::DatabaseName;
+    use chroma_types::{DatabaseName, SegmentScope};
     use std::collections::{HashMap, HashSet};
 
+    use crate::{
+        compactor::RebuildInfo,
+        config::RootConfig,
+        execution::{operators::fetch_log::FetchLogOperator, orchestration::get::GetOrchestrator},
+    };
     use chroma_blockstore::arrow::config::{BlockManagerConfig, TEST_MAX_BLOCK_SIZE_BYTES};
     use chroma_blockstore::provider::BlockfileProvider;
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
@@ -1043,16 +1061,10 @@ mod tests {
     use chroma_types::{
         operator::{Filter, Limit, Projection, ProjectionRecord},
         Collection, DocumentExpression, DocumentOperator, MetadataExpression, PrimitiveOperator,
-        Segment, SegmentShard, SegmentUuid, Where,
+        Segment, SegmentShard, SegmentType, SegmentUuid, Where,
     };
     use futures::TryStreamExt;
     use regex::Regex;
-    use tempfile;
-
-    use crate::{
-        config::RootConfig,
-        execution::{operators::fetch_log::FetchLogOperator, orchestration::get::GetOrchestrator},
-    };
 
     use super::{compact, CompactionContext, CompactionResponse, LogFetchOrchestratorResponse};
     use crate::execution::orchestration::register_orchestrator::CollectionRegisterInfo;
@@ -1065,7 +1077,6 @@ mod tests {
         hnsw_provider: HnswIndexProvider,
         blockfile_provider: &BlockfileProvider,
     ) {
-        // Get offset IDs from vector segment
         let vector_reader = DistributedHNSWSegmentReader::from_segment(
             collection,
             vector_segment,
@@ -1080,34 +1091,43 @@ mod tests {
             .expect("Should get all IDs from HNSW index");
         vector_offset_ids.sort();
 
-        // Get offset IDs from record segment
-        let record_segment_shard =
-            SegmentShard::try_from((record_segment, 0)).expect("valid shard index");
-        let record_reader = Box::pin(RecordSegmentReaderShard::from_segment(
-            &record_segment_shard,
-            blockfile_provider,
-            None,
-        ))
-        .await
-        .expect("Should create record reader");
+        // Get offset IDs from all record shards
+        let record_shards = record_segment
+            .get_shards()
+            .expect("Should get record shards");
 
-        let record_data: Vec<_> = record_reader
-            .get_data_stream(..)
-            .await
-            .try_collect()
-            .await
-            .expect("Should read all records");
+        let mut all_record_offset_ids = Vec::new();
 
-        let mut record_offset_ids: Vec<usize> = record_data
-            .into_iter()
-            .map(|(offset_id, _data)| offset_id as usize)
-            .collect();
-        record_offset_ids.sort();
+        for record_shard in &record_shards {
+            let record_reader = Box::pin(RecordSegmentReaderShard::from_segment(
+                record_shard,
+                blockfile_provider,
+                None,
+            ))
+            .await
+            .expect("Should create record reader");
+
+            let record_data: Vec<_> = record_reader
+                .get_data_stream(..)
+                .await
+                .try_collect()
+                .await
+                .expect("Should read all records");
+
+            let record_offset_ids: Vec<usize> = record_data
+                .into_iter()
+                .map(|(offset_id, _data)| offset_id as usize)
+                .collect();
+
+            all_record_offset_ids.extend(record_offset_ids);
+        }
+
+        all_record_offset_ids.sort();
 
         // Assert they match
-        assert_eq!(vector_offset_ids.len(), record_offset_ids.len());
+        assert_eq!(vector_offset_ids.len(), all_record_offset_ids.len());
         assert_eq!(
-            vector_offset_ids, record_offset_ids,
+            vector_offset_ids, all_record_offset_ids,
             "Vector and record segment offset IDs should match after vector-only rebuild"
         );
     }
@@ -1122,7 +1142,7 @@ mod tests {
         let fetch_log = FetchLogOperator {
             log_client: log,
             batch_size: 50,
-            start_log_offset_id: u64::try_from(cas.collection.log_position + 1).unwrap_or_default(),
+            start_log_offset_id: 0, // Start from 0 since InMemoryLog starts from 0
             maximum_fetch_count: None,
             collection_uuid: cas.collection.collection_id,
             tenant: cas.collection.tenant.clone(),
@@ -1148,6 +1168,7 @@ mod tests {
             metadata: true,
         };
 
+        // Query without specifying shards - just get all records
         let get_orchestrator = GetOrchestrator::new(
             blockfile_provider,
             dispatcher_handle.clone(),
@@ -1254,8 +1275,7 @@ mod tests {
             system.clone(),
             collection_id,
             database_name.clone(),
-            false,
-            HashSet::new(),
+            None,
             1,
             10,
             1000,
@@ -1269,11 +1289,15 @@ mod tests {
             false,
             None,
             None,
-            None,
+            Some(20), // Small shard size to force multiple shards
             None,
         ))
         .await;
-        assert!(compact_result.is_ok());
+        assert!(
+            compact_result.is_ok(),
+            "Compact failed: {:?}",
+            compact_result.err()
+        );
 
         // Get the CAS after initial compaction
         let old_cas = sysdb
@@ -1361,8 +1385,10 @@ mod tests {
             system.clone(),
             collection_id,
             database_name.clone(),
-            true,
-            metadata_only_scopes,
+            Some(RebuildInfo {
+                segment_scopes: metadata_only_scopes,
+                shard_index: None,
+            }),
             1,
             10,
             10000,
@@ -1376,7 +1402,7 @@ mod tests {
             false,
             None,
             None,
-            None,
+            Some(30), // Small shard size to force multiple shards
             None,
         ))
         .await;
@@ -1485,8 +1511,8 @@ mod tests {
                     test_segments.metadata_segment.clone(),
                     test_segments.vector_segment.clone(),
                 ],
-                None,
-                None,
+                Some(test_segments.collection.config.clone()),
+                test_segments.collection.schema.clone(),
                 None,
                 test_segments.collection.dimension,
                 false,
@@ -1514,8 +1540,7 @@ mod tests {
             system.clone(),
             collection_id,
             database_name.clone(),
-            false,
-            HashSet::new(),
+            None,
             50,
             10,
             1000,
@@ -1533,7 +1558,11 @@ mod tests {
             None,
         ))
         .await;
-        assert!(compact_result.is_ok());
+        assert!(
+            compact_result.is_ok(),
+            "Compact failed: {:?}",
+            compact_result.err()
+        );
 
         let old_cas = sysdb
             .get_collection_with_segments(None, collection_id)
@@ -1603,8 +1632,10 @@ mod tests {
             system.clone(),
             collection_id,
             database_name,
-            true,
-            HashSet::new(),
+            Some(RebuildInfo {
+                segment_scopes: HashSet::new(),
+                shard_index: None,
+            }),
             5000,
             10,
             10000,
@@ -1622,7 +1653,11 @@ mod tests {
             None,
         ))
         .await;
-        assert!(rebuild_result.is_ok());
+        assert!(
+            rebuild_result.is_ok(),
+            "Rebuild should succeed: {:?}",
+            rebuild_result.err()
+        );
 
         let new_cas = sysdb
             .get_collection_with_segments(None, collection_id)
@@ -1631,6 +1666,8 @@ mod tests {
 
         let mut expected_new_collection = old_cas.collection.clone();
         expected_new_collection.version += 1;
+        expected_new_collection.size_bytes_post_compaction =
+            new_cas.collection.size_bytes_post_compaction;
 
         let version_suffix_re = Regex::new(r"/\d+$").unwrap();
 
@@ -1735,8 +1772,7 @@ mod tests {
             system.clone(),
             collection_id,
             database_name.clone(),
-            false,
-            HashSet::new(),
+            None,
             50,
             10,
             1000,
@@ -1754,7 +1790,11 @@ mod tests {
             None,
         ))
         .await;
-        assert!(compact_result.is_ok());
+        assert!(
+            compact_result.is_ok(),
+            "Compact failed: {:?}",
+            compact_result.err()
+        );
 
         let delete_ids = [75, 77, 79, 83];
         for (idx, rec_id) in delete_ids.iter().enumerate() {
@@ -1787,8 +1827,7 @@ mod tests {
             system.clone(),
             collection_id,
             database_name.clone(),
-            false,
-            HashSet::new(),
+            None,
             1,
             10,
             1000,
@@ -1806,7 +1845,11 @@ mod tests {
             None,
         ))
         .await;
-        assert!(compact_result.is_ok());
+        assert!(
+            compact_result.is_ok(),
+            "Compact failed: {:?}",
+            compact_result.err()
+        );
 
         let old_cas = sysdb
             .get_collection_with_segments(None, collection_id)
@@ -1839,8 +1882,10 @@ mod tests {
             system.clone(),
             collection_id,
             database_name,
-            true,
-            vector_only_scopes,
+            Some(RebuildInfo {
+                segment_scopes: vector_only_scopes,
+                shard_index: None,
+            }),
             5000,
             10,
             10000,
@@ -1981,8 +2026,10 @@ mod tests {
             system.clone(),
             collection_id,
             database_name,
-            true,
-            HashSet::new(),
+            Some(RebuildInfo {
+                segment_scopes: HashSet::new(),
+                shard_index: None,
+            }),
             5000,
             10,
             10000,
@@ -2164,8 +2211,7 @@ mod tests {
             system.clone(),
             collection_uuid,
             database_name,
-            false,
-            HashSet::new(),
+            None,
             5000,
             10,
             10000,
@@ -2361,8 +2407,7 @@ mod tests {
             system.clone(),
             collection_uuid,
             database_name,
-            false,
-            HashSet::new(),
+            None,
             5000,
             10,
             10000,
@@ -2555,12 +2600,12 @@ mod tests {
         // Run first compaction - this should fail to update the log offset
         let database_name = chroma_types::DatabaseName::new(collection_database.clone())
             .expect("database name should be valid");
+
         let first_compaction_result = Box::pin(compact(
             system.clone(),
             collection_uuid,
             database_name.clone(),
-            false,
-            HashSet::new(),
+            None,
             5000,
             10,
             10000,
@@ -2574,7 +2619,7 @@ mod tests {
             false,
             None,
             None,
-            None,
+            Some(30), // Small shard size to force multiple shards
             None,
         ))
         .await;
@@ -2599,8 +2644,7 @@ mod tests {
             system.clone(),
             collection_uuid,
             database_name,
-            false,
-            HashSet::new(),
+            None,
             5000,
             10,
             10000,
@@ -2614,7 +2658,7 @@ mod tests {
             false,
             None,
             None,
-            None,
+            Some(30), // Small shard size to force multiple shards
             None,
         ))
         .await;
@@ -2834,8 +2878,7 @@ mod tests {
             system.clone(),
             collection_uuid,
             database_name,
-            false, // walrus_enabled
-            HashSet::new(),
+            None,
             50,   // min_compaction_size
             10,   // fetch_log_concurrency
             1000, // max_compaction_size
@@ -2849,7 +2892,7 @@ mod tests {
             false,
             None,
             None,
-            None,
+            Some(30), // Small shard size to force multiple shards
             None,
         ))
         .await;
@@ -3051,8 +3094,7 @@ mod tests {
             system.clone(),
             collection_uuid,
             database_name.clone(),
-            false, // walrus_enabled
-            HashSet::new(),
+            None,
             50,   // min_compaction_size
             10,   // fetch_log_concurrency
             1000, // max_compaction_size
@@ -3141,8 +3183,7 @@ mod tests {
             system.clone(),
             collection_uuid,
             database_name,
-            false, // walrus_enabled
-            HashSet::new(),
+            None,
             50,   // min_compaction_size
             10,   // fetch_log_concurrency
             1000, // max_compaction_size
@@ -3393,8 +3434,7 @@ mod tests {
 
         // Compaction 1: Start with run_get_logs only
         let mut compaction_context_1 = CompactionContext::new(
-            false,
-            HashSet::new(),
+            None,
             50,
             10,
             1000,
@@ -3448,8 +3488,7 @@ mod tests {
         // Create a NEW compaction context for compaction 2 to simulate a fresh compaction
         // This ensures both compactions work with the same initial state
         let _ = CompactionContext::new(
-            false,
-            HashSet::new(),
+            None,
             50,
             10,
             1000,
@@ -3474,8 +3513,7 @@ mod tests {
             system.clone(),
             collection_uuid,
             database_name,
-            false, // walrus_enabled
-            HashSet::new(),
+            None,
             50,   // min_compaction_size
             10,   // fetch_log_concurrency
             1000, // max_compaction_size
@@ -3489,7 +3527,7 @@ mod tests {
             false,
             None,
             None,
-            None,
+            Some(30), // Small shard size to force multiple shards
             None,
         ));
 
@@ -3718,8 +3756,7 @@ mod tests {
             system.clone(),
             collection_id,
             database_name.clone(),
-            false, // not a rebuild
-            HashSet::new(),
+            None,
             50,
             10,
             1000,
@@ -3733,7 +3770,7 @@ mod tests {
             false,
             None,
             None,
-            None,
+            Some(30), // Small shard size to force multiple shards
             None,
         ))
         .await
@@ -3808,8 +3845,7 @@ mod tests {
             system.clone(),
             collection_id,
             database_name.clone(),
-            false, // not a rebuild
-            HashSet::new(),
+            None,
             50,
             10,
             1000,
@@ -3872,8 +3908,10 @@ mod tests {
             system.clone(),
             collection_id,
             database_name,
-            true, // is_rebuild = true
-            HashSet::new(),
+            Some(RebuildInfo {
+                segment_scopes: HashSet::new(),
+                shard_index: None,
+            }),
             5000,
             10,
             10000,
@@ -4029,5 +4067,557 @@ mod tests {
             green_count,
             total_count
         );
+    }
+
+    #[tokio::test]
+    async fn test_rebuild_vector_segment_only_with_sharding() {
+        let config = RootConfig::default();
+        let system = System::default();
+        let registry = Registry::new();
+        let dispatcher = Dispatcher::try_from_config(&config.query_service.dispatcher, &registry)
+            .await
+            .expect("Should be able to initialize dispatcher");
+        let dispatcher_handle = system.start_component(dispatcher);
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+
+        // Create test segments with SPANN configuration (dimension 6 for add_delete_generator)
+        let mut test_segments = TestDistributedSegment::new_with_dimension(6).await;
+
+        // Configure collection for SPANN
+        test_segments.collection.config =
+            chroma_types::InternalCollectionConfiguration::default_spann();
+        test_segments.collection.schema = Some(
+            chroma_types::Schema::try_from(&test_segments.collection.config)
+                .expect("Should be able to create schema from config"),
+        );
+
+        // Change vector segment to SPANN type
+        test_segments.vector_segment.r#type = SegmentType::Spann;
+
+        let collection_id = test_segments.collection.collection_id;
+        let database_name =
+            chroma_types::DatabaseName::new(test_segments.collection.database.clone())
+                .expect("database name should be valid");
+
+        // Create collection with SPANN configuration
+        sysdb
+            .create_collection(
+                test_segments.collection.tenant.clone(),
+                database_name.clone(),
+                collection_id,
+                test_segments.collection.name.clone(),
+                vec![
+                    test_segments.record_segment.clone(),
+                    test_segments.metadata_segment.clone(),
+                    test_segments.vector_segment.clone(),
+                ],
+                Some(test_segments.collection.config.clone()),
+                Some(test_segments.collection.schema.clone().unwrap()),
+                None,
+                Some(6),
+                false,
+            )
+            .await
+            .expect("Collection create should be successful");
+
+        let mut in_memory_log = InMemoryLog::new();
+        let mut log_offset = 0i64;
+
+        // Insert records in two batches and compact after each to create 2 shards
+        // Each batch: 60 records (50 adds, 10 deletes) = 50 net adds
+        for batch_num in 0..2 {
+            let start = batch_num * 60 + 1;
+            let end = (batch_num + 1) * 60;
+            let batch_logs: Vec<_> = add_delete_generator.generate_vec(start..=end);
+
+            batch_logs.into_iter().for_each(|log| {
+                in_memory_log.add_log(
+                    collection_id,
+                    InternalLogRecord {
+                        collection_id,
+                        log_offset,
+                        log_ts: log_offset + 1,
+                        record: log,
+                    },
+                );
+                log_offset += 1;
+            });
+
+            // Compact after each batch to create one shard at a time
+            let compact_result = Box::pin(compact(
+                system.clone(),
+                collection_id,
+                database_name.clone(),
+                None, // No rebuild
+                1,    // fetch_log_batch_size
+                10,   // fetch_log_concurrency
+                40,   // max_compaction_size - reduced to below shard size
+                1000, // max_partition_size
+                Log::InMemory(in_memory_log.clone()),
+                sysdb.clone(),
+                test_segments.blockfile_provider.clone(),
+                test_segments.hnsw_provider.clone(),
+                test_segments.spann_provider.clone(),
+                dispatcher_handle.clone(),
+                false,
+                None,
+                None,
+                Some(50), // Shard size 50 to create 1 shard per batch
+                None,
+            ))
+            .await;
+            assert!(
+                compact_result.is_ok(),
+                "Compaction batch {} failed: {:?}",
+                batch_num,
+                compact_result.err()
+            );
+        }
+
+        let original_log = in_memory_log.clone();
+
+        let mut old_cas = sysdb
+            .get_collection_with_segments(None, collection_id)
+            .await
+            .expect("Should get collection");
+
+        assert!(
+            !old_cas.vector_segment.file_path.is_empty(),
+            "Vector segment should have file paths after compaction"
+        );
+
+        let num_shards = if let Some(hnsw_paths) = old_cas.vector_segment.file_path.get("hnsw_path")
+        {
+            hnsw_paths.len()
+        } else {
+            panic!("No hnsw_path found in vector segment file paths");
+        };
+
+        assert_eq!(
+            num_shards, 2,
+            "Expected exactly 2 shards, but got {}",
+            num_shards
+        );
+
+        // Verify we can query all records before rebuild
+        let old_records = get_all_records(
+            &system,
+            &dispatcher_handle.clone(),
+            test_segments.blockfile_provider.clone(),
+            Log::InMemory(original_log.clone()),
+            old_cas.clone(),
+        )
+        .await;
+
+        // We should have 80 records (100 adds - 20 deletes of IDs 1-20)
+        assert_eq!(
+            old_records.len(),
+            80,
+            "Should have 80 records before rebuild"
+        );
+
+        // Test rebuilding vector segments for different shard configurations
+        for (test_name, rebuild_shard_index) in &[
+            ("all shards", None),
+            ("shard 0", Some(0)),
+            ("shard 1", Some(1)),
+        ] {
+            // Store original file paths for comparison
+            let original_file_paths = old_cas.vector_segment.file_path.clone();
+            let original_version = old_cas.collection.version;
+
+            // Build rebuild info for vector segments only
+            let mut vector_only_scopes = HashSet::new();
+            vector_only_scopes.insert(SegmentScope::VECTOR);
+
+            let rebuild_info = Some(RebuildInfo {
+                segment_scopes: vector_only_scopes,
+                shard_index: *rebuild_shard_index,
+            });
+
+            let empty_log = Log::InMemory(InMemoryLog::new());
+
+            let rebuild_result = Box::pin(compact(
+                system.clone(),
+                collection_id,
+                database_name.clone(),
+                rebuild_info,
+                1, // fetch_log_batch_size
+                10,
+                10000,
+                20,
+                empty_log,
+                sysdb.clone(),
+                test_segments.blockfile_provider.clone(),
+                test_segments.hnsw_provider.clone(),
+                test_segments.spann_provider.clone(),
+                dispatcher_handle.clone(),
+                false,
+                None,
+                None,
+                Some(50), // Use same shard size as initial compaction
+                None,
+            ))
+            .await;
+
+            assert!(
+                rebuild_result.is_ok(),
+                "Rebuild of {} failed: {:?}",
+                test_name,
+                rebuild_result.err()
+            );
+
+            let new_cas = sysdb
+                .get_collection_with_segments(None, collection_id)
+                .await
+                .expect("Should get collection");
+
+            // Verify collection version incremented
+            assert_eq!(
+                new_cas.collection.version,
+                original_version + 1,
+                "Collection version should increment after rebuild of {}",
+                test_name
+            );
+
+            // Verify vector segment was rebuilt correctly
+            for (key, old_paths) in &original_file_paths {
+                let new_paths = &new_cas.vector_segment.file_path[key];
+                assert_eq!(
+                    old_paths.len(),
+                    new_paths.len(),
+                    "Number of shards should not change for rebuild of {}",
+                    test_name
+                );
+
+                assert_eq!(
+                    old_paths.len(),
+                    new_paths.len(),
+                    "Number of shards should not change"
+                );
+            }
+
+            // Verify metadata and record segments were NOT rebuilt (vector-only rebuild)
+            assert_eq!(
+                old_cas.metadata_segment.file_path, new_cas.metadata_segment.file_path,
+                "Metadata segment should not be rebuilt for vector-only rebuild of {}",
+                test_name
+            );
+            assert_eq!(
+                old_cas.record_segment.file_path, new_cas.record_segment.file_path,
+                "Record segment should not be rebuilt for vector-only rebuild of {}",
+                test_name
+            );
+
+            // Verify all records are still available after rebuild
+            let new_records = get_all_records(
+                &system,
+                &dispatcher_handle.clone(),
+                test_segments.blockfile_provider.clone(),
+                Log::InMemory(original_log.clone()),
+                new_cas.clone(),
+            )
+            .await;
+
+            assert_eq!(
+                new_records.len(),
+                80,
+                "Should still have 80 records after {} rebuild",
+                test_name
+            );
+
+            // Verify the records are identical before and after rebuild
+            for (id, old_record) in &old_records {
+                let new_record = new_records.get(id).unwrap_or_else(|| {
+                    panic!("Record {} should exist after {} rebuild", id, test_name)
+                });
+                assert_eq!(
+                    old_record.document, new_record.document,
+                    "Document for {} should be identical after {} rebuild",
+                    id, test_name
+                );
+                assert_eq!(
+                    old_record.embedding, new_record.embedding,
+                    "Embedding for {} should be identical after {} rebuild",
+                    id, test_name
+                );
+                assert_eq!(
+                    old_record.metadata, new_record.metadata,
+                    "Metadata for {} should be identical after {} rebuild",
+                    id, test_name
+                );
+            }
+
+            // Update old_cas for next iteration
+            old_cas = new_cas;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_rebuild_all_segments_per_shard_with_sharding() {
+        let config = RootConfig::default();
+        let system = System::default();
+        let registry = Registry::new();
+        let dispatcher = Dispatcher::try_from_config(&config.query_service.dispatcher, &registry)
+            .await
+            .expect("Should be able to initialize dispatcher");
+        let dispatcher_handle = system.start_component(dispatcher);
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+
+        // Create test segments with SPANN configuration (dimension 6 for add_delete_generator)
+        let mut test_segments = TestDistributedSegment::new_with_dimension(6).await;
+
+        // Configure collection for SPANN
+        test_segments.collection.config =
+            chroma_types::InternalCollectionConfiguration::default_spann();
+        test_segments.collection.schema = Some(
+            chroma_types::Schema::try_from(&test_segments.collection.config)
+                .expect("Should be able to create schema from config"),
+        );
+
+        // Change vector segment to SPANN type
+        test_segments.vector_segment.r#type = SegmentType::Spann;
+
+        let collection_id = test_segments.collection.collection_id;
+        let database_name =
+            chroma_types::DatabaseName::new(test_segments.collection.database.clone())
+                .expect("database name should be valid");
+
+        // Create collection with SPANN configuration
+        sysdb
+            .create_collection(
+                test_segments.collection.tenant.clone(),
+                database_name.clone(),
+                collection_id,
+                test_segments.collection.name.clone(),
+                vec![
+                    test_segments.record_segment.clone(),
+                    test_segments.metadata_segment.clone(),
+                    test_segments.vector_segment.clone(),
+                ],
+                Some(test_segments.collection.config.clone()),
+                Some(test_segments.collection.schema.clone().unwrap()),
+                None,
+                Some(6),
+                false,
+            )
+            .await
+            .expect("Collection create should be successful");
+
+        let mut in_memory_log = InMemoryLog::new();
+        let mut log_offset = 0i64;
+
+        // Insert records in two batches and compact after each to create 2 shards
+        // Each batch: 60 records (50 adds, 10 deletes) = 50 net adds
+        for batch_num in 0..2 {
+            let start = batch_num * 60 + 1;
+            let end = (batch_num + 1) * 60;
+            let batch_logs: Vec<_> = add_delete_generator.generate_vec(start..=end);
+
+            batch_logs.into_iter().for_each(|log| {
+                in_memory_log.add_log(
+                    collection_id,
+                    InternalLogRecord {
+                        collection_id,
+                        log_offset,
+                        log_ts: log_offset + 1,
+                        record: log,
+                    },
+                );
+                log_offset += 1;
+            });
+
+            // Compact after each batch to create one shard at a time
+            let compact_result = Box::pin(compact(
+                system.clone(),
+                collection_id,
+                database_name.clone(),
+                None, // No rebuild
+                1,    // fetch_log_batch_size
+                10,   // fetch_log_concurrency
+                100,
+                1000, // max_partition_size
+                Log::InMemory(in_memory_log.clone()),
+                sysdb.clone(),
+                test_segments.blockfile_provider.clone(),
+                test_segments.hnsw_provider.clone(),
+                test_segments.spann_provider.clone(),
+                dispatcher_handle.clone(),
+                false,
+                None,
+                None,
+                Some(50), // Shard size 50 to create 1 shard per batch
+                None,
+            ))
+            .await;
+            assert!(
+                compact_result.is_ok(),
+                "Compaction batch {} failed: {:?}",
+                batch_num,
+                compact_result.err()
+            );
+        }
+
+        let original_log = in_memory_log.clone();
+
+        let mut old_cas = sysdb
+            .get_collection_with_segments(None, collection_id)
+            .await
+            .expect("Should get collection");
+
+        let num_record_shards = if let Some(user_id_paths) =
+            old_cas.record_segment.file_path.get("user_id_to_offset_id")
+        {
+            user_id_paths.len()
+        } else {
+            0
+        };
+
+        let num_shards = if let Some(hnsw_paths) = old_cas.vector_segment.file_path.get("hnsw_path")
+        {
+            hnsw_paths.len()
+        } else {
+            0
+        };
+
+        assert_eq!(
+            num_shards, 2,
+            "Expected exactly 2 shards, but got {}",
+            num_shards
+        );
+
+        // Verify we can query all records before rebuild
+        let old_records = get_all_records(
+            &system,
+            &dispatcher_handle.clone(),
+            test_segments.blockfile_provider.clone(),
+            Log::InMemory(original_log.clone()),
+            old_cas.clone(),
+        )
+        .await;
+
+        // We should have 80 records (100 adds - 20 deletes of IDs 1-20)
+        assert_eq!(
+            old_records.len(),
+            80,
+            "Should have 80 records before rebuild"
+        );
+
+        // Test rebuilding all segments for specific shards
+        for (test_name, rebuild_shard_index) in &[("shard 0", Some(0)), ("shard 1", Some(1))] {
+            // Store original version for comparison
+            let original_version = old_cas.collection.version;
+
+            // Build rebuild info for all segments of specific shard
+            let rebuild_info = Some(RebuildInfo {
+                segment_scopes: HashSet::new(), // Empty means all segments
+                shard_index: *rebuild_shard_index,
+            });
+
+            let empty_log = Log::InMemory(InMemoryLog::new());
+
+            let rebuild_result = Box::pin(compact(
+                system.clone(),
+                collection_id,
+                database_name.clone(),
+                rebuild_info,
+                1, // fetch_log_batch_size
+                10,
+                10000,
+                20,
+                empty_log,
+                sysdb.clone(),
+                test_segments.blockfile_provider.clone(),
+                test_segments.hnsw_provider.clone(),
+                test_segments.spann_provider.clone(),
+                dispatcher_handle.clone(),
+                false,
+                None,
+                None,
+                Some(50), // Use same shard size as initial compaction
+                None,
+            ))
+            .await;
+
+            assert!(
+                rebuild_result.is_ok(),
+                "Rebuild of {} failed: {:?}",
+                test_name,
+                rebuild_result.err()
+            );
+
+            let new_cas = sysdb
+                .get_collection_with_segments(None, collection_id)
+                .await
+                .expect("Should get collection");
+
+            // Verify collection version incremented
+            assert_eq!(
+                new_cas.collection.version,
+                original_version + 1,
+                "Collection version should increment after rebuild of {}",
+                test_name
+            );
+
+            if let Some(hnsw_paths) = &new_cas.vector_segment.file_path.get("hnsw_path") {
+                assert_eq!(
+                    hnsw_paths.len(),
+                    num_shards,
+                    "Vector segment shard count should not change"
+                );
+            }
+
+            if let Some(user_id_paths) =
+                &new_cas.record_segment.file_path.get("user_id_to_offset_id")
+            {
+                assert_eq!(
+                    user_id_paths.len(),
+                    num_record_shards,
+                    "Record segment shard count should not change"
+                );
+            }
+
+            // Verify all records are still available after rebuild
+            let new_records = get_all_records(
+                &system,
+                &dispatcher_handle.clone(),
+                test_segments.blockfile_provider.clone(),
+                Log::InMemory(original_log.clone()),
+                new_cas.clone(),
+            )
+            .await;
+
+            assert_eq!(
+                new_records.len(),
+                80,
+                "Should still have 80 records after {} rebuild",
+                test_name
+            );
+
+            // Verify the records are identical before and after rebuild
+            for (id, old_record) in &old_records {
+                let new_record = new_records.get(id).unwrap_or_else(|| {
+                    panic!("Record {} should exist after {} rebuild", id, test_name)
+                });
+                assert_eq!(
+                    old_record.document, new_record.document,
+                    "Document for {} should be identical after {} rebuild",
+                    id, test_name
+                );
+                assert_eq!(
+                    old_record.embedding, new_record.embedding,
+                    "Embedding for {} should be identical after {} rebuild",
+                    id, test_name
+                );
+                assert_eq!(
+                    old_record.metadata, new_record.metadata,
+                    "Metadata for {} should be identical after {} rebuild",
+                    id, test_name
+                );
+            }
+
+            // Update old_cas for next iteration
+            old_cas = new_cas;
+        }
     }
 }

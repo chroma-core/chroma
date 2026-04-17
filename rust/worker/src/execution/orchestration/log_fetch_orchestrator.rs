@@ -1,5 +1,3 @@
-use std::sync::{atomic::AtomicU32, Arc};
-
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -28,6 +26,7 @@ use chroma_types::{
     SegmentShardError,
 };
 use opentelemetry::trace::TraceContextExt;
+use std::sync::{atomic::AtomicU32, Arc};
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
@@ -36,6 +35,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 use crate::execution::{
     operators::{
         fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
+        fragment_fetch::FragmentFetcher,
         get_collection_and_segments::{
             GetCollectionAndSegmentsError, GetCollectionAndSegmentsOperator,
             GetCollectionAndSegmentsOutput,
@@ -49,10 +49,7 @@ use crate::execution::{
             PrefetchSegmentError, PrefetchSegmentInput, PrefetchSegmentOperator,
             PrefetchSegmentOutput,
         },
-        source_record_segment::{
-            SourceRecordSegmentError, SourceRecordSegmentInput, SourceRecordSegmentOperator,
-            SourceRecordSegmentOutput,
-        },
+        source_record_segment::{SourceRecordSegmentError, SourceRecordSegmentOutput},
         source_record_segment_v2::{
             SourceRecordSegmentV2Error, SourceRecordSegmentV2Input, SourceRecordSegmentV2Operator,
             SourceRecordSegmentV2Output,
@@ -319,8 +316,7 @@ impl LogFetchOrchestrator {
     pub fn new(
         collection_id: CollectionUuid,
         database_name: chroma_types::DatabaseName,
-        is_rebuild: bool,
-        apply_segment_scopes: std::collections::HashSet<chroma_types::SegmentScope>,
+        rebuild_info: Option<crate::compactor::RebuildInfo>,
         fetch_log_batch_size: u32,
         fetch_log_concurrency: usize,
         max_compaction_size: usize,
@@ -331,12 +327,11 @@ impl LogFetchOrchestrator {
         hnsw_provider: HnswIndexProvider,
         spann_provider: SpannProvider,
         dispatcher: ComponentHandle<Dispatcher>,
-        fragment_fetcher: Option<Arc<crate::execution::operators::fragment_fetch::FragmentFetcher>>,
+        fragment_fetcher: Option<Arc<FragmentFetcher>>,
         bloom_filter_manager: Option<BloomFilterManager>,
     ) -> Self {
         let context = CompactionContext::new(
-            is_rebuild,
-            apply_segment_scopes,
+            rebuild_info,
             fetch_log_batch_size,
             fetch_log_concurrency,
             max_compaction_size,
@@ -474,7 +469,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         let collection = output.collection.clone();
 
         // Create RecordSegmentReader for MaterializeLogOperator
-        let record_segment_reader = self
+        let record_segment_reader = match self
             .ok_or_terminate(
                 Box::pin(RecordSegmentReader::from_segment(
                     &output.record_segment,
@@ -484,73 +479,73 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                 .await,
                 ctx,
             )
-            .await;
-
-        if record_segment_reader.is_none() {
-            return;
-        }
-
-        // Also create RecordSegmentReaderShard for source operators
-        let record_segment_shard = match self
-            .ok_or_terminate(SegmentShard::try_from((&output.record_segment, 0)), ctx)
-            .await
-        {
-            Some(shard) => shard,
-            None => return,
-        };
-        let record_reader_shard = match self
-            .ok_or_terminate(
-                match Box::pin(RecordSegmentReaderShard::from_segment(
-                    &record_segment_shard,
-                    &self.context.blockfile_provider,
-                    self.context.bloom_filter_manager.clone(),
-                ))
-                .await
-                {
-                    Ok(reader) => Ok(Some(reader)),
-                    Err(err) => match *err {
-                        RecordSegmentReaderShardCreationError::UninitializedSegment => Ok(None),
-                        _ => Err(*err),
-                    },
-                },
-                ctx,
-            )
             .await
         {
             Some(reader) => reader,
             None => return,
         };
 
-        let log_task = if self.context.is_rebuild {
-            // TODO(tanujnay112): Remove this once we've fully baked in SourceRecordSegmentV2Operator
-            if self.context.is_full_rebuild() {
-                wrap(
-                    Box::new(SourceRecordSegmentOperator::new()),
-                    SourceRecordSegmentInput {
-                        // TODO(tanujnay112): Rebuilds need to work with sharding
-                        record_segment_reader: record_reader_shard.clone(),
-                    },
-                    ctx.receiver(),
-                    self.context
-                        .orchestrator_context
-                        .task_cancellation_token
-                        .clone(),
-                )
-            } else {
-                wrap(
-                    Box::new(SourceRecordSegmentV2Operator::new(
-                        self.context.max_partition_size,
+        let log_task = if self.context.is_rebuild() {
+            // Also create RecordSegmentReaderShard for source operators
+            let record_segment_shard = match self
+                .ok_or_terminate(
+                    SegmentShard::try_from((
+                        &output.record_segment,
+                        self.context.rebuild_shard_idx(),
                     )),
-                    SourceRecordSegmentV2Input {
-                        record_segment_reader: record_reader_shard.clone(),
-                    },
-                    ctx.receiver(),
-                    self.context
-                        .orchestrator_context
-                        .task_cancellation_token
-                        .clone(),
+                    ctx,
                 )
-            }
+                .await
+            {
+                Some(shard) => shard,
+                None => return,
+            };
+            let record_reader_shard = match self
+                .ok_or_terminate(
+                    match Box::pin(RecordSegmentReaderShard::from_segment(
+                        &record_segment_shard,
+                        &self.context.blockfile_provider,
+                        self.context.bloom_filter_manager.clone(),
+                    ))
+                    .await
+                    {
+                        Ok(reader) => Ok(Some(reader)),
+                        Err(err) => match *err {
+                            RecordSegmentReaderShardCreationError::UninitializedSegment => Ok(None),
+                            _ => Err(*err),
+                        },
+                    },
+                    ctx,
+                )
+                .await
+            {
+                Some(reader) => reader,
+                None => return,
+            };
+
+            let shard_count = match self
+                .ok_or_terminate(output.record_segment.num_shards(), ctx)
+                .await
+            {
+                Some(count) => count,
+                None => return,
+            };
+
+            wrap(
+                Box::new(SourceRecordSegmentV2Operator::new(
+                    self.context.max_partition_size,
+                    shard_count,
+                    self.context.rebuild_shard_idx(),
+                )),
+                SourceRecordSegmentV2Input {
+                    record_segment_reader: record_reader_shard.clone(),
+                },
+                ctx.receiver(),
+                self.context
+                    .orchestrator_context
+                    .task_cancellation_token
+                    .clone(),
+            )
         } else {
             let database_name = match chroma_types::DatabaseName::new(collection.database.clone()) {
                 Some(name) => name,
@@ -639,17 +634,19 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         let mut metadata_segment = output.metadata_segment.clone();
         let mut record_segment = output.record_segment.clone();
         let mut vector_segment = output.vector_segment.clone();
-        if self.context.is_rebuild {
+        if self.context.is_rebuild() {
+            let shard_index = self.context.rebuild_shard_idx();
+
             // Only clear file paths for segments that are being rebuilt.
             // Empty apply_segment_scopes means rebuild all (backward compatible).
             if self.context.scope_is_active(&SegmentScope::METADATA) {
-                metadata_segment.file_path = Default::default();
+                metadata_segment.clear_shard_file_paths(shard_index);
             }
             if self.context.scope_is_active(&SegmentScope::RECORD) {
-                record_segment.file_path = Default::default();
+                record_segment.clear_shard_file_paths(shard_index);
             }
             if self.context.scope_is_active(&SegmentScope::VECTOR) {
-                vector_segment.file_path = Default::default();
+                vector_segment.clear_shard_file_paths(shard_index);
             }
         }
 
@@ -714,9 +711,11 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
 
         let writers = CompactWriters {
             // No record reader when rebuilding
-            record_reader: record_segment_reader
-                .clone()
-                .filter(|_| !self.context.is_rebuild),
+            record_reader: if self.context.is_rebuild() {
+                None
+            } else {
+                Some(record_segment_reader.clone())
+            },
             metadata_writer,
             record_writer,
             vector_writer,
@@ -736,21 +735,26 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         collection_info.hnsw_index_uuid = None;
 
         // Prefetch segments
-        let prefetch_segments = match self.context.is_rebuild {
-            true => vec![output.record_segment],
-            false => {
-                let mut segments = vec![output.metadata_segment, output.record_segment];
-                if vector_segment.r#type == chroma_types::SegmentType::Spann {
-                    segments.push(output.vector_segment);
-                }
-                segments
+        let mut shard_index = None;
+        let prefetch_segments = if self.context.is_rebuild() {
+            shard_index = Some(self.context.rebuild_shard_idx());
+            vec![output.record_segment]
+        } else {
+            let mut segments = vec![output.metadata_segment, output.record_segment];
+            if vector_segment.r#type != chroma_types::SegmentType::HnswDistributed {
+                segments.push(output.vector_segment);
             }
+            segments
         };
         for segment in prefetch_segments {
             let segment_id = segment.id;
             let prefetch_task = wrap(
                 Box::new(PrefetchSegmentOperator::new()),
-                PrefetchSegmentInput::new(segment, self.context.blockfile_provider.clone()),
+                PrefetchSegmentInput::new_with_shard(
+                    segment,
+                    self.context.blockfile_provider.clone(),
+                    shard_index,
+                ),
                 ctx.receiver(),
                 self.context
                     .orchestrator_context
@@ -923,16 +927,6 @@ impl Handler<TaskResult<SourceRecordSegmentV2Output, SourceRecordSegmentV2Error>
             output.total_records,
             output.partitions.len()
         );
-
-        // Update total records count
-        let collection_info = match self.context.get_collection_info_mut() {
-            Ok(info) => info,
-            Err(err) => {
-                self.terminate_with_result(Err(err.into()), ctx).await;
-                return;
-            }
-        };
-        collection_info.collection.total_records_post_compaction = output.total_records as u64;
 
         // If no records, terminate early
         if output.partitions.is_empty() {

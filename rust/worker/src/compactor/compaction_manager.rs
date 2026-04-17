@@ -1,10 +1,10 @@
 use super::scheduler::Scheduler;
 use super::scheduler_policy::LasCompactionTimeSchedulerPolicy;
-use super::OneOffCompactMessage;
 use super::RebuildMessage;
-use crate::compactor::types::{
+use crate::compactor::types::RebuildInfo;
+use crate::compactor::{
     GetCollectionAssignmentMessage, GetCollectionAssignmentResponse, InProgressJobEntry,
-    ListInProgressJobsMessage, ScheduledCompactMessage,
+    ListInProgressJobsMessage, OneOffCompactMessage, ScheduledCompactMessage,
 };
 use crate::config::CompactionServiceConfig;
 use crate::execution::operators::fragment_fetch::FragmentFetcher;
@@ -235,8 +235,7 @@ impl CompactionManager {
                     job.collection_id,
                     job.database_name.clone(),
                     job.tenant_id.clone(),
-                    false,
-                    HashSet::new(),
+                    None,
                 )
                 .instrument(instrumented_span);
             if let Err(e) = compact_awaiter_channel
@@ -260,6 +259,7 @@ impl CompactionManager {
         &mut self,
         collection_ids: &[CollectionUuid],
         segment_scopes: &HashSet<chroma_types::SegmentScope>,
+        shard_index: Option<u32>,
     ) {
         let options = chroma_sysdb::types::GetCollectionsOptions {
             collection_ids: Some(collection_ids.to_vec()),
@@ -282,8 +282,10 @@ impl CompactionManager {
                             collection.collection_id,
                             database_name,
                             collection.tenant.clone(),
-                            true,
-                            segment_scopes.clone(),
+                            Some(RebuildInfo {
+                                segment_scopes: segment_scopes.clone(),
+                                shard_index,
+                            }),
                         )
                     ),
                     None => {
@@ -465,8 +467,7 @@ impl CompactionManagerContext {
         collection_id: CollectionUuid,
         database_name: chroma_types::DatabaseName,
         tenant_id: String,
-        is_rebuild: bool,
-        apply_segment_scopes: HashSet<chroma_types::SegmentScope>,
+        rebuild_info: Option<RebuildInfo>,
     ) -> Result<CompactionResponse, Box<dyn ChromaError>> {
         tracing::info!("Compacting collection: {}", collection_id);
         let dispatcher = match self.dispatcher {
@@ -493,8 +494,7 @@ impl CompactionManagerContext {
             self.system.clone(),
             collection_id,
             database_name,
-            is_rebuild,
-            apply_segment_scopes,
+            rebuild_info,
             self.fetch_log_batch_size,
             self.fetch_log_concurrency,
             self.max_compaction_size,
@@ -868,8 +868,19 @@ impl Handler<RebuildMessage> for CompactionManager {
             message.collection_ids,
             message.segment_scopes
         );
-        self.rebuild_batch(&message.collection_ids, &message.segment_scopes)
-            .await;
+        if message.collection_ids.len() > 1 && message.shard_index.is_some() {
+            tracing::error!(
+                "Rebuild failed for collections: {:?}, Can't rebuild multiple collections with a shard index",
+                message.collection_ids
+            );
+            return;
+        }
+        self.rebuild_batch(
+            &message.collection_ids,
+            &message.segment_scopes,
+            message.shard_index,
+        )
+        .await;
         tracing::info!(
             "Rebuild completed for collections: {:?}",
             message.collection_ids

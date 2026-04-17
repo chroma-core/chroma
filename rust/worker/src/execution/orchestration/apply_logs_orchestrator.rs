@@ -368,32 +368,22 @@ impl ApplyLogsOrchestrator {
             }
         };
         let collection = collection_info.collection.clone();
-        let collection_logical_size_bytes = if self.context.is_full_rebuild() {
-            match u64::try_from(self.collection_logical_size_delta_bytes) {
-                Ok(size_bytes) => size_bytes,
-                _ => {
-                    self.terminate_with_result(
-                        Err(ApplyLogsOrchestratorError::InvariantViolation(
-                            "The collection size delta after rebuild should be non-negative",
-                        )),
-                        ctx,
-                    )
-                    .await;
-                    return;
-                }
-            }
-        } else {
-            collection
-                .size_bytes_post_compaction
-                .saturating_add_signed(self.collection_logical_size_delta_bytes)
-        };
+        let collection_logical_size_bytes = collection
+            .size_bytes_post_compaction
+            .saturating_add_signed(self.collection_logical_size_delta_bytes);
 
         let mut flush_results = std::mem::take(&mut self.flush_results);
 
         // During selective rebuild, non-rebuilt segments are skipped (no apply/commit/flush),
         // so they won't appear in flush_results. Include their original file paths from sysdb
         // so the version file and sysdb registration contain all segments.
-        if !self.context.apply_segment_scopes.is_empty() {
+        if self
+            .context
+            .rebuild_info
+            .as_ref()
+            .map(|info| !info.segment_scopes.is_empty())
+            .unwrap_or(false)
+        {
             let flushed_ids: std::collections::HashSet<_> =
                 flush_results.iter().map(|f| f.segment_id).collect();
             for original in &collection_info.original_segment_flush_infos {
@@ -479,7 +469,8 @@ impl Orchestrator for ApplyLogsOrchestrator {
         };
 
         if let Some(shard_size) = self.context.shard_size {
-            if shard_size != 0 {
+            // No sealing required during rebuild operations
+            if shard_size != 0 && !self.context.is_rebuild() {
                 // Get the writers
                 let writers = match self.context.get_segment_writers() {
                     Ok(writers) => writers,
@@ -507,7 +498,6 @@ impl Orchestrator for ApplyLogsOrchestrator {
                     .iter()
                     .map(|output| output.collection_logical_size_delta)
                     .sum();
-
                 self.collection_logical_size_delta_bytes = collection_logical_size_delta;
 
                 // might have to seal the active shard and create a new one
@@ -541,6 +531,8 @@ impl Orchestrator for ApplyLogsOrchestrator {
             }
         }
 
+        self.collection_logical_size_delta_bytes = 0;
+
         for materialized_output in materialized_outputs.iter() {
             if materialized_output.result.is_empty() {
                 self.terminate_with_result(
@@ -552,8 +544,11 @@ impl Orchestrator for ApplyLogsOrchestrator {
                 .await;
                 return Vec::new();
             }
-            self.collection_logical_size_delta_bytes +=
-                materialized_output.collection_logical_size_delta;
+
+            if !self.context.is_rebuild() {
+                self.collection_logical_size_delta_bytes +=
+                    materialized_output.collection_logical_size_delta;
+            }
 
             // Create tasks for each materialized output
             let result = self
