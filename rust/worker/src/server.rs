@@ -47,6 +47,9 @@ use crate::{
     utils::fragment_fetch::fragment_fetcher_for_collection as resolve_fragment_fetcher_for_collection,
 };
 
+// TODO: Make this configurable.
+const DEFAULT_ORCHESTRATOR_QUEUE_SIZE: usize = 1000;
+
 #[derive(Debug, thiserror::Error)]
 #[error("Invalid collection UUID in config: {0}")]
 struct InvalidCollectionUuidError(String);
@@ -669,7 +672,7 @@ impl WorkerServer {
             self.blockfile_provider.clone(),
             self.clone_dispatcher()?,
             self.hnsw_index_provider.clone(),
-            1000, // TODO: Make this configurable
+            DEFAULT_ORCHESTRATOR_QUEUE_SIZE,
             collection_and_segments.clone(),
             fetch_log,
             search_payload.filter.clone(),
@@ -711,7 +714,7 @@ impl WorkerServer {
                             SegmentType::QuantizedSpann => QuantizedSpannKnnOrchestrator::new(
                                 spann_provider,
                                 dispatcher,
-                                1000,
+                                DEFAULT_ORCHESTRATOR_QUEUE_SIZE,
                                 collection_and_segments_clone,
                                 filter_orchestrator_output_clone,
                                 Knn {
@@ -727,7 +730,7 @@ impl WorkerServer {
                             SegmentType::Spann => SpannKnnOrchestrator::new(
                                 spann_provider,
                                 dispatcher,
-                                1000,
+                                DEFAULT_ORCHESTRATOR_QUEUE_SIZE,
                                 collection_and_segments_clone,
                                 filter_orchestrator_output_clone,
                                 knn_query.limit as usize,
@@ -747,7 +750,7 @@ impl WorkerServer {
                                 KnnOrchestrator::new(
                                     blockfile_provider,
                                     dispatcher,
-                                    1000,
+                                    DEFAULT_ORCHESTRATOR_QUEUE_SIZE,
                                     collection_and_segments_clone,
                                     filter_orchestrator_output_clone,
                                     knn,
@@ -765,7 +768,7 @@ impl WorkerServer {
                         let sparse_orchestrator = SparseKnnOrchestrator::new(
                             blockfile_provider,
                             dispatcher,
-                            1000,
+                            DEFAULT_ORCHESTRATOR_QUEUE_SIZE,
                             collection_and_segments_clone,
                             filter_orchestrator_output_clone,
                             query,
@@ -795,7 +798,7 @@ impl WorkerServer {
         let rank_orchestrator = RankOrchestrator::new(
             self.blockfile_provider.clone(),
             self.clone_dispatcher()?,
-            1000, // TODO: Make this configurable
+            DEFAULT_ORCHESTRATOR_QUEUE_SIZE,
             filter_orchestrator_output,
             knn_results,
             search_payload.rank,

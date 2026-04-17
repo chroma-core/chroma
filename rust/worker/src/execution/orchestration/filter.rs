@@ -155,37 +155,43 @@ pub struct FilterOrchestratorOutput {
 
 type FilterOrchestratorResult = Result<FilterOrchestratorOutput, KnnError>;
 
-/// The `FilterOrchestrator` chains a sequence of operators in sequence to evaluate
-/// the first half of a `<collection>.query(...)` query from the user
+/// The `FilterOrchestrator` evaluates the first half of a collection search query:
+/// it fetches the relevant logs, partitions them to the current shard, evaluates the
+/// user-supplied `Where` predicate, and opens the HNSW reader (for HNSW-backed
+/// collections). Its output feeds the downstream KNN / Rank / Projection orchestrators.
 ///
 /// # Pipeline
 /// ```text
-///       ┌────────────┐
-///       │            │
-///       │  on_start  │
-///       │            │
-///       └──────┬─────┘
-///              │
-///              ▼
-///    ┌────────────────────┐
-///    │                    │
-///    │  FetchLogOperator  │
-///    │                    │
-///    └─────────┬──────────┘
-///              │
-///              ▼
-///    ┌───────────────────┐
-///    │                   │
-///    │   FilterOperator  │
-///    │                   │
-///    └─────────┬─────────┘
-///              │
-///              ▼
-///     ┌──────────────────┐
-///     │                  │
-///     │  result_channel  │
-///     │                  │
-///     └──────────────────┘
+///                          ┌────────────┐
+///                          │  on_start  │
+///                          └──────┬─────┘
+///                                 │
+///                 ┌───────────────┼─────────────────────────────┐
+///                 │               │                             │
+///                 ▼               ▼                             ▼
+///         ┌──────────────┐ ┌──────────────┐           ┌────────────────────┐
+///         │  Prefetch    │ │  Prefetch    │   ...     │  FetchLogOperator  │
+///         │    vector    │ │   record     │           │   (skipped for     │
+///         │   segment    │ │   segment    │           │    IndexOnly)      │
+///         └──────────────┘ └──────────────┘           └─────────┬──────────┘
+///         (detached)       (detached)                           │
+///                                                               ▼
+///                                                ┌─────────────────────────────┐
+///                                                │  FilterLogsForShardOperator │
+///                                                └──────────────┬──────────────┘
+///                                                               │
+///                                                               ▼
+///                                                     ┌───────────────────┐
+///                                                     │   FilterOperator  │
+///                                                     └─────────┬─────────┘
+///                                                               │
+///                                                               ▼
+///                                                    open DistributedHNSWSegment
+///                                                               │
+///                                                               ▼
+///                                                     ┌──────────────────┐
+///                                                     │  result_channel  │
+///                                                     └──────────────────┘
 /// ```
 #[derive(Debug)]
 pub struct FilterOrchestrator {
@@ -298,7 +304,7 @@ impl Orchestrator for FilterOrchestrator {
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
         let mut tasks = vec![];
-        // prefetch spann segment
+        // Prefetch vector segment
         let prefetch_task = wrap(
             Box::new(PrefetchSegmentOperator::new()),
             PrefetchSegmentInput::new_with_shard(
@@ -310,7 +316,7 @@ impl Orchestrator for FilterOrchestrator {
             self.context.task_cancellation_token.clone(),
         );
         // Prefetch task is detached from the orchestrator
-        let prefetch_span = tracing::info_span!(parent: None, "Prefetch spann segment", segment_id = %self.collection_and_segments.vector_segment.id);
+        let prefetch_span = tracing::info_span!(parent: None, "Prefetch vector segment", segment_id = %self.collection_and_segments.vector_segment.id);
         Span::current().add_link(prefetch_span.context().span().span_context().clone());
         tasks.push((prefetch_task, Some(prefetch_span)));
 
