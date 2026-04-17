@@ -368,25 +368,9 @@ impl ApplyLogsOrchestrator {
             }
         };
         let collection = collection_info.collection.clone();
-        let collection_logical_size_bytes = if self.context.is_full_rebuild() {
-            match u64::try_from(self.collection_logical_size_delta_bytes) {
-                Ok(size_bytes) => size_bytes,
-                _ => {
-                    self.terminate_with_result(
-                        Err(ApplyLogsOrchestratorError::InvariantViolation(
-                            "The collection size delta after rebuild should be non-negative",
-                        )),
-                        ctx,
-                    )
-                    .await;
-                    return;
-                }
-            }
-        } else {
-            collection
-                .size_bytes_post_compaction
-                .saturating_add_signed(self.collection_logical_size_delta_bytes)
-        };
+        let collection_logical_size_bytes = collection
+            .size_bytes_post_compaction
+            .saturating_add_signed(self.collection_logical_size_delta_bytes);
 
         let mut flush_results = std::mem::take(&mut self.flush_results);
 
@@ -514,7 +498,6 @@ impl Orchestrator for ApplyLogsOrchestrator {
                     .iter()
                     .map(|output| output.collection_logical_size_delta)
                     .sum();
-
                 self.collection_logical_size_delta_bytes = collection_logical_size_delta;
 
                 // might have to seal the active shard and create a new one
@@ -548,6 +531,8 @@ impl Orchestrator for ApplyLogsOrchestrator {
             }
         }
 
+        self.collection_logical_size_delta_bytes = 0;
+
         for materialized_output in materialized_outputs.iter() {
             if materialized_output.result.is_empty() {
                 self.terminate_with_result(
@@ -559,8 +544,11 @@ impl Orchestrator for ApplyLogsOrchestrator {
                 .await;
                 return Vec::new();
             }
-            self.collection_logical_size_delta_bytes +=
-                materialized_output.collection_logical_size_delta;
+
+            if !self.context.is_rebuild() {
+                self.collection_logical_size_delta_bytes +=
+                    materialized_output.collection_logical_size_delta;
+            }
 
             // Create tasks for each materialized output
             let result = self

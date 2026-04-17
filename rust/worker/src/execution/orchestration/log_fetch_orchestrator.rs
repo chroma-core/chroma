@@ -515,15 +515,15 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             None => return,
         };
 
-        let log_task = if self.context.is_rebuild() {
-            let shard_count = output
-                .record_segment
-                .file_path
-                .values()
-                .next()
-                .map(|paths| paths.len())
-                .unwrap_or(1);
+        let shard_count = match self
+            .ok_or_terminate(output.record_segment.num_shards(), ctx)
+            .await
+        {
+            Some(count) => count,
+            None => return,
+        };
 
+        let log_task = if self.context.is_rebuild() {
             wrap(
                 Box::new(SourceRecordSegmentV2Operator::new(
                     self.context.max_partition_size,
@@ -726,21 +726,26 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         collection_info.hnsw_index_uuid = None;
 
         // Prefetch segments
-        let prefetch_segments = match self.context.is_rebuild() {
-            true => vec![output.record_segment],
-            false => {
-                let mut segments = vec![output.metadata_segment, output.record_segment];
-                if vector_segment.r#type == chroma_types::SegmentType::Spann {
-                    segments.push(output.vector_segment);
-                }
-                segments
+        let mut shard_index = None;
+        let prefetch_segments = if self.context.is_rebuild() {
+            shard_index = Some(self.context.rebuild_shard_idx());
+            vec![output.record_segment]
+        } else {
+            let mut segments = vec![output.metadata_segment, output.record_segment];
+            if vector_segment.r#type == chroma_types::SegmentType::Spann {
+                segments.push(output.vector_segment);
             }
+            segments
         };
         for segment in prefetch_segments {
             let segment_id = segment.id;
             let prefetch_task = wrap(
                 Box::new(PrefetchSegmentOperator::new()),
-                PrefetchSegmentInput::new(segment, self.context.blockfile_provider.clone()),
+                PrefetchSegmentInput::new_with_shard(
+                    segment,
+                    self.context.blockfile_provider.clone(),
+                    shard_index,
+                ),
                 ctx.receiver(),
                 self.context
                     .orchestrator_context
@@ -913,16 +918,6 @@ impl Handler<TaskResult<SourceRecordSegmentV2Output, SourceRecordSegmentV2Error>
             output.total_records,
             output.partitions.len()
         );
-
-        // Update total records count
-        let collection_info = match self.context.get_collection_info_mut() {
-            Ok(info) => info,
-            Err(err) => {
-                self.terminate_with_result(Err(err.into()), ctx).await;
-                return;
-            }
-        };
-        collection_info.collection.total_records_post_compaction = output.total_records as u64;
 
         // If no records, terminate early
         if output.partitions.is_empty() {

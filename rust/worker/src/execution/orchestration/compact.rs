@@ -1,5 +1,5 @@
-use std::cell::OnceCell;
 use std::sync::Arc;
+use std::{cell::OnceCell, collections::HashSet};
 
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -455,15 +455,23 @@ impl CompactionContext {
         collection_id: CollectionUuid,
         database_name: chroma_types::DatabaseName,
         system: System,
-        _is_getting_compacted_logs: bool,
+        is_getting_compacted_logs: bool,
     ) -> Result<LogFetchOrchestratorResponse, LogFetchOrchestratorError> {
         // TODO(tanujnay112): This is awful, we need to find a better way to pass
         // the active collection info around.
         self.collection_info = OnceCell::new();
+        let rebuild_info = if is_getting_compacted_logs {
+            Some(RebuildInfo {
+                segment_scopes: HashSet::new(),
+                shard_index: None,
+            })
+        } else {
+            self.rebuild_info.clone()
+        };
         let log_fetch_orchestrator = LogFetchOrchestrator::new(
             collection_id,
             database_name,
-            self.rebuild_info.clone(),
+            rebuild_info,
             self.fetch_log_batch_size,
             self.fetch_log_concurrency,
             self.max_compaction_size,
