@@ -1531,7 +1531,13 @@ mod tests {
             .output
             .iter()
             .flat_map(|line| line.chars())
-            .map(|c| if "│┌┐└┘─".contains(c) { ' ' } else { c })
+            .map(|c| {
+                if "│┌┐└┘─".contains(c) {
+                    ' '
+                } else {
+                    c
+                }
+            })
             .collect();
         stripped.split_whitespace().collect::<Vec<_>>().join(" ")
     }
