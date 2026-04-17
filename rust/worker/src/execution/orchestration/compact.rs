@@ -1077,7 +1077,6 @@ mod tests {
         hnsw_provider: HnswIndexProvider,
         blockfile_provider: &BlockfileProvider,
     ) {
-        // Get offset IDs from vector segment using distributed reader (handles all shards)
         let vector_reader = DistributedHNSWSegmentReader::from_segment(
             collection,
             vector_segment,

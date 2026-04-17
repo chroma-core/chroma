@@ -469,7 +469,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         let collection = output.collection.clone();
 
         // Create RecordSegmentReader for MaterializeLogOperator
-        let record_segment_reader = self
+        let record_segment_reader = match self
             .ok_or_terminate(
                 Box::pin(RecordSegmentReader::from_segment(
                     &output.record_segment,
@@ -479,51 +479,58 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                 .await,
                 ctx,
             )
-            .await;
-
-        // Also create RecordSegmentReaderShard for source operators
-        let record_segment_shard = match self
-            .ok_or_terminate(
-                SegmentShard::try_from((&output.record_segment, self.context.rebuild_shard_idx())),
-                ctx,
-            )
-            .await
-        {
-            Some(shard) => shard,
-            None => return,
-        };
-        let record_reader_shard = match self
-            .ok_or_terminate(
-                match Box::pin(RecordSegmentReaderShard::from_segment(
-                    &record_segment_shard,
-                    &self.context.blockfile_provider,
-                    self.context.bloom_filter_manager.clone(),
-                ))
-                .await
-                {
-                    Ok(reader) => Ok(Some(reader)),
-                    Err(err) => match *err {
-                        RecordSegmentReaderShardCreationError::UninitializedSegment => Ok(None),
-                        _ => Err(*err),
-                    },
-                },
-                ctx,
-            )
             .await
         {
             Some(reader) => reader,
             None => return,
         };
 
-        let shard_count = match self
-            .ok_or_terminate(output.record_segment.num_shards(), ctx)
-            .await
-        {
-            Some(count) => count,
-            None => return,
-        };
-
         let log_task = if self.context.is_rebuild() {
+            // Also create RecordSegmentReaderShard for source operators
+            let record_segment_shard = match self
+                .ok_or_terminate(
+                    SegmentShard::try_from((
+                        &output.record_segment,
+                        self.context.rebuild_shard_idx(),
+                    )),
+                    ctx,
+                )
+                .await
+            {
+                Some(shard) => shard,
+                None => return,
+            };
+            let record_reader_shard = match self
+                .ok_or_terminate(
+                    match Box::pin(RecordSegmentReaderShard::from_segment(
+                        &record_segment_shard,
+                        &self.context.blockfile_provider,
+                        self.context.bloom_filter_manager.clone(),
+                    ))
+                    .await
+                    {
+                        Ok(reader) => Ok(Some(reader)),
+                        Err(err) => match *err {
+                            RecordSegmentReaderShardCreationError::UninitializedSegment => Ok(None),
+                            _ => Err(*err),
+                        },
+                    },
+                    ctx,
+                )
+                .await
+            {
+                Some(reader) => reader,
+                None => return,
+            };
+
+            let shard_count = match self
+                .ok_or_terminate(output.record_segment.num_shards(), ctx)
+                .await
+            {
+                Some(count) => count,
+                None => return,
+            };
+
             wrap(
                 Box::new(SourceRecordSegmentV2Operator::new(
                     self.context.max_partition_size,
@@ -704,9 +711,11 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
 
         let writers = CompactWriters {
             // No record reader when rebuilding
-            record_reader: record_segment_reader
-                .clone()
-                .filter(|_| !self.context.is_rebuild()),
+            record_reader: if self.context.is_rebuild() {
+                None
+            } else {
+                Some(record_segment_reader.clone())
+            },
             metadata_writer,
             record_writer,
             vector_writer,
@@ -732,7 +741,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             vec![output.record_segment]
         } else {
             let mut segments = vec![output.metadata_segment, output.record_segment];
-            if vector_segment.r#type == chroma_types::SegmentType::Spann {
+            if vector_segment.r#type != chroma_types::SegmentType::HnswDistributed {
                 segments.push(output.vector_segment);
             }
             segments

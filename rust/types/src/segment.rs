@@ -126,23 +126,10 @@ pub struct Segment {
 impl Segment {
     // INVARIANT: THIS ALWAYS RETURNS AT LEAST ONE SHARD
     pub fn get_shards(&self) -> Result<Vec<SegmentShard>, SegmentShardError> {
-        // If there are no file paths, return a single empty shard
-        let mut values_iter = self.file_path.values();
-        let Some(first_paths) = values_iter.next() else {
+        let num_shards = self.num_shards()?;
+        if self.file_path.is_empty() {
             return Ok(vec![self.new_shard()]);
-        };
-        let expected = first_paths.len();
-
-        // Check that all file-path keys have the same number of shards
-        if let Some(mismatched) = values_iter.find(|paths| paths.len() != expected) {
-            return Err(SegmentShardError::MismatchedShardCounts {
-                key: format!("segment {}", self.id),
-                actual: mismatched.len(),
-                expected,
-            });
         }
-
-        let num_shards = expected;
 
         // Create a SegmentShard for each shard index, propagating any errors
         let shards: Result<Vec<SegmentShard>, SegmentShardError> = (0..num_shards)
