@@ -42,12 +42,12 @@ pub enum GarbageCollectError {
 pub enum PushLogsError {
     /// Backoff due to write batching pressure.
     #[error("log is under write batching pressure; please backoff exponentially and retry")]
-    Backoff,
+    Backoff { enumeration_offset: Option<u64> },
     /// Backoff because the log needs compaction.
     #[error(
         "log needs compaction before accepting more writes; please backoff exponentially and retry"
     )]
-    BackoffCompaction,
+    BackoffCompaction { enumeration_offset: Option<u64> },
     /// Any other push failure.
     #[error(transparent)]
     Other(Box<dyn ChromaError>),
@@ -56,8 +56,8 @@ pub enum PushLogsError {
 impl ChromaError for PushLogsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            PushLogsError::Backoff => ErrorCodes::ResourceExhausted,
-            PushLogsError::BackoffCompaction => ErrorCodes::ResourceExhausted,
+            PushLogsError::Backoff { .. } => ErrorCodes::ResourceExhausted,
+            PushLogsError::BackoffCompaction { .. } => ErrorCodes::ResourceExhausted,
             PushLogsError::Other(e) => e.code(),
         }
     }
@@ -66,9 +66,23 @@ impl ChromaError for PushLogsError {
 impl From<GrpcPushLogsError> for PushLogsError {
     fn from(err: GrpcPushLogsError) -> Self {
         match err {
-            GrpcPushLogsError::Backoff => PushLogsError::Backoff,
-            GrpcPushLogsError::BackoffCompaction => PushLogsError::BackoffCompaction,
+            GrpcPushLogsError::Backoff { enumeration_offset } => {
+                PushLogsError::Backoff { enumeration_offset }
+            }
+            GrpcPushLogsError::BackoffCompaction { enumeration_offset } => {
+                PushLogsError::BackoffCompaction { enumeration_offset }
+            }
             other => PushLogsError::Other(Box::new(other)),
+        }
+    }
+}
+
+impl PushLogsError {
+    pub fn enumeration_offset(&self) -> Option<u64> {
+        match self {
+            PushLogsError::Backoff { enumeration_offset }
+            | PushLogsError::BackoffCompaction { enumeration_offset } => *enumeration_offset,
+            PushLogsError::Other(_) => None,
         }
     }
 }

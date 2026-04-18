@@ -1,13 +1,13 @@
 # Add up to 200k records until the log-is-full message is seen.
 
 import grpc
-import math
 import random
 import time
 
 import numpy as np
 
 from chromadb.api import ClientAPI
+from chromadb.errors import ChromaError
 from chromadb.proto.logservice_pb2 import SealLogRequest, MigrateLogRequest
 from chromadb.proto.logservice_pb2_grpc import LogServiceStub
 from chromadb.test.conftest import (
@@ -49,6 +49,20 @@ def test_log_backpressure(
         except Exception as x:
             print(f"Caught exception:\n{x}")
             if 'log needs compaction before accepting more writes; please backoff exponentially and retry' in str(x):
+                assert isinstance(x, ChromaError)
+                assert x.indexing_status is not None
+                # The 429 includes a point-in-time snapshot; a live status poll can race
+                # with compaction and observe newer values.
+                indexing_status = x.indexing_status
+                assert indexing_status["num_indexed_ops"] >= 0
+                assert indexing_status["num_unindexed_ops"] >= 0
+                assert indexing_status["total_ops"] >= 0
+                assert 0.0 <= indexing_status["op_indexing_progress"] <= 1.0
+                assert (
+                    indexing_status["num_indexed_ops"]
+                    + indexing_status["num_unindexed_ops"]
+                    == indexing_status["total_ops"]
+                )
                 excepted = True
                 break
     assert excepted, "Expected an exception to be thrown."

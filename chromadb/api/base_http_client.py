@@ -122,6 +122,10 @@ class BaseHTTPClient(Component):
                     if trace_id:
                         chroma_error.trace_id = trace_id
 
+                    indexing_status = body.get("indexing_status")
+                    if indexing_status is not None:
+                        chroma_error.indexing_status = indexing_status
+
         except BaseException:
             pass
 
