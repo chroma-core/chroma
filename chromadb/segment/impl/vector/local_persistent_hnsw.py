@@ -70,9 +70,17 @@ class PersistentData:
 
     @staticmethod
     def load_from_file(filename: str) -> "PersistentData":
-        """Load persistent data from a file"""
+        """Load persistent data from a file using SafeUnpickler to prevent arbitrary code execution (CWE-502)"""
+        class SafeUnpickler(pickle.Unpickler):
+            ALLOWED_CLASSES = {
+                ("chromadb.segment.impl.vector.local_persistent_hnsw", "PersistentData"),
+            }
+            def find_class(self, module, name):
+                if (module, name) not in self.ALLOWED_CLASSES:
+                    raise pickle.UnpicklingError(f"Forbidden: {module}.{name}")
+                return super().find_class(module, name)
         with open(filename, "rb") as f:
-            ret = cast(PersistentData, pickle.load(f))
+            ret = cast(PersistentData, SafeUnpickler(f).load())
             return ret
 
 
