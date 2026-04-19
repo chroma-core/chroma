@@ -74,6 +74,13 @@ class PersistentData:
         class SafeUnpickler(pickle.Unpickler):
             ALLOWED_CLASSES = {
                 ("chromadb.segment.impl.vector.local_persistent_hnsw", "PersistentData"),
+                ("builtins", "dict"),
+                ("builtins", "list"),
+                ("builtins", "int"),
+                ("builtins", "str"),
+                ("builtins", "float"),
+                ("builtins", "bool"),
+                ("builtins", "bytes"),
             }
             def find_class(self, module, name):
                 if (module, name) not in self.ALLOWED_CLASSES:
