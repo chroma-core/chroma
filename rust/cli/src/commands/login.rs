@@ -2,13 +2,13 @@ use crate::client::dashboard_client::{DashboardClient, DashboardClientError, Tea
 use crate::commands::db::DbError;
 use crate::commands::login::LoginError::BrowserAuthFailed;
 use crate::config_store::{ConfigStore, FileConfigStore};
-use crate::style;
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::ui_utils::validate_uri;
 use crate::utils::{CliError, Profile, Profiles, UtilsError};
 use chroma::client::ChromaHttpClientOptions;
 use chroma::ChromaHttpClient;
 use clap::Parser;
+use colored::Colorize;
 use std::error::Error;
 use std::time::Duration;
 use thiserror::Error;
@@ -37,25 +37,25 @@ pub enum LoginError {
 }
 
 fn team_selection_prompt() -> String {
-    format!(
-        "{}",
-        style::prompt_bold("Which team would you like to log in with?")
-    )
+    "Which team would you like to log in with?"
+        .blue()
+        .bold()
+        .to_string()
 }
 
 fn profile_name_input_prompt(profile_name: &str) -> String {
     format!(
         "{} {}\nPress Return to override it, or input a new profile name",
-        style::warning_bold("You already have a profile with team name"),
-        style::command_bold(profile_name)
+        "You already have a profile with team name".yellow().bold(),
+        profile_name.yellow().bold()
     )
 }
 
 fn login_success_message(team_name: &str, profile_name: &str, config_dir: &str) -> String {
     format!(
         "{} {}\nCredentials saved to {} under the profile {}\n",
-        style::success_bold("Login successful for team"),
-        style::success_bold(team_name),
+        "Login successful for team".green().bold(),
+        team_name.green().bold(),
         config_dir,
         profile_name
     )
@@ -64,16 +64,16 @@ fn login_success_message(team_name: &str, profile_name: &str, config_dir: &str) 
 fn set_profile_message(profile_name: &str) -> String {
     format!(
         "To set this profile as the current profile: {} {}",
-        style::command("chroma profile use"),
-        style::command(profile_name),
+        "chroma profile use".yellow(),
+        profile_name.yellow(),
     )
 }
 
 fn next_steps_message() -> String {
     format!(
         "Try this next:\n   Create a database\n    {}\n\nFor a full list of commands:\n   {}",
-        style::command("chroma db create <db_name>"),
-        style::command("chroma --help")
+        "chroma db create <db_name>".yellow(),
+        "chroma --help".yellow()
     )
 }
 
@@ -90,7 +90,7 @@ fn select_team(teams: Vec<Team>, term: &mut dyn Terminal) -> Result<Team, CliErr
             term.println(&team_selection_prompt());
             let selection = term.prompt_select(&team_names)?;
             let selected = teams.into_iter().nth(selection).unwrap();
-            term.println(&format!("{}\n", style::success(&selected.name)));
+            term.println(&format!("{}\n", selected.name.green()));
             Ok(selected)
         }
     }
@@ -124,13 +124,13 @@ fn get_profile_from_team(
         "" => {
             term.println(&format!(
                 "{} {}\n",
-                style::success("Overriding profile"),
-                style::success(team_name)
+                "Overriding profile".green(),
+                team_name.green()
             ));
             Ok(team_name.to_string())
         }
         _ => {
-            term.println(&format!("{}\n", style::success(profile_name.clone())));
+            term.println(&format!("{}\n", profile_name.green()));
             Ok(profile_name)
         }
     }

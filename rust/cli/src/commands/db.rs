@@ -1,5 +1,4 @@
 use crate::config_store::{ConfigStore, FileConfigStore};
-use crate::style;
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::ui_utils::copy_to_clipboard;
 use crate::utils::{
@@ -9,6 +8,7 @@ use crate::utils::{
 use chroma::client::Database;
 use chroma::ChromaHttpClient;
 use clap::{Args, Subcommand, ValueEnum};
+use colored::Colorize;
 use std::error::Error;
 use std::path::Path;
 use std::{fmt, fs};
@@ -130,14 +130,14 @@ fn no_dbs_message(profile_name: &str) -> String {
     format!(
         "Profile {} has 0 DBs. To create a new Chroma DB use: {}",
         profile_name,
-        style::command("chroma db create <db name>")
+        "chroma db create <db name>".yellow()
     )
 }
 
 fn env_file_created_message() -> String {
     format!(
         "{}",
-        style::accent_bold("Chroma environment variables set in .env!")
+        "Chroma environment variables set in .env!".blue().bold()
     )
 }
 
@@ -148,38 +148,35 @@ fn select_language_message() -> String {
 fn create_db_already_exists_message(name: &str) -> String {
     format!(
         "{} {} {}\nIf you want to delete it, use: {} {}",
-        style::error("DB with name"),
-        style::error(name),
-        style::error("already exists!"),
-        style::command("chroma db delete"),
-        style::command(name)
+        "DB with name".red(),
+        name.red(),
+        "already exists!".red(),
+        "chroma db delete".yellow(),
+        name.yellow()
     )
 }
 
 fn creating_db_message(name: &str) -> String {
     format!(
         "\n{} {}...",
-        style::accent_bold("Creating database"),
-        style::accent_bold(name)
+        "Creating database".bold().blue(),
+        name.bold().blue()
     )
 }
 
 fn create_db_success_message(name: &str) -> String {
     format!(
         "{} {} {}\nTo get a connection string, run:\n   {} {}",
-        style::success("\nDatabase"),
-        style::success(name),
-        style::success("created successfully!"),
-        style::command("chroma db connect"),
-        style::command(name)
+        "\nDatabase".green(),
+        name.green(),
+        "created successfully!".green(),
+        "chroma db connect".yellow(),
+        name.yellow()
     )
 }
 
 fn db_delete_confirm_message() -> String {
-    format!(
-        "{}",
-        style::error_bold("Are you sure you want to delete this DB?\nThis action cannot be reverted and you will lose all the data in this DB.\n\nIf you want to continue please type the name of DB to confirm.")
-    )
+    format!("{}", "Are you sure you want to delete this DB?\nThis action cannot be reverted and you will lose all the data in this DB.\n\nIf you want to continue please type the name of DB to confirm.".red().bold())
 }
 
 fn db_delete_success_message(name: &str) -> String {
@@ -189,16 +186,16 @@ fn db_delete_success_message(name: &str) -> String {
 fn list_dbs_message(dbs: &[Database]) -> String {
     format!(
         "{} {} {}",
-        style::accent_bold("Listing"),
-        style::accent_bold(dbs.len().to_string()),
-        style::accent_bold("databases")
+        "Listing".blue().bold(),
+        dbs.len().to_string().blue().bold(),
+        "databases".blue().bold()
     )
 }
 
 fn db_delete_cancelled() -> String {
     format!(
         "\n{}",
-        style::warning("DB deletion cancelled. Confirmation input did not match DB name to delete")
+        "DB deletion cancelled. Confirmation input did not match DB name to delete".yellow()
     )
 }
 
@@ -265,7 +262,7 @@ pub fn get_db_name(
         return Err(CliError::Db(DbError::NoDBs));
     }
 
-    term.println(&format!("{}", style::prompt_bold(prompt)));
+    term.println(&format!("{}", prompt.blue().bold()));
     let name = match dbs.len() {
         0..=SELECTION_LIMIT => select_db(dbs, term),
         _ => prompt_db_name(term),
@@ -278,23 +275,14 @@ fn select_language(term: &mut dyn Terminal) -> Result<Language, CliError> {
     let languages: Vec<Language> = Language::iter().collect();
     let options: Vec<String> = languages
         .iter()
-        .map(|language| {
-            format!(
-                "{} {}",
-                style::list_marker(),
-                capitalize(&language.to_string())
-            )
-        })
+        .map(|language| format!("{} {}", ">".yellow(), capitalize(&language.to_string())))
         .collect();
 
-    term.println(&format!(
-        "{}",
-        style::prompt_bold(select_language_message())
-    ));
+    term.println(&format!("{}", select_language_message().blue().bold()));
     let selection = term.prompt_select(&options)?;
 
     let language = languages[selection].clone();
-    term.println(&format!("{}", style::success(language.to_string())));
+    term.println(&format!("{}", language.to_string().green()));
 
     Ok(language)
 }
@@ -469,7 +457,7 @@ pub async fn list(
 
     term.println(&list_dbs_message(&dbs));
     for db in dbs {
-        term.println(&format!("{} {}", style::list_marker(), db.name));
+        term.println(&format!("{} {}", ">".yellow(), db.name));
     }
 
     Ok(())

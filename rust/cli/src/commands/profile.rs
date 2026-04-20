@@ -1,5 +1,4 @@
 use crate::config_store::{ConfigStore, FileConfigStore};
-use crate::style;
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::utils::{CliConfig, CliError, Profiles};
 use clap::{Args, Subcommand};
@@ -59,66 +58,59 @@ pub enum ProfileCommand {
 fn confirm_profile_delete_message(profile_name: &str) -> String {
     format!(
         "{}\n{}\n{} {}, {}\n\nDo you want to delete profile {}? (Y/n)",
-        style::warning_bold("Warning! You are deleting the currently active profile"),
+        "Warning! You are deleting the currently active profile"
+            .yellow()
+            .bold(),
         "All Chroma Cloud CLI operations will fail without an active profile.",
         "If you wish to proceed, please use:",
-        style::command("chroma profile use <profile name>"),
+        "chroma profile use <profile name>".yellow(),
         "to set a new profile",
         profile_name
     )
 }
 
 fn profile_delete_abort_message() -> String {
-    format!("{}", style::success("\nDelete cancelled!"))
+    format!("{}", "\nDelete cancelled!".green())
 }
 
 fn profile_delete_success_message(profile_name: &str) -> String {
     format!(
         "{} {} {}",
-        style::success("Profile"),
-        style::success(profile_name),
-        style::success("successfully removed")
+        "Profile".green(),
+        profile_name.green(),
+        "successfully removed".green()
     )
 }
 
 fn no_profiles_found_message() -> String {
     format!(
         "No profiles defined at the moment. To add a new profile use {}",
-        style::command("chroma login")
+        "chroma login".yellow()
     )
 }
 
 fn current_profile_set_message(profile_name: &str) -> String {
-    format!(
-        "{}",
-        style::success(format!("Current profile set to {}", profile_name))
-    )
+    format!("Current profile set to {}", profile_name)
+        .green()
+        .to_string()
 }
 
 fn no_current_profile_message() -> String {
     format!(
         "No profile set currently. Please use {} to add a profile, or {} to set an existing profile",
-        style::command("chroma login"),
-        style::command("chroma profile use <profile name>")
+        "chroma login".yellow(),
+        "chroma profile use <profile name>".yellow()
     )
 }
 
 fn current_profile_message(profile_name: &str) -> String {
-    format!(
-        "{}\n{}",
-        style::accent_bold("Current profile: "),
-        profile_name
-    )
+    format!("{}\n{}", "Current profile: ".blue().bold(), profile_name)
 }
 
 fn rename_success_message(old_name: &str, new_name: &str) -> String {
-    format!(
-        "{}",
-        style::success(format!(
-            "Successfully renamed profile {} to {}",
-            old_name, new_name
-        ))
-    )
+    format!("Successfully renamed profile {} to {}", old_name, new_name)
+        .green()
+        .to_string()
 }
 
 fn confirm_deletion(profile_name: &str, term: &mut dyn Terminal) -> Result<bool, CliError> {
@@ -171,20 +163,16 @@ fn list_profiles(
         return Ok(());
     }
 
-    term.println(&format!("{}", style::section_header("Available profiles:")));
+    term.println(&format!("{}", "Available profiles:".blue().bold()));
 
     if !config.current_profile.is_empty() {
         let current_profile_label = format!("{} (current)", config.current_profile).bold();
-        term.println(&format!(
-            "{} {}",
-            style::list_marker(),
-            current_profile_label
-        ));
+        term.println(&format!("{} {}", ">".yellow(), current_profile_label));
     }
 
     for key in profiles.keys() {
         if *key != config.current_profile {
-            term.println(&format!("{} {}", style::list_marker(), key));
+            term.println(&format!("{} {}", ">".yellow(), key));
         }
     }
 
