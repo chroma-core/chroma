@@ -1,4 +1,3 @@
-use crate::style;
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::ui_utils::{HOLIDAY_LOGO, LOGO};
 use crate::utils::CliError;
@@ -92,16 +91,20 @@ fn display_run_message(config: &FrontendServerConfig, term: &mut dyn Terminal) {
     term.println(&format!("Saving data to: {}", config.persist_path.bold()));
     term.println(&format!(
         "Connect to Chroma at: {}",
-        style::link(format!("http://localhost:{}", config.port))
+        format!("http://localhost:{}", config.port)
+            .underline()
+            .blue()
     ));
     term.println(&format!(
         "Getting started guide: {}",
-        style::link("https://docs.trychroma.com/docs/overview/getting-started\n")
+        "https://docs.trychroma.com/docs/overview/getting-started\n"
+            .underline()
+            .blue()
     ));
     term.println(&format!(
         "☁️ To deploy your DB - try Chroma Cloud!\n- Sign up: {}\n- Copy your data to Cloud: {}\n",
-        style::link("https://trychroma.com/signup"),
-        style::command("chroma copy --to-cloud --all")
+        "https://trychroma.com/signup".underline().blue(),
+        "chroma copy --to-cloud --all".yellow()
     ));
 }
 

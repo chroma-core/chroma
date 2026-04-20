@@ -1,10 +1,10 @@
 mod client;
 mod commands;
 mod config_store;
-pub mod style;
+mod style;
 mod terminal;
 mod tui;
-pub mod ui;
+mod ui;
 mod ui_utils;
 mod utils;
 
@@ -20,6 +20,8 @@ use crate::commands::update::update;
 use crate::commands::vacuum::{vacuum, VacuumArgs};
 use crate::commands::webpage::{open_browser, WebPageCommand};
 use clap::{Parser, Subcommand};
+use colored::Colorize;
+
 #[derive(Subcommand, Debug)]
 enum Command {
     #[command(about = "Browse Chroma collections", long_about = None)]
@@ -81,7 +83,7 @@ pub fn chroma_cli(args: Vec<String>) {
 
     if result.is_err() {
         let error_message = result.err().unwrap().to_string();
-        eprintln!("{}", crate::style::error(error_message));
+        eprintln!("{}", error_message.red());
     }
 
     println!();

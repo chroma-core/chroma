@@ -2,7 +2,6 @@ use crate::commands::browse::BrowseError;
 use crate::commands::db::get_db_name;
 use crate::commands::install::InstallError;
 use crate::config_store::{ConfigStore, FileConfigStore};
-use crate::style;
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::utils::{
     cloud_client, connect_local, CliError, ErrorResponse, LocalChromaArgs, Profile, UtilsError,
@@ -12,6 +11,7 @@ use chroma::ChromaHttpClient;
 use chroma_types::operator::Key;
 use chroma_types::plan::SearchPayload;
 use clap::Parser;
+use crossterm::style::Stylize;
 use futures::{stream, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::fmt::{self, Display};
@@ -182,7 +182,7 @@ fn get_target_and_destination(
         (_, _, true, _) => (Environment::Local, Environment::Cloud),
         (_, _, _, true) => (Environment::Cloud, Environment::Local),
         _ => {
-            let prompt = style::prompt_bold(select_chroma_server_prompt());
+            let prompt = select_chroma_server_prompt().bold().blue();
             term.println(&format!("{}", prompt));
             let options = vec![
                 Environment::Cloud.to_string(),
@@ -226,7 +226,7 @@ async fn copy_collections(
 
     term.println(&format!(
         "{}",
-        style::accent_bold(start_copy_prompt(collections.len()))
+        start_copy_prompt(collections.len()).bold().blue()
     ));
 
     term.println("Verifying collections...");
