@@ -2,7 +2,7 @@ use super::operator::OperatorType;
 use super::{operator::TaskMessage, worker_thread::WorkerThread};
 use crate::execution::affinity::{io_core_for_task, pin_current_thread};
 use crate::execution::config::DispatcherConfig;
-use crate::utils::duration_ms;
+use crate::utils::{duration_ms, thread_stack_size_bytes};
 use crate::{
     Component, ComponentContext, ComponentHandle, ConsumeJoinHandleError, Handler,
     ReceiverForMessage, System,
@@ -194,6 +194,7 @@ impl Dispatcher {
         let mut builder = tokio::runtime::Builder::new_multi_thread();
         builder.enable_all();
         builder.thread_name("chroma-io");
+        builder.thread_stack_size(thread_stack_size_bytes());
         if let Some(affinity_count) = config.io_affinity_num_cores {
             let total_cores = std::thread::available_parallelism()
                 .map(|n| n.get())
