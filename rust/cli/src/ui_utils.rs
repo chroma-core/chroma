@@ -65,37 +65,6 @@ fn write_secret_prompt(
     Ok(())
 }
 
-#[cfg(unix)]
-fn raise_interrupt_signal() {
-    unsafe {
-        libc::raise(libc::SIGINT);
-    }
-}
-
-#[cfg(not(unix))]
-fn raise_interrupt_signal() {}
-
-#[cfg(unix)]
-fn suspend_process() -> io::Result<()> {
-    let result = unsafe { libc::raise(libc::SIGTSTP) };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::new(
-            io::ErrorKind::Interrupted,
-            "failed to suspend process",
-        ))
-    }
-}
-
-#[cfg(not(unix))]
-fn suspend_process() -> io::Result<()> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "process suspension is not supported on this platform",
-    ))
-}
-
 pub fn read_secret(prompt: &str) -> io::Result<String> {
     let mut stdout = stdout();
     let mut password = String::new();
@@ -113,18 +82,7 @@ pub fn read_secret(prompt: &str) -> io::Result<String> {
                 disable_raw_mode()?;
                 stdout.write_all(b"\n")?;
                 stdout.flush()?;
-                raise_interrupt_signal();
                 return Err(io::Error::new(io::ErrorKind::Interrupted, "interrupted"));
-            }
-
-            if modifiers == KeyModifiers::CONTROL && code == KeyCode::Char('z') {
-                disable_raw_mode()?;
-                stdout.write_all(b"\n")?;
-                stdout.flush()?;
-                suspend_process()?;
-                write_secret_prompt(&mut stdout, prompt, password.len())?;
-                enable_raw_mode()?;
-                continue;
             }
 
             match code {
