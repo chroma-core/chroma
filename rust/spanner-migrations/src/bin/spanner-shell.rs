@@ -1,6 +1,7 @@
 use std::io::{self, IsTerminal, Read, Write};
 
 use chroma_tracing::{init_global_filter_layer, init_otel_layer, init_stdout_layer, init_tracing};
+use chroma_types::Topology;
 use clap::{Parser, ValueEnum};
 use google_cloud_googleapis::spanner::admin::database::v1::UpdateDatabaseDdlRequest;
 use google_cloud_spanner::admin::client::Client as AdminClient;
@@ -14,6 +15,7 @@ use spanner_migrations::{
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 enum TargetDatabase {
     Sysdb,
+    #[value(alias = "log")]
     Logdb,
 }
 
@@ -24,6 +26,21 @@ impl TargetDatabase {
             Self::Logdb => "spanner_logdb",
         }
     }
+
+    fn shell_name(self) -> &'static str {
+        match self {
+            Self::Sysdb => "sysdb",
+            Self::Logdb => "log",
+        }
+    }
+
+    fn from_repl_arg(value: &str) -> Option<Self> {
+        match value.to_ascii_lowercase().as_str() {
+            "sysdb" | "spanner_sysdb" => Some(Self::Sysdb),
+            "log" | "logdb" | "spanner_logdb" => Some(Self::Logdb),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -31,6 +48,13 @@ enum SqlKind {
     Query,
     Dml,
     Ddl,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReplCommand {
+    Help,
+    Quit,
+    SwitchDatabase(TargetDatabase),
 }
 
 #[derive(Debug, Parser)]
@@ -56,12 +80,88 @@ struct Args {
     execute: Option<String>,
 }
 
-struct ShellContext {
+struct ShellConnection {
     client: Client,
     admin_client: AdminClient,
     database_path: String,
-    topology_name: String,
     admin_rpc_timeout_secs: u64,
+}
+
+struct ShellContext {
+    connection: ShellConnection,
+    topology: Topology<TopologySpannerConfig>,
+    topology_name: String,
+    target_database: TargetDatabase,
+}
+
+impl ShellContext {
+    async fn connect(
+        topology: &Topology<TopologySpannerConfig>,
+        target_database: TargetDatabase,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let connection = connect_target(topology, target_database).await?;
+        Ok(Self {
+            connection,
+            topology: topology.clone(),
+            topology_name: topology.name.to_string(),
+            target_database,
+        })
+    }
+
+    fn prompt_label(&self) -> &'static str {
+        self.target_database.shell_name()
+    }
+
+    async fn switch_database(
+        &mut self,
+        target_database: TargetDatabase,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if self.target_database == target_database {
+            println!(
+                "Already connected to {} via {} on {}.",
+                self.target_database.slug(),
+                self.topology_name,
+                self.connection.database_path
+            );
+            return Ok(());
+        }
+
+        let new_connection = connect_target(&self.topology, target_database).await?;
+        let old_connection = std::mem::replace(&mut self.connection, new_connection);
+        self.target_database = target_database;
+        old_connection.client.close().await;
+        println!(
+            "Switched to {} via {} on {}.",
+            self.target_database.slug(),
+            self.topology_name,
+            self.connection.database_path
+        );
+        Ok(())
+    }
+
+    async fn close(self) {
+        self.connection.client.close().await;
+    }
+}
+
+async fn connect_target(
+    topology: &Topology<TopologySpannerConfig>,
+    target_database: TargetDatabase,
+) -> Result<ShellConnection, Box<dyn std::error::Error>> {
+    let spanner_config = match target_database {
+        TargetDatabase::Sysdb => &topology.config.sysdb_spanner,
+        TargetDatabase::Logdb => &topology.config.logdb_spanner,
+    };
+
+    let connected = connect_spanner(spanner_config)
+        .await
+        .map_err(render_connection_error)?;
+    Ok(ShellConnection {
+        client: connected.client,
+        admin_client: connected.admin_client,
+        database_path: connected.database_path,
+        admin_rpc_timeout_secs: connected.admin_rpc_timeout_secs,
+    })
 }
 
 #[tokio::main]
@@ -75,25 +175,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_shell_tracing(&config);
 
     let topology = select_topology(&config.topologies, args.topology.as_deref())?;
-    let spanner_config = match args.database {
-        TargetDatabase::Sysdb => &topology.config.sysdb_spanner,
-        TargetDatabase::Logdb => &topology.config.logdb_spanner,
-    };
-
-    let connected = connect_spanner(spanner_config)
-        .await
-        .map_err(render_connection_error)?;
-    let mut shell = ShellContext {
-        client: connected.client,
-        admin_client: connected.admin_client,
-        database_path: connected.database_path,
-        topology_name: topology.name.to_string(),
-        admin_rpc_timeout_secs: connected.admin_rpc_timeout_secs,
-    };
+    let mut shell = ShellContext::connect(topology, args.database).await?;
 
     if let Some(sql) = args.execute {
         run_statement(&mut shell, &sql).await?;
-        shell.client.close().await;
+        shell.close().await;
         return Ok(());
     }
 
@@ -103,19 +189,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if !input.trim().is_empty() {
             run_statement(&mut shell, &input).await?;
         }
-        shell.client.close().await;
+        shell.close().await;
         return Ok(());
     }
 
     println!(
-        "Connected to {} via {} on {}. End statements with ';'. Type 'help' or 'quit'.",
-        args.database.slug(),
+        "Connected to {} via {} on {}. Use 'use sysdb' or 'use log'. End statements with ';'. Type 'help' or 'quit'.",
+        shell.target_database.slug(),
         shell.topology_name,
-        shell.database_path
+        shell.connection.database_path
     );
 
     repl(&mut shell).await?;
-    shell.client.close().await;
+    shell.close().await;
     Ok(())
 }
 
@@ -151,12 +237,13 @@ async fn repl(shell: &mut ShellContext) -> Result<(), Box<dyn std::error::Error>
     let mut buffer = String::new();
 
     loop {
+        let prompt_label = shell.prompt_label();
         let prompt = if buffer.trim().is_empty() {
-            "spanner> "
+            format!("{prompt_label}> ")
         } else {
-            "       > "
+            format!("{:width$}> ", "", width = prompt_label.len())
         };
-        print!("{prompt}");
+        print!("{}", prompt);
         io::stdout().flush()?;
 
         let mut line = String::new();
@@ -172,14 +259,24 @@ async fn repl(shell: &mut ShellContext) -> Result<(), Box<dyn std::error::Error>
 
         let trimmed = line.trim();
         if buffer.trim().is_empty() {
-            match trimmed {
-                "" => continue,
-                "quit" | "exit" | "\\q" => break,
-                "help" => {
+            match parse_repl_command(trimmed) {
+                Ok(Some(ReplCommand::Quit)) => break,
+                Ok(Some(ReplCommand::Help)) => {
                     print_help();
                     continue;
                 }
-                _ => {}
+                Ok(Some(ReplCommand::SwitchDatabase(target_database))) => {
+                    if let Err(err) = shell.switch_database(target_database).await {
+                        eprintln!("error: {err}");
+                    }
+                    continue;
+                }
+                Ok(None) if trimmed.is_empty() => continue,
+                Ok(None) => {}
+                Err(err) => {
+                    eprintln!("error: {err}");
+                    continue;
+                }
             }
         }
 
@@ -201,9 +298,51 @@ fn print_help() {
     println!("Commands:");
     println!("  help          Show this help.");
     println!("  quit | exit   Exit the shell.");
+    println!("  use <db>      Switch to 'sysdb' or 'log'.");
+    println!("  \\c <db>       Alias for 'use <db>'.");
     println!("Notes:");
     println!("  One statement at a time.");
     println!("  Multi-line statements are supported and execute when the last line ends with ';'.");
+}
+
+fn parse_repl_command(line: &str) -> Result<Option<ReplCommand>, String> {
+    let command = line.trim().trim_end_matches(';').trim();
+    if command.is_empty() {
+        return Ok(None);
+    }
+
+    match command {
+        "help" => return Ok(Some(ReplCommand::Help)),
+        "quit" | "exit" | "\\q" => return Ok(Some(ReplCommand::Quit)),
+        _ => {}
+    }
+
+    let mut parts = command.split_whitespace();
+    let Some(verb) = parts.next() else {
+        return Ok(None);
+    };
+    match verb.to_ascii_lowercase().as_str() {
+        "use" => parse_switch_command(parts),
+        _ if verb == "\\c" => parse_switch_command(parts),
+        _ => Ok(None),
+    }
+}
+
+fn parse_switch_command<'a>(
+    mut args: impl Iterator<Item = &'a str>,
+) -> Result<Option<ReplCommand>, String> {
+    const USAGE: &str = "Usage: use <sysdb|log> or \\c <sysdb|log>";
+
+    let Some(target) = args.next() else {
+        return Err(USAGE.to_string());
+    };
+    if args.next().is_some() {
+        return Err(USAGE.to_string());
+    }
+
+    let target_database = TargetDatabase::from_repl_arg(target)
+        .ok_or_else(|| format!("Unknown database '{}'. Use 'sysdb' or 'log'.", target))?;
+    Ok(Some(ReplCommand::SwitchDatabase(target_database)))
 }
 
 async fn run_statement(
@@ -216,13 +355,13 @@ async fn run_statement(
     }
 
     match classify_sql(&sql)? {
-        SqlKind::Query => execute_query(&mut shell.client, &sql).await?,
-        SqlKind::Dml => execute_dml(&mut shell.client, &sql).await?,
+        SqlKind::Query => execute_query(&mut shell.connection.client, &sql).await?,
+        SqlKind::Dml => execute_dml(&mut shell.connection.client, &sql).await?,
         SqlKind::Ddl => {
             execute_ddl(
-                &shell.admin_client,
-                &shell.database_path,
-                shell.admin_rpc_timeout_secs,
+                &shell.connection.admin_client,
+                &shell.connection.database_path,
+                shell.connection.admin_rpc_timeout_secs,
                 &sql,
             )
             .await?
@@ -361,7 +500,10 @@ fn render_connection_error(err: RunMigrationsError) -> Box<dyn std::error::Error
 
 #[cfg(test)]
 mod tests {
-    use super::{classify_sql, strip_leading_comments, wrap_query_for_json, SqlKind};
+    use super::{
+        classify_sql, parse_repl_command, strip_leading_comments, wrap_query_for_json, ReplCommand,
+        SqlKind, TargetDatabase,
+    };
 
     #[test]
     fn strips_leading_comments_before_classifying() {
@@ -385,6 +527,34 @@ mod tests {
         assert_eq!(
             wrap_query_for_json("select * from collections"),
             "SELECT TO_JSON_STRING(TO_JSON((SELECT AS STRUCT row_data.*))) AS row_json FROM (select * from collections) AS row_data"
+        );
+    }
+
+    #[test]
+    fn parses_database_switch_commands() {
+        assert_eq!(
+            parse_repl_command("use sysdb").unwrap(),
+            Some(ReplCommand::SwitchDatabase(TargetDatabase::Sysdb))
+        );
+        assert_eq!(
+            parse_repl_command("use log;").unwrap(),
+            Some(ReplCommand::SwitchDatabase(TargetDatabase::Logdb))
+        );
+        assert_eq!(
+            parse_repl_command("\\c spanner_logdb").unwrap(),
+            Some(ReplCommand::SwitchDatabase(TargetDatabase::Logdb))
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_switch_commands() {
+        assert_eq!(
+            parse_repl_command("use").unwrap_err(),
+            "Usage: use <sysdb|log> or \\c <sysdb|log>"
+        );
+        assert_eq!(
+            parse_repl_command("use other").unwrap_err(),
+            "Unknown database 'other'. Use 'sysdb' or 'log'."
         );
     }
 }

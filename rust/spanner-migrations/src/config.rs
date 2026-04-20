@@ -210,9 +210,10 @@ mod tests {
     };
 
     fn emulator(database: &str) -> SpannerConfig {
-        let mut emulator = SpannerEmulatorConfig::default();
-        emulator.database = database.to_string();
-        SpannerConfig::Emulator(emulator)
+        SpannerConfig::Emulator(SpannerEmulatorConfig {
+            database: database.to_string(),
+            ..SpannerEmulatorConfig::default()
+        })
     }
 
     fn region(name: &str) -> ProviderRegion<IgnoredRegionConfig> {
