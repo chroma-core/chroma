@@ -159,7 +159,7 @@ def _test_add(
     current_version2 = cast(int, coll2.get_model()["version"])
     records_since_compaction_wait = 0
     min_records_between_compaction_waits = max(
-        MIN_RECORDS_BETWEEN_COMPACTION_WAITS, len(record_set["ids"]) // 10
+        MIN_RECORDS_BETWEEN_COMPACTION_WAITS, len(normalized_record_set["ids"]) // 10
     )
     print(
         f"starting min_records_between_compaction_waits={min_records_between_compaction_waits}"
@@ -170,10 +170,10 @@ def _test_add(
     batches = list(
         create_batches(
             api=client1,
-            ids=cast(List[str], record_set["ids"]),
-            embeddings=cast(Embeddings, record_set["embeddings"]),
-            metadatas=cast(Metadatas, record_set["metadatas"]),
-            documents=cast(List[str], record_set["documents"]),
+            ids=cast(List[str], normalized_record_set["ids"]),
+            embeddings=cast(Embeddings, normalized_record_set["embeddings"]),
+            metadatas=cast(Metadatas, normalized_record_set["metadatas"]),
+            documents=cast(List[str], normalized_record_set["documents"]),
         )
     )
     for batch_index, batch in enumerate(batches):

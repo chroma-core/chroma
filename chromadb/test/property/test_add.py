@@ -166,7 +166,7 @@ def _test_add(
     records_since_compaction_wait = 0
     has_waited_for_compaction = False
     min_records_between_compaction_waits = max(
-        MIN_RECORDS_BETWEEN_COMPACTION_WAITS, len(record_set["ids"]) // 10
+        MIN_RECORDS_BETWEEN_COMPACTION_WAITS, len(normalized_record_set["ids"]) // 10
     )
     print(f"starting min_records_between_compaction_waits={min_records_between_compaction_waits}")
 
@@ -174,16 +174,16 @@ def _test_add(
     # like [{"a": 1}, None, {"a": 3}]
     for batch in create_batches(
         api=client,
-        ids=cast(List[str], record_set["ids"]),
-        embeddings=cast(Embeddings, record_set["embeddings"]),
-        metadatas=cast(Metadatas, record_set["metadatas"]),
-        documents=cast(List[str], record_set["documents"]),
+        ids=cast(List[str], normalized_record_set["ids"]),
+        embeddings=cast(Embeddings, normalized_record_set["embeddings"]),
+        metadatas=cast(Metadatas, normalized_record_set["metadatas"]),
+        documents=cast(List[str], normalized_record_set["documents"]),
     ):
         print('adding', len(batch[0]))
         coll.add(*batch)
         if should_wait_for_compaction:
             print('should wait for compaction')
-            records_since_compaction_wait += len(batch[0])
+            records_since_compaction_wait += len(normalized_batch[0])
             if records_since_compaction_wait >= min_records_between_compaction_waits:
                 print(f"records_since_compaction_wait = {records_since_compaction_wait}")
                 print(f"min_records_between_compaction_waits = {min_records_between_compaction_waits}")
