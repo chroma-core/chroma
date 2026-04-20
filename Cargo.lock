@@ -7866,6 +7866,7 @@ dependencies = [
  "chroma-error",
  "chroma-segment",
  "chroma-storage",
+ "chroma-system",
  "chroma-tracing",
  "chroma-types",
  "chrono",
