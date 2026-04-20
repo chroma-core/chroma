@@ -10,13 +10,14 @@ mod runner;
 pub use config::MigrationConfig;
 pub use config::MigrationMode;
 pub use config::RootConfig;
+pub use config::SpannerConfig;
 pub use config::TopologySpannerConfig;
 pub use migrations::MigrationDir;
 pub use migrations::MIGRATION_DIRS;
 
 use std::time::Duration;
 
-use chroma_config::spanner::{SpannerChannelConfig, SpannerConfig, SpannerSessionPoolConfig};
+use chroma_config::spanner::{SpannerChannelConfig, SpannerSessionPoolConfig};
 use google_cloud_gax::conn::Environment;
 use google_cloud_gax::grpc::Code;
 use google_cloud_gax::retry::RetrySetting;
@@ -26,6 +27,14 @@ use google_cloud_spanner::client::{ChannelConfig, Client, ClientConfig};
 use google_cloud_spanner::session::SessionConfig;
 use runner::MigrationRunner;
 use thiserror::Error;
+
+/// An initialized Spanner client pair plus connection metadata.
+pub struct ConnectedSpanner {
+    pub client: Client,
+    pub admin_client: AdminClient,
+    pub database_path: String,
+    pub admin_rpc_timeout_secs: u64,
+}
 
 /// Converts a SpannerSessionPoolConfig to the library's SessionConfig.
 fn to_session_config(cfg: &SpannerSessionPoolConfig) -> SessionConfig {
@@ -158,6 +167,52 @@ pub async fn run_migrations(
 ) -> Result<(), RunMigrationsError> {
     validate_slug(slug)?;
 
+    let ConnectedSpanner {
+        client,
+        admin_client,
+        database_path,
+        admin_rpc_timeout_secs,
+    } = connect_spanner(spanner_config).await?;
+    let mut runner =
+        MigrationRunner::new(client, admin_client, database_path, admin_rpc_timeout_secs);
+    if let Some(topology) = topology_name {
+        runner = runner.with_topology(topology.to_string());
+    }
+
+    match mode {
+        MigrationMode::Apply => {
+            tracing::info!("Initializing migrations table...");
+            runner
+                .initialize_migrations_table()
+                .await
+                .map_err(|e| RunMigrationsError::InitializeMigrationsTableError(e.to_string()))?;
+
+            tracing::info!("Applying migrations...");
+            runner
+                .apply_all_migrations(slug)
+                .await
+                .map_err(|e| RunMigrationsError::ApplyMigrationsError(e.to_string()))?;
+
+            tracing::info!("Migrations applied successfully!");
+        }
+        MigrationMode::Validate => {
+            tracing::info!("Validating migrations...");
+            runner
+                .validate_all_migrations(slug)
+                .await
+                .map_err(|e| RunMigrationsError::ValidateMigrationsError(e.to_string()))?;
+
+            tracing::info!("All migrations are applied!");
+        }
+    }
+
+    Ok(())
+}
+
+/// Connects to Spanner using the shared migration configuration conventions.
+pub async fn connect_spanner(
+    spanner_config: &SpannerConfig,
+) -> Result<ConnectedSpanner, RunMigrationsError> {
     let session_config = to_session_config(spanner_config.session_pool());
     let (database_path, client_config, admin_client_config) = match spanner_config {
         SpannerConfig::Emulator(emulator) => {
@@ -221,41 +276,12 @@ pub async fn run_migrations(
         .await
         .map_err(|e| RunMigrationsError::CreateAdminClientError(e.to_string()))?;
 
-    let admin_rpc_timeout_secs = spanner_config.channel().admin_rpc_timeout_secs;
-    let mut runner =
-        MigrationRunner::new(client, admin_client, database_path, admin_rpc_timeout_secs);
-    if let Some(topology) = topology_name {
-        runner = runner.with_topology(topology.to_string());
-    }
-
-    match mode {
-        MigrationMode::Apply => {
-            tracing::info!("Initializing migrations table...");
-            runner
-                .initialize_migrations_table()
-                .await
-                .map_err(|e| RunMigrationsError::InitializeMigrationsTableError(e.to_string()))?;
-
-            tracing::info!("Applying migrations...");
-            runner
-                .apply_all_migrations(slug)
-                .await
-                .map_err(|e| RunMigrationsError::ApplyMigrationsError(e.to_string()))?;
-
-            tracing::info!("Migrations applied successfully!");
-        }
-        MigrationMode::Validate => {
-            tracing::info!("Validating migrations...");
-            runner
-                .validate_all_migrations(slug)
-                .await
-                .map_err(|e| RunMigrationsError::ValidateMigrationsError(e.to_string()))?;
-
-            tracing::info!("All migrations are applied!");
-        }
-    }
-
-    Ok(())
+    Ok(ConnectedSpanner {
+        client,
+        admin_client,
+        database_path,
+        admin_rpc_timeout_secs: spanner_config.channel().admin_rpc_timeout_secs,
+    })
 }
 
 #[cfg(test)]
