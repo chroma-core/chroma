@@ -1686,7 +1686,6 @@ dependencies = [
  "futures-util",
  "httpmock",
  "indicatif",
- "libc",
  "rand 0.8.5",
  "ratatui",
  "regex",
