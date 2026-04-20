@@ -1804,6 +1804,7 @@ dependencies = [
  "tantivy",
  "tempfile",
  "thiserror 1.0.69",
+ "tikv-jemalloc-ctl",
  "tikv-jemallocator",
  "tokio",
  "tracing",

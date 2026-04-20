@@ -172,6 +172,34 @@ impl<
 }
 
 impl<
+        'me,
+        K: Key + Into<KeyWrapper> + ArrowReadableKey<'me>,
+        V: Value + ArrowReadableValue<'me>,
+    > BlockfileReader<'me, K, V>
+{
+    /// Per-reader pinned-block stats `(count, bytes)`. See
+    /// `ArrowBlockfileReader::loaded_blocks_stats` for semantics. Returns
+    /// `(0, 0)` for the in-memory variant.
+    pub fn loaded_blocks_stats(&self) -> (usize, u64) {
+        match self {
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.loaded_blocks_stats(),
+            BlockfileReader::MemoryBlockfileReader(_) => (0, 0),
+        }
+    }
+
+    /// Drop every block this reader has pinned in `loaded_blocks`. See the
+    /// safety contract on `ArrowBlockfileReader::clear_loaded_blocks`:
+    /// callers must guarantee no value previously returned by this reader
+    /// is still borrowed. No-op for the in-memory variant.
+    pub fn clear_loaded_blocks(&self) {
+        match self {
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.clear_loaded_blocks(),
+            BlockfileReader::MemoryBlockfileReader(_) => {}
+        }
+    }
+}
+
+impl<
         'referred_data,
         K: Key
             + Into<KeyWrapper>

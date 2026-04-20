@@ -238,13 +238,25 @@ impl OrderedBlockDelta {
                 last_added_key: None,
             };
 
-            output.push((
-                curr_block
-                    .builder
-                    .get_min_key()
-                    .expect("Block must be non empty after split"),
-                curr_block,
-            ));
+            // It is possible for the left side of the split to be empty when a
+            // single key/value pair is larger than `half_size` (e.g. a very
+            // large quantized posting list). In that case the underlying
+            // storage cannot be split any further, so we drop the empty left
+            // block and emit the right block as-is even if it still exceeds
+            // `max_block_size_bytes`. This keeps progress and avoids panicking
+            // on `get_min_key()` returning None.
+            match curr_block.builder.get_min_key() {
+                Some(curr_min_key) => {
+                    output.push((curr_min_key, curr_block));
+                }
+                None => {
+                    tracing::warn!(
+                        "Block split produced an empty left half (single oversized value); emitting right half without further splitting"
+                    );
+                    output.push((new_start_key, new_block));
+                    continue;
+                }
+            }
 
             if new_block.get_size::<K, V>() > max_block_size_bytes {
                 blocks_to_split.push(new_block);

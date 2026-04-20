@@ -385,6 +385,319 @@ Index quality (always printed)
 
 GT clusters (p100, p95, p90) -- how many clusters GT vectors spread across
 
+## Commit-time memory
+
+`HierarchicalSpannWriter::commit` materialises the in-memory tree into four
+forked blockfiles (scalar metadata, vector data, list data, posting lists).
+The fork phase dominates the commit-time memory spike — empirically the
+RSS delta during fork tracks the on-disk size of the previously committed
+index almost exactly, while the subsequent flush phase is allocation-neutral
+or even returns memory.
+
+### Why fork is expensive
+
+Each `set()` on an `ArrowOrderedBlockfileWriter` may push a completed Arrow
+`Block` onto an internal `Vec<Block>` (`inner.completed_blocks`). Those
+blocks are not freed until `flusher.flush()` writes them to storage. Any
+block that gets touched during commit therefore lives in RAM until the very
+end of the commit pipeline.
+
+For a hierarchical SPANN index the per-node metadata (length, parent,
+node_type, centroid, centroid_code, children) is itself O(live tree) — at
+CP55 of a 113M run that was ~145K nodes worth of metadata blocks. The
+posting list writer already skipped lazy shells (`!leaf.ids.is_empty()`
+guard), but the metadata writers did not, so every commit re-touched every
+metadata block of the entire live tree even though only a small fraction
+of nodes were actually mutated since the previous commit.
+
+### Option B (implemented): dirty-node commit
+
+The writer now tracks three "dirty" sets, populated at every mutation site:
+
+```
+dirty_nodes:      DashSet<NodeId>  -- nodes inserted or in-place mutated
+dirty_versions:   DashSet<u32>     -- vector ids whose version was bumped
+dirty_embeddings: DashSet<u32>     -- vector ids whose embedding was added
+```
+
+`commit()` iterates `(dirty_nodes ∩ live) ∪ tombstones` for per-node
+metadata, `dirty_versions` for the version prefix, and `dirty_embeddings`
+for the embedding prefix. Lazy shells inherited from the forked parent
+are skipped entirely; their on-disk blocks remain unmodified and are
+inherited verbatim via copy-on-write.
+
+Empirically the dirty-to-live ratio at CP55 was ~38K / ~145K ≈ 26%, so
+per-commit allocations drop from O(live tree) to O(dirty tree) — roughly
+4x less commit RAM in steady state, enough to fit a 113M build in ~500 GB
+without OOM.
+
+The `WriterMemoryUsage` struct exposes `dirty_nodes_count`,
+`dirty_versions_count`, and `dirty_embeddings_count` so the bench can
+print the dirty-set sizes alongside total in-memory state at every
+checkpoint boundary, making it easy to spot a missed `mark_dirty` call
+(dirty_nodes should be near-zero immediately after `open()` and grow with
+adds/splits/merges between commits).
+
+#### Correctness contract
+
+Dirty-node commit is correct only if **every** mutation marks the affected
+ids dirty before the next commit. Every site in `writer/mod.rs` that
+mutates the in-memory tree calls one of `mark_node_dirty`,
+`mark_version_dirty`, or `mark_embedding_dirty`:
+
+- `nodes.insert(id, ...)` → `mark_node_dirty(id)`
+- `register_in_leaf(id, ...)` on success → `mark_node_dirty(leaf_id)`
+- `scrub(id)` when entries removed → `mark_node_dirty(cluster_id)`
+- `replace_child(parent, ...)` → `mark_node_dirty(parent)` plus each new
+  child whose `parent_id` and `centroid_code` get rewritten
+- `remove_child_locked(parent, ...)` → `mark_node_dirty(parent)` plus the
+  surviving "only_child" or new_root when applicable
+- `create_root_above(...)` / `adopt_orphans(...)` → mark new root and
+  re-parented children dirty
+- `add()` / `reassign()` → `mark_embedding_dirty` and `mark_version_dirty`
+  for the touched data id
+
+When a node is tombstoned (`tombstones.insert(id)`), it is also removed
+from `dirty_nodes` so we don't try to write a node that is being deleted
+in the same commit. When a previously tombstoned id is resurrected
+(merge_leaf bail-out re-inserts a leaf that was just tombstoned), the id
+is removed from `tombstones` and re-marked dirty. `open()` initialises
+all three dirty sets empty so a freshly reopened checkpoint commits
+nothing if no mutations happen before the next commit.
+
+### Option C (deferred): stream completed blocks during commit
+
+The architectural fix is in `chroma_blockstore`: change
+`swap_current_delta` to *immediately* upload the just-completed `Block`
+to storage and drop it from RAM, replacing
+`inner.completed_blocks: Vec<Block>` with a `Vec<Uuid>` (or similar)
+tracking the in-flight uploads. Commit RAM would then be bounded by the
+working set of one delta block (~1-2 MB) regardless of corpus size or
+mutation rate, instead of being O(touched blocks).
+
+#### Benefit relative to Option B
+
+Option B caps commit RAM at O(dirty tree). That works well in steady
+state where each commit only touches a fraction of the tree, but it has
+two failure modes that Option C addresses:
+
+1. **Initial bulk load**: the first commit of a fresh index writes every
+   node from scratch, so dirty == live and Option B saves nothing. With
+   Option C, that first commit fits in 1-2 MB of writer RAM regardless
+   of how many nodes were inserted.
+
+2. **Heavy-mutation checkpoints**: any rebalancing pass that touches a
+   large fraction of the tree (e.g. branching factor change, tau retune,
+   level-width retune) reverts to O(live tree) commit RAM. Option C is
+   indifferent.
+
+Option C also benefits production blockfile writers, not just the bench
+— any caller that flushes a large dirty delta currently pays the same
+"completed_blocks accumulates until flush" cost.
+
+#### Why it isn't done yet
+
+It is a real refactor of the writer/flusher contract:
+
+- The flusher loses its in-memory `Vec<Block>`; downstream code that
+  expected to access blocks between `commit()` and `flush()` (e.g. the
+  cache pre-warm path) needs to be reworked.
+- The `block_cache` insertion point shifts: inserting *before* upload
+  caches an unflushed block that may never land on disk if upload fails;
+  inserting *after* upload means cold reads right after commit.
+- Error handling becomes more nuanced: a failed upload mid-commit needs
+  to either retry, surface as a commit error, or be tracked for later
+  retry — all of which currently work because everything is buffered.
+
+For the bench, Option B is sufficient to fit 113M on a 495 GB box. Option
+C is the right long-term fix for production and would also let the bench
+scale to arbitrarily large corpora without further work.
+
+## Reader-side block pinning
+
+`HierarchicalSpannWriter` keeps two `BlockfileReader`s alive between
+commits — `posting_list_reader` (used by `load(node_id)` for lazy
+posting-list shells) and `vector_data_reader` (used by `load_raw(ids)`
+for full-precision embeddings during NPA / split / reassign). Each
+underlying `ArrowBlockfileReader` owns a per-reader pin set:
+
+```
+loaded_blocks: Arc<RwLock<HashMap<Uuid, Box<Block>>>>
+```
+
+This is **not** the foyer block cache (which lives in `BlockManager` and
+is bounded by `--max-cache-bytes`). It is a separate, **unbounded,
+never-evicting** map — every block ever fetched through this reader is
+pinned in here for the reader's entire lifetime. The reason is the
+unsafe `transmute::<&Block, &Block>` in `ArrowBlockfileReader::get_block`
+that extends the borrow to the reader's `'me` lifetime so callers can
+return `V<'me>` values that reference block-internal buffers without
+copying. The safety invariant — "never remove the `Box<Block>` from the
+HashMap, so the reference is always valid" — is what forces the cache
+to be unbounded.
+
+### Why this dominates RSS in the 100M+ regime
+
+At dim=1024, lookups in `vector_data_reader` are scattered by vector id
+across the *entire* embedding blockfile. With ~360 embeddings per block
+on disk, the probability that a given block is hit at least once during
+a CP that loads N embeddings is `1 - (1 - N / total)^360`. By
+N ≈ 5M / total ≈ 100M that's effectively 100% per block — a single
+checkpoint touches essentially every embedding block. Same story (worse,
+actually) for `posting_list_reader`: navigate-driven loads cover ~all
+leaf-postings blocks within a few CPs of a fresh reopen.
+
+The result: `loaded_blocks` ends up pinning hundreds of GB by the end of
+a CP, which is the bulk of the unaccounted RSS visible as
+`(jemalloc.allocated - writer.memory_usage)` in the per-CP `Process mem`
+line. Concretely, at CP206 of a 113M run:
+
+```
+balanced  RSS=359 GB anon, jemalloc.allocated=404 GB
+writer.memory_usage=35 GB
+gap = ~370 GB  ← all in loaded_blocks
+```
+
+Dropping the writer at the end of the CP releases everything (drops the
+two readers → drops `loaded_blocks` → frees ~370 GB; jemalloc moves it
+to `retained` and RSS recovers shortly after). That's why per-CP peak
+RSS climbs across a writer's lifetime and falls back at the reopen
+boundary, even with the foyer cache strictly bounded.
+
+### Option 1 (implemented, bench-only): clear between CP phases
+
+`HierarchicalSpannWriter::clear_reader_block_pins(&self)` calls
+`BlockfileReader::clear_loaded_blocks()` on both readers, draining the
+`loaded_blocks` HashMaps. The bench calls it once per CP after
+`balance_index_parallel` returns and before `commit()`, gated by the
+default-on `--clear-reader-block-pins` flag.
+
+#### Safety contract
+
+`ArrowBlockfileReader::clear_loaded_blocks(&self)` is sound only if **no
+value previously returned by this reader is still borrowed**. The unsafe
+`transmute` pretends a `&Block` rooted in the read guard lives for `'me`;
+freeing the box invalidates that borrow.
+
+The bench's call site satisfies this trivially: by the time we clear,
+all `add()` and `balance_index_parallel()` work has returned and joined,
+the writer is held by `&mut writer` on the main thread (no concurrent
+borrowers), and the writer's own `load`/`load_raw` paths copy data via
+`to_vec()` and drop the returned `V<'me>` before returning. There are no
+outstanding `V` references on the stack at the clear point.
+
+#### Per-CP probe
+
+The bench prints a "Reader pins (balanced)" line right above the
+existing "Writer mem" line. It captures pin stats *before* the clear so
+the numbers reflect the actual peak paid for during add+balance, then
+reports the post-clear RSS drop:
+
+```
+Reader pins (balanced): postings 5.2K blocks/14.1GB | vector_data 280K blocks/372.4GB | total 386.5GB | post-clear rss 38.4GB (-336.1GB, freed pl+vd=386.5GB)
+```
+
+The byte column undercounts the heap footprint by the `Box` header,
+RecordBatch metadata, and validity bitmaps; expect the true footprint to
+be ~1.3x larger than reported.
+
+### Option 2 (deferred, upstream fix): bounded per-reader cache
+
+The architectural fix is in `chroma_blockstore`: replace
+`loaded_blocks: HashMap<Uuid, Box<Block>>` with a bounded LRU (or feed
+lookups directly off the foyer block cache and stop double-pinning).
+This requires eliminating the `transmute<&Block, &Block>` so callers
+either receive an owned `Arc<Block>` guard whose lifetime they manage,
+or copy out at the read API surface. Concretely:
+
+- Change `get_block` to return `Result<Option<Arc<Block>>, GetError>`
+  and have callers thread the `Arc` through to `V`'s materialisation.
+- Stop maintaining a per-reader pin set entirely; let the foyer block
+  cache be the single source of truth for hot-block residency. Cache
+  misses re-fetch from storage on demand; with the foyer cache sized to
+  the working set this is rare.
+- Keep `clear_loaded_blocks` as an explicit `evict_all` on the foyer
+  cache for callers (like the bench) that want to recover memory at
+  known phase boundaries.
+
+This is the right long-term fix for production too — any service that
+keeps a `BlockfileReader` alive across many random-access reads will
+otherwise pin a fraction of its blockfile that grows monotonically with
+read coverage, completely independent of the foyer cap. Today the bench
+hides this with periodic reopens; a long-lived production reader has no
+such reset and will accumulate RSS until the process restarts.
+
+#### Why it isn't done yet
+
+The unsafe `transmute` is load-bearing for the entire ArrowReadable
+value family — every `V<'me>` constructed from a block (e.g.
+`QuantizedCluster<'static>`, `&'static [f32]`) carries borrows that
+currently rely on the box living forever. Migrating to `Arc<Block>`
+guards changes the read API signature, the `ArrowReadableValue` trait,
+and every call site that synthesises a `V<'me>`. It is a wide refactor
+but a mechanical one.
+
+For the bench, Option 1 is sufficient to keep balanced-RSS bounded by
+`writer.memory_usage + foyer_cap + jemalloc slack` (~50 GB at our
+configs) and lets a 113M+ build fit comfortably on a 495 GB box.
+
+### Recall-path corollary: `load_all_embeddings` + `load_all_postings`
+
+The recall step (`HierarchicalSpannReader`) has the same two problems,
+just with a different trigger:
+
+- `load_all_postings()` copies every leaf posting into the reader's
+  owned `nodes` DashMap **and** pins every posting block in the posting
+  reader's `loaded_blocks` (doubled memory: ~30 GB owned + ~30 GB pins).
+- `load_all_embeddings()` copies every f32 embedding into the reader's
+  owned `embeddings` DashMap **and** pins every vector-data block in the
+  vector-data reader's `loaded_blocks` (doubled memory: at 113M × dim=1024
+  that is ~454 GB owned + ~454 GB pins, which will OOM any non-TB box).
+
+Two fixes land in the bench, behind a single unified flag:
+
+1. **Post-eager-load pin clear (unconditional).** Even on the eager
+   path, after the reader finishes `load_all_postings` /
+   `load_all_embeddings`, the bench calls
+   `HierarchicalSpannReader::clear_loaded_blocks()`, which drops both
+   readers' `loaded_blocks` HashMaps. The reader-owned copies are
+   unaffected. Halves the recall-step RSS.
+
+2. **Lazy recall path (`--lazy-recall`, default `true`).** A single
+   flag that turns on the entire production-shaped recall path:
+
+   - **Skip eager loads.** Both `load_all_postings` and
+     `load_all_embeddings` are skipped at setup.
+   - **Per-query lazy fetches with bounded async concurrency.** Each
+     query calls `HierarchicalSpannReader::search_with_policy_lazy`,
+     which uses `futures::stream::buffer_unordered` to keep up to
+     `LAZY_RECALL_CONCURRENCY` (= 32) posting `load_node` calls in
+     flight, then up to 32 vector-data `get` calls in flight for the
+     rerank set. With ~32 rayon workers each driving one query, the
+     system holds ~1k in-flight blockfile ops, which keeps the NVMe
+     queue deep on the cold pass without changing query results.
+     Embeddings land in a per-query local `HashMap<u32, Vec<f32>>`,
+     never the shared `embeddings` DashMap.
+   - **Cold/warm two-pass per row.** Each `(tau, rerank)` row runs
+     twice: a `cold` pass with both `loaded_blocks` HashMaps and per-
+     leaf posting data cleared first, then a `warm` pass that reuses
+     what cold populated. The pair isolates the lazy fetch cost.
+   - **Between-row clearing.** After every row's warm pass (and at the
+     top of every cold pass) the bench clears both readers'
+     `loaded_blocks` and the per-leaf posting data in `self.nodes`,
+     so block pins stay bounded by one row's working set, not the
+     union across all rows.
+
+   `--lazy-recall=false` reverts to the legacy eager single-pass path
+   (`load_all_postings` + conditional `load_all_embeddings` +
+   `search_with_policy_sync`, no clearing). That path only fits in
+   RAM with room to spare below ~50M vectors at dim=1024 on a 495 GB
+   box with `max-cache-bytes=16 GiB`.
+
+The lazy path is also the production-shaped one: it is what a long-
+lived server would want. The eager path is a benchmark optimisation
+useful only when the whole embedding set fits in RAM.
+
 ## Future improvements
 - replication:
   - Experiment with internal node replication
@@ -406,3 +719,15 @@ GT clusters (p100, p95, p90) -- how many clusters GT vectors spread across
   - Deferred replication (not at insert time)
 - Space efficiency
   - u8 versions, instead of u32
+- Commit memory
+  - Implement Option C in `chroma_blockstore` (stream completed blocks
+    during `swap_current_delta` so commit RAM is bounded by one delta
+    block instead of O(dirty tree)). See "Commit-time memory" above for
+    the trade-offs and motivation.
+- Reader memory
+  - Implement Option 2 in `chroma_blockstore` (replace
+    `ArrowBlockfileReader::loaded_blocks` with a bounded LRU and an
+    `Arc<Block>` return contract on `get_block`, so per-reader RSS is
+    bounded by the foyer cache cap regardless of read coverage). See
+    "Reader-side block pinning" above for the diagnosis and the API
+    surface that needs to change.

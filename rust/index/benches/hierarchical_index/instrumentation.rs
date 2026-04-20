@@ -4,6 +4,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use parking_lot::Mutex;
 
+/// Maximum tree depth tracked by per-level navigate counters. Deeper
+/// expansions get bucketed into the last slot. 8 covers anything we'd
+/// realistically build (current 113M run is depth 4).
+pub const MAX_NAV_LEVELS: usize = 8;
+
 // =============================================================================
 // Stats (atomic for thread safety)
 // =============================================================================
@@ -36,6 +41,11 @@ pub struct WriterStats {
     pub register_nanos: AtomicU64,
     pub register_lock_wait_nanos: AtomicU64,
     pub register_quantize_nanos: AtomicU64,
+
+    /// Number of outer rounds executed by `balance_index` /
+    /// `balance_index_parallel`. A "round" is one full pass that found at
+    /// least one leaf needing balance and ran balance() on it.
+    pub balance_rounds: AtomicU64,
 
     // Sub-step timing breakdowns (nanos)
     pub add_navigate_nanos: AtomicU64,
@@ -73,6 +83,48 @@ pub struct WriterStats {
     pub navigate_rerank_nanos: AtomicU64,
     pub navigate_levels: AtomicU64,
     pub navigate_dist_count: AtomicU64,
+
+    /// Per-level navigate accounting (indexed by level-1, capped at
+    /// MAX_NAV_LEVELS - 1).
+    ///
+    ///  - `nav_in_per_level[L]`: sum of input-beam sizes (number of
+    ///    internals being expanded) at level L+1 across all navigate calls.
+    ///  - `nav_dist_per_level[L]`: sum of children scored (= distances
+    ///    computed) at level L+1, before the effective_beam truncate.
+    ///  - `nav_out_per_level[L]`: sum of post-truncate beam sizes at
+    ///    level L+1 (i.e. how many candidates survived the tau filter +
+    ///    min/max clamp). Includes both leaf and internal survivors.
+    ///
+    /// Useful to attribute the bulk of `navigate_dist_count` to a
+    /// specific level when the per-level beam policy
+    /// (--write-level-min-pcts / --write-level-taus) lets intermediate
+    /// levels expand far beyond `--write-beam-max`.
+    pub nav_in_per_level: [AtomicU64; MAX_NAV_LEVELS],
+    pub nav_dist_per_level: [AtomicU64; MAX_NAV_LEVELS],
+    pub nav_out_per_level: [AtomicU64; MAX_NAV_LEVELS],
+    /// How many navigate() calls reached level L+1 (i.e., executed at
+    /// least one expansion at that level). Used to compute the per-call
+    /// avg from the sums above.
+    pub nav_calls_per_level: [AtomicU64; MAX_NAV_LEVELS],
+
+    // ---- Lazy I/O counters (per-checkpoint when the writer is reopened
+    // each checkpoint). All counters are cumulative since the writer was
+    // constructed via `new()` or `open()`.
+    /// Number of leaf posting lists actually fetched from the blockfile
+    /// (cached / no-op `load()` calls do not count).
+    pub posting_loads: AtomicU64,
+    /// Sum of cluster entry counts across all `posting_loads`. Multiply by
+    /// the in-memory per-entry size (`4 + code_size + 1` bytes) to estimate
+    /// bytes loaded for posting lists.
+    pub posting_load_entries: AtomicU64,
+    /// Number of full-precision embeddings actually fetched from the
+    /// blockfile (cache hits inside `load_raw()` do not count).
+    /// Multiply by `dim * 4` to get bytes.
+    pub embedding_loads: AtomicU64,
+    /// Number of full-precision embeddings inserted via `add()` (i.e.,
+    /// new vectors entering the index this checkpoint). Multiply by
+    /// `dim * 4` to get bytes added.
+    pub embeddings_added: AtomicU64,
 }
 
 impl Default for WriterStats {
@@ -98,6 +150,7 @@ impl Default for WriterStats {
             register_nanos: AtomicU64::new(0),
             register_lock_wait_nanos: AtomicU64::new(0),
             register_quantize_nanos: AtomicU64::new(0),
+            balance_rounds: AtomicU64::new(0),
             add_navigate_nanos: AtomicU64::new(0),
             add_register_nanos: AtomicU64::new(0),
             add_balance_nanos: AtomicU64::new(0),
@@ -124,6 +177,14 @@ impl Default for WriterStats {
             navigate_rerank_nanos: AtomicU64::new(0),
             navigate_levels: AtomicU64::new(0),
             navigate_dist_count: AtomicU64::new(0),
+            nav_in_per_level: std::array::from_fn(|_| AtomicU64::new(0)),
+            nav_dist_per_level: std::array::from_fn(|_| AtomicU64::new(0)),
+            nav_out_per_level: std::array::from_fn(|_| AtomicU64::new(0)),
+            nav_calls_per_level: std::array::from_fn(|_| AtomicU64::new(0)),
+            posting_loads: AtomicU64::new(0),
+            posting_load_entries: AtomicU64::new(0),
+            embedding_loads: AtomicU64::new(0),
+            embeddings_added: AtomicU64::new(0),
         }
     }
 }
@@ -162,6 +223,15 @@ pub struct WriterStatsSnapshot {
     pub navigate_substeps: [u64; 5],
     pub navigate_levels: u64,
     pub navigate_dist_count: u64,
+    pub nav_in_per_level: [u64; MAX_NAV_LEVELS],
+    pub nav_dist_per_level: [u64; MAX_NAV_LEVELS],
+    pub nav_out_per_level: [u64; MAX_NAV_LEVELS],
+    pub nav_calls_per_level: [u64; MAX_NAV_LEVELS],
+    pub posting_loads: u64,
+    pub posting_load_entries: u64,
+    pub embedding_loads: u64,
+    pub embeddings_added: u64,
+    pub balance_rounds: u64,
 }
 
 impl WriterStats {
@@ -228,6 +298,23 @@ impl WriterStats {
             ],
             navigate_levels: self.navigate_levels.load(Ordering::Relaxed),
             navigate_dist_count: self.navigate_dist_count.load(Ordering::Relaxed),
+            nav_in_per_level: std::array::from_fn(|i| {
+                self.nav_in_per_level[i].load(Ordering::Relaxed)
+            }),
+            nav_dist_per_level: std::array::from_fn(|i| {
+                self.nav_dist_per_level[i].load(Ordering::Relaxed)
+            }),
+            nav_out_per_level: std::array::from_fn(|i| {
+                self.nav_out_per_level[i].load(Ordering::Relaxed)
+            }),
+            nav_calls_per_level: std::array::from_fn(|i| {
+                self.nav_calls_per_level[i].load(Ordering::Relaxed)
+            }),
+            posting_loads: self.posting_loads.load(Ordering::Relaxed),
+            posting_load_entries: self.posting_load_entries.load(Ordering::Relaxed),
+            embedding_loads: self.embedding_loads.load(Ordering::Relaxed),
+            embeddings_added: self.embeddings_added.load(Ordering::Relaxed),
+            balance_rounds: self.balance_rounds.load(Ordering::Relaxed),
         }
     }
 
@@ -291,6 +378,25 @@ impl WriterStats {
             navigate_dist_count: cur
                 .navigate_dist_count
                 .saturating_sub(prev.navigate_dist_count),
+            nav_in_per_level: std::array::from_fn(|i| {
+                cur.nav_in_per_level[i].saturating_sub(prev.nav_in_per_level[i])
+            }),
+            nav_dist_per_level: std::array::from_fn(|i| {
+                cur.nav_dist_per_level[i].saturating_sub(prev.nav_dist_per_level[i])
+            }),
+            nav_out_per_level: std::array::from_fn(|i| {
+                cur.nav_out_per_level[i].saturating_sub(prev.nav_out_per_level[i])
+            }),
+            nav_calls_per_level: std::array::from_fn(|i| {
+                cur.nav_calls_per_level[i].saturating_sub(prev.nav_calls_per_level[i])
+            }),
+            posting_loads: cur.posting_loads.saturating_sub(prev.posting_loads),
+            posting_load_entries: cur
+                .posting_load_entries
+                .saturating_sub(prev.posting_load_entries),
+            embedding_loads: cur.embedding_loads.saturating_sub(prev.embedding_loads),
+            embeddings_added: cur.embeddings_added.saturating_sub(prev.embeddings_added),
+            balance_rounds: cur.balance_rounds.saturating_sub(prev.balance_rounds),
         }
     }
 }
@@ -530,6 +636,64 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
             .unwrap();
         }
     }
+    {
+        // Per-level beam attribution. Helps answer "where did the
+        // distance computations go?" when the per-level write policy
+        // (--write-level-min-pcts / --write-level-taus) lets non-leaf
+        // levels expand far beyond --write-beam-max.
+        //
+        //  - in:      avg input-beam size (internals being expanded).
+        //  - dists:   avg children scored at this level (= distances).
+        //  - out:     avg post-truncate beam size (survivors of tau +
+        //             min/max clamp). At the leaf level this is the
+        //             number of leaves returned by navigate().
+        //  - fan:     avg fan-out of beam parents at this level (= dists/in).
+        //  - tau:     avg dists/out -- how aggressively the tau filter
+        //             trimmed candidates (1.0 = nothing trimmed; large =
+        //             tau is doing real work).
+        //
+        // Levels where the call never reached are blank.
+        writeln!(out, "\n--- navigate() Per-Level ---").unwrap();
+        writeln!(
+            out,
+            "| CP |  L |   calls | calls% |     in |   dists |    out |    fan |    trim |"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "|----|----|---------|--------|--------|---------|--------|--------|---------|"
+        )
+        .unwrap();
+        for (i, snap) in snapshots.iter().enumerate() {
+            let total_calls = snap.calls[1].max(1);
+            for li in 0..MAX_NAV_LEVELS {
+                let calls_l = snap.nav_calls_per_level[li];
+                if calls_l == 0 {
+                    continue;
+                }
+                let in_l = snap.nav_in_per_level[li] as f64 / calls_l as f64;
+                let dist_l = snap.nav_dist_per_level[li] as f64 / calls_l as f64;
+                let out_l = snap.nav_out_per_level[li] as f64 / calls_l as f64;
+                let fan = if in_l > 0.0 { dist_l / in_l } else { 0.0 };
+                let trim = if out_l > 0.0 { dist_l / out_l } else { 0.0 };
+                let calls_pct = calls_l as f64 / total_calls as f64 * 100.0;
+                writeln!(
+                    out,
+                    "| {:>2} | {:>2} | {:>7} | {:>5.0}% | {:>6.1} | {:>7.1} | {:>6.1} | {:>6.1} | {:>6.1}x |",
+                    i + 1,
+                    li + 1,
+                    fmt_count(calls_l),
+                    calls_pct,
+                    in_l,
+                    dist_l,
+                    out_l,
+                    fan,
+                    trim,
+                )
+                .unwrap();
+            }
+        }
+    }
     write_substep_table(
         &mut out,
         "register_in_leaf()",
@@ -674,6 +838,102 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
         5,
         &|s| &s.reassign_substeps,
     );
+
+    out
+}
+
+/// Per-checkpoint table of bytes loaded from / written to the persisted
+/// blockfiles by the lazy I/O paths (`load`, `load_raw`) plus bytes added
+/// to the in-memory embedding map by `add()`.
+///
+/// Each row corresponds to one entry in `snapshots`, which when produced via
+/// `snapshot_delta` represent per-checkpoint values. `dim` is the vector
+/// dimensionality (used to compute embedding bytes and posting code bytes
+/// assuming 1-bit codes).
+pub fn format_data_loaded_table(snapshots: &[WriterStatsSnapshot], dim: usize) -> String {
+    use std::fmt::Write;
+
+    fn fmt_count(n: u64) -> String {
+        if n < 1_000 {
+            n.to_string()
+        } else if n < 1_000_000 {
+            format!("{:.1}K", n as f64 / 1_000.0)
+        } else if n < 1_000_000_000 {
+            format!("{:.2}M", n as f64 / 1_000_000.0)
+        } else {
+            format!("{:.2}B", n as f64 / 1_000_000_000.0)
+        }
+    }
+    fn fmt_mb(bytes: u64) -> String {
+        let mb = bytes as f64 / (1024.0 * 1024.0);
+        if mb < 1.0 {
+            format!("{:.0}KB", bytes as f64 / 1024.0)
+        } else if mb < 1024.0 {
+            format!("{:.1}MB", mb)
+        } else {
+            format!("{:.2}GB", mb / 1024.0)
+        }
+    }
+
+    // In-memory bytes per entry for posting lists: id (u32) + code (1 byte
+    // per dim/8) + version (u8). For dim=1024 with 1-bit codes:
+    // 4 + 128 + 1 = 133 bytes/entry.
+    let posting_bytes_per_entry: u64 = (4 + (dim as u64) / 8 + 1) as u64;
+    let embedding_bytes_per_vec: u64 = (dim as u64) * 4;
+
+    let mut out = String::new();
+    writeln!(out, "\n--- Data Loaded (lazy I/O per checkpoint) ---").unwrap();
+    writeln!(
+        out,
+        "| CP | post nodes | post entries | post bytes | emb loaded |  emb bytes | added vec |   add bytes | total IO |"
+    ).unwrap();
+    writeln!(
+        out,
+        "|----|-----------|--------------|------------|-----------|------------|-----------|-------------|----------|"
+    ).unwrap();
+    for (i, s) in snapshots.iter().enumerate() {
+        let post_bytes = s.posting_load_entries.saturating_mul(posting_bytes_per_entry);
+        let emb_bytes = s.embedding_loads.saturating_mul(embedding_bytes_per_vec);
+        let add_bytes = s.embeddings_added.saturating_mul(embedding_bytes_per_vec);
+        let total = post_bytes + emb_bytes + add_bytes;
+        writeln!(
+            out,
+            "| {:>2} | {:>9} | {:>12} | {:>10} | {:>9} | {:>10} | {:>9} | {:>11} | {:>8} |",
+            i + 1,
+            fmt_count(s.posting_loads),
+            fmt_count(s.posting_load_entries),
+            fmt_mb(post_bytes),
+            fmt_count(s.embedding_loads),
+            fmt_mb(emb_bytes),
+            fmt_count(s.embeddings_added),
+            fmt_mb(add_bytes),
+            fmt_mb(total),
+        )
+        .unwrap();
+    }
+
+    // Cumulative totals row.
+    let tot_post_loads: u64 = snapshots.iter().map(|s| s.posting_loads).sum();
+    let tot_post_entries: u64 = snapshots.iter().map(|s| s.posting_load_entries).sum();
+    let tot_emb: u64 = snapshots.iter().map(|s| s.embedding_loads).sum();
+    let tot_add: u64 = snapshots.iter().map(|s| s.embeddings_added).sum();
+    let tot_post_bytes = tot_post_entries.saturating_mul(posting_bytes_per_entry);
+    let tot_emb_bytes = tot_emb.saturating_mul(embedding_bytes_per_vec);
+    let tot_add_bytes = tot_add.saturating_mul(embedding_bytes_per_vec);
+    let tot_io = tot_post_bytes + tot_emb_bytes + tot_add_bytes;
+    writeln!(
+        out,
+        "| ** | {:>9} | {:>12} | {:>10} | {:>9} | {:>10} | {:>9} | {:>11} | {:>8} |",
+        fmt_count(tot_post_loads),
+        fmt_count(tot_post_entries),
+        fmt_mb(tot_post_bytes),
+        fmt_count(tot_emb),
+        fmt_mb(tot_emb_bytes),
+        fmt_count(tot_add),
+        fmt_mb(tot_add_bytes),
+        fmt_mb(tot_io),
+    )
+    .unwrap();
 
     out
 }

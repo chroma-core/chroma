@@ -98,6 +98,18 @@ impl ArrowBlockfileProvider {
         self.block_manager.storage()
     }
 
+    /// Enumerate every block UUID referenced by the sparse-index root with
+    /// the given id and prefix path. Reads the root from storage (or from
+    /// the root cache); does not load any blocks. Useful for GC: build the
+    /// live set of blocks for a known root, then sweep everything else.
+    pub async fn get_all_block_ids(
+        &self,
+        id: &Uuid,
+        prefix_path: &str,
+    ) -> Result<Vec<Uuid>, RootManagerError> {
+        self.root_manager.get_all_block_ids(id, prefix_path).await
+    }
+
     pub async fn read<
         'new,
         K: Key + Into<KeyWrapper> + ArrowReadableKey<'new> + 'new,

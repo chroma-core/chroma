@@ -130,6 +130,28 @@ impl RootWriter {
         // a count
         for (_, value) in sparse_index_data.counts.iter() {
             count_builder.append_value(*value);
+            // XOR...
+            // Iterate over `forward` (the source of truth for which blocks exist) and
+            // look up each count in `counts`. The two maps are normally kept in sync
+            // by `set_count` at commit time, but `add_block` does not touch `counts`
+            // and `remove_block` documents that it does not require sync. Iterating
+            // `forward` here guarantees that the resulting array length matches the
+            // other columns (id, key, prefix), which is required by Arrow.
+            // let mut missing_count = 0usize;
+            // for (key, _block_id) in sparse_index_data.forward.iter() {
+            //     let count = sparse_index_data.counts.get(key).copied().unwrap_or_else(|| {
+            //         missing_count += 1;
+            //         0
+            //     });
+            //     count_builder.append_value(count);
+            // }
+            // if missing_count > 0 {
+            //     tracing::warn!(
+            //         "RootWriter::counts_as_arrow: {} block(s) in `forward` had no entry in `counts`; defaulted to 0. \
+            //          This usually indicates an internal bookkeeping bug; the file is still serializable.",
+            //         missing_count
+            //     );
+            // 
         }
         (
             Arc::new(count_builder.finish()),

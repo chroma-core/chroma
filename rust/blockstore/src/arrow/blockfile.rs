@@ -468,6 +468,43 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         }
     }
 
+    /// Returns `(count, bytes)` describing the per-reader `loaded_blocks`
+    /// pin set. Bytes is the sum of `Block::get_size()` (Arrow record-batch
+    /// payload) over every pinned block; the actual heap footprint is a
+    /// little larger (Box header, RecordBatch metadata, validity bitmaps).
+    ///
+    /// This is what callers should watch when chasing the mid-CP RSS
+    /// spikes documented under "Reader-side block pinning" in the bench
+    /// `docs/README.md`. The block-manager's foyer cache is a *separate*
+    /// (bounded) cache and is NOT included here.
+    pub fn loaded_blocks_stats(&self) -> (usize, u64) {
+        let guard = self.loaded_blocks.read();
+        let count = guard.len();
+        let bytes: u64 = guard.values().map(|b| b.get_size() as u64).sum();
+        (count, bytes)
+    }
+
+    /// Drop every block that this reader has pinned in `loaded_blocks`,
+    /// freeing potentially many GB of heap. Safe to call between batches
+    /// of `get*()` calls when **no value previously returned by this
+    /// reader is still borrowed** (e.g. between checkpoint sub-batches in
+    /// the bench): the unsafe `transmute<&Block, &Block>` in `get_block`
+    /// extends a borrow to `'me`, so a returned `V<'me>` whose buffer
+    /// pointers reference one of these blocks would dangle if its block
+    /// were freed.
+    ///
+    /// In practice the writer's `load()` / `load_raw()` paths copy data
+    /// out via `to_vec()` and drop the returned `V` before returning, so
+    /// calling this from the main thread between checkpoint phases (e.g.
+    /// after `balance_index_parallel`, before `commit`) is sound. See the
+    /// bench `docs/README.md` -> "Reader-side block pinning" for the full
+    /// rationale and the upstream fix that would let this be a private
+    /// implementation detail again.
+    pub fn clear_loaded_blocks(&self) {
+        let mut guard = self.loaded_blocks.write();
+        guard.clear();
+    }
+
     pub(super) async fn get_block(
         &self,
         block_id: Uuid,

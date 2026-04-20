@@ -66,6 +66,7 @@ dirs = "5.0"
 ureq = "2"
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = { workspace = true }
+tikv-jemalloc-ctl = { version = "0.6", features = ["stats"] }
 
 [[bench]]
 name = "full_text"

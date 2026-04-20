@@ -1,12 +1,14 @@
 pub mod arxiv;
+pub mod bigann_sift1b;
 pub mod dbpedia;
 pub mod deep;
 pub mod ground_truth;
 pub mod msmarco;
+pub mod msmarco_en;
 pub mod sec;
 pub mod sift;
-pub mod wikipedia;
 pub mod synthetic;
+pub mod wikipedia;
 
 use std::collections::HashSet;
 use std::io;
@@ -91,8 +93,10 @@ pub enum DatasetType {
     Arxiv,
     Sec,
     MsMarco,
+    MsMarcoEn,
     WikipediaEn,
     Sift,
+    BigAnnSift1b,
     Deep10m,
     Synthetic,
 }
