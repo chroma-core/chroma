@@ -183,7 +183,7 @@ def _test_add(
         coll.add(*batch)
         if should_wait_for_compaction:
             print('should wait for compaction')
-            records_since_compaction_wait += len(normalized_batch[0])
+            records_since_compaction_wait += len(batch[0])
             if records_since_compaction_wait >= min_records_between_compaction_waits:
                 print(f"records_since_compaction_wait = {records_since_compaction_wait}")
                 print(f"min_records_between_compaction_waits = {min_records_between_compaction_waits}")
