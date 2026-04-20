@@ -175,7 +175,7 @@ compaction_service:
     active_io_tasks: 10000
   compactor:
     compaction_manager_queue_size: 1000
-    max_concurrent_jobs: 50
+    max_concurrent_jobs: 2
     compaction_interval_sec: 10
     min_compaction_size: 10
     max_compaction_size: 10000
@@ -192,7 +192,7 @@ compaction_service:
           lru:
             name: "block_cache"
             capacity: 1000
-        num_concurrent_block_flushes: 40
+        num_concurrent_block_flushes: 1
       sparse_index_manager_config:
         sparse_index_cache_config:
           lru:
@@ -311,6 +311,7 @@ garbage_collector:
     - crate_name: "garbage_collector"
       filter_level: "debug"
   relative_cutoff_time_seconds: 60 # GC all versions created at time < now() - relative_cutoff_time_seconds (1 minute)
+  collection_soft_delete_grace_period: 60
   max_collections_to_gc: 1000
   gc_interval_mins: 1
   enable_log_gc_for_tenant: ["default_tenant"]
