@@ -310,7 +310,7 @@ garbage_collector:
     - crate_name: "garbage_collector"
       filter_level: "debug"
   relative_cutoff_time_seconds: 60 # GC all versions created at time < now() - relative_cutoff_time_seconds (1 minute)
-  collection_soft_delete_grace_period: 60
+  collection_soft_delete_grace_period_seconds: 60
   max_collections_to_gc: 1000
   gc_interval_mins: 1
   enable_log_gc_for_tenant: ["default_tenant"]
