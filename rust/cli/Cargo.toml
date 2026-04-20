@@ -21,7 +21,6 @@ colored = "3.0.0"
 dialoguer = "0.11.0"
 dirs = "6.0.0"
 indicatif = { workspace = true }
-libc = { workspace = true }
 rand = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
