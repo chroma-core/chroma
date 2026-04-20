@@ -1,5 +1,4 @@
 use crate::config_store::{ConfigStore, FileConfigStore};
-use crate::style;
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::ui_utils::read_secret;
 use crate::utils::UtilsError::UserInputFailed;
@@ -388,7 +387,7 @@ fn prompt_app_name(
     cli_config: &CliConfig,
     term: &mut dyn Terminal,
 ) -> Result<String, CliError> {
-    term.println(&format!("{}", style::prompt_bold(prompt)));
+    term.println(&format!("{}", prompt.blue().bold()));
     let name = match apps.len() {
         0..=SELECTION_LIMIT => select_app(apps, cli_config, term),
         _ => term.prompt_input(),
@@ -430,9 +429,9 @@ fn show_apps(
     term: &mut dyn Terminal,
 ) -> Result<(), CliError> {
     let app_listings = get_display_app_names(apps, cli_config)?;
-    term.println(&format!("{}", style::section_header(show_apps_message())));
+    term.println(&format!("{}", show_apps_message().blue().bold()));
     app_listings.iter().for_each(|listing| {
-        term.println(&format!("{} {}", style::list_marker(), listing));
+        term.println(&format!("{} {}", ">".yellow(), listing));
     });
     Ok(())
 }
@@ -500,9 +499,9 @@ fn get_app_env_variables(
 
     term.println(&format!(
         "{}",
-        style::accent_bold(prompt_env_variables_message(
-            &app_config.required_env_variables
-        ))
+        prompt_env_variables_message(&app_config.required_env_variables)
+            .blue()
+            .bold()
     ));
     let items = vec![
         "Set with the installer".to_string(),
@@ -530,7 +529,7 @@ fn display_run_instructions(app_config: SampleAppConfig, term: &mut dyn Terminal
         .join("\n\n");
     term.println(&format!(
         "\n\n{}\n{}",
-        style::accent_bold("Installation completed!"),
+        "Installation completed!".bold().blue(),
         instructions
     ));
 }

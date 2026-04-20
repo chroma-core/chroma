@@ -34,62 +34,6 @@ pub struct FilterableMultiSelectPrompt<'a> {
     pub empty_message: &'a str,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SharedUiElementKind {
-    SectionHeader,
-    CommandHint,
-    SummaryPanel,
-    PanelSelect,
-    FilterableMultiSelect,
-    StatusLine,
-    SuccessBanner,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SharedUiElement {
-    pub kind: SharedUiElementKind,
-    pub name: &'static str,
-    pub description: &'static str,
-}
-
-pub const SHARED_UI_ELEMENTS: &[SharedUiElement] = &[
-    SharedUiElement {
-        kind: SharedUiElementKind::SectionHeader,
-        name: "section_header",
-        description: "Blue bold section title for command output.",
-    },
-    SharedUiElement {
-        kind: SharedUiElementKind::CommandHint,
-        name: "command_hint",
-        description: "Instruction line with a highlighted command example.",
-    },
-    SharedUiElement {
-        kind: SharedUiElementKind::SummaryPanel,
-        name: "summary_panel",
-        description: "Boxed key/value confirmation panel for resolved selections.",
-    },
-    SharedUiElement {
-        kind: SharedUiElementKind::PanelSelect,
-        name: "panel_select",
-        description: "Tagged single-choice panel rendered by the terminal backend.",
-    },
-    SharedUiElement {
-        kind: SharedUiElementKind::FilterableMultiSelect,
-        name: "filterable_multi_select",
-        description: "Tagged searchable multi-select checklist rendered by the terminal backend.",
-    },
-    SharedUiElement {
-        kind: SharedUiElementKind::StatusLine,
-        name: "status_line",
-        description: "Action-oriented banner used before long-running work starts.",
-    },
-    SharedUiElement {
-        kind: SharedUiElementKind::SuccessBanner,
-        name: "success_banner",
-        description: "Blue bold completion message shown after successful work.",
-    },
-];
-
 pub fn print_section_header(term: &mut dyn Terminal, title: &str) {
     term.println(&format!("{}", style::section_header(title)));
 }
@@ -203,30 +147,9 @@ fn truncate_summary_line(line: &str, width: usize) -> String {
 mod tests {
     use super::{
         build_summary_panel_lines, print_command_hint, print_section_header, print_status_line,
-        print_success_banner, print_summary_panel, SHARED_UI_ELEMENTS,
+        print_success_banner, print_summary_panel,
     };
     use crate::terminal::test_terminal::TestTerminal;
-
-    #[test]
-    fn shared_ui_catalog_lists_expected_elements() {
-        let names = SHARED_UI_ELEMENTS
-            .iter()
-            .map(|element| element.name)
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            names,
-            vec![
-                "section_header",
-                "command_hint",
-                "summary_panel",
-                "panel_select",
-                "filterable_multi_select",
-                "status_line",
-                "success_banner",
-            ]
-        );
-    }
 
     #[test]
     fn summary_panel_draws_a_box_for_multiline_content() {

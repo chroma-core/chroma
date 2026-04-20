@@ -1,8 +1,8 @@
-use crate::style;
 use crate::utils::{CliError, UtilsError};
 use arboard::Clipboard;
 use clap::ValueEnum;
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use colored::Colorize;
+use crossterm::event::{Event, KeyCode, KeyEvent};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use crossterm::{cursor, event, ExecutableCommand};
 use regex::Regex;
@@ -51,40 +51,18 @@ pub enum Theme {
     Light,
 }
 
-fn write_secret_prompt(
-    stdout: &mut std::io::Stdout,
-    prompt: &str,
-    password_len: usize,
-) -> io::Result<()> {
-    stdout.write_all(prompt.as_bytes())?;
-    stdout.write_all(b": ")?;
-    if password_len > 0 {
-        stdout.write_all("*".repeat(password_len).as_bytes())?;
-    }
-    stdout.flush()?;
-    Ok(())
-}
-
 pub fn read_secret(prompt: &str) -> io::Result<String> {
     let mut stdout = stdout();
     let mut password = String::new();
 
-    write_secret_prompt(&mut stdout, prompt, password.len())?;
+    stdout.write_all(prompt.as_bytes())?;
+    stdout.write_all(b": ")?;
+    stdout.flush()?;
 
     enable_raw_mode()?;
 
     loop {
-        if let Event::Key(KeyEvent {
-            code, modifiers, ..
-        }) = event::read()?
-        {
-            if modifiers == KeyModifiers::CONTROL && code == KeyCode::Char('c') {
-                disable_raw_mode()?;
-                stdout.write_all(b"\n")?;
-                stdout.flush()?;
-                return Err(io::Error::new(io::ErrorKind::Interrupted, "interrupted"));
-            }
-
+        if let Event::Key(KeyEvent { code, .. }) = event::read()? {
             match code {
                 KeyCode::Enter => break,
                 KeyCode::Char(c) => {
@@ -132,6 +110,6 @@ pub fn copy_to_clipboard(copy_string: &str) -> Result<(), CliError> {
     clipboard
         .set_text(copy_string)
         .map_err(|_| UtilsError::CopyToClipboardFailed)?;
-    println!("\n{}", style::accent_bold("Copied to clipboard!"));
+    println!("\n{}", "Copied to clipboard!".blue().bold());
     Ok(())
 }
