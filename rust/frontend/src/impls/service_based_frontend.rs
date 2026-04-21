@@ -380,7 +380,7 @@ impl ServiceBasedFrontend {
         })
     }
 
-    async fn fan_out_knn(&self, plan: Knn) -> Result<KnnBatchResult, ExecutorError> {
+    async fn fan_out_knn(&self, mut plan: Knn) -> Result<KnnBatchResult, ExecutorError> {
         let num_shards = plan
             .scan
             .collection_and_segments
@@ -424,6 +424,10 @@ impl ServiceBasedFrontend {
             )
             .await;
         }
+        // Always request distances for correct cross-shard merge sorting.
+        let strip_distance = !plan.proj.distance;
+        plan.proj.distance = true;
+
         let futs: Vec<_> = (0..num_shards)
             .map(|shard_index| {
                 let mut executor = self.executor.clone();
@@ -483,6 +487,11 @@ impl ServiceBasedFrontend {
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
             output.records.truncate(fetch);
+            if strip_distance {
+                for record in &mut output.records {
+                    record.distance = None;
+                }
+            }
         }
         Ok(KnnBatchResult {
             pulled_log_bytes: total_pulled_log_bytes,
