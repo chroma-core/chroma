@@ -319,10 +319,12 @@ def ann_accuracy(
     dim = len(embeddings[0])
     accuracy_threshold = accuracy_threshold * math.pow(10, int(math.log10(dim)))
 
-    # Quantized SPANN (e.g. 4-bit RaBitQ) introduces approximation error in
-    # distance computation that exceeds the tight tolerance used for exact indices.
-    # Widen the threshold when quantization is active. The quantize field lives in
-    # the schema (under #embedding key), not in configuration_json.
+    # Detect whether quantization is active on this collection so the
+    # per-result distance equality check below can use a wider tolerance
+    # derived from the RaBitQ paper's theoretical error bound. The
+    # quantize field lives in the schema (under #embedding key), not in
+    # configuration_json.
+    quantization_active = False
     serialized_schema = collection._model.serialized_schema
     if serialized_schema is not None:
         embedding_spann_cfg = (
@@ -334,7 +336,7 @@ def ann_accuracy(
             .get("spann", {})
         )
         if embedding_spann_cfg.get("quantize") not in (None, "none"):
-            accuracy_threshold = max(accuracy_threshold, 1e-2)
+            quantization_active = True
 
     # Perform exact distance computation
     if query_embeddings is None:
@@ -415,11 +417,39 @@ def ann_accuracy(
             unexpected_id = id not in expected_ids
             index = id_to_index[id]
 
-            correct_distance = np.allclose(
-                distances_i[index],
-                query_results["distances"][i][j],
-                atol=accuracy_threshold,
-            )
+            # For quantized SPANN (4-bit RaBitQ) the paper's Theorem 3.2
+            # bounds the distance-estimator error by O(1/sqrt(D)) with a
+            # constant that scales with the norms of the data and query
+            # vectors. We observed on test_add_mcmr that 100% of failing
+            # quantized comparisons fall within 5 * ||q|| * ||d|| / sqrt(D)
+            # (P95 at ~9% of that bound, max at 16%). The corresponding
+            # *relative* error can be large when the true distance value
+            # happens to be near zero (notably for inner product, whose
+            # value has no non-zero floor), which is why a simple rtol
+            # cannot cover quantized IP.
+            #
+            # For quantized collections we therefore use an absolute
+            # tolerance derived from the RaBitQ bound in addition to the
+            # standard accuracy_threshold floor. For non-quantized
+            # collections we omit rtol so numpy's default rtol=1e-5
+            # applies, matching pre-branch behavior (e.g.
+            # test_cross_version_persist's local HNSW relies on it for
+            # small numerical drift).
+            if quantization_active:
+                q_norm = float(np.linalg.norm(query_embeddings[i]))
+                d_norm = float(np.linalg.norm(embeddings[index]))
+                rabitq_atol = 5.0 * q_norm * d_norm / math.sqrt(dim)
+                correct_distance = np.allclose(
+                    distances_i[index],
+                    query_results["distances"][i][j],
+                    atol=max(accuracy_threshold, rabitq_atol),
+                )
+            else:
+                correct_distance = np.allclose(
+                    distances_i[index],
+                    query_results["distances"][i][j],
+                    atol=accuracy_threshold,
+                )
             if unexpected_id:
                 # If the ID is unexpcted, but the distance is correct, then we
                 # have a duplicate in the data. In this case, we should not reduce recall.
@@ -465,8 +495,7 @@ def _query_results_are_correct_shape(
     for result_type in ["distances", "embeddings", "documents", "metadatas"]:
         assert query_results[result_type] is not None  # type: ignore[literal-required]
         assert all(
-            len(result) == n_results
-            for result in query_results[result_type]  # type: ignore[literal-required]
+            len(result) == n_results for result in query_results[result_type]  # type: ignore[literal-required]
         )
 
 

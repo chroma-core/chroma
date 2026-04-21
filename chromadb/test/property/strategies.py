@@ -694,7 +694,15 @@ def collections(
 
     name = draw(collection_name())
     metadata = draw(collection_metadata)
-    dimension = draw(st.integers(min_value=2, max_value=2048))
+    # Dimension bounds tuned for 4-bit RaBitQ quantization (enabled broadly
+    # in the distributed test tenant configs):
+    #   - min 128: below this, RaBitQ's concentration-of-measure bound
+    #     (~1/sqrt(d)) produces relative error >10% on cosine/L2 distances,
+    #     and hypothesis eagerly shrinks to pathological low-dim cases.
+    #   - max 512: quantized compaction's per-record cost is dominated by
+    #     a dense O(dim^2) random rotation matmul; capping dimension keeps
+    #     per-compaction CPU bounded so the test fits in COMPACTION_SLEEP.
+    dimension = draw(st.integers(min_value=128, max_value=512))
     dtype = draw(st.sampled_from(float_types))
 
     use_persistent_hnsw_params = draw(with_persistent_hnsw_params)
