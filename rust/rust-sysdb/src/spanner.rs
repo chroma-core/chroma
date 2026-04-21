@@ -694,6 +694,8 @@ impl SpannerBackend {
                             &[
                                 "collection_id",
                                 "region",
+                                "tenant",
+                                "database_id",
                                 "index_schema",
                                 "created_at",
                                 "updated_at",
@@ -701,6 +703,8 @@ impl SpannerBackend {
                             &[
                                 &collection_id,
                                 &region_str,
+                                &tenant_id_str,
+                                &database_id,
                                 &index_schema_json,
                                 &commit_ts,
                                 &commit_ts,
