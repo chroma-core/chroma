@@ -74,7 +74,7 @@ enum SkillsSubcommand {
     Install(InstallSkillArgs),
 }
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Default)]
 pub struct InstallSkillArgs {
     #[clap(index = 1, help = "The name of the skill to install")]
     name: Option<String>,
@@ -95,6 +95,15 @@ pub struct InstallSkillArgs {
     scope: Option<InstallScope>,
     #[clap(long, value_enum, help = "Install method")]
     mode: Option<InstallMode>,
+}
+
+impl InstallSkillArgs {
+    pub(crate) fn for_skill(name: impl Into<String>) -> Self {
+        Self {
+            name: Some(name.into()),
+            ..Self::default()
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -661,7 +670,10 @@ async fn list_skills(term: &mut dyn Terminal) -> Result<(), CliError> {
     Ok(())
 }
 
-async fn install_skill(args: InstallSkillArgs, term: &mut dyn Terminal) -> Result<(), CliError> {
+pub(crate) async fn install_skill(
+    args: InstallSkillArgs,
+    term: &mut dyn Terminal,
+) -> Result<(), CliError> {
     let context = InstallContext::current()?;
     let registry = fetch_skills_registry().await?;
     let skill = resolve_skill(&registry, args.name, term)?;
