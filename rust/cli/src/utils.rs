@@ -2,6 +2,7 @@ use crate::client::dashboard_client::DashboardClientError;
 use crate::commands::browse::BrowseError;
 use crate::commands::copy::CopyError;
 use crate::commands::db::DbError;
+use crate::commands::init::InitError;
 use crate::commands::install::InstallError;
 use crate::commands::login::LoginError;
 use crate::commands::profile::ProfileError;
@@ -54,6 +55,8 @@ pub enum CliError {
     Login(#[from] LoginError),
     #[error("{0}")]
     DashboardClient(#[from] DashboardClientError),
+    #[error("{0}")]
+    Init(#[from] InitError),
     #[error("{0}")]
     Install(#[from] InstallError),
     #[error("{0}")]

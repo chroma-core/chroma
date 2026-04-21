@@ -230,7 +230,7 @@ fn prompt_db_name(term: &mut dyn Terminal) -> Result<String, CliError> {
     term.prompt_input()
 }
 
-fn validate_db_name(db_name: &str) -> Result<String, CliError> {
+pub(crate) fn validate_db_name(db_name: &str) -> Result<String, CliError> {
     if db_name.is_empty() {
         return Err(CliError::Db(DbError::EmptyDbName));
     }
@@ -293,7 +293,10 @@ fn confirm_db_deletion(name: &str, term: &mut dyn Terminal) -> Result<bool, CliE
     Ok(confirm.eq(name))
 }
 
-fn create_env_connection(current_profile: Profile, db_name: String) -> Result<(), Box<dyn Error>> {
+pub(crate) fn create_env_connection(
+    current_profile: Profile,
+    db_name: String,
+) -> Result<(), Box<dyn Error>> {
     let env_path = ".env";
     let chroma_keys = [
         CHROMA_API_KEY_ENV_VAR,

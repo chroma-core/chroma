@@ -11,6 +11,7 @@ mod utils;
 use crate::commands::browse::{browse, BrowseArgs};
 use crate::commands::copy::{copy, CopyArgs};
 use crate::commands::db::{db_command, DbCommand};
+use crate::commands::init::{init, InitArgs};
 use crate::commands::install::{install, InstallArgs};
 use crate::commands::login::{login, LoginArgs};
 use crate::commands::profile::{profile_command, ProfileCommand};
@@ -33,6 +34,8 @@ enum Command {
     Db(DbCommand),
     #[command(about = "Open Chroma online documentation", long_about = None)]
     Docs,
+    #[command(about = "Initialize a Chroma workspace in the current directory", long_about = None)]
+    Init(InitArgs),
     #[command(about = "Install sample applications", long_about = None)]
     Install(InstallArgs),
     #[command(about = "Log in to Chroma Cloud", long_about = None)]
@@ -71,6 +74,7 @@ pub fn chroma_cli(args: Vec<String>) {
         Command::Copy(args) => copy(args),
         Command::Db(db_subcommand) => db_command(db_subcommand),
         Command::Docs => open_browser(WebPageCommand::Docs),
+        Command::Init(args) => init(args),
         Command::Install(args) => install(args),
         Command::Login(args) => login(args),
         Command::Profile(profile_subcommand) => profile_command(profile_subcommand),
