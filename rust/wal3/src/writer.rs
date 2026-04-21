@@ -819,6 +819,7 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                 }
                 Ok(None) => None,
                 Err(err) => {
+                    tracing::error!(error =% err, "could not install garbage");
                     return Err(err);
                 }
             };
@@ -856,6 +857,7 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                 | Err(Error::LogContentionRetry)
                 | Err(Error::LogContentionDurable) => {}
                 Err(err) => {
+                    tracing::error!(error =% err, "could not install garbage");
                     return Err(err);
                 }
             };

@@ -335,6 +335,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                                 system.clone(),
                                 state.storage.clone(),
                                 state.logs.clone(),
+                                None,
                                 state.root_manager.clone(),
                                 CleanupMode::DeleteV2,
                                 min_versions_to_keep as u32,

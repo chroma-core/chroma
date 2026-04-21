@@ -8,16 +8,19 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::Log;
 use chroma_storage::Storage;
 use chroma_system::{Operator, OperatorType};
-use chroma_types::{CollectionUuid, DatabaseName};
+use chroma_types::{CollectionUuid, DatabaseName, TopologyName};
 use futures::future::try_join_all;
 use thiserror::Error;
 use tracing::Level;
 use wal3::{
-    create_s3_factories, FragmentSeqNo, GarbageCollectionOptions, GarbageCollector, LogPosition,
-    LogReaderOptions, LogWriterOptions, ManifestManager, S3FragmentManagerFactory,
-    S3ManifestManagerFactory, SnapshotOptions, ThrottleOptions,
+    create_repl_factories, create_s3_factories, FragmentSeqNo, FragmentUuid,
+    GarbageCollectionOptions, GarbageCollectionState, GarbageCollector, LogPosition,
+    LogReaderOptions, LogWriterOptions, ManifestManager, ManifestManagerFactory,
+    ReplicatedFragmentManagerFactory, ReplicatedManifestManagerFactory, S3FragmentManagerFactory,
+    S3ManifestManagerFactory, SnapshotOptions, StorageWrapper, ThrottleOptions,
 };
 
+use crate::mcmr::RegionsAndTopologies;
 use crate::types::CleanupMode;
 
 #[derive(Clone, Debug)]
@@ -26,6 +29,7 @@ pub struct DeleteUnusedLogsOperator {
     pub mode: CleanupMode,
     pub storage: Storage,
     pub logs: Log,
+    pub regions_and_topologies: Option<Arc<RegionsAndTopologies>>,
     pub enable_dangerous_option_to_ignore_min_versions_for_wal3: bool,
 }
 
@@ -45,6 +49,20 @@ pub enum DeleteUnusedLogsError {
         collection_id: CollectionUuid,
         err: wal3::Error,
     },
+    #[error("missing MCMR regions_and_topologies config for database {database_name}")]
+    MissingRegionsAndTopologies { database_name: String },
+    #[error("invalid topology {topology} for database {database_name}")]
+    InvalidTopology {
+        database_name: String,
+        topology: String,
+    },
+    #[error("topology {topology} not found in regions_and_topologies config")]
+    MissingTopology { topology: String },
+    #[error("preferred region {preferred_region} is not present in topology {topology}")]
+    PreferredRegionNotInTopology {
+        preferred_region: String,
+        topology: String,
+    },
     #[error(transparent)]
     Gc(#[from] chroma_log::GarbageCollectError),
 }
@@ -52,6 +70,208 @@ pub enum DeleteUnusedLogsError {
 impl ChromaError for DeleteUnusedLogsError {
     fn code(&self) -> ErrorCodes {
         ErrorCodes::Internal
+    }
+}
+
+struct ReplTopologyContext {
+    storage_wrappers: Arc<Vec<StorageWrapper>>,
+    region_names: Vec<String>,
+    preferred_index: usize,
+    spanner: Arc<google_cloud_spanner::client::Client>,
+    repl_options: wal3::ReplicatedFragmentOptions,
+}
+
+#[async_trait]
+trait CollectionGarbageCollector: Send {
+    async fn garbage_collect_phase1_compute_garbage(
+        &self,
+        options: &GarbageCollectionOptions,
+        keep_at_least: Option<LogPosition>,
+    ) -> Result<Option<GarbageCollectionState>, wal3::Error>;
+
+    async fn garbage_collect_phase3_delete_garbage(
+        &self,
+        options: &GarbageCollectionOptions,
+        gc_state: &GarbageCollectionState,
+    ) -> Result<(), wal3::Error>;
+}
+
+#[async_trait]
+impl<P, FP, MP> CollectionGarbageCollector for GarbageCollector<P, FP, MP>
+where
+    P: wal3::FragmentPointer + Send + Sync + 'static,
+    FP: wal3::FragmentManagerFactory<FragmentPointer = P> + Send + Sync + 'static,
+    MP: wal3::ManifestManagerFactory<FragmentPointer = P> + Send + Sync + 'static,
+{
+    async fn garbage_collect_phase1_compute_garbage(
+        &self,
+        options: &GarbageCollectionOptions,
+        keep_at_least: Option<LogPosition>,
+    ) -> Result<Option<GarbageCollectionState>, wal3::Error> {
+        GarbageCollector::garbage_collect_phase1_compute_garbage(self, options, keep_at_least).await
+    }
+
+    async fn garbage_collect_phase3_delete_garbage(
+        &self,
+        options: &GarbageCollectionOptions,
+        gc_state: &GarbageCollectionState,
+    ) -> Result<(), wal3::Error> {
+        GarbageCollector::garbage_collect_phase3_delete_garbage(self, options, gc_state).await
+    }
+}
+
+impl DeleteUnusedLogsOperator {
+    fn repl_topology_context(
+        &self,
+        database_name: Option<&DatabaseName>,
+        collection_id: CollectionUuid,
+    ) -> Result<Option<ReplTopologyContext>, DeleteUnusedLogsError> {
+        let Some(database_name) = database_name else {
+            return Ok(None);
+        };
+        let Some(topology) = database_name.topology() else {
+            return Ok(None);
+        };
+        let Some(regions_and_topologies) = &self.regions_and_topologies else {
+            return Err(DeleteUnusedLogsError::MissingRegionsAndTopologies {
+                database_name: database_name.as_ref().to_string(),
+            });
+        };
+
+        let topology_name = TopologyName::new(topology.clone()).map_err(|_| {
+            DeleteUnusedLogsError::InvalidTopology {
+                database_name: database_name.as_ref().to_string(),
+                topology: topology.clone(),
+            }
+        })?;
+        let Some((regions, topology_config)) =
+            regions_and_topologies.lookup_topology(&topology_name)
+        else {
+            return Err(DeleteUnusedLogsError::MissingTopology {
+                topology: topology_name.to_string(),
+            });
+        };
+
+        let prefix = collection_id.storage_prefix_for_log();
+        let mut storage_wrappers = Vec::with_capacity(regions.len());
+        let mut region_names = Vec::with_capacity(regions.len());
+        for region in regions {
+            region_names.push(region.name().to_string());
+            storage_wrappers.push(StorageWrapper::new(
+                region.name().to_string(),
+                region.config.storage.clone(),
+                prefix.clone(),
+            ));
+        }
+
+        let preferred_index = storage_wrappers
+            .iter()
+            .position(|region| region.region.as_str() == regions_and_topologies.preferred.as_str())
+            .ok_or_else(|| DeleteUnusedLogsError::PreferredRegionNotInTopology {
+                preferred_region: regions_and_topologies.preferred.to_string(),
+                topology: topology_name.to_string(),
+            })?;
+
+        Ok(Some(ReplTopologyContext {
+            storage_wrappers: Arc::new(storage_wrappers),
+            region_names,
+            preferred_index,
+            spanner: Arc::new(topology_config.config.spanner.clone()),
+            repl_options: topology_config.config.repl.clone(),
+        }))
+    }
+
+    async fn open_collection_garbage_collector(
+        &self,
+        database_name: Option<&DatabaseName>,
+        collection_id: CollectionUuid,
+        storage: Arc<Storage>,
+    ) -> Result<Box<dyn CollectionGarbageCollector>, DeleteUnusedLogsError> {
+        let prefix = collection_id.storage_prefix_for_log();
+        let options = LogWriterOptions::default();
+
+        if let Some(repl) = self.repl_topology_context(database_name, collection_id)? {
+            let (fragment_manager_factory, manifest_manager_factory) = create_repl_factories(
+                options.clone(),
+                repl.repl_options,
+                repl.preferred_index,
+                repl.storage_wrappers,
+                repl.spanner,
+                repl.region_names,
+                collection_id.0,
+            );
+            let writer =
+                GarbageCollector::<
+                    FragmentUuid,
+                    ReplicatedFragmentManagerFactory,
+                    ReplicatedManifestManagerFactory,
+                >::open(options, fragment_manager_factory, manifest_manager_factory)
+                .await
+                .map_err(|err| DeleteUnusedLogsError::Wal3 { collection_id, err })?;
+            Ok(Box::new(writer))
+        } else {
+            let (fragment_manager_factory, manifest_manager_factory) = create_s3_factories(
+                options.clone(),
+                LogReaderOptions::default(),
+                storage,
+                prefix,
+                "garbage collection service".to_string(),
+                Arc::new(()),
+                Arc::new(()),
+            );
+            let writer =
+                GarbageCollector::<
+                    (FragmentSeqNo, LogPosition),
+                    S3FragmentManagerFactory,
+                    S3ManifestManagerFactory,
+                >::open(options, fragment_manager_factory, manifest_manager_factory)
+                .await
+                .map_err(|err| DeleteUnusedLogsError::Wal3 { collection_id, err })?;
+            Ok(Box::new(writer))
+        }
+    }
+
+    async fn destroy_collection_log(
+        &self,
+        database_name: Option<&DatabaseName>,
+        collection_id: CollectionUuid,
+        storage: Arc<Storage>,
+    ) -> Result<(), DeleteUnusedLogsError> {
+        let prefix = collection_id.storage_prefix_for_log();
+
+        if let Some(repl) = self.repl_topology_context(database_name, collection_id)? {
+            let local_region = repl.region_names[repl.preferred_index].clone();
+            let preferred_storage =
+                Arc::new(repl.storage_wrappers[repl.preferred_index].storage.clone());
+            let manifest_manager_factory = ReplicatedManifestManagerFactory::new(
+                repl.spanner,
+                repl.region_names,
+                local_region,
+                collection_id.0,
+            );
+            let manifest_manager = manifest_manager_factory
+                .open_publisher()
+                .await
+                .map_err(|err| DeleteUnusedLogsError::Wal3 { collection_id, err })?;
+            wal3::destroy(preferred_storage, &prefix, &manifest_manager)
+                .await
+                .map_err(|err| DeleteUnusedLogsError::Wal3 { collection_id, err })
+        } else {
+            let manifest_manager = ManifestManager::new(
+                ThrottleOptions::default(),
+                SnapshotOptions::default(),
+                storage.clone(),
+                prefix.clone(),
+                "destroy service".to_string(),
+                Arc::new(()),
+                Arc::new(()),
+            )
+            .await
+            .map_err(|err| DeleteUnusedLogsError::Wal3 { collection_id, err })?;
+            wal3::destroy(storage, &prefix, &manifest_manager)
+                .await
+                .map_err(|err| DeleteUnusedLogsError::Wal3 { collection_id, err })
+        }
     }
 }
 
@@ -80,35 +300,27 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
             {
                 let collection_id = *collection_id;
                 let storage_clone = storage_arc.clone();
+                let database_name = input.database_name.clone();
                 let mut logs = self.logs.clone();
                 log_gc_futures.push(async move {
-                    let prefix = collection_id.storage_prefix_for_log();
-                    let options = LogWriterOptions::default();
-                    let (fragment_manager_factory, manifest_manager_factory) = create_s3_factories(
-                        options.clone(),
-                        LogReaderOptions::default(),
-                        storage_clone.clone(),
-                        prefix.clone(),
-                        "garbage collection service".to_string(),
-                        Arc::new(()),
-                        Arc::new(()),
-                    );
-                    let writer = match GarbageCollector::<
-                        (FragmentSeqNo, LogPosition),
-                        S3FragmentManagerFactory,
-                        S3ManifestManagerFactory,
-                    >::open(
-                        options,
-                        fragment_manager_factory,
-                        manifest_manager_factory,
-                    )
-                    .await
+                    let writer = match self
+                        .open_collection_garbage_collector(
+                            database_name.as_ref(),
+                            collection_id,
+                            storage_clone.clone(),
+                        )
+                        .await
                     {
                         Ok(log_writer) => log_writer,
-                        Err(wal3::Error::UninitializedLog) => return Ok(()),
+                        Err(DeleteUnusedLogsError::Wal3 {
+                            collection_id: _,
+                            err: wal3::Error::UninitializedLog,
+                        }) => return Ok(()),
                         Err(err) => {
-                            tracing::error!("Unable to initialize log writer for collection [{collection_id}]: {err}");
-                            return Err(DeleteUnusedLogsError::Wal3{ collection_id, err})
+                            tracing::error!(
+                                "Unable to initialize log writer for collection [{collection_id}]: {err}"
+                            );
+                            return Err(err);
                         }
                     };
                     // NOTE(rescrv):  Once upon a time, we had a bug where we would not pass the
@@ -127,32 +339,61 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                     // times.
                     let mut min_log_offset = Some(*minimum_log_offset_to_keep);
                     let mut gc_state = wal3::GarbageCollectionState::empty();
-                    for _ in 0..if self.enable_dangerous_option_to_ignore_min_versions_for_wal3 { 2 } else { 1 } {
+                    for _ in 0..if self.enable_dangerous_option_to_ignore_min_versions_for_wal3 {
+                        2
+                    } else {
+                        1
+                    } {
                         // See README.md in wal3 for a description of why this happens in three phases.
-                        match writer.garbage_collect_phase1_compute_garbage(&GarbageCollectionOptions::default(), min_log_offset).await {
-                            Ok(Some(state)) => { gc_state = state; },
+                        match writer
+                            .garbage_collect_phase1_compute_garbage(
+                                &GarbageCollectionOptions::default(),
+                                min_log_offset,
+                            )
+                            .await
+                        {
+                            Ok(Some(state)) => {
+                                gc_state = state;
+                            }
                             Ok(None) => return Ok(()),
-                            Err(wal3::Error::CorruptGarbage(c)) if c.starts_with("First to keep does not overlap manifest") => {
+                            Err(wal3::Error::CorruptGarbage(c))
+                                if c.starts_with("First to keep does not overlap manifest") =>
+                            {
                                 if self.enable_dangerous_option_to_ignore_min_versions_for_wal3 {
                                     tracing::event!(Level::WARN, name = "encountered enable_dangerous_option_to_ignore_min_versions_for_wal3 path", collection_id =? collection_id);
                                     min_log_offset.take();
                                 }
                             }
                             Err(err) => {
-                                tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
-                                return Err(DeleteUnusedLogsError::Wal3{ collection_id, err});
+                                tracing::error!(
+                                    "Unable to garbage collect log for collection [{collection_id}]: {err}"
+                                );
+                                return Err(DeleteUnusedLogsError::Wal3 { collection_id, err });
                             }
                         };
                     }
-                    if let Err(err) = logs.garbage_collect_phase2(input.database_name.clone(), collection_id).await {
-                        tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
+                    if let Err(err) = logs
+                        .garbage_collect_phase2(database_name.clone(), collection_id)
+                        .await
+                    {
+                        tracing::error!(
+                            "Unable to garbage collect log for collection [{collection_id}]: {err}"
+                        );
                         return Err(DeleteUnusedLogsError::Gc(err));
                     };
                     match self.mode {
                         CleanupMode::DeleteV2 => {
-                            if let Err(err) = writer.garbage_collect_phase3_delete_garbage(&GarbageCollectionOptions::default(), &gc_state).await {
-                                tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
-                                return Err(DeleteUnusedLogsError::Wal3{ collection_id, err});
+                            if let Err(err) = writer
+                                .garbage_collect_phase3_delete_garbage(
+                                    &GarbageCollectionOptions::default(),
+                                    &gc_state,
+                                )
+                                .await
+                            {
+                                tracing::error!(
+                                    "Unable to garbage collect log for collection [{collection_id}]: {err}"
+                                );
+                                return Err(DeleteUnusedLogsError::Wal3 { collection_id, err });
                             };
                         }
                         mode => {
@@ -176,38 +417,26 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                     for collection_id in &input.collections_to_destroy {
                         let collection_id = *collection_id;
                         let storage_clone = storage_arc.clone();
+                        let database_name = input.database_name.clone();
                         log_destroy_futures.push(async move {
-                            let prefix = collection_id.storage_prefix_for_log();
-                            let manifest_manager = match ManifestManager::new(
-                                ThrottleOptions::default(),
-                                SnapshotOptions::default(),
-                                storage_clone.clone(),
-                                prefix.clone(),
-                                "destroy service".to_string(),
-                                Arc::new(()),
-                                Arc::new(()),
-                            )
-                            .await
+                            match self
+                                .destroy_collection_log(
+                                    database_name.as_ref(),
+                                    collection_id,
+                                    storage_clone.clone(),
+                                )
+                                .await
                             {
-                                Ok(mm) => mm,
-                                Err(wal3::Error::UninitializedLog) => return Ok(()),
-                                Err(err) => {
-                                    tracing::error!(
-                                        "Unable to create manifest manager for collection [{collection_id}]: {err:?}"
-                                    );
-                                    return Err(DeleteUnusedLogsError::Wal3 {
-                                        collection_id,
-                                        err,
-                                    });
-                                }
-                            };
-                            match wal3::destroy(storage_clone, &prefix, &manifest_manager).await {
                                 Ok(()) => Ok(()),
+                                Err(DeleteUnusedLogsError::Wal3 {
+                                    collection_id: _,
+                                    err: wal3::Error::UninitializedLog,
+                                }) => Ok(()),
                                 Err(err) => {
                                     tracing::error!(
                                         "Unable to destroy log for collection [{collection_id}]: {err:?}"
                                     );
-                                    Err(DeleteUnusedLogsError::Wal3 { collection_id, err })
+                                    Err(err)
                                 }
                             }
                         })

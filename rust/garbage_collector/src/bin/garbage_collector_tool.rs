@@ -15,7 +15,8 @@ use clap::Parser;
 use futures::StreamExt;
 use garbage_collector_library::{
     config::GarbageCollectorConfig,
-    garbage_collector_orchestrator_v2::GarbageCollectorOrchestrator, types::CleanupMode,
+    garbage_collector_orchestrator_v2::GarbageCollectorOrchestrator,
+    mcmr::instantiate_regions_and_topologies, types::CleanupMode,
 };
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
@@ -189,7 +190,7 @@ async fn main() {
             let registry = chroma_config::registry::Registry::new();
             let config = GarbageCollectorConfig::load_from_path(&config_path);
 
-            let log_client = Log::try_from_config(&(config.log, system.clone()), &registry)
+            let log_client = Log::try_from_config(&(config.log.clone(), system.clone()), &registry)
                 .await
                 .unwrap();
 
@@ -199,7 +200,8 @@ async fn main() {
 
             let dispatcher_handle = system.start_component(dispatcher);
 
-            let storage_client = Storage::try_from_config(&config.storage_config, &registry)
+            let storage_client = config
+                .instantiate_storage(&registry)
                 .await
                 .expect("Failed to create storage client");
 
@@ -218,6 +220,12 @@ async fn main() {
                     .await
                     .unwrap();
             let root_manager = RootManager::new(storage_client.clone(), root_manager_cache);
+            let regions_and_topologies = instantiate_regions_and_topologies(
+                config.regions_and_topologies.clone(),
+                &registry,
+            )
+            .await
+            .expect("Failed to create regions_and_topologies");
 
             let mut collections = sysdb_client
                 .get_collections(GetCollectionsOptions {
@@ -254,6 +262,7 @@ async fn main() {
                 system.clone(),
                 storage_client,
                 log_client,
+                regions_and_topologies,
                 root_manager,
                 cleanup_mode.into(),
                 config.min_versions_to_keep,
@@ -287,7 +296,8 @@ async fn main() {
             let registry = chroma_config::registry::Registry::new();
             let config = GarbageCollectorConfig::load_from_path(&config_path);
 
-            let storage_client = Storage::try_from_config(&config.storage_config, &registry)
+            let storage_client = config
+                .instantiate_storage(&registry)
                 .await
                 .expect("Failed to create storage client");
 
