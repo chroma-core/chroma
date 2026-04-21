@@ -525,7 +525,13 @@ impl ServiceBasedFrontend {
             for record in records.drain(..) {
                 let key = extract_key(&record, group_keys);
                 if current_key.as_ref() == Some(&key) {
-                    groups.last_mut().unwrap().push(record);
+                    debug_assert!(
+                        !groups.is_empty(),
+                        "groups cannot be empty when current_key is Some"
+                    );
+                    if let Some(last) = groups.last_mut() {
+                        last.push(record);
+                    }
                 } else {
                     current_key = Some(key);
                     groups.push(vec![record]);
@@ -548,13 +554,18 @@ impl ServiceBasedFrontend {
         }
     }
 
-    /// After cross-shard merge, re-applies group-by on payloads that had it,
-    /// strips extra metadata/score fields that were added solely for grouping,
-    /// and applies the original offset/limit.
-    fn reapply_group_by(
+    /// Unified post-merge finalization for multi-shard search results.
+    ///
+    /// For each payload this method:
+    ///  1. Re-applies group-by aggregation (if active).
+    ///  2. Sorts by score (scores are always present due to injection).
+    ///  3. Applies the original offset / limit.
+    ///  4. Strips metadata and score fields that were injected for grouping
+    ///     (only on the final result set, after limit, for performance).
+    fn finalize_merged_payloads(
         payloads: &[SearchPayload],
         merged_payloads: &mut [SearchPayloadResult],
-        original_selects: &[Select],
+        original_selects: Option<&[Select]>,
         original_limits: &[Limit],
     ) {
         for (i, (payload_result, orig_limit)) in merged_payloads
@@ -562,12 +573,26 @@ impl ServiceBasedFrontend {
             .zip(original_limits.iter())
             .enumerate()
         {
-            let group_by = &payloads[i].group_by;
-            if group_by.is_active() {
-                Self::apply_group_by(&mut payload_result.records, group_by);
+            if payloads[i].group_by.is_active() {
+                Self::apply_group_by(&mut payload_result.records, &payloads[i].group_by);
+            }
+
+            payload_result.records.sort_by(|a, b| {
+                a.score
+                    .partial_cmp(&b.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+            let offset = orig_limit.offset as usize;
+            let limit = orig_limit.limit.unwrap_or(u32::MAX) as usize;
+            let records = std::mem::take(&mut payload_result.records);
+            payload_result.records = records.into_iter().skip(offset).take(limit).collect();
+
+            if let Some(original_selects) = original_selects {
                 let orig_select = &original_selects[i];
-                let keeps_all_metadata = orig_select.keys.contains(&Key::Metadata);
-                if !keeps_all_metadata {
+                let group_by = &payloads[i].group_by;
+
+                if group_by.is_active() && !orig_select.keys.contains(&Key::Metadata) {
                     let group_meta_keys = group_by.metadata_keys();
                     for record in &mut payload_result.records {
                         if let Some(meta) = &mut record.metadata {
@@ -581,21 +606,13 @@ impl ServiceBasedFrontend {
                         }
                     }
                 }
+
                 if !orig_select.keys.contains(&Key::Score) {
                     for record in &mut payload_result.records {
                         record.score = None;
                     }
                 }
             }
-            payload_result.records.sort_by(|a, b| {
-                a.score
-                    .partial_cmp(&b.score)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
-            let offset = orig_limit.offset as usize;
-            let limit = orig_limit.limit.unwrap_or(u32::MAX) as usize;
-            let records = std::mem::take(&mut payload_result.records);
-            payload_result.records = records.into_iter().skip(offset).take(limit).collect();
         }
     }
 
@@ -643,17 +660,22 @@ impl ServiceBasedFrontend {
             .await;
         }
         let any_group_by = plan.payloads.iter().any(|p| p.group_by.is_active());
+        let any_missing_score = plan
+            .payloads
+            .iter()
+            .any(|p| !p.select.keys.contains(&Key::Score));
 
-        // When any payload uses group_by, save the original selects and
-        // augment them with metadata keys needed for frontend re-grouping.
-        let original_selects = if any_group_by {
+        // Save original selects and inject fields needed for correct
+        // cross-shard merge (score for sorting, metadata keys for re-grouping).
+        // Skipped entirely when nothing needs augmentation.
+        let original_selects = if any_group_by || any_missing_score {
             let selects: Vec<Select> = plan.payloads.iter().map(|p| p.select.clone()).collect();
             for payload in &mut plan.payloads {
+                payload.select.keys.insert(Key::Score);
                 if payload.group_by.is_active() {
                     for k in payload.group_by.metadata_keys() {
                         payload.select.keys.insert(k);
                     }
-                    payload.select.keys.insert(Key::Score);
                 }
             }
             Some(selects)
@@ -737,28 +759,12 @@ impl ServiceBasedFrontend {
                 }
             }
         }
-        if let Some(original_selects) = &original_selects {
-            Self::reapply_group_by(
-                &plan.payloads,
-                &mut merged_payloads,
-                original_selects,
-                &original_limits,
-            );
-        } else {
-            for (payload_result, orig_limit) in
-                merged_payloads.iter_mut().zip(original_limits.iter())
-            {
-                payload_result.records.sort_by(|a, b| {
-                    a.score
-                        .partial_cmp(&b.score)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
-                let offset = orig_limit.offset as usize;
-                let limit = orig_limit.limit.unwrap_or(u32::MAX) as usize;
-                let records = std::mem::take(&mut payload_result.records);
-                payload_result.records = records.into_iter().skip(offset).take(limit).collect();
-            }
-        }
+        Self::finalize_merged_payloads(
+            &plan.payloads,
+            &mut merged_payloads,
+            original_selects.as_deref(),
+            &original_limits,
+        );
         Ok(SearchResult {
             results: merged_payloads,
             pulled_log_bytes: total_pulled_log_bytes,
@@ -3187,7 +3193,7 @@ mod tests {
             assert_eq!(gb.metadata_keys().len(), 1);
         }
 
-        // ---- Tests for reapply_group_by ----
+        // ---- Tests for finalize_merged_payloads ----
 
         #[test]
         fn test_post_merge_applies_group_by_on_cross_shard_records() {
@@ -3232,10 +3238,10 @@ mod tests {
                 limit: Some(10),
             }];
 
-            ServiceBasedFrontend::reapply_group_by(
+            ServiceBasedFrontend::finalize_merged_payloads(
                 &payloads,
                 &mut merged,
-                &orig_selects,
+                Some(&orig_selects),
                 &orig_limits,
             );
 
@@ -3274,10 +3280,10 @@ mod tests {
                 limit: Some(10),
             }];
 
-            ServiceBasedFrontend::reapply_group_by(
+            ServiceBasedFrontend::finalize_merged_payloads(
                 &payloads,
                 &mut merged,
-                &orig_selects,
+                Some(&orig_selects),
                 &orig_limits,
             );
 
@@ -3316,10 +3322,10 @@ mod tests {
                 limit: Some(10),
             }];
 
-            ServiceBasedFrontend::reapply_group_by(
+            ServiceBasedFrontend::finalize_merged_payloads(
                 &payloads,
                 &mut merged,
-                &orig_selects,
+                Some(&orig_selects),
                 &orig_limits,
             );
 
@@ -3364,10 +3370,10 @@ mod tests {
                 limit: Some(1),
             }];
 
-            ServiceBasedFrontend::reapply_group_by(
+            ServiceBasedFrontend::finalize_merged_payloads(
                 &payloads,
                 &mut merged,
-                &orig_selects,
+                Some(&orig_selects),
                 &orig_limits,
             );
 
@@ -3404,10 +3410,10 @@ mod tests {
                 limit: Some(2),
             }];
 
-            ServiceBasedFrontend::reapply_group_by(
+            ServiceBasedFrontend::finalize_merged_payloads(
                 &payloads,
                 &mut merged,
-                &orig_selects,
+                Some(&orig_selects),
                 &orig_limits,
             );
 
@@ -3449,10 +3455,10 @@ mod tests {
                 limit: Some(10),
             }];
 
-            ServiceBasedFrontend::reapply_group_by(
+            ServiceBasedFrontend::finalize_merged_payloads(
                 &payloads,
                 &mut merged,
-                &orig_selects,
+                Some(&orig_selects),
                 &orig_limits,
             );
 
@@ -3495,10 +3501,10 @@ mod tests {
                 limit: Some(10),
             }];
 
-            ServiceBasedFrontend::reapply_group_by(
+            ServiceBasedFrontend::finalize_merged_payloads(
                 &payloads,
                 &mut merged,
-                &orig_selects,
+                Some(&orig_selects),
                 &orig_limits,
             );
 
@@ -3575,10 +3581,10 @@ mod tests {
                 limit: Some(10),
             }];
 
-            ServiceBasedFrontend::reapply_group_by(
+            ServiceBasedFrontend::finalize_merged_payloads(
                 &payloads,
                 &mut merged,
-                &orig_selects,
+                Some(&orig_selects),
                 &orig_limits,
             );
 
@@ -3660,10 +3666,10 @@ mod tests {
                 },
             ];
 
-            ServiceBasedFrontend::reapply_group_by(
+            ServiceBasedFrontend::finalize_merged_payloads(
                 &payloads,
                 &mut merged,
-                &orig_selects,
+                Some(&orig_selects),
                 &orig_limits,
             );
 
@@ -3714,10 +3720,10 @@ mod tests {
                 limit: Some(10),
             }];
 
-            ServiceBasedFrontend::reapply_group_by(
+            ServiceBasedFrontend::finalize_merged_payloads(
                 &payloads,
                 &mut merged,
-                &orig_selects,
+                Some(&orig_selects),
                 &orig_limits,
             );
 
@@ -3781,10 +3787,10 @@ mod tests {
                 limit: Some(10),
             }];
 
-            ServiceBasedFrontend::reapply_group_by(
+            ServiceBasedFrontend::finalize_merged_payloads(
                 &payloads,
                 &mut merged,
-                &orig_selects,
+                Some(&orig_selects),
                 &orig_limits,
             );
 
@@ -3849,10 +3855,10 @@ mod tests {
                 limit: Some(10),
             }];
 
-            ServiceBasedFrontend::reapply_group_by(
+            ServiceBasedFrontend::finalize_merged_payloads(
                 &payloads,
                 &mut merged,
-                &orig_selects,
+                Some(&orig_selects),
                 &orig_limits,
             );
 
@@ -3870,6 +3876,386 @@ mod tests {
                 "injected group-by key stripped"
             );
             assert!(merged[0].records[0].score.is_some(), "score preserved");
+        }
+
+        #[test]
+        fn test_finalize_no_group_by_score_not_selected_sorts_then_strips() {
+            let payloads = vec![SearchPayload {
+                filter: Filter::default(),
+                rank: Default::default(),
+                group_by: GroupBy::default(),
+                limit: Limit {
+                    offset: 0,
+                    limit: Some(2),
+                },
+                select: Select {
+                    keys: [Key::Document].into_iter().collect(),
+                },
+            }];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record("c", Some(0.3), vec![]),
+                    make_record("a", Some(0.1), vec![]),
+                    make_record("b", Some(0.2), vec![]),
+                ],
+            }];
+            let orig_selects = vec![Select {
+                keys: [Key::Document].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(2),
+            }];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                Some(&orig_selects),
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records.len(), 2);
+            assert_eq!(merged[0].records[0].id, "a", "sorted by score before strip");
+            assert_eq!(merged[0].records[1].id, "b");
+            assert!(
+                merged[0].records[0].score.is_none(),
+                "score stripped after sort"
+            );
+            assert!(merged[0].records[1].score.is_none());
+        }
+
+        #[test]
+        fn test_finalize_no_augmentation_skips_stripping() {
+            let payloads = vec![SearchPayload {
+                filter: Filter::default(),
+                rank: Default::default(),
+                group_by: GroupBy::default(),
+                limit: Limit {
+                    offset: 0,
+                    limit: Some(10),
+                },
+                select: Select {
+                    keys: [Key::Score].into_iter().collect(),
+                },
+            }];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record("b", Some(0.2), vec![]),
+                    make_record("a", Some(0.1), vec![]),
+                ],
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                None,
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records[0].id, "a", "sorted by score");
+            assert_eq!(merged[0].records[1].id, "b");
+            assert!(merged[0].records[0].score.is_some(), "score not stripped");
+            assert!(merged[0].records[1].score.is_some());
+        }
+
+        #[test]
+        fn test_finalize_group_by_without_original_selects() {
+            let payloads = vec![make_payload_with_group_by(
+                "color",
+                Aggregate::MinK {
+                    keys: vec![Key::Score],
+                    k: 1,
+                },
+                Some(10),
+                vec![Key::Score],
+            )];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record(
+                        "r1",
+                        Some(0.5),
+                        vec![("color", MetadataValue::Str("red".into()))],
+                    ),
+                    make_record(
+                        "r2",
+                        Some(0.1),
+                        vec![("color", MetadataValue::Str("red".into()))],
+                    ),
+                    make_record(
+                        "b1",
+                        Some(0.3),
+                        vec![("color", MetadataValue::Str("blue".into()))],
+                    ),
+                ],
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                None,
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records.len(), 2, "group-by still applied");
+            assert_eq!(merged[0].records[0].id, "r2");
+            assert_eq!(merged[0].records[1].id, "b1");
+            assert!(
+                merged[0].records[0].score.is_some(),
+                "no stripping without original_selects"
+            );
+        }
+
+        #[test]
+        fn test_finalize_with_none_scores() {
+            let payloads = vec![SearchPayload {
+                filter: Filter::default(),
+                rank: Default::default(),
+                group_by: GroupBy::default(),
+                limit: Limit {
+                    offset: 0,
+                    limit: Some(10),
+                },
+                select: Select {
+                    keys: [Key::Document].into_iter().collect(),
+                },
+            }];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record("a", None, vec![]),
+                    make_record("b", Some(0.5), vec![]),
+                    make_record("c", None, vec![]),
+                ],
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                None,
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records.len(), 3, "all records kept");
+        }
+
+        #[test]
+        fn test_finalize_empty_records() {
+            let payloads = vec![make_payload_with_group_by(
+                "color",
+                Aggregate::MinK {
+                    keys: vec![Key::Score],
+                    k: 1,
+                },
+                Some(10),
+                vec![Key::Score],
+            )];
+            let mut merged = vec![SearchPayloadResult { records: vec![] }];
+            let orig_selects = vec![Select {
+                keys: [Key::Score].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                Some(&orig_selects),
+                &orig_limits,
+            );
+
+            assert!(merged[0].records.is_empty());
+        }
+
+        #[test]
+        fn test_finalize_offset_exceeds_records() {
+            let payloads = vec![SearchPayload {
+                filter: Filter::default(),
+                rank: Default::default(),
+                group_by: GroupBy::default(),
+                limit: Limit {
+                    offset: 100,
+                    limit: Some(10),
+                },
+                select: Select {
+                    keys: [Key::Score].into_iter().collect(),
+                },
+            }];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record("a", Some(0.1), vec![]),
+                    make_record("b", Some(0.2), vec![]),
+                ],
+            }];
+            let orig_limits = vec![Limit {
+                offset: 100,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                None,
+                &orig_limits,
+            );
+
+            assert!(
+                merged[0].records.is_empty(),
+                "offset past end returns empty"
+            );
+        }
+
+        #[test]
+        fn test_finalize_key_metadata_skips_stripping() {
+            let payloads = vec![SearchPayload {
+                filter: Filter::default(),
+                rank: Default::default(),
+                group_by: GroupBy {
+                    keys: vec![Key::MetadataField("category".into())],
+                    aggregate: Some(Aggregate::MinK {
+                        keys: vec![Key::Score],
+                        k: 1,
+                    }),
+                },
+                limit: Limit {
+                    offset: 0,
+                    limit: Some(10),
+                },
+                select: Select {
+                    keys: [Key::Metadata, Key::Score].into_iter().collect(),
+                },
+            }];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record(
+                        "a",
+                        Some(0.1),
+                        vec![
+                            ("category", MetadataValue::Str("X".into())),
+                            ("color", MetadataValue::Str("red".into())),
+                        ],
+                    ),
+                    make_record(
+                        "b",
+                        Some(0.2),
+                        vec![
+                            ("category", MetadataValue::Str("Y".into())),
+                            ("color", MetadataValue::Str("blue".into())),
+                        ],
+                    ),
+                ],
+            }];
+            let orig_selects = vec![Select {
+                keys: [Key::Metadata, Key::Score].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                Some(&orig_selects),
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records.len(), 2);
+            let meta_a = merged[0].records[0].metadata.as_ref().unwrap();
+            assert!(
+                meta_a.contains_key("category"),
+                "category kept with Key::Metadata"
+            );
+            assert!(
+                meta_a.contains_key("color"),
+                "color kept with Key::Metadata"
+            );
+            assert!(merged[0].records[0].score.is_some());
+        }
+
+        // ---- Direct tests for apply_group_by ----
+
+        #[test]
+        fn test_apply_group_by_basic_min_k() {
+            let group_by = GroupBy {
+                keys: vec![Key::MetadataField("color".into())],
+                aggregate: Some(Aggregate::MinK {
+                    keys: vec![Key::Score],
+                    k: 1,
+                }),
+            };
+            let mut records = vec![
+                make_record(
+                    "r1",
+                    Some(0.5),
+                    vec![("color", MetadataValue::Str("red".into()))],
+                ),
+                make_record(
+                    "r2",
+                    Some(0.1),
+                    vec![("color", MetadataValue::Str("red".into()))],
+                ),
+                make_record(
+                    "b1",
+                    Some(0.3),
+                    vec![("color", MetadataValue::Str("blue".into()))],
+                ),
+                make_record(
+                    "b2",
+                    Some(0.9),
+                    vec![("color", MetadataValue::Str("blue".into()))],
+                ),
+            ];
+
+            ServiceBasedFrontend::apply_group_by(&mut records, &group_by);
+
+            assert_eq!(records.len(), 2, "one per group");
+            let ids: Vec<&str> = records.iter().map(|r| r.id.as_str()).collect();
+            assert!(ids.contains(&"r2"), "red: lowest score 0.1");
+            assert!(ids.contains(&"b1"), "blue: lowest score 0.3");
+        }
+
+        #[test]
+        fn test_apply_group_by_inactive_is_noop() {
+            let group_by = GroupBy::default();
+            let mut records = vec![
+                make_record("a", Some(0.1), vec![]),
+                make_record("b", Some(0.2), vec![]),
+            ];
+
+            ServiceBasedFrontend::apply_group_by(&mut records, &group_by);
+
+            assert_eq!(records.len(), 2);
+            assert_eq!(records[0].id, "a");
+            assert_eq!(records[1].id, "b");
+        }
+
+        #[test]
+        fn test_apply_group_by_empty_records() {
+            let group_by = GroupBy {
+                keys: vec![Key::MetadataField("color".into())],
+                aggregate: Some(Aggregate::MinK {
+                    keys: vec![Key::Score],
+                    k: 1,
+                }),
+            };
+            let mut records = vec![];
+
+            ServiceBasedFrontend::apply_group_by(&mut records, &group_by);
+
+            assert!(records.is_empty());
         }
     }
 }
