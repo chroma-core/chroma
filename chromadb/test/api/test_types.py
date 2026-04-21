@@ -101,19 +101,37 @@ def test_default_embedding_function_caches_onnx_instance() -> None:
     # _ef should start as None
     assert ef._ef is None
 
-    # Create a mock ONNX instance
+    # Create a mock ONNX instance that returns valid embeddings
     mock_onnx = MagicMock()
-    mock_onnx.return_value = [[0.1] * 384]
+    expected_embeddings = [[0.1] * 384]
+    mock_onnx.return_value = expected_embeddings
 
-    # Simulate that __call__ has already created and cached the instance
-    ef._ef = mock_onnx
+    # First call: _ef is None, so __call__ should create and cache the instance
+    with patch(
+        "chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2.ONNXMiniLM_L6_V2",
+        return_value=mock_onnx,
+    ) as MockONNX:
+        result = ef(["first"])
+        # Verify the return value is correct
+        assert result == expected_embeddings
+        # ONNXMiniLM_L6_V2 was instantiated once
+        MockONNX.assert_called_once()
+        # The instance was called with our input
+        mock_onnx.assert_called_once_with(["first"])
 
-    # Now calling __call__ should reuse the cached instance
+    # _ef should now be cached
+    assert ef._ef is mock_onnx
+
+    # Second call: should reuse the cached instance, not create a new one
+    mock_onnx.reset_mock()
+    mock_onnx.return_value = expected_embeddings
     with patch(
         "chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2.ONNXMiniLM_L6_V2"
     ) as MockONNX:
-        result = ef(["test"])
+        result = ef(["second"])
+        # Verify the return value is still correct
+        assert result == expected_embeddings
         # ONNXMiniLM_L6_V2 should NOT be instantiated again
         MockONNX.assert_not_called()
-        # The cached mock should have been called
-        mock_onnx.assert_called_once_with(["test"])
+        # The cached mock should have been called with the new input
+        mock_onnx.assert_called_once_with(["second"])
