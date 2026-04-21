@@ -1,0 +1,126 @@
+name: Build and publish service images
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit-sha:
+        description: 'Full commit SHA to build. Defaults to the currently-checked-out commit.'
+        required: false
+        default: ''
+      address_sanitizer:
+        description: 'Enable Address Sanitizer for builds. Set to "1" to enable.'
+        required: false
+        default: ''
+      enable_avx512:
+        description: 'Enable AVX512 for builds. Set to "1" to enable.'
+        required: false
+        default: ''
+      force:
+        description: 'Skip the short-circuit check and always rebuild/push.'
+        required: false
+        default: false
+        type: boolean
+  workflow_call:
+    inputs:
+      commit-sha:
+        description: 'Full commit SHA to build. Defaults to the currently-checked-out commit.'
+        type: string
+        required: false
+        default: ''
+      address_sanitizer:
+        description: 'Enable Address Sanitizer for builds. Set to "1" to enable.'
+        type: string
+        required: false
+        default: ''
+      enable_avx512:
+        description: 'Enable AVX512 for builds. Set to "1" to enable.'
+        type: string
+        required: false
+        default: ''
+      force:
+        description: 'Skip the short-circuit check and always rebuild/push.'
+        type: boolean
+        required: false
+        default: false
+    secrets:
+      DOCKERHUB_USERNAME:
+        description: 'DockerHub username for authentication'
+        required: false
+      DOCKERHUB_TOKEN:
+        description: 'DockerHub token for authentication'
+        required: false
+    outputs:
+      skipped:
+        description: 'Whether the build+push was skipped because all images already existed.'
+        value: ${{ jobs.build.outputs.skipped }}
+      commit_short_sha:
+        description: 'Short commit SHA used for the image tags.'
+        value: ${{ jobs.build.outputs.commit_short_sha }}
+
+env:
+  AWS_REGION: us-east-1
+
+# Avoid two concurrent runs building the same commit. A second trigger
+# waits for the first; when it runs, the short-circuit will hit and it
+# exits quickly.
+concurrency:
+  group: build-service-images-${{ inputs.commit-sha || github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      skipped: ${{ steps.bake.outputs.skipped }}
+      commit_short_sha: ${{ steps.bake.outputs.commit_short_sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit-sha || github.sha }}
+
+      - name: Build and publish
+        id: bake
+        uses: ./.github/actions/build_service_images
+        with:
+          COMMIT_SHA: ${{ inputs.commit-sha || github.sha }}
+          PUSH: 'true'
+          FORCE: ${{ inputs.force && 'true' || 'false' }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+          AWS_ECR_OIDC_ARN: ${{ vars.AWS_ECR_OIDC_ARN }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_GITHUB_ACTIONS_SERVICE_ACCOUNT_EMAIL: ${{ vars.GCP_GITHUB_ACTIONS_SERVICE_ACCOUNT_EMAIL }}
+          GCP_ARTIFACT_REGISTRY_REGION: ${{ vars.GCP_ARTIFACT_REGISTRY_REGION }}
+          GCP_ARTIFACT_REGISTRY_PROJECT_ID: ${{ vars.GCP_ARTIFACT_REGISTRY_PROJECT_ID }}
+          GCP_ARTIFACT_REGISTRY_NAME: ${{ vars.GCP_ARTIFACT_REGISTRY_NAME }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          ADDRESS_SANITIZER: ${{ inputs.address_sanitizer }}
+          ENABLE_AVX512: ${{ inputs.enable_avx512 }}
+
+  notify-slack-on-failure:
+    name: Notify Slack on build failure
+    if: ${{ always() && contains(needs.*.result, 'failure') }}
+    needs:
+      - build
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          token: '${{ secrets.SLACK_BOT_TOKEN }}'
+          method: chat.postMessage
+          payload: |
+            channel: ${{ secrets.SLACK_CHANNEL_ID }}
+            text: |
+              :x: *Service Image Build Failed!*
+              *Workflow:* ${{ github.workflow }}
+              *Run:* <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>
+              *Ref:* <https://github.com/${{ github.repository }}/commit/${{ github.sha }}|${{ github.ref_name }}>
+              *Author:* ${{ github.actor }}
+              *Commit SHA:* ${{ inputs.commit-sha || github.sha }}
+              *Address Sanitizer:* ${{ inputs.address_sanitizer || 'disabled' }}
+              *AVX512:* ${{ inputs.enable_avx512 || 'disabled' }}
