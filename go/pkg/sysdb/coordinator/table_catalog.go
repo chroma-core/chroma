@@ -185,11 +185,8 @@ func (tc *Catalog) DeleteDatabase(ctx context.Context, deleteDatabase *model.Del
 		if len(databases) == 0 {
 			return common.ErrDatabaseNotFound
 		}
-		err = tc.metaDomain.DatabaseDb(txCtx).SoftDelete(databases[0].ID)
-		if err != nil {
-			return err
-		}
 
+		// Cascade-soft-delete collections BEFORE renaming the database.
 		collections, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(nil, nil, deleteDatabase.Tenant, deleteDatabase.Name, nil, nil, false)
 		if err != nil {
 			return err
@@ -209,6 +206,10 @@ func (tc *Catalog) DeleteDatabase(ctx context.Context, deleteDatabase *model.Del
 			if err != nil {
 				return err
 			}
+		}
+
+		if err := tc.metaDomain.DatabaseDb(txCtx).SoftDelete(databases[0].ID); err != nil {
+			return err
 		}
 
 		return nil
@@ -594,7 +595,11 @@ func (tc *Catalog) hardDeleteCollection(ctx context.Context, deleteCollection *m
 			return err
 		}
 
-		collectionEntry, err := tc.metaDomain.CollectionDb(txCtx).GetCollectionWithoutMetadata(types.FromUniqueID(collectionID), &deleteCollection.DatabaseName, nil)
+		// Look up by collection ID only. The database that owns this collection may
+		// have been soft-deleted (and thus renamed to "_deleted_<name>_<id>"), in
+		// which case joining on databases.name with the caller-supplied name would
+		// return nothing. Collection IDs are globally unique, so the lookup is safe.
+		collectionEntry, err := tc.metaDomain.CollectionDb(txCtx).GetCollectionWithoutMetadata(types.FromUniqueID(collectionID), nil, nil)
 		if err != nil {
 			return err
 		}
