@@ -2373,6 +2373,40 @@ pub struct GroupBy {
     pub aggregate: Option<Aggregate>,
 }
 
+impl GroupBy {
+    /// Returns true when this GroupBy has both keys and an aggregate,
+    /// meaning it will actually perform grouping.
+    pub fn is_active(&self) -> bool {
+        !self.keys.is_empty() && self.aggregate.is_some()
+    }
+
+    /// Returns the sort keys from the aggregate (`MinK`/`MaxK`),
+    /// or an empty slice if no aggregate is set.
+    pub fn aggregate_keys(&self) -> &[Key] {
+        match &self.aggregate {
+            Some(Aggregate::MinK { keys, .. } | Aggregate::MaxK { keys, .. }) => keys,
+            None => &[],
+        }
+    }
+
+    /// Returns all distinct metadata `Key`s referenced by this GroupBy
+    /// (from both grouping keys and aggregate sort keys).
+    pub fn metadata_keys(&self) -> Vec<Key> {
+        let mut result: Vec<Key> = self
+            .keys
+            .iter()
+            .filter(|k| matches!(k, Key::MetadataField(_)))
+            .cloned()
+            .collect();
+        for k in self.aggregate_keys() {
+            if matches!(k, Key::MetadataField(_)) && !result.contains(k) {
+                result.push(k.clone());
+            }
+        }
+        result
+    }
+}
+
 impl TryFrom<chroma_proto::Aggregate> for Aggregate {
     type Error = QueryConversionError;
 
