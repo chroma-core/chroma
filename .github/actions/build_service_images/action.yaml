@@ -15,40 +15,31 @@ inputs:
     default: 'false'
   AWS_REGION:
     description: 'AWS region of ECR'
-    required: false
-    default: ''
+    required: true
   AWS_ECR_OIDC_ARN:
     description: 'AWS ARN of the OIDC role to assume for logging into ECR'
-    required: false
-    default: ''
+    required: true
   GCP_WORKLOAD_IDENTITY_PROVIDER:
     description: 'GCP workload identity provider'
-    required: false
-    default: ''
+    required: true
   GCP_GITHUB_ACTIONS_SERVICE_ACCOUNT_EMAIL:
     description: 'GCP service account email'
-    required: false
-    default: ''
+    required: true
   GCP_ARTIFACT_REGISTRY_REGION:
     description: 'GCP artifact registry region'
-    required: false
-    default: ''
+    required: true
   GCP_ARTIFACT_REGISTRY_PROJECT_ID:
     description: 'GCP artifact registry project ID'
-    required: false
-    default: ''
+    required: true
   GCP_ARTIFACT_REGISTRY_NAME:
     description: 'GCP artifact registry name'
-    required: false
-    default: ''
+    required: true
   DOCKERHUB_USERNAME:
     description: 'DockerHub username for authentication'
-    required: false
-    default: ''
+    required: true
   DOCKERHUB_TOKEN:
     description: 'DockerHub token for authentication'
-    required: false
-    default: ''
+    required: true
   ADDRESS_SANITIZER:
     description: 'Enable Address Sanitizer for builds. Set to "1" to enable.'
     required: false
@@ -87,19 +78,19 @@ runs:
         echo "COMMIT_SHORT_SHA=$(echo "$COMMIT_SHA" | cut -c1-7)" >> "$GITHUB_OUTPUT"
 
     - name: Configure AWS Credentials
-      if: inputs.PUSH == 'true' && inputs.AWS_REGION != '' && inputs.AWS_ECR_OIDC_ARN != ''
+      if: inputs.PUSH == 'true'
       uses: aws-actions/configure-aws-credentials@v3
       with:
         role-to-assume: ${{ inputs.AWS_ECR_OIDC_ARN }}
         aws-region: ${{ inputs.AWS_REGION }}
 
     - name: Login to Amazon ECR
-      if: inputs.PUSH == 'true' && inputs.AWS_REGION != '' && inputs.AWS_ECR_OIDC_ARN != ''
+      if: inputs.PUSH == 'true'
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
 
     - name: Authenticate to Google Cloud
-      if: inputs.PUSH == 'true' && inputs.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && inputs.GCP_GITHUB_ACTIONS_SERVICE_ACCOUNT_EMAIL != ''
+      if: inputs.PUSH == 'true'
       id: auth-gcp
       uses: google-github-actions/auth@v2
       with:
@@ -107,12 +98,14 @@ runs:
         service_account: ${{ inputs.GCP_GITHUB_ACTIONS_SERVICE_ACCOUNT_EMAIL }}
 
     - name: Configure Docker for GCP Artifact Registry
-      if: inputs.PUSH == 'true' && inputs.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && inputs.GCP_GITHUB_ACTIONS_SERVICE_ACCOUNT_EMAIL != ''
+      if: inputs.PUSH == 'true'
       shell: bash
-      run: gcloud auth configure-docker '${{ inputs.GCP_ARTIFACT_REGISTRY_REGION }}-docker.pkg.dev' --quiet
+      env:
+        GCP_AR_REGION: ${{ inputs.GCP_ARTIFACT_REGISTRY_REGION }}
+      run: gcloud auth configure-docker "${GCP_AR_REGION}-docker.pkg.dev" --quiet
 
     - name: Login to DockerHub
-      if: inputs.PUSH == 'true' && inputs.DOCKERHUB_USERNAME != '' && inputs.DOCKERHUB_TOKEN != ''
+      if: inputs.PUSH == 'true'
       uses: docker/login-action@v3
       with:
         username: ${{ inputs.DOCKERHUB_USERNAME }}
@@ -121,25 +114,23 @@ runs:
     - name: Resolve registries
       shell: bash
       id: get-registries
+      env:
+        PUSH: ${{ inputs.PUSH }}
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        GCP_AR_REGION: ${{ inputs.GCP_ARTIFACT_REGISTRY_REGION }}
+        GCP_AR_PROJECT: ${{ inputs.GCP_ARTIFACT_REGISTRY_PROJECT_ID }}
+        GCP_AR_NAME: ${{ inputs.GCP_ARTIFACT_REGISTRY_NAME }}
       run: |
         set -euo pipefail
 
-        if [[ "${{ inputs.PUSH }}" == "true" ]] && [[ -n "${{ inputs.AWS_REGION }}" ]] && [[ -n "${{ inputs.AWS_ECR_OIDC_ARN }}" ]]; then
-          echo "REGISTRY_AWS=${{ steps.login-ecr.outputs.registry }}" >> "$GITHUB_OUTPUT"
+        if [[ "$PUSH" == "true" ]]; then
+          printf '%s\n' "REGISTRY_AWS=${ECR_REGISTRY}" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "REGISTRY_GCP=${GCP_AR_REGION}-docker.pkg.dev/${GCP_AR_PROJECT}/${GCP_AR_NAME}" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "REGISTRY_DOCKERHUB=chromadb" >> "$GITHUB_OUTPUT"
         else
-          echo "REGISTRY_AWS=local" >> "$GITHUB_OUTPUT"
-        fi
-
-        if [[ "${{ inputs.PUSH }}" == "true" ]] && [[ -n "${{ inputs.GCP_WORKLOAD_IDENTITY_PROVIDER }}" ]] && [[ -n "${{ inputs.GCP_GITHUB_ACTIONS_SERVICE_ACCOUNT_EMAIL }}" ]]; then
-          echo "REGISTRY_GCP=${{ inputs.GCP_ARTIFACT_REGISTRY_REGION }}-docker.pkg.dev/${{ inputs.GCP_ARTIFACT_REGISTRY_PROJECT_ID }}/${{ inputs.GCP_ARTIFACT_REGISTRY_NAME }}" >> "$GITHUB_OUTPUT"
-        else
-          echo "REGISTRY_GCP=local" >> "$GITHUB_OUTPUT"
-        fi
-
-        if [[ "${{ inputs.PUSH }}" == "true" ]] && [[ -n "${{ inputs.DOCKERHUB_USERNAME }}" ]] && [[ -n "${{ inputs.DOCKERHUB_TOKEN }}" ]]; then
-          echo "REGISTRY_DOCKERHUB=chromadb" >> "$GITHUB_OUTPUT"
-        else
-          echo "REGISTRY_DOCKERHUB=local" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "REGISTRY_AWS=local" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "REGISTRY_GCP=local" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "REGISTRY_DOCKERHUB=local" >> "$GITHUB_OUTPUT"
         fi
 
     # Derives the set of image refs to probe from `docker buildx bake
