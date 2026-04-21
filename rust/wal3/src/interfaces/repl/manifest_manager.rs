@@ -1372,6 +1372,7 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
 
     async fn destroy(&self) -> Result<(), Error> {
         let log_id = self.log_id.to_string();
+        tracing::info!(log_id = %log_id, "destroying");
         let exp_backoff = ExponentialBackoff::new(2_000.0, 1_500.0);
         let mut last_err: Option<String> = None;
         for _ in 0..3 {

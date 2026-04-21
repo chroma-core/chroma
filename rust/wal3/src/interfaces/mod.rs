@@ -6,9 +6,9 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use setsum::Setsum;
 use tracing::Span;
 
-use chroma_storage::{
-    admissioncontrolleds3::StorageRequestPriority, ETag, GetOptions, Storage, StorageError,
-};
+#[cfg(test)]
+use chroma_storage::{admissioncontrolleds3::StorageRequestPriority, GetOptions, StorageError};
+use chroma_storage::{ETag, Storage};
 use chroma_types::Cmek;
 
 use crate::{
@@ -909,43 +909,13 @@ pub fn checksum_parquet(
     }
 }
 
-async fn read_raw_bytes(
-    path: &str,
-    storages: &[repl::StorageWrapper],
-) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
-    let mut err: Option<StorageError> = None;
-    for storage in storages.iter() {
-        let path = crate::fragment_path(&storage.prefix, path);
-        match storage
-            .storage
-            .get_with_e_tag(&path, GetOptions::new(StorageRequestPriority::P0))
-            .await
-        {
-            Ok((parquet, e_tag)) => return Ok((parquet, e_tag)),
-            Err(e @ StorageError::NotFound { .. }) => err = Some(e),
-            Err(e) => {
-                tracing::error!("reading from region {} failed", storage.region);
-                err = Some(e);
-            }
-        }
-    }
-    if let Some(err) = err {
-        Err(err)
-    } else {
-        Err(StorageError::NotFound {
-            path: path.into(),
-            source: Arc::new(std::io::Error::other("replicas exhausted")),
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
     use crate::{FragmentSeqNo, LogPosition};
-    use chroma_storage::Storage;
+    use chroma_storage::{test_storage, PutOptions, Storage};
 
     const TEST_EPOCH_MICROS: u64 = 1234567890123456;
 

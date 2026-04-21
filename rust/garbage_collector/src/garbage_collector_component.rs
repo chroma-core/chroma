@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::operators::truncate_dirty_log::{
     TruncateDirtyLogError, TruncateDirtyLogOperator, TruncateDirtyLogOutput,
@@ -35,12 +36,15 @@ use thiserror::Error;
 use tracing::{span, Instrument, Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+use crate::mcmr::{instantiate_regions_and_topologies, RegionsAndTopologies};
+
 #[allow(dead_code)]
 pub(crate) struct GarbageCollector {
     config: GarbageCollectorConfig,
     sysdb_client: SysDb,
     storage: Storage,
     logs: Log,
+    regions_and_topologies: Option<Arc<RegionsAndTopologies>>,
     dispatcher: Option<ComponentHandle<Dispatcher>>,
     system: Option<System>,
     assignment_policy: Box<dyn AssignmentPolicy>,
@@ -78,6 +82,7 @@ impl GarbageCollector {
         sysdb_client: SysDb,
         storage: Storage,
         logs: Log,
+        regions_and_topologies: Option<Arc<RegionsAndTopologies>>,
         assignment_policy: Box<dyn AssignmentPolicy>,
         root_manager: RootManager,
     ) -> Self {
@@ -88,6 +93,7 @@ impl GarbageCollector {
             sysdb_client,
             storage,
             logs,
+            regions_and_topologies,
             dispatcher: None,
             system: None,
             assignment_policy,
@@ -141,6 +147,7 @@ impl GarbageCollector {
                 dispatcher.clone(),
                 self.storage.clone(),
                 self.logs.clone(),
+                self.regions_and_topologies.clone(),
                 collection_id,
                 database_name,
             );
@@ -267,6 +274,7 @@ impl GarbageCollector {
                 system.clone(),
                 self.storage.clone(),
                 self.logs.clone(),
+                self.regions_and_topologies.clone(),
                 self.root_manager.clone(),
                 cleanup_mode,
                 self.config.min_versions_to_keep,
@@ -746,13 +754,16 @@ impl Configurable<(GarbageCollectorConfig, System)> for GarbageCollector {
             config.mcmr_sysdb_config.clone(),
         );
         let sysdb_client = SysDb::try_from_config(&sysdb_config, registry).await?;
-        let storage = Storage::try_from_config(&config.storage_config, registry).await?;
+        let storage = config.instantiate_storage(registry).await?;
 
         let assignment_policy =
             Box::<dyn AssignmentPolicy>::try_from_config(&config.assignment_policy, registry)
                 .await?;
 
         let logs = Log::try_from_config(&(config.log.clone(), system.clone()), registry).await?;
+        let regions_and_topologies =
+            instantiate_regions_and_topologies(config.regions_and_topologies.clone(), registry)
+                .await?;
 
         let root_manager_cache =
             chroma_cache::from_config_persistent(&config.root_cache_config).await?;
@@ -763,6 +774,7 @@ impl Configurable<(GarbageCollectorConfig, System)> for GarbageCollector {
             sysdb_client,
             storage,
             logs,
+            regions_and_topologies,
             assignment_policy,
             root_manager,
         ))
@@ -988,8 +1000,9 @@ mod tests {
                 num_channels: 1,
             },
             mcmr_sysdb_config: None,
+            regions_and_topologies: None,
             dispatcher_config: DispatcherConfig::default(),
-            storage_config: s3_config_for_localhost_with_bucket_name("chroma-storage").await,
+            storage_config: Some(s3_config_for_localhost_with_bucket_name("chroma-storage").await),
             default_mode: CleanupMode::DryRunV2,
             tenant_mode_overrides: Some(tenant_mode_overrides),
             assignment_policy: chroma_config::assignment::config::AssignmentPolicyConfig::default(),
@@ -1212,7 +1225,7 @@ mod tests {
                 num_channels: 1,
             },
             dispatcher_config: DispatcherConfig::default(),
-            storage_config: s3_config_for_localhost_with_bucket_name("chroma-storage").await,
+            storage_config: Some(s3_config_for_localhost_with_bucket_name("chroma-storage").await),
             default_mode: CleanupMode::DeleteV2,
             tenant_mode_overrides: None,
             assignment_policy: chroma_config::assignment::config::AssignmentPolicyConfig::default(),

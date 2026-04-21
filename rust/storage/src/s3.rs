@@ -138,6 +138,10 @@ impl S3Storage {
                     }
                     _ => match inner.code() {
                         Some("SlowDown") => StorageError::Backoff,
+                        Some("NoSuchKey") => StorageError::NotFound {
+                            path: key.to_string(),
+                            source: Arc::new(inner),
+                        },
                         Some("AccessDenied") => {
                             tracing::error!(
                                 bucket = %self.bucket,
@@ -179,9 +183,16 @@ impl S3Storage {
             Err(e) => match e {
                 SdkError::ServiceError(err) => {
                     let inner = err.into_err();
-                    Err(StorageError::Generic {
-                        source: Arc::new(inner),
-                    })
+                    if inner.is_not_found() || inner.code() == Some("NoSuchKey") {
+                        Err(StorageError::NotFound {
+                            path: key.to_string(),
+                            source: Arc::new(inner),
+                        })
+                    } else {
+                        Err(StorageError::Generic {
+                            source: Arc::new(inner),
+                        })
+                    }
                 }
                 _ => Err(StorageError::Generic {
                     source: Arc::new(e),
@@ -396,6 +407,10 @@ impl S3Storage {
                         let code = inner.code().map(|code| code.to_string());
                         match code.as_deref() {
                             Some("SlowDown") => Err(StorageError::Backoff),
+                            Some("NoSuchKey") => Err(StorageError::NotFound {
+                                path: key.to_string(),
+                                source: Arc::new(inner),
+                            }),
                             Some("AccessDenied") => Err(StorageError::PermissionDenied {
                                 path: key.to_string(),
                                 source: Arc::new(inner),
@@ -801,6 +816,11 @@ impl S3Storage {
                     path: key.to_string(),
                     source: Arc::new(err),
                 }
+            } else if err.meta().code() == Some("NoSuchKey") {
+                StorageError::NotFound {
+                    path: key.to_string(),
+                    source: Arc::new(err),
+                }
             } else if err.meta().code() == Some("SlowDown") {
                 StorageError::Backoff
             } else {
@@ -989,7 +1009,7 @@ impl S3Storage {
                 SdkError::ServiceError(err) => {
                     let inner = err.into_err();
                     match inner.code() {
-                        Some("NotFound") => Err(StorageError::NotFound {
+                        Some("NotFound") | Some("NoSuchKey") => Err(StorageError::NotFound {
                             path: key.to_string(),
                             source: Arc::new(inner),
                         }),
@@ -1068,6 +1088,11 @@ impl S3Storage {
             Err(e) => {
                 if e.code() == Some("SlowDown") {
                     Err(StorageError::Backoff)
+                } else if e.code() == Some("NoSuchKey") {
+                    Err(StorageError::NotFound {
+                        path: String::new(),
+                        source: Arc::new(e),
+                    })
                 } else {
                     Err(StorageError::Generic {
                         source: Arc::new(e),
@@ -1120,10 +1145,18 @@ impl S3Storage {
         {
             Ok(_) => Ok(()),
             Err(e) => {
-                tracing::error!(error = %e, src = %src_key, dst = %dst_key, "Failed to copy object");
-                Err(StorageError::Generic {
-                    source: Arc::new(e.into_service_error()),
-                })
+                let inner = e.into_service_error();
+                tracing::error!(error = %inner, src = %src_key, dst = %dst_key, "Failed to copy object");
+                if inner.meta().code() == Some("NoSuchKey") {
+                    Err(StorageError::NotFound {
+                        path: src_key.to_string(),
+                        source: Arc::new(inner),
+                    })
+                } else {
+                    Err(StorageError::Generic {
+                        source: Arc::new(inner),
+                    })
+                }
             }
         }
     }

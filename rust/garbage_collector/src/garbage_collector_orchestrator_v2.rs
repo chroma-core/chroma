@@ -49,6 +49,8 @@ use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
 use wal3::LogPosition;
 
+use crate::mcmr::RegionsAndTopologies;
+
 #[derive(Debug)]
 pub struct GarbageCollectorOrchestrator {
     collection_id: CollectionUuid,
@@ -61,6 +63,7 @@ pub struct GarbageCollectorOrchestrator {
     system: System,
     storage: Storage,
     logs: Log,
+    regions_and_topologies: Option<Arc<RegionsAndTopologies>>,
     root_manager: RootManager,
     result_channel: Option<Sender<Result<GarbageCollectorResponse, GarbageCollectorError>>>,
     cleanup_mode: CleanupMode,
@@ -98,6 +101,7 @@ impl GarbageCollectorOrchestrator {
         system: System,
         storage: Storage,
         logs: Log,
+        regions_and_topologies: Option<Arc<RegionsAndTopologies>>,
         root_manager: RootManager,
         cleanup_mode: CleanupMode,
         min_versions_to_keep: u32,
@@ -116,6 +120,7 @@ impl GarbageCollectorOrchestrator {
             system,
             storage,
             logs,
+            regions_and_topologies,
             root_manager,
             cleanup_mode,
             result_channel: None,
@@ -564,6 +569,7 @@ impl GarbageCollectorOrchestrator {
                 mode: self.cleanup_mode,
                 storage: self.storage.clone(),
                 logs: self.logs.clone(),
+                regions_and_topologies: self.regions_and_topologies.clone(),
                 enable_dangerous_option_to_ignore_min_versions_for_wal3: self
                     .enable_dangerous_option_to_ignore_min_versions_for_wal3,
             }),
@@ -1394,6 +1400,7 @@ mod tests {
             system.clone(),
             storage,
             logs,
+            None,
             root_manager,
             crate::types::CleanupMode::DeleteV2,
             1,

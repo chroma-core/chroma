@@ -3885,6 +3885,8 @@ dependencies = [
  "clap",
  "figment",
  "futures",
+ "gcloud-gax",
+ "gcloud-spanner",
  "humantime",
  "indicatif",
  "itertools 0.13.0",
