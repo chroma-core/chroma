@@ -13,8 +13,9 @@ target "compactor-service" {
   context    = "."
   dockerfile = "rust/Dockerfile"
   args = {
-    "RELEASE_MODE"  = "1"
-    "ENABLE_AVX512" = "${ENABLE_AVX512}"
+    "RELEASE_MODE"      = "1"
+    "ENABLE_AVX512"     = "${ENABLE_AVX512}"
+    "ADDRESS_SANITIZER" = "${ADDRESS_SANITIZER}"
   }
   target = "compaction_service"
   tags = flatten([
@@ -78,7 +79,8 @@ target "heap-tender-service" {
   context    = "."
   dockerfile = "rust/Dockerfile"
   args = {
-    "RELEASE_MODE" = "1"
+    "RELEASE_MODE"      = "1"
+    "ADDRESS_SANITIZER" = "${ADDRESS_SANITIZER}"
   }
   target = "heap_tender_service"
   tags = flatten([
@@ -99,8 +101,9 @@ target "query-service" {
   context    = "."
   dockerfile = "rust/Dockerfile"
   args = {
-    "RELEASE_MODE"  = "1"
-    "ENABLE_AVX512" = "${ENABLE_AVX512}"
+    "RELEASE_MODE"      = "1"
+    "ENABLE_AVX512"     = "${ENABLE_AVX512}"
+    "ADDRESS_SANITIZER" = "${ADDRESS_SANITIZER}"
   }
   target = "query_service"
   tags = flatten([
@@ -121,7 +124,8 @@ target "garbage-collector" {
   context    = "."
   dockerfile = "rust/Dockerfile"
   args = {
-    "RELEASE_MODE" = "1"
+    "RELEASE_MODE"      = "1"
+    "ADDRESS_SANITIZER" = "${ADDRESS_SANITIZER}"
   }
   target = "garbage_collector"
   tags = flatten([
@@ -178,7 +182,8 @@ target "rust-sysdb-migration" {
   context    = "."
   dockerfile = "rust/Dockerfile"
   args = {
-    "RELEASE_MODE" = "1"
+    "RELEASE_MODE"      = "1"
+    "ADDRESS_SANITIZER" = "${ADDRESS_SANITIZER}"
   }
   target = "rust-sysdb-migration"
   tags = flatten([
@@ -199,7 +204,8 @@ target "rust-sysdb-service" {
   context    = "."
   dockerfile = "rust/Dockerfile"
   args = {
-    "RELEASE_MODE" = "1"
+    "RELEASE_MODE"      = "1"
+    "ADDRESS_SANITIZER" = "${ADDRESS_SANITIZER}"
   }
   target = "sysdb_service"
   tags = flatten([
@@ -220,7 +226,8 @@ target "load-service" {
   context    = "."
   dockerfile = "rust/Dockerfile"
   args = {
-    "RELEASE_MODE" = "1"
+    "RELEASE_MODE"      = "1"
+    "ADDRESS_SANITIZER" = "${ADDRESS_SANITIZER}"
   }
   target = "load_service"
   tags = flatten([

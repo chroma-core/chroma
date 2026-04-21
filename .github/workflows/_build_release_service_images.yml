@@ -49,6 +49,12 @@ on:
       DOCKERHUB_TOKEN:
         description: 'DockerHub token for authentication'
         required: false
+      SLACK_BOT_TOKEN:
+        description: 'Slack bot token for failure notifications'
+        required: true
+      SLACK_CHANNEL_ID:
+        description: 'Slack channel ID for failure notifications'
+        required: true
     outputs:
       skipped:
         description: 'Whether the build+push was skipped because all images already existed.'

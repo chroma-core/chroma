@@ -5,10 +5,6 @@ inputs:
     description: 'Full commit SHA to build. Defaults to the currently-checked-out commit.'
     required: false
     default: ''
-  SHORT_SHA_LENGTH:
-    description: 'Length of commit SHAs to use in image tags'
-    required: false
-    default: '7'
   PUSH:
     description: 'Flag for whether to push built images, must be a string set to "true" to push'
     required: false
@@ -78,22 +74,17 @@ runs:
 
     - name: Resolve commit SHA
       shell: bash
-      id: resolve-sha
-      run: |
-        set -euo pipefail
-        if [[ -n "${{ inputs.COMMIT_SHA }}" ]]; then
-          echo "COMMIT_SHA=${{ inputs.COMMIT_SHA }}" >> "$GITHUB_OUTPUT"
-        else
-          echo "COMMIT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-        fi
-
-    - name: Compute short commit SHA
-      shell: bash
       id: short-shas
+      env:
+        COMMIT_SHA_INPUT: ${{ inputs.COMMIT_SHA }}
       run: |
         set -euo pipefail
-        COMMIT_SHORT_SHA=$(echo "${{ steps.resolve-sha.outputs.COMMIT_SHA }}" | cut -c1-${{ inputs.SHORT_SHA_LENGTH }})
-        echo "COMMIT_SHORT_SHA=$COMMIT_SHORT_SHA" >> "$GITHUB_OUTPUT"
+        if [[ -n "$COMMIT_SHA_INPUT" ]]; then
+          COMMIT_SHA="$COMMIT_SHA_INPUT"
+        else
+          COMMIT_SHA=$(git rev-parse HEAD)
+        fi
+        echo "COMMIT_SHORT_SHA=$(echo "$COMMIT_SHA" | cut -c1-7)" >> "$GITHUB_OUTPUT"
 
     - name: Configure AWS Credentials
       if: inputs.PUSH == 'true' && inputs.AWS_REGION != '' && inputs.AWS_ECR_OIDC_ARN != ''
