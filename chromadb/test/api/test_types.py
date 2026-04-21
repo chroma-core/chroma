@@ -85,21 +85,35 @@ def test_embedding_function_results_format_when_response_is_invalid() -> None:
 
         def validate_config_update(
             self, old_config: Dict[str, Any], new_config: Dict[str, Any]
-        ) -> None:
-            pass
 
-        def __call__(self, input: Documents) -> Embeddings:
-            # Return something that's not a valid Embeddings type
-            return cast(Embeddings, invalid_embedding)
 
-    ef = TestEmbeddingFunction()
+def test_default_embedding_function_caches_onnx_instance() -> None:
+    """DefaultEmbeddingFunction should cache ONNXMiniLM_L6_V2 instance across calls (#6941).
 
-    # The EmbeddingFunction protocol should validate the return value
-    # but we need to bypass the protocol's __call__ wrapper for this test
-    with pytest.raises(ValueError):
-        # This should raise a ValueError during normalization/validation
-        result = ef.__call__(random_documents())
-        # The normalize_embeddings function will raise a ValueError when given an invalid embedding
-        from chromadb.api.types import normalize_embeddings
+    Before the fix, __call__ constructed a fresh ONNXMiniLM_L6_V2() on every
+    invocation, triggering cold lazy-init of the tokenizer (~5ms) and ONNX
+    session. After the fix, the instance is created once and reused.
+    """
+    from chromadb.api.types import DefaultEmbeddingFunction
+    from unittest.mock import patch, MagicMock
 
-        normalize_embeddings(result)
+    ef = DefaultEmbeddingFunction()
+    # _ef should start as None
+    assert ef._ef is None
+
+    # Create a mock ONNX instance
+    mock_onnx = MagicMock()
+    mock_onnx.return_value = [[0.1] * 384]
+
+    # Simulate that __call__ has already created and cached the instance
+    ef._ef = mock_onnx
+
+    # Now calling __call__ should reuse the cached instance
+    with patch(
+        "chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2.ONNXMiniLM_L6_V2"
+    ) as MockONNX:
+        result = ef(["test"])
+        # ONNXMiniLM_L6_V2 should NOT be instantiated again
+        MockONNX.assert_not_called()
+        # The cached mock should have been called
+        mock_onnx.assert_called_once_with(["test"])

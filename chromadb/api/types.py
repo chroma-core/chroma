@@ -42,6 +42,7 @@ from chromadb.base_types import (
 
 if TYPE_CHECKING:
     from chromadb.execution.expression.operator import Key
+    from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import ONNXMiniLM_L6_V2
 
 try:
     from chromadb.is_thin_client import is_thin_client
@@ -948,6 +949,7 @@ class DefaultEmbeddingFunction(EmbeddingFunction[Documents]):
     """Default embedding function that delegates to ONNXMiniLM_L6_V2."""
 
     def __init__(self) -> None:
+        self._ef: ONNXMiniLM_L6_V2 | None = None
         if is_thin_client:
             return
 
@@ -957,7 +959,11 @@ class DefaultEmbeddingFunction(EmbeddingFunction[Documents]):
             ONNXMiniLM_L6_V2,
         )
 
-        return ONNXMiniLM_L6_V2()(input)
+        # Reuse the same embedding function instance to avoid repeated
+        # lazy-init of the tokenizer and ONNX session on every call.
+        if self._ef is None:
+            self._ef = ONNXMiniLM_L6_V2()
+        return self._ef(input)
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "DefaultEmbeddingFunction":
