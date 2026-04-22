@@ -238,17 +238,12 @@ impl TryFrom<chroma_proto::CreateCollectionRequest> for CreateCollectionRequest 
             return Err(SysDbError::InvalidSegmentsCount);
         }
 
-        // Convert metadata if provided, filtering out legacy "hnsw:" keys
+        // Convert metadata if provided. Legacy "hnsw:" keys are still
+        // user-visible collection metadata and must round-trip.
         let metadata = req
             .metadata
             .map(|proto_metadata| -> Result<Metadata, SysDbError> {
-                let mut metadata =
-                    Metadata::try_from(proto_metadata).map_err(SysDbError::InvalidMetadata)?;
-
-                // Filter out legacy metadata keys starting with "hnsw:"
-                metadata.retain(|key, _| !key.starts_with("hnsw:"));
-
-                Ok(metadata)
+                Metadata::try_from(proto_metadata).map_err(SysDbError::InvalidMetadata)
             })
             .transpose()?;
 
@@ -1414,9 +1409,53 @@ impl TryAs<GrpcStatus> for SysDbError {
 
 #[cfg(test)]
 mod tests {
-    use super::SysDbError;
+    use super::*;
     use chroma_error::{ChromaError, ErrorCodes};
     use google_cloud_gax::grpc::Status as GrpcStatus;
+
+    #[test]
+    fn create_collection_request_preserves_legacy_hnsw_metadata() {
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        let mut metadata = chroma_proto::UpdateMetadata {
+            metadata: HashMap::new(),
+        };
+        metadata.metadata.insert(
+            "hnsw:space".to_string(),
+            chroma_proto::UpdateMetadataValue {
+                value: Some(chroma_proto::update_metadata_value::Value::StringValue(
+                    "cosine".to_string(),
+                )),
+            },
+        );
+
+        let proto_req = chroma_proto::CreateCollectionRequest {
+            id: collection_id.0.to_string(),
+            name: "test_collection".to_string(),
+            dimension: None,
+            segments: [
+                SegmentScope::METADATA,
+                SegmentScope::RECORD,
+                SegmentScope::VECTOR,
+            ]
+            .into_iter()
+            .map(|scope| chroma_types::test_segment(collection_id, scope).into())
+            .collect(),
+            configuration_json_str: "{}".to_string(),
+            metadata: Some(metadata),
+            get_or_create: Some(false),
+            tenant: "test_tenant".to_string(),
+            database: "test_database".to_string(),
+            schema_str: Some(serde_json::to_string(&Schema::default()).unwrap()),
+        };
+
+        let req = CreateCollectionRequest::try_from(proto_req).unwrap();
+        let got = req.metadata.unwrap();
+
+        assert_eq!(
+            got.get("hnsw:space"),
+            Some(&MetadataValue::Str("cosine".to_string()))
+        );
+    }
 
     #[test]
     fn sysdb_error_recognizes_spanner_aborted_as_retryable() {
