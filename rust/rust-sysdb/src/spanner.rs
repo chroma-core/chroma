@@ -2188,6 +2188,53 @@ impl SpannerBackend {
         let ddl_retry =
             ddl_wait_retry_setting(self.spanner_config.channel().admin_rpc_timeout_secs);
 
+        // Step 2.5: Drop all change streams (must happen before dropping tables,
+        // since Spanner rejects DROP TABLE while an active change stream references it).
+        let get_change_streams_stmt = Statement::new(
+            "SELECT change_stream_name FROM INFORMATION_SCHEMA.CHANGE_STREAMS WHERE change_stream_catalog = '' AND change_stream_schema = ''",
+        );
+        let mut tx = self.client.single().await?;
+        let mut change_streams_result = tx
+            .query(get_change_streams_stmt)
+            .instrument(tracing::debug_span!("get_spanner_change_streams"))
+            .await?;
+        let mut change_stream_names: Vec<String> = Vec::new();
+        while let Some(row) = change_streams_result.next().await? {
+            let name: String = row
+                .column_by_name("change_stream_name")
+                .map_err(SysDbError::FailedToReadColumn)?;
+            change_stream_names.push(name);
+        }
+        tracing::info!(
+            "Found {} change streams to drop: {:?}",
+            change_stream_names.len(),
+            change_stream_names
+        );
+        for name in &change_stream_names {
+            let drop_cs_ddl = format!("DROP CHANGE STREAM {}", name);
+            let request = UpdateDatabaseDdlRequest {
+                database: database_path.clone(),
+                statements: vec![drop_cs_ddl],
+                operation_id: String::new(),
+                proto_descriptors: Vec::new(),
+                throughput_mode: false,
+            };
+            let mut operation = admin_client
+                .database()
+                .update_database_ddl(request, None)
+                .await
+                .map_err(|e| {
+                    SysDbError::Internal(format!(
+                        "Failed to submit DROP CHANGE STREAM {}: {}",
+                        name, e
+                    ))
+                })?;
+            operation.wait(Some(ddl_retry.clone())).await.map_err(|e| {
+                SysDbError::Internal(format!("Failed to DROP CHANGE STREAM {}: {}", name, e))
+            })?;
+            tracing::info!("Successfully executed DDL DROP CHANGE STREAM {}", name);
+        }
+
         // Step 3: Drop all indexes first, then tables
         // Try multiple passes to handle dependencies
         for _pass in 0..5 {
