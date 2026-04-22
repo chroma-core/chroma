@@ -6228,7 +6228,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_mcmr_integration_repl_scout_logs_returns_unavailable_and_retries_when_spanner_is_unreachable() {
+    async fn test_k8s_mcmr_integration_repl_scout_logs_returns_unavailable_and_retries_when_spanner_is_unreachable(
+    ) {
         let config = s3_storage_with_unreachable_topology_config("unreachable", "lazy-retry-test");
         let registry = chroma_config::registry::Registry::new();
         let server = LogServer::try_from_config(&config, &registry)
