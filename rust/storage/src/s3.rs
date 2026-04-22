@@ -1967,10 +1967,10 @@ mod tests {
             "confirm_same should return error for nonexistent file"
         );
         match result.unwrap_err() {
-            StorageError::Generic { source: _ } => {
-                // This is expected - the head operation will fail on nonexistent file
+            StorageError::NotFound { path, .. } => {
+                assert_eq!(path, "nonexistent-file");
             }
-            other => panic!("Expected Generic error, got: {:?}", other),
+            other => panic!("Expected NotFound error, got: {:?}", other),
         }
     }
 
