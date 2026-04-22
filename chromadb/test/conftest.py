@@ -559,9 +559,9 @@ users:
                 yield item
 
 
-def fastapi_fixture_admin_and_singleton_tenant_db_user() -> Generator[
-    System, None, None
-]:
+def fastapi_fixture_admin_and_singleton_tenant_db_user(
+    singleton_database: str = "singleton_database",
+) -> Generator[System, None, None]:
     # Check if we should connect to existing server instead of spawning a new one
     if os.getenv("CHROMA_SERVER_HOST") and not NOT_CLUSTER_ONLY:
         # Connect to existing Tilt instance using the same pattern as basic_http_client
@@ -587,7 +587,7 @@ def fastapi_fixture_admin_and_singleton_tenant_db_user() -> Generator[
     # Original behavior: spawn isolated server
     with tempfile.NamedTemporaryFile("w", suffix=".authn", delete=False) as f:
         f.write(
-            """
+            f"""
 users:
   - id: admin
     tokens:
@@ -595,7 +595,7 @@ users:
   - id: singleton_user
     tenant: singleton_tenant
     databases:
-      - singleton_database
+      - {singleton_database}
     tokens:
       - singleton-token
 """

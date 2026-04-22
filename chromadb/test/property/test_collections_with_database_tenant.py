@@ -3,12 +3,12 @@ from typing import Dict, Optional, Tuple
 import pytest
 from chromadb.api import AdminAPI
 import chromadb.api.types as types
-from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
+from chromadb.config import DEFAULT_TENANT
 from chromadb.test.conftest import (
     ClientFactories,
-    MULTI_REGION_ENABLED,
     DEFAULT_MCMR_DATABASE,
     MULTI_REGION_TOPOLOGY,
+    multi_region_test,
 )
 
 from chromadb.test.property.test_collections import CollectionStateMachine
@@ -22,11 +22,6 @@ from hypothesis.stateful import (
 )
 import chromadb.test.property.strategies as strategies
 
-EFFECTIVE_DEFAULT_DATABASE = (
-    DEFAULT_MCMR_DATABASE if MULTI_REGION_ENABLED else DEFAULT_DATABASE
-)
-
-
 class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
     """A collection state machine test that includes tenant and database information,
     and switches between them."""
@@ -39,12 +34,20 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
     admin_client: AdminAPI
     curr_tenant: str
     curr_database: str
+    effective_default_database: str
+    uses_multi_region_database: bool
 
     tenants = Bundle("tenants")
     databases = Bundle("databases")
 
-    def __init__(self, client_factories: ClientFactories):
-        client = client_factories.create_client()
+    def __init__(
+        self,
+        client_factories: ClientFactories,
+        database_name: str,
+    ) -> None:
+        self.effective_default_database = database_name
+        self.uses_multi_region_database = database_name == DEFAULT_MCMR_DATABASE
+        client = client_factories.create_client(database=database_name)
         super().__init__(client)
         self.client = client
         self.admin_client = client_factories.create_admin_client_from_system()
@@ -54,8 +57,8 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
         self.client.reset()
         self.tenant_to_database_to_model = {}
         self.curr_tenant = DEFAULT_TENANT
-        self.curr_database = EFFECTIVE_DEFAULT_DATABASE
-        self.client.set_tenant(DEFAULT_TENANT, EFFECTIVE_DEFAULT_DATABASE)
+        self.curr_database = self.effective_default_database
+        self.client.set_tenant(DEFAULT_TENANT, self.effective_default_database)
         self.set_tenant_model(self.curr_tenant, {})
         self.set_database_model_for_tenant(self.curr_tenant, self.curr_database, {})
 
@@ -72,14 +75,18 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
         # When we create a tenant, create a default database for it just for testing
         # since the state machine could call collection operations before creating a
         # database
-        self.admin_client.create_database(EFFECTIVE_DEFAULT_DATABASE, tenant=tenant)
+        self.admin_client.create_database(
+            self.effective_default_database, tenant=tenant
+        )
         self.set_tenant_model(tenant, {})
-        self.set_database_model_for_tenant(tenant, EFFECTIVE_DEFAULT_DATABASE, {})
+        self.set_database_model_for_tenant(
+            tenant, self.effective_default_database, {}
+        )
         return multiple(tenant)
 
     @rule(target=databases, name=strategies.tenant_database_name)
     def create_database(self, name: str) -> MultipleResults:  # [Tuple[str, str]]:
-        if MULTI_REGION_ENABLED:
+        if self.uses_multi_region_database:
             name = f"{MULTI_REGION_TOPOLOGY}+{name}"
         database = self.overwrite_database(name)
         tenant = self.overwrite_tenant(self.curr_tenant)
@@ -106,9 +113,9 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
 
     @rule(tenant=tenants)
     def set_tenant(self, tenant: str) -> None:
-        self.set_api_tenant_database(tenant, EFFECTIVE_DEFAULT_DATABASE)
+        self.set_api_tenant_database(tenant, self.effective_default_database)
         self.curr_tenant = tenant
-        self.curr_database = EFFECTIVE_DEFAULT_DATABASE
+        self.curr_database = self.effective_default_database
 
     # These methods allow other tests, namely
     # test_collections_with_database_tenant_override.py, to swap out the model
@@ -157,8 +164,15 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
         return self.tenant_to_database_to_model[self.curr_tenant][self.curr_database]
 
 
+@multi_region_test
 def test_collections(
-    caplog: pytest.LogCaptureFixture, client_factories: ClientFactories
+    caplog: pytest.LogCaptureFixture,
+    client_factories: ClientFactories,
+    database_name: str,
 ) -> None:
     caplog.set_level(logging.ERROR)
-    run_state_machine_as_test(lambda: TenantDatabaseCollectionStateMachine(client_factories))  # type: ignore
+    run_state_machine_as_test(
+        lambda: TenantDatabaseCollectionStateMachine(
+            client_factories, database_name=database_name
+        )
+    )  # type: ignore
