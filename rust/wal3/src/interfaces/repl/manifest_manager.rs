@@ -1405,7 +1405,7 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                         );
                         stmt2.add_param("log_id", &log_id);
                         let mut iter = tx.query(stmt2).await?;
-                        let mut preserve_the_shared_pieces = false;
+                        let mut preserve_shared_pieces = false;
                         while let Some(row) = iter.next().await? {
                             let region = row.column_by_name::<String>("region")?;
                             if region == local_region {
@@ -1414,11 +1414,11 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                                 Key::composite(&[&log_id, &region]),
                             ));
                             } else {
-                                preserve_the_shared_pieces = true;
+                                preserve_shared_pieces = true;
                             }
                         }
 
-                        if !preserve_the_shared_pieces {
+                        if !preserve_shared_pieces {
                             // Query all fragment idents to delete from fragments.
                             let mut stmt3 =
                                 Statement::new("SELECT ident FROM fragments WHERE log_id = @log_id");
