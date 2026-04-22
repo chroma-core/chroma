@@ -6,8 +6,6 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use setsum::Setsum;
 use tracing::Span;
 
-#[cfg(test)]
-use chroma_storage::{admissioncontrolleds3::StorageRequestPriority, GetOptions, StorageError};
 use chroma_storage::{ETag, Storage};
 use chroma_types::Cmek;
 
@@ -915,7 +913,7 @@ mod tests {
 
     use super::*;
     use crate::{FragmentSeqNo, LogPosition};
-    use chroma_storage::{test_storage, PutOptions, Storage};
+    use chroma_storage::Storage;
 
     const TEST_EPOCH_MICROS: u64 = 1234567890123456;
 

@@ -1380,12 +1380,14 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                 .spanner
                 .read_write_transaction(|tx| {
                     let log_id = log_id.clone();
+                    let local_region = self.local_region.clone();
                     Box::pin(async move {
                         // First, query all fragment idents and regions to delete from fragment_regions.
                         let mut stmt1 = Statement::new(
-                            "SELECT ident, region FROM fragment_regions WHERE log_id = @log_id",
+                            "SELECT ident, region FROM fragment_regions WHERE log_id = @log_id AND region = @local_region",
                         );
                         stmt1.add_param("log_id", &log_id);
+                        stmt1.add_param("local_region", &local_region);
                         let mut iter = tx.query(stmt1).await?;
                         let mut mutations = vec![];
                         while let Some(row) = iter.next().await? {
@@ -1397,32 +1399,38 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                             ));
                         }
 
-                        // Query all fragment idents to delete from fragments.
-                        let mut stmt2 =
-                            Statement::new("SELECT ident FROM fragments WHERE log_id = @log_id");
-                        stmt2.add_param("log_id", &log_id);
-                        let mut iter = tx.query(stmt2).await?;
-                        while let Some(row) = iter.next().await? {
-                            let ident = row.column_by_name::<String>("ident")?;
-                            mutations.push(delete("fragments", Key::composite(&[&log_id, &ident])));
-                        }
-
                         // Query all regions to delete from manifest_regions.
-                        let mut stmt3 = Statement::new(
+                        let mut stmt2 = Statement::new(
                             "SELECT region FROM manifest_regions WHERE log_id = @log_id",
                         );
-                        stmt3.add_param("log_id", &log_id);
-                        let mut iter = tx.query(stmt3).await?;
+                        stmt2.add_param("log_id", &log_id);
+                        let mut iter = tx.query(stmt2).await?;
+                        let mut preserve_the_shared_pieces = false;
                         while let Some(row) = iter.next().await? {
                             let region = row.column_by_name::<String>("region")?;
+                            if region == local_region {
                             mutations.push(delete(
                                 "manifest_regions",
                                 Key::composite(&[&log_id, &region]),
                             ));
+                            } else {
+                                preserve_the_shared_pieces = true;
+                            }
                         }
 
-                        // Delete from manifests.
-                        mutations.push(delete("manifests", Key::new(&log_id)));
+                        if !preserve_the_shared_pieces {
+                            // Query all fragment idents to delete from fragments.
+                            let mut stmt3 =
+                                Statement::new("SELECT ident FROM fragments WHERE log_id = @log_id");
+                            stmt3.add_param("log_id", &log_id);
+                            let mut iter = tx.query(stmt3).await?;
+                            while let Some(row) = iter.next().await? {
+                                let ident = row.column_by_name::<String>("ident")?;
+                                mutations.push(delete("fragments", Key::composite(&[&log_id, &ident])));
+                            }
+                            // Delete from manifests.
+                            mutations.push(delete("manifests", Key::new(&log_id)));
+                        }
 
                         tx.buffer_write(mutations);
                         Ok::<_, google_cloud_spanner::client::Error>(())
