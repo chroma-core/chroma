@@ -3894,7 +3894,11 @@ mod tests {
     use chroma_config::spanner::SpannerEmulatorConfig;
     use chroma_faults::FaultRegistry;
     use chroma_storage::{
-        s3_client_for_test_with_new_bucket, s3_config_for_localhost_with_bucket_name,
+        config::{
+            AdmissionControlledS3StorageConfig, CountBasedPolicyConfig, RateLimitingConfig,
+            StorageConfig,
+        },
+        s3_client_for_test_with_new_bucket, S3CredentialsConfig, S3StorageConfig,
     };
     #[cfg(feature = "faults")]
     use chroma_types::chroma_proto::fault_injection_service_server::FaultInjectionServiceServer;
@@ -5689,29 +5693,65 @@ mod tests {
         })
     }
 
-    async fn s3_storage_with_unreachable_topology_config(
+    fn s3_storage_with_unreachable_topology_config(
         topology_name: &str,
         spanner_database: &str,
     ) -> LogServerConfig {
-        let bucket = format!("log-service-lazy-{}", rand::thread_rng().gen::<u64>());
-        let _storage = chroma_storage::s3::s3_client_for_test_with_bucket_name(&bucket).await;
-        let region = RegionName::new("local").expect("'local' is a valid region name");
+        let region1 = RegionName::new("tilt-config-1").expect("region name should be valid");
+        let region2 = RegionName::new("tilt-config-2").expect("region name should be valid");
         let topology_name =
             TopologyName::new(topology_name).expect("topology name should be valid");
-        LogServerConfig {
-            regions_and_topologies: Some(MultiCloudMultiRegionConfiguration {
-                preferred: region.clone(),
-                regions: vec![ProviderRegion::new(
-                    region.clone(),
-                    "local",
-                    "test",
-                    RegionalStorageConfig {
-                        storage: s3_config_for_localhost_with_bucket_name(bucket).await,
+        let storage_config = |bucket: &str,
+                              request_timeout_ms: u64,
+                              max_concurrent_requests: usize,
+                              bandwidth_allocation: Vec<f32>| {
+            StorageConfig::AdmissionControlledS3(AdmissionControlledS3StorageConfig {
+                s3_config: S3StorageConfig {
+                    bucket: bucket.to_string(),
+                    credentials: S3CredentialsConfig::Localhost,
+                    connect_timeout_ms: 5000,
+                    request_timeout_ms,
+                    upload_part_size_bytes: 512 * 1024 * 1024,
+                    download_part_size_bytes: 8 * 1024 * 1024,
+                    ..Default::default()
+                },
+                rate_limiting_policy: RateLimitingConfig::CountBasedPolicy(
+                    CountBasedPolicyConfig {
+                        max_concurrent_requests,
+                        bandwidth_allocation,
                     },
-                )],
+                ),
+                ..Default::default()
+            })
+        };
+        LogServerConfig {
+            my_member_id: format!(
+                "rust-log-service-{spanner_database}-{}",
+                rand::thread_rng().gen::<u64>()
+            ),
+            regions_and_topologies: Some(MultiCloudMultiRegionConfiguration {
+                preferred: region1.clone(),
+                regions: vec![
+                    ProviderRegion::new(
+                        region1.clone(),
+                        "tilt",
+                        "config-1",
+                        RegionalStorageConfig {
+                            storage: storage_config("chroma-storage", 60000, 500, vec![1.0]),
+                        },
+                    ),
+                    ProviderRegion::new(
+                        region2.clone(),
+                        "tilt",
+                        "config-2",
+                        RegionalStorageConfig {
+                            storage: storage_config("chroma-storage2", 30000, 30, vec![0.7, 0.3]),
+                        },
+                    ),
+                ],
                 topologies: vec![Topology::new(
                     topology_name,
-                    vec![region],
+                    vec![region1, region2],
                     TopologicalStorageConfig {
                         spanner: unreachable_spanner_config(spanner_database),
                         repl: ReplicatedFragmentOptions::default(),
@@ -6177,23 +6217,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_log_server_starts_when_repl_spanner_is_unreachable() {
+    async fn test_k8s_mcmr_integration_log_server_starts_when_repl_spanner_is_unreachable() {
         let config =
-            s3_storage_with_unreachable_topology_config("unreachable", "lazy-startup-test").await;
+            s3_storage_with_unreachable_topology_config("unreachable", "lazy-startup-test");
         let registry = chroma_config::registry::Registry::new();
 
-        let server = LogServer::try_from_config(&config, &registry).await;
-
-        assert!(
-            server.is_ok(),
-            "log server should start without contacting spanner at boot"
-        );
+        if let Err(err) = LogServer::try_from_config(&config, &registry).await {
+            panic!("log server should start without contacting spanner at boot: {err:?}");
+        }
     }
 
     #[tokio::test]
-    async fn test_repl_scout_logs_returns_unavailable_and_retries_when_spanner_is_unreachable() {
-        let config =
-            s3_storage_with_unreachable_topology_config("unreachable", "lazy-retry-test").await;
+    async fn test_k8s_mcmr_integration_repl_scout_logs_returns_unavailable_and_retries_when_spanner_is_unreachable() {
+        let config = s3_storage_with_unreachable_topology_config("unreachable", "lazy-retry-test");
         let registry = chroma_config::registry::Registry::new();
         let server = LogServer::try_from_config(&config, &registry)
             .await
