@@ -8,9 +8,8 @@ use std::sync::Arc;
 use tokio::runtime::{Builder, Handle, Runtime};
 
 use chroma_blockstore::{
-    arrow::provider::BlockfileReaderOptions,
-    provider::BlockfileProvider,
-    BlockfileFlusher, BlockfileWriterOptions,
+    arrow::provider::BlockfileReaderOptions, provider::BlockfileProvider, BlockfileFlusher,
+    BlockfileWriterOptions,
 };
 use chroma_distance::DistanceFunction;
 use chroma_error::ChromaError;
@@ -48,9 +47,7 @@ where
                         .expect("tokio runtime for blockfile sync paths"),
                 );
             }
-            slot.as_ref()
-                .expect("initialized")
-                .block_on(future)
+            slot.as_ref().expect("initialized").block_on(future)
         }),
     }
 }
@@ -116,12 +113,8 @@ impl HierarchicalSpannFlusher {
             .flush::<u32, QuantizedCluster<'_>>()
             .await?;
         self.scalar_metadata_flusher.flush::<u32, u32>().await?;
-        self.vector_data_flusher
-            .flush::<u32, Vec<f32>>()
-            .await?;
-        self.list_data_flusher
-            .flush::<u32, Vec<u32>>()
-            .await?;
+        self.vector_data_flusher.flush::<u32, Vec<f32>>().await?;
+        self.list_data_flusher.flush::<u32, Vec<u32>>().await?;
 
         Ok(HierarchicalSpannIds {
             posting_list_id,
@@ -333,7 +326,11 @@ impl HierarchicalSpannWriter {
 
         // -- "root" (singleton) --
         scalar_metadata_writer
-            .set(PREFIX_ROOT, SINGLETON_KEY, self.root_id.load(Ordering::Relaxed))
+            .set(
+                PREFIX_ROOT,
+                SINGLETON_KEY,
+                self.root_id.load(Ordering::Relaxed),
+            )
             .await?;
 
         // -- "version" -- versions are only ever upserted (never deleted per id);
@@ -386,7 +383,9 @@ impl HierarchicalSpannWriter {
             .iter()
             .filter_map(|e| {
                 let id = *e;
-                self.embeddings.get(&id).map(|emb| (id, emb.value().clone()))
+                self.embeddings
+                    .get(&id)
+                    .map(|emb| (id, emb.value().clone()))
             })
             .collect();
         embedding_entries.sort_unstable_by_key(|(k, _)| *k);
@@ -546,8 +545,7 @@ impl HierarchicalSpannWriter {
             parent_ids.insert(key, value);
         }
 
-        let mut lengths: std::collections::HashMap<u32, usize> =
-            std::collections::HashMap::new();
+        let mut lengths: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
         for (_prefix, key, value) in sm_reader
             .get_range(PREFIX_LENGTH..=PREFIX_LENGTH, ..)
             .await?
@@ -600,9 +598,7 @@ impl HierarchicalSpannWriter {
                 .copied()
                 .map(|p| if p == NO_PARENT { None } else { Some(p) })
                 .unwrap_or(None);
-            let centroid = centroids
-                .remove(&node_id)
-                .unwrap_or_else(|| vec![0.0; dim]);
+            let centroid = centroids.remove(&node_id).unwrap_or_else(|| vec![0.0; dim]);
 
             if ntype == NODE_TYPE_LEAF {
                 let length = lengths.get(&node_id).copied().unwrap_or(0);
@@ -619,9 +615,7 @@ impl HierarchicalSpannWriter {
                     }),
                 );
             } else {
-                let children = children_map
-                    .remove(&node_id)
-                    .unwrap_or_default();
+                let children = children_map.remove(&node_id).unwrap_or_default();
                 nodes.insert(
                     node_id,
                     TreeNode::Internal(InternalNode {
@@ -754,9 +748,7 @@ impl HierarchicalSpannWriter {
         // I/O accounting: count this as one posting load, plus the number of
         // entries fetched. Bytes ≈ entries * (4 + code_size + 1) where
         // code_size = dim/8 for 1-bit codes.
-        self.stats
-            .posting_loads
-            .fetch_add(1, Ordering::Relaxed);
+        self.stats.posting_loads.fetch_add(1, Ordering::Relaxed);
         self.stats
             .posting_load_entries
             .fetch_add(cluster.ids.len() as u64, Ordering::Relaxed);
@@ -782,11 +774,13 @@ impl HierarchicalSpannWriter {
         Ok(())
     }
 
-    pub fn load_raw_sync(&self, ids: &[u32]) {
+    pub fn load_embeddings_sync(&self, ids: &[u32]) {
         if self.vector_data_reader.is_none() {
             return;
         }
-        let missing: Vec<u32> = ids.iter().copied()
+        let missing: Vec<u32> = ids
+            .iter()
+            .copied()
             .filter(|id| !self.embeddings.contains_key(id))
             .collect();
         if missing.is_empty() {
@@ -818,9 +812,7 @@ impl HierarchicalSpannWriter {
             if let Some(embedding) = reader.get(PREFIX_EMBEDDING, id).await? {
                 self.embeddings.insert(id, Arc::from(embedding));
                 // I/O accounting: bytes = dim * 4.
-                self.stats
-                    .embedding_loads
-                    .fetch_add(1, Ordering::Relaxed);
+                self.stats.embedding_loads.fetch_add(1, Ordering::Relaxed);
             }
         }
 

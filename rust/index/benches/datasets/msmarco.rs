@@ -16,7 +16,7 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
 use super::{ground_truth, Dataset, LazyShardLoader, Query};
 
-const REPO_ID: &str = "Cohere/msmarco-v2-embed-multilingual-v3";
+const REPO_ID: &str = "CohereLabs/msmarco-v2-embed-multilingual-v3";
 const NUM_SHARDS: usize = 139;
 pub const DIMENSION: usize = 1024;
 pub const DATA_LEN: usize = 138_364_198;

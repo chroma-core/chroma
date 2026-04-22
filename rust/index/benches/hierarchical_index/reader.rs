@@ -32,12 +32,13 @@ use super::writer::{
 };
 
 pub struct HierarchicalSpannReader {
-    dim: usize,
-    distance_fn: DistanceFunction,
-    config: HierarchicalSpannConfig,
     nodes: DashMap<NodeId, TreeNode>,
     root_id: u32,
     embeddings: DashMap<u32, Arc<[f32]>>,
+    
+    dim: usize,
+    distance_fn: DistanceFunction,
+    config: HierarchicalSpannConfig,
     pub stats: WriterStats,
     posting_list_reader:
         chroma_blockstore::BlockfileReader<'static, u32, QuantizedCluster<'static>>,

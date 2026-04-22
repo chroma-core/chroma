@@ -16,7 +16,7 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
 use super::{ground_truth, Dataset, LazyShardLoader, Query};
 
-const REPO_ID: &str = "Cohere/wikipedia-2023-11-embed-multilingual-v3";
+const REPO_ID: &str = "CohereLabs/wikipedia-2023-11-embed-multilingual-v3";
 const NUM_SHARDS: usize = 415;
 pub const DIMENSION: usize = 1024;
 pub const DATA_LEN: usize = 41_488_110;

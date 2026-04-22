@@ -531,16 +531,6 @@ impl HierarchicalSpannWriter {
                 continue;
             }
 
-            if !self.config.deferred_balance {
-                let balance_start = Instant::now();
-                for cluster_id in clusters_to_balance {
-                    self.balance(cluster_id, 0);
-                }
-                self.stats
-                    .add_balance_nanos
-                    .fetch_add(balance_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
-            }
-
             break;
         }
 
@@ -677,8 +667,7 @@ impl HierarchicalSpannWriter {
                 Self::effective_beam(&child_scores, params.tau, params.beam_min, params.beam_max);
             child_scores.truncate(effective);
             sort_nanos += sort_start.elapsed().as_nanos() as u64;
-            nav_out_per_level[li] =
-                nav_out_per_level[li].saturating_add(child_scores.len() as u64);
+            nav_out_per_level[li] = nav_out_per_level[li].saturating_add(child_scores.len() as u64);
 
             let mut next_internals: Vec<NodeId> = Vec::new();
             for &(node_id, dist) in &child_scores {
@@ -714,10 +703,8 @@ impl HierarchicalSpannWriter {
             .fetch_add(dist_count, Ordering::Relaxed);
         for li in 0..(levels as usize).min(MAX_NAV_LEVELS) {
             self.stats.nav_in_per_level[li].fetch_add(nav_in_per_level[li], Ordering::Relaxed);
-            self.stats.nav_dist_per_level[li]
-                .fetch_add(nav_dist_per_level[li], Ordering::Relaxed);
-            self.stats.nav_out_per_level[li]
-                .fetch_add(nav_out_per_level[li], Ordering::Relaxed);
+            self.stats.nav_dist_per_level[li].fetch_add(nav_dist_per_level[li], Ordering::Relaxed);
+            self.stats.nav_out_per_level[li].fetch_add(nav_out_per_level[li], Ordering::Relaxed);
             self.stats.nav_calls_per_level[li].fetch_add(1, Ordering::Relaxed);
         }
         self.stats.navigates.fetch_add(1, Ordering::Relaxed);
@@ -841,8 +828,7 @@ impl HierarchicalSpannWriter {
             let effective =
                 Self::effective_beam(&child_scores, params.tau, params.beam_min, params.beam_max);
             child_scores.truncate(effective);
-            nav_out_per_level[li] =
-                nav_out_per_level[li].saturating_add(child_scores.len() as u64);
+            nav_out_per_level[li] = nav_out_per_level[li].saturating_add(child_scores.len() as u64);
 
             let mut next_internals: Vec<NodeId> = Vec::new();
             for &(node_id, dist) in &child_scores {
@@ -887,10 +873,8 @@ impl HierarchicalSpannWriter {
             .fetch_add(dist_count, Ordering::Relaxed);
         for li in 0..(levels as usize).min(MAX_NAV_LEVELS) {
             self.stats.nav_in_per_level[li].fetch_add(nav_in_per_level[li], Ordering::Relaxed);
-            self.stats.nav_dist_per_level[li]
-                .fetch_add(nav_dist_per_level[li], Ordering::Relaxed);
-            self.stats.nav_out_per_level[li]
-                .fetch_add(nav_out_per_level[li], Ordering::Relaxed);
+            self.stats.nav_dist_per_level[li].fetch_add(nav_dist_per_level[li], Ordering::Relaxed);
+            self.stats.nav_out_per_level[li].fetch_add(nav_out_per_level[li], Ordering::Relaxed);
             self.stats.nav_calls_per_level[li].fetch_add(1, Ordering::Relaxed);
         }
         self.stats.navigates.fetch_add(1, Ordering::Relaxed);
@@ -938,6 +922,10 @@ impl HierarchicalSpannWriter {
         let first_distance = candidates[0].1;
         let mut result = Vec::new();
         let mut selected_centroids: Vec<Vec<f32>> = Vec::new();
+
+        if self.config.max_replicas == 1 {
+            return vec![candidates[0].0];
+        }
 
         for &(node_id, distance) in candidates {
             if (distance - first_distance).abs()
@@ -1309,7 +1297,7 @@ impl HierarchicalSpannWriter {
         self.tombstones.insert(leaf_id);
         self.dirty_nodes.remove(&leaf_id);
 
-        self.load_raw_sync(&old_ids);
+        self.load_embeddings_sync(&old_ids);
         let embeddings: Vec<EmbeddingPoint> = old_ids
             .iter()
             .zip(old_versions.iter())
@@ -1761,7 +1749,7 @@ impl HierarchicalSpannWriter {
         let mut n_reassigned = 0usize;
         let mut n_evaluated = 0usize;
 
-        self.load_raw_sync(&n_ids);
+        self.load_embeddings_sync(&n_ids);
         let n_embeddings: Vec<_> = n_ids
             .iter()
             .map(|id| self.embeddings.get(id).map(|e| e.value().clone()))
@@ -1883,7 +1871,7 @@ impl HierarchicalSpannWriter {
             return;
         }
 
-        self.load_raw_sync(&[id]);
+        self.load_embeddings_sync(&[id]);
         let Some(embedding) = self.embeddings.get(&id).map(|e| e.value().clone()) else {
             return;
         };
@@ -2136,7 +2124,7 @@ impl HierarchicalSpannWriter {
             .merge_nanos
             .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
-        self.load_raw_sync(&source_ids);
+        self.load_embeddings_sync(&source_ids);
         for (&id, &version) in source_ids.iter().zip(source_versions.iter()) {
             let current_ver = self.versions.get(&id).map(|r| *r).unwrap_or(0);
             if version != current_ver {

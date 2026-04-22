@@ -96,7 +96,7 @@ struct Args {
     merge_threshold: usize,
 
     /// Dynamic beam tau for write path (add/reassign/merge navigate)
-    #[arg(long, default_value = "2.0")]
+    #[arg(long, default_value = "1.5")]
     write_beam_tau: f64,
 
     /// Per-level write taus overriding the global write tau, comma-separated.
@@ -117,7 +117,7 @@ struct Args {
     write_beam_min: usize,
 
     /// Max beam width for write path
-    #[arg(long, default_value = "512")]
+    #[arg(long, default_value = "16")]
     write_beam_max: usize,
 
     /// Max replicas per vector (RNG select)
@@ -228,11 +228,11 @@ struct Args {
     fp_npa: bool,
 
     /// Tau values for recall sweep, comma-separated
-    #[arg(long, default_value = "1.1,1.5,2.0")]
+    #[arg(long, default_value = "1.5,2.0")]
     recall_tau_values: String,
 
     /// Vector rerank factors to sweep during recall
-    #[arg(long, default_value = "1,4,16", value_delimiter = ',')]
+    #[arg(long, default_value = "1,8", value_delimiter = ',')]
     recall_rerank_vectors: Vec<usize>,
 
     /// Defer splits/merges until an explicit balance_index() call after each checkpoint
@@ -1715,7 +1715,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if let Err(e) = writer.load_all_postings().await {
         eprintln!("warning: failed to load postings for build summary: {e}");
     }
-    // writer.print_tree_stats(format_count, Some(total_vectors));
+    writer.print_tree_stats(format_count, Some(total_vectors));
     let total_time = total_start.elapsed();
     let overall_throughput = total_vectors as f64 / total_time.as_secs_f64();
 
@@ -1998,6 +1998,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     .expect("failed to open reader");
             let open_time = open_start.elapsed();
 
+            // Snapshot memory right after open() but before load_all_*: this
+            // is what just walking the tree (root + internal nodes + their
+            // centroids) brought into memory. Postings and embeddings are
+            // not touched yet.
+            let ((pl_open_n, pl_open_b), (vd_open_n, vd_open_b)) = r.loaded_blocks_stats();
+            let mu_open = r.memory_usage();
+
             let load_start = Instant::now();
             if !args.lazy_recall {
                 r.load_all_postings()
@@ -2029,6 +2036,20 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 format_duration(open_time),
                 format_duration(load_time),
                 format_duration(reader_total_start.elapsed()),
+            );
+            println!(
+                "  Reader after open: tree {} nodes ({} leaf, {} internal, {}) | centroids ({}) \
+                 | block pins postings {} blocks/{} | vector_data {} blocks/{} | total pins {}",
+                format_count((mu_open.leaf_count + mu_open.internal_count) as usize),
+                format_count(mu_open.leaf_count as usize),
+                format_count(mu_open.internal_count as usize),
+                mem_probe::format_bytes(mu_open.tree_bytes),
+                mem_probe::format_bytes(mu_open.centroid_bytes),
+                format_count(pl_open_n),
+                mem_probe::format_bytes(pl_open_b),
+                format_count(vd_open_n),
+                mem_probe::format_bytes(vd_open_b),
+                mem_probe::format_bytes(pl_open_b + vd_open_b),
             );
             println!(
                 "  Reader pins after load: postings {} blocks/{} | vector_data {} blocks/{} | total {} (cleared)",
