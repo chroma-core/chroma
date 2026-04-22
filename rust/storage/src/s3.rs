@@ -50,6 +50,20 @@ pub struct DeletedObjects {
     pub errors: Vec<StorageError>,
 }
 
+fn not_found_deleted_objects(
+    keys: Vec<String>,
+    source: Arc<dyn std::error::Error + Send + Sync + 'static>,
+) -> DeletedObjects {
+    let mut out = DeletedObjects::default();
+    for key in keys {
+        out.errors.push(StorageError::NotFound {
+            path: key,
+            source: Arc::clone(&source),
+        });
+    }
+    out
+}
+
 #[derive(Clone)]
 pub struct S3Storage {
     pub(crate) bucket: String,
@@ -1036,11 +1050,16 @@ impl S3Storage {
     ) -> Result<DeletedObjects, StorageError> {
         self.metrics.s3_delete_many_count.add(1, &[]);
 
-        let mut objects = vec![];
-        for key in keys {
+        let keys = keys
+            .into_iter()
+            .map(|key| key.as_ref().to_string())
+            .collect::<Vec<_>>();
+
+        let mut objects = Vec::with_capacity(keys.len());
+        for key in &keys {
             objects.push(
                 ObjectIdentifier::builder()
-                    .key(key.as_ref())
+                    .key(key.as_str())
                     .build()
                     .map_err(|err| StorageError::Generic {
                         source: Arc::new(err),
@@ -1071,7 +1090,7 @@ impl S3Storage {
                 for error in resp.errors() {
                     out.errors.push(if Some("NoSuchKey") == error.code() {
                         StorageError::NotFound {
-                            path: error.key.clone().unwrap_or(String::new()),
+                            path: error.key.clone().unwrap_or_else(|| keys.join(",")),
                             source: Arc::new(StorageError::Message {
                                 message: format!("{error:#?}"),
                             }),
@@ -1089,10 +1108,8 @@ impl S3Storage {
                 if e.code() == Some("SlowDown") {
                     Err(StorageError::Backoff)
                 } else if e.code() == Some("NoSuchKey") {
-                    Err(StorageError::NotFound {
-                        path: String::new(),
-                        source: Arc::new(e),
-                    })
+                    let source: Arc<dyn std::error::Error + Send + Sync + 'static> = Arc::new(e);
+                    Ok(not_found_deleted_objects(keys, source))
                 } else {
                     Err(StorageError::Generic {
                         source: Arc::new(e),
@@ -1396,6 +1413,29 @@ mod tests {
     use rand::{distributions::Alphanumeric, Rng, SeedableRng};
     use std::io::Write;
     use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_not_found_deleted_objects_preserves_requested_keys() {
+        let source: Arc<dyn std::error::Error + Send + Sync + 'static> =
+            Arc::new(StorageError::Message {
+                message: "NoSuchKey".to_string(),
+            });
+        let deleted_objects =
+            not_found_deleted_objects(vec!["first".to_string(), "second".to_string()], source);
+
+        assert!(deleted_objects.deleted.is_empty());
+        assert_eq!(deleted_objects.errors.len(), 2);
+
+        let paths = deleted_objects
+            .errors
+            .iter()
+            .map(|err| match err {
+                StorageError::NotFound { path, .. } => path.as_str(),
+                other => panic!("expected NotFound error, got {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(paths, vec!["first", "second"]);
+    }
 
     fn get_s3_client() -> aws_sdk_s3::Client {
         // Set up credentials assuming minio is running locally
