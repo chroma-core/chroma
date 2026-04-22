@@ -1,3 +1,4 @@
+import json
 from typing import List, Optional, Sequence, Tuple, Union, cast
 from uuid import UUID
 from overrides import overrides
@@ -339,6 +340,8 @@ class GrpcSysDB(SysDB):
                 database=database,
                 segments=[to_proto_segment(segment) for segment in segments],
             )
+            if schema is not None:
+                request.schema_str = json.dumps(schema.serialize_to_json())
             response = self._sys_db_stub.CreateCollection(
                 request, timeout=self._request_timeout_seconds
             )

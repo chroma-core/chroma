@@ -913,6 +913,12 @@ impl TryFrom<chroma_proto::CollectionToGcInfo> for CollectionToGcInfo {
 }
 
 impl GrpcSysDb {
+    fn routes_to_mcmr(database_name: &DatabaseName) -> bool {
+        database_name
+            .topology()
+            .is_some_and(|topo_str| TopologyName::new(topo_str).is_ok())
+    }
+
     fn client(
         &self,
         database_name: &DatabaseName,
@@ -923,13 +929,11 @@ impl GrpcSysDb {
         // Route to MCMR client if database has a valid topology prefix (before '+').
         // TopologyName::new() validates the topology is non-empty and well-formed.
         // Otherwise use single region client.
-        if let Some(topo_str) = database_name.topology() {
-            if TopologyName::new(topo_str).is_ok() {
-                if let Some(mcmr_client) = &self._mcmr_client {
-                    return Ok(mcmr_client.clone());
-                } else {
-                    return Err(ClientResolutionError::McmrNotSupported);
-                }
+        if Self::routes_to_mcmr(database_name) {
+            if let Some(mcmr_client) = &self._mcmr_client {
+                return Ok(mcmr_client.clone());
+            } else {
+                return Err(ClientResolutionError::McmrNotSupported);
             }
         }
         Ok(self.client.clone())
@@ -1445,9 +1449,16 @@ impl GrpcSysDb {
                 .map_err(|e| UpdateCollectionError::Internal(Box::new(e)))?,
             None => self.client.clone(),
         };
+        let routes_to_mcmr = database.as_ref().map(Self::routes_to_mcmr).unwrap_or(false);
         let mut configuration_json_str = None;
         if let Some(configuration) = configuration {
-            configuration_json_str = Some(serde_json::to_string(&configuration).unwrap());
+            configuration_json_str = Some(if routes_to_mcmr {
+                let configuration =
+                    chroma_types::UpdateCollectionConfiguration::from(configuration);
+                serde_json::to_string(&configuration).unwrap()
+            } else {
+                serde_json::to_string(&configuration).unwrap()
+            });
         }
         let req = chroma_proto::UpdateCollectionRequest {
             id: collection_id.0.to_string(),

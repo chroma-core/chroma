@@ -240,6 +240,9 @@ def from_proto_collection(collection: chroma_pb.Collection) -> Collection:
         id=UUID(hex=collection.id),
         name=collection.name,
         configuration_json=json.loads(collection.configuration_json_str),
+        serialized_schema=json.loads(collection.schema_str)
+        if collection.HasField("schema_str") and collection.schema_str
+        else None,
         metadata=from_proto_metadata(collection.metadata)
         if collection.HasField("metadata")
         else None,
@@ -254,7 +257,7 @@ def from_proto_collection(collection: chroma_pb.Collection) -> Collection:
 
 
 def to_proto_collection(collection: Collection) -> chroma_pb.Collection:
-    return chroma_pb.Collection(
+    collection_proto = chroma_pb.Collection(
         id=collection["id"].hex,
         name=collection["name"],
         configuration_json_str=collection_configuration_to_json_str(
@@ -269,6 +272,9 @@ def to_proto_collection(collection: Collection) -> chroma_pb.Collection:
         log_position=collection["log_position"],
         version=collection["version"],
     )
+    if collection["serialized_schema"] is not None:
+        collection_proto.schema_str = json.dumps(collection["serialized_schema"])
+    return collection_proto
 
 
 def to_proto_operation(operation: Operation) -> chroma_pb.Operation:

@@ -119,6 +119,8 @@ class Bindings:
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
         new_configuration_json_str: Optional[str] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> None: ...
     def delete_collection(
         self,

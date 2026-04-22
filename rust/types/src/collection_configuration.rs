@@ -585,6 +585,22 @@ impl TryFrom<UpdateCollectionConfiguration> for InternalUpdateCollectionConfigur
     }
 }
 
+impl From<InternalUpdateCollectionConfiguration> for UpdateCollectionConfiguration {
+    fn from(value: InternalUpdateCollectionConfiguration) -> Self {
+        let (hnsw, spann) = match value.vector_index {
+            Some(UpdateVectorIndexConfiguration::Hnsw(hnsw)) => (hnsw, None),
+            Some(UpdateVectorIndexConfiguration::Spann(spann)) => (None, spann),
+            None => (None, None),
+        };
+
+        Self {
+            hnsw,
+            spann,
+            embedding_function: value.embedding_function,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -1078,6 +1094,36 @@ mod tests {
                 },
             ))
         );
+    }
+
+    #[test]
+    fn test_internal_update_collection_configuration_to_public_spann() {
+        let embedding_function =
+            EmbeddingFunctionConfiguration::Known(EmbeddingFunctionNewConfiguration {
+                name: "test".to_string(),
+                config: serde_json::Value::Null,
+            });
+        let internal = InternalUpdateCollectionConfiguration {
+            vector_index: Some(UpdateVectorIndexConfiguration::Spann(Some(
+                UpdateSpannConfiguration {
+                    search_nprobe: Some(128),
+                    ef_search: Some(200),
+                },
+            ))),
+            embedding_function: Some(embedding_function.clone()),
+        };
+
+        let public = UpdateCollectionConfiguration::from(internal);
+
+        assert_eq!(public.hnsw, None);
+        assert_eq!(
+            public.spann,
+            Some(UpdateSpannConfiguration {
+                search_nprobe: Some(128),
+                ef_search: Some(200),
+            })
+        );
+        assert_eq!(public.embedding_function, Some(embedding_function));
     }
 
     #[cfg(feature = "testing")]

@@ -4,6 +4,12 @@ from uuid import UUID
 from overrides import overrides
 import json
 
+from chromadb.api.collection_configuration import (
+    load_update_collection_configuration_from_json_str,
+    overwrite_collection_configuration,
+    update_schema_from_collection_configuration,
+)
+from chromadb.api.types import Schema
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Component, System
 from chromadb.proto.convert import (
     from_proto_metadata,
@@ -292,7 +298,9 @@ class GrpcMockSysDB(SysDBServicer, Component):
             id=id,
             name=request.name,
             configuration_json=configuration_json,
-            serialized_schema=None,
+            serialized_schema=json.loads(request.schema_str)
+            if request.HasField("schema_str") and request.schema_str
+            else None,
             metadata=from_proto_metadata(request.metadata),
             dimension=request.dimension,
             database=database,
@@ -477,6 +485,26 @@ class GrpcMockSysDB(SysDBServicer, Component):
             elif request.HasField("reset_metadata"):
                 if request.reset_metadata:
                     collection["metadata"] = {}
+            # NOTE(rescrv):  Unsure of the invariants between the json string and the other schema,
+            # but from what I can gather, the configuration_json_str is the old way and this retains
+            # compatiblity.  It was necessary to get parity between sysdb and rust sysdb.
+            if request.HasField("configuration_json_str"):
+                update_configuration = load_update_collection_configuration_from_json_str(
+                    request.configuration_json_str
+                )
+                collection.set_configuration(
+                    overwrite_collection_configuration(
+                        collection.get_configuration(), update_configuration
+                    )
+                )
+
+                serialized_schema = collection.get_serialized_schema()
+                if serialized_schema is not None:
+                    schema = update_schema_from_collection_configuration(
+                        Schema.deserialize_from_json(serialized_schema),
+                        update_configuration,
+                    )
+                    collection.set_serialized_schema(schema.serialize_to_json())
 
             return UpdateCollectionResponse()
 

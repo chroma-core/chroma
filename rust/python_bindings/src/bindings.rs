@@ -366,7 +366,7 @@ impl Bindings {
     }
 
     #[pyo3(
-        signature = (collection_id, new_name = None, new_metadata = None, new_configuration_json_str = None)
+        signature = (collection_id, new_name = None, new_metadata = None, new_configuration_json_str = None, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
     )]
     fn update_collection(
         &self,
@@ -374,10 +374,15 @@ impl Bindings {
         new_name: Option<String>,
         new_metadata: Option<UpdateMetadata>,
         new_configuration_json_str: Option<String>,
+        tenant: String,
+        database: String,
     ) -> ChromaPyResult<()> {
+        let _ = tenant;
         let collection_id = chroma_types::CollectionUuid(
             uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
         );
+        let database_name =
+            DatabaseName::new(database.clone()).ok_or(InvalidDatabaseNameError(database))?;
 
         let configuration_json = match new_configuration_json_str {
             Some(new_configuration_json_str) => {
@@ -397,7 +402,7 @@ impl Bindings {
         };
 
         let request = UpdateCollectionRequest::try_new(
-            None,
+            Some(database_name),
             collection_id,
             new_name,
             new_metadata.map(CollectionMetadataUpdate::UpdateMetadata),

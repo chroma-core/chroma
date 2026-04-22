@@ -17,6 +17,7 @@ from chromadb.api.types import (
 from chromadb.execution.expression.operator import Key
 from chromadb.test.conftest import (
     ClientFactories,
+    multi_region_test,
     is_spann_disabled_mode,
     skip_if_not_cluster,
     skip_reason_spann_disabled,
@@ -98,12 +99,14 @@ class RecordingSearchEmbeddingFunction(EmbeddingFunction[List[str]]):
         return RecordingSearchEmbeddingFunction(config.get("label", "default"))
 
 
+@multi_region_test
 def test_schema_vector_config_persistence(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Ensure schema-provided SPANN settings persist across client restarts."""
 
-    client = client_factories.create_client_from_system()
+    client = client_factories.create_client(database=database_name)
     client.reset()
 
     collection_name = f"schema_spann_{uuid4().hex}"
@@ -140,7 +143,7 @@ def test_schema_vector_config_persistence(
     assert vector_index.config.space is not None
     assert vector_index.config.space == "cosine"
 
-    client_reloaded = client_factories.create_client_from_system()
+    client_reloaded = client_factories.create_client(database=database_name)
     reloaded_collection = client_reloaded.get_collection(
         name=collection_name,
     )
@@ -156,12 +159,14 @@ def test_schema_vector_config_persistence(
     assert reloaded_vector_index.config.space == "cosine"
 
 
+@multi_region_test
 def test_schema_vector_config_persistence_with_ef(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Ensure schema-provided SPANN settings persist across client restarts."""
 
-    client = client_factories.create_client_from_system()
+    client = client_factories.create_client(database=database_name)
     client.reset()
 
     collection_name = f"schema_spann_{uuid4().hex}"
@@ -236,7 +241,7 @@ def test_schema_vector_config_persistence_with_ef(
         assert hnsw_json["ef_search"] == 100
         assert hnsw_json["max_neighbors"] == 16
 
-    client_reloaded = client_factories.create_client_from_system()
+    client_reloaded = client_factories.create_client(database=database_name)
     reloaded_collection = client_reloaded.get_collection(
         name=collection_name,
     )
@@ -298,11 +303,12 @@ class DeterministicSparseEmbeddingFunction(SparseEmbeddingFunction[List[str]]):
 
 def _create_isolated_collection(
     client_factories: "ClientFactories",
+    database_name: str,
     schema: Optional[Schema] = None,
     embedding_function: Optional[EmbeddingFunction[Any]] = None,
 ) -> Tuple[Collection, ClientAPI]:
     """Provision a new temporary collection and return it with the backing client."""
-    client = client_factories.create_client_from_system()
+    client = client_factories.create_client(database=database_name)
     client.reset()
 
     collection_name = f"schema_e2e_{uuid4().hex}"
@@ -354,11 +360,13 @@ def _collect_knn_queries(rank: Any) -> List[Any]:
     return queries
 
 
+@multi_region_test
 def test_schema_defaults_enable_indexed_operations(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Validate default schema indexes support filtering, updates, and embeddings."""
-    collection, client = _create_isolated_collection(client_factories)
+    collection, client = _create_isolated_collection(client_factories, database_name)
 
     schema = collection.schema
     assert schema is not None
@@ -432,8 +440,10 @@ def test_schema_defaults_enable_indexed_operations(
         assert reloaded.schema.serialize_to_json() == schema.serialize_to_json()
 
 
+@multi_region_test
 def test_get_or_create_and_get_collection_preserve_schema(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Ensure repeated collection lookups reuse the persisted schema definition."""
     base_schema = Schema()
@@ -448,6 +458,7 @@ def test_get_or_create_and_get_collection_preserve_schema(
 
     collection, client = _create_isolated_collection(
         client_factories,
+        database_name,
         schema=base_schema,
     )
 
@@ -474,8 +485,10 @@ def test_get_or_create_and_get_collection_preserve_schema(
     assert set(stored["ids"]) == {"schema-preserve"}
 
 
+@multi_region_test
 def test_delete_collection_resets_schema_configuration(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Deleting and recreating a collection should drop prior schema overrides."""
     schema = Schema()
@@ -486,6 +499,7 @@ def test_delete_collection_resets_schema_configuration(
 
     collection, client = _create_isolated_collection(
         client_factories,
+        database_name,
         schema=schema,
     )
 
@@ -503,8 +517,10 @@ def test_delete_collection_resets_schema_configuration(
 
 
 @pytest.mark.skipif(not is_spann_disabled_mode, reason=skip_reason_spann_enabled)
+@multi_region_test
 def test_sparse_vector_not_allowed_locally(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Sparse vector configs are not allowed to be created locally."""
     schema = Schema()
@@ -512,12 +528,14 @@ def test_sparse_vector_not_allowed_locally(
     with pytest.raises(
         InvalidArgumentError, match="Sparse vector indexing is not enabled in local"
     ):
-        _create_isolated_collection(client_factories, schema=schema)
+        _create_isolated_collection(client_factories, database_name, schema=schema)
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_sparse_vector_source_key_and_index_constraints(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Sparse vector configs honor source key embedding and single-index enforcement."""
     sparse_ef = DeterministicSparseEmbeddingFunction(label="source-test")
@@ -533,7 +551,11 @@ def test_sparse_vector_source_key_and_index_constraints(
     schema.create_index(key="tag_a", config=StringInvertedIndexConfig())
     schema.create_index(key="tag_b", config=StringInvertedIndexConfig())
 
-    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+    collection, _ = _create_isolated_collection(
+        client_factories,
+        database_name,
+        schema=schema,
+    )
 
     assert collection.schema is not None
     assert "sparse_metadata" in collection.schema.keys
@@ -573,8 +595,10 @@ def test_sparse_vector_source_key_and_index_constraints(
     assert set(string_filter["ids"]) == {"sparse-1"}
 
 
+@multi_region_test
 def test_schema_persistence_with_custom_overrides(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Custom schema overrides persist across new client instances."""
     schema = Schema()
@@ -585,6 +609,7 @@ def test_schema_persistence_with_custom_overrides(
 
     collection, client = _create_isolated_collection(
         client_factories,
+        database_name,
         schema=schema,
     )
 
@@ -604,7 +629,7 @@ def test_schema_persistence_with_custom_overrides(
     assert collection.schema is not None
     expected_schema_json = collection.schema.serialize_to_json()
 
-    reloaded_client = client_factories.create_client_from_system()
+    reloaded_client = client_factories.create_client(database=database_name)
     reloaded_collection = reloaded_client.get_collection(name=collection.name)
     assert reloaded_collection.schema is not None
     if not is_spann_disabled_mode:
@@ -614,8 +639,10 @@ def test_schema_persistence_with_custom_overrides(
     assert set(fetched["ids"]) == {"persist-1"}
 
 
+@multi_region_test
 def test_collection_embed_uses_schema_or_collection_embedding_function(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """_embed should respect schema-provided and direct embedding functions."""
 
@@ -625,6 +652,7 @@ def test_collection_embed_uses_schema_or_collection_embedding_function(
     )
     schema_collection, _ = _create_isolated_collection(
         client_factories,
+        database_name,
         schema=schema,
     )
 
@@ -635,6 +663,7 @@ def test_collection_embed_uses_schema_or_collection_embedding_function(
     direct_emb_fn = SimpleEmbeddingFunction(dim=3)
     direct_collection, _ = _create_isolated_collection(
         client_factories,
+        database_name,
         embedding_function=direct_emb_fn,
     )
 
@@ -644,14 +673,18 @@ def test_collection_embed_uses_schema_or_collection_embedding_function(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_search_embeds_string_knn_queries(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """_embed_search_string_queries should embed string KNN queries using collection EF."""
 
     embedding_fn = RecordingSearchEmbeddingFunction(label="primary")
     collection, _ = _create_isolated_collection(
-        client_factories, embedding_function=embedding_fn
+        client_factories,
+        database_name,
+        embedding_function=embedding_fn,
     )
 
     search = Search().rank(Knn(query="hello world"))
@@ -672,8 +705,10 @@ def test_search_embeds_string_knn_queries(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_search_embeds_string_knn_queries_with_sparse_embedding_function(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """_embed_search_string_queries should embed string KNN queries using collection EF."""
 
@@ -684,7 +719,11 @@ def test_search_embeds_string_knn_queries_with_sparse_embedding_function(
             source_key="raw_text", embedding_function=sparse_ef
         ),
     )
-    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+    collection, _ = _create_isolated_collection(
+        client_factories,
+        database_name,
+        schema=schema,
+    )
 
     search = Search().rank(Knn(key="sparse_metadata", query="hello world"))
 
@@ -702,14 +741,18 @@ def test_search_embeds_string_knn_queries_with_sparse_embedding_function(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_search_embeds_string_queries_in_nested_ranks(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """String queries in composite rank trees should all be embedded."""
 
     embedding_fn = RecordingSearchEmbeddingFunction(label="nested")
     collection, _ = _create_isolated_collection(
-        client_factories, embedding_function=embedding_fn
+        client_factories,
+        database_name,
+        embedding_function=embedding_fn,
     )
 
     rank_one = (Knn(query="alpha") + Knn(query="beta")).max(Knn(query="gamma"))
@@ -730,13 +773,16 @@ def test_search_embeds_string_queries_in_nested_ranks(
     assert all(isinstance(query, list) for query in all_queries)
 
 
+@multi_region_test
 def test_schema_delete_index_and_restore(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Toggling inverted index enablement reflects in query behavior."""
     disabled_defaults = Schema().delete_index(config=StringInvertedIndexConfig())
     collection, client = _create_isolated_collection(
         client_factories,
+        database_name,
         schema=disabled_defaults,
     )
 
@@ -786,14 +832,20 @@ def test_schema_delete_index_and_restore(
     assert set(search["ids"]) == {"key-enabled"}
 
 
+@multi_region_test
 def test_disabled_metadata_index_filters_raise_invalid_argument_all_modes(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Disabled metadata inverted index should block filter-based operations in get, query, and delete for local, single node, and distributed."""
     schema = Schema().delete_index(
         key="restricted_tag", config=StringInvertedIndexConfig()
     )
-    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+    collection, _ = _create_isolated_collection(
+        client_factories,
+        database_name,
+        schema=schema,
+    )
 
     collection.add(
         ids=["restricted-doc"],
@@ -833,14 +885,20 @@ def test_disabled_metadata_index_filters_raise_invalid_argument_all_modes(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_disabled_metadata_index_filters_raise_invalid_argument(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Disabled metadata inverted index should block filter-based operations."""
     schema = Schema().delete_index(
         key="restricted_tag", config=StringInvertedIndexConfig()
     )
-    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+    collection, _ = _create_isolated_collection(
+        client_factories,
+        database_name,
+        schema=schema,
+    )
 
     collection.add(
         ids=["restricted-doc"],
@@ -881,11 +939,13 @@ def test_disabled_metadata_index_filters_raise_invalid_argument(
         _expect_disabled_error(operation)
 
 
+@multi_region_test
 def test_schema_discovers_new_keys_after_compaction(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Compaction promotes unseen metadata keys into discoverable schema entries."""
-    collection, client = _create_isolated_collection(client_factories)
+    collection, client = _create_isolated_collection(client_factories, database_name)
 
     initial_version = get_collection_version(client, collection.name)
 
@@ -943,18 +1003,20 @@ def test_schema_discovers_new_keys_after_compaction(
     result_upsert = collection.get(where={"discover_upsert": "topic_42"})
     assert set(result_upsert["ids"]) == {"discover-upsert-42"}
 
-    reload_client = client_factories.create_client_from_system()
+    reload_client = client_factories.create_client(database=database_name)
     persisted = reload_client.get_collection(collection.name)
     assert persisted.schema is not None
     assert "discover_add" in persisted.schema.keys
     assert "discover_upsert" in persisted.schema.keys
 
 
+@multi_region_test
 def test_schema_rejects_conflicting_discoverable_key_types(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Conflicting value types should not corrupt discoverable schema entries."""
-    collection, client = _create_isolated_collection(client_factories)
+    collection, client = _create_isolated_collection(client_factories, database_name)
 
     initial_version = get_collection_version(client, collection.name)
 
@@ -1003,6 +1065,7 @@ def test_schema_rejects_conflicting_discoverable_key_types(
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
 def test_collection_fork_inherits_and_isolates_schema(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Assert forked collections inherit schema and evolve independently of the parent."""
     schema = Schema()
@@ -1010,6 +1073,7 @@ def test_collection_fork_inherits_and_isolates_schema(
 
     collection, client = _create_isolated_collection(
         client_factories,
+        database_name,
         schema=schema,
     )
 
@@ -1073,8 +1137,10 @@ def test_collection_fork_inherits_and_isolates_schema(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_schema_embedding_configuration_enforced(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Schema-provided embedding functions drive both dense and sparse embeddings."""
     vector_schema = Schema().create_index(
@@ -1082,6 +1148,7 @@ def test_schema_embedding_configuration_enforced(
     )
     vector_collection, _ = _create_isolated_collection(
         client_factories,
+        database_name,
         schema=vector_schema,
         embedding_function=SimpleEmbeddingFunction(dim=5),
     )
@@ -1105,6 +1172,7 @@ def test_schema_embedding_configuration_enforced(
     )
     sparse_collection, _ = _create_isolated_collection(
         client_factories,
+        database_name,
         schema=sparse_schema,
     )
 
@@ -1141,8 +1209,10 @@ def test_schema_embedding_configuration_enforced(
     assert "sparse_auto" not in numeric_metadata
 
 
+@multi_region_test
 def test_schema_precedence_for_overrides_discoverables_and_defaults(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Explicit overrides take precedence over disabled defaults and discoverables."""
     schema = (
@@ -1153,6 +1223,7 @@ def test_schema_precedence_for_overrides_discoverables_and_defaults(
 
     collection, client = _create_isolated_collection(
         client_factories,
+        database_name,
         schema=schema,
     )
 
@@ -1193,8 +1264,10 @@ def test_schema_precedence_for_overrides_discoverables_and_defaults(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_sparse_auto_embedding_with_document_source_no_metadata(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Test sparse embedding auto-generation using #document as source with no metadata."""
     sparse_ef = DeterministicSparseEmbeddingFunction(label="doc_no_meta")
@@ -1207,7 +1280,11 @@ def test_sparse_auto_embedding_with_document_source_no_metadata(
         ),
     )
 
-    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+    collection, _ = _create_isolated_collection(
+        client_factories,
+        database_name,
+        schema=schema,
+    )
 
     # Add documents without metadata
     collection.add(
@@ -1234,8 +1311,10 @@ def test_sparse_auto_embedding_with_document_source_no_metadata(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_sparse_auto_embedding_with_document_source_and_metadata(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Test sparse embedding with #document source when metadata is also provided."""
     sparse_ef = DeterministicSparseEmbeddingFunction(label="doc_with_meta")
@@ -1248,7 +1327,11 @@ def test_sparse_auto_embedding_with_document_source_and_metadata(
         ),
     )
 
-    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+    collection, _ = _create_isolated_collection(
+        client_factories,
+        database_name,
+        schema=schema,
+    )
 
     # Add documents with metadata
     collection.add(
@@ -1280,8 +1363,10 @@ def test_sparse_auto_embedding_with_document_source_and_metadata(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_sparse_auto_embedding_with_metadata_source_key(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Test sparse embedding using a metadata field as source."""
     sparse_ef = DeterministicSparseEmbeddingFunction(label="meta_source")
@@ -1294,7 +1379,11 @@ def test_sparse_auto_embedding_with_metadata_source_key(
         ),
     )
 
-    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+    collection, _ = _create_isolated_collection(
+        client_factories,
+        database_name,
+        schema=schema,
+    )
 
     # Add with source field in metadata
     collection.add(
@@ -1330,8 +1419,10 @@ def test_sparse_auto_embedding_with_metadata_source_key(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_sparse_auto_embedding_with_mixed_metadata_none_and_filled(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Test sparse embedding with mixed metadata (None, empty, filled)."""
     sparse_ef = DeterministicSparseEmbeddingFunction(label="mixed_meta")
@@ -1344,7 +1435,11 @@ def test_sparse_auto_embedding_with_mixed_metadata_none_and_filled(
         ),
     )
 
-    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+    collection, _ = _create_isolated_collection(
+        client_factories,
+        database_name,
+        schema=schema,
+    )
 
     # Add with None metadata items mixed in
     collection.add(
@@ -1378,8 +1473,10 @@ def test_sparse_auto_embedding_with_mixed_metadata_none_and_filled(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_sparse_auto_embedding_skips_existing_values(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Test that sparse auto-embedding doesn't overwrite existing values."""
     sparse_ef = DeterministicSparseEmbeddingFunction(label="preserve")
@@ -1392,7 +1489,11 @@ def test_sparse_auto_embedding_skips_existing_values(
         ),
     )
 
-    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+    collection, _ = _create_isolated_collection(
+        client_factories,
+        database_name,
+        schema=schema,
+    )
 
     # Pre-create a sparse vector
     existing_sparse = SparseVector(indices=[999], values=[123.456])
@@ -1426,8 +1527,10 @@ def test_sparse_auto_embedding_skips_existing_values(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_sparse_auto_embedding_with_missing_source_field(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Test sparse embedding when source metadata field is missing or wrong type."""
     sparse_ef = DeterministicSparseEmbeddingFunction(label="missing_field")
@@ -1440,7 +1543,11 @@ def test_sparse_auto_embedding_with_missing_source_field(
         ),
     )
 
-    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+    collection, _ = _create_isolated_collection(
+        client_factories,
+        database_name,
+        schema=schema,
+    )
 
     collection.add(
         ids=["f1", "f2", "f3", "f4"],
@@ -1469,8 +1576,10 @@ def test_sparse_auto_embedding_with_missing_source_field(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_sparse_auto_embedding_with_string_inverted_index(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Test sparse auto-embedding works alongside string inverted indexes."""
     sparse_ef = DeterministicSparseEmbeddingFunction(label="with_string_index")
@@ -1488,7 +1597,11 @@ def test_sparse_auto_embedding_with_string_inverted_index(
         ),
     )
 
-    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+    collection, _ = _create_isolated_collection(
+        client_factories,
+        database_name,
+        schema=schema,
+    )
 
     collection.add(
         ids=["multi1", "multi2"],
@@ -1524,8 +1637,10 @@ def test_sparse_auto_embedding_with_string_inverted_index(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_dense_and_sparse_auto_embeddings_together(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Test that dense and sparse auto-embeddings work together."""
     dense_ef = SimpleEmbeddingFunction(dim=4)
@@ -1543,6 +1658,7 @@ def test_dense_and_sparse_auto_embeddings_together(
 
     collection, _ = _create_isolated_collection(
         client_factories,
+        database_name,
         schema=schema,
         embedding_function=dense_ef,
     )
@@ -1570,8 +1686,10 @@ def test_dense_and_sparse_auto_embeddings_together(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_sparse_auto_embedding_with_update_and_upsert(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Test sparse auto-embedding with update and upsert operations."""
     sparse_ef = DeterministicSparseEmbeddingFunction(label="update_upsert")
@@ -1584,7 +1702,11 @@ def test_sparse_auto_embedding_with_update_and_upsert(
         ),
     )
 
-    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+    collection, _ = _create_isolated_collection(
+        client_factories,
+        database_name,
+        schema=schema,
+    )
 
     # Initial add
     collection.add(
@@ -1626,8 +1748,10 @@ def test_sparse_auto_embedding_with_update_and_upsert(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_sparse_auto_embedding_persistence_across_client_reload(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Test that sparse auto-embedding config persists across client reloads."""
     sparse_ef = DeterministicSparseEmbeddingFunction(label="persist_test")
@@ -1640,7 +1764,11 @@ def test_sparse_auto_embedding_persistence_across_client_reload(
         ),
     )
 
-    collection, client = _create_isolated_collection(client_factories, schema=schema)
+    collection, client = _create_isolated_collection(
+        client_factories,
+        database_name,
+        schema=schema,
+    )
     collection_name = collection.name
 
     collection.add(
@@ -1649,7 +1777,7 @@ def test_sparse_auto_embedding_persistence_across_client_reload(
     )
 
     # Reload client
-    reloaded_client = client_factories.create_client_from_system()
+    reloaded_client = client_factories.create_client(database=database_name)
     reloaded_collection = reloaded_client.get_collection(
         name=collection_name,
     )
@@ -1675,8 +1803,10 @@ def test_sparse_auto_embedding_persistence_across_client_reload(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_sparse_auto_embedding_with_batch_operations(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Test sparse auto-embedding with large batch of documents."""
     sparse_ef = DeterministicSparseEmbeddingFunction(label="batch_test")
@@ -1689,7 +1819,11 @@ def test_sparse_auto_embedding_with_batch_operations(
         ),
     )
 
-    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+    collection, _ = _create_isolated_collection(
+        client_factories,
+        database_name,
+        schema=schema,
+    )
 
     # Add large batch
     batch_size = 100
@@ -1714,8 +1848,10 @@ def test_sparse_auto_embedding_with_batch_operations(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_sparse_auto_embedding_with_empty_documents(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Test sparse auto-embedding handles empty/None documents gracefully."""
     sparse_ef = DeterministicSparseEmbeddingFunction(label="empty_test")
@@ -1728,7 +1864,11 @@ def test_sparse_auto_embedding_with_empty_documents(
         ),
     )
 
-    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+    collection, _ = _create_isolated_collection(
+        client_factories,
+        database_name,
+        schema=schema,
+    )
 
     # Add with empty string document
     collection.add(
@@ -1745,12 +1885,14 @@ def test_sparse_auto_embedding_with_empty_documents(
     assert "empty_sparse" in metadata
 
 
+@multi_region_test
 def test_default_embedding_function_when_no_schema_provided(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Verify that when no schema is provided, the collection uses DefaultEmbeddingFunction (not legacy)."""
     # Create collection without providing any schema
-    collection, client = _create_isolated_collection(client_factories)
+    collection, client = _create_isolated_collection(client_factories, database_name)
 
     # Get the schema from the collection
     schema = collection.schema
@@ -1802,11 +1944,13 @@ def test_default_embedding_function_when_no_schema_provided(
     assert sparse_ef_config["type"] == "unknown"
 
 
+@multi_region_test
 def test_custom_embedding_function_without_schema(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Verify that custom embedding function is reflected in schema when no schema is provided."""
-    client = client_factories.create_client_from_system()
+    client = client_factories.create_client(database=database_name)
     client.reset()
 
     collection_name = f"custom_ef_no_schema_{uuid4().hex}"
@@ -1878,11 +2022,13 @@ def test_custom_embedding_function_without_schema(
     assert len(result["embeddings"][0]) == 8
 
 
+@multi_region_test
 def test_custom_embedding_function_with_default_schema(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Verify that custom embedding function is reflected in schema when default Schema() is provided."""
-    client = client_factories.create_client_from_system()
+    client = client_factories.create_client(database=database_name)
     client.reset()
 
     collection_name = f"custom_ef_default_schema_{uuid4().hex}"
@@ -1955,11 +2101,13 @@ def test_custom_embedding_function_with_default_schema(
     assert len(result["embeddings"][0]) == 8
 
 
+@multi_region_test
 def test_conflicting_embedding_functions_in_schema_and_config_fails(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Verify that setting different custom embedding functions in schema and config fails."""
-    client = client_factories.create_client_from_system()
+    client = client_factories.create_client(database=database_name)
     client.reset()
 
     collection_name = f"conflict_ef_{uuid4().hex}"
@@ -1988,8 +2136,10 @@ def test_conflicting_embedding_functions_in_schema_and_config_fails(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_create_index_with_key_type(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Test that create_index accepts both str and Key types."""
     # Create schema using both str and Key types
@@ -1997,7 +2147,11 @@ def test_create_index_with_key_type(
     schema.create_index(config=StringInvertedIndexConfig(), key="field_str")
     schema.create_index(config=IntInvertedIndexConfig(), key=Key("field_key"))
 
-    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+    collection, _ = _create_isolated_collection(
+        client_factories,
+        database_name,
+        schema=schema,
+    )
 
     # Verify both fields are in the schema
     assert collection.schema is not None
@@ -2021,8 +2175,10 @@ def test_create_index_with_key_type(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_delete_index_with_key_type(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Test that delete_index accepts both str and Key types."""
     # Disable indexes using both str and Key types
@@ -2030,7 +2186,11 @@ def test_delete_index_with_key_type(
     schema.delete_index(config=StringInvertedIndexConfig(), key="disabled_str")
     schema.delete_index(config=IntInvertedIndexConfig(), key=Key("disabled_key"))
 
-    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+    collection, _ = _create_isolated_collection(
+        client_factories,
+        database_name,
+        schema=schema,
+    )
 
     # Verify both fields have disabled indexes
     assert collection.schema is not None
@@ -2053,8 +2213,10 @@ def test_delete_index_with_key_type(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_vector_index_config_with_key_document_source(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Test that VectorIndexConfig source_key accepts Key.DOCUMENT."""
     schema = Schema()
@@ -2067,6 +2229,7 @@ def test_vector_index_config_with_key_document_source(
 
     collection, _ = _create_isolated_collection(
         client_factories,
+        database_name,
         schema=schema,
         embedding_function=SimpleEmbeddingFunction(dim=5),
     )
@@ -2100,8 +2263,10 @@ def test_vector_index_config_with_key_document_source(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_sparse_vector_index_config_with_key_types(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Test that SparseVectorIndexConfig source_key accepts both str and Key types."""
     sparse_ef = DeterministicSparseEmbeddingFunction(label="key_types")
@@ -2115,7 +2280,11 @@ def test_sparse_vector_index_config_with_key_types(
         ),
     )
 
-    collection1, _ = _create_isolated_collection(client_factories, schema=schema1)
+    collection1, _ = _create_isolated_collection(
+        client_factories,
+        database_name,
+        schema=schema1,
+    )
     assert collection1.schema is not None
     sparse1_config = collection1.schema.keys["sparse1"].sparse_vector
     assert sparse1_config is not None
@@ -2150,7 +2319,11 @@ def test_sparse_vector_index_config_with_key_types(
         ),
     )
 
-    collection2, _ = _create_isolated_collection(client_factories, schema=schema2)
+    collection2, _ = _create_isolated_collection(
+        client_factories,
+        database_name,
+        schema=schema2,
+    )
     assert collection2.schema is not None
     sparse2_config = collection2.schema.keys["sparse2"].sparse_vector
     assert sparse2_config is not None
@@ -2232,11 +2405,13 @@ def test_schema_rejects_invalid_source_key_in_configs() -> None:
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_server_validates_schema_with_special_keys(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Test that server-side validation rejects schemas with invalid special keys."""
-    client = client_factories.create_client_from_system()
+    client = client_factories.create_client(database=database_name)
     client.reset()
 
     collection_name = f"server_validate_{uuid4().hex}"
@@ -2273,11 +2448,13 @@ def test_server_validates_schema_with_special_keys(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_server_validates_invalid_source_key_in_sparse_vector_config(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Test that server-side validation rejects invalid source_key in SparseVectorIndexConfig."""
-    client = client_factories.create_client_from_system()
+    client = client_factories.create_client(database=database_name)
     client.reset()
 
     collection_name = f"server_source_key_{uuid4().hex}"
@@ -2321,6 +2498,7 @@ def test_server_validates_invalid_source_key_in_sparse_vector_config(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_modify_collection_no_initial_config_creates_default_schema(
     client: ClientAPI,
 ) -> None:
@@ -2355,6 +2533,7 @@ def test_modify_collection_no_initial_config_creates_default_schema(
 
 
 @pytest.mark.skipif(not is_spann_disabled_mode, reason="SPANN is disabled")
+@multi_region_test
 def test_modify_collection_no_initial_config_creates_default_schema_local(
     client: ClientAPI,
 ) -> None:
@@ -2389,6 +2568,7 @@ def test_modify_collection_no_initial_config_creates_default_schema_local(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_modify_collection_with_initial_spann_schema(client: ClientAPI) -> None:
     """Test creating collection with SPANN schema within server limits and modifying it."""
     collection_name = f"test_modify_with_schema_{uuid4()}"
@@ -2434,6 +2614,7 @@ def test_modify_collection_with_initial_spann_schema(client: ClientAPI) -> None:
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_modify_collection_updates_schema_spann_multiple_fields(
     client: ClientAPI,
 ) -> None:
@@ -2479,6 +2660,7 @@ def test_modify_collection_updates_schema_spann_multiple_fields(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_modify_collection_preserves_other_schema_fields(client: ClientAPI) -> None:
     """Test that modifying configuration doesn't affect other schema value types."""
     collection_name = f"test_modify_schema_preserve_{uuid4()}"
@@ -2617,8 +2799,10 @@ class TestSparseEmbeddingFunction(SparseEmbeddingFunction[List[str]]):
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_search_api_uses_embedded_searches_with_sparse_embeddings(
     client_factories: ClientFactories,
+    database_name: str,
 ) -> None:
     """Test that search API uses embedded_searches when string queries are embedded."""
 
@@ -2631,7 +2815,11 @@ def test_search_api_uses_embedded_searches_with_sparse_embeddings(
         ),
     )
 
-    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+    collection, _ = _create_isolated_collection(
+        client_factories,
+        database_name,
+        schema=schema,
+    )
 
     collection.add(
         ids=["doc1", "doc2"],
@@ -2658,14 +2846,20 @@ def test_search_api_uses_embedded_searches_with_sparse_embeddings(
 # ============================================================================
 
 
+@multi_region_test
 def test_fts_disabled_blocks_where_document_queries(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Disabling FTS via schema should block where_document queries on get, query, and delete."""
     schema = Schema()
     schema.delete_index(config=FtsIndexConfig(), key="#document")
 
-    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+    collection, _ = _create_isolated_collection(
+        client_factories,
+        database_name,
+        schema=schema,
+    )
 
     # Verify FTS is disabled in the schema
     assert collection.schema is not None
@@ -2707,11 +2901,13 @@ def test_fts_disabled_blocks_where_document_queries(
     assert set(filtered["ids"]) == {"fts-off-1", "fts-off-3"}
 
 
+@multi_region_test
 def test_fts_enabled_by_default_where_document_works(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Default schema should have FTS enabled and where_document queries should work."""
-    collection, _ = _create_isolated_collection(client_factories)
+    collection, _ = _create_isolated_collection(client_factories, database_name)
 
     # Verify FTS is enabled in the default schema
     assert collection.schema is not None
@@ -2732,14 +2928,20 @@ def test_fts_enabled_by_default_where_document_works(
     assert set(items["ids"]) == {"fts-on-2"}
 
 
+@multi_region_test
 def test_fts_disabled_schema_persistence(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """FTS-disabled schema should persist across client reloads."""
     schema = Schema()
     schema.delete_index(config=FtsIndexConfig(), key="#document")
 
-    collection, client = _create_isolated_collection(client_factories, schema=schema)
+    collection, client = _create_isolated_collection(
+        client_factories,
+        database_name,
+        schema=schema,
+    )
     collection_name = collection.name
 
     collection.add(
@@ -2748,7 +2950,7 @@ def test_fts_disabled_schema_persistence(
     )
 
     # Reload client
-    reloaded_client = client_factories.create_client_from_system()
+    reloaded_client = client_factories.create_client(database=database_name)
     reloaded_collection = reloaded_client.get_collection(name=collection_name)
 
     # Verify FTS is still disabled after reload
@@ -2763,14 +2965,20 @@ def test_fts_disabled_schema_persistence(
         reloaded_collection.get(where_document={"$contains": "persistent"})
 
 
+@multi_region_test
 def test_fts_disabled_documents_still_stored(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Documents should still be stored and retrievable when FTS is disabled."""
     schema = Schema()
     schema.delete_index(config=FtsIndexConfig(), key="#document")
 
-    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+    collection, _ = _create_isolated_collection(
+        client_factories,
+        database_name,
+        schema=schema,
+    )
 
     collection.add(
         ids=["stored-1", "stored-2"],
@@ -2787,8 +2995,10 @@ def test_fts_disabled_documents_still_stored(
     assert collection.count() == 2
 
 
+@multi_region_test
 def test_fts_disabled_then_new_collection_with_fts_enabled(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Deleting a FTS-disabled collection and recreating with FTS enabled should restore FTS."""
     # Create with FTS disabled
@@ -2796,7 +3006,9 @@ def test_fts_disabled_then_new_collection_with_fts_enabled(
     schema_disabled.delete_index(config=FtsIndexConfig(), key="#document")
 
     collection, client = _create_isolated_collection(
-        client_factories, schema=schema_disabled
+        client_factories,
+        database_name,
+        schema=schema_disabled,
     )
     col_name = collection.name
 
@@ -2822,14 +3034,20 @@ def test_fts_disabled_then_new_collection_with_fts_enabled(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+@multi_region_test
 def test_fts_disabled_search_api_blocks_document_filter(
     client_factories: "ClientFactories",
+    database_name: str,
 ) -> None:
     """Search API should also reject document filters when FTS is disabled."""
     schema = Schema()
     schema.delete_index(config=FtsIndexConfig(), key="#document")
 
-    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+    collection, _ = _create_isolated_collection(
+        client_factories,
+        database_name,
+        schema=schema,
+    )
 
     collection.add(
         ids=["search-fts-1", "search-fts-2"],
