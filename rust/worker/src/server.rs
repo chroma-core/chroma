@@ -955,7 +955,6 @@ mod tests {
             worker_queue_size: 10,
             active_io_tasks: 10,
             cpu_affinity_num_cores: None,
-            io_affinity_num_cores: None,
         });
         let dispatcher_handle = system.start_component(dispatcher);
         server.set_dispatcher(dispatcher_handle);

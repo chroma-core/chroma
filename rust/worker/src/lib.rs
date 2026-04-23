@@ -20,9 +20,8 @@ pub mod execution;
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
-pub async fn query_service_entrypoint() {
-    // Check if the config path is set in the env var
-    let config = match std::env::var(CONFIG_PATH_ENV_VAR) {
+pub fn load_root_config() -> config::RootConfig {
+    match std::env::var(CONFIG_PATH_ENV_VAR) {
         Ok(config_path) => {
             eprintln!("loading from {config_path}");
             config::RootConfig::load_from_path(&config_path)
@@ -31,7 +30,11 @@ pub async fn query_service_entrypoint() {
             eprintln!("loading from default path because {err}");
             config::RootConfig::load()
         }
-    };
+    }
+}
+
+pub async fn query_service_entrypoint() {
+    let config = load_root_config();
 
     let config = config.query_service;
     let registry = Registry::new();
@@ -81,17 +84,7 @@ pub async fn query_service_entrypoint() {
 }
 
 pub async fn compaction_service_entrypoint() {
-    // Check if the config path is set in the env var
-    let config = match std::env::var(CONFIG_PATH_ENV_VAR) {
-        Ok(config_path) => {
-            eprintln!("loading from {config_path}");
-            config::RootConfig::load_from_path(&config_path)
-        }
-        Err(err) => {
-            eprintln!("loading from default path because {err}");
-            config::RootConfig::load()
-        }
-    };
+    let config = load_root_config();
 
     let config = config.compaction_service;
     let registry = Registry::new();

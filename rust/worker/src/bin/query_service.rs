@@ -1,4 +1,4 @@
-use worker::query_service_entrypoint;
+use worker::{load_root_config, query_service_entrypoint};
 
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
@@ -7,7 +7,9 @@ use tikv_jemallocator::Jemalloc;
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
-#[tokio::main]
-async fn main() {
-    query_service_entrypoint().await;
+fn main() {
+    let root_config = load_root_config();
+    let runtime = chroma_system::build_tokio_main_runtime(&root_config.query_service.dispatcher)
+        .expect("failed to build chroma-main tokio runtime");
+    runtime.block_on(query_service_entrypoint());
 }

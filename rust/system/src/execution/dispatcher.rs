@@ -1,6 +1,5 @@
 use super::operator::OperatorType;
 use super::{operator::TaskMessage, worker_thread::WorkerThread};
-use crate::execution::affinity::{io_core_for_task, pin_current_thread};
 use crate::execution::config::DispatcherConfig;
 use crate::utils::duration_ms;
 use crate::{
@@ -17,7 +16,6 @@ use std::fmt::Debug;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::runtime::Runtime;
 use tracing::{trace_span, Instrument, Span};
 
 /// The dispatcher is responsible for distributing tasks to worker threads.
@@ -67,7 +65,6 @@ pub struct Dispatcher {
     task_queue: VecDeque<(TaskMessage, Span)>,
     waiters: Vec<TaskRequestMessage>,
     active_io_tasks: Arc<AtomicU64>,
-    io_runtime: Arc<Runtime>,
     worker_handles: Arc<Mutex<Vec<ComponentHandle<WorkerThread>>>>,
     metrics: DispatcherMetrics,
 }
@@ -173,42 +170,14 @@ pub struct DispatcherStats {
 impl Dispatcher {
     /// Create a new dispatcher from a configuration.
     pub fn new(config: DispatcherConfig) -> Self {
-        let io_runtime = Self::build_io_runtime(&config);
         Dispatcher {
             config: config.clone(),
             task_queue: VecDeque::new(),
             waiters: Vec::new(),
             active_io_tasks: Arc::new(AtomicU64::new(config.active_io_tasks as u64)),
-            io_runtime: Arc::new(io_runtime),
             worker_handles: Arc::new(Mutex::new(Vec::new())),
             metrics: DispatcherMetrics::new(),
         }
-    }
-
-    /// Build a dedicated tokio runtime for IO tasks.
-    ///
-    /// When `io_affinity_num_cores` is set, each runtime thread is pinned to a
-    /// core on startup via `on_thread_start`, filling from the right
-    /// (total - 1, total - 2, ...) and wrapping after `affinity_count` slots.
-    fn build_io_runtime(config: &DispatcherConfig) -> Runtime {
-        let mut builder = tokio::runtime::Builder::new_multi_thread();
-        builder.enable_all();
-        builder.thread_name("chroma-io");
-        if let Some(affinity_count) = config.io_affinity_num_cores {
-            let total_cores = std::thread::available_parallelism()
-                .map(|n| n.get())
-                .unwrap_or(1);
-            let thread_index = Arc::new(AtomicU64::new(0));
-            builder.on_thread_start(move || {
-                let idx = thread_index.fetch_add(1, Ordering::Relaxed) as usize;
-                if let Some(core) = io_core_for_task(idx, affinity_count, total_cores) {
-                    if !pin_current_thread(core) {
-                        tracing::warn!(core_id = core, "failed to pin IO runtime thread");
-                    }
-                }
-            });
-        }
-        builder.build().expect("IO tokio runtime should build")
     }
 
     /// Spawn worker threads
@@ -306,7 +275,7 @@ impl Dispatcher {
                     .queue_latency_ms
                     .record(duration_ms(task_created_at.elapsed()), &task_kv);
                 self.record_depths();
-                self.io_runtime.spawn(async move {
+                tokio::spawn(async move {
                     task.run().instrument(child_span).await;
                     drop(counter);
                 });
@@ -751,7 +720,6 @@ mod tests {
             worker_queue_size: 1000,
             active_io_tasks: 1000,
             cpu_affinity_num_cores: None,
-            io_affinity_num_cores: None,
         });
         let dispatcher_handle = system.start_component(dispatcher);
         let counter = Arc::new(AtomicUsize::new(0));
@@ -787,7 +755,6 @@ mod tests {
             worker_queue_size: 1000,
             active_io_tasks: 1000,
             cpu_affinity_num_cores: None,
-            io_affinity_num_cores: None,
         });
         let dispatcher_handle = system.start_component(dispatcher);
         let counter = Arc::new(AtomicUsize::new(0));
@@ -823,7 +790,6 @@ mod tests {
             worker_queue_size: 1,
             active_io_tasks: 1,
             cpu_affinity_num_cores: None,
-            io_affinity_num_cores: None,
         });
         let mut dispatcher_handle = system.start_component(dispatcher);
         let (result_receiver, result_rx) = OneshotMessageReceiver::new();
@@ -850,7 +816,6 @@ mod tests {
             worker_queue_size: 1,
             active_io_tasks: 1,
             cpu_affinity_num_cores: None,
-            io_affinity_num_cores: None,
         });
         let mut dispatcher_handle = system.start_component(dispatcher);
 
