@@ -17,6 +17,25 @@ pub const MAX_BLOCK_ENTRIES: usize = 4096;
 const HEADER_SIZE: usize = 16;
 const DIRECTORY_ENTRY_SIZE: usize = 8; // u32 max_offset + f32 max_weight
 
+/// Fill `out` with one group of relative offsets (`offset - min_offset`),
+/// padding trailing slots with `last_relative`. `offsets` may be shorter
+/// than `BITPACK_GROUP_SIZE` for the last group.
+fn fill_relative_group(
+    offsets: &[u32],
+    min_offset: u32,
+    last_relative: u32,
+    out: &mut [u32; BITPACK_GROUP_SIZE],
+) {
+    for (r, val) in out.iter_mut().zip(
+        offsets
+            .iter()
+            .map(|&o| o - min_offset)
+            .chain(std::iter::repeat(last_relative)),
+    ) {
+        *r = val;
+    }
+}
+
 /// Prefix tag prepended to a dimension-id key for directory block parts.
 ///
 /// The blockfile composite key uses `(prefix: String, key: u32)`.  Posting
@@ -128,23 +147,32 @@ struct Decompressed {
 ///   `SparsePostingBlock`. Used by *lazy/view cursors* for large dimensions
 ///   where we only touch a fraction of each block's entries.
 ///
-/// # Relationship between struct fields and `raw_body`
+/// # `raw_body` vs `decompressed`
 ///
-/// The struct fields (`min_offset`, `max_offset`, etc.) mirror the 16-byte
-/// header. `raw_body` stores the *body* bytes that follow the header (byte 16
-/// onward). There is no duplication: `serialize()` reconstructs the full blob
-/// by writing the header from struct fields then appending `raw_body`.
+/// These two fields form a one-of relationship — exactly one is the
+/// authoritative source of body data at construction time:
+///
+/// - **`from_sorted_entries` / `DirectoryBlock::new`** → `raw_body` is
+///   empty (posting) or packed directory bytes; `decompressed` holds the
+///   materialized offsets/values (posting) or is empty (directory).
+/// - **`deserialize`** → `raw_body` holds the compressed body bytes;
+///   `decompressed` is lazily populated on first call to `offsets()` or
+///   `values()`. Directory blocks read `raw_body` directly and never
+///   populate `decompressed`.
+///
+/// After lazy decompression, both fields may be populated simultaneously
+/// for posting blocks — `raw_body` remains as the serialization source
+/// and `decompressed` caches the decoded form.
 #[derive(Debug, Clone)]
 pub struct SparsePostingBlock {
-    pub min_offset: u32,
-    pub max_offset: u32,
-    pub max_weight: f32,
-    num_entries: u16,
-    bits_per_delta: u8,
-    /// Compressed body bytes (everything after the 16-byte header).
-    /// Empty for blocks created via `from_sorted_entries` (data lives in
-    /// `decompressed` instead, serialized on demand).
+    /// The 16-byte header fields (num_entries, bits_per_delta, min/max offset, max weight).
+    pub header: PostingBlockHeader,
+    /// Compressed body bytes after the 16-byte header. Empty when the
+    /// block was created via `from_sorted_entries` (posting blocks only).
     raw_body: Vec<u8>,
+    /// Lazily-decoded offsets and values. Populated eagerly by
+    /// `from_sorted_entries`; populated on first access for deserialized
+    /// posting blocks; never populated for directory blocks.
     decompressed: OnceLock<Decompressed>,
 }
 
@@ -187,14 +215,7 @@ impl SparsePostingBlock {
         for g in 0..num_groups {
             let start = g * BITPACK_GROUP_SIZE;
             let group_offsets = &offsets[start..n.min(start + BITPACK_GROUP_SIZE)];
-            for (r, val) in rel_group.iter_mut().zip(
-                group_offsets
-                    .iter()
-                    .map(|&o| o - min_offset)
-                    .chain(std::iter::repeat(last_relative)),
-            ) {
-                *r = val;
-            }
+            fill_relative_group(group_offsets, min_offset, last_relative, &mut rel_group);
             let initial = if g == 0 {
                 0
             } else {
@@ -204,22 +225,24 @@ impl SparsePostingBlock {
         }
 
         Ok(SparsePostingBlock {
-            min_offset,
-            max_offset,
-            max_weight,
-            num_entries: n as u16,
-            bits_per_delta: max_bits,
+            header: PostingBlockHeader {
+                min_offset,
+                max_offset,
+                max_weight,
+                num_entries: n as u16,
+                bits_per_delta: max_bits,
+            },
             raw_body: Vec::new(),
             decompressed: OnceLock::from(Decompressed { offsets, values }),
         })
     }
 
     pub fn len(&self) -> usize {
-        self.num_entries as usize
+        self.header.num_entries as usize
     }
 
     pub fn is_empty(&self) -> bool {
-        self.num_entries == 0
+        self.header.num_entries == 0
     }
 
     /// Decompressed doc offsets (materializes on first call).
@@ -244,9 +267,9 @@ impl SparsePostingBlock {
         self.decompressed.get_or_init(|| {
             Self::decompress_raw(
                 &self.raw_body,
-                self.num_entries as usize,
-                self.bits_per_delta,
-                self.min_offset,
+                self.header.num_entries as usize,
+                self.header.bits_per_delta,
+                self.header.min_offset,
             )
         })
     }
@@ -287,7 +310,7 @@ impl SparsePostingBlock {
     ) {
         let packer = BitPacker4x::new();
         let num_groups = num_entries.div_ceil(BITPACK_GROUP_SIZE);
-        let packed_group_bytes = BITPACK_GROUP_SIZE * (bits_per_delta as usize) / 8;
+        let packed_group_bytes = (BITPACK_GROUP_SIZE * (bits_per_delta as usize)).div_ceil(8);
 
         let padded_len = num_groups * BITPACK_GROUP_SIZE;
         buf.clear();
@@ -318,7 +341,7 @@ impl SparsePostingBlock {
     /// Byte offset of the weight section within the body (after the header).
     fn body_weight_offset(num_entries: usize, bits_per_delta: u8) -> usize {
         let num_groups = num_entries.div_ceil(BITPACK_GROUP_SIZE);
-        let packed_group_bytes = BITPACK_GROUP_SIZE * (bits_per_delta as usize) / 8;
+        let packed_group_bytes = (BITPACK_GROUP_SIZE * (bits_per_delta as usize)).div_ceil(8);
         num_groups * packed_group_bytes
     }
 
@@ -336,39 +359,40 @@ impl SparsePostingBlock {
         let data = self.ensure_decompressed();
         let n = data.offsets.len();
         let packer = BitPacker4x::new();
-        let last_relative = self.max_offset - self.min_offset;
+        let last_relative = self.header.max_offset - self.header.min_offset;
 
         let num_groups = n.div_ceil(BITPACK_GROUP_SIZE);
-        let packed_group_bytes = BITPACK_GROUP_SIZE * (self.bits_per_delta as usize) / 8;
+        let packed_group_bytes =
+            (BITPACK_GROUP_SIZE * (self.header.bits_per_delta as usize)).div_ceil(8);
 
         let mut buf = Vec::with_capacity(self.serialized_size());
         self.write_header(&mut buf);
 
-        // Max packed_group_bytes = 128 * 32 / 8 = 512.
+        // Scratch buffer sized for the worst case (bits_per_delta = 32):
+        // ceil(128 * 32 / 8) = 512 bytes. Only packed[..packed_group_bytes]
+        // is used per iteration.
         let mut packed = [0u8; BITPACK_GROUP_SIZE * 4];
         let mut rel_group = [0u32; BITPACK_GROUP_SIZE];
         for g in 0..num_groups {
             let start = g * BITPACK_GROUP_SIZE;
             let group_offsets = &data.offsets[start..n.min(start + BITPACK_GROUP_SIZE)];
-            for (r, val) in rel_group.iter_mut().zip(
-                group_offsets
-                    .iter()
-                    .map(|&o| o - self.min_offset)
-                    .chain(std::iter::repeat(last_relative)),
-            ) {
-                *r = val;
-            }
+            fill_relative_group(
+                group_offsets,
+                self.header.min_offset,
+                last_relative,
+                &mut rel_group,
+            );
             let initial = if g == 0 {
                 0
             } else {
-                data.offsets[start - 1] - self.min_offset
+                data.offsets[start - 1] - self.header.min_offset
             };
             packed[..packed_group_bytes].fill(0);
             packer.compress_sorted(
                 initial,
                 &rel_group,
                 &mut packed[..packed_group_bytes],
-                self.bits_per_delta,
+                self.header.bits_per_delta,
             );
             buf.extend_from_slice(&packed[..packed_group_bytes]);
         }
@@ -383,7 +407,8 @@ impl SparsePostingBlock {
     /// Byte length of the serialized representation (computable without
     /// decompression).
     pub fn serialized_size(&self) -> usize {
-        HEADER_SIZE + Self::expected_body_size(self.num_entries as usize, self.bits_per_delta)
+        HEADER_SIZE
+            + Self::expected_body_size(self.header.num_entries as usize, self.header.bits_per_delta)
     }
 
     /// Deserialize from bytes. Only reads the 16-byte header; body
@@ -413,11 +438,13 @@ impl SparsePostingBlock {
         }
 
         Ok(SparsePostingBlock {
-            min_offset,
-            max_offset,
-            max_weight,
-            num_entries,
-            bits_per_delta,
+            header: PostingBlockHeader {
+                min_offset,
+                max_offset,
+                max_weight,
+                num_entries,
+                bits_per_delta,
+            },
             raw_body: bytes[HEADER_SIZE..HEADER_SIZE + expected_body].to_vec(),
             decompressed: OnceLock::new(),
         })
@@ -426,19 +453,19 @@ impl SparsePostingBlock {
     /// Compute the expected body size (bytes after the header) from header fields.
     fn expected_body_size(num_entries: usize, bits_per_delta: u8) -> usize {
         if bits_per_delta == DIRECTORY_SENTINEL {
-            num_entries * 8
+            num_entries * DIRECTORY_ENTRY_SIZE
         } else {
             Self::body_weight_offset(num_entries, bits_per_delta) + num_entries * 2
         }
     }
 
     fn write_header(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&self.num_entries.to_le_bytes());
-        buf.push(self.bits_per_delta);
+        buf.extend_from_slice(&self.header.num_entries.to_le_bytes());
+        buf.push(self.header.bits_per_delta);
         buf.push(0); // reserved — available for format versioning if needed
-        buf.extend_from_slice(&self.min_offset.to_le_bytes());
-        buf.extend_from_slice(&self.max_offset.to_le_bytes());
-        buf.extend_from_slice(&self.max_weight.to_le_bytes());
+        buf.extend_from_slice(&self.header.min_offset.to_le_bytes());
+        buf.extend_from_slice(&self.header.max_offset.to_le_bytes());
+        buf.extend_from_slice(&self.header.max_weight.to_le_bytes());
     }
 
     // ── Zero-copy access from raw serialized bytes ──────────────────
@@ -524,7 +551,7 @@ impl SparsePostingBlock {
     }
 
     pub fn is_directory(&self) -> bool {
-        self.bits_per_delta == DIRECTORY_SENTINEL
+        self.header.bits_per_delta == DIRECTORY_SENTINEL
     }
 }
 
@@ -575,11 +602,13 @@ impl DirectoryBlock {
         }
 
         Ok(DirectoryBlock(SparsePostingBlock {
-            min_offset: max_offsets.first().copied().unwrap_or(0),
-            max_offset: max_offsets.last().copied().unwrap_or(0),
-            max_weight: dim_max,
-            num_entries: n as u16,
-            bits_per_delta: DIRECTORY_SENTINEL,
+            header: PostingBlockHeader {
+                min_offset: max_offsets.first().copied().unwrap_or(0),
+                max_offset: max_offsets.last().copied().unwrap_or(0),
+                max_weight: dim_max,
+                num_entries: n as u16,
+                bits_per_delta: DIRECTORY_SENTINEL,
+            },
             raw_body,
             decompressed: OnceLock::new(),
         }))
@@ -597,17 +626,17 @@ impl DirectoryBlock {
 
     /// Dimension-level maximum weight (max of all per-block max_weights).
     pub fn dim_max_weight(&self) -> f32 {
-        self.0.max_weight
+        self.0.header.max_weight
     }
 
     /// Number of posting blocks summarized by this directory.
     pub fn num_blocks(&self) -> usize {
-        self.0.num_entries as usize
+        self.0.header.num_entries as usize
     }
 
     /// Extract `(max_offsets, max_weights)` — one pair per posting block.
     pub fn entries(&self) -> (Vec<u32>, Vec<f32>) {
-        let n = self.0.num_entries as usize;
+        let n = self.0.header.num_entries as usize;
         let mut max_offsets = Vec::with_capacity(n);
         let mut max_weights = Vec::with_capacity(n);
         for i in 0..n {
@@ -811,11 +840,11 @@ mod tests {
         // padded group would have a large backward delta → wrong bits.
         let entries = sequential_entries(0, 1, 129, 0.5);
         let block = make_block(&entries);
-        assert_eq!(block.bits_per_delta, 1);
+        assert_eq!(block.header.bits_per_delta, 1);
 
         // Same for a single entry (padded to a full group of 128).
         let single = make_block(&[(42, 0.5)]);
-        assert_eq!(single.bits_per_delta, 0);
+        assert_eq!(single.header.bits_per_delta, 0);
     }
 
     #[test]
@@ -842,9 +871,9 @@ mod tests {
         let block = make_block(&entries);
         let bytes = block.serialize();
         let restored = SparsePostingBlock::deserialize(&bytes).unwrap();
-        assert_eq!(restored.min_offset, 10);
-        assert_eq!(restored.max_offset, 30);
-        assert_eq!(restored.max_weight, 0.9);
+        assert_eq!(restored.header.min_offset, 10);
+        assert_eq!(restored.header.max_offset, 30);
+        assert_eq!(restored.header.max_weight, 0.9);
         assert_eq!(restored.offsets().len(), 3);
     }
 
