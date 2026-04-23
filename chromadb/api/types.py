@@ -955,6 +955,7 @@ class DefaultEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(self) -> None:
         if is_thin_client:
             return
+        self._ef: Optional["ONNXMiniLM_L6_V2"] = None
 
     def __call__(self, input: Documents) -> Embeddings:
         # Import here to avoid circular imports
@@ -962,7 +963,9 @@ class DefaultEmbeddingFunction(EmbeddingFunction[Documents]):
             ONNXMiniLM_L6_V2,
         )
 
-        return ONNXMiniLM_L6_V2()(input)
+        if self._ef is None:
+            self._ef = ONNXMiniLM_L6_V2()
+        return self._ef(input)
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "DefaultEmbeddingFunction":
