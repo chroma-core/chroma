@@ -1,4 +1,4 @@
-use crate::key::CompositeKey;
+use crate::key::{CompositeKey, KeyWrapper};
 use chroma_error::ChromaError;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -71,6 +71,10 @@ pub(super) struct SparseIndexWriterData {
     // This is not intended updated incrementally, and is only populated
     // at commit time of the blockfile.
     pub(super) counts: BTreeMap<SparseIndexDelimiter, u32>,
+    // The byte offset of the value buffer (e.g., embedding array) within each block.
+    // This is optional and only populated when track_value_buffer_offsets is enabled.
+    // Used for byte-range reads of individual values without loading the entire block.
+    pub(super) value_buffer_offsets: BTreeMap<SparseIndexDelimiter, u64>,
 }
 
 impl SparseIndexWriterData {
@@ -107,11 +111,42 @@ impl ChromaError for SetCountError {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum SetValueBufferOffsetError {
+    #[error("Block id does not exist in the sparse index")]
+    BlockIdDoesNotExist,
+}
+
+impl ChromaError for SetValueBufferOffsetError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        match self {
+            SetValueBufferOffsetError::BlockIdDoesNotExist => {
+                chroma_error::ErrorCodes::InvalidArgument
+            }
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum SparseIndexReadError {
+    #[error("Invalid key type: expected u32 key for index calculation")]
+    InvalidKeyType,
+}
+
+impl ChromaError for SparseIndexReadError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        match self {
+            SparseIndexReadError::InvalidKeyType => chroma_error::ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
 impl SparseIndexWriter {
     pub(crate) fn new(initial_block_id: Uuid) -> Self {
         let mut forward = BTreeMap::new();
         let mut reverse = HashMap::new();
         let counts = BTreeMap::new();
+        let value_buffer_offsets = BTreeMap::new();
 
         forward.insert(SparseIndexDelimiter::Start, initial_block_id);
         reverse.insert(initial_block_id, SparseIndexDelimiter::Start);
@@ -120,6 +155,7 @@ impl SparseIndexWriter {
             forward,
             reverse,
             counts,
+            value_buffer_offsets,
         };
 
         Self {
@@ -146,7 +182,13 @@ impl SparseIndexWriter {
                     .counts
                     .remove(&old_start_key)
                     .expect("Invariant Violation, these maps are always in sync");
-                lock_guard.counts.insert(old_start_key, old_count);
+                lock_guard.counts.insert(old_start_key.clone(), old_count);
+                // Also migrate value_buffer_offset if present
+                if let Some(old_offset) = lock_guard.value_buffer_offsets.remove(&old_start_key) {
+                    lock_guard
+                        .value_buffer_offsets
+                        .insert(old_start_key, old_offset);
+                }
             }
         }
 
@@ -193,7 +235,11 @@ impl SparseIndexWriter {
                 .counts
                 .remove(&old_start_key)
                 .expect("Invariant Violation, these maps are always in sync");
-            data.counts.insert(old_start_key, old_count);
+            data.counts.insert(old_start_key.clone(), old_count);
+            // Also migrate value_buffer_offset if present
+            if let Some(old_offset) = data.value_buffer_offsets.remove(&old_start_key) {
+                data.value_buffer_offsets.insert(old_start_key, old_offset);
+            }
         }
     }
 
@@ -212,6 +258,28 @@ impl SparseIndexWriter {
                 Ok(())
             }
             None => Err(SetCountError::BlockIdDoesNotExist),
+        }
+    }
+
+    /// Set the byte offset of the value buffer within a block.
+    /// This is used for byte-range reads of individual values (e.g., embeddings)
+    /// without loading the entire block.
+    /// # Arguments
+    /// * `block_id` - The block id to set the offset for
+    /// * `offset` - The byte offset of the value buffer within the block
+    pub(crate) fn set_value_buffer_offset(
+        &self,
+        block_id: Uuid,
+        offset: u64,
+    ) -> Result<(), SetValueBufferOffsetError> {
+        let mut data = self.data.lock();
+        let start_key = data.reverse.get(&block_id);
+        match start_key.cloned() {
+            Some(start_key) => {
+                data.value_buffer_offsets.insert(start_key, offset);
+                Ok(())
+            }
+            None => Err(SetValueBufferOffsetError::BlockIdDoesNotExist),
         }
     }
 
@@ -240,6 +308,8 @@ impl SparseIndexWriter {
                 data.forward.remove(&start_key);
                 // data.counts is not guaranteed to be in sync with forward, so ignore the result if the key doesn't exist
                 let _ = data.counts.remove(&start_key);
+                // Same for value_buffer_offsets
+                let _ = data.value_buffer_offsets.remove(&start_key);
             }
             removed = true;
         }
@@ -276,6 +346,11 @@ impl SparseIndexWriter {
             if let Some(old_count) = data.counts.remove(&key_copy) {
                 data.counts.insert(SparseIndexDelimiter::Start, old_count);
             }
+            // Same for value_buffer_offsets
+            if let Some(old_offset) = data.value_buffer_offsets.remove(&key_copy) {
+                data.value_buffer_offsets
+                    .insert(SparseIndexDelimiter::Start, old_offset);
+            }
         }
     }
 
@@ -288,7 +363,11 @@ impl SparseIndexWriter {
 
         let zipped = data.forward.iter().zip(data.counts.iter());
         let new_forward = zipped.map(|((key, block_id), (_, count))| {
-            (key.clone(), SparseIndexValue::new(*block_id, *count))
+            let value_buffer_offset = data.value_buffer_offsets.get(key).copied();
+            (
+                key.clone(),
+                SparseIndexValue::new(*block_id, *count, value_buffer_offset),
+            )
         });
         let new_forward = BTreeMap::from_iter(new_forward);
         Ok(SparseIndexReader::new(new_forward))
@@ -327,15 +406,24 @@ pub(super) struct SparseIndexReaderData {
 /// # Fields
 /// * `id` - The block id that contains the keys in the range
 /// * `count` - The number of keys in the block
+/// * `value_buffer_offset` - Optional byte offset of the value buffer within the block
 #[derive(Serialize, Deserialize)]
 pub(super) struct SparseIndexValue {
     pub(super) id: Uuid,
     pub(super) count: u32,
+    /// Byte offset of the value buffer (e.g., embedding array) within the block.
+    /// Only present for blockfiles with value buffer offset tracking enabled.
+    #[serde(default)]
+    pub(super) value_buffer_offset: Option<u64>,
 }
 
 impl SparseIndexValue {
-    pub(super) fn new(id: Uuid, count: u32) -> Self {
-        Self { id, count }
+    pub(super) fn new(id: Uuid, count: u32, value_buffer_offset: Option<u64>) -> Self {
+        Self {
+            id,
+            count,
+            value_buffer_offset,
+        }
     }
 }
 
@@ -357,6 +445,43 @@ impl SparseIndexReader {
     pub(super) fn get_target_block_id(&self, search_key: &CompositeKey) -> Uuid {
         let forward = &self.data.forward;
         get_target_block(search_key, forward).id
+    }
+
+    /// Get block info and index within block for a given key.
+    ///
+    /// Returns `(block_id, value_buffer_offset, index_within_block)` for a search key.
+    /// Computes index_within_block internally using the delimiter's start key.
+    /// Only works for u32 keys.
+    ///
+    /// **PROTOTYPE LIMITATION**: Assumes offset_ids are contiguous (no deletes).
+    /// The calculation `index = offset_id - start_key` only works without gaps.
+    pub(super) fn get_block_and_index_for_key(
+        &self,
+        search_key: &CompositeKey,
+    ) -> Result<(Uuid, Option<u64>, u32), SparseIndexReadError> {
+        let forward = &self.data.forward;
+
+        // Find the delimiter and value for this key
+        let (delimiter, value) = get_target_block_with_delimiter(search_key, forward);
+
+        // Compute index within block using delimiter's start key
+        // ASSUMES: offset_ids are contiguous (no deletes)
+        let start_key = match delimiter {
+            SparseIndexDelimiter::Start => 0,
+            SparseIndexDelimiter::Key(key) => match &key.key {
+                KeyWrapper::Uint32(n) => *n,
+                _ => return Err(SparseIndexReadError::InvalidKeyType),
+            },
+        };
+
+        let search_key_value = match &search_key.key {
+            KeyWrapper::Uint32(n) => *n,
+            _ => return Err(SparseIndexReadError::InvalidKeyType),
+        };
+
+        let index_in_block = search_key_value - start_key;
+
+        Ok((value.id, value.value_buffer_offset, index_in_block))
     }
 
     /// Get all the block ids that contain keys in the given input search keys
@@ -521,12 +646,16 @@ impl SparseIndexReader {
         let mut new_forward = BTreeMap::new();
         let mut new_reverse = HashMap::new();
         let mut new_counts = BTreeMap::new();
+        let mut new_value_buffer_offsets = BTreeMap::new();
         let old_data = &self.data;
         let old_forward = &old_data.forward;
         for (key, curr_block_value) in old_forward.iter() {
             new_forward.insert(key.clone(), curr_block_value.id);
             new_reverse.insert(curr_block_value.id, key.clone());
             new_counts.insert(key.clone(), curr_block_value.count);
+            if let Some(offset) = curr_block_value.value_buffer_offset {
+                new_value_buffer_offsets.insert(key.clone(), offset);
+            }
         }
 
         SparseIndexWriter {
@@ -534,6 +663,7 @@ impl SparseIndexReader {
                 forward: new_forward,
                 reverse: new_reverse,
                 counts: new_counts,
+                value_buffer_offsets: new_value_buffer_offsets,
             })),
         }
     }
@@ -578,6 +708,22 @@ fn get_target_block<'data, T>(
         .next_back()
     {
         Some((_, data)) => data,
+        None => {
+            panic!("No blocks in the sparse index");
+        }
+    }
+}
+
+// Helper function to get the target block and its delimiter for a given key
+fn get_target_block_with_delimiter<'data, T>(
+    search_key: &CompositeKey,
+    forward: &'data BTreeMap<SparseIndexDelimiter, T>,
+) -> (&'data SparseIndexDelimiter, &'data T) {
+    match forward
+        .range(..=SparseIndexDelimiter::Key(search_key.clone()))
+        .next_back()
+    {
+        Some((delimiter, data)) => (delimiter, data),
         None => {
             panic!("No blocks in the sparse index");
         }
