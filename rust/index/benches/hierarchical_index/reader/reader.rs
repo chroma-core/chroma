@@ -7,10 +7,9 @@ use chroma_index::quantization::{Code, QuantizedQuery};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use simsimd::SpatialSimilarity;
 
-use super::super::writer::{
-    code_slice, effective_beam, persistence::PREFIX_EMBEDDING, NodeId, ReadBeamPolicy,
-    SearchTimings, TreeNode,
-};
+use super::super::common::{code_slice, effective_beam, NodeId, ReadBeamPolicy, TreeNode};
+use super::super::instrumentation::SearchTimings;
+use super::super::persistance::PREFIX_EMBEDDING;
 use super::HierarchicalSpannReader;
 
 /// Max in-flight async loads per query in `search_with_policy_lazy`.

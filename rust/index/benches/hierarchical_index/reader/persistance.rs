@@ -10,13 +10,14 @@ use chroma_types::hierarchical_spann::{
 };
 use dashmap::DashMap;
 
-use super::super::writer::{
-    persistence::{
-        HierarchicalSpannIds, NO_PARENT, PREFIX_CENTROID, PREFIX_DIM, PREFIX_EMBEDDING,
-        PREFIX_ROOT, SINGLETON_KEY,
-    },
-    HierarchicalSpannConfig, InternalNode, LeafNode, NodeId, TreeNode, WriterStats,
+use super::super::common::{InternalNode, LeafNode, NodeId, TreeNode};
+use super::super::config::HierarchicalSpannConfig;
+use super::super::persistance::{
+    NO_PARENT, PREFIX_CENTROID, PREFIX_DIM, PREFIX_EMBEDDING, PREFIX_ROOT, SINGLETON_KEY,
 };
+
+use super::super::writer::{persistence::HierarchicalSpannIds, WriterStats};
+
 use super::HierarchicalSpannReader;
 
 impl HierarchicalSpannReader {

@@ -1,4 +1,4 @@
-use super::super::writer::{NodeId, TreeNode};
+use super::super::common::{NodeId, TreeNode};
 use super::HierarchicalSpannReader;
 use chroma_index::quantization::Code;
 

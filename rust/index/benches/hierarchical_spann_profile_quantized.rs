@@ -47,12 +47,14 @@ use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 
 use datasets::{format_count, recall_at_k, Dataset, DatasetType, MetricType, Query};
+use hierarchical_index::common::ReadBeamPolicy;
+use hierarchical_index::config::{HierarchicalSpannConfig, NavigationMode};
+use hierarchical_index::instrumentation::SearchTimings;
 use hierarchical_index::mem_probe::{self, RssSampler};
 use hierarchical_index::reader::HierarchicalSpannReader;
 use hierarchical_index::writer::{
-    format_data_loaded_table, format_task_tables, HierarchicalSpannConfig, HierarchicalSpannIds,
-    HierarchicalSpannWriter, LeafMissDiagnostic, LeafTraits, NavigationMode, ReadBeamPolicy,
-    SearchTimings, WriterStatsSnapshot,
+    format_data_loaded_table, format_task_tables, HierarchicalSpannIds, HierarchicalSpannWriter,
+    LeafMissDiagnostic, LeafTraits, WriterStatsSnapshot,
 };
 
 // =============================================================================

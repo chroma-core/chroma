@@ -4,10 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use parking_lot::Mutex;
 
-/// Maximum tree depth tracked by per-level navigate counters. Deeper
-/// expansions get bucketed into the last slot. 8 covers anything we'd
-/// realistically build (current 113M run is depth 4).
-pub const MAX_NAV_LEVELS: usize = 8;
+use super::writer::MAX_NAV_LEVELS;
 
 // =============================================================================
 // Stats (atomic for thread safety)

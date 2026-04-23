@@ -20,10 +20,13 @@ use dashmap::{DashMap, DashSet};
 use parking_lot::ReentrantMutex;
 use uuid::Uuid;
 
-use super::{
-    HierarchicalSpannConfig, HierarchicalSpannWriter, InternalNode, LeafNode, NodeId, TreeNode,
-    WriterStats, DELETED_BIT,
+use super::super::common::{InternalNode, LeafNode, NodeId, TreeNode};
+use super::super::persistance::{
+    NO_PARENT, PREFIX_CENTROID, PREFIX_DIM, PREFIX_EMBEDDING, PREFIX_NEXT_NODE, PREFIX_ROOT,
+    PREFIX_VERSION, SINGLETON_KEY,
 };
+use super::super::writer::DELETED_BIT;
+use super::{HierarchicalSpannConfig, HierarchicalSpannWriter, WriterStats};
 
 thread_local! {
     /// Used from sync writer paths on threads with no Tokio runtime (Rayon / scoped workers).
@@ -52,17 +55,6 @@ where
         }),
     }
 }
-
-// Blockfile prefix constants
-pub const PREFIX_ROOT: &str = "root";
-pub const PREFIX_NEXT_NODE: &str = "next_node";
-pub const PREFIX_DIM: &str = "dim";
-pub const PREFIX_VERSION: &str = "version";
-pub const PREFIX_EMBEDDING: &str = "embedding";
-pub const PREFIX_CENTROID: &str = "centroid";
-
-pub const SINGLETON_KEY: u32 = 0;
-pub const NO_PARENT: u32 = u32::MAX;
 
 pub fn pack_bytes_to_u32s(bytes: &[u8]) -> Vec<u32> {
     bytes
@@ -344,11 +336,8 @@ impl HierarchicalSpannWriter {
         //    version blockfile (above) already carries DELETED_BIT for these
         //    ids; here we erase the actual f32 data so it can't be served by
         //    rerank/recall and so disk space is reclaimed.
-        let mut deleted_emb_ids: Vec<u32> = self
-            .dirty_deleted_embeddings
-            .iter()
-            .map(|e| *e)
-            .collect();
+        let mut deleted_emb_ids: Vec<u32> =
+            self.dirty_deleted_embeddings.iter().map(|e| *e).collect();
         deleted_emb_ids.sort_unstable();
         let n_deleted = deleted_emb_ids.len() as u64;
         for data_id in deleted_emb_ids {

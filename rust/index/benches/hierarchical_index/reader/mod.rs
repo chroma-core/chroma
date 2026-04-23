@@ -7,11 +7,13 @@ use chroma_distance::DistanceFunction;
 use chroma_types::hierarchical_spann::HierarchicalSpannPostingList;
 use dashmap::DashMap;
 
-use super::writer::{HierarchicalSpannConfig, NodeId, TreeNode, WriterStats};
+use super::config::HierarchicalSpannConfig;
+use super::common::{NodeId, TreeNode};
+use super::writer::WriterStats;
 
+mod diagnostics;
 mod persistance;
 mod reader;
-mod diagnostics;
 
 pub struct HierarchicalSpannReader {
     nodes: DashMap<NodeId, TreeNode>,

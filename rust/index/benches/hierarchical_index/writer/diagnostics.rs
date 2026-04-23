@@ -4,11 +4,10 @@ use std::collections::{HashMap, HashSet};
 
 use chroma_index::quantization::{Code, QuantizedQuery};
 
-use super::{
-    HierarchicalSpannWriter, LeafMissDiagnostic, LeafTraits, LevelRecall,
-    NodeId, ReadBeamPolicy, TreeNode,
-};
+use super::super::common::{NodeId, TreeNode};
 use super::{percentile_f32, percentile_usize};
+use super::{HierarchicalSpannWriter, LeafMissDiagnostic, LeafTraits, LevelRecall};
+use super::super::common::ReadBeamPolicy;
 
 // =============================================================================
 // Search + Diagnostics + Tree Info
@@ -96,12 +95,8 @@ impl HierarchicalSpannWriter {
             let params = policy.level_params(level);
             child_scores.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
-            let effective = Self::effective_beam(
-                &child_scores,
-                params.tau,
-                params.beam_min,
-                params.beam_max,
-            );
+            let effective =
+                Self::effective_beam(&child_scores, params.tau, params.beam_min, params.beam_max);
             child_scores.truncate(effective);
 
             let mut next_internals: Vec<NodeId> = Vec::new();
@@ -311,7 +306,9 @@ impl HierarchicalSpannWriter {
 
             // Check if this is the leaf level (no internal children).
             let has_internals = child_scores.iter().any(|(nid, _)| {
-                self.nodes.get(nid).map_or(false, |n| matches!(n.value(), TreeNode::Internal(_)))
+                self.nodes
+                    .get(nid)
+                    .map_or(false, |n| matches!(n.value(), TreeNode::Internal(_)))
             });
 
             if !has_internals {
@@ -322,7 +319,9 @@ impl HierarchicalSpannWriter {
                 let total_leaves = child_scores.len();
 
                 // Build rank map: node_id -> 1-indexed rank in sorted order.
-                let rank_map: HashMap<NodeId, usize> = child_scores.iter().enumerate()
+                let rank_map: HashMap<NodeId, usize> = child_scores
+                    .iter()
+                    .enumerate()
                     .map(|(i, (nid, _))| (*nid, i + 1))
                     .collect();
 
@@ -330,7 +329,12 @@ impl HierarchicalSpannWriter {
                 let params = policy.level_params(level_depth);
                 let mut beam_scores = child_scores.clone();
 
-                let effective = Self::effective_beam(&beam_scores, params.tau, params.beam_min, params.beam_max);
+                let effective = Self::effective_beam(
+                    &beam_scores,
+                    params.tau,
+                    params.beam_min,
+                    params.beam_max,
+                );
                 beam_scores.truncate(effective);
 
                 let beam_set: HashSet<NodeId> = beam_scores.iter().map(|(nid, _)| *nid).collect();
@@ -345,7 +349,8 @@ impl HierarchicalSpannWriter {
                 let beam_radius = beam_scores.last().map(|(_, s)| *s).unwrap_or(0.0);
 
                 // Build score map for looking up scores by node id.
-                let score_map: HashMap<NodeId, f32> = child_scores.iter()
+                let score_map: HashMap<NodeId, f32> = child_scores
+                    .iter()
                     .map(|&(nid, score)| (nid, score))
                     .collect();
 
@@ -372,7 +377,8 @@ impl HierarchicalSpannWriter {
                             for (i, &id) in leaf.ids.iter().enumerate() {
                                 if gt_100.contains(&id) {
                                     let version = leaf.versions[i];
-                                    let current_ver = self.versions.get(&id).map(|r| *r).unwrap_or(0);
+                                    let current_ver =
+                                        self.versions.get(&id).map(|r| *r).unwrap_or(0);
                                     if version == current_ver {
                                         gt_ids_for_leaf.push(id);
                                         if let Some(emb) = self.embeddings.get(&id) {
@@ -447,10 +453,9 @@ impl HierarchicalSpannWriter {
                 let mut missed_gt_ranks: Vec<(u32, usize)> = best_rank_for_gt.into_iter().collect();
                 missed_gt_ranks.sort_by_key(|&(_, rank)| rank);
 
-                let gt_distances: Vec<f32> = gt_100.iter()
-                    .filter_map(|&id| {
-                        self.embeddings.get(&id).map(|emb| self.dist(query, &emb))
-                    })
+                let gt_distances: Vec<f32> = gt_100
+                    .iter()
+                    .filter_map(|&id| self.embeddings.get(&id).map(|emb| self.dist(query, &emb)))
                     .collect();
 
                 return LeafMissDiagnostic {
@@ -470,12 +475,15 @@ impl HierarchicalSpannWriter {
             // Not the leaf level yet -- truncate beam and continue down.
             let params = policy.level_params(level_depth);
 
-            let effective = Self::effective_beam(&child_scores, params.tau, params.beam_min, params.beam_max);
+            let effective =
+                Self::effective_beam(&child_scores, params.tau, params.beam_min, params.beam_max);
             child_scores.truncate(effective);
 
-            beam = child_scores.iter()
+            beam = child_scores
+                .iter()
                 .filter_map(|(nid, _)| {
-                    self.nodes.get(nid)
+                    self.nodes
+                        .get(nid)
                         .filter(|n| matches!(n.value(), TreeNode::Internal(_)))
                         .map(|_| *nid)
                 })
@@ -708,7 +716,11 @@ impl HierarchicalSpannWriter {
                 // Materialized leaves: live ids count. Lazy shells (ids empty
                 // but length>0): the persisted length, since the actual entries
                 // live on disk and have not been loaded yet.
-                TreeNode::Leaf(l) => Some(if l.ids.is_empty() { l.length } else { l.ids.len() }),
+                TreeNode::Leaf(l) => Some(if l.ids.is_empty() {
+                    l.length
+                } else {
+                    l.ids.len()
+                }),
                 _ => None,
             })
             .sum()
@@ -917,7 +929,8 @@ impl HierarchicalSpannWriter {
 
         if vectors_with_replicas > 0 {
             // Replica count distribution.
-            let mut replica_counts: Vec<usize> = live_entry_counts.values()
+            let mut replica_counts: Vec<usize> = live_entry_counts
+                .values()
                 .filter(|&&c| c > 1)
                 .copied()
                 .collect();
@@ -930,12 +943,14 @@ impl HierarchicalSpannWriter {
             }
             let mut hist_keys: Vec<usize> = count_histogram.keys().copied().collect();
             hist_keys.sort_unstable();
-            let hist_str: String = hist_keys.iter()
+            let hist_str: String = hist_keys
+                .iter()
                 .map(|k| format!("{}x={}", k, count_histogram[k]))
                 .collect::<Vec<_>>()
                 .join(" ");
 
-            println!("  Replicated vectors: {} | Avg copies: {:.2} | Distribution: {}",
+            println!(
+                "  Replicated vectors: {} | Avg copies: {:.2} | Distribution: {}",
                 format_count_fn(vectors_with_replicas),
                 avg_rep,
                 hist_str,
@@ -944,7 +959,8 @@ impl HierarchicalSpannWriter {
             // For replicated vectors, compute distance stats.
             // Sample to keep this tractable on large datasets.
             let sample_cap = 100_000usize;
-            let mut replicated_vids: Vec<u32> = vector_leaves.keys()
+            let mut replicated_vids: Vec<u32> = vector_leaves
+                .keys()
                 .filter(|vid| vector_leaves[vid].len() >= 2)
                 .copied()
                 .collect();
@@ -968,10 +984,9 @@ impl HierarchicalSpannWriter {
                     None => continue,
                 };
 
-                let mut dists: Vec<f32> = leaves.iter()
-                    .filter_map(|&nid| {
-                        self.nodes.get(&nid).map(|n| self.dist(&emb, n.centroid()))
-                    })
+                let mut dists: Vec<f32> = leaves
+                    .iter()
+                    .filter_map(|&nid| self.nodes.get(&nid).map(|n| self.dist(&emb, n.centroid())))
                     .collect();
                 dists.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
@@ -982,11 +997,12 @@ impl HierarchicalSpannWriter {
                     d_farthest_values.push(*dists.last().unwrap());
                 }
 
-                let centroids: Vec<Vec<f32>> = leaves.iter()
+                let centroids: Vec<Vec<f32>> = leaves
+                    .iter()
                     .filter_map(|&nid| self.nodes.get(&nid).map(|n| n.centroid().to_vec()))
                     .collect();
                 for i in 0..centroids.len() {
-                    for j in (i+1)..centroids.len() {
+                    for j in (i + 1)..centroids.len() {
                         inter_centroid_dists.push(self.dist(&centroids[i], &centroids[j]));
                     }
                 }
@@ -1001,30 +1017,65 @@ impl HierarchicalSpannWriter {
                 let pf = |v: &[f32], p: f64| v[(p * (v.len() - 1) as f64) as usize];
                 let favg = |v: &[f32]| v.iter().map(|x| *x as f64).sum::<f64>() / v.len() as f64;
 
-                println!("  {:30}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}",
-                    "metric", "min", "p25", "p50", "avg", "p75", "p90", "max");
-                println!("  {:30}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}",
-                    "------------------------------", "-------", "-------", "-------", "-------", "-------", "-------", "-------");
-                println!("  {:30}  {:>7.3}  {:>7.3}  {:>7.3}  {:>7.3}  {:>7.3}  {:>7.3}  {:>7.3}",
+                println!(
+                    "  {:30}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}",
+                    "metric", "min", "p25", "p50", "avg", "p75", "p90", "max"
+                );
+                println!(
+                    "  {:30}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}",
+                    "------------------------------",
+                    "-------",
+                    "-------",
+                    "-------",
+                    "-------",
+                    "-------",
+                    "-------",
+                    "-------"
+                );
+                println!(
+                    "  {:30}  {:>7.3}  {:>7.3}  {:>7.3}  {:>7.3}  {:>7.3}  {:>7.3}  {:>7.3}",
                     "d2/d1 (boundary proximity)",
-                    d_ratio_values[0], pf(&d_ratio_values, 0.25), pf(&d_ratio_values, 0.5),
-                    favg(&d_ratio_values), pf(&d_ratio_values, 0.75), pf(&d_ratio_values, 0.9),
-                    d_ratio_values[d_ratio_values.len()-1]);
-                println!("  {:30}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7}  {:>7.4}",
+                    d_ratio_values[0],
+                    pf(&d_ratio_values, 0.25),
+                    pf(&d_ratio_values, 0.5),
+                    favg(&d_ratio_values),
+                    pf(&d_ratio_values, 0.75),
+                    pf(&d_ratio_values, 0.9),
+                    d_ratio_values[d_ratio_values.len() - 1]
+                );
+                println!(
+                    "  {:30}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7}  {:>7.4}",
                     "d_nearest (to closest cent.)",
-                    d_nearest_values[0], pf(&d_nearest_values, 0.25), pf(&d_nearest_values, 0.5),
-                    favg(&d_nearest_values), pf(&d_nearest_values, 0.75), "", 
-                    d_nearest_values[d_nearest_values.len()-1]);
-                println!("  {:30}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7}  {:>7.4}",
+                    d_nearest_values[0],
+                    pf(&d_nearest_values, 0.25),
+                    pf(&d_nearest_values, 0.5),
+                    favg(&d_nearest_values),
+                    pf(&d_nearest_values, 0.75),
+                    "",
+                    d_nearest_values[d_nearest_values.len() - 1]
+                );
+                println!(
+                    "  {:30}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7}  {:>7.4}",
                     "d_farthest (to farthest cent.)",
-                    d_farthest_values[0], pf(&d_farthest_values, 0.25), pf(&d_farthest_values, 0.5),
-                    favg(&d_farthest_values), pf(&d_farthest_values, 0.75), "",
-                    d_farthest_values[d_farthest_values.len()-1]);
-                println!("  {:30}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7}  {:>7.4}",
+                    d_farthest_values[0],
+                    pf(&d_farthest_values, 0.25),
+                    pf(&d_farthest_values, 0.5),
+                    favg(&d_farthest_values),
+                    pf(&d_farthest_values, 0.75),
+                    "",
+                    d_farthest_values[d_farthest_values.len() - 1]
+                );
+                println!(
+                    "  {:30}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7}  {:>7.4}",
                     "inter-centroid dist",
-                    inter_centroid_dists[0], pf(&inter_centroid_dists, 0.25), pf(&inter_centroid_dists, 0.5),
-                    favg(&inter_centroid_dists), pf(&inter_centroid_dists, 0.75), "",
-                    inter_centroid_dists[inter_centroid_dists.len()-1]);
+                    inter_centroid_dists[0],
+                    pf(&inter_centroid_dists, 0.25),
+                    pf(&inter_centroid_dists, 0.5),
+                    favg(&inter_centroid_dists),
+                    pf(&inter_centroid_dists, 0.75),
+                    "",
+                    inter_centroid_dists[inter_centroid_dists.len() - 1]
+                );
             }
         }
     }
