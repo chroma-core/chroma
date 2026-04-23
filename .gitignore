@@ -45,3 +45,6 @@ target/
 
 # Rapid test data
 testdata
+
+# Examples test data
+examples/gemini*/chroma_storage/
