@@ -433,8 +433,10 @@ impl SysDb {
                     .await
             }
             SysDb::Sqlite(_) => unimplemented!(),
-            SysDb::Test(_) => {
-                todo!()
+            SysDb::Test(test) => {
+                let _ = tenant;
+                let _ = database;
+                test.finish_collection_deletion(collection_id).await
             }
         }
     }

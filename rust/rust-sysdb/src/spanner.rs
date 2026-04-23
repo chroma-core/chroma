@@ -1772,12 +1772,11 @@ impl SpannerBackend {
     ) -> Result<ListCollectionsToGcResponse, SysDbError> {
         let region = self.local_region();
 
-        // TODO(tanujnay112): This is due to the garbage collector being unable
-        // to handle collections with no version files. Until that is fixed, we
-        // must have this filter.
+        // GC typically starts from the latest version file. Empty MCMR
+        // collections never write one, so allow soft-deleted '+' databases to
+        // flow through to the dedicated no-version-file fallback path.
         let mut where_clauses: Vec<String> = vec![
-            "ccc.version_file_name IS NOT NULL".to_string(),
-            "ccc.version_file_name != ''".to_string(),
+            "((ccc.version_file_name IS NOT NULL AND ccc.version_file_name != '') OR c.is_deleted = TRUE)".to_string(),
         ];
 
         if req.tenant_id.is_some() {
@@ -1858,7 +1857,7 @@ impl SpannerBackend {
             let name: String = row
                 .column_by_name("name")
                 .map_err(SysDbError::FailedToReadColumn)?;
-            let version_file_name: String = row
+            let version_file_name: Option<String> = row
                 .column_by_name("version_file_name")
                 .map_err(SysDbError::FailedToReadColumn)?;
             let tenant_id: String = row
@@ -1871,7 +1870,7 @@ impl SpannerBackend {
             collections.push(chroma_proto::CollectionToGcInfo {
                 id: collection_id,
                 name,
-                version_file_path: version_file_name,
+                version_file_path: version_file_name.unwrap_or_default(),
                 tenant_id,
                 lineage_file_path: None, // Not available in Spanner schema
                 database_name,
@@ -9287,8 +9286,8 @@ pub mod tests {
             result.err()
         );
 
-        // Manually insert a compaction cursor to make the collection eligible for GC
-        // (list_collections_to_gc only returns collections with version_file_name set)
+        // Manually insert a compaction cursor to make this non-soft-deleted collection eligible
+        // for GC. Soft-deleted empty MCMR collections are covered separately below.
         let version_file_name = format!("test_version_{}.bin", collection_id);
         let region = backend.local_region().to_string();
         backend
@@ -9344,6 +9343,95 @@ pub mod tests {
         assert_eq!(gc_collection.version_file_path, version_file_name);
         assert_eq!(gc_collection.database_name, Some(db_name.into_string()));
         assert_eq!(gc_collection.lineage_file_path, None); // Not set in Spanner schema
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_list_collections_to_gc_includes_soft_deleted_empty_mcmr_collection(
+    ) {
+        let Some(backend) = setup_test_backend().await else {
+            eprintln!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+            return;
+        };
+
+        let tenant_id = Uuid::new_v4().to_string();
+        backend
+            .create_tenant(CreateTenantRequest {
+                id: tenant_id.clone(),
+            })
+            .await
+            .expect("Failed to create tenant");
+
+        let db_name = chroma_types::DatabaseName::new(format!(
+            "tilt-spanning+test_db_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+        .expect("test db name should be valid");
+        backend
+            .create_database(CreateDatabaseRequest {
+                id: Uuid::new_v4(),
+                name: db_name.clone(),
+                tenant_id: tenant_id.clone(),
+            })
+            .await
+            .expect("Failed to create database");
+
+        let collection_name = format!("test_gc_empty_collection_{}", Uuid::new_v4());
+        let collection_id = create_collection_for_update(
+            &backend,
+            &tenant_id,
+            &db_name,
+            &collection_name,
+            Some(128),
+            None,
+        )
+        .await;
+
+        backend
+            .update_collection(UpdateCollectionRequest {
+                database_name: db_name.clone(),
+                id: collection_id,
+                name: Some(format!("deleted_{}", collection_name)),
+                dimension: None,
+                metadata: None,
+                reset_metadata: false,
+                new_configuration: None,
+                cursor_updates: None,
+                is_deleted: Some(true),
+            })
+            .await
+            .expect("Failed to soft-delete collection");
+
+        let response = backend
+            .list_collections_to_gc(ListCollectionsToGcRequest {
+                cutoff_time: None,
+                limit: None,
+                tenant_id: Some(tenant_id.clone()),
+                min_versions_if_alive: None,
+            })
+            .await
+            .expect("Failed to list collections to GC");
+
+        assert_eq!(
+            response.collections.len(),
+            1,
+            "Expected exactly one collection eligible for GC"
+        );
+
+        let gc_collection = &response.collections[0];
+        assert_eq!(gc_collection.id, collection_id.to_string());
+        assert_eq!(gc_collection.name, format!("deleted_{}", collection_name));
+        assert_eq!(gc_collection.tenant_id, tenant_id);
+        assert_eq!(
+            gc_collection.version_file_path, "",
+            "Soft-deleted empty MCMR collections should surface an empty version file path"
+        );
+        assert_eq!(
+            gc_collection.database_name,
+            Some(db_name.as_ref().to_string())
+        );
     }
 
     #[tokio::test]

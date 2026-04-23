@@ -16,13 +16,14 @@ use chroma_log::Log;
 use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_storage::Storage;
 use chroma_sysdb::{
-    CollectionToGcInfo, GetCollectionsOptions, GetCollectionsToGcError, SysDb, SysDbConfig,
+    CollectionToGcInfo, DatabaseOrTopology, GetCollectionsOptions, GetCollectionsToGcError, SysDb,
+    SysDbConfig,
 };
 use chroma_system::{
     wrap, Component, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, System,
     TaskResult,
 };
-use chroma_types::{CollectionUuid, DatabaseName, GetCollectionsError};
+use chroma_types::{CollectionUuid, DatabaseName, DeleteCollectionError, GetCollectionsError};
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use opentelemetry::metrics::{Counter, Histogram};
@@ -73,6 +74,14 @@ enum GarbageCollectCollectionError {
     NoSuchCollection,
     #[error("Failed to get collections: {0}")]
     GetCollectionsError(#[from] GetCollectionsError),
+    #[error("Collection deletion failed: {0}")]
+    CollectionDeletionFailed(#[from] DeleteCollectionError),
+    #[error("SysDb method failed: {0}")]
+    SysDbMethodFailed(String),
+}
+
+fn should_use_no_version_file_fallback(collection: &CollectionToGcInfo) -> bool {
+    collection.version_file_path.is_empty() && collection.database.as_ref().contains('+')
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -255,6 +264,37 @@ impl GarbageCollector {
             .as_ref()
             .ok_or(GarbageCollectCollectionError::Uninitialized)?;
 
+        let started_at = SystemTime::now();
+
+        if should_use_no_version_file_fallback(&collection) {
+            let result = self
+                .garbage_collect_collection_without_version_file(
+                    collection_soft_delete_absolute_cutoff_time,
+                    collection,
+                )
+                .await?;
+            let duration_ms = started_at
+                .elapsed()
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            self.job_duration_ms_metric.record(duration_ms, &[]);
+            self.total_files_deleted_metric.add(
+                result.num_files_deleted as u64,
+                &[opentelemetry::KeyValue::new(
+                    "cleanup_mode",
+                    format!("{:?}", cleanup_mode),
+                )],
+            );
+            self.total_versions_deleted_metric.add(
+                result.num_versions_deleted as u64,
+                &[opentelemetry::KeyValue::new(
+                    "cleanup_mode",
+                    format!("{:?}", cleanup_mode),
+                )],
+            );
+            return Ok(result);
+        }
+
         let enable_log_gc = collection.tenant <= self.config.enable_log_gc_for_tenant_threshold
             || self
                 .config
@@ -284,7 +324,6 @@ impl GarbageCollector {
                     .max_concurrent_list_files_operations_per_collection,
             );
 
-        let started_at = SystemTime::now();
         let result = match orchestrator.run(system.clone()).await {
             Ok(res) => res,
             Err(e) => {
@@ -313,6 +352,99 @@ impl GarbageCollector {
         );
 
         Ok(result)
+    }
+
+    async fn garbage_collect_collection_without_version_file(
+        &self,
+        collection_soft_delete_absolute_cutoff_time: DateTime<Utc>,
+        collection: CollectionToGcInfo,
+    ) -> Result<GarbageCollectorResponse, GarbageCollectCollectionError> {
+        if !self
+            .should_hard_delete_collection_without_version_file(
+                collection_soft_delete_absolute_cutoff_time,
+                &collection,
+            )
+            .await?
+        {
+            return Ok(GarbageCollectorResponse {
+                collection_id: collection.id,
+                ..Default::default()
+            });
+        }
+
+        let result = self
+            .garbage_collect_hard_delete_log(collection.id, Some(collection.database.clone()))
+            .await?;
+
+        tracing::debug!("Hard deleting collections {:#?}", vec![collection.id]);
+
+        self.sysdb_client
+            .clone()
+            .finish_collection_deletion(
+                collection.tenant,
+                collection.database.into_string(),
+                collection.id,
+            )
+            .await?;
+
+        Ok(result)
+    }
+
+    async fn should_hard_delete_collection_without_version_file(
+        &self,
+        collection_soft_delete_absolute_cutoff_time: DateTime<Utc>,
+        collection: &CollectionToGcInfo,
+    ) -> Result<bool, GarbageCollectCollectionError> {
+        let is_soft_deleted = self
+            .sysdb_client
+            .clone()
+            .batch_get_collection_soft_delete_status(
+                Some(collection.database.clone()),
+                vec![collection.id],
+            )
+            .await
+            .map_err(|err| GarbageCollectCollectionError::SysDbMethodFailed(err.to_string()))?
+            .get(&collection.id)
+            .copied()
+            .unwrap_or(false);
+
+        if !is_soft_deleted {
+            tracing::debug!(
+                collection_id = %collection.id,
+                database_name = %collection.database.as_ref(),
+                "Skipping no-version-file GC fallback because collection is not soft deleted"
+            );
+            return Ok(false);
+        }
+
+        let mut sysdb = self.sysdb_client.clone();
+        let mut collections = sysdb
+            .get_collections(GetCollectionsOptions {
+                collection_ids: Some(vec![collection.id]),
+                database_or_topology: Some(DatabaseOrTopology::Database(
+                    collection.database.clone(),
+                )),
+                include_soft_deleted: true,
+                ..Default::default()
+            })
+            .await?;
+        let stored_collection = collections
+            .pop()
+            .ok_or(GarbageCollectCollectionError::NoSuchCollection)?;
+
+        let cutoff_time: SystemTime = collection_soft_delete_absolute_cutoff_time.into();
+        if stored_collection.updated_at >= cutoff_time {
+            tracing::debug!(
+                collection_id = %collection.id,
+                database_name = %collection.database.as_ref(),
+                updated_at = ?stored_collection.updated_at,
+                cutoff_time = ?cutoff_time,
+                "Skipping no-version-file GC fallback because collection is still inside the soft delete grace period"
+            );
+            return Ok(false);
+        }
+
+        Ok(true)
     }
 
     async fn truncate_dirty_log(&self, ctx: &ComponentContext<Self>) {
@@ -792,6 +924,7 @@ mod tests {
     use crate::helper::ChromaGrpcClients;
     use chroma_blockstore::RootManager;
     use chroma_cache::nop::NopCache;
+    use chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
     use chroma_config::assignment::{
         assignment_policy::AssignmentPolicy, rendezvous_hash::AssignmentError,
     };
@@ -961,6 +1094,86 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![assigned_collection_id]
         );
+    }
+
+    #[test]
+    fn no_version_file_fallback_is_mcmr_only() {
+        let make_collection = |database_name: &str, version_file_path: &str| CollectionToGcInfo {
+            id: CollectionUuid::new(),
+            tenant: "tenant".to_string(),
+            database: DatabaseName::new(database_name).expect("database name should be valid"),
+            name: "collection".to_string(),
+            version_file_path: version_file_path.to_string(),
+            lineage_file_path: None,
+        };
+
+        assert!(should_use_no_version_file_fallback(&make_collection(
+            "tilt-spanning+test-db",
+            ""
+        )));
+        assert!(!should_use_no_version_file_fallback(&make_collection(
+            "test-db", ""
+        )));
+        assert!(!should_use_no_version_file_fallback(&make_collection(
+            "tilt-spanning+test-db",
+            "tenant/default/versionfiles/000001_flush"
+        )));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn recognizes_soft_deleted_mcmr_collection_without_version_file() {
+        let (_storage_dir, storage) = test_storage();
+        let mut test_sysdb = TestSysDb::new();
+        let database_name =
+            DatabaseName::new(format!("tilt-spanning+test-db-{}", Uuid::new_v4())).unwrap();
+        let collection_id = CollectionUuid::new();
+
+        SysDb::Test(test_sysdb.clone())
+            .create_collection(
+                "tenant".to_string(),
+                database_name.clone(),
+                collection_id,
+                "collection".to_string(),
+                vec![],
+                None,
+                None,
+                None,
+                None,
+                false,
+            )
+            .await
+            .expect("should create collection");
+        test_sysdb.soft_delete_collection(collection_id);
+        test_sysdb.set_collection_updated_at(
+            collection_id,
+            SystemTime::UNIX_EPOCH + Duration::from_secs(1),
+        );
+
+        let gc = GarbageCollector::new(
+            GarbageCollectorConfig::default(),
+            SysDb::Test(test_sysdb.clone()),
+            storage.clone(),
+            Log::InMemory(InMemoryLog::default()),
+            None,
+            Box::new(RendezvousHashingAssignmentPolicy::default()),
+            RootManager::new(storage, Box::new(NopCache)),
+        );
+        let should_hard_delete = gc
+            .should_hard_delete_collection_without_version_file(
+                Utc::now(),
+                &CollectionToGcInfo {
+                    id: collection_id,
+                    tenant: "tenant".to_string(),
+                    database: database_name,
+                    name: "collection".to_string(),
+                    version_file_path: String::new(),
+                    lineage_file_path: None,
+                },
+            )
+            .await
+            .expect("should evaluate no-version-file fallback");
+
+        assert!(should_hard_delete);
     }
 
     #[tokio::test]

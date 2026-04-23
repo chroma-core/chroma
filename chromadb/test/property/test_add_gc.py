@@ -274,6 +274,10 @@ def _child_text(element: ET.Element, name: str) -> Optional[str]:
     return None
 
 
+def _is_collection_version_file_key(key: str, collection_uuid: str) -> bool:
+    return f"/collection/{collection_uuid}/versionfiles/" in key
+
+
 def _list_minio_files_for_collection(bucket: str, collection_uuid: str) -> List[str]:
     keys: List[str] = []
     continuation_token: Optional[str] = None
@@ -292,7 +296,7 @@ def _list_minio_files_for_collection(bucket: str, collection_uuid: str) -> List[
             if (
                 key is not None
                 and collection_uuid in key
-                and "/versionfiles/" not in key
+                and not _is_collection_version_file_key(key, collection_uuid)
             ):
                 keys.append(key)
 
@@ -332,7 +336,7 @@ def _wait_for_minio_files_for_collection(collection_uuid: str) -> Dict[str, List
                 bucket for bucket, paths in paths_by_bucket.items() if not paths
             ]
             pytest.fail(
-                "Expected MinIO to contain files for collection "
+                "Expected MinIO to contain non-version files for collection "
                 f"{collection_uuid} in every test bucket before deletion, "
                 f"but these buckets had none: {missing_buckets}. "
                 f"Found counts: "
@@ -360,7 +364,7 @@ def _wait_for_minio_files_deleted(collection_uuid: str) -> None:
                 for bucket, paths in remaining.items()
             }
             pytest.fail(
-                "Expected MinIO files for collection "
+                "Expected non-version MinIO files for collection "
                 f"{collection_uuid} to be deleted from every test bucket, "
                 f"but found files in these buckets: "
                 f"{ {bucket: len(paths) for bucket, paths in remaining.items()} }. "
@@ -371,6 +375,58 @@ def _wait_for_minio_files_deleted(collection_uuid: str) -> None:
 
 def round_robin(round_index, round_around):
     return round_around[round_index % len(round_around)]
+
+
+def _delete_collection_and_assert_gc_hard_delete(
+    client: ClientAPI, collection_name: str, collection_uuid: str
+) -> None:
+    watchers = _start_gc_log_watchers()
+    captured_stdout = {namespace: [] for namespace in GC_NAMESPACES}
+    captured_stderr: Dict[str, str] = {}
+    try:
+        time.sleep(1)
+        client.delete_collection(collection_name)
+        _wait_for_gc_hard_delete_log(watchers, captured_stdout, collection_uuid)
+    finally:
+        captured_stderr = _stop_gc_log_watchers(watchers, captured_stdout)
+
+    stdout_by_namespace = {
+        namespace: "".join(lines) for namespace, lines in captured_stdout.items()
+    }
+    matching_namespaces = [
+        namespace
+        for namespace, stdout in stdout_by_namespace.items()
+        if _hard_delete_log_found(stdout, collection_uuid)
+    ]
+
+    for namespace, stdout in stdout_by_namespace.items():
+        print(f"{namespace} GC stdout captured {len(stdout)} bytes")
+    for namespace, stderr in captured_stderr.items():
+        if stderr:
+            print(f"{namespace} GC stderr: {stderr[-1000:]}")
+
+    assert matching_namespaces, (
+        "Expected garbage collector logs to hard delete collection "
+        f"{collection_uuid}. Captured stdout tails: "
+        f"{ {namespace: stdout[-2000:] for namespace, stdout in stdout_by_namespace.items()} }"
+    )
+
+
+@pytest.mark.skipif(
+    not MULTI_REGION_ENABLED,
+    reason="MCMR GC coverage requires a multi-region Kubernetes cluster",
+)
+def test_add_gc_hard_deletes_empty_mcmr_collection() -> None:
+    client1, client2 = _create_mcmr_clients()
+    _create_isolated_database_mcmr(client1, client2, "tilt-spanning")
+
+    collection_name = f"test_add_gc_empty_{uuid.uuid4().hex}"
+    collection = client1.create_collection(name=collection_name)
+    client2.get_collection(name=collection_name)
+
+    _delete_collection_and_assert_gc_hard_delete(
+        client1, collection_name, str(collection.id)
+    )
 
 
 @pytest.mark.skipif(
@@ -413,34 +469,7 @@ def test_add_gc_hard_deletes_mcmr_collection() -> None:
             f"{collection_uuid} before deletion"
         )
 
-    watchers = _start_gc_log_watchers()
-    captured_stdout = {namespace: [] for namespace in GC_NAMESPACES}
-    captured_stderr: Dict[str, str] = {}
-    try:
-        time.sleep(1)
-        client1.delete_collection(collection_name)
-        _wait_for_gc_hard_delete_log(watchers, captured_stdout, collection_uuid)
-    finally:
-        captured_stderr = _stop_gc_log_watchers(watchers, captured_stdout)
-
-    stdout_by_namespace = {
-        namespace: "".join(lines) for namespace, lines in captured_stdout.items()
-    }
-    matching_namespaces = [
-        namespace
-        for namespace, stdout in stdout_by_namespace.items()
-        if _hard_delete_log_found(stdout, collection_uuid)
-    ]
-
-    for namespace, stdout in stdout_by_namespace.items():
-        print(f"{namespace} GC stdout captured {len(stdout)} bytes")
-    for namespace, stderr in captured_stderr.items():
-        if stderr:
-            print(f"{namespace} GC stderr: {stderr[-1000:]}")
-
-    assert matching_namespaces, (
-        "Expected garbage collector logs to hard delete collection "
-        f"{collection_uuid}. Captured stdout tails: "
-        f"{ {namespace: stdout[-2000:] for namespace, stdout in stdout_by_namespace.items()} }"
+    _delete_collection_and_assert_gc_hard_delete(
+        client1, collection_name, collection_uuid
     )
     _wait_for_minio_files_deleted(collection_uuid)

@@ -1,11 +1,12 @@
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
-    CollectionAndSegments, CollectionUuid, CountForksError, Database, FlushCompactionResponse,
-    GetCollectionByCrnError, GetCollectionSizeError, GetCollectionWithSegmentsError,
-    GetCollectionsError, GetSegmentsError, ListAttachedFunctionsError, ListDatabasesError,
-    ListDatabasesResponse, Segment, SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid,
-    Tenant, UpdateTenantError, UpdateTenantResponse,
+    CollectionAndSegments, CollectionUuid, CountForksError, Database, DeleteCollectionError,
+    FlushCompactionResponse, GetCollectionByCrnError, GetCollectionSizeError,
+    GetCollectionWithSegmentsError, GetCollectionsError, GetSegmentsError,
+    ListAttachedFunctionsError, ListDatabasesError, ListDatabasesResponse, Segment,
+    SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid, Tenant, UpdateTenantError,
+    UpdateTenantResponse,
 };
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
@@ -137,6 +138,21 @@ impl TestSysDb {
 
         let collection = inner.collections.get_mut(&collection_id).unwrap();
         collection.version_file_path = Some(version_file_path);
+    }
+
+    pub fn set_collection_updated_at(
+        &mut self,
+        collection_id: CollectionUuid,
+        updated_at: SystemTime,
+    ) {
+        let mut inner = self.inner.lock();
+        let collection = inner.collections.get_mut(&collection_id).unwrap();
+        collection.updated_at = updated_at;
+    }
+
+    pub fn soft_delete_collection(&mut self, collection_id: CollectionUuid) {
+        let mut inner = self.inner.lock();
+        inner.soft_deleted_collections.insert(collection_id);
     }
 
     fn filter_collections(
@@ -736,6 +752,24 @@ impl TestSysDb {
             }
         }
         Ok(statuses)
+    }
+
+    pub(crate) async fn finish_collection_deletion(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<(), DeleteCollectionError> {
+        let mut inner = self.inner.lock();
+        if !inner.soft_deleted_collections.remove(&collection_id) {
+            return Err(DeleteCollectionError::NotFound(collection_id.to_string()));
+        }
+        if inner.collections.remove(&collection_id).is_none() {
+            return Err(DeleteCollectionError::NotFound(collection_id.to_string()));
+        }
+        inner.collection_to_version_file.remove(&collection_id);
+        inner
+            .segments
+            .retain(|_, segment| segment.collection != collection_id);
+        Ok(())
     }
 
     pub(crate) async fn update_tenant(
