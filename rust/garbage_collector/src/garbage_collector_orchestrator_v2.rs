@@ -205,6 +205,73 @@ where
     }
 }
 
+/// After mark_version_for_deletion succeeds in sysdb, update the cached version
+/// files so that marked_for_deletion is true for the affected versions. Without
+/// this refresh, DeleteVersionsAtSysDbOperator receives a stale pre-mark
+/// snapshot and skips physical file deletion, orphaning per-version files in
+/// storage.
+///
+/// NOTE: Old root/current version-file snapshots (_flush, _gc_mark, _gc_delete)
+/// created by sysdb during mark/delete operations are a separate cleanup concern.
+/// See rust/rust-sysdb/src/server.rs for the existing CAS-failure orphan TODO.
+fn refresh_version_files_after_mark(
+    version_files: &mut HashMap<CollectionUuid, Arc<CollectionVersionFile>>,
+    versions_marked: &[VersionListForCollection],
+) -> Result<(), GarbageCollectorError> {
+    for version_list in versions_marked {
+        let collection_id: CollectionUuid = version_list
+            .collection_id
+            .parse()
+            .map_err(GarbageCollectorError::UnparsableUuid)?;
+        if let Some(version_file_arc) = version_files.get_mut(&collection_id) {
+            let mut version_file = (**version_file_arc).clone();
+            let history =
+                version_file
+                    .version_history
+                    .as_mut()
+                    .ok_or(GarbageCollectorError::InvariantViolation(format!(
+                        "Expected version_history to be set for collection {} when refreshing marked versions",
+                        collection_id
+                    )))?;
+
+            for version_info in history.versions.iter_mut() {
+                if version_list.versions.contains(&version_info.version) {
+                    version_info.marked_for_deletion = true;
+                }
+            }
+            *version_file_arc = Arc::new(version_file);
+        } else {
+            return Err(GarbageCollectorError::MissingVersionFile(collection_id));
+        }
+    }
+    Ok(())
+}
+
+fn validate_mark_version_results(
+    versions_marked: &[VersionListForCollection],
+    mark_results: &HashMap<String, bool>,
+) -> Result<(), GarbageCollectorError> {
+    for version_list in versions_marked {
+        match mark_results.get(&version_list.collection_id) {
+            Some(true) => {}
+            Some(false) => {
+                return Err(GarbageCollectorError::SysDbMethodFailed(format!(
+                    "mark_version_for_deletion reported failure for collection {}",
+                    version_list.collection_id
+                )));
+            }
+            None => {
+                return Err(GarbageCollectorError::SysDbMethodFailed(format!(
+                    "mark_version_for_deletion did not return a result for collection {}",
+                    version_list.collection_id
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn build_versions_to_mark(
     versions_by_collection: &HashMap<CollectionUuid, HashMap<i64, CollectionVersionAction>>,
     version_files: &HashMap<CollectionUuid, Arc<CollectionVersionFile>>,
@@ -424,11 +491,15 @@ impl GarbageCollectorOrchestrator {
         let versions_to_mark = build_versions_to_mark(&output.versions, &self.version_files)?;
 
         if !versions_to_mark.is_empty() {
-            self.sysdb_client
+            let versions_marked = versions_to_mark.clone();
+            let mark_results = self
+                .sysdb_client
                 .mark_version_for_deletion(0, versions_to_mark, self.database_name.clone())
                 .await
                 .map_err(|err| GarbageCollectorError::SysDbMethodFailed(err.to_string()))?;
 
+            validate_mark_version_results(&versions_marked, &mark_results)?;
+            refresh_version_files_after_mark(&mut self.version_files, &versions_marked)?;
             tracing::debug!("Marked versions as deleted in SysDb.");
         } else {
             tracing::debug!("No versions to mark for deletion in SysDb.");
@@ -1139,6 +1210,8 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
 #[cfg(test)]
 mod tests {
     use super::build_versions_to_mark;
+    use super::refresh_version_files_after_mark;
+    use super::validate_mark_version_results;
     use super::GarbageCollectorError;
     use super::GarbageCollectorOrchestrator;
     use crate::operators::compute_versions_to_delete_from_graph::CollectionVersionAction;
@@ -1148,9 +1221,12 @@ mod tests {
     use chroma_storage::test_storage;
     use chroma_sysdb::{GetCollectionsOptions, TestSysDb};
     use chroma_system::{Dispatcher, Orchestrator, System};
+    use chroma_types::chroma_proto::{
+        CollectionInfoImmutable, CollectionVersionFile, CollectionVersionHistory,
+        CollectionVersionInfo, VersionListForCollection,
+    };
     use chroma_types::{
-        chroma_proto::CollectionInfoImmutable, chroma_proto::CollectionVersionFile, CollectionUuid,
-        Segment, SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid,
+        CollectionUuid, Segment, SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid,
     };
     use chrono::DateTime;
     use std::{collections::HashMap, sync::Arc, time::SystemTime};
@@ -1264,6 +1340,219 @@ mod tests {
                 );
             }
             other => panic!("expected InvariantViolation, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn refresh_version_files_marks_correct_versions() {
+        let collection_id = CollectionUuid::new();
+        let mut version_files = HashMap::from([(
+            collection_id,
+            Arc::new(CollectionVersionFile {
+                collection_info_immutable: Some(CollectionInfoImmutable {
+                    tenant_id: "t".to_string(),
+                    database_id: "d".to_string(),
+                    collection_id: collection_id.to_string(),
+                    dimension: 0,
+                    ..Default::default()
+                }),
+                version_history: Some(CollectionVersionHistory {
+                    versions: vec![
+                        CollectionVersionInfo {
+                            version: 1,
+                            marked_for_deletion: false,
+                            version_file_name: "v1_file".to_string(),
+                            ..Default::default()
+                        },
+                        CollectionVersionInfo {
+                            version: 2,
+                            marked_for_deletion: false,
+                            version_file_name: "v2_file".to_string(),
+                            ..Default::default()
+                        },
+                        CollectionVersionInfo {
+                            version: 3,
+                            marked_for_deletion: false,
+                            version_file_name: "v3_file".to_string(),
+                            ..Default::default()
+                        },
+                    ],
+                }),
+            }),
+        )]);
+
+        let versions_marked = vec![VersionListForCollection {
+            collection_id: collection_id.to_string(),
+            tenant_id: "t".to_string(),
+            database_id: "d".to_string(),
+            versions: vec![1, 3],
+        }];
+
+        refresh_version_files_after_mark(&mut version_files, &versions_marked)
+            .expect("refresh should succeed");
+
+        let vf = version_files.get(&collection_id).unwrap();
+        let history = vf.version_history.as_ref().unwrap();
+
+        // Version 1 should now be marked.
+        assert!(
+            history.versions[0].marked_for_deletion,
+            "version 1 should be marked_for_deletion"
+        );
+        // Version 2 was not in the mark list and should remain unmarked.
+        assert!(
+            !history.versions[1].marked_for_deletion,
+            "version 2 should NOT be marked_for_deletion"
+        );
+        // Version 3 should now be marked.
+        assert!(
+            history.versions[2].marked_for_deletion,
+            "version 3 should be marked_for_deletion"
+        );
+        println!("refresh_version_files_marks_correct_versions: passed");
+    }
+
+    #[test]
+    fn refresh_version_files_errors_on_missing_collection() {
+        let present_id = CollectionUuid::new();
+        let absent_id = CollectionUuid::new();
+
+        let mut version_files = HashMap::from([(
+            present_id,
+            Arc::new(CollectionVersionFile {
+                collection_info_immutable: Some(CollectionInfoImmutable {
+                    tenant_id: "t".to_string(),
+                    database_id: "d".to_string(),
+                    collection_id: present_id.to_string(),
+                    dimension: 0,
+                    ..Default::default()
+                }),
+                version_history: Some(CollectionVersionHistory {
+                    versions: vec![CollectionVersionInfo {
+                        version: 1,
+                        marked_for_deletion: false,
+                        version_file_name: "v1_file".to_string(),
+                        ..Default::default()
+                    }],
+                }),
+            }),
+        )]);
+
+        // Mark a collection that is NOT in the cache.
+        let versions_marked = vec![VersionListForCollection {
+            collection_id: absent_id.to_string(),
+            tenant_id: "t".to_string(),
+            database_id: "d".to_string(),
+            versions: vec![1],
+        }];
+
+        let err = refresh_version_files_after_mark(&mut version_files, &versions_marked)
+            .expect_err("refresh should fail when a collection is missing from the cache");
+        match err {
+            GarbageCollectorError::MissingVersionFile(id) => {
+                assert_eq!(id, absent_id);
+            }
+            other => panic!("expected MissingVersionFile, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn refresh_version_files_errors_on_missing_version_history() {
+        let collection_id = CollectionUuid::new();
+        let mut version_files = HashMap::from([(
+            collection_id,
+            Arc::new(CollectionVersionFile {
+                collection_info_immutable: Some(CollectionInfoImmutable {
+                    tenant_id: "t".to_string(),
+                    database_id: "d".to_string(),
+                    collection_id: collection_id.to_string(),
+                    dimension: 0,
+                    ..Default::default()
+                }),
+                version_history: None, // No history
+            }),
+        )]);
+
+        let versions_marked = vec![VersionListForCollection {
+            collection_id: collection_id.to_string(),
+            tenant_id: "t".to_string(),
+            database_id: "d".to_string(),
+            versions: vec![1],
+        }];
+
+        let err = refresh_version_files_after_mark(&mut version_files, &versions_marked)
+            .expect_err("refresh should fail when version_history is missing");
+        match err {
+            GarbageCollectorError::InvariantViolation(msg) => {
+                assert!(
+                    msg.contains("Expected version_history to be set"),
+                    "unexpected message: {msg}"
+                );
+            }
+            other => panic!("expected InvariantViolation, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_mark_version_results_accepts_successful_results() {
+        let collection_id = CollectionUuid::new();
+        let versions_marked = vec![VersionListForCollection {
+            collection_id: collection_id.to_string(),
+            tenant_id: "t".to_string(),
+            database_id: "d".to_string(),
+            versions: vec![1, 2],
+        }];
+        let mark_results = HashMap::from([(collection_id.to_string(), true)]);
+
+        validate_mark_version_results(&versions_marked, &mark_results)
+            .expect("all successful mark results should validate");
+    }
+
+    #[test]
+    fn validate_mark_version_results_errors_on_failed_collection() {
+        let collection_id = CollectionUuid::new();
+        let versions_marked = vec![VersionListForCollection {
+            collection_id: collection_id.to_string(),
+            tenant_id: "t".to_string(),
+            database_id: "d".to_string(),
+            versions: vec![1],
+        }];
+        let mark_results = HashMap::from([(collection_id.to_string(), false)]);
+
+        let err = validate_mark_version_results(&versions_marked, &mark_results)
+            .expect_err("failed mark results should return an error");
+        match err {
+            GarbageCollectorError::SysDbMethodFailed(msg) => {
+                assert!(
+                    msg.contains("reported failure"),
+                    "unexpected message: {msg}"
+                );
+            }
+            other => panic!("expected SysDbMethodFailed, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_mark_version_results_errors_on_missing_collection_result() {
+        let collection_id = CollectionUuid::new();
+        let versions_marked = vec![VersionListForCollection {
+            collection_id: collection_id.to_string(),
+            tenant_id: "t".to_string(),
+            database_id: "d".to_string(),
+            versions: vec![1],
+        }];
+        let mark_results = HashMap::new();
+
+        let err = validate_mark_version_results(&versions_marked, &mark_results)
+            .expect_err("missing mark results should return an error");
+        match err {
+            GarbageCollectorError::SysDbMethodFailed(msg) => {
+                assert!(
+                    msg.contains("did not return a result"),
+                    "unexpected message: {msg}"
+                );
+            }
+            other => panic!("expected SysDbMethodFailed, got: {other:?}"),
         }
     }
 
