@@ -70,7 +70,7 @@ jobs:
         with:
           ghcr-username: ${{ github.actor }}
           ghcr-password: ${{ secrets.GITHUB_TOKEN }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
           dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Compute arch-specific tags
@@ -129,7 +129,7 @@ jobs:
         with:
           ghcr-username: ${{ github.actor }}
           ghcr-password: ${{ secrets.GITHUB_TOKEN }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
           dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Create and push manifest

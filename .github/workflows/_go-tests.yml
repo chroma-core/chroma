@@ -18,7 +18,7 @@ jobs:
       - name: Set up Docker
         uses: ./.github/actions/docker
         with:
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
           dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Start Tilt services
         uses: ./.github/actions/tilt

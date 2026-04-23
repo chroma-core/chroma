@@ -102,7 +102,7 @@ jobs:
           GCP_ARTIFACT_REGISTRY_REGION: ${{ vars.GCP_ARTIFACT_REGISTRY_REGION }}
           GCP_ARTIFACT_REGISTRY_PROJECT_ID: ${{ vars.GCP_ARTIFACT_REGISTRY_PROJECT_ID }}
           GCP_ARTIFACT_REGISTRY_NAME: ${{ vars.GCP_ARTIFACT_REGISTRY_NAME }}
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           ADDRESS_SANITIZER: ${{ inputs.address_sanitizer }}
           ENABLE_AVX512: ${{ inputs.enable_avx512 }}
