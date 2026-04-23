@@ -422,6 +422,161 @@ mod tests {
         assert_eq!(output.versions_to_delete, versions_to_delete);
     }
 
+    /// Confirms the stale-cache bug: when the operator receives a version file
+    /// cached BEFORE mark_version_for_deletion (so marked_for_deletion is false),
+    /// physical files are NOT deleted even though they appear in versions_to_delete.
+    ///
+    /// This proves that if the GC orchestrator does not refresh its cached version
+    /// files after calling mark_version_for_deletion, per-version files will be
+    /// orphaned in storage.
+    #[tokio::test]
+    async fn stale_cache_skips_physical_file_deletion() {
+        let tmp_dir = TempDir::new().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let sysdb = SysDb::Test(TestSysDb::new());
+
+        // Create physical files in storage that should be deleted.
+        let test_files = vec!["stale_version_1", "stale_version_2"];
+        for file in &test_files {
+            std::fs::write(tmp_dir.path().join(file), "test content").unwrap();
+        }
+
+        // Simulate a PRE-MARK cached version file: marked_for_deletion is false
+        // because this snapshot was captured before mark_version_for_deletion was
+        // called on sysdb.
+        let stale_version_file = Arc::new(CollectionVersionFile {
+            version_history: Some(chroma_proto::CollectionVersionHistory {
+                versions: vec![
+                    chroma_proto::CollectionVersionInfo {
+                        version: 1,
+                        version_file_name: "stale_version_1".to_string(),
+                        marked_for_deletion: false, // Stale: not yet marked
+                        ..Default::default()
+                    },
+                    chroma_proto::CollectionVersionInfo {
+                        version: 2,
+                        version_file_name: "stale_version_2".to_string(),
+                        marked_for_deletion: false, // Stale: not yet marked
+                        ..Default::default()
+                    },
+                ],
+            }),
+            ..Default::default()
+        });
+
+        let versions_to_delete = VersionListForCollection {
+            collection_id: "test_collection".to_string(),
+            database_id: "default".to_string(),
+            tenant_id: "default".to_string(),
+            versions: vec![1, 2],
+        };
+
+        let input = DeleteVersionsAtSysDbInput {
+            version_file: stale_version_file,
+            versions_to_delete,
+            sysdb_client: sysdb,
+            epoch_id: 123,
+            database_name: DatabaseName::new("test_db").expect("valid db name"),
+        };
+
+        let operator = DeleteVersionsAtSysDbOperator {
+            storage: storage.clone(),
+        };
+        let result = operator.run(&input).await;
+
+        // The operator reports success (sysdb logical deletion works via TestSysDb).
+        assert!(result.is_ok());
+
+        // Physical files REMAIN because the stale version file has
+        // marked_for_deletion = false, so delete_version_files skips them.
+        //
+        // This is part of the contract for the operator and is handled at a
+        // higher level by the orchestration code.
+        for file in &test_files {
+            assert!(
+                tmp_dir.path().join(file).exists(),
+                "File {} was deleted despite stale (unmarked) version file; \
+                 the stale-cache bug is not present at the operator level",
+                file
+            );
+        }
+    }
+
+    /// Control test: when the operator receives a version file refreshed AFTER
+    /// mark_version_for_deletion (so marked_for_deletion is true), physical
+    /// files are correctly deleted.
+    ///
+    /// Together with stale_cache_skips_physical_file_deletion, this pair proves
+    /// that the only difference between "files orphaned" and "files cleaned up"
+    /// is whether the version file passed to the operator reflects the post-mark
+    /// state.
+    #[tokio::test]
+    async fn refreshed_cache_enables_physical_file_deletion() {
+        let tmp_dir = TempDir::new().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let sysdb = SysDb::Test(TestSysDb::new());
+
+        // Create physical files in storage that should be deleted.
+        let test_files = vec!["refreshed_version_1", "refreshed_version_2"];
+        for file in &test_files {
+            std::fs::write(tmp_dir.path().join(file), "test content").unwrap();
+        }
+
+        // Simulate a POST-MARK refreshed version file: marked_for_deletion is
+        // true because the orchestrator refreshed the cache after
+        // mark_version_for_deletion succeeded.
+        let refreshed_version_file = Arc::new(CollectionVersionFile {
+            version_history: Some(chroma_proto::CollectionVersionHistory {
+                versions: vec![
+                    chroma_proto::CollectionVersionInfo {
+                        version: 1,
+                        version_file_name: "refreshed_version_1".to_string(),
+                        marked_for_deletion: true, // Refreshed: marked after sysdb call
+                        ..Default::default()
+                    },
+                    chroma_proto::CollectionVersionInfo {
+                        version: 2,
+                        version_file_name: "refreshed_version_2".to_string(),
+                        marked_for_deletion: true, // Refreshed: marked after sysdb call
+                        ..Default::default()
+                    },
+                ],
+            }),
+            ..Default::default()
+        });
+
+        let versions_to_delete = VersionListForCollection {
+            collection_id: "test_collection".to_string(),
+            database_id: "default".to_string(),
+            tenant_id: "default".to_string(),
+            versions: vec![1, 2],
+        };
+
+        let input = DeleteVersionsAtSysDbInput {
+            version_file: refreshed_version_file,
+            versions_to_delete,
+            sysdb_client: sysdb,
+            epoch_id: 123,
+            database_name: DatabaseName::new("test_db").expect("valid db name"),
+        };
+
+        let operator = DeleteVersionsAtSysDbOperator {
+            storage: storage.clone(),
+        };
+        let result = operator.run(&input).await;
+        assert!(result.is_ok());
+
+        // Physical files are correctly deleted because the refreshed version
+        // file has marked_for_deletion = true.
+        for file in &test_files {
+            assert!(
+                !tmp_dir.path().join(file).exists(),
+                "File {} should have been deleted with a refreshed (marked) version file",
+                file
+            );
+        }
+    }
+
     #[tokio::test]
     async fn test_only_deletes_files_marked_for_deletion() {
         let tmp_dir = TempDir::new().unwrap();
