@@ -1,6 +1,11 @@
 use crate::key::{CompositeKey, KeyWrapper};
 use chroma_error::ChromaError;
-use chroma_types::{DataRecord, QuantizedCluster, SpannPostingList};
+use chroma_types::{
+    hierarchical_spann::{
+        HierarchicalInternalNode, HierarchicalLeafNode, HierarchicalSpannPostingList,
+    },
+    DataRecord, QuantizedCluster, SpannPostingList,
+};
 use parking_lot::RwLock;
 use roaring::RoaringBitmap;
 use std::{
@@ -766,6 +771,113 @@ impl<'referred_data> Readable<'referred_data> for SpannPostingList<'referred_dat
 }
 
 impl<'referred_data> Readable<'referred_data> for QuantizedCluster<'referred_data> {
+    fn read_from_storage(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> Option<Self> {
+        None
+    }
+
+    fn read_range_from_storage<'prefix, PrefixRange, KeyRange>(
+        _: PrefixRange,
+        _: KeyRange,
+        _: &'referred_data Storage,
+    ) -> Vec<(&'referred_data CompositeKey, Self)>
+    where
+        PrefixRange: std::ops::RangeBounds<&'prefix str>,
+        KeyRange: std::ops::RangeBounds<KeyWrapper>,
+    {
+        vec![]
+    }
+
+    fn count(_: &Storage) -> Result<usize, Box<dyn ChromaError>> {
+        Ok(0)
+    }
+
+    fn contains(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> bool {
+        false
+    }
+
+    fn rank(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> usize {
+        0
+    }
+}
+
+// HierarchicalLeafNode / HierarchicalInternalNode only support Arrow blockfiles.
+// These no-op stubs satisfy the Writeable/Readable bounds on BlockfileWriter/Reader.
+impl Writeable for HierarchicalLeafNode<'_> {
+    fn write_to_storage(_: &str, _: KeyWrapper, _: Self, _: &StorageBuilder) {}
+    fn remove_from_storage(_: &str, _: KeyWrapper, _: &StorageBuilder) {}
+}
+
+impl<'referred_data> Readable<'referred_data> for HierarchicalLeafNode<'referred_data> {
+    fn read_from_storage(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> Option<Self> {
+        None
+    }
+
+    fn read_range_from_storage<'prefix, PrefixRange, KeyRange>(
+        _: PrefixRange,
+        _: KeyRange,
+        _: &'referred_data Storage,
+    ) -> Vec<(&'referred_data CompositeKey, Self)>
+    where
+        PrefixRange: std::ops::RangeBounds<&'prefix str>,
+        KeyRange: std::ops::RangeBounds<KeyWrapper>,
+    {
+        vec![]
+    }
+
+    fn count(_: &Storage) -> Result<usize, Box<dyn ChromaError>> {
+        Ok(0)
+    }
+
+    fn contains(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> bool {
+        false
+    }
+
+    fn rank(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> usize {
+        0
+    }
+}
+
+impl Writeable for HierarchicalInternalNode<'_> {
+    fn write_to_storage(_: &str, _: KeyWrapper, _: Self, _: &StorageBuilder) {}
+    fn remove_from_storage(_: &str, _: KeyWrapper, _: &StorageBuilder) {}
+}
+
+impl<'referred_data> Readable<'referred_data> for HierarchicalInternalNode<'referred_data> {
+    fn read_from_storage(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> Option<Self> {
+        None
+    }
+
+    fn read_range_from_storage<'prefix, PrefixRange, KeyRange>(
+        _: PrefixRange,
+        _: KeyRange,
+        _: &'referred_data Storage,
+    ) -> Vec<(&'referred_data CompositeKey, Self)>
+    where
+        PrefixRange: std::ops::RangeBounds<&'prefix str>,
+        KeyRange: std::ops::RangeBounds<KeyWrapper>,
+    {
+        vec![]
+    }
+
+    fn count(_: &Storage) -> Result<usize, Box<dyn ChromaError>> {
+        Ok(0)
+    }
+
+    fn contains(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> bool {
+        false
+    }
+
+    fn rank(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> usize {
+        0
+    }
+}
+
+impl Writeable for HierarchicalSpannPostingList<'_> {
+    fn write_to_storage(_: &str, _: KeyWrapper, _: Self, _: &StorageBuilder) {}
+    fn remove_from_storage(_: &str, _: KeyWrapper, _: &StorageBuilder) {}
+}
+
+impl<'referred_data> Readable<'referred_data> for HierarchicalSpannPostingList<'referred_data> {
     fn read_from_storage(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> Option<Self> {
         None
     }

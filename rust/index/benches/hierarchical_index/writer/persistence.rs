@@ -13,15 +13,16 @@ use chroma_blockstore::{
 };
 use chroma_distance::DistanceFunction;
 use chroma_error::ChromaError;
-use chroma_index::quantization::Code;
-use chroma_types::QuantizedCluster;
+use chroma_types::hierarchical_spann::{
+    HierarchicalInternalNode, HierarchicalLeafNode, HierarchicalSpannPostingList,
+};
 use dashmap::{DashMap, DashSet};
 use parking_lot::ReentrantMutex;
 use uuid::Uuid;
 
 use super::{
     HierarchicalSpannConfig, HierarchicalSpannWriter, InternalNode, LeafNode, NodeId, TreeNode,
-    WriterStats,
+    WriterStats, DELETED_BIT,
 };
 
 thread_local! {
@@ -56,18 +57,11 @@ where
 pub const PREFIX_ROOT: &str = "root";
 pub const PREFIX_NEXT_NODE: &str = "next_node";
 pub const PREFIX_DIM: &str = "dim";
-pub const PREFIX_NODE_TYPE: &str = "node_type";
-pub const PREFIX_PARENT: &str = "parent";
-pub const PREFIX_LENGTH: &str = "length";
 pub const PREFIX_VERSION: &str = "version";
-pub const PREFIX_CENTROID: &str = "centroid";
 pub const PREFIX_EMBEDDING: &str = "embedding";
-pub const PREFIX_CHILDREN: &str = "children";
-pub const PREFIX_CENTROID_CODE: &str = "centroid_code";
+pub const PREFIX_CENTROID: &str = "centroid";
 
 pub const SINGLETON_KEY: u32 = 0;
-pub const NODE_TYPE_LEAF: u32 = 0;
-pub const NODE_TYPE_INTERNAL: u32 = 1;
 pub const NO_PARENT: u32 = u32::MAX;
 
 pub fn pack_bytes_to_u32s(bytes: &[u8]) -> Vec<u32> {
@@ -92,14 +86,16 @@ pub struct HierarchicalSpannIds {
     pub posting_list_id: Uuid,
     pub scalar_metadata_id: Uuid,
     pub vector_data_id: Uuid,
-    pub list_data_id: Uuid,
+    pub leaf_node_id: Uuid,
+    pub internal_node_id: Uuid,
 }
 
 pub struct HierarchicalSpannFlusher {
     posting_list_flusher: BlockfileFlusher,
     scalar_metadata_flusher: BlockfileFlusher,
     vector_data_flusher: BlockfileFlusher,
-    list_data_flusher: BlockfileFlusher,
+    leaf_node_flusher: BlockfileFlusher,
+    internal_node_flusher: BlockfileFlusher,
 }
 
 impl HierarchicalSpannFlusher {
@@ -107,20 +103,27 @@ impl HierarchicalSpannFlusher {
         let posting_list_id = self.posting_list_flusher.id();
         let scalar_metadata_id = self.scalar_metadata_flusher.id();
         let vector_data_id = self.vector_data_flusher.id();
-        let list_data_id = self.list_data_flusher.id();
+        let leaf_node_id = self.leaf_node_flusher.id();
+        let internal_node_id = self.internal_node_flusher.id();
 
         self.posting_list_flusher
-            .flush::<u32, QuantizedCluster<'_>>()
+            .flush::<u32, HierarchicalSpannPostingList<'_>>()
             .await?;
         self.scalar_metadata_flusher.flush::<u32, u32>().await?;
         self.vector_data_flusher.flush::<u32, Vec<f32>>().await?;
-        self.list_data_flusher.flush::<u32, Vec<u32>>().await?;
+        self.leaf_node_flusher
+            .flush::<u32, HierarchicalLeafNode<'_>>()
+            .await?;
+        self.internal_node_flusher
+            .flush::<u32, HierarchicalInternalNode<'_>>()
+            .await?;
 
         Ok(HierarchicalSpannIds {
             posting_list_id,
             scalar_metadata_id,
             vector_data_id,
-            list_data_id,
+            leaf_node_id,
+            internal_node_id,
         })
     }
 }
@@ -148,16 +151,18 @@ impl HierarchicalSpannWriter {
         let mut pl_options = BlockfileWriterOptions::new("".to_string()).ordered_mutations();
         let mut sm_options = BlockfileWriterOptions::new("".to_string()).ordered_mutations();
         let mut vd_options = BlockfileWriterOptions::new("".to_string()).ordered_mutations();
-        let mut ld_options = BlockfileWriterOptions::new("".to_string()).ordered_mutations();
+        let mut ln_options = BlockfileWriterOptions::new("".to_string()).ordered_mutations();
+        let mut in_options = BlockfileWriterOptions::new("".to_string()).ordered_mutations();
         if let Some(ids) = fork_from {
             pl_options = pl_options.fork(ids.posting_list_id);
             sm_options = sm_options.fork(ids.scalar_metadata_id);
             vd_options = vd_options.fork(ids.vector_data_id);
-            ld_options = ld_options.fork(ids.list_data_id);
+            ln_options = ln_options.fork(ids.leaf_node_id);
+            in_options = in_options.fork(ids.internal_node_id);
         }
 
         let posting_list_writer = blockfile_provider
-            .write::<u32, QuantizedCluster<'_>>(pl_options)
+            .write::<u32, HierarchicalSpannPostingList<'_>>(pl_options)
             .await
             .map_err(|e| e as Box<dyn ChromaError>)?;
         let scalar_metadata_writer = blockfile_provider
@@ -168,8 +173,12 @@ impl HierarchicalSpannWriter {
             .write::<u32, Vec<f32>>(vd_options)
             .await
             .map_err(|e| e as Box<dyn ChromaError>)?;
-        let list_data_writer = blockfile_provider
-            .write::<u32, Vec<u32>>(ld_options)
+        let leaf_node_writer = blockfile_provider
+            .write::<u32, HierarchicalLeafNode<'_>>(ln_options)
+            .await
+            .map_err(|e| e as Box<dyn ChromaError>)?;
+        let internal_node_writer = blockfile_provider
+            .write::<u32, HierarchicalInternalNode<'_>>(in_options)
             .await
             .map_err(|e| e as Box<dyn ChromaError>)?;
 
@@ -226,9 +235,10 @@ impl HierarchicalSpannWriter {
 
         // All writes within each blockfile writer MUST be in lexicographic
         // (prefix, key) order. Prefix order for each writer:
-        //   scalar_metadata_writer: dim < length < next_node < node_type < parent < root < version
+        //   scalar_metadata_writer: dim < next_node < root < version
         //   vector_data_writer:     centroid < embedding
-        //   list_data_writer:       centroid_code < children
+        //   leaf_node_writer:       "" (empty prefix, key = node_id)
+        //   internal_node_writer:   "" (empty prefix, key = node_id)
         //   posting_list_writer:    "" (empty)
 
         // =========================================================
@@ -240,36 +250,6 @@ impl HierarchicalSpannWriter {
             .set(PREFIX_DIM, SINGLETON_KEY, self.dim as u32)
             .await?;
 
-        // -- "length" (leaf nodes only; delete tombstones unconditionally) --
-        for &id in &changed_ids {
-            match action_for(&id) {
-                Action::Set => {
-                    let node_ref = self.nodes.get(&id);
-                    if let Some(n) = node_ref {
-                        if let TreeNode::Leaf(leaf) = n.value() {
-                            // For a materialized leaf use the live count (register_in_leaf
-                            // and scrub mutate ids without touching `length`). For a lazy
-                            // shell (ids empty but length>0) keep the persisted length so
-                            // the inherited posting list is still discoverable on reopen.
-                            let len = if leaf.ids.is_empty() {
-                                leaf.length
-                            } else {
-                                leaf.ids.len()
-                            };
-                            scalar_metadata_writer
-                                .set(PREFIX_LENGTH, id, len as u32)
-                                .await?;
-                        }
-                    }
-                }
-                Action::Delete => {
-                    scalar_metadata_writer
-                        .delete::<_, u32>(PREFIX_LENGTH, id)
-                        .await?;
-                }
-            }
-        }
-
         // -- "next_node" (singleton) --
         scalar_metadata_writer
             .set(
@@ -278,51 +258,6 @@ impl HierarchicalSpannWriter {
                 self.next_node_id.load(Ordering::Relaxed),
             )
             .await?;
-
-        // -- "node_type" (all nodes; critical: phantom nodes would resurface
-        //    at open() if stale node_type entries remain after tombstoning) --
-        for &id in &changed_ids {
-            match action_for(&id) {
-                Action::Set => {
-                    if let Some(node_ref) = self.nodes.get(&id) {
-                        let type_val = match node_ref.value() {
-                            TreeNode::Leaf(_) => NODE_TYPE_LEAF,
-                            TreeNode::Internal(_) => NODE_TYPE_INTERNAL,
-                        };
-                        scalar_metadata_writer
-                            .set(PREFIX_NODE_TYPE, id, type_val)
-                            .await?;
-                    }
-                }
-                Action::Delete => {
-                    scalar_metadata_writer
-                        .delete::<_, u32>(PREFIX_NODE_TYPE, id)
-                        .await?;
-                }
-            }
-        }
-
-        // -- "parent" (all nodes) --
-        for &id in &changed_ids {
-            match action_for(&id) {
-                Action::Set => {
-                    if let Some(node_ref) = self.nodes.get(&id) {
-                        let parent = match node_ref.value() {
-                            TreeNode::Leaf(l) => l.parent_id.unwrap_or(NO_PARENT),
-                            TreeNode::Internal(i) => i.parent_id.unwrap_or(NO_PARENT),
-                        };
-                        scalar_metadata_writer
-                            .set(PREFIX_PARENT, id, parent)
-                            .await?;
-                    }
-                }
-                Action::Delete => {
-                    scalar_metadata_writer
-                        .delete::<_, u32>(PREFIX_PARENT, id)
-                        .await?;
-                }
-            }
-        }
 
         // -- "root" (singleton) --
         scalar_metadata_writer
@@ -356,13 +291,22 @@ impl HierarchicalSpannWriter {
         // vector_data_writer
         // =========================================================
 
-        // -- "centroid" (all nodes) --
+        // -- "centroid" (per-node f32 centroid; writer-only data) --
+        //    Reader does not open this prefix; only the writer's `open()`
+        //    enumerates it via `get_range`. We write a centroid for every
+        //    dirty live node and delete for every tombstoned node so the
+        //    forked parent stays in sync with the leaf/internal node
+        //    blockfile. Iterate `changed_ids` in sorted order.
         for &id in &changed_ids {
             match action_for(&id) {
                 Action::Set => {
                     if let Some(node_ref) = self.nodes.get(&id) {
+                        let centroid = match node_ref.value() {
+                            TreeNode::Leaf(leaf) => leaf.centroid.clone(),
+                            TreeNode::Internal(internal) => internal.centroid.clone(),
+                        };
                         vector_data_writer
-                            .set(PREFIX_CENTROID, id, node_ref.centroid().to_vec())
+                            .set(PREFIX_CENTROID, id, centroid)
                             .await?;
                     }
                 }
@@ -395,46 +339,71 @@ impl HierarchicalSpannWriter {
                 .await?;
         }
 
-        // =========================================================
-        // list_data_writer
-        // =========================================================
-
-        // -- "centroid_code" (all nodes) --
-        for &id in &changed_ids {
-            match action_for(&id) {
-                Action::Set => {
-                    if let Some(node_ref) = self.nodes.get(&id) {
-                        let code = node_ref.centroid_code();
-                        if !code.is_empty() {
-                            list_data_writer
-                                .set(PREFIX_CENTROID_CODE, id, pack_bytes_to_u32s(code))
-                                .await?;
-                        }
-                    }
-                }
-                Action::Delete => {
-                    list_data_writer
-                        .delete::<_, Vec<u32>>(PREFIX_CENTROID_CODE, id)
-                        .await?;
-                }
-            }
+        // -- "embedding" deletes --
+        //    Ids tombstoned via `delete()` since the last commit. The
+        //    version blockfile (above) already carries DELETED_BIT for these
+        //    ids; here we erase the actual f32 data so it can't be served by
+        //    rerank/recall and so disk space is reclaimed.
+        let mut deleted_emb_ids: Vec<u32> = self
+            .dirty_deleted_embeddings
+            .iter()
+            .map(|e| *e)
+            .collect();
+        deleted_emb_ids.sort_unstable();
+        let n_deleted = deleted_emb_ids.len() as u64;
+        for data_id in deleted_emb_ids {
+            vector_data_writer
+                .delete::<_, Vec<f32>>(PREFIX_EMBEDDING, data_id)
+                .await?;
         }
+        self.stats
+            .embedding_deletes_committed
+            .fetch_add(n_deleted, std::sync::atomic::Ordering::Relaxed);
 
-        // -- "children" (internal nodes only) --
+        // =========================================================
+        // leaf_node_writer / internal_node_writer
+        //
+        // Each dirty or tombstoned node is written to exactly one typed
+        // writer. For tombstones we delete from both writers: only one
+        // will have the key; the other delete is a harmless no-op against
+        // the forked parent.
+        // =========================================================
+
         for &id in &changed_ids {
             match action_for(&id) {
                 Action::Set => {
                     if let Some(node_ref) = self.nodes.get(&id) {
-                        if let TreeNode::Internal(internal) = node_ref.value() {
-                            list_data_writer
-                                .set(PREFIX_CHILDREN, id, internal.children.clone())
-                                .await?;
+                        match node_ref.value() {
+                            TreeNode::Leaf(leaf) => {
+                                let length = if leaf.ids.is_empty() {
+                                    leaf.length
+                                } else {
+                                    leaf.ids.len()
+                                };
+                                let node = HierarchicalLeafNode {
+                                    parent: leaf.parent_id.unwrap_or(NO_PARENT),
+                                    length: length as u32,
+                                    centroid_code: &leaf.centroid_code,
+                                };
+                                leaf_node_writer.set("", id, node).await?;
+                            }
+                            TreeNode::Internal(internal) => {
+                                let node = HierarchicalInternalNode {
+                                    parent: internal.parent_id.unwrap_or(NO_PARENT),
+                                    centroid_code: &internal.centroid_code,
+                                    children: &internal.children,
+                                };
+                                internal_node_writer.set("", id, node).await?;
+                            }
                         }
                     }
                 }
                 Action::Delete => {
-                    list_data_writer
-                        .delete::<_, Vec<u32>>(PREFIX_CHILDREN, id)
+                    leaf_node_writer
+                        .delete::<_, HierarchicalLeafNode<'_>>("", id)
+                        .await?;
+                    internal_node_writer
+                        .delete::<_, HierarchicalInternalNode<'_>>("", id)
                         .await?;
                 }
             }
@@ -455,22 +424,19 @@ impl HierarchicalSpannWriter {
                     if let Some(n) = node_ref {
                         if let TreeNode::Leaf(leaf) = n.value() {
                             if !leaf.ids.is_empty() {
-                                let wide_versions: Vec<u32> =
-                                    leaf.versions.iter().map(|&v| v as u32).collect();
-                                let cluster = QuantizedCluster {
-                                    center: &leaf.centroid,
+                                let posting = HierarchicalSpannPostingList {
                                     codes: &leaf.codes,
                                     ids: &leaf.ids,
-                                    versions: &wide_versions,
+                                    versions: &leaf.versions,
                                 };
-                                posting_list_writer.set("", id, cluster).await?;
+                                posting_list_writer.set("", id, posting).await?;
                             }
                         }
                     }
                 }
                 Action::Delete => {
                     posting_list_writer
-                        .delete::<_, QuantizedCluster<'_>>("", id)
+                        .delete::<_, HierarchicalSpannPostingList<'_>>("", id)
                         .await?;
                 }
             }
@@ -478,11 +444,16 @@ impl HierarchicalSpannWriter {
 
         // --- Commit all writers ---
         let posting_list_flusher = posting_list_writer
-            .commit::<u32, QuantizedCluster<'_>>()
+            .commit::<u32, HierarchicalSpannPostingList<'_>>()
             .await?;
         let scalar_metadata_flusher = scalar_metadata_writer.commit::<u32, u32>().await?;
         let vector_data_flusher = vector_data_writer.commit::<u32, Vec<f32>>().await?;
-        let list_data_flusher = list_data_writer.commit::<u32, Vec<u32>>().await?;
+        let leaf_node_flusher = leaf_node_writer
+            .commit::<u32, HierarchicalLeafNode<'_>>()
+            .await?;
+        let internal_node_flusher = internal_node_writer
+            .commit::<u32, HierarchicalInternalNode<'_>>()
+            .await?;
 
         // Tombstones and dirty sets have been flushed; clear for next
         // checkpoint. Even though the writer is typically dropped and
@@ -492,12 +463,14 @@ impl HierarchicalSpannWriter {
         self.dirty_nodes.clear();
         self.dirty_versions.clear();
         self.dirty_embeddings.clear();
+        self.dirty_deleted_embeddings.clear();
 
         Ok(HierarchicalSpannFlusher {
             posting_list_flusher,
             scalar_metadata_flusher,
             vector_data_flusher,
-            list_data_flusher,
+            leaf_node_flusher,
+            internal_node_flusher,
         })
     }
 
@@ -529,32 +502,21 @@ impl HierarchicalSpannWriter {
             .await?
             .expect("missing dim") as usize;
 
-        let mut node_types: Vec<(u32, u32)> = Vec::new();
-        for (_prefix, key, value) in sm_reader
-            .get_range(PREFIX_NODE_TYPE..=PREFIX_NODE_TYPE, ..)
-            .await?
-        {
-            node_types.push((key, value));
-        }
-
-        let mut parent_ids: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
-        for (_prefix, key, value) in sm_reader
-            .get_range(PREFIX_PARENT..=PREFIX_PARENT, ..)
-            .await?
-        {
-            parent_ids.insert(key, value);
-        }
-
-        let mut lengths: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
-        for (_prefix, key, value) in sm_reader
-            .get_range(PREFIX_LENGTH..=PREFIX_LENGTH, ..)
-            .await?
-        {
-            lengths.insert(key, value as usize);
-        }
-
-        // Versions populated lazily as posting lists are loaded.
+        // Live versions are populated lazily as posting lists are loaded.
+        // Tombstoned versions (DELETED_BIT set) MUST be loaded eagerly:
+        // otherwise `load_posting_sync` would `or_insert` the stale low-7-bit
+        // version from the posting list and the deleted id would resurrect
+        // (no DELETED_BIT in the global version => `is_valid` would pass).
         let versions: DashMap<u32, u8> = DashMap::new();
+        for (_prefix, id, ver) in sm_reader
+            .get_range(PREFIX_VERSION..=PREFIX_VERSION, ..)
+            .await?
+        {
+            let v = ver as u8;
+            if v & DELETED_BIT != 0 {
+                versions.insert(id, v);
+            }
+        }
 
         let vd_reader = blockfile_provider
             .read::<u32, &'static [f32]>(BlockfileReaderOptions::new(
@@ -564,121 +526,80 @@ impl HierarchicalSpannWriter {
             .await
             .map_err(|e| e as Box<dyn ChromaError>)?;
 
-        let mut centroids: std::collections::HashMap<u32, Vec<f32>> =
-            std::collections::HashMap::new();
-        for (_prefix, key, value) in vd_reader
-            .get_range(PREFIX_CENTROID..=PREFIX_CENTROID, ..)
-            .await?
-        {
-            centroids.insert(key, value.to_vec());
-        }
-
-        let ld_reader = blockfile_provider
-            .read::<u32, &'static [u32]>(BlockfileReaderOptions::new(
-                ids.list_data_id,
+        let ln_reader = blockfile_provider
+            .read::<u32, HierarchicalLeafNode<'static>>(BlockfileReaderOptions::new(
+                ids.leaf_node_id,
                 "".to_string(),
             ))
             .await
             .map_err(|e| e as Box<dyn ChromaError>)?;
 
-        let mut children_map: std::collections::HashMap<u32, Vec<u32>> =
-            std::collections::HashMap::new();
-        for (_prefix, key, value) in ld_reader
-            .get_range(PREFIX_CHILDREN..=PREFIX_CHILDREN, ..)
+        let in_reader = blockfile_provider
+            .read::<u32, HierarchicalInternalNode<'static>>(BlockfileReaderOptions::new(
+                ids.internal_node_id,
+                "".to_string(),
+            ))
+            .await
+            .map_err(|e| e as Box<dyn ChromaError>)?;
+
+        // Eagerly load per-node f32 centroids from vector_data under
+        // PREFIX_CENTROID. Writer needs full-precision centroids for
+        // distance computations during balancing/splits; they are not
+        // embedded in the leaf/internal node blockfiles (so the reader
+        // can skip them entirely).
+        let centroid_map: std::collections::HashMap<NodeId, Vec<f32>> = vd_reader
+            .get_range(PREFIX_CENTROID..=PREFIX_CENTROID, ..)
             .await?
-        {
-            children_map.insert(key, value.to_vec());
-        }
+            .into_iter()
+            .map(|(_p, k, v)| (k, v.to_vec()))
+            .collect();
 
         let nodes: DashMap<NodeId, TreeNode> = DashMap::new();
 
-        for &(node_id, ntype) in &node_types {
-            let parent_id = parent_ids
-                .get(&node_id)
-                .copied()
-                .map(|p| if p == NO_PARENT { None } else { Some(p) })
-                .unwrap_or(None);
-            let centroid = centroids.remove(&node_id).unwrap_or_else(|| vec![0.0; dim]);
-
-            if ntype == NODE_TYPE_LEAF {
-                let length = lengths.get(&node_id).copied().unwrap_or(0);
-                nodes.insert(
-                    node_id,
-                    TreeNode::Leaf(LeafNode {
-                        centroid,
-                        centroid_code: Vec::new(),
-                        ids: Vec::new(),
-                        versions: Vec::new(),
-                        codes: Vec::new(),
-                        parent_id,
-                        length,
-                    }),
-                );
+        for (_prefix, node_id, leaf) in ln_reader.get_range(""..="", ..).await? {
+            let parent_id = if leaf.parent == NO_PARENT {
+                None
             } else {
-                let children = children_map.remove(&node_id).unwrap_or_default();
-                nodes.insert(
-                    node_id,
-                    TreeNode::Internal(InternalNode {
-                        centroid,
-                        centroid_code: Vec::new(),
-                        children,
-                        parent_id,
-                    }),
-                );
-            }
+                Some(leaf.parent)
+            };
+            let centroid = centroid_map.get(&node_id).cloned().unwrap_or_default();
+            nodes.insert(
+                node_id,
+                TreeNode::Leaf(LeafNode {
+                    centroid,
+                    centroid_code: leaf.centroid_code.to_vec(),
+                    ids: Vec::new(),
+                    versions: Vec::new(),
+                    codes: Vec::new(),
+                    parent_id,
+                    length: leaf.length as usize,
+                }),
+            );
         }
 
-        let code_byte_len = Code::<1, Vec<u8>>::size(dim);
-        for (_prefix, key, value) in ld_reader
-            .get_range(PREFIX_CENTROID_CODE..=PREFIX_CENTROID_CODE, ..)
-            .await?
-        {
-            let code_bytes = unpack_u32s_to_bytes(&value, code_byte_len);
-            if let Some(mut node_ref) = nodes.get_mut(&key) {
-                match node_ref.value_mut() {
-                    TreeNode::Leaf(leaf) => {
-                        leaf.centroid_code = code_bytes;
-                    }
-                    TreeNode::Internal(internal) => {
-                        internal.centroid_code = code_bytes;
-                    }
-                }
-            }
+        for (_prefix, node_id, internal) in in_reader.get_range(""..="", ..).await? {
+            let parent_id = if internal.parent == NO_PARENT {
+                None
+            } else {
+                Some(internal.parent)
+            };
+            let centroid = centroid_map.get(&node_id).cloned().unwrap_or_default();
+            nodes.insert(
+                node_id,
+                TreeNode::Internal(InternalNode {
+                    centroid,
+                    centroid_code: internal.centroid_code.to_vec(),
+                    children: internal.children.to_vec(),
+                    parent_id,
+                }),
+            );
         }
 
-        // Fallback: recompute codes for any nodes missing persisted codes
-        // (e.g., loading a checkpoint written before centroid_code persistence).
-        let missing_code_ids: Vec<NodeId> = nodes
-            .iter()
-            .filter_map(|e| {
-                if e.value().centroid_code().is_empty() {
-                    Some(*e.key())
-                } else {
-                    None
-                }
-            })
-            .collect();
-        let zero_centroid = vec![0.0f32; dim];
-        // Recomputed codes need to be persisted on the next commit, so mark
-        // them dirty.
         let dirty_nodes_init: DashSet<NodeId> = DashSet::new();
-        for &nid in &missing_code_ids {
-            if let Some(mut node_ref) = nodes.get_mut(&nid) {
-                let centroid = node_ref.centroid().to_vec();
-                let code = Code::<1>::quantize(&centroid, &zero_centroid);
-                let code_bytes = code.as_ref().to_vec();
-                match node_ref.value_mut() {
-                    TreeNode::Leaf(leaf) => leaf.centroid_code = code_bytes,
-                    TreeNode::Internal(internal) => internal.centroid_code = code_bytes,
-                }
-                drop(node_ref);
-                dirty_nodes_init.insert(nid);
-            }
-        }
 
         let posting_list_reader = Some(
             blockfile_provider
-                .read::<u32, QuantizedCluster<'static>>(BlockfileReaderOptions::new(
+                .read::<u32, HierarchicalSpannPostingList<'static>>(BlockfileReaderOptions::new(
                     ids.posting_list_id,
                     "".to_string(),
                 ))
@@ -697,6 +618,7 @@ impl HierarchicalSpannWriter {
             dirty_nodes: dirty_nodes_init,
             dirty_versions: DashSet::new(),
             dirty_embeddings: DashSet::new(),
+            dirty_deleted_embeddings: DashSet::new(),
             tree_lock: ReentrantMutex::new(()),
             root_id: AtomicU32::new(root_id),
             next_node_id: AtomicU32::new(next_node_id),
@@ -741,7 +663,7 @@ impl HierarchicalSpannWriter {
             }
         }
 
-        let Some(cluster) = reader.get("", node_id).await? else {
+        let Some(posting) = reader.get("", node_id).await? else {
             return Ok(());
         };
 
@@ -751,12 +673,12 @@ impl HierarchicalSpannWriter {
         self.stats.posting_loads.fetch_add(1, Ordering::Relaxed);
         self.stats
             .posting_load_entries
-            .fetch_add(cluster.ids.len() as u64, Ordering::Relaxed);
+            .fetch_add(posting.ids.len() as u64, Ordering::Relaxed);
 
-        let narrow_versions: Vec<u8> = cluster.versions.iter().map(|&v| v as u8).collect();
-        let loaded_ids = cluster.ids.to_vec();
+        let loaded_ids = posting.ids.to_vec();
+        let loaded_versions: Vec<u8> = posting.versions.to_vec();
 
-        for (&id, &ver) in loaded_ids.iter().zip(narrow_versions.iter()) {
+        for (&id, &ver) in loaded_ids.iter().zip(loaded_versions.iter()) {
             self.versions.entry(id).or_insert(ver);
         }
 
@@ -764,8 +686,8 @@ impl HierarchicalSpannWriter {
             if let TreeNode::Leaf(leaf) = node_ref.value_mut() {
                 if leaf.ids.len() < leaf.length {
                     leaf.ids = loaded_ids;
-                    leaf.versions = narrow_versions;
-                    leaf.codes = cluster.codes.to_vec();
+                    leaf.versions = loaded_versions;
+                    leaf.codes = posting.codes.to_vec();
                     leaf.length = leaf.ids.len();
                 }
             }

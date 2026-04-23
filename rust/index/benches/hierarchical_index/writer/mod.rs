@@ -61,8 +61,6 @@ pub struct HierarchicalSpannConfig {
     pub write_navigation: NavigationMode,
     /// If true, NPA uses full precision f32 distances; if false, NPA uses quantized distances.
     pub fp_npa: bool,
-    /// If true, add() skips inline balance; caller must invoke balance_index() explicitly.
-    pub deferred_balance: bool,
 }
 
 impl Default for HierarchicalSpannConfig {
@@ -85,7 +83,6 @@ impl Default for HierarchicalSpannConfig {
             reassign_neighbor_count: 32,
             write_navigation: NavigationMode::Fp,
             fp_npa: true,
-            deferred_balance: false,
         }
     }
 }
@@ -196,7 +193,7 @@ pub mod persistence;
 pub use super::instrumentation::*;
 #[allow(unused_imports)]
 pub use diagnostics::WriterMemoryUsage;
-pub use persistence::{unpack_u32s_to_bytes, HierarchicalSpannIds};
+pub use persistence::HierarchicalSpannIds;
 
 #[derive(Clone, Debug)]
 pub struct ReadBeamPolicy {
@@ -369,12 +366,19 @@ pub struct HierarchicalSpannWriter {
     pub(super) dirty_versions: DashSet<u32>,
     /// Vector ids whose `embeddings` entry was inserted since the last commit.
     pub(super) dirty_embeddings: DashSet<u32>,
+    /// Vector ids whose embedding should be deleted from the vector_data
+    /// blockfile at the next commit. Populated by `delete()`.
+    pub(super) dirty_deleted_embeddings: DashSet<u32>,
 
     pub stats: WriterStats,
 
     // Blockfile readers for lazy loading from persisted state.
     pub(super) posting_list_reader: Option<
-        chroma_blockstore::BlockfileReader<'static, u32, chroma_types::QuantizedCluster<'static>>,
+        chroma_blockstore::BlockfileReader<
+            'static,
+            u32,
+            chroma_types::hierarchical_spann::HierarchicalSpannPostingList<'static>,
+        >,
     >,
     pub(super) vector_data_reader:
         Option<chroma_blockstore::BlockfileReader<'static, u32, &'static [f32]>>,
@@ -408,6 +412,7 @@ impl HierarchicalSpannWriter {
             dirty_nodes,
             dirty_versions: DashSet::new(),
             dirty_embeddings: DashSet::new(),
+            dirty_deleted_embeddings: DashSet::new(),
             tree_lock: ReentrantMutex::new(()),
             root_id: AtomicU32::new(0),
             next_node_id: AtomicU32::new(1),
@@ -437,6 +442,15 @@ impl HierarchicalSpannWriter {
     #[inline]
     pub(super) fn mark_embedding_dirty(&self, id: u32) {
         self.dirty_embeddings.insert(id);
+    }
+
+    #[inline]
+    pub(super) fn mark_embedding_deleted(&self, id: u32) {
+        // If we deleted before the embedding was ever flushed, the embedding
+        // never made it to disk; cancel the pending upsert so commit doesn't
+        // try to write and then delete the same key.
+        self.dirty_embeddings.remove(&id);
+        self.dirty_deleted_embeddings.insert(id);
     }
 
     fn write_beam_policy(&self) -> ReadBeamPolicy {
@@ -489,6 +503,17 @@ impl HierarchicalSpannWriter {
     pub fn add(&self, id: u32, embedding: &[f32]) {
         let add_start = Instant::now();
 
+        // Refuse to resurrect a deleted id. Re-adding after delete is not a
+        // supported operation; silently drop. (Lifting this restriction would
+        // require a separate "undelete" path that scrubs every leaf for the
+        // stale tombstoned entries before bumping the version below the
+        // DELETED_BIT.)
+        if let Some(g) = self.versions.get(&id) {
+            if *g & DELETED_BIT != 0 {
+                return;
+            }
+        }
+
         let emb: Arc<[f32]> = Arc::from(embedding);
         self.embeddings.insert(id, emb);
         self.mark_embedding_dirty(id);
@@ -538,6 +563,39 @@ impl HierarchicalSpannWriter {
         self.stats
             .add_nanos
             .fetch_add(add_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+    }
+
+    /// Mark a vector id as deleted.
+    ///
+    /// O(1) and idempotent. Sets `DELETED_BIT` on the global version map
+    /// entry, which causes:
+    ///   1. `is_valid()` / reassign to treat the id as gone immediately
+    ///   2. `scrub()` and `split_leaf()` to drop the id's posting entries
+    ///      (the in-memory and on-disk version no longer match the global)
+    ///   3. `commit()` to delete the id's embedding from the vector_data
+    ///      blockfile and persist the tombstoned version
+    ///
+    /// Posting list cleanup is lazy: tombstoned ids remain in untouched
+    /// leaves on disk until those leaves are next mutated/scrubbed.
+    pub fn delete(&self, id: u32) {
+        let already = {
+            let mut v = self.versions.entry(id).or_insert(0);
+            if *v & DELETED_BIT != 0 {
+                true
+            } else {
+                *v |= DELETED_BIT;
+                false
+            }
+        };
+        if already {
+            return;
+        }
+        self.mark_version_dirty(id);
+        self.mark_embedding_deleted(id);
+        // Drop the in-memory embedding eagerly so it can't be used by any
+        // subsequent reassign/split for an id that's already tombstoned.
+        self.embeddings.remove(&id);
+        self.stats.deletes.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Register a vector in a leaf. Uses per-leaf DashMap get_mut -- no global lock.
@@ -1933,9 +1991,10 @@ impl HierarchicalSpannWriter {
     }
 
     fn is_valid(&self, id: u32, version: u8) -> bool {
-        self.versions
-            .get(&id)
-            .is_some_and(|global_version| *global_version == version)
+        self.versions.get(&id).is_some_and(|g| {
+            // Tombstoned ids are never valid, even if the low 7 bits match.
+            *g & DELETED_BIT == 0 && (*g & VERSION_MASK) == (version & VERSION_MASK)
+        })
     }
 
     // =========================================================================

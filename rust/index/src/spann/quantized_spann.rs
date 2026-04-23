@@ -276,12 +276,25 @@ pub mod stats {
 
     /// Methods shown in `quantized_spann` benchmark batch tables (indexing only; no query `search*`).
     const INDEXING_TASK_METHODS: &[&str] = &[
-        "add", "navigate", "nav_search", "nav_fetch", "nav_rerank",
-        "register", "spawn",
-        "scrub", "split", "merge", "reassign", "drop",
-        "load", "load_raw",
+        "add",
+        "navigate",
+        "nav_search",
+        "nav_fetch",
+        "nav_rerank",
+        "register",
+        "spawn",
+        "scrub",
+        "split",
+        "merge",
+        "reassign",
+        "drop",
+        "load",
+        "load_raw",
         "quantize",
-        "raw_add", "raw_rm", "q_add", "q_rm",
+        "raw_add",
+        "raw_rm",
+        "q_add",
+        "q_rm",
     ];
 
     fn format_duration(nanos: u64) -> String {
@@ -723,8 +736,13 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
                         quantization::Code::<1, _>::new(code)
                             .distance_quantized_query(&self.distance_function, qq)
                     } else {
-                        quantization::Code::<4, _>::new(code)
-                            .distance_query(&self.distance_function, &r_q, c_norm, c_dot_q, q_norm)
+                        quantization::Code::<4, _>::new(code).distance_query(
+                            &self.distance_function,
+                            &r_q,
+                            c_norm,
+                            c_dot_q,
+                            q_norm,
+                        )
                     };
                     results.push((*id, distance));
                 }
@@ -1031,9 +1049,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             candidates
                 .keys
                 .iter()
-                .filter_map(|&key| {
-                    self.centroid(key).map(|v| (key, v))
-                })
+                .filter_map(|&key| self.centroid(key).map(|v| (key, v)))
                 .collect()
         };
 
@@ -1428,10 +1444,34 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             let code_bits = self.data_bits();
             let qq_1bit = (code_bits == 1).then(|| {
                 let pb = quantization::packed_len_1bit(self.dimension);
-                let left = quantization::QuantizedQuery::new(&left_r_q, pb, c_norm, left_c_dot_q, left_q_norm);
-                let right = quantization::QuantizedQuery::new(&right_r_q, pb, c_norm, right_c_dot_q, right_q_norm);
-                let neighbor = quantization::QuantizedQuery::new(&neighbor_r_q, pb, c_norm, neighbor_c_dot_q, neighbor_q_norm);
-                let old = quantization::QuantizedQuery::new(&old_r_q, pb, c_norm, old_c_dot_q, old_q_norm);
+                let left = quantization::QuantizedQuery::new(
+                    &left_r_q,
+                    pb,
+                    c_norm,
+                    left_c_dot_q,
+                    left_q_norm,
+                );
+                let right = quantization::QuantizedQuery::new(
+                    &right_r_q,
+                    pb,
+                    c_norm,
+                    right_c_dot_q,
+                    right_q_norm,
+                );
+                let neighbor = quantization::QuantizedQuery::new(
+                    &neighbor_r_q,
+                    pb,
+                    c_norm,
+                    neighbor_c_dot_q,
+                    neighbor_q_norm,
+                );
+                let old = quantization::QuantizedQuery::new(
+                    &old_r_q,
+                    pb,
+                    c_norm,
+                    old_c_dot_q,
+                    old_q_norm,
+                );
                 (left, right, neighbor, old)
             });
 
@@ -1448,21 +1488,40 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
 
                 let code_bytes: &[u8] = code.as_ref();
 
-                let (left_dist, right_dist, neighbor_dist) = if let Some((ref lq, ref rq, ref nq, _)) = qq_1bit {
-                    let c = quantization::Code::<1, _>::new(code_bytes);
-                    (
-                        c.distance_quantized_query(&self.distance_function, lq),
-                        c.distance_quantized_query(&self.distance_function, rq),
-                        c.distance_quantized_query(&self.distance_function, nq),
-                    )
-                } else {
-                    let c = quantization::Code::<4, _>::new(code_bytes);
-                    (
-                        c.distance_query(&self.distance_function, &left_r_q, c_norm, left_c_dot_q, left_q_norm),
-                        c.distance_query(&self.distance_function, &right_r_q, c_norm, right_c_dot_q, right_q_norm),
-                        c.distance_query(&self.distance_function, &neighbor_r_q, c_norm, neighbor_c_dot_q, neighbor_q_norm),
-                    )
-                };
+                let (left_dist, right_dist, neighbor_dist) =
+                    if let Some((ref lq, ref rq, ref nq, _)) = qq_1bit {
+                        let c = quantization::Code::<1, _>::new(code_bytes);
+                        (
+                            c.distance_quantized_query(&self.distance_function, lq),
+                            c.distance_quantized_query(&self.distance_function, rq),
+                            c.distance_quantized_query(&self.distance_function, nq),
+                        )
+                    } else {
+                        let c = quantization::Code::<4, _>::new(code_bytes);
+                        (
+                            c.distance_query(
+                                &self.distance_function,
+                                &left_r_q,
+                                c_norm,
+                                left_c_dot_q,
+                                left_q_norm,
+                            ),
+                            c.distance_query(
+                                &self.distance_function,
+                                &right_r_q,
+                                c_norm,
+                                right_c_dot_q,
+                                right_q_norm,
+                            ),
+                            c.distance_query(
+                                &self.distance_function,
+                                &neighbor_r_q,
+                                c_norm,
+                                neighbor_c_dot_q,
+                                neighbor_q_norm,
+                            ),
+                        )
+                    };
 
                 if neighbor_dist <= left_dist && neighbor_dist <= right_dist {
                     continue;
@@ -1472,8 +1531,13 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
                     quantization::Code::<1, _>::new(code_bytes)
                         .distance_quantized_query(&self.distance_function, oq)
                 } else {
-                    quantization::Code::<4, _>::new(code_bytes)
-                        .distance_query(&self.distance_function, &old_r_q, c_norm, old_c_dot_q, old_q_norm)
+                    quantization::Code::<4, _>::new(code_bytes).distance_query(
+                        &self.distance_function,
+                        &old_r_q,
+                        c_norm,
+                        old_c_dot_q,
+                        old_q_norm,
+                    )
                 };
 
                 if old_dist <= left_dist && old_dist <= right_dist {

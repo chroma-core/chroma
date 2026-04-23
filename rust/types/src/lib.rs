@@ -16,6 +16,7 @@ mod metadata;
 mod operation;
 pub mod operators;
 pub mod operators_generated;
+pub mod hierarchical_spann;
 mod quantized_cluster;
 mod record;
 mod scalar_encoding;

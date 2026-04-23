@@ -1,4 +1,7 @@
 pub(super) mod data_record_value;
+pub(super) mod hierarchical_internal_node_value;
+pub(super) mod hierarchical_leaf_node_value;
+pub(super) mod hierarchical_posting_list_value;
 pub(super) mod f32_value;
 pub(super) mod float32array_value;
 pub(super) mod quantized_cluster_value;

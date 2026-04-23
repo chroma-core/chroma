@@ -1,6 +1,11 @@
 use std::mem::size_of;
 
-use chroma_types::{DataRecord, QuantizedCluster, SpannPostingList};
+use chroma_types::{
+    hierarchical_spann::{
+        HierarchicalInternalNode, HierarchicalLeafNode, HierarchicalSpannPostingList,
+    },
+    DataRecord, QuantizedCluster, SpannPostingList,
+};
 use roaring::RoaringBitmap;
 
 pub trait Value: Clone + Send + Sync {
@@ -92,6 +97,24 @@ impl Value for &SpannPostingList<'_> {
 }
 
 impl Value for QuantizedCluster<'_> {
+    fn get_size(&self) -> usize {
+        self.compute_size()
+    }
+}
+
+impl Value for HierarchicalLeafNode<'_> {
+    fn get_size(&self) -> usize {
+        self.compute_size()
+    }
+}
+
+impl Value for HierarchicalInternalNode<'_> {
+    fn get_size(&self) -> usize {
+        self.compute_size()
+    }
+}
+
+impl Value for HierarchicalSpannPostingList<'_> {
     fn get_size(&self) -> usize {
         self.compute_size()
     }

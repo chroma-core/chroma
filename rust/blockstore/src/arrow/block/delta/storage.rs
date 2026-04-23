@@ -1,6 +1,11 @@
 use super::{
-    data_record::DataRecordStorage, quantized_cluster_delta::QuantizedClusterDelta,
-    single_column_storage::SingleColumnStorage, spann_posting_list_delta::SpannPostingListDelta,
+    data_record::DataRecordStorage,
+    hierarchical_internal_node_delta::HierarchicalInternalNodeDelta,
+    hierarchical_leaf_node_delta::HierarchicalLeafNodeDelta,
+    hierarchical_posting_list_delta::HierarchicalPostingListDelta,
+    quantized_cluster_delta::QuantizedClusterDelta,
+    single_column_storage::SingleColumnStorage,
+    spann_posting_list_delta::SpannPostingListDelta,
 };
 use crate::{
     arrow::types::ArrowWriteableKey,
@@ -29,6 +34,9 @@ pub enum BlockStorage {
     DataRecord(DataRecordStorage),
     QuantizedClusterDelta(QuantizedClusterDelta),
     SpannPostingListDelta(SpannPostingListDelta),
+    HierarchicalLeafNodeDelta(HierarchicalLeafNodeDelta),
+    HierarchicalInternalNodeDelta(HierarchicalInternalNodeDelta),
+    HierarchicalPostingListDelta(HierarchicalPostingListDelta),
 }
 
 impl Debug for BlockStorage {
@@ -46,6 +54,15 @@ impl Debug for BlockStorage {
             }
             BlockStorage::SpannPostingListDelta(_) => {
                 f.debug_struct("SpannPostingListDelta").finish()
+            }
+            BlockStorage::HierarchicalLeafNodeDelta(_) => {
+                f.debug_struct("HierarchicalLeafNodeDelta").finish()
+            }
+            BlockStorage::HierarchicalInternalNodeDelta(_) => {
+                f.debug_struct("HierarchicalInternalNodeDelta").finish()
+            }
+            BlockStorage::HierarchicalPostingListDelta(_) => {
+                f.debug_struct("HierarchicalPostingListDelta").finish()
             }
         }
     }
@@ -170,6 +187,9 @@ impl BlockStorage {
             BlockStorage::RoaringBitmap(builder) => builder.get_prefix_size(),
             BlockStorage::QuantizedClusterDelta(builder) => builder.get_prefix_size(),
             BlockStorage::SpannPostingListDelta(builder) => builder.get_prefix_size(),
+            BlockStorage::HierarchicalLeafNodeDelta(builder) => builder.get_prefix_size(),
+            BlockStorage::HierarchicalInternalNodeDelta(builder) => builder.get_prefix_size(),
+            BlockStorage::HierarchicalPostingListDelta(builder) => builder.get_prefix_size(),
         }
     }
 
@@ -184,6 +204,9 @@ impl BlockStorage {
             BlockStorage::RoaringBitmap(builder) => builder.get_key_size(),
             BlockStorage::QuantizedClusterDelta(builder) => builder.get_key_size(),
             BlockStorage::SpannPostingListDelta(builder) => builder.get_key_size(),
+            BlockStorage::HierarchicalLeafNodeDelta(builder) => builder.get_key_size(),
+            BlockStorage::HierarchicalInternalNodeDelta(builder) => builder.get_key_size(),
+            BlockStorage::HierarchicalPostingListDelta(builder) => builder.get_key_size(),
         }
     }
 
@@ -198,6 +221,9 @@ impl BlockStorage {
             BlockStorage::RoaringBitmap(builder) => builder.get_min_key(),
             BlockStorage::QuantizedClusterDelta(builder) => builder.get_min_key(),
             BlockStorage::SpannPostingListDelta(builder) => builder.get_min_key(),
+            BlockStorage::HierarchicalLeafNodeDelta(builder) => builder.get_min_key(),
+            BlockStorage::HierarchicalInternalNodeDelta(builder) => builder.get_min_key(),
+            BlockStorage::HierarchicalPostingListDelta(builder) => builder.get_min_key(),
         }
     }
 
@@ -213,6 +239,9 @@ impl BlockStorage {
             BlockStorage::RoaringBitmap(builder) => builder.get_size::<K>(),
             BlockStorage::QuantizedClusterDelta(builder) => builder.get_size::<K>(),
             BlockStorage::SpannPostingListDelta(builder) => builder.get_size::<K>(),
+            BlockStorage::HierarchicalLeafNodeDelta(builder) => builder.get_size::<K>(),
+            BlockStorage::HierarchicalInternalNodeDelta(builder) => builder.get_size::<K>(),
+            BlockStorage::HierarchicalPostingListDelta(builder) => builder.get_size::<K>(),
         }
     }
 
@@ -254,6 +283,18 @@ impl BlockStorage {
                 let (split_key, storage) = builder.split::<K>(split_size);
                 (split_key, BlockStorage::SpannPostingListDelta(storage))
             }
+            BlockStorage::HierarchicalLeafNodeDelta(builder) => {
+                let (split_key, storage) = builder.split::<K>(split_size);
+                (split_key, BlockStorage::HierarchicalLeafNodeDelta(storage))
+            }
+            BlockStorage::HierarchicalInternalNodeDelta(builder) => {
+                let (split_key, storage) = builder.split::<K>(split_size);
+                (split_key, BlockStorage::HierarchicalInternalNodeDelta(storage))
+            }
+            BlockStorage::HierarchicalPostingListDelta(builder) => {
+                let (split_key, storage) = builder.split::<K>(split_size);
+                (split_key, BlockStorage::HierarchicalPostingListDelta(storage))
+            }
         }
     }
 
@@ -268,6 +309,9 @@ impl BlockStorage {
             BlockStorage::RoaringBitmap(builder) => builder.len(),
             BlockStorage::QuantizedClusterDelta(builder) => builder.len(),
             BlockStorage::SpannPostingListDelta(builder) => builder.len(),
+            BlockStorage::HierarchicalLeafNodeDelta(builder) => builder.len(),
+            BlockStorage::HierarchicalInternalNodeDelta(builder) => builder.len(),
+            BlockStorage::HierarchicalPostingListDelta(builder) => builder.len(),
         }
     }
 
@@ -316,7 +360,15 @@ impl BlockStorage {
                 builder.into_arrow(key_builder).unwrap()
             }
             BlockStorage::SpannPostingListDelta(builder) => {
-                // TODO: handle error
+                builder.into_arrow(key_builder).unwrap()
+            }
+            BlockStorage::HierarchicalLeafNodeDelta(builder) => {
+                builder.into_arrow(key_builder).unwrap()
+            }
+            BlockStorage::HierarchicalInternalNodeDelta(builder) => {
+                builder.into_arrow(key_builder).unwrap()
+            }
+            BlockStorage::HierarchicalPostingListDelta(builder) => {
                 builder.into_arrow(key_builder).unwrap()
             }
         }

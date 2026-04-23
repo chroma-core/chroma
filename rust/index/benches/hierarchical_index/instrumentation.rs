@@ -16,6 +16,12 @@ pub const MAX_NAV_LEVELS: usize = 8;
 pub struct WriterStats {
     pub adds: AtomicU64,
     pub add_nanos: AtomicU64,
+    /// Count of `delete()` calls that flipped a fresh tombstone (idempotent
+    /// re-deletes do not increment this).
+    pub deletes: AtomicU64,
+    /// Count of embeddings actually erased from the vector_data blockfile
+    /// at commit time.
+    pub embedding_deletes_committed: AtomicU64,
     pub navigates: AtomicU64,
     pub navigate_nanos: AtomicU64,
     pub splits: AtomicU64,
@@ -132,6 +138,8 @@ impl Default for WriterStats {
         Self {
             adds: AtomicU64::new(0),
             add_nanos: AtomicU64::new(0),
+            deletes: AtomicU64::new(0),
+            embedding_deletes_committed: AtomicU64::new(0),
             navigates: AtomicU64::new(0),
             navigate_nanos: AtomicU64::new(0),
             splits: AtomicU64::new(0),
