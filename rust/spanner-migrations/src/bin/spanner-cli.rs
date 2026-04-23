@@ -7,10 +7,16 @@ fn main() {
         let mut pid = std::process::Command::new(KNOWN_PATH)
             .args(std::env::args_os().skip(1))
             .spawn()
-            .expect("failed to spawn spanner-cli");
+            .unwrap_or_else(|err| {
+                eprintln!("failed to spawn spanner-cli: {}", err);
+                std::process::exit(1);
+            });
         let exit = pid
             .wait()
-            .expect("could not wait for spanner-cli; zombies?");
+            .unwrap_or_else(|err| {
+                eprintln!("failed while waiting for spanner-cli: {}", err);
+                std::process::exit(1);
+            });
         std::process::exit(exit.code().unwrap_or(if exit.success() { 0 } else { 1 }));
     }
     eprintln!(
