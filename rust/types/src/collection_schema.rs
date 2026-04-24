@@ -3044,7 +3044,7 @@ pub enum SparseIndexAlgorithm {
 }
 
 fn is_default_sparse_algorithm(v: &SparseIndexAlgorithm) -> bool {
-    matches!(v, SparseIndexAlgorithm::Wand)
+    v == &SparseIndexAlgorithm::default()
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
