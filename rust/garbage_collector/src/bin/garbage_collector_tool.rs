@@ -63,8 +63,6 @@ enum GarbageCollectorCommand {
         collection_id: String,
         #[arg(long, default_value = "true")]
         enable_log_gc: bool,
-        #[arg(long, default_value = "false")]
-        enable_dangerous_option_to_ignore_min_versions_for_wal3: bool,
         #[arg(long)]
         cleanup_mode: CliCleanupMode,
         #[arg(long)]
@@ -178,7 +176,6 @@ async fn main() {
         GarbageCollectorCommand::GarbageCollect {
             collection_id,
             enable_log_gc,
-            enable_dangerous_option_to_ignore_min_versions_for_wal3,
             cleanup_mode,
             version_absolute_cutoff_time,
             collection_soft_delete_absolute_cutoff_time,
@@ -267,7 +264,6 @@ async fn main() {
                 cleanup_mode.into(),
                 config.min_versions_to_keep,
                 enable_log_gc,
-                enable_dangerous_option_to_ignore_min_versions_for_wal3,
                 10,
             );
 

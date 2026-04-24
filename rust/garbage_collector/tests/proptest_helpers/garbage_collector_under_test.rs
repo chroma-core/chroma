@@ -340,7 +340,6 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                                 CleanupMode::DeleteV2,
                                 min_versions_to_keep as u32,
                                 true,
-                                false,
                                 10,
                             );
                             let result = orchestrator.run(system.clone()).await;
