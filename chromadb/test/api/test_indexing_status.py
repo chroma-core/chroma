@@ -1,5 +1,5 @@
 from time import sleep
-import threading
+
 from chromadb.api import ClientAPI
 from chromadb.api.types import IndexingStatus
 from chromadb.test.conftest import skip_if_not_cluster
@@ -220,63 +220,37 @@ def test_indexing_status_not_found(client: ClientAPI) -> None:
 
 @skip_if_not_cluster()
 def test_indexing_status_concurrent_progress_variation(client: ClientAPI) -> None:
-    """Test that progress values vary during concurrent operations"""
+    """Test that progress values vary as indexing completes"""
     client.reset()
 
     collection = client.create_collection(name="concurrent_test_collection")
+    initial_version = get_collection_version(client, collection.name)
 
-    progress_values = []
-    stop_monitoring = threading.Event()
+    ids = [f"concurrent_id_{i}" for i in range(300)]
+    embeddings = [[float(i), float(i + 1), float(i + 2)] for i in range(300)]
+    collection.add(ids=ids, embeddings=embeddings)  # type: ignore
 
-    def progress_monitor() -> None:
-        """Thread that continuously monitors indexing progress"""
-        while not stop_monitoring.is_set():
-            try:
-                status = collection.get_indexing_status()
-                progress_values.append(status.op_indexing_progress)
-                sleep(0.1)  # Poll every 100ms
-            except Exception:
-                break
+    progress_values = set()
 
-    def record_adder() -> None:
-        """Thread that adds records one at a time"""
-        for i in range(50):  # Add 50 records one by one
-            collection.add(
-                ids=[f"concurrent_id_{i}"],
-                embeddings=[[float(i), float(i + 1), float(i + 2)]],  # type: ignore
-            )
-            sleep(0.05)  # Small delay between additions
+    # Record status before compaction completes
+    status = collection.get_indexing_status()
+    progress_values.add(status.op_indexing_progress)
 
-    # Start both threads
-    monitor_thread = threading.Thread(target=progress_monitor)
-    adder_thread = threading.Thread(target=record_adder)
+    if initial_version == get_collection_version(client, collection.name):
+        assert status.op_indexing_progress == 0.0
+        wait_for_version_increase(client, collection.name, initial_version)
+        # Give time to invalidate the frontend query cache
+        sleep(60)
 
-    monitor_thread.start()
-    adder_thread.start()
+    # Record status after compaction
+    final_status = collection.get_indexing_status()
+    progress_values.add(final_status.op_indexing_progress)
 
-    # Wait for record addition to complete
-    adder_thread.join()
+    assert final_status.op_indexing_progress == 1.0
 
-    # Give a moment for final progress updates
-    sleep(1.0)
+    # We should have observed at least two distinct progress values (0.0 and 1.0)
+    assert len(progress_values) > 1, (
+        f"Expected variation in progress values, but only got: {progress_values}"
+    )
 
-    # Stop monitoring and wait for thread to finish
-    stop_monitoring.set()
-    monitor_thread.join()
-
-    # Assert that we collected progress values
-    assert len(progress_values) > 0, "No progress values were collected"
-
-    # Assert that not all progress values are 0
-    non_zero_progress = [p for p in progress_values if p > 0.0]
-    assert len(non_zero_progress) > 0, "All progress values remained at 0"
-
-    # Assert that there's variation in progress values
-    unique_progress = set(progress_values)
-    assert (
-        len(unique_progress) > 1
-    ), f"Expected variation in progress values, but only got: {unique_progress}"
-
-    print(f"Collected {len(progress_values)} progress values")
-    print(f"Unique progress values: {sorted(unique_progress)}")
-    print(f"Progress range: {min(progress_values):.3f} - {max(progress_values):.3f}")
+    print(f"Unique progress values: {sorted(progress_values)}")
