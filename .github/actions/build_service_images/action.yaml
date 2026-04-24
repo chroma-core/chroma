@@ -13,45 +13,33 @@ inputs:
     description: 'If "true", skip the short-circuit check and always rebuild/push.'
     required: false
     default: 'false'
-  # Registry/credential inputs are only consumed by push-gated steps
-  # (if: inputs.PUSH == 'true'), so callers that build locally
-  # (e.g. tilt-setup-prebuild with PUSH=false) can omit them.
   AWS_REGION:
     description: 'AWS region of ECR'
-    required: false
-    default: ''
+    required: true
   AWS_ECR_OIDC_ARN:
     description: 'AWS ARN of the OIDC role to assume for logging into ECR'
-    required: false
-    default: ''
+    required: true
   GCP_WORKLOAD_IDENTITY_PROVIDER:
     description: 'GCP workload identity provider'
-    required: false
-    default: ''
+    required: true
   GCP_GITHUB_ACTIONS_SERVICE_ACCOUNT_EMAIL:
     description: 'GCP service account email'
-    required: false
-    default: ''
+    required: true
   GCP_ARTIFACT_REGISTRY_REGION:
     description: 'GCP artifact registry region'
-    required: false
-    default: ''
+    required: true
   GCP_ARTIFACT_REGISTRY_PROJECT_ID:
     description: 'GCP artifact registry project ID'
-    required: false
-    default: ''
+    required: true
   GCP_ARTIFACT_REGISTRY_NAME:
     description: 'GCP artifact registry name'
-    required: false
-    default: ''
+    required: true
   DOCKERHUB_USERNAME:
     description: 'DockerHub username for authentication'
-    required: false
-    default: ''
+    required: true
   DOCKERHUB_TOKEN:
     description: 'DockerHub token for authentication'
-    required: false
-    default: ''
+    required: true
   ADDRESS_SANITIZER:
     description: 'Enable Address Sanitizer for builds. Set to "1" to enable.'
     required: false
@@ -60,18 +48,6 @@ inputs:
     description: 'Enable AVX512 for builds. Set to "1" to enable.'
     required: false
     default: ''
-  RELEASE_MODE:
-    description: 'Pass "1" for release builds, "" for debug builds. Defaults to debug; the release-image publish workflow opts in to "1".'
-    required: false
-    default: ''
-  LOG_SERVICE_CARGO_FEATURES:
-    description: 'Extra cargo features for the rust-log-service image (e.g. "faults" for CI fault-injection).'
-    required: false
-    default: ''
-  LOAD:
-    description: 'If "true", load built images into the host Docker daemon (needed by Tilt, which tags <name>:ci into its own refs). Ignored when PUSH=true.'
-    required: false
-    default: 'false'
 
 outputs:
   skipped:
@@ -173,8 +149,6 @@ runs:
         COMMIT_SHORT_SHA: ${{ steps.short-shas.outputs.COMMIT_SHORT_SHA }}
         ADDRESS_SANITIZER: ${{ inputs.ADDRESS_SANITIZER }}
         ENABLE_AVX512: ${{ inputs.ENABLE_AVX512 }}
-        RELEASE_MODE: ${{ inputs.RELEASE_MODE }}
-        LOG_SERVICE_CARGO_FEATURES: ${{ inputs.LOG_SERVICE_CARGO_FEATURES }}
         FORCE: ${{ inputs.FORCE }}
         PUSH: ${{ inputs.PUSH }}
       run: |
@@ -227,10 +201,6 @@ runs:
       uses: docker/bake-action@v5
       with:
         push: false
-        # Load into the host daemon only when requested and we aren't pushing.
-        # Tilt's CI custom_build reads from the local daemon; the release
-        # push path never needs this (it pushes layers directly).
-        load: ${{ inputs.PUSH != 'true' && inputs.LOAD == 'true' }}
         files: docker-bake.hcl
       env:
         LOCAL_BUILD: ${{ inputs.PUSH == 'true' && 'false' || 'true' }}
@@ -240,8 +210,6 @@ runs:
         COMMIT_SHORT_SHA: ${{ steps.short-shas.outputs.COMMIT_SHORT_SHA }}
         ADDRESS_SANITIZER: ${{ inputs.ADDRESS_SANITIZER }}
         ENABLE_AVX512: ${{ inputs.ENABLE_AVX512 }}
-        RELEASE_MODE: ${{ inputs.RELEASE_MODE }}
-        LOG_SERVICE_CARGO_FEATURES: ${{ inputs.LOG_SERVICE_CARGO_FEATURES }}
 
     # Retry to absorb transient registry failures. Buildx cache + registry
     # layer dedup make retries cheap — only whatever failed gets re-pushed.
@@ -256,8 +224,6 @@ runs:
         COMMIT_SHORT_SHA: ${{ steps.short-shas.outputs.COMMIT_SHORT_SHA }}
         ADDRESS_SANITIZER: ${{ inputs.ADDRESS_SANITIZER }}
         ENABLE_AVX512: ${{ inputs.ENABLE_AVX512 }}
-        RELEASE_MODE: ${{ inputs.RELEASE_MODE }}
-        LOG_SERVICE_CARGO_FEATURES: ${{ inputs.LOG_SERVICE_CARGO_FEATURES }}
       run: |
         set -euo pipefail
 

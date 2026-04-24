@@ -106,7 +106,6 @@ jobs:
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           ADDRESS_SANITIZER: ${{ inputs.address_sanitizer }}
           ENABLE_AVX512: ${{ inputs.enable_avx512 }}
-          RELEASE_MODE: '1'
 
   notify-slack-on-failure:
     name: Notify Slack on build failure

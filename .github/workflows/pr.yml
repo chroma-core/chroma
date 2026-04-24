@@ -157,8 +157,6 @@ jobs:
   # test-mcmr-integration, test-cluster-rust-frontend) will clone this
   # snapshot and get all BuildKit layers cached — avoiding ~6 min of
   # redundant cargo compilation per job (~20 jobs × 6 min → 1 × 6 min).
-  # Inputs here must match those in .github/actions/tilt-setup-prebuild
-  # so the warmed BuildKit layers are reused by the tilt-driven jobs.
   build-images:
     name: Build Docker images (warm sticky disk)
     needs: change-detection
@@ -169,11 +167,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Set up Blacksmith builder
+        uses: useblacksmith/setup-docker-builder@v1
       - name: Build all CI images (warms BuildKit cache on sticky disk)
-        uses: ./.github/actions/build_service_images
-        with:
-          PUSH: 'false'
-          LOG_SERVICE_CARGO_FEATURES: 'faults'
+        run: docker buildx bake -f .github/actions/tilt-setup-prebuild/docker-bake.hcl
 
   python-tests:
     name: Python tests
