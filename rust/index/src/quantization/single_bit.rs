@@ -202,6 +202,7 @@ impl<T: AsRef<[u8]>> Code<1, T> {
     /// `[j*pb .. (j+1)*pb]`) rather than `Vec<Vec<u8>>`, so all four plane
     /// slices are contiguous and extracted with cheap slice indexing before
     /// the loop.
+    // TODO remove in favor of distance_quantized_query2?
     pub fn distance_quantized_query(
         &self,
         distance_fn: &DistanceFunction,
@@ -246,6 +247,56 @@ impl<T: AsRef<[u8]>> Code<1, T> {
             h.radial,
             qq.c_norm,
             qq.c_dot_q,
+            qq.q_norm,
+            distance_fn,
+        )
+    }
+    pub fn distance_quantized_query2(
+        &self,
+        distance_fn: &DistanceFunction,
+        qq: &QuantizedQuery,
+        c_norm: f32,
+        c_dot_q: f32,
+    ) -> f32 {
+        let packed = self.packed();
+
+        // Compute ⟨packed, q_u⟩ (the binary versions of g and r_q) via bit planes.
+        // ⟨packed, q_u⟩ = Σ_j 2^j · popcount(packed AND q_u^(j))
+        let pb = qq.padded_bytes;
+        let packed_dot_qu: u32 = {
+            let p0 = &qq.bit_planes[0..pb];
+            let p1 = &qq.bit_planes[pb..2 * pb];
+            let p2 = &qq.bit_planes[2 * pb..3 * pb];
+            let p3 = &qq.bit_planes[3 * pb..4 * pb];
+            let (mut pop0, mut pop1, mut pop2, mut pop3) = (0u32, 0u32, 0u32, 0u32);
+            for (x_chunk, (((q0, q1), q2), q3)) in packed.chunks_exact(8).zip(
+                p0.chunks_exact(8)
+                    .zip(p1.chunks_exact(8))
+                    .zip(p2.chunks_exact(8))
+                    .zip(p3.chunks_exact(8)),
+            ) {
+                let x = u64::from_le_bytes(x_chunk.try_into().unwrap());
+                pop0 += (x & u64::from_le_bytes(q0.try_into().unwrap())).count_ones();
+                pop1 += (x & u64::from_le_bytes(q1.try_into().unwrap())).count_ones();
+                pop2 += (x & u64::from_le_bytes(q2.try_into().unwrap())).count_ones();
+                pop3 += (x & u64::from_le_bytes(q3.try_into().unwrap())).count_ones();
+            }
+            pop0 + (pop1 << 1) + (pop2 << 2) + (pop3 << 3)
+        };
+
+        let h = self.header();
+        let signed_sum = h.signed_sum as f32;
+        let signed_dot_qu = 2.0 * packed_dot_qu as f32 - qq.sum_q_u as f32;
+        // ⟨g, r_q⟩ = 0.5·(delta·signed_dot_qu + v_l·signed_sum)
+        let g_dot_r_q = 0.5 * (qq.delta * signed_dot_qu + qq.v_l * signed_sum);
+
+        rabitq_distance_query(
+            g_dot_r_q,
+            h.correction,
+            h.norm,
+            h.radial,
+            c_norm,
+            c_dot_q,
             qq.q_norm,
             distance_fn,
         )
@@ -620,6 +671,104 @@ impl QuantizedQuery {
             sum_q_u,
             c_norm,
             c_dot_q,
+            q_norm,
+        }
+    }
+}
+
+/// Pre-computed query quantization for the bitwise distance path.
+///
+/// Computed once per query-cluster pair and reused across all codes in the
+/// cluster. For BITS=1 with B_q=4, this stores:
+///   - 4 bit planes of the quantized query (`r_q`) in a flat contiguous buffer
+///   - `v_l`, `delta`, `sum_q_u`: scalar factors for Equation 20
+pub struct QuantizedQuery2 {
+    /// Flat bit-plane buffer: plane j occupies bytes [j*padded_bytes .. (j+1)*padded_bytes].
+    /// bit_planes[j*padded_bytes + i] holds the j-th bit of q_u[i*8 .. i*8+8], packed LSB-first.
+    /// One contiguous allocation replaces the prior b_q separate Vec<u8> allocations.
+    pub bit_planes: Vec<u8>,
+    /// Byte length of one bit plane (= packed data code length = ceil(dim/64)*8).
+    pub padded_bytes: usize,
+    /// Lower bound of query values: v_l = min(r_q[i])
+    pub v_l: f32,
+    /// Quantization step size: delta = (v_r - v_l) / (2^B_q - 1)
+    pub delta: f32,
+    /// Sum of quantized query values: Σ q_u[i]
+    pub sum_q_u: u32,
+    /// Precomputed query-level scalar
+    pub q_norm: f32,
+}
+
+impl QuantizedQuery2 {
+    /// Quantize a query residual `r_q` into B_q-bit unsigned integers and
+    /// decompose into bit planes for AND+popcount inner products.
+    ///
+    /// `padded_bytes` is the byte length of the packed data codes (for alignment).
+    pub fn new(r_q: &[f32], padded_bytes: usize, q_norm: f32) -> Self {
+        let max_val = (1u32 << B_Q) - 1;
+
+        // Two separate folds — each auto-vectorises to a SIMD reduction
+        // (FMINV/FMAXV on ARM NEON, VMINPS horizontal on x86).
+        // A combined tuple fold `(min, max)` breaks this vectorisation (scalar
+        // pair dependency), measured 3.77× slower on Apple M-series.
+        let v_l = r_q.iter().copied().fold(f32::INFINITY, f32::min);
+        let v_r = r_q.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let range = v_r - v_l;
+        let delta = if range > f32::EPSILON {
+            range / max_val as f32
+        } else {
+            1.0
+        };
+
+        // Single fused pass: quantize each element, accumulate sum, and scatter
+        // bits into a flat bit-plane buffer via chunks_exact(8). The exact-chunk
+        // guarantee lets LLVM eliminate bounds checks and generate tighter code
+        // (44% faster than chunks(8) on Apple M-series).
+        //
+        // Layout: plane j occupies bit_planes[j*padded_bytes .. (j+1)*padded_bytes].
+        let inv_delta = 1.0 / delta;
+        let mut bit_planes = vec![0u8; B_Q as usize * padded_bytes];
+        let mut sum_q_u = 0u32;
+        for (byte_idx, chunk) in r_q.chunks_exact(8).enumerate() {
+            let (mut b0, mut b1, mut b2, mut b3) = (0u8, 0u8, 0u8, 0u8);
+            for (bit, &v) in chunk.iter().enumerate() {
+                let qu = (((v - v_l) * inv_delta).round() as u32).min(max_val);
+                sum_q_u += qu;
+                b0 |= (((qu) & 1) as u8) << bit;
+                b1 |= (((qu >> 1) & 1) as u8) << bit;
+                b2 |= (((qu >> 2) & 1) as u8) << bit;
+                b3 |= (((qu >> 3) & 1) as u8) << bit;
+            }
+            bit_planes[byte_idx] = b0;
+            bit_planes[padded_bytes + byte_idx] = b1;
+            bit_planes[2 * padded_bytes + byte_idx] = b2;
+            bit_planes[3 * padded_bytes + byte_idx] = b3;
+        }
+        // Handle remainder for dim not divisible by 8.
+        let rem = r_q.chunks_exact(8).remainder();
+        if !rem.is_empty() {
+            let byte_idx = r_q.len() / 8;
+            let (mut b0, mut b1, mut b2, mut b3) = (0u8, 0u8, 0u8, 0u8);
+            for (bit, &v) in rem.iter().enumerate() {
+                let qu = (((v - v_l) * inv_delta).round() as u32).min(max_val);
+                sum_q_u += qu;
+                b0 |= (((qu) & 1) as u8) << bit;
+                b1 |= (((qu >> 1) & 1) as u8) << bit;
+                b2 |= (((qu >> 2) & 1) as u8) << bit;
+                b3 |= (((qu >> 3) & 1) as u8) << bit;
+            }
+            bit_planes[byte_idx] = b0;
+            bit_planes[padded_bytes + byte_idx] = b1;
+            bit_planes[2 * padded_bytes + byte_idx] = b2;
+            bit_planes[3 * padded_bytes + byte_idx] = b3;
+        }
+
+        Self {
+            bit_planes,
+            padded_bytes,
+            v_l,
+            delta,
+            sum_q_u,
             q_norm,
         }
     }

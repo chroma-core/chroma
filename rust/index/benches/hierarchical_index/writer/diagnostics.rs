@@ -73,12 +73,8 @@ impl HierarchicalSpannWriter {
                         for child_id in children {
                             if let Some(child) = self.nodes.get(&child_id) {
                                 let code_bytes = child.centroid_code();
-                                let dist = if code_bytes.is_empty() {
-                                    self.dist(query, child.centroid())
-                                } else {
-                                    Code::<1, _>::new(code_bytes)
-                                        .distance_quantized_query(&self.distance_fn, &qq_abs)
-                                };
+                                let dist = Code::<1, _>::new(code_bytes)
+                                    .distance_quantized_query(&self.distance_fn, &qq_abs);
                                 child_scores.push((child_id, dist));
                             }
                         }
@@ -283,12 +279,8 @@ impl HierarchicalSpannWriter {
                         for child_id in children {
                             if let Some(child) = self.nodes.get(&child_id) {
                                 let code_bytes = child.centroid_code();
-                                let dist = if code_bytes.is_empty() {
-                                    self.dist(query, child.centroid())
-                                } else {
-                                    Code::<1, _>::new(code_bytes)
-                                        .distance_quantized_query(&self.distance_fn, &qq_abs)
-                                };
+                                let dist = Code::<1, _>::new(code_bytes)
+                                    .distance_quantized_query(&self.distance_fn, &qq_abs);
                                 child_scores.push((child_id, dist));
                             }
                         }

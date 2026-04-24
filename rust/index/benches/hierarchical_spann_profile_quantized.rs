@@ -218,7 +218,7 @@ struct Args {
     read_level_min_pcts: Option<String>,
 
     /// Number of threads for parallel add
-    #[arg(long, default_value = "1")]
+    #[arg(long, default_value = "32")]
     threads: usize,
 
     /// Write-path navigation mode: fp (f32), 4bit (QuantizedQuery)
@@ -924,9 +924,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         write_beam_max: args.write_beam_max,
         write_level_taus: write_level_taus.clone(),
         write_level_min_pcts: write_level_min_pcts.clone(),
-        beam_tau: args.beam_tau,
-        beam_min: args.read_beam_min,
-        beam_max: args.read_beam_max,
+        // beam_tau: args.beam_tau,
+        // beam_min: args.read_beam_min,
+        // beam_max: args.read_beam_max,
         max_replicas: args.max_replicas,
         write_rng_epsilon: args.write_rng_epsilon,
         write_rng_factor: args.write_rng_factor,

@@ -57,12 +57,8 @@ impl HierarchicalSpannReader {
                         for child_id in children {
                             if let Some(child) = self.nodes.get(&child_id) {
                                 let code_bytes = child.centroid_code();
-                                let dist = if code_bytes.is_empty() {
-                                    f32::MAX
-                                } else {
-                                    Code::<1, _>::new(code_bytes)
-                                        .distance_quantized_query(&self.distance_fn, &qq)
-                                };
+                                let dist = Code::<1, _>::new(code_bytes)
+                                    .distance_quantized_query(&self.distance_fn, &qq);
                                 child_scores.push((child_id, dist));
                             }
                         }

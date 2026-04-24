@@ -34,7 +34,6 @@ pub const DELETED_BIT: u8 = 0x80;
 /// 1-bit quantized hierarchical SPANN index (thread-safe).
 ///
 /// Stores data vectors as 1-bit RaBitQ codes in leaf nodes (posting lists).
-/// Node centroids are also stored as 1-bit codes (residuals vs parent centroid).
 /// Navigation mode is configurable: fp (f32), 1bit (code-to-code), or 4bit (QuantizedQuery). Search scores data vectors with quantized codes
 /// and optionally reranks with f32 embeddings.
 ///
