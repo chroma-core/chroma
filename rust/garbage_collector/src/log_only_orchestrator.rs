@@ -104,7 +104,6 @@ impl HardDeleteLogOnlyGarbageCollectorOrchestrator {
                 storage: self.storage.clone(),
                 logs: self.logs.clone(),
                 regions_and_topologies: self.regions_and_topologies.clone(),
-                enable_dangerous_option_to_ignore_min_versions_for_wal3: false,
             }),
             DeleteUnusedLogsInput {
                 collections_to_destroy,
@@ -230,7 +229,6 @@ mod tests {
     /// it uses the following hardcoded configuration:
     /// - `enabled`: true (operator is active)
     /// - `mode`: `CleanupMode::DeleteV2` (performs hard deletion)
-    /// - `enable_dangerous_option_to_ignore_min_versions_for_wal3`: false (safety check enabled)
     ///
     /// The collection UUID stored in `collection_to_destroy` is placed in the
     /// `collections_to_destroy` set, while `collections_to_garbage_collect` remains empty

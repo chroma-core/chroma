@@ -11,7 +11,6 @@ use chroma_system::{Operator, OperatorType};
 use chroma_types::{CollectionUuid, DatabaseName, TopologyName};
 use futures::future::try_join_all;
 use thiserror::Error;
-use tracing::Level;
 use wal3::{
     create_repl_factories, create_s3_factories, FragmentSeqNo, FragmentUuid,
     GarbageCollectionOptions, GarbageCollectionState, GarbageCollector, LogPosition,
@@ -30,7 +29,6 @@ pub struct DeleteUnusedLogsOperator {
     pub storage: Storage,
     pub logs: Log,
     pub regions_and_topologies: Option<Arc<RegionsAndTopologies>>,
-    pub enable_dangerous_option_to_ignore_min_versions_for_wal3: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -323,55 +321,26 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                             return Err(err);
                         }
                     };
-                    // NOTE(rescrv):  Once upon a time, we had a bug where we would not pass the
-                    // min log offset into the wal3 garbage collect process.  For disaster
-                    // recovery, we need to keep N versions per the config, but the collections
-                    // (staging only) were collected up to the most recent version.  The fix is
-                    // this hack to allow a corrupt garbage error to be masked iff the appropriate
-                    // configuration value is set.
-                    //
-                    // The configuration is
-                    // enable_dangerous_option_to_ignore_min_versions_for_wal3.  Its default is
-                    // false.  Setting it to true enables this loop to skip the min_log_offset.
-                    //
-                    // To remove this hack, search for the warning below, and then make every
-                    // collection that appears with that warning compact min-versions-to-keep
-                    // times.
-                    let mut min_log_offset = Some(*minimum_log_offset_to_keep);
-                    let mut gc_state = wal3::GarbageCollectionState::empty();
-                    for _ in 0..if self.enable_dangerous_option_to_ignore_min_versions_for_wal3 {
-                        2
-                    } else {
-                        1
-                    } {
-                        // See README.md in wal3 for a description of why this happens in three phases.
-                        match writer
-                            .garbage_collect_phase1_compute_garbage(
-                                &GarbageCollectionOptions::default(),
-                                min_log_offset,
-                            )
-                            .await
-                        {
-                            Ok(Some(state)) => {
-                                gc_state = state;
-                            }
-                            Ok(None) => return Ok(()),
-                            Err(wal3::Error::CorruptGarbage(c))
-                                if c.starts_with("First to keep does not overlap manifest") =>
-                            {
-                                if self.enable_dangerous_option_to_ignore_min_versions_for_wal3 {
-                                    tracing::event!(Level::WARN, name = "encountered enable_dangerous_option_to_ignore_min_versions_for_wal3 path", collection_id =? collection_id);
-                                    min_log_offset.take();
-                                }
-                            }
-                            Err(err) => {
-                                tracing::error!(
-                                    "Unable to garbage collect log for collection [{collection_id}]: {err}"
-                                );
-                                return Err(DeleteUnusedLogsError::Wal3 { collection_id, err });
-                            }
-                        };
-                    }
+                    let min_log_offset = Some(*minimum_log_offset_to_keep);
+                    // See README.md in wal3 for a description of why this happens in three phases.
+                    let gc_state = match writer
+                        .garbage_collect_phase1_compute_garbage(
+                            &GarbageCollectionOptions::default(),
+                            min_log_offset,
+                        )
+                        .await
+                    {
+                        Ok(Some(state)) => {
+                            state
+                        }
+                        Ok(None) => return Ok(()),
+                        Err(err) => {
+                            tracing::error!(
+                                "Unable to garbage collect log for collection [{collection_id}]: {err}"
+                            );
+                            return Err(DeleteUnusedLogsError::Wal3 { collection_id, err });
+                        }
+                    };
                     if let Err(err) = logs
                         .garbage_collect_phase2(database_name.clone(), collection_id)
                         .await

@@ -244,7 +244,6 @@ impl GarbageCollector {
         collection_soft_delete_absolute_cutoff_time: DateTime<Utc>,
         collection: CollectionToGcInfo,
         cleanup_mode: CleanupMode,
-        enable_dangerous_option_to_ignore_min_versions_for_wal3: bool,
     ) -> Result<GarbageCollectorResponse, GarbageCollectCollectionError> {
         let dispatcher = self
             .dispatcher
@@ -279,7 +278,6 @@ impl GarbageCollector {
                 cleanup_mode,
                 self.config.min_versions_to_keep,
                 enable_log_gc,
-                enable_dangerous_option_to_ignore_min_versions_for_wal3,
                 self.config
                     .max_concurrent_list_files_operations_per_collection,
             );
@@ -627,8 +625,6 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
                     collection_soft_delete_absolute_cutoff_time,
                     collection,
                     cleanup_mode,
-                    self.config
-                        .enable_dangerous_option_to_ignore_min_versions_for_wal3,
                 )
                 .instrument(instrumented_span)) as std::pin::Pin<Box<dyn std::future::Future<Output = Result<GarbageCollectorResponse, GarbageCollectCollectionError>> + Send + '_>>
             });
