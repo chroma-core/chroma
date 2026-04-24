@@ -769,10 +769,15 @@ fn filter_competitive(cand_docs: &mut Vec<u32>, cand_scores: &mut Vec<f32>, cuto
 
     #[cfg(target_arch = "x86_64")]
     {
-        if is_x86_feature_detected!("sse2") {
-            // SAFETY: SSE2 feature detected at runtime; both slices have
+        if is_x86_feature_detected!("avx512f") {
+            // SAFETY: avx512f detected at runtime; both slices have
             // equal length (debug_assert above), and write <= read index
             // guarantees no out-of-bounds writes.
+            unsafe { filter_competitive_avx512(cand_docs, cand_scores, cutoff) };
+            return;
+        }
+        if is_x86_feature_detected!("sse2") {
+            // SAFETY: SSE2 detected at runtime; same index invariants.
             unsafe { filter_competitive_sse2(cand_docs, cand_scores, cutoff) };
             return;
         }
@@ -799,6 +804,50 @@ fn filter_competitive_scalar(cand_docs: &mut Vec<u32>, cand_scores: &mut Vec<f32
             write += 1;
         }
     }
+    cand_docs.truncate(write);
+    cand_scores.truncate(write);
+}
+
+/// AVX-512: 16-wide `_mm512_cmp_ps_mask` returns a `__mmask16` directly,
+/// then scatter surviving elements.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f")]
+unsafe fn filter_competitive_avx512(
+    cand_docs: &mut Vec<u32>,
+    cand_scores: &mut Vec<f32>,
+    cutoff: f32,
+) {
+    use std::arch::x86_64::*;
+
+    let n = cand_docs.len();
+    let chunks = n / 16;
+    let mut write = 0;
+
+    let vcutoff = _mm512_set1_ps(cutoff);
+
+    for c in 0..chunks {
+        let base = c * 16;
+        let vs = _mm512_loadu_ps(cand_scores.as_ptr().add(base));
+        let mask = _mm512_cmp_ps_mask::<_CMP_GT_OQ>(vs, vcutoff);
+
+        for bit in 0..16u32 {
+            if mask & (1 << bit) != 0 {
+                *cand_docs.get_unchecked_mut(write) = *cand_docs.get_unchecked(base + bit as usize);
+                *cand_scores.get_unchecked_mut(write) =
+                    *cand_scores.get_unchecked(base + bit as usize);
+                write += 1;
+            }
+        }
+    }
+
+    for i in (chunks * 16)..n {
+        if *cand_scores.get_unchecked(i) > cutoff {
+            *cand_docs.get_unchecked_mut(write) = *cand_docs.get_unchecked(i);
+            *cand_scores.get_unchecked_mut(write) = *cand_scores.get_unchecked(i);
+            write += 1;
+        }
+    }
+
     cand_docs.truncate(write);
     cand_scores.truncate(write);
 }

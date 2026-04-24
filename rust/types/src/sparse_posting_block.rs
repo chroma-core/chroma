@@ -790,8 +790,14 @@ pub fn convert_f16_to_f32(f16_bytes: &[u8], out: &mut [f32]) {
     }
     #[cfg(target_arch = "x86_64")]
     {
+        if is_x86_feature_detected!("avx512f") {
+            // SAFETY: avx512f detected at runtime; inputs are valid
+            // f16 byte slices and output buffer is correctly sized.
+            unsafe { convert_f16_to_f32_avx512(f16_bytes, out) };
+            return;
+        }
         if is_x86_feature_detected!("f16c") {
-            // SAFETY: f16c feature detected at runtime; inputs are valid
+            // SAFETY: f16c detected at runtime; inputs are valid
             // f16 byte slices and output buffer is correctly sized.
             unsafe { convert_f16_to_f32_f16c(f16_bytes, out) };
             return;
@@ -854,6 +860,27 @@ fn convert_f16_to_f32_neon(f16_bytes: &[u8], out: &mut [f32]) {
     }
 
     let rem_start = chunks * 8;
+    convert_f16_to_f32_scalar(&f16_bytes[rem_start * 2..], &mut out[rem_start..]);
+}
+
+/// x86_64 AVX-512: `_mm512_cvtph_ps` converts 16×f16 → 16×f32 in one instruction.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f")]
+unsafe fn convert_f16_to_f32_avx512(f16_bytes: &[u8], out: &mut [f32]) {
+    use std::arch::x86_64::*;
+
+    let n = out.len();
+    let chunks = n / 16;
+
+    for c in 0..chunks {
+        let base = c * 16;
+        let byte_base = base * 2;
+        let h16 = _mm256_loadu_si256(f16_bytes.as_ptr().add(byte_base) as *const __m256i);
+        let f16_out = _mm512_cvtph_ps(h16);
+        _mm512_storeu_ps(out.as_mut_ptr().add(base), f16_out);
+    }
+
+    let rem_start = chunks * 16;
     convert_f16_to_f32_scalar(&f16_bytes[rem_start * 2..], &mut out[rem_start..]);
 }
 
