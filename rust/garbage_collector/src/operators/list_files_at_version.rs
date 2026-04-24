@@ -345,4 +345,236 @@ mod tests {
         assert_eq!(all_paths.len(), 1);
         assert!(all_paths.contains(&bf_path));
     }
+
+    #[tokio::test]
+    async fn test_hnsw_index_paths_are_expanded() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
+        let root_manager = RootManager::new(storage, Box::new(NopCache));
+
+        let index_id = Uuid::new_v4();
+        let prefix = "hnsw-index";
+        let collection_id = Uuid::new_v4().to_string();
+        let version_file = create_version_file(
+            &collection_id,
+            vec![CollectionVersionInfo {
+                version: 1,
+                segment_info: Some(create_segment_info(vec![(
+                    HNSW_PATH.to_string(),
+                    vec![format!("{prefix}/{index_id}")],
+                )])),
+                collection_info_mutable: None,
+                created_at_secs: 0,
+                version_change_reason: 0,
+                version_file_name: String::new(),
+                marked_for_deletion: false,
+            }],
+        );
+
+        let output = ListFilesAtVersionsOperator {}
+            .run(&ListFilesAtVersionInput::new(root_manager, version_file, 1))
+            .await
+            .unwrap();
+
+        let all_paths: std::collections::HashSet<String> = output.file_paths.iter().collect();
+        let expected_paths: std::collections::HashSet<String> = FILES
+            .iter()
+            .map(|file| HnswIndexProvider::format_key(prefix, &IndexUuid(index_id), file))
+            .collect();
+
+        assert_eq!(all_paths, expected_paths);
+    }
+
+    #[tokio::test]
+    async fn test_quantized_spann_paths_are_expanded() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
+        let root_manager = RootManager::new(storage, Box::new(NopCache));
+
+        let raw_id = Uuid::new_v4();
+        let quantized_id = Uuid::new_v4();
+        let collection_id = Uuid::new_v4().to_string();
+        let version_file = create_version_file(
+            &collection_id,
+            vec![CollectionVersionInfo {
+                version: 1,
+                segment_info: Some(create_segment_info(vec![
+                    (
+                        QUANTIZED_SPANN_RAW_CENTROID.to_string(),
+                        vec![format!("spann-raw/{raw_id}")],
+                    ),
+                    (
+                        QUANTIZED_SPANN_QUANTIZED_CENTROID.to_string(),
+                        vec![format!("spann-quantized/{quantized_id}")],
+                    ),
+                ])),
+                collection_info_mutable: None,
+                created_at_secs: 0,
+                version_change_reason: 0,
+                version_file_name: String::new(),
+                marked_for_deletion: false,
+            }],
+        );
+
+        let output = ListFilesAtVersionsOperator {}
+            .run(&ListFilesAtVersionInput::new(root_manager, version_file, 1))
+            .await
+            .unwrap();
+
+        let all_paths: std::collections::HashSet<String> = output.file_paths.iter().collect();
+        let expected_paths = std::collections::HashSet::from([
+            USearchIndex::format_storage_key("spann-raw", IndexUuid(raw_id), false),
+            USearchIndex::format_storage_key("spann-quantized", IndexUuid(quantized_id), true),
+        ]);
+
+        assert_eq!(all_paths, expected_paths);
+    }
+
+    #[tokio::test]
+    async fn test_sparse_index_not_found_keeps_root_path_only() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
+        let root_manager = RootManager::new(storage.clone(), Box::new(NopCache));
+
+        let sparse_index_id = Uuid::new_v4();
+        let prefix = "sparse-index";
+        let collection_id = Uuid::new_v4().to_string();
+        let version_file = create_version_file(
+            &collection_id,
+            vec![CollectionVersionInfo {
+                version: 1,
+                segment_info: Some(create_segment_info(vec![(
+                    "data".to_string(),
+                    vec![format!("{prefix}/{sparse_index_id}")],
+                )])),
+                collection_info_mutable: None,
+                created_at_secs: 0,
+                version_change_reason: 0,
+                version_file_name: String::new(),
+                marked_for_deletion: false,
+            }],
+        );
+
+        let output = ListFilesAtVersionsOperator {}
+            .run(&ListFilesAtVersionInput::new(root_manager, version_file, 1))
+            .await
+            .unwrap();
+
+        let all_paths: std::collections::HashSet<String> = output.file_paths.iter().collect();
+        assert_eq!(
+            all_paths,
+            std::collections::HashSet::from([RootManager::get_storage_key(
+                prefix,
+                &sparse_index_id
+            )])
+        );
+    }
+
+    #[tokio::test]
+    async fn test_missing_version_history_returns_error() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
+        let root_manager = RootManager::new(storage, Box::new(NopCache));
+        let version_file = Arc::new(CollectionVersionFile {
+            collection_info_immutable: Some(CollectionInfoImmutable {
+                collection_id: Uuid::new_v4().to_string(),
+                tenant_id: "test_tenant".to_string(),
+                database_id: "test_db".to_string(),
+                dimension: 0,
+                ..Default::default()
+            }),
+            version_history: None,
+        });
+
+        let err = ListFilesAtVersionsOperator {}
+            .run(&ListFilesAtVersionInput::new(root_manager, version_file, 1))
+            .await
+            .expect_err("missing version history should fail");
+
+        assert!(matches!(
+            err,
+            ListFilesAtVersionError::VersionHistoryMissing
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_missing_collection_id_returns_error() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
+        let root_manager = RootManager::new(storage, Box::new(NopCache));
+        let version_file = Arc::new(CollectionVersionFile {
+            collection_info_immutable: None,
+            version_history: Some(CollectionVersionHistory { versions: vec![] }),
+        });
+
+        let err = ListFilesAtVersionsOperator {}
+            .run(&ListFilesAtVersionInput::new(root_manager, version_file, 1))
+            .await
+            .expect_err("missing collection id should fail");
+
+        assert!(matches!(
+            err,
+            ListFilesAtVersionError::VersionFileMissingCollectionId
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_invalid_collection_uuid_returns_error() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
+        let root_manager = RootManager::new(storage, Box::new(NopCache));
+        let version_file = Arc::new(CollectionVersionFile {
+            collection_info_immutable: Some(CollectionInfoImmutable {
+                collection_id: "not-a-uuid".to_string(),
+                tenant_id: "test_tenant".to_string(),
+                database_id: "test_db".to_string(),
+                dimension: 0,
+                ..Default::default()
+            }),
+            version_history: Some(CollectionVersionHistory {
+                versions: vec![CollectionVersionInfo {
+                    version: 1,
+                    segment_info: None,
+                    collection_info_mutable: None,
+                    created_at_secs: 0,
+                    version_change_reason: 0,
+                    version_file_name: String::new(),
+                    marked_for_deletion: false,
+                }],
+            }),
+        });
+
+        let err = ListFilesAtVersionsOperator {}
+            .run(&ListFilesAtVersionInput::new(root_manager, version_file, 1))
+            .await
+            .expect_err("invalid collection id should fail");
+
+        assert!(matches!(err, ListFilesAtVersionError::InvalidUuid(_)));
+    }
+
+    #[tokio::test]
+    async fn test_missing_requested_version_returns_error() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
+        let root_manager = RootManager::new(storage, Box::new(NopCache));
+        let version_file = create_version_file(
+            &Uuid::new_v4().to_string(),
+            vec![CollectionVersionInfo {
+                version: 1,
+                segment_info: None,
+                collection_info_mutable: None,
+                created_at_secs: 0,
+                version_change_reason: 0,
+                version_file_name: String::new(),
+                marked_for_deletion: false,
+            }],
+        );
+
+        let err = ListFilesAtVersionsOperator {}
+            .run(&ListFilesAtVersionInput::new(root_manager, version_file, 2))
+            .await
+            .expect_err("missing version should fail");
+
+        assert!(matches!(err, ListFilesAtVersionError::VersionNotFound(2)));
+    }
 }

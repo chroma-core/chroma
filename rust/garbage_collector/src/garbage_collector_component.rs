@@ -778,15 +778,84 @@ mod tests {
 
     use super::*;
     use crate::helper::ChromaGrpcClients;
+    use chroma_blockstore::RootManager;
+    use chroma_cache::nop::NopCache;
+    use chroma_config::assignment::{
+        assignment_policy::AssignmentPolicy, rendezvous_hash::AssignmentError,
+    };
     use chroma_log::config::{GrpcLogConfig, LogConfig};
+    use chroma_log::in_memory_log::InMemoryLog;
     use chroma_memberlist::memberlist_provider::Member;
     use chroma_storage::s3_config_for_localhost_with_bucket_name;
-    use chroma_sysdb::{GetCollectionsOptions, GrpcSysDb, GrpcSysDbConfig};
+    use chroma_storage::test_storage;
+    use chroma_sysdb::{GetCollectionsOptions, GrpcSysDb, GrpcSysDbConfig, SysDb, TestSysDb};
     use chroma_system::{DispatcherConfig, System};
     use chroma_tracing::{OtelFilter, OtelFilterLevel};
-    use chroma_types::CollectionUuid;
+    use chroma_types::{CollectionUuid, DatabaseName};
     use tracing_test::traced_test;
     use uuid::Uuid;
+
+    #[derive(Clone, Debug, Default)]
+    struct TestAssignmentPolicy {
+        members: Vec<String>,
+        assignments: HashMap<String, String>,
+        fail_keys: HashSet<String>,
+    }
+
+    impl AssignmentPolicy for TestAssignmentPolicy {
+        fn assign_one(&self, key: &str) -> Result<String, AssignmentError> {
+            if self.fail_keys.contains(key) {
+                return Err(AssignmentError::HashError);
+            }
+            if let Some(member) = self.assignments.get(key) {
+                return Ok(member.clone());
+            }
+            self.members
+                .first()
+                .cloned()
+                .ok_or(AssignmentError::InsufficientMember(1, 0))
+        }
+
+        fn assign(&self, key: &str, k: usize) -> Result<Vec<String>, AssignmentError> {
+            let member = self.assign_one(key)?;
+            if k == 1 {
+                Ok(vec![member])
+            } else {
+                Err(AssignmentError::InsufficientMember(k, 1))
+            }
+        }
+
+        fn get_members(&self) -> Vec<String> {
+            self.members.clone()
+        }
+
+        fn set_members(&mut self, members: Vec<String>) {
+            self.members = members;
+        }
+    }
+
+    fn test_gc_config(my_member_id: &str) -> GarbageCollectorConfig {
+        GarbageCollectorConfig {
+            my_member_id: my_member_id.to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn new_test_garbage_collector(
+        config: GarbageCollectorConfig,
+        sysdb_client: SysDb,
+        storage: Storage,
+        assignment_policy: Box<dyn AssignmentPolicy>,
+    ) -> GarbageCollector {
+        GarbageCollector::new(
+            config,
+            sysdb_client,
+            storage.clone(),
+            Log::InMemory(InMemoryLog::new()),
+            assignment_policy,
+            RootManager::new(storage, Box::new(NopCache)),
+        )
+    }
 
     #[test]
     fn test_runtime_drop_join_error_detection() {
@@ -795,6 +864,151 @@ mod tests {
         ));
         assert!(!is_known_runtime_drop_join_error(
             "panic: dispatcher task failed"
+        ));
+    }
+
+    #[test]
+    fn test_filter_collections_respects_assignment_disallow_list_and_assignment_failures() {
+        let (_storage_dir, storage) = test_storage();
+        let assigned_collection_id = CollectionUuid::new();
+        let other_member_collection_id = CollectionUuid::new();
+        let disallowed_collection_id = CollectionUuid::new();
+        let failed_collection_id = CollectionUuid::new();
+        let database = DatabaseName::new("test_db").expect("valid database name");
+
+        let mut garbage_collector = new_test_garbage_collector(
+            GarbageCollectorConfig {
+                disallow_collections: HashSet::from([disallowed_collection_id]),
+                ..test_gc_config("gc-a")
+            },
+            SysDb::Test(TestSysDb::new()),
+            storage,
+            Box::new(TestAssignmentPolicy {
+                assignments: HashMap::from([
+                    (assigned_collection_id.0.to_string(), "gc-a".to_string()),
+                    (other_member_collection_id.0.to_string(), "gc-b".to_string()),
+                    (disallowed_collection_id.0.to_string(), "gc-a".to_string()),
+                ]),
+                fail_keys: HashSet::from([failed_collection_id.0.to_string()]),
+                ..Default::default()
+            }),
+        );
+        garbage_collector.memberlist = vec![
+            Member {
+                member_id: "gc-a".to_string(),
+                member_ip: "127.0.0.1".to_string(),
+                member_node_name: "gc-a-node".to_string(),
+            },
+            Member {
+                member_id: "gc-b".to_string(),
+                member_ip: "127.0.0.2".to_string(),
+                member_node_name: "gc-b-node".to_string(),
+            },
+        ];
+
+        let filtered = garbage_collector.filter_collections(vec![
+            CollectionToGcInfo {
+                id: assigned_collection_id,
+                tenant: "tenant-a".to_string(),
+                database: database.clone(),
+                name: "assigned".to_string(),
+                version_file_path: "assigned/version.bin".to_string(),
+                lineage_file_path: None,
+            },
+            CollectionToGcInfo {
+                id: other_member_collection_id,
+                tenant: "tenant-a".to_string(),
+                database: database.clone(),
+                name: "other-member".to_string(),
+                version_file_path: "other/version.bin".to_string(),
+                lineage_file_path: None,
+            },
+            CollectionToGcInfo {
+                id: disallowed_collection_id,
+                tenant: "tenant-a".to_string(),
+                database: database.clone(),
+                name: "disallowed".to_string(),
+                version_file_path: "disallowed/version.bin".to_string(),
+                lineage_file_path: None,
+            },
+            CollectionToGcInfo {
+                id: failed_collection_id,
+                tenant: "tenant-a".to_string(),
+                database,
+                name: "failed".to_string(),
+                version_file_path: "failed/version.bin".to_string(),
+                lineage_file_path: None,
+            },
+        ]);
+
+        assert_eq!(
+            filtered
+                .into_iter()
+                .map(|collection| collection.id)
+                .collect::<Vec<_>>(),
+            vec![assigned_collection_id]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_manual_garbage_collection_request_records_existing_collection() {
+        let (_storage_dir, storage) = test_storage();
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+        let collection_id = CollectionUuid::new();
+        let database_name = DatabaseName::new("test_db").expect("valid database name");
+
+        sysdb
+            .create_collection(
+                "test-tenant".to_string(),
+                database_name.clone(),
+                collection_id,
+                "test-collection".to_string(),
+                vec![],
+                None,
+                None,
+                None,
+                None,
+                false,
+            )
+            .await
+            .expect("collection should be created");
+
+        let mut garbage_collector = new_test_garbage_collector(
+            test_gc_config("gc-a"),
+            sysdb,
+            storage,
+            Box::new(TestAssignmentPolicy::default()),
+        );
+
+        garbage_collector
+            .manual_garbage_collection_request(collection_id)
+            .await
+            .expect("manual collection request should succeed");
+
+        assert_eq!(
+            garbage_collector.manual_collections.lock().clone(),
+            HashMap::from([(collection_id, database_name)])
+        );
+    }
+
+    #[tokio::test]
+    async fn test_manual_garbage_collection_request_missing_collection() {
+        let (_storage_dir, storage) = test_storage();
+        let mut garbage_collector = new_test_garbage_collector(
+            test_gc_config("gc-a"),
+            SysDb::Test(TestSysDb::new()),
+            storage,
+            Box::new(TestAssignmentPolicy::default()),
+        );
+
+        let err = garbage_collector
+            .manual_garbage_collection_request(CollectionUuid::new())
+            .await
+            .expect_err("missing collection should fail");
+
+        assert!(matches!(
+            err,
+            GarbageCollectCollectionError::NoSuchCollection
         ));
     }
 

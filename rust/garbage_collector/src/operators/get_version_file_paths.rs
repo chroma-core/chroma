@@ -77,3 +77,91 @@ impl Operator<GetVersionFilePathsInput, GetVersionFilePathsOutput> for GetVersio
         Ok(GetVersionFilePathsOutput(paths))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chroma_sysdb::TestSysDb;
+    use chroma_system::Operator;
+
+    #[tokio::test]
+    async fn test_get_version_file_paths_success() {
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+        let database_name = DatabaseName::new("test_db").expect("valid database name");
+        let collection_id = CollectionUuid::new();
+
+        sysdb
+            .create_collection(
+                "test-tenant".to_string(),
+                database_name.clone(),
+                collection_id,
+                "test-collection".to_string(),
+                vec![],
+                None,
+                None,
+                None,
+                None,
+                false,
+            )
+            .await
+            .expect("collection should be created");
+
+        match &mut sysdb {
+            SysDb::Test(test_sysdb) => {
+                test_sysdb.set_collection_version_file_path(
+                    collection_id,
+                    "version-files/test.bin".to_string(),
+                );
+            }
+            _ => panic!("expected test sysdb"),
+        }
+
+        let output = GetVersionFilePathsOperator::new()
+            .run(&GetVersionFilePathsInput::new(
+                vec![collection_id],
+                sysdb,
+                database_name,
+            ))
+            .await
+            .expect("version file path lookup should succeed");
+
+        assert_eq!(
+            output.0,
+            HashMap::from([(collection_id, "version-files/test.bin".to_string())])
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_version_file_paths_missing_path() {
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+        let database_name = DatabaseName::new("test_db").expect("valid database name");
+        let collection_id = CollectionUuid::new();
+
+        sysdb
+            .create_collection(
+                "test-tenant".to_string(),
+                database_name.clone(),
+                collection_id,
+                "test-collection".to_string(),
+                vec![],
+                None,
+                None,
+                None,
+                None,
+                false,
+            )
+            .await
+            .expect("collection should be created");
+
+        let err = GetVersionFilePathsOperator::new()
+            .run(&GetVersionFilePathsInput::new(
+                vec![collection_id],
+                sysdb,
+                database_name,
+            ))
+            .await
+            .expect_err("lookup should fail when the version file path is missing");
+
+        assert!(matches!(err, GetVersionFilePathsError::SysDb(_)));
+    }
+}

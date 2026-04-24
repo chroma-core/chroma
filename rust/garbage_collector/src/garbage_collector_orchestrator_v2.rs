@@ -586,12 +586,6 @@ impl GarbageCollectorOrchestrator {
         &mut self,
         output: ListFilesAtVersionOutput,
     ) -> Result<(), GarbageCollectorError> {
-        let version_file = self.version_files.get(&output.collection_id).ok_or(
-            GarbageCollectorError::InvariantViolation(format!(
-                "Expected version file to be set for collection {}",
-                output.collection_id
-            )),
-        )?;
         let version_action = self
             .versions_to_delete_output
             .as_ref()
@@ -709,13 +703,18 @@ impl GarbageCollectorOrchestrator {
                 }
                 Ok(false)
             }
-            let extracted_paths = nodes_from_root_to_this_node
-                .iter()
-                .map(|node| extract_paths(version_file, node, &output).map(|x| (node.version, x)))
-                .collect::<Vec<_>>();
-            let mut have_paths = Vec::with_capacity(extracted_paths.len());
-            for res in extracted_paths.into_iter() {
-                have_paths.push(res?);
+            let mut have_paths = Vec::with_capacity(nodes_from_root_to_this_node.len());
+            for node in nodes_from_root_to_this_node.iter() {
+                let node_version_file = self.version_files.get(&node.collection_id).ok_or(
+                    GarbageCollectorError::InvariantViolation(format!(
+                        "Expected version file to be set for collection {}",
+                        node.collection_id
+                    )),
+                )?;
+                have_paths.push((
+                    node.version,
+                    extract_paths(node_version_file, node, &output)?,
+                ));
             }
             let has_no_paths_at_version = have_paths
                 .into_iter()
@@ -1136,15 +1135,21 @@ mod tests {
     use super::GarbageCollectorError;
     use super::GarbageCollectorOrchestrator;
     use crate::operators::compute_versions_to_delete_from_graph::CollectionVersionAction;
+    use crate::operators::compute_versions_to_delete_from_graph::ComputeVersionsToDeleteOutput;
+    use crate::operators::list_files_at_version::ListFilesAtVersionOutput;
+    use crate::types::{VersionGraph, VersionGraphNode};
     use chroma_blockstore::RootManager;
     use chroma_cache::nop::NopCache;
-    use chroma_log::Log;
+    use chroma_log::{in_memory_log::InMemoryLog, Log};
     use chroma_storage::test_storage;
     use chroma_sysdb::{GetCollectionsOptions, TestSysDb};
     use chroma_system::{Dispatcher, Orchestrator, System};
     use chroma_types::{
-        chroma_proto::CollectionInfoImmutable, chroma_proto::CollectionVersionFile, CollectionUuid,
-        Segment, SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid,
+        chroma_proto::{
+            CollectionInfoImmutable, CollectionSegmentInfo, CollectionVersionFile,
+            CollectionVersionHistory, CollectionVersionInfo, FilePaths, FlushSegmentCompactionInfo,
+        },
+        CollectionUuid, Segment, SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid,
     };
     use chrono::DateTime;
     use std::{collections::HashMap, sync::Arc, time::SystemTime};
@@ -1405,5 +1410,164 @@ mod tests {
         assert!(result.is_err());
         println!("{:?}", result);
         assert!(format!("{:?}", result).contains("no file paths"));
+    }
+
+    fn test_version_file(
+        collection_id: CollectionUuid,
+        versions: Vec<CollectionVersionInfo>,
+    ) -> Arc<CollectionVersionFile> {
+        Arc::new(CollectionVersionFile {
+            collection_info_immutable: Some(CollectionInfoImmutable {
+                tenant_id: "test-tenant".to_string(),
+                database_id: "test-db".to_string(),
+                collection_id: collection_id.to_string(),
+                dimension: 0,
+                ..Default::default()
+            }),
+            version_history: Some(CollectionVersionHistory { versions }),
+        })
+    }
+
+    fn version_info(version: i64, has_paths: bool) -> CollectionVersionInfo {
+        CollectionVersionInfo {
+            version,
+            segment_info: Some(CollectionSegmentInfo {
+                segment_compaction_info: if has_paths {
+                    vec![FlushSegmentCompactionInfo {
+                        segment_id: "segment-1".to_string(),
+                        file_paths: HashMap::from([(
+                            "data".to_string(),
+                            FilePaths {
+                                paths: vec!["data/path".to_string()],
+                            },
+                        )]),
+                    }]
+                } else {
+                    vec![]
+                },
+            }),
+            collection_info_mutable: None,
+            created_at_secs: 0,
+            version_change_reason: 0,
+            version_file_name: String::new(),
+            marked_for_deletion: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn errors_on_cross_collection_version_collisions_in_empty_path_invariant_check() {
+        let (_storage_dir, storage) = test_storage();
+        let system = System::new();
+        let dispatcher = Dispatcher::new(Default::default());
+        let dispatcher_handle = system.start_component(dispatcher);
+        let root_manager = RootManager::new(storage.clone(), Box::new(NopCache));
+        let database_name = chroma_types::DatabaseName::new("test_db").expect("valid db name");
+        let root_collection_id = CollectionUuid::new();
+        let child_collection_id = CollectionUuid::new();
+
+        let mut orchestrator = GarbageCollectorOrchestrator::new(
+            child_collection_id,
+            database_name,
+            "version_file".to_string(),
+            None,
+            chrono::Utc::now(),
+            chrono::Utc::now(),
+            chroma_sysdb::SysDb::Test(TestSysDb::new()),
+            dispatcher_handle,
+            system,
+            storage,
+            Log::InMemory(InMemoryLog::new()),
+            root_manager,
+            crate::types::CleanupMode::DeleteV2,
+            1,
+            false,
+            false,
+            10,
+        );
+
+        orchestrator.version_files = HashMap::from([
+            (
+                root_collection_id,
+                test_version_file(
+                    root_collection_id,
+                    vec![
+                        version_info(0, false),
+                        version_info(1, false),
+                        version_info(2, true),
+                    ],
+                ),
+            ),
+            (
+                child_collection_id,
+                test_version_file(
+                    child_collection_id,
+                    vec![
+                        version_info(0, false),
+                        version_info(1, false),
+                        version_info(2, false),
+                    ],
+                ),
+            ),
+        ]);
+        orchestrator.versions_to_delete_output = Some(ComputeVersionsToDeleteOutput {
+            versions: HashMap::from([(
+                child_collection_id,
+                HashMap::from([(2, CollectionVersionAction::Keep)]),
+            )]),
+        });
+
+        let mut graph = VersionGraph::new();
+        let root_v0 = graph.add_node(VersionGraphNode {
+            collection_id: root_collection_id,
+            version: 0,
+            status: crate::types::VersionStatus::Deleted,
+        });
+        let root_v1 = graph.add_node(VersionGraphNode {
+            collection_id: root_collection_id,
+            version: 1,
+            status: crate::types::VersionStatus::Deleted,
+        });
+        let root_v2 = graph.add_node(VersionGraphNode {
+            collection_id: root_collection_id,
+            version: 2,
+            status: crate::types::VersionStatus::Deleted,
+        });
+        let child_v0 = graph.add_node(VersionGraphNode {
+            collection_id: child_collection_id,
+            version: 0,
+            status: crate::types::VersionStatus::Deleted,
+        });
+        let child_v1 = graph.add_node(VersionGraphNode {
+            collection_id: child_collection_id,
+            version: 1,
+            status: crate::types::VersionStatus::Deleted,
+        });
+        let child_v2 = graph.add_node(VersionGraphNode {
+            collection_id: child_collection_id,
+            version: 2,
+            status: crate::types::VersionStatus::Deleted,
+        });
+        graph.add_edge(root_v0, root_v1, ());
+        graph.add_edge(root_v1, root_v2, ());
+        graph.add_edge(root_v2, child_v0, ());
+        graph.add_edge(child_v0, child_v1, ());
+        graph.add_edge(child_v1, child_v2, ());
+        orchestrator.graph = Some(graph);
+
+        let err = orchestrator
+            .handle_list_files_at_version_output(ListFilesAtVersionOutput {
+                collection_id: child_collection_id,
+                version: 2,
+                file_paths: crate::types::FilePathSet::new(),
+            })
+            .await
+            .expect_err("cross-collection version collisions should not bypass the invariant");
+
+        match err {
+            GarbageCollectorError::InvariantViolation(message) => {
+                assert!(message.contains("has no file paths, but has ancestors with file paths"));
+            }
+            other => panic!("expected invariant violation, got {other:?}"),
+        }
     }
 }
