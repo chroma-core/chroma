@@ -19,7 +19,7 @@ async fn lazy_cursor_advance_matches_eager() {
     let (_tmp, _prov, reader) = common::build_index(vectors).await;
     let encoded_dim = encode_u32(1);
 
-    let dir = reader
+    let (dir, _) = reader
         .get_directory(&encoded_dim)
         .await
         .unwrap()
@@ -70,7 +70,7 @@ async fn lazy_cursor_get_value() {
     let (_tmp, _prov, reader) = common::build_index(vectors).await;
     let encoded_dim = encode_u32(1);
 
-    let dir = reader
+    let (dir, _) = reader
         .get_directory(&encoded_dim)
         .await
         .unwrap()
@@ -104,7 +104,7 @@ async fn lazy_cursor_drain_essential() {
     let (_tmp, _prov, reader) = common::build_index(vectors).await;
     let encoded_dim = encode_u32(1);
 
-    let dir = reader
+    let (dir, _) = reader
         .get_directory(&encoded_dim)
         .await
         .unwrap()

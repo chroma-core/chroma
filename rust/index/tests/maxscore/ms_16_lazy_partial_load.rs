@@ -21,7 +21,7 @@ async fn lazy_partial_load_advance_skips_unloaded() {
     let (_tmp, _prov, reader) = common::build_index_with_block_size(vectors, Some(2)).await;
     let encoded_dim = encode_u32(1);
 
-    let dir = reader
+    let (dir, _) = reader
         .get_directory(&encoded_dim)
         .await
         .unwrap()
@@ -79,7 +79,7 @@ async fn lazy_partial_load_drain_skips_unloaded() {
     let (_tmp, _prov, reader) = common::build_index_with_block_size(vectors, Some(2)).await;
     let encoded_dim = encode_u32(1);
 
-    let dir = reader
+    let (dir, _) = reader
         .get_directory(&encoded_dim)
         .await
         .unwrap()
@@ -141,7 +141,7 @@ async fn lazy_partial_load_score_candidates_skips_unloaded() {
     let (_tmp, _prov, reader) = common::build_index_with_block_size(vectors, Some(2)).await;
     let encoded_dim = encode_u32(1);
 
-    let dir = reader
+    let (dir, _) = reader
         .get_directory(&encoded_dim)
         .await
         .unwrap()

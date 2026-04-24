@@ -495,7 +495,7 @@ impl<'me> MaxScoreReader<'me> {
         let mut metas: Vec<TermMeta> = Vec::new();
         for (idx, &(_, query_weight)) in collected.iter().enumerate() {
             let encoded_dim = encoded_dims[idx].clone();
-            let Some(dir) = self.get_directory(&encoded_dim).await? else {
+            let Some((dir, _part_count)) = self.get_directory(&encoded_dim).await? else {
                 continue;
             };
             if dir.num_blocks() == 0 {
