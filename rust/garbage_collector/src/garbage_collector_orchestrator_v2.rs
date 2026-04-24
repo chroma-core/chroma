@@ -1454,19 +1454,18 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn errors_on_cross_collection_version_collisions_in_empty_path_invariant_check() {
-        let (_storage_dir, storage) = test_storage();
+    fn test_orchestrator(
+        storage: chroma_storage::Storage,
+        collection_id: CollectionUuid,
+    ) -> GarbageCollectorOrchestrator {
         let system = System::new();
         let dispatcher = Dispatcher::new(Default::default());
         let dispatcher_handle = system.start_component(dispatcher);
         let root_manager = RootManager::new(storage.clone(), Box::new(NopCache));
         let database_name = chroma_types::DatabaseName::new("test_db").expect("valid db name");
-        let root_collection_id = CollectionUuid::new();
-        let child_collection_id = CollectionUuid::new();
 
-        let mut orchestrator = GarbageCollectorOrchestrator::new(
-            child_collection_id,
+        GarbageCollectorOrchestrator::new(
+            collection_id,
             database_name,
             "version_file".to_string(),
             None,
@@ -1483,7 +1482,179 @@ mod tests {
             false,
             false,
             10,
-        );
+        )
+    }
+
+    fn fork_tree_graph(
+        root_collection_id: CollectionUuid,
+        root_versions: &[i64],
+        child_collection_id: CollectionUuid,
+        child_versions: &[i64],
+    ) -> VersionGraph {
+        let mut graph = VersionGraph::new();
+
+        let mut previous_root = None;
+        for version in root_versions {
+            let node = graph.add_node(VersionGraphNode {
+                collection_id: root_collection_id,
+                version: *version,
+                status: crate::types::VersionStatus::Deleted,
+            });
+            if let Some(previous) = previous_root {
+                graph.add_edge(previous, node, ());
+            }
+            previous_root = Some(node);
+        }
+
+        let root_tail = previous_root.expect("root_versions should not be empty");
+        let mut previous_child = None;
+        for version in child_versions {
+            let node = graph.add_node(VersionGraphNode {
+                collection_id: child_collection_id,
+                version: *version,
+                status: crate::types::VersionStatus::Deleted,
+            });
+            if let Some(previous) = previous_child {
+                graph.add_edge(previous, node, ());
+            } else {
+                graph.add_edge(root_tail, node, ());
+            }
+            previous_child = Some(node);
+        }
+
+        graph
+    }
+
+    fn file_path_set(paths: &[&str]) -> crate::types::FilePathSet {
+        let mut file_paths = crate::types::FilePathSet::new();
+        for path in paths {
+            file_paths.insert_path((*path).to_string());
+        }
+        file_paths
+    }
+
+    fn sorted_paths(file_paths: crate::types::FilePathSet) -> Vec<String> {
+        let mut paths = file_paths.iter().collect::<Vec<_>>();
+        paths.sort();
+        paths
+    }
+
+    #[tokio::test]
+    async fn allows_empty_file_paths_before_any_ancestor_has_paths_in_fork_tree() {
+        let (_storage_dir, storage) = test_storage();
+        let root_collection_id = CollectionUuid::new();
+        let child_collection_id = CollectionUuid::new();
+
+        let mut orchestrator = test_orchestrator(storage, child_collection_id);
+        orchestrator.version_files = HashMap::from([
+            (
+                root_collection_id,
+                test_version_file(
+                    root_collection_id,
+                    vec![version_info(0, false), version_info(1, false)],
+                ),
+            ),
+            (
+                child_collection_id,
+                test_version_file(
+                    child_collection_id,
+                    vec![version_info(0, false), version_info(1, false)],
+                ),
+            ),
+        ]);
+        orchestrator.versions_to_delete_output = Some(ComputeVersionsToDeleteOutput {
+            versions: HashMap::from([(
+                child_collection_id,
+                HashMap::from([(1, CollectionVersionAction::Keep)]),
+            )]),
+        });
+        orchestrator.graph = Some(fork_tree_graph(
+            root_collection_id,
+            &[0, 1],
+            child_collection_id,
+            &[0, 1],
+        ));
+
+        orchestrator
+            .handle_list_files_at_version_output(ListFilesAtVersionOutput {
+                collection_id: child_collection_id,
+                version: 1,
+                file_paths: crate::types::FilePathSet::new(),
+            })
+            .await
+            .expect("empty paths should be allowed until some ancestor first has paths");
+
+        assert!(orchestrator.file_ref_counts.is_empty());
+    }
+
+    #[tokio::test]
+    async fn errors_on_cross_collection_missing_ancestor_versions_in_empty_path_invariant_check() {
+        let (_storage_dir, storage) = test_storage();
+        let root_collection_id = CollectionUuid::new();
+        let child_collection_id = CollectionUuid::new();
+
+        let mut orchestrator = test_orchestrator(storage, child_collection_id);
+        orchestrator.version_files = HashMap::from([
+            (
+                root_collection_id,
+                test_version_file(
+                    root_collection_id,
+                    vec![
+                        version_info(0, false),
+                        version_info(1, false),
+                        version_info(3, true),
+                    ],
+                ),
+            ),
+            (
+                child_collection_id,
+                test_version_file(
+                    child_collection_id,
+                    vec![
+                        version_info(0, false),
+                        version_info(1, false),
+                        version_info(2, false),
+                    ],
+                ),
+            ),
+        ]);
+        orchestrator.versions_to_delete_output = Some(ComputeVersionsToDeleteOutput {
+            versions: HashMap::from([(
+                child_collection_id,
+                HashMap::from([(2, CollectionVersionAction::Keep)]),
+            )]),
+        });
+        orchestrator.graph = Some(fork_tree_graph(
+            root_collection_id,
+            &[0, 1, 3],
+            child_collection_id,
+            &[0, 1, 2],
+        ));
+
+        let err = orchestrator
+            .handle_list_files_at_version_output(ListFilesAtVersionOutput {
+                collection_id: child_collection_id,
+                version: 2,
+                file_paths: crate::types::FilePathSet::new(),
+            })
+            .await
+            .expect_err("ancestor versions from another collection should resolve via that collection's version file");
+
+        match err {
+            GarbageCollectorError::InvariantViolation(message) => {
+                assert!(message.contains("has no file paths, but has ancestors with file paths"));
+            }
+            other => panic!("expected InvariantViolation, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn errors_on_cross_collection_version_collisions_in_empty_path_invariant_check() {
+        let (_storage_dir, storage) = test_storage();
+        let root_collection_id = CollectionUuid::new();
+        let child_collection_id = CollectionUuid::new();
+
+        let mut orchestrator = test_orchestrator(storage, child_collection_id);
 
         orchestrator.version_files = HashMap::from([
             (
@@ -1515,44 +1686,12 @@ mod tests {
                 HashMap::from([(2, CollectionVersionAction::Keep)]),
             )]),
         });
-
-        let mut graph = VersionGraph::new();
-        let root_v0 = graph.add_node(VersionGraphNode {
-            collection_id: root_collection_id,
-            version: 0,
-            status: crate::types::VersionStatus::Deleted,
-        });
-        let root_v1 = graph.add_node(VersionGraphNode {
-            collection_id: root_collection_id,
-            version: 1,
-            status: crate::types::VersionStatus::Deleted,
-        });
-        let root_v2 = graph.add_node(VersionGraphNode {
-            collection_id: root_collection_id,
-            version: 2,
-            status: crate::types::VersionStatus::Deleted,
-        });
-        let child_v0 = graph.add_node(VersionGraphNode {
-            collection_id: child_collection_id,
-            version: 0,
-            status: crate::types::VersionStatus::Deleted,
-        });
-        let child_v1 = graph.add_node(VersionGraphNode {
-            collection_id: child_collection_id,
-            version: 1,
-            status: crate::types::VersionStatus::Deleted,
-        });
-        let child_v2 = graph.add_node(VersionGraphNode {
-            collection_id: child_collection_id,
-            version: 2,
-            status: crate::types::VersionStatus::Deleted,
-        });
-        graph.add_edge(root_v0, root_v1, ());
-        graph.add_edge(root_v1, root_v2, ());
-        graph.add_edge(root_v2, child_v0, ());
-        graph.add_edge(child_v0, child_v1, ());
-        graph.add_edge(child_v1, child_v2, ());
-        orchestrator.graph = Some(graph);
+        orchestrator.graph = Some(fork_tree_graph(
+            root_collection_id,
+            &[0, 1, 2],
+            child_collection_id,
+            &[0, 1, 2],
+        ));
 
         let err = orchestrator
             .handle_list_files_at_version_output(ListFilesAtVersionOutput {
@@ -1569,5 +1708,93 @@ mod tests {
             }
             other => panic!("expected invariant violation, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn cross_collection_empty_path_invariant_stops_before_unprotected_delete_candidates_can_proceed(
+    ) {
+        let (_storage_dir, storage) = test_storage();
+        let root_collection_id = CollectionUuid::new();
+        let child_collection_id = CollectionUuid::new();
+
+        let mut orchestrator = test_orchestrator(storage, child_collection_id);
+        orchestrator.version_files = HashMap::from([
+            (
+                root_collection_id,
+                test_version_file(
+                    root_collection_id,
+                    vec![
+                        version_info(0, false),
+                        version_info(1, false),
+                        version_info(2, true),
+                    ],
+                ),
+            ),
+            (
+                child_collection_id,
+                test_version_file(
+                    child_collection_id,
+                    vec![
+                        version_info(0, false),
+                        version_info(1, false),
+                        version_info(2, false),
+                    ],
+                ),
+            ),
+        ]);
+        orchestrator.versions_to_delete_output = Some(ComputeVersionsToDeleteOutput {
+            versions: HashMap::from([
+                (
+                    root_collection_id,
+                    HashMap::from([(2, CollectionVersionAction::Delete)]),
+                ),
+                (
+                    child_collection_id,
+                    HashMap::from([(2, CollectionVersionAction::Keep)]),
+                ),
+            ]),
+        });
+        orchestrator.graph = Some(fork_tree_graph(
+            root_collection_id,
+            &[0, 1, 2],
+            child_collection_id,
+            &[0, 1, 2],
+        ));
+
+        orchestrator
+            .handle_list_files_at_version_output(ListFilesAtVersionOutput {
+                collection_id: root_collection_id,
+                version: 2,
+                file_paths: file_path_set(&["data/path"]),
+            })
+            .await
+            .expect("delete candidates should be tracked for deleted ancestor versions");
+        assert_eq!(
+            sorted_paths(orchestrator.file_ref_counts.as_set(0)),
+            vec!["data/path".to_string()]
+        );
+
+        let err = orchestrator
+            .handle_list_files_at_version_output(ListFilesAtVersionOutput {
+                collection_id: child_collection_id,
+                version: 2,
+                file_paths: crate::types::FilePathSet::new(),
+            })
+            .await
+            .expect_err(
+                "kept child versions with empty paths must fail closed when ancestors have data",
+            );
+
+        match err {
+            GarbageCollectorError::InvariantViolation(message) => {
+                assert!(message.contains("has no file paths, but has ancestors with file paths"));
+            }
+            other => panic!("expected InvariantViolation, got {other:?}"),
+        }
+
+        assert_eq!(
+            sorted_paths(orchestrator.file_ref_counts.as_set(0)),
+            vec!["data/path".to_string()]
+        );
     }
 }
