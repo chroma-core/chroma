@@ -1,6 +1,5 @@
 use bitpacking::{BitPacker, BitPacker4x};
 use half::f16;
-use std::sync::OnceLock;
 use thiserror::Error;
 
 const BITPACK_GROUP_SIZE: usize = BitPacker4x::BLOCK_LEN; // 128
@@ -67,6 +66,8 @@ pub enum SparsePostingBlockError {
     TruncatedHeader { len: usize },
     #[error("expected {expected} body bytes, got {actual}")]
     TruncatedBody { expected: usize, actual: usize },
+    #[error("invalid bits_per_delta: {value} (expected 0..=32 or 0xFF for directory)")]
+    InvalidBitsPerDelta { value: u8 },
 }
 
 /// Header read from the first 16 bytes of a serialized block.
@@ -116,6 +117,19 @@ struct Decompressed {
     values: Vec<f32>,
 }
 
+/// Body payload of a [`SparsePostingBlock`].
+///
+/// - **`Encoded`**: raw body bytes (after the 16-byte header). Used for
+///   deserialized posting blocks (decoded lazily on first `decode()` call)
+///   and for directory blocks (read directly by `DirectoryBlock::entries()`).
+/// - **`Decoded`**: materialized offsets and values. Produced by
+///   `from_sorted_entries` or by calling `decode()` on an `Encoded` block.
+#[derive(Debug, Clone)]
+enum PostingBody {
+    Encoded(Vec<u8>),
+    Decoded(Decompressed),
+}
+
 /// A compressed block of posting list entries for sparse vector search.
 ///
 /// # On-disk format
@@ -137,43 +151,20 @@ struct Decompressed {
 /// This type supports two access patterns used by different cursor modes in
 /// the query pipeline:
 ///
-/// - **Materialized** (`offsets()`, `values()`): Deserializes the full block
-///   into owned `Vec`s on first access via `OnceLock`. Used by *eager cursors*
-///   for small dimensions where block reuse amortizes the cost.
+/// - **Materialized** (`decode()`): Decompresses the full block into owned
+///   `Vec`s. Used by *eager cursors* for small dimensions. Transitions the
+///   body from `Encoded` to `Decoded` on first call.
 ///
 /// - **Zero-copy** (`peek_header`, `decompress_offsets_into`, `read_value_at`,
 ///   `raw_weight_bytes`): Static methods that operate directly on a `&[u8]`
 ///   slice (e.g. from an Arrow block cache) without constructing a
 ///   `SparsePostingBlock`. Used by *lazy/view cursors* for large dimensions
 ///   where we only touch a fraction of each block's entries.
-///
-/// # `raw_body` vs `decompressed`
-///
-/// These two fields form a one-of relationship — exactly one is the
-/// authoritative source of body data at construction time:
-///
-/// - **`from_sorted_entries` / `DirectoryBlock::new`** → `raw_body` is
-///   empty (posting) or packed directory bytes; `decompressed` holds the
-///   materialized offsets/values (posting) or is empty (directory).
-/// - **`deserialize`** → `raw_body` holds the compressed body bytes;
-///   `decompressed` is lazily populated on first call to `offsets()` or
-///   `values()`. Directory blocks read `raw_body` directly and never
-///   populate `decompressed`.
-///
-/// After lazy decompression, both fields may be populated simultaneously
-/// for posting blocks — `raw_body` remains as the serialization source
-/// and `decompressed` caches the decoded form.
 #[derive(Debug, Clone)]
 pub struct SparsePostingBlock {
     /// The 16-byte header fields (num_entries, bits_per_delta, min/max offset, max weight).
     pub header: PostingBlockHeader,
-    /// Compressed body bytes after the 16-byte header. Empty when the
-    /// block was created via `from_sorted_entries` (posting blocks only).
-    raw_body: Vec<u8>,
-    /// Lazily-decoded offsets and values. Populated eagerly by
-    /// `from_sorted_entries`; populated on first access for deserialized
-    /// posting blocks; never populated for directory blocks.
-    decompressed: OnceLock<Decompressed>,
+    body: PostingBody,
 }
 
 impl SparsePostingBlock {
@@ -232,8 +223,7 @@ impl SparsePostingBlock {
                 num_entries: n as u16,
                 bits_per_delta: max_bits,
             },
-            raw_body: Vec::new(),
-            decompressed: OnceLock::from(Decompressed { offsets, values }),
+            body: PostingBody::Decoded(Decompressed { offsets, values }),
         })
     }
 
@@ -245,33 +235,43 @@ impl SparsePostingBlock {
         self.header.num_entries == 0
     }
 
-    /// Decompressed doc offsets (materializes on first call).
-    /// Returns `&[]` for directory blocks.
-    pub fn offsets(&self) -> &[u32] {
-        if self.is_directory() {
-            return &[];
+    /// Decode this block in place, transitioning from `Encoded` to `Decoded`.
+    ///
+    /// Returns `(&[u32], &[f32])` — the decompressed offsets and values.
+    /// If already `Decoded`, returns the existing data. Returns empty
+    /// slices for directory blocks (which are always `Encoded` and have
+    /// no posting-block-shaped body).
+    ///
+    /// Callers do not need to call this directly — `offsets()` and
+    /// `values()` invoke it automatically.
+    pub fn decode(&mut self) -> (&[u32], &[f32]) {
+        if let PostingBody::Encoded(ref raw) = self.body {
+            if !self.is_directory() {
+                let decoded = Self::decompress_raw(
+                    raw,
+                    self.header.num_entries as usize,
+                    self.header.bits_per_delta,
+                    self.header.min_offset,
+                );
+                self.body = PostingBody::Decoded(decoded);
+            }
         }
-        &self.ensure_decompressed().offsets
+        match &self.body {
+            PostingBody::Decoded(d) => (&d.offsets, &d.values),
+            PostingBody::Encoded(_) => (&[], &[]),
+        }
     }
 
-    /// Decompressed f32 weights (materializes on first call).
-    /// Returns `&[]` for directory blocks.
-    pub fn values(&self) -> &[f32] {
-        if self.is_directory() {
-            return &[];
-        }
-        &self.ensure_decompressed().values
+    /// Decompressed doc offsets. Decodes on first call for deserialized
+    /// posting blocks. Returns `&[]` for directory blocks.
+    pub fn offsets(&mut self) -> &[u32] {
+        self.decode().0
     }
 
-    fn ensure_decompressed(&self) -> &Decompressed {
-        self.decompressed.get_or_init(|| {
-            Self::decompress_raw(
-                &self.raw_body,
-                self.header.num_entries as usize,
-                self.header.bits_per_delta,
-                self.header.min_offset,
-            )
-        })
+    /// Decompressed f32 weights. Decodes on first call for deserialized
+    /// posting blocks. Returns `&[]` for directory blocks.
+    pub fn values(&mut self) -> &[f32] {
+        self.decode().1
     }
 
     fn decompress_raw(
@@ -349,14 +349,15 @@ impl SparsePostingBlock {
 
     /// Serialize to bytes: 16-byte header + bitpacked deltas + f16 weights.
     pub fn serialize(&self) -> Vec<u8> {
-        if !self.raw_body.is_empty() {
-            let mut buf = Vec::with_capacity(HEADER_SIZE + self.raw_body.len());
-            self.write_header(&mut buf);
-            buf.extend_from_slice(&self.raw_body);
-            return buf;
-        }
-
-        let data = self.ensure_decompressed();
+        let data = match &self.body {
+            PostingBody::Encoded(raw) => {
+                let mut buf = Vec::with_capacity(HEADER_SIZE + raw.len());
+                self.write_header(&mut buf);
+                buf.extend_from_slice(raw);
+                return buf;
+            }
+            PostingBody::Decoded(d) => d,
+        };
         let n = data.offsets.len();
         let packer = BitPacker4x::new();
         let last_relative = self.header.max_offset - self.header.min_offset;
@@ -411,8 +412,8 @@ impl SparsePostingBlock {
             + Self::expected_body_size(self.header.num_entries as usize, self.header.bits_per_delta)
     }
 
-    /// Deserialize from bytes. Only reads the 16-byte header; body
-    /// decompression is lazy.
+    /// Deserialize from bytes. Stores body bytes as `Encoded`; call
+    /// `decode()` to decompress posting blocks on first access.
     ///
     /// Returns an error if the buffer is too small for the header or the
     /// body is shorter than the header implies.
@@ -427,6 +428,12 @@ impl SparsePostingBlock {
         let min_offset = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
         let max_offset = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
         let max_weight = f32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]);
+
+        if bits_per_delta > 32 && bits_per_delta != DIRECTORY_SENTINEL {
+            return Err(SparsePostingBlockError::InvalidBitsPerDelta {
+                value: bits_per_delta,
+            });
+        }
 
         let expected_body = Self::expected_body_size(num_entries as usize, bits_per_delta);
         let actual_body = bytes.len() - HEADER_SIZE;
@@ -445,8 +452,7 @@ impl SparsePostingBlock {
                 num_entries,
                 bits_per_delta,
             },
-            raw_body: bytes[HEADER_SIZE..HEADER_SIZE + expected_body].to_vec(),
-            decompressed: OnceLock::new(),
+            body: PostingBody::Encoded(bytes[HEADER_SIZE..HEADER_SIZE + expected_body].to_vec()),
         })
     }
 
@@ -609,8 +615,7 @@ impl DirectoryBlock {
                 num_entries: n as u16,
                 bits_per_delta: DIRECTORY_SENTINEL,
             },
-            raw_body,
-            decompressed: OnceLock::new(),
+            body: PostingBody::Encoded(raw_body),
         }))
     }
 
@@ -636,22 +641,29 @@ impl DirectoryBlock {
 
     /// Extract `(max_offsets, max_weights)` — one pair per posting block.
     pub fn entries(&self) -> (Vec<u32>, Vec<f32>) {
+        let raw = match &self.0.body {
+            PostingBody::Encoded(raw) => raw.as_slice(),
+            // Directory blocks are always Encoded by construction
+            // (DirectoryBlock::new and DirectoryBlock::from_block enforce this).
+            // Return empty if somehow Decoded.
+            PostingBody::Decoded(_) => return (Vec::new(), Vec::new()),
+        };
         let n = self.0.header.num_entries as usize;
         let mut max_offsets = Vec::with_capacity(n);
         let mut max_weights = Vec::with_capacity(n);
         for i in 0..n {
             let pos = i * 8;
             max_offsets.push(u32::from_le_bytes([
-                self.0.raw_body[pos],
-                self.0.raw_body[pos + 1],
-                self.0.raw_body[pos + 2],
-                self.0.raw_body[pos + 3],
+                raw[pos],
+                raw[pos + 1],
+                raw[pos + 2],
+                raw[pos + 3],
             ]));
             max_weights.push(f32::from_le_bytes([
-                self.0.raw_body[pos + 4],
-                self.0.raw_body[pos + 5],
-                self.0.raw_body[pos + 6],
-                self.0.raw_body[pos + 7],
+                raw[pos + 4],
+                raw[pos + 5],
+                raw[pos + 6],
+                raw[pos + 7],
             ]));
         }
         (max_offsets, max_weights)
@@ -798,16 +810,16 @@ mod tests {
     }
 
     fn assert_roundtrip_offsets(entries: &[(u32, f32)]) {
-        let block = make_block(entries);
+        let mut block = make_block(entries);
         let bytes = block.serialize();
-        let restored = SparsePostingBlock::deserialize(&bytes).unwrap();
+        let mut restored = SparsePostingBlock::deserialize(&bytes).unwrap();
         assert_eq!(restored.offsets(), block.offsets());
     }
 
     fn assert_roundtrip_values(entries: &[(u32, f32)]) {
-        let block = make_block(entries);
+        let mut block = make_block(entries);
         let bytes = block.serialize();
-        let restored = SparsePostingBlock::deserialize(&bytes).unwrap();
+        let mut restored = SparsePostingBlock::deserialize(&bytes).unwrap();
         for (i, (&orig, &rest)) in block
             .values()
             .iter()
@@ -857,9 +869,9 @@ mod tests {
     #[test]
     fn roundtrip_tiny_weights() {
         let entries = vec![(0, 0.001), (1, 1.0)];
-        let block = make_block(&entries);
+        let mut block = make_block(&entries);
         let bytes = block.serialize();
-        let restored = SparsePostingBlock::deserialize(&bytes).unwrap();
+        let mut restored = SparsePostingBlock::deserialize(&bytes).unwrap();
         assert_eq!(restored.offsets(), block.offsets());
         assert_approx(restored.values()[1], 1.0, F16_TOL);
         assert!(restored.values()[0] < 0.01);
@@ -870,7 +882,7 @@ mod tests {
         let entries = vec![(10, 0.5), (20, 0.9), (30, 0.2)];
         let block = make_block(&entries);
         let bytes = block.serialize();
-        let restored = SparsePostingBlock::deserialize(&bytes).unwrap();
+        let mut restored = SparsePostingBlock::deserialize(&bytes).unwrap();
         assert_eq!(restored.header.min_offset, 10);
         assert_eq!(restored.header.max_offset, 30);
         assert_eq!(restored.header.max_weight, 0.9);
@@ -987,11 +999,11 @@ mod tests {
     #[test]
     fn deserialize_extra_trailing_bytes_ignored() {
         let entries = sequential_entries(0, 1, 50, 0.5);
-        let block = make_block(&entries);
+        let mut block = make_block(&entries);
         let mut bytes = block.serialize();
         bytes.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
 
-        let restored = SparsePostingBlock::deserialize(&bytes).unwrap();
+        let mut restored = SparsePostingBlock::deserialize(&bytes).unwrap();
         assert_eq!(restored.offsets(), block.offsets());
     }
 
@@ -1012,9 +1024,9 @@ mod tests {
             .map(|i| (i as u32 * 7, cheap_rng(12345, i)))
             .collect();
 
-        let block = make_block(&entries);
+        let mut block = make_block(&entries);
         let bytes = block.serialize();
-        let restored = SparsePostingBlock::deserialize(&bytes).unwrap();
+        let mut restored = SparsePostingBlock::deserialize(&bytes).unwrap();
 
         for (i, (&orig, &rest)) in block
             .values()
@@ -1072,7 +1084,7 @@ mod tests {
     #[test]
     fn directory_block_offsets_values_return_empty() {
         let dir = DirectoryBlock::new(&[100], &[0.5]).unwrap();
-        let block = dir.into_block();
+        let mut block = dir.into_block();
         assert!(block.is_directory());
         assert_eq!(block.offsets(), &[] as &[u32]);
         assert_eq!(block.values(), &[] as &[f32]);
@@ -1432,7 +1444,7 @@ mod tests {
     fn zero_copy_offsets_at_boundary_sizes() {
         for count in [1, 2, 63, 127, 128, 129, 130, 255, 256, 257, 512] {
             let entries = sequential_entries(10, 3, count, 0.5);
-            let block = make_block(&entries);
+            let mut block = make_block(&entries);
             let bytes = block.serialize();
             let hdr = SparsePostingBlock::peek_header(&bytes).unwrap();
 
@@ -1446,7 +1458,7 @@ mod tests {
     fn zero_copy_values_at_boundary_sizes() {
         for count in [1, 2, 63, 127, 128, 129, 130, 255, 256, 257, 512] {
             let entries = sequential_entries(0, 1, count, 0.7);
-            let block = make_block(&entries);
+            let mut block = make_block(&entries);
             let bytes = block.serialize();
             let hdr = SparsePostingBlock::peek_header(&bytes).unwrap();
 
@@ -1464,7 +1476,7 @@ mod tests {
             let entries: Vec<(u32, f32)> = (0..count)
                 .map(|i| (i as u32 * 5, 0.1 + 0.001 * i as f32))
                 .collect();
-            let block = make_block(&entries);
+            let mut block = make_block(&entries);
             let bytes = block.serialize();
             let hdr = SparsePostingBlock::peek_header(&bytes).unwrap();
 
@@ -1510,17 +1522,17 @@ mod proptests {
 
         #[test]
         fn roundtrip_offsets_always_match(entries in arb_entries(512)) {
-            let block = SparsePostingBlock::from_sorted_entries(&entries).unwrap();
+            let mut block = SparsePostingBlock::from_sorted_entries(&entries).unwrap();
             let bytes = block.serialize();
-            let restored = SparsePostingBlock::deserialize(&bytes).unwrap();
+            let mut restored = SparsePostingBlock::deserialize(&bytes).unwrap();
             prop_assert_eq!(restored.offsets(), block.offsets());
         }
 
         #[test]
         fn roundtrip_values_within_f16_tolerance(entries in arb_entries(512)) {
-            let block = SparsePostingBlock::from_sorted_entries(&entries).unwrap();
+            let mut block = SparsePostingBlock::from_sorted_entries(&entries).unwrap();
             let bytes = block.serialize();
-            let restored = SparsePostingBlock::deserialize(&bytes).unwrap();
+            let mut restored = SparsePostingBlock::deserialize(&bytes).unwrap();
             for (i, (&orig, &rest)) in block
                 .values()
                 .iter()
@@ -1538,7 +1550,7 @@ mod proptests {
 
         #[test]
         fn zero_copy_matches_lazy_offsets(entries in arb_entries(512)) {
-            let block = SparsePostingBlock::from_sorted_entries(&entries).unwrap();
+            let mut block = SparsePostingBlock::from_sorted_entries(&entries).unwrap();
             let bytes = block.serialize();
             let hdr = SparsePostingBlock::peek_header(&bytes).unwrap();
             let mut buf = Vec::new();
@@ -1548,7 +1560,7 @@ mod proptests {
 
         #[test]
         fn zero_copy_matches_lazy_values(entries in arb_entries(512)) {
-            let block = SparsePostingBlock::from_sorted_entries(&entries).unwrap();
+            let mut block = SparsePostingBlock::from_sorted_entries(&entries).unwrap();
             let bytes = block.serialize();
             let hdr = SparsePostingBlock::peek_header(&bytes).unwrap();
             let mut buf = Vec::new();
