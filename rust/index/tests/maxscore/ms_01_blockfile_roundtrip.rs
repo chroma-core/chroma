@@ -34,7 +34,7 @@ async fn directory_stored_under_prefix() {
 
     let (_dir, _provider, reader) = common::build_index(docs).await;
 
-    let dir = reader
+    let (dir, _part_count) = reader
         .get_directory(&encode_u32(1))
         .await
         .unwrap()
@@ -91,7 +91,7 @@ async fn multi_block_dimension_roundtrip() {
         common::assert_approx(*val, expected, 5e-4);
     }
 
-    let dir = reader
+    let (dir, _part_count) = reader
         .get_directory(&encode_u32(1))
         .await
         .unwrap()

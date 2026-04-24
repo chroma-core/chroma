@@ -162,18 +162,10 @@ impl<'me> MaxScoreWriter<'me> {
                 None
             };
 
-            if let Some(ref directory) = old_directory {
+            if let Some((ref directory, old_dir_part_count)) = old_directory {
                 let old_block_count = directory.num_blocks() as u32;
-                let old_dir_part_count = if let Some(ref reader) = self.old_reader {
-                    reader.count_directory_parts(encoded_dim).await? as u32
-                } else {
-                    0
-                };
 
                 // Find the smallest offset touched by any delta.
-                // Safety: `updates` is guaranteed non-empty because we only
-                // reach this path when `self.delta.remove(dimension_id)`
-                // returns `Some`, and entries are never inserted empty.
                 let Some(min_affected_offset) = updates.iter().map(|e| *e.key()).min() else {
                     continue;
                 };
@@ -188,7 +180,7 @@ impl<'me> MaxScoreWriter<'me> {
                 // Load only the suffix of posting blocks.
                 let suffix_blocks = if let Some(ref reader) = self.old_reader {
                     reader
-                        .get_posting_blocks_from(encoded_dim, first_affected)
+                        .get_posting_blocks_range(encoded_dim, first_affected)
                         .await?
                 } else {
                     vec![]
@@ -206,13 +198,10 @@ impl<'me> MaxScoreWriter<'me> {
                 // Apply deltas.
                 for entry in updates.into_iter() {
                     let (off, update) = entry;
-                    match update {
-                        Some(val) => {
-                            entries.insert(off, val);
-                        }
-                        None => {
-                            entries.remove(&off);
-                        }
+                    if let Some(val) = update {
+                        entries.insert(off, val);
+                    } else {
+                        entries.remove(&off);
                     }
                 }
 
@@ -230,7 +219,7 @@ impl<'me> MaxScoreWriter<'me> {
                     dir_work.push(DirWork {
                         prefix: dir_prefix,
                         directory: None,
-                        old_part_count: old_dir_part_count,
+                        old_part_count: old_dir_part_count as u32,
                     });
                     continue;
                 }
@@ -274,7 +263,7 @@ impl<'me> MaxScoreWriter<'me> {
                 dir_work.push(DirWork {
                     prefix: dir_prefix,
                     directory: Some(directory),
-                    old_part_count: old_dir_part_count,
+                    old_part_count: old_dir_part_count as u32,
                 });
             } else {
                 // ── Fresh dimension (no old reader or no directory) ─────
@@ -522,6 +511,8 @@ impl PostingCursor {
                 }
                 if mask.contains(doc) {
                     let idx = (doc - window_start) as usize;
+                    // Set bit `idx` in packed bitmap (word = idx/64, bit = idx%64)
+                    // to track touched slots for efficient enumeration later.
                     bitmap[idx >> 6] |= 1u64 << (idx & 63);
                     accum[idx] += vals[self.pos] * query_weight;
                 }
@@ -617,11 +608,8 @@ impl<'me> MaxScoreReader<'me> {
         Ok(blocks.into_iter().map(|(_, b)| b).collect())
     }
 
-    /// Load posting blocks for a dimension starting from `start_seq` onward.
-    ///
-    /// Used by the suffix-rewrite optimization in `MaxScoreWriter::commit()`
-    /// to avoid loading blocks before the first affected offset.
-    pub async fn get_posting_blocks_from(
+    /// Load posting blocks for a dimension from `start_seq` onward.
+    pub async fn get_posting_blocks_range(
         &self,
         encoded_dim: &str,
         start_seq: u32,
@@ -634,30 +622,26 @@ impl<'me> MaxScoreReader<'me> {
         Ok(blocks.into_iter().map(|(_, _, b)| b).collect())
     }
 
-    /// Load the full directory for a dimension from its directory parts.
+    /// Load the directory for a dimension, returning the reconstructed
+    /// `Directory` and the number of on-disk directory parts.
     pub async fn get_directory(
         &self,
         encoded_dim: &str,
-    ) -> Result<Option<Directory>, MaxScoreError> {
+    ) -> Result<Option<(Directory, usize)>, MaxScoreError> {
         let dir_prefix = format!("{}{}", DIRECTORY_PREFIX, encoded_dim);
         let parts: Vec<(u32, SparsePostingBlock)> =
             self.posting_reader.get_prefix(&dir_prefix).await?.collect();
         if parts.is_empty() {
             return Ok(None);
         }
+        let part_count = parts.len();
         let dir_blocks: Vec<DirectoryBlock> = parts
             .into_iter()
             .filter_map(|(_, b)| DirectoryBlock::from_block(b).ok())
             .collect();
-        Ok(Directory::from_parts(dir_blocks).ok())
-    }
-
-    /// Count the number of directory parts stored for a dimension.
-    pub async fn count_directory_parts(&self, encoded_dim: &str) -> Result<usize, MaxScoreError> {
-        let dir_prefix = format!("{}{}", DIRECTORY_PREFIX, encoded_dim);
-        let parts: Vec<(u32, SparsePostingBlock)> =
-            self.posting_reader.get_prefix(&dir_prefix).await?.collect();
-        Ok(parts.len())
+        Ok(Directory::from_parts(dir_blocks)
+            .ok()
+            .map(|d| (d, part_count)))
     }
 
     /// Return all dimension IDs stored in the blockfile.
