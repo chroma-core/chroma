@@ -20,6 +20,7 @@ use chroma_index::sparse::maxscore::{
 };
 use chroma_index::sparse::reader::SparseReader;
 use chroma_index::sparse::types::DEFAULT_BLOCK_SIZE;
+use chroma_index::sparse::types::{encode_u32, Score};
 use chroma_index::sparse::writer::SparseFlusher;
 use chroma_index::sparse::writer::SparseWriter;
 use chroma_types::Cmek;
@@ -51,7 +52,12 @@ use tracing::Span;
 ///
 /// For existing collections the variant is determined by which blockfile
 /// keys are present in the segment's file_path (`SPARSE_MAX` → WAND,
-/// `SPARSE_POSTING` → MaxScore). For fresh collections the schema's
+/// `SPARSE_POSTING` → MaxScore), not the schema, because schema changes
+/// are metadata-only and do not rewrite on-disk data. This matters
+/// during migration: a collection's schema may be updated to MaxScore
+/// while the existing segments still contain WAND blockfiles — the read
+/// path must use the on-disk format until compaction rewrites them.
+/// For fresh collections (no existing file paths) the schema's
 /// `algorithm` field decides.
 #[derive(Clone)]
 #[allow(clippy::large_enum_variant)]
@@ -67,10 +73,128 @@ pub(crate) enum SparseIndexFlusher {
     MaxScore(MaxScoreFlusher),
 }
 
+impl<'me> SparseIndexWriter<'me> {
+    pub async fn set(&self, offset: u32, sparse_vector: impl IntoIterator<Item = (u32, f32)>) {
+        match self {
+            Self::Wand(w) => w.set(offset, sparse_vector).await,
+            Self::MaxScore(w) => w.set(offset, sparse_vector).await,
+        }
+    }
+
+    pub async fn delete(&self, offset: u32, sparse_indices: impl IntoIterator<Item = u32>) {
+        match self {
+            Self::Wand(w) => w.delete(offset, sparse_indices).await,
+            Self::MaxScore(w) => w.delete(offset, sparse_indices).await,
+        }
+    }
+
+    pub async fn commit(self) -> Result<SparseIndexFlusher, Box<dyn ChromaError>> {
+        match self {
+            Self::Wand(w) => Ok(SparseIndexFlusher::Wand(
+                Box::pin(w.commit()).await.map_err(ChromaError::boxed)?,
+            )),
+            Self::MaxScore(w) => Ok(SparseIndexFlusher::MaxScore(
+                Box::pin(w.commit()).await.map_err(ChromaError::boxed)?,
+            )),
+        }
+    }
+}
+
+impl SparseIndexFlusher {
+    /// Flush the sparse index, returning `(file_path_key, paths)` entries
+    /// that should be registered on the segment.
+    pub async fn flush(
+        self,
+        prefix_path: &str,
+    ) -> Result<Vec<(String, Vec<String>)>, Box<dyn ChromaError>> {
+        match self {
+            Self::Wand(f) => {
+                let max_id = f.max_id();
+                let offset_value_id = f.offset_value_id();
+                Box::pin(f.flush()).await.map_err(ChromaError::boxed)?;
+                Ok(vec![
+                    (
+                        SPARSE_MAX.to_string(),
+                        vec![ChromaSegmentFlusher::flush_key(prefix_path, &max_id)],
+                    ),
+                    (
+                        SPARSE_OFFSET_VALUE.to_string(),
+                        vec![ChromaSegmentFlusher::flush_key(
+                            prefix_path,
+                            &offset_value_id,
+                        )],
+                    ),
+                ])
+            }
+            Self::MaxScore(f) => {
+                let posting_id = f.id();
+                Box::pin(f.flush()).await.map_err(ChromaError::boxed)?;
+                Ok(vec![(
+                    SPARSE_POSTING.to_string(),
+                    vec![ChromaSegmentFlusher::flush_key(prefix_path, &posting_id)],
+                )])
+            }
+        }
+    }
+}
+
 /// The sparse vector index reader for a segment shard.
 pub enum SparseIndexReader<'me> {
     Wand(SparseReader<'me>),
     MaxScore(MaxScoreReader<'me>),
+}
+
+impl<'me> SparseIndexReader<'me> {
+    /// Compute document frequency for each dimension.
+    pub async fn dimension_counts(
+        &self,
+        dimensions: &[u32],
+    ) -> Result<HashMap<u32, u32>, Box<dyn ChromaError>> {
+        let mut counts = HashMap::new();
+        match self {
+            Self::Wand(r) => {
+                let encoded: Vec<(u32, String)> =
+                    dimensions.iter().map(|d| (*d, encode_u32(*d))).collect();
+                r.load_offset_values(encoded.iter().map(|(_, e)| e.as_str()))
+                    .await;
+                for (dim, enc) in &encoded {
+                    let nt = r
+                        .get_dimension_offset_rank(enc, u32::MAX)
+                        .await
+                        .map_err(ChromaError::boxed)?
+                        .saturating_sub(
+                            r.get_dimension_offset_rank(enc, 0)
+                                .await
+                                .map_err(ChromaError::boxed)?,
+                        );
+                    counts.insert(*dim, nt);
+                }
+            }
+            Self::MaxScore(r) => {
+                for dim in dimensions {
+                    let nt = r
+                        .count_postings(&encode_u32(*dim))
+                        .await
+                        .map_err(ChromaError::boxed)? as u32;
+                    counts.insert(*dim, nt);
+                }
+            }
+        }
+        Ok(counts)
+    }
+
+    /// Run a sparse KNN query, returning scored results.
+    pub async fn knn_query(
+        &'me self,
+        query: impl IntoIterator<Item = (u32, f32)>,
+        k: u32,
+        mask: chroma_types::SignedRoaringBitmap,
+    ) -> Result<Vec<Score>, Box<dyn ChromaError>> {
+        match self {
+            Self::Wand(r) => r.wand(query, k, mask).await.map_err(ChromaError::boxed),
+            Self::MaxScore(r) => r.query(query, k, mask).await.map_err(ChromaError::boxed),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -792,11 +916,7 @@ impl<'me> MetadataSegmentWriterShard<'me> {
                 }
             }
             MetadataValue::SparseVector(offset_value) => match &self.sparse_index_writer {
-                Some(SparseIndexWriter::MaxScore(w)) => {
-                    w.set(offset_id, offset_value.iter()).await;
-                    Ok(())
-                }
-                Some(SparseIndexWriter::Wand(w)) => {
+                Some(w) => {
                     w.set(offset_id, offset_value.iter()).await;
                     Ok(())
                 }
@@ -929,12 +1049,7 @@ impl<'me> MetadataSegmentWriterShard<'me> {
                 }
             }
             MetadataValue::SparseVector(offset_value) => match &self.sparse_index_writer {
-                Some(SparseIndexWriter::MaxScore(w)) => {
-                    w.delete(offset_id, offset_value.indices.iter().cloned())
-                        .await;
-                    Ok(())
-                }
-                Some(SparseIndexWriter::Wand(w)) => {
+                Some(w) => {
                     w.delete(offset_id, offset_value.indices.iter().cloned())
                         .await;
                     Ok(())
@@ -1431,14 +1546,7 @@ impl<'me> MetadataSegmentWriterShard<'me> {
         };
 
         let sparse_index_flusher = match self.sparse_index_writer {
-            Some(SparseIndexWriter::Wand(w)) => match Box::pin(w.commit()).await {
-                Ok(flusher) => Some(SparseIndexFlusher::Wand(flusher)),
-                Err(e) => return Err(Box::new(e)),
-            },
-            Some(SparseIndexWriter::MaxScore(w)) => match Box::pin(w.commit()).await {
-                Ok(flusher) => Some(SparseIndexFlusher::MaxScore(flusher)),
-                Err(e) => return Err(Box::new(e)),
-            },
+            Some(w) => Some(w.commit().await?),
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
 
@@ -1568,38 +1676,10 @@ impl MetadataSegmentFlusherShard {
             )],
         );
 
-        match self.sparse_index_flusher {
-            Some(SparseIndexFlusher::Wand(sparse_flusher)) => {
-                let max_id = sparse_flusher.max_id();
-                let offset_value_id = sparse_flusher.offset_value_id();
-                match Box::pin(sparse_flusher.flush()).await {
-                    Ok(_) => {}
-                    Err(e) => return Err(Box::new(e)),
-                }
-                flushed.insert(
-                    SPARSE_MAX.to_string(),
-                    vec![ChromaSegmentFlusher::flush_key(&prefix_path, &max_id)],
-                );
-                flushed.insert(
-                    SPARSE_OFFSET_VALUE.to_string(),
-                    vec![ChromaSegmentFlusher::flush_key(
-                        &prefix_path,
-                        &offset_value_id,
-                    )],
-                );
+        if let Some(sparse_flusher) = self.sparse_index_flusher {
+            for (key, paths) in sparse_flusher.flush(&prefix_path).await? {
+                flushed.insert(key, paths);
             }
-            Some(SparseIndexFlusher::MaxScore(maxscore_flusher)) => {
-                let posting_id = maxscore_flusher.id();
-                match Box::pin(maxscore_flusher.flush()).await {
-                    Ok(_) => {}
-                    Err(e) => return Err(Box::new(e)),
-                }
-                flushed.insert(
-                    SPARSE_POSTING.to_string(),
-                    vec![ChromaSegmentFlusher::flush_key(&prefix_path, &posting_id)],
-                );
-            }
-            None => {}
         }
 
         Ok(flushed)
@@ -1719,7 +1799,8 @@ impl MetadataSegmentReaderShard<'_> {
 
         let sparse_posting_reader = sparse_posting_reader?;
 
-        // MaxScore takes precedence over WAND if both file paths exist.
+        // Exactly one of SPARSE_POSTING (MaxScore) or SPARSE_MAX (WAND)
+        // is present per segment; check MaxScore first, then fall back to WAND.
         let sparse_index_reader = if let Some(posting_reader) = sparse_posting_reader {
             Some(SparseIndexReader::MaxScore(MaxScoreReader::new(
                 posting_reader,
