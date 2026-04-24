@@ -242,6 +242,8 @@ impl<'view> PostingCursor<'view> {
         self.block_count
     }
 
+    /// Returns `None` when the cursor is exhausted or positioned at an
+    /// unloaded lazy block (intentional — lazy cursors skip such blocks).
     pub fn current(&mut self) -> Option<(u32, f32)> {
         if self.block_idx >= self.block_count {
             return None;
@@ -302,7 +304,7 @@ impl<'view> PostingCursor<'view> {
         None
     }
 
-    /// Point lookup for a single doc_id.
+    /// Point lookup for a single doc_id. Currently used only in tests.
     ///
     /// Fast path: reuses the forward buffer if the target block is already
     /// loaded there. View/Lazy slow path: decompresses only offsets, then
@@ -539,6 +541,8 @@ impl<'view> PostingCursor<'view> {
         cand_docs: &[u32],
         cand_scores: &mut [f32],
     ) {
+        // No candidates survived the essential-term drain for this window,
+        // so there is nothing to merge-join against.
         if cand_docs.is_empty() {
             return;
         }
