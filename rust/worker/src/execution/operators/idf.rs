@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
-use chroma_index::sparse::{maxscore::MaxScoreError, reader::SparseReaderError, types::encode_u32};
+
 use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentReaderShard},
     blockfile_record::{
@@ -62,10 +62,6 @@ pub enum IdfError {
     RecordReader(#[from] RecordSegmentReaderShardCreationError),
     #[error(transparent)]
     SegmentShard(#[from] SegmentShardError),
-    #[error("Error using sparse reader: {0}")]
-    SparseReader(#[from] SparseReaderError),
-    #[error("Error using maxscore reader: {0}")]
-    MaxScoreReader(#[from] MaxScoreError),
     #[error("Query tokens length ({tokens}) does not match query indices length ({indices})")]
     TokenLengthMismatch { tokens: usize, indices: usize },
 }
@@ -78,8 +74,6 @@ impl ChromaError for IdfError {
             IdfError::MetadataReader(err) => err.code(),
             IdfError::RecordReader(err) => err.code(),
             IdfError::SegmentShard(e) => e.code(),
-            IdfError::SparseReader(err) => err.code(),
-            IdfError::MaxScoreReader(err) => err.code(),
             IdfError::TokenLengthMismatch { .. } => chroma_error::ErrorCodes::InvalidArgument,
         }
     }
@@ -144,47 +138,8 @@ impl Operator<IdfInput, IdfOutput> for Idf {
         let logs =
             materialize_logs(&record_segment_reader, input.logs.clone(), None, &plan).await?;
 
-        match metadata_segment_reader.sparse_index_reader.as_ref() {
-            Some(chroma_segment::blockfile_metadata::SparseIndexReader::MaxScore(
-                maxscore_reader,
-            )) => {
-                for dimension_id in &self.query.indices {
-                    let encoded = encode_u32(*dimension_id);
-                    let nt = maxscore_reader.count_postings(&encoded).await? as u32;
-                    nts.insert(*dimension_id, nt);
-                }
-            }
-            Some(chroma_segment::blockfile_metadata::SparseIndexReader::Wand(
-                sparse_index_reader,
-            )) => {
-                let encoded_dimensions = self
-                    .query
-                    .indices
-                    .iter()
-                    .map(|dimension_id| (*dimension_id, encode_u32(*dimension_id)))
-                    .collect::<Vec<_>>();
-
-                sparse_index_reader
-                    .load_offset_values(
-                        encoded_dimensions
-                            .iter()
-                            .map(|(_, encoded_dimension)| encoded_dimension.as_str()),
-                    )
-                    .await;
-
-                for (dimension_id, encoded_dimension_id) in encoded_dimensions {
-                    let nt = sparse_index_reader
-                        .get_dimension_offset_rank(&encoded_dimension_id, u32::MAX)
-                        .await?
-                        .saturating_sub(
-                            sparse_index_reader
-                                .get_dimension_offset_rank(&encoded_dimension_id, 0)
-                                .await?,
-                        );
-                    nts.insert(dimension_id, nt);
-                }
-            }
-            None => {}
+        if let Some(reader) = metadata_segment_reader.sparse_index_reader.as_ref() {
+            nts = reader.dimension_counts(&self.query.indices).await?;
         }
 
         for log in &logs {
