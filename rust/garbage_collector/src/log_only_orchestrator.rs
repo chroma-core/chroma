@@ -185,7 +185,7 @@ mod tests {
     /// - Collection UUID must match the one provided during construction
     /// - Result channel must be `None` initially (set later by the system)
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_orchestrator_initialization() {
+    async fn test_k8s_integration_orchestrator_initialization() {
         let (_storage_dir, storage) = test_storage();
         let system = System::new();
         let dispatcher = Dispatcher::new(Default::default());
