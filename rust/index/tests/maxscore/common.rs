@@ -179,7 +179,14 @@ pub async fn get_all_entries(reader: &MaxScoreReader<'_>, dim: u32) -> Vec<(u32,
     let blocks = reader.get_posting_blocks(&encode_u32(dim)).await.unwrap();
     blocks
         .into_iter()
-        .flat_map(|b| b.offsets().to_vec().into_iter().zip(b.values().to_vec()))
+        .flat_map(|mut b| {
+            let (offsets, values) = b.decode();
+            offsets
+                .iter()
+                .copied()
+                .zip(values.iter().copied())
+                .collect::<Vec<_>>()
+        })
         .collect()
 }
 

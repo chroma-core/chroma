@@ -196,8 +196,9 @@ impl<'me> MaxScoreWriter<'me> {
 
                 // Decompress suffix blocks into entries.
                 let mut entries = std::collections::HashMap::new();
-                for block in suffix_blocks {
-                    for (off, val) in block.offsets().iter().zip(block.values().iter()) {
+                for mut block in suffix_blocks {
+                    let (offsets, values) = block.decode();
+                    for (off, val) in offsets.iter().zip(values.iter()) {
                         entries.insert(*off, *val);
                     }
                 }
@@ -254,8 +255,8 @@ impl<'me> MaxScoreWriter<'me> {
                         sorted_suffix.chunks(self.block_size as usize).len() as u32;
                     for (i, chunk) in sorted_suffix.chunks(self.block_size as usize).enumerate() {
                         let block = SparsePostingBlock::from_sorted_entries(chunk)?;
-                        dir_max_offsets.push(block.max_offset);
-                        dir_max_weights.push(block.max_weight);
+                        dir_max_offsets.push(block.header.max_offset);
+                        dir_max_weights.push(block.header.max_weight);
                         let seq = first_affected + i as u32;
                         self.posting_writer.set(encoded_dim, seq, block).await?;
                     }
@@ -297,8 +298,8 @@ impl<'me> MaxScoreWriter<'me> {
 
                 for (seq, chunk) in entries.chunks(self.block_size as usize).enumerate() {
                     let block = SparsePostingBlock::from_sorted_entries(chunk)?;
-                    dir_max_offsets.push(block.max_offset);
-                    dir_max_weights.push(block.max_weight);
+                    dir_max_offsets.push(block.header.max_offset);
+                    dir_max_weights.push(block.header.max_weight);
                     self.posting_writer
                         .set(encoded_dim, seq as u32, block)
                         .await?;
@@ -366,8 +367,8 @@ pub struct PostingCursor {
 
 impl PostingCursor {
     pub fn from_blocks(blocks: Vec<SparsePostingBlock>) -> Self {
-        let dir_max_offsets: Vec<u32> = blocks.iter().map(|b| b.max_offset).collect();
-        let dir_max_weights: Vec<f32> = blocks.iter().map(|b| b.max_weight).collect();
+        let dir_max_offsets: Vec<u32> = blocks.iter().map(|b| b.header.max_offset).collect();
+        let dir_max_weights: Vec<f32> = blocks.iter().map(|b| b.header.max_weight).collect();
         let dim_max = dir_max_weights.iter().copied().fold(0.0f32, f32::max);
         let block_count = blocks.len();
 
@@ -386,12 +387,11 @@ impl PostingCursor {
         self.block_count
     }
 
-    pub fn current(&self) -> Option<(u32, f32)> {
+    pub fn current(&mut self) -> Option<(u32, f32)> {
         if self.block_idx >= self.block_count {
             return None;
         }
-        let offsets = self.blocks[self.block_idx].offsets();
-        let values = self.blocks[self.block_idx].values();
+        let (offsets, values) = self.blocks[self.block_idx].decode();
         if self.pos < offsets.len() {
             Some((offsets[self.pos], values[self.pos]))
         } else {
@@ -407,8 +407,7 @@ impl PostingCursor {
                 continue;
             }
 
-            let offsets = self.blocks[self.block_idx].offsets();
-            let values = self.blocks[self.block_idx].values();
+            let (offsets, values) = self.blocks[self.block_idx].decode();
 
             if self.pos == 0 || offsets.get(self.pos).is_some_and(|&o| o < target) {
                 let start = self.pos;
@@ -437,8 +436,7 @@ impl PostingCursor {
             return None;
         }
 
-        let offsets = self.blocks[bi].offsets();
-        let values = self.blocks[bi].values();
+        let (offsets, values) = self.blocks[bi].decode();
         if offsets.is_empty() || doc_id < offsets[0] {
             return None;
         }
@@ -512,8 +510,7 @@ impl PostingCursor {
                 continue;
             }
 
-            let offsets = self.blocks[self.block_idx].offsets();
-            let vals = self.blocks[self.block_idx].values();
+            let (offsets, vals) = self.blocks[self.block_idx].decode();
 
             if offsets.get(self.pos).is_some_and(|&o| o < window_start) {
                 self.pos = offsets.partition_point(|&o| o < window_start);
@@ -561,8 +558,7 @@ impl PostingCursor {
                 continue;
             }
 
-            let offsets = self.blocks[self.block_idx].offsets();
-            let values = self.blocks[self.block_idx].values();
+            let (offsets, values) = self.blocks[self.block_idx].decode();
 
             if offsets.get(self.pos).is_some_and(|&o| o < window_start) {
                 self.pos = offsets.partition_point(|&o| o < window_start);
