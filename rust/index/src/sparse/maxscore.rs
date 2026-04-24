@@ -422,7 +422,7 @@ impl<'me> MaxScoreReader<'me> {
     /// overestimates by at most `block_size - 1` on the last block, which
     /// is negligible for the IDF formula.
     pub async fn count_postings(&self, encoded_dim: &str) -> Result<usize, MaxScoreError> {
-        let Some(dir) = self.get_directory(encoded_dim).await? else {
+        let Some((dir, _)) = self.get_directory(encoded_dim).await? else {
             return Ok(0);
         };
         let num_blocks = dir.num_blocks();
