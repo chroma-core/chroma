@@ -25,7 +25,6 @@ pub mod config;
 mod construct_version_graph_orchestrator;
 mod garbage_collector_component;
 pub mod garbage_collector_orchestrator_v2;
-mod log_only_orchestrator;
 pub mod mcmr;
 
 #[cfg(test)]
