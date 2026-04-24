@@ -1,0 +1,113 @@
+---
+title: "Delete Data"
+description: "Learn how to delete data from Chroma collections."
+---
+
+import { Danger } from '/snippets/callout.mdx';
+
+Chroma supports deleting items from a collection by `id` using `.delete`. The embeddings, documents, and metadata associated with each item will be deleted.
+
+<Danger>
+Naturally, this is a destructive operation, and cannot be undone.
+</Danger>
+
+<CodeGroup>
+```python Python
+import chromadb
+
+# Run an in-memory Chroma server. Use PersistentClient(path="...") for local
+# persistence, or HttpClient(host=..., port=...) to connect to a running server.
+client = chromadb.Client()
+
+collection = client.get_collection(name="my-collection")
+
+collection.delete(
+    ids=["id1", "id2", "id3"],
+)
+```
+
+```typescript TypeScript
+import { ChromaClient } from "chromadb";
+
+// Assumes a Chroma server is running at http://localhost:8000
+// Start one with: npx chroma run --path ./chroma-data
+const client = new ChromaClient();
+
+const collection = await client.getCollection({ name: "my-collection" });
+
+await collection.delete({
+  ids: ["id1", "id2", "id3"],
+});
+```
+
+```rust Rust
+use chroma::ChromaHttpClient;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Assumes a Chroma server is running at http://localhost:8000
+    // Start one with: chroma run --path ./chroma-data
+    let client = ChromaHttpClient::new(Default::default());
+
+    let collection = client.get_collection("my-collection").await?;
+
+    collection
+        .delete(
+            Some(vec!["id1".to_string(), "id2".to_string(), "id3".to_string()]),
+            None,
+        )
+        .await?;
+
+    Ok(())
+}
+```
+</CodeGroup>
+
+`.delete` also supports the `where` filter. It will delete all items in the collection that match the `where` filter.
+
+<CodeGroup>
+```python Python
+import chromadb
+
+client = chromadb.Client()
+collection = client.get_collection(name="my-collection")
+
+collection.delete(
+    where={"chapter": "20"}
+)
+```
+
+```typescript TypeScript
+import { ChromaClient } from "chromadb";
+
+const client = new ChromaClient();
+const collection = await client.getCollection({ name: "my-collection" });
+
+await collection.delete({
+  where: { chapter: "20" },
+});
+```
+
+```rust Rust
+use chroma::types::{MetadataComparison, MetadataExpression, MetadataValue, PrimitiveOperator, Where};
+use chroma::ChromaHttpClient;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = ChromaHttpClient::new(Default::default());
+    let collection = client.get_collection("my-collection").await?;
+
+    let where_clause = Where::Metadata(MetadataExpression {
+        key: "chapter".to_string(),
+        comparison: MetadataComparison::Primitive(
+            PrimitiveOperator::Equal,
+            MetadataValue::Str("20".to_string()),
+        ),
+    });
+
+    collection.delete(None, Some(where_clause)).await?;
+
+    Ok(())
+}
+```
+</CodeGroup>

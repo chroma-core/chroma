@@ -20,95 +20,43 @@
   "navigation": {
     "tabs": [
       {
-        "tab": "Docs",
-        "icon": "book",
+        "tab": "Chroma Cloud",
+        "icon": "cloud",
         "pages": [
           {
             "group": "Overview",
             "pages": [
-              "docs/overview/introduction",
-              "docs/overview/getting-started"
-            ]
-          },
-          {
-            "group": "Run Chroma",
-            "pages": [
-              "docs/run-chroma/clients",
-              "docs/run-chroma/client-server"
+              "cloud/overview/introduction",
+              "cloud/overview/getting-started",
+              "cloud/pricing",
+              "cloud/quotas-limits"
             ]
           },
           {
             "group": "Collections",
             "pages": [
-              "docs/collections/manage-collections",
-              "docs/collections/add-data",
-              "docs/collections/update-data",
-              "docs/collections/delete-data",
-              "docs/collections/configure"
+              "cloud/collections/manage-collections",
+              "cloud/collections/add-data",
+              "cloud/collections/update-data",
+              "cloud/collections/delete-data",
+              "cloud/collections/configure"
             ]
           },
           {
             "group": "Querying Collections",
             "pages": [
-              "docs/querying-collections/query-and-get",
-              "docs/querying-collections/metadata-filtering",
-              "docs/querying-collections/full-text-search"
+              "cloud/querying-collections/query-and-get",
+              "cloud/querying-collections/metadata-filtering",
+              "cloud/querying-collections/full-text-search"
             ]
           },
           {
             "group": "Embeddings",
             "pages": [
-              "docs/embeddings/embedding-functions",
-              "docs/embeddings/multimodal"
+              "cloud/embeddings/embedding-functions",
+              "cloud/embeddings/multimodal"
             ]
           },
-          {
-            "group": "CLI",
-            "pages": [
-              "docs/cli/install",
-              "docs/cli/run",
-              {
-                "group": "Data Management",
-                "pages": [
-                  "docs/cli/browse",
-                  "docs/cli/copy",
-                  "docs/cli/db",
-                  "docs/cli/vacuum"
-                ]
-              },
-              {
-                "group": "Cloud",
-                "pages": [
-                  "docs/cli/login",
-                  "docs/cli/profile"
-                ]
-              },
-              {
-                "group": "Other",
-                "pages": [
-                  "docs/cli/sample-apps",
-                  "docs/cli/update"
-                ]
-              }
-            ]
-          },
-          {
-            "group": "Other",
-            "pages": [
-              "docs/overview/oss",
-              "docs/overview/migration",
-              "docs/overview/troubleshooting"
-            ]
-          }
-        ]
-      },
-      {
-        "tab": "Chroma Cloud",
-        "icon": "cloud",
-        "pages": [
-          "cloud/getting-started",
-          "cloud/pricing",
-          "cloud/quotas-limits",
           {
             "group": "Features",
             "pages": [
@@ -153,6 +101,104 @@
             "pages": [
               "cloud/package-search/mcp",
               "cloud/package-search/registry"
+            ]
+          },
+          {
+            "group": "CLI",
+            "pages": [
+              "cloud/cli/install",
+              "cloud/cli/login",
+              "cloud/cli/profile",
+              "cloud/cli/db",
+              {
+                "group": "Data Management",
+                "pages": [
+                  "cloud/cli/browse",
+                  "cloud/cli/copy"
+                ]
+              },
+              {
+                "group": "Other",
+                "pages": [
+                  "cloud/cli/sample-apps",
+                  "cloud/cli/update"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Chroma OSS",
+        "icon": "/images/chroma_logo_icon.svg",
+        "pages": [
+          {
+            "group": "Overview",
+            "pages": [
+              "oss/overview/introduction",
+              "oss/overview/getting-started"
+            ]
+          },
+          {
+            "group": "Run Chroma",
+            "pages": [
+              "oss/run-chroma/clients",
+              "oss/run-chroma/client-server"
+            ]
+          },
+          {
+            "group": "Collections",
+            "pages": [
+              "oss/collections/manage-collections",
+              "oss/collections/add-data",
+              "oss/collections/update-data",
+              "oss/collections/delete-data",
+              "oss/collections/configure"
+            ]
+          },
+          {
+            "group": "Querying Collections",
+            "pages": [
+              "oss/querying-collections/query-and-get",
+              "oss/querying-collections/metadata-filtering",
+              "oss/querying-collections/full-text-search"
+            ]
+          },
+          {
+            "group": "Embeddings",
+            "pages": [
+              "oss/embeddings/embedding-functions",
+              "oss/embeddings/multimodal"
+            ]
+          },
+          {
+            "group": "CLI",
+            "pages": [
+              "oss/cli/install",
+              "oss/cli/run",
+              {
+                "group": "Data Management",
+                "pages": [
+                  "oss/cli/browse",
+                  "oss/cli/copy",
+                  "oss/cli/vacuum"
+                ]
+              },
+              {
+                "group": "Other",
+                "pages": [
+                  "oss/cli/sample-apps",
+                  "oss/cli/update"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Other",
+            "pages": [
+              "oss/overview/oss",
+              "oss/overview/migration",
+              "oss/overview/troubleshooting"
             ]
           }
         ]
@@ -526,6 +572,38 @@
     {
       "source": "/docs/overview/architecture",
       "destination": "/reference/architecture/overview"
+    },
+    {
+      "source": "/docs/cli/db",
+      "destination": "/cloud/cli/db"
+    },
+    {
+      "source": "/docs/cli/login",
+      "destination": "/cloud/cli/login"
+    },
+    {
+      "source": "/docs/cli/profile",
+      "destination": "/cloud/cli/profile"
+    },
+    {
+      "source": "/oss/cli/db",
+      "destination": "/cloud/cli/db"
+    },
+    {
+      "source": "/oss/cli/login",
+      "destination": "/cloud/cli/login"
+    },
+    {
+      "source": "/oss/cli/profile",
+      "destination": "/cloud/cli/profile"
+    },
+    {
+      "source": "/docs/:slug*",
+      "destination": "/oss/:slug*"
+    },
+    {
+      "source": "/cloud/getting-started",
+      "destination": "/cloud/overview/getting-started"
     },
     {
       "source": "/reference/architecture",

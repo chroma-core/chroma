@@ -18,19 +18,39 @@ Chroma collections are created with a name. Collection names are used in the url
 
 <CodeGroup>
 ```python Python
+import chromadb
+
+# Set CHROMA_API_KEY, CHROMA_TENANT, and CHROMA_DATABASE in your environment
+client = chromadb.CloudClient()
+
 collection = client.create_collection(name="my_collection")
 ```
 
 ```typescript TypeScript
+import { CloudClient } from "chromadb";
+
+// Set CHROMA_API_KEY, CHROMA_TENANT, and CHROMA_DATABASE in your environment
+const client = new CloudClient();
+
 const collection = await client.createCollection({
   name: "my_collection",
 });
 ```
 
 ```rust Rust
-let collection = client
-    .create_collection("my_collection", None, None)
-    .await?;
+use chroma::ChromaHttpClient;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Set CHROMA_API_KEY, CHROMA_TENANT, and CHROMA_DATABASE in your environment
+    let client = ChromaHttpClient::cloud()?;
+
+    let collection = client
+        .create_collection("my_collection", None, None)
+        .await?;
+
+    Ok(())
+}
 ```
 </CodeGroup>
 
@@ -65,7 +85,11 @@ Create your collection with the `OpenAIEmbeddingFunction`:
 
 ```python
 import os
+import chromadb
 from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
+
+# Set CHROMA_API_KEY, CHROMA_TENANT, and CHROMA_DATABASE in your environment
+client = chromadb.CloudClient()
 
 collection = client.create_collection(
     name="my_collection",
@@ -79,6 +103,10 @@ collection = client.create_collection(
 Instead of having Chroma embed documents, you can also provide embeddings directly when [adding data](./add-data) to a collection. In this case, your collection will not have an embedding function set, and you will be responsible for providing embeddings directly when adding data and querying.
 
 ```python
+import chromadb
+
+client = chromadb.CloudClient()
+
 collection = client.create_collection(
     name="my_collection",
     embedding_function=None
@@ -112,7 +140,11 @@ yarn add @chroma-core/openai
 Create your collection with the `OpenAIEmbeddingFunction`:
 
 ```typescript
+import { CloudClient } from "chromadb";
 import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
+
+// Set CHROMA_API_KEY, CHROMA_TENANT, and CHROMA_DATABASE in your environment
+const client = new CloudClient();
 
 const collection = await client.createCollection({
   name: "my_collection",
@@ -126,6 +158,10 @@ const collection = await client.createCollection({
 Instead of having Chroma embed documents, you can also provide embeddings directly when [adding data](./add-data) to a collection. In this case, your collection will not have an embedding function set, and you will be responsible for providing embeddings directly when adding data and querying.
 
 ```typescript
+import { CloudClient } from "chromadb";
+
+const client = new CloudClient();
+
 const collection = await client.createCollection({
   name: "my_collection",
   embeddingFunction: null,
@@ -138,21 +174,37 @@ const collection = await client.createCollection({
 The Rust client expects embeddings to be provided directly when using `add`, `get`, `search` and other functions. Use your provider SDK to generate embeddings, then pass them to Chroma.
 
 ```rust
-collection.add(
-    vec!["id1".to_string(), "id2".to_string(), "id3".to_string()],
-    vec![
-        vec![1.1, 2.3, 3.2],
-        vec![4.5, 6.9, 4.4],
-        vec![1.1, 2.3, 3.2],
-    ],
-    Some(vec![
-        Some("lorem ipsum...".to_string()),
-        Some("doc2".to_string()),
-        Some("doc3".to_string()),
-    ]),
-    None,
-    None,
-).await?;
+use chroma::ChromaHttpClient;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Set CHROMA_API_KEY, CHROMA_TENANT, and CHROMA_DATABASE in your environment
+    let client = ChromaHttpClient::cloud()?;
+
+    let collection = client
+        .get_or_create_collection("my_collection", None, None)
+        .await?;
+
+    collection
+        .add(
+            vec!["id1".to_string(), "id2".to_string(), "id3".to_string()],
+            vec![
+                vec![1.1, 2.3, 3.2],
+                vec![4.5, 6.9, 4.4],
+                vec![1.1, 2.3, 3.2],
+            ],
+            Some(vec![
+                Some("lorem ipsum...".to_string()),
+                Some("doc2".to_string()),
+                Some("doc3".to_string()),
+            ]),
+            None,
+            None,
+        )
+        .await?;
+
+    Ok(())
+}
 ```
 
 </Tab>
@@ -165,10 +217,12 @@ When creating collections, you can pass the optional `metadata` argument to add 
 <CodeGroup>
 ```python Python
 from datetime import datetime
+import chromadb
+
+client = chromadb.CloudClient()
 
 collection = client.create_collection(
     name="my_collection",
-    embedding_function=emb_fn,
     metadata={
         "description": "my first Chroma collection",
         "created": str(datetime.now())
@@ -177,9 +231,12 @@ collection = client.create_collection(
 ```
 
 ```typescript TypeScript
-let collection = await client.createCollection({
+import { CloudClient } from "chromadb";
+
+const client = new CloudClient();
+
+const collection = await client.createCollection({
   name: "my_collection",
-  embeddingFunction: emb_fn,
   metadata: {
     description: "my first Chroma collection",
     created: new Date().toString(),
@@ -189,14 +246,22 @@ let collection = await client.createCollection({
 
 ```rust Rust
 use chroma::types::Metadata;
+use chroma::ChromaHttpClient;
 
-let mut metadata = Metadata::new();
-metadata.insert("description".to_string(), "my first Chroma collection".into());
-metadata.insert("created".to_string(), "2024-01-01T00:00:00Z".into());
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = ChromaHttpClient::cloud()?;
 
-let collection = client
-    .create_collection("my_collection", None, Some(metadata))
-    .await?;
+    let mut metadata = Metadata::new();
+    metadata.insert("description".to_string(), "my first Chroma collection".into());
+    metadata.insert("created".to_string(), "2024-01-01T00:00:00Z".into());
+
+    let collection = client
+        .create_collection("my_collection", None, Some(metadata))
+        .await?;
+
+    Ok(())
+}
 ```
 </CodeGroup>
 
@@ -210,12 +275,20 @@ There are several ways to get a collection after it was created.
 The `get_collection` function will get a collection from Chroma by name. It returns a `Collection` object with `name`, `metadata`, `configuration`, and `embedding_function`.
 
 ```python
+import chromadb
+
+client = chromadb.CloudClient()
+
 collection = client.get_collection(name="my-collection")
 ```
 
 The `get_or_create_collection` function behaves similarly, but will create the collection if it doesn't exist. You can pass to it the same arguments `create_collection` expects, and the client will ignore them if the collection already exists.
 
 ```python
+import chromadb
+
+client = chromadb.CloudClient()
+
 collection = client.get_or_create_collection(
     name="my-collection",
     metadata={"description": "..."}
@@ -225,12 +298,20 @@ collection = client.get_or_create_collection(
 The `list_collections` function returns the collections you have in your Chroma database. The collections will be ordered by creation time from oldest to newest.
 
 ```python
+import chromadb
+
+client = chromadb.CloudClient()
+
 collections = client.list_collections()
 ```
 
 By default, `list_collections` returns up to 100 collections. If you have more than 100 collections, or need to get only a subset of your collections, you can use the `limit` and `offset` arguments:
 
 ```python
+import chromadb
+
+client = chromadb.CloudClient()
+
 first_collections_batch = client.list_collections(limit=100) # get the first 100 collections
 second_collections_batch = client.list_collections(limit=100, offset=100) # get the next 100 collections
 collections_subset = client.list_collections(limit=20, offset=50) # get 20 collections starting from the 50th
@@ -239,6 +320,17 @@ collections_subset = client.list_collections(limit=20, offset=50) # get 20 colle
 Current versions of Chroma store the embedding function you used to create a collection on the server, so the client can resolve it for you on subsequent "get" operations. If you are running an older version of the Chroma client or server (earlier than 1.1.13), you will need to provide the same embedding function you used to create a collection when using `get_collection`:
 
 ```python
+import os
+import chromadb
+from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
+
+client = chromadb.CloudClient()
+
+ef = OpenAIEmbeddingFunction(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    model_name="text-embedding-3-small",
+)
+
 collection = client.get_collection(
     name='my-collection',
     embedding_function=ef
@@ -254,12 +346,20 @@ There are several ways to get a collection after it was created.
 The `getCollection` function will get a collection from Chroma by name. It returns a collection object with `name`, `metadata`, `configuration`, and `embeddingFunction`. If you did not provide an embedding function to `createCollection`, you can provide it to `getCollection`.
 
 ```typescript
-const collection = await client.getCollection({ name: "my-collection " });
+import { CloudClient } from "chromadb";
+
+const client = new CloudClient();
+
+const collection = await client.getCollection({ name: "my-collection" });
 ```
 
 The `getOrCreate` function behaves similarly, but will create the collection if it doesn't exist. You can pass to it the same arguments `createCollection` expects, and the client will ignore them if the collection already exists.
 
 ```typescript
+import { CloudClient } from "chromadb";
+
+const client = new CloudClient();
+
 const collection = await client.getOrCreateCollection({
   name: "my-collection",
   metadata: { description: "..." },
@@ -269,18 +369,30 @@ const collection = await client.getOrCreateCollection({
 If you need to get multiple collections at once, you can use `getCollections()`:
 
 ```typescript
-const [col1, col2] = client.getCollections(["col1", "col2"]);
+import { CloudClient } from "chromadb";
+
+const client = new CloudClient();
+
+const [col1, col2] = await client.getCollections(["col1", "col2"]);
 ```
 
 The `listCollections` function returns all the collections you have in your Chroma database. The collections will be ordered by creation time from oldest to newest.
 
 ```typescript
+import { CloudClient } from "chromadb";
+
+const client = new CloudClient();
+
 const collections = await client.listCollections();
 ```
 
 By default, `listCollections` returns up to 100 collections. If you have more than 100 collections, or need to get only a subset of your collections, you can use the `limit` and `offset` arguments:
 
 ```typescript
+import { CloudClient } from "chromadb";
+
+const client = new CloudClient();
+
 const firstCollectionsBatch = await client.listCollections({ limit: 100 }); // get the first 100 collections
 const secondCollectionsBatch = await client.listCollections({
   limit: 100,
@@ -295,12 +407,24 @@ const collectionsSubset = await client.listCollections({
 Current versions of Chroma store the embedding function you used to create a collection on the server, so the client can resolve it for you on subsequent "get" operations. If you are running an older version of the Chroma JS/TS client (earlier than 3.04) or server (earlier than 1.1.13), you will need to provide the same embedding function you used to create a collection when using `getCollection` and `getCollections`:
 
 ```typescript
+import { CloudClient } from "chromadb";
+import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
+import { DefaultEmbeddingFunction } from "@chroma-core/default-embed";
+
+const client = new CloudClient();
+
+const openaiEF = new OpenAIEmbeddingFunction({
+  apiKey: process.env.OPENAI_API_KEY,
+  modelName: "text-embedding-3-small",
+});
+const defaultEF = new DefaultEmbeddingFunction();
+
 const collection = await client.getCollection({
   name: "my-collection",
-  embeddingFunction: ef,
+  embeddingFunction: openaiEF,
 });
 
-const [col1, col2] = client.getCollections([
+const [col1, col2] = await client.getCollections([
   { name: "col1", embeddingFunction: openaiEF },
   { name: "col2", embeddingFunction: defaultEF },
 ]);
@@ -312,13 +436,23 @@ const [col1, col2] = client.getCollections([
 Use the client to get collections or list them with pagination.
 
 ```rust
-let collection = client.get_collection("my-collection").await?;
+use chroma::ChromaHttpClient;
 
-let collection = client
-    .get_or_create_collection("my-collection", None, None)
-    .await?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Set CHROMA_API_KEY, CHROMA_TENANT, and CHROMA_DATABASE in your environment
+    let client = ChromaHttpClient::cloud()?;
 
-let collections = client.list_collections(100, Some(0)).await?;
+    let collection = client.get_collection("my-collection").await?;
+
+    let collection = client
+        .get_or_create_collection("my-collection", None, None)
+        .await?;
+
+    let collections = client.list_collections(100, Some(0)).await?;
+
+    Ok(())
+}
 ```
 
 </Tab>
@@ -330,6 +464,11 @@ After a collection is created, you can modify its name, metadata and elements of
 
 <CodeGroup>
 ```python Python
+import chromadb
+
+client = chromadb.CloudClient()
+collection = client.get_collection(name="my-collection")
+
 collection.modify(
    name="new-name",
    metadata={"description": "new description"}
@@ -337,6 +476,11 @@ collection.modify(
 ```
 
 ```typescript TypeScript
+import { CloudClient } from "chromadb";
+
+const client = new CloudClient();
+const collection = await client.getCollection({ name: "my-collection" });
+
 await collection.modify({
   name: "new-name",
   metadata: { description: "new description" },
@@ -354,10 +498,18 @@ Deleting collections is destructive and not reversible
 
 <CodeGroup>
 ```python Python
+import chromadb
+
+client = chromadb.CloudClient()
+
 client.delete_collection(name="my-collection")
 ```
 
 ```typescript TypeScript
+import { CloudClient } from "chromadb";
+
+const client = new CloudClient();
+
 await client.deleteCollection({ name: "my-collection" });
 ```
 </CodeGroup>
@@ -371,11 +523,21 @@ Collections also offer a few useful convenience methods:
 
 <CodeGroup>
 ```python Python
+import chromadb
+
+client = chromadb.CloudClient()
+collection = client.get_collection(name="my-collection")
+
 collection.count()
 collection.peek()
 ```
 
 ```typescript TypeScript
+import { CloudClient } from "chromadb";
+
+const client = new CloudClient();
+const collection = await client.getCollection({ name: "my-collection" });
+
 await collection.count();
 await collection.peek();
 ```

@@ -1,0 +1,56 @@
+---
+title: "Installing the CLI"
+description: "Install the Chroma CLI to run a local server, browse collections, and interact with Chroma Cloud."
+---
+
+The Chroma CLI lets you run a Chroma server locally on your machine, install sample apps, browse your collections, interact with your Chroma Cloud DBs, and much more!
+
+When you install our Python or JavaScript package globally, you will automatically get the Chroma CLI.
+
+If you don't use one of our packages, you can still install the CLI as a standalone program with `cURL` (or `iex` on Windows).
+
+## Python
+
+You can install Chroma using `pip`:
+
+```bash
+pip install chromadb
+```
+
+If your machine does not allow for global `pip` installs, you can get the Chroma CLI with `pipx`:
+
+```bash
+pipx install chromadb
+```
+
+## JavaScript
+
+<CodeGroup>
+```bash npm
+npm install -g chromadb
+```
+
+```bash pnpm
+pnpm add -g chromadb
+```
+
+```bash bun
+bun add -g chromadb
+```
+
+```bash yarn
+yarn global add chromadb
+```
+</CodeGroup>
+
+## Install Globally
+
+<CodeGroup>
+```bash cURL
+curl -sSL https://raw.githubusercontent.com/chroma-core/chroma/main/rust/cli/install/install.sh | bash
+```
+
+```bash Windows
+iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/chroma-core/chroma/main/rust/cli/install/install.ps1'))
+```
+</CodeGroup>

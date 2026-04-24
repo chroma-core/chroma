@@ -49,6 +49,13 @@ For example, here we create a collection with customized values for `space` and 
 
 <CodeGroup>
 ```python Python
+import chromadb
+from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
+
+# Run an in-memory Chroma server. Use PersistentClient(path="...") for local
+# persistence, or HttpClient(host=..., port=...) to connect to a running server.
+client = chromadb.Client()
+
 collection = client.create_collection(
     name="my-collection",
     embedding_function=OpenAIEmbeddingFunction(model_name="text-embedding-3-small"),
@@ -62,7 +69,14 @@ collection = client.create_collection(
 ```
 
 ```typescript TypeScript
-collection = await client.createCollection({
+import { ChromaClient } from "chromadb";
+import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
+
+// Assumes a Chroma server is running at http://localhost:8000
+// Start one with: npx chroma run --path ./chroma-data
+const client = new ChromaClient();
+
+const collection = await client.createCollection({
   name: "my-collection",
   embeddingFunction: new OpenAIEmbeddingFunction({
     modelName: "text-embedding-3-small",
@@ -182,7 +196,10 @@ Creating collections with embedding function and custom configuration:
 
 ```python
 import os
+import chromadb
 from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction, CohereEmbeddingFunction
+
+client = chromadb.Client()
 
 # Using the `embedding_function` argument
 openai_collection = client.create_collection(
@@ -211,6 +228,8 @@ cohere_collection = client.get_or_create_collection(
 If your API key is stored in an environment variable with a non-standard name, you can configure your embedding function to use your custom environment variable by setting the `api_key_env_var` argument. In order for the embedding function to operate correctly, you will have to set this variable in every environment where you use your collection.
 
 ```python
+from chromadb.utils.embedding_functions import CohereEmbeddingFunction
+
 cohere_ef = CohereEmbeddingFunction(
     api_key_env_var="MY_CUSTOM_COHERE_API_KEY",
     model_name="embed-english-light-v2.0",
@@ -245,14 +264,17 @@ yarn add @chroma-core/openai @chroma-core/cohere
 Creating collections with embedding function and custom configuration:
 
 ```typescript
+import { ChromaClient } from "chromadb";
 import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
 import { CohereEmbeddingFunction } from "@chroma-core/cohere";
+
+const client = new ChromaClient();
 
 // Using the `embedding_function` argument
 const openAICollection = await client.createCollection({
   name: "my_openai_collection",
-  embedding_function: new OpenAIEmbeddingFunction({
-    model_name: "text-embedding-3-small",
+  embeddingFunction: new OpenAIEmbeddingFunction({
+    modelName: "text-embedding-3-small",
   }),
   configuration: { hnsw: { space: "cosine" } },
 });
@@ -275,7 +297,9 @@ const cohereCollection = await client.getOrCreateCollection({
 If your API key is stored in an environment variable with a non-standard name, you can configure your embedding function to use your custom environment variable by setting the `apiKeyEnvVar` argument. In order for the embedding function to operate correctly, you will have to set this variable in every environment where you use your collection.
 
 ```typescript
-cohere_ef = CohereEmbeddingFunction({
+import { CohereEmbeddingFunction } from "@chroma-core/cohere";
+
+const cohereEf = new CohereEmbeddingFunction({
   apiKeyEnvVar: "MY_CUSTOM_COHERE_API_KEY",
   modelName: "embed-english-light-v2.0",
   truncate: "NONE",
