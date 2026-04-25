@@ -78,3 +78,80 @@ impl Operator<FetchLineageFileInput, FetchLineageFileOutput> for FetchLineageFil
         Ok(FetchLineageFileOutput(lineage))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chroma_storage::{test_storage, PutOptions};
+    use chroma_system::Operator;
+    use chroma_types::chroma_proto::CollectionVersionDependency;
+
+    #[tokio::test]
+    async fn test_fetch_lineage_file_success() {
+        let (_storage_dir, storage) = test_storage();
+        let lineage_file = CollectionLineageFile {
+            dependencies: vec![CollectionVersionDependency {
+                source_collection_id: "source".to_string(),
+                source_collection_version: 7,
+                target_collection_id: "target".to_string(),
+            }],
+        };
+        let lineage_file_path = "lineage/test.bin".to_string();
+
+        storage
+            .put_bytes(
+                &lineage_file_path,
+                lineage_file.encode_to_vec(),
+                PutOptions::default(),
+            )
+            .await
+            .expect("lineage file should be written");
+
+        let output = FetchLineageFileOperator::new()
+            .run(&FetchLineageFileInput::new(
+                storage,
+                lineage_file_path.to_string(),
+            ))
+            .await
+            .expect("lineage file should be fetched");
+
+        assert_eq!(output.0, lineage_file);
+    }
+
+    #[tokio::test]
+    async fn test_fetch_lineage_file_missing_object() {
+        let (_storage_dir, storage) = test_storage();
+
+        let err = FetchLineageFileOperator::new()
+            .run(&FetchLineageFileInput::new(
+                storage,
+                "lineage/missing.bin".to_string(),
+            ))
+            .await
+            .expect_err("missing lineage file should fail");
+
+        assert!(matches!(err, FetchLineageFileError::Storage(_)));
+    }
+
+    #[tokio::test]
+    async fn test_fetch_lineage_file_decode_error() {
+        let (_storage_dir, storage) = test_storage();
+        let lineage_file_path = "lineage/invalid.bin".to_string();
+
+        storage
+            .put_bytes(
+                &lineage_file_path,
+                b"not a protobuf".to_vec(),
+                PutOptions::default(),
+            )
+            .await
+            .expect("invalid lineage file should be written");
+
+        let err = FetchLineageFileOperator::new()
+            .run(&FetchLineageFileInput::new(storage, lineage_file_path))
+            .await
+            .expect_err("invalid lineage file should fail to decode");
+
+        assert!(matches!(err, FetchLineageFileError::Decode(_)));
+    }
+}
