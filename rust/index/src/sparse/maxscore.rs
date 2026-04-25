@@ -571,38 +571,6 @@ impl<'me> MaxScoreReader<'me> {
 
         terms.sort_by(|a, b| a.max_score.total_cmp(&b.max_score));
 
-        // ── Batch 2: load all blocks for essential terms ───────────
-        // At threshold=MIN all terms are essential. Load their posting
-        // blocks so the first windows can run without blocking.
-        let essential_idx = 0usize;
-        {
-            let mut keys_to_load: Vec<(String, u32)> = Vec::new();
-            for t in terms[essential_idx..].iter() {
-                if t.cursor.is_lazy() {
-                    for bk in 0..t.cursor.block_count() as u32 {
-                        keys_to_load.push((t.encoded_dim.clone(), bk));
-                    }
-                }
-            }
-            if !keys_to_load.is_empty() {
-                self.posting_reader.load_data_for_keys(keys_to_load).await;
-                for t in terms[essential_idx..].iter_mut() {
-                    if t.cursor.is_lazy() {
-                        let dim = t.encoded_dim.clone();
-                        t.cursor.populate_all_from_cache(&self.posting_reader, &dim);
-                    }
-                }
-            }
-        }
-
-        for t in terms.iter_mut() {
-            if t.cursor.is_lazy() {
-                t.cursor.advance(0, &mask);
-            }
-        }
-
-        let mut non_essential_loaded = false;
-
         // ── Window loop ────────────────────────────────────────────
         let k_usize = k as usize;
         let mut heap = TopKHeap::new(k_usize);
@@ -622,6 +590,9 @@ impl<'me> MaxScoreReader<'me> {
             .unwrap_or(0);
 
         let mut window_start = 0u32;
+        let mut keys_to_load: Vec<(String, u32)> = Vec::new();
+        let mut keys_per_term: Vec<Vec<usize>> = (0..terms.len()).map(|_| Vec::new()).collect();
+        let mut overlapping: Vec<usize> = Vec::new();
 
         while window_start <= max_doc_id {
             let window_end = (window_start + WINDOW_WIDTH - 1).min(max_doc_id);
@@ -640,6 +611,53 @@ impl<'me> MaxScoreReader<'me> {
                     if prefix >= threshold {
                         essential_idx = i;
                         break;
+                    }
+                }
+            }
+
+            // ── Pre-Phase-1: load blocks overlapping this window ───
+            // Each posting block (~131K offsets) typically spans many
+            // windows, so most iterations find zero new blocks to load.
+            // Essential terms load unconditionally; non-essential terms
+            // are gated by a partial-score-aware bound.
+            {
+                let essential_budget: f32 =
+                    terms[essential_idx..].iter().map(|t| t.window_score).sum();
+                let block_load_floor = threshold - essential_budget;
+
+                keys_to_load.clear();
+                for v in keys_per_term.iter_mut() {
+                    v.clear();
+                }
+
+                for (ti, t) in terms.iter().enumerate() {
+                    overlapping.clear();
+                    t.cursor
+                        .collect_overlapping_blocks(window_start, window_end, &mut overlapping);
+                    let is_essential = ti >= essential_idx;
+                    for &bi in &overlapping {
+                        if !is_essential
+                            && t.query_weight * t.cursor.dir_max_weights[bi] <= block_load_floor
+                        {
+                            continue;
+                        }
+                        keys_to_load.push((t.encoded_dim.clone(), bi as u32));
+                        keys_per_term[ti].push(bi);
+                    }
+                }
+
+                if !keys_to_load.is_empty() {
+                    self.posting_reader
+                        .load_data_for_keys(keys_to_load.drain(..))
+                        .await;
+                    for (ti, indices) in keys_per_term.iter().enumerate() {
+                        if indices.is_empty() {
+                            continue;
+                        }
+                        let dim = terms[ti].encoded_dim.clone();
+                        terms[ti]
+                            .cursor
+                            .populate_from_cache(&self.posting_reader, &dim, indices);
                     }
                 }
             }
@@ -668,40 +686,14 @@ impl<'me> MaxScoreReader<'me> {
                 }
             }
 
+            // No essential term touched any doc in this window. Skip
+            // Phase 2, heap update, and accumulator reset.
             if cand_docs.is_empty() {
                 window_start = window_end.wrapping_add(1);
                 if window_start == 0 {
                     break;
                 }
                 continue;
-            }
-
-            // ── Batch 3: lazy-load non-essential blocks (once) ────
-            if !non_essential_loaded && essential_idx > 0 {
-                non_essential_loaded = true;
-                let mut ne_keys: Vec<(String, u32)> = Vec::new();
-                for t in terms.iter() {
-                    if !t.cursor.is_lazy() {
-                        continue;
-                    }
-                    for bi in 0..t.cursor.block_count() {
-                        if t.cursor.is_block_loaded(bi) {
-                            continue;
-                        }
-                        if t.query_weight * t.cursor.dir_max_weights[bi] > threshold {
-                            ne_keys.push((t.encoded_dim.clone(), bi as u32));
-                        }
-                    }
-                }
-                if !ne_keys.is_empty() {
-                    self.posting_reader.load_data_for_keys(ne_keys).await;
-                    for t in terms.iter_mut() {
-                        if t.cursor.is_lazy() {
-                            let dim = t.encoded_dim.clone();
-                            t.cursor.populate_all_from_cache(&self.posting_reader, &dim);
-                        }
-                    }
-                }
             }
 
             if essential_idx > 0 {
@@ -713,6 +705,8 @@ impl<'me> MaxScoreReader<'me> {
                         let cutoff = threshold - remaining_budget;
                         filter_competitive(&mut cand_docs, &mut cand_scores, cutoff);
                     }
+                    // All candidates pruned by budget filter; no point
+                    // scoring further non-essential terms.
                     if cand_docs.is_empty() {
                         break;
                     }

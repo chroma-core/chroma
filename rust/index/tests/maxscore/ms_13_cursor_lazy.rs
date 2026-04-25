@@ -35,7 +35,8 @@ async fn lazy_cursor_advance_matches_eager() {
 
     let mut lazy_cursor =
         PostingCursor::open_lazy(dir_max_offsets.clone(), dir_max_weights.clone());
-    lazy_cursor.populate_all_from_cache(reader.posting_reader(), &encoded_dim);
+    let all_indices: Vec<usize> = (0..dir_max_offsets.len()).collect();
+    lazy_cursor.populate_from_cache(reader.posting_reader(), &encoded_dim, &all_indices);
 
     let blocks = reader.get_posting_blocks(&encoded_dim).await.unwrap();
     let mut eager_cursor = PostingCursor::from_blocks(blocks);
@@ -83,8 +84,9 @@ async fn lazy_cursor_get_value() {
         .load_blocks_for_prefixes([encoded_dim.as_str()])
         .await;
 
-    let mut cursor = PostingCursor::open_lazy(offsets, weights);
-    cursor.populate_all_from_cache(reader.posting_reader(), &encoded_dim);
+    let mut cursor = PostingCursor::open_lazy(offsets.clone(), weights);
+    let all_indices: Vec<usize> = (0..offsets.len()).collect();
+    cursor.populate_from_cache(reader.posting_reader(), &encoded_dim, &all_indices);
 
     common::assert_approx(cursor.get_value(0).unwrap(), 0.1, 1e-3);
     common::assert_approx(cursor.get_value(5).unwrap(), 0.2, 1e-3);
@@ -117,8 +119,9 @@ async fn lazy_cursor_drain_essential() {
         .load_blocks_for_prefixes([encoded_dim.as_str()])
         .await;
 
-    let mut cursor = PostingCursor::open_lazy(offsets, weights);
-    cursor.populate_all_from_cache(reader.posting_reader(), &encoded_dim);
+    let mut cursor = PostingCursor::open_lazy(offsets.clone(), weights);
+    let all_indices: Vec<usize> = (0..offsets.len()).collect();
+    cursor.populate_from_cache(reader.posting_reader(), &encoded_dim, &all_indices);
 
     let mask = all_mask();
     let mut accum = vec![0.0f32; 4096];

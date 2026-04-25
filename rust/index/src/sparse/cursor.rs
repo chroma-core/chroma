@@ -9,7 +9,7 @@ enum CursorSource<'view> {
     /// Decompressed on-the-fly into reusable buffers.
     View { raw_blocks: Vec<&'view [u8]> },
     /// Similar to View but blocks start as `None` and are populated via
-    /// `populate_from_cache` / `populate_all_from_cache`.
+    /// `populate_from_cache`.
     Lazy {
         raw_blocks: Vec<Option<&'view [u8]>>,
     },
@@ -103,7 +103,7 @@ impl<'view> PostingCursor<'view> {
 
     /// Create a lazy cursor with unloaded data blocks. The directory
     /// metadata must have been pre-loaded. Blocks start as `None` and
-    /// are populated via [`populate_from_cache`] / [`populate_all_from_cache`].
+    /// are populated via [`populate_from_cache`].
     pub fn open_lazy(dir_max_offsets: Vec<u32>, dir_max_weights: Vec<f32>) -> Self {
         debug_assert_eq!(dir_max_offsets.len(), dir_max_weights.len());
         let block_count = dir_max_offsets.len();
@@ -157,27 +157,36 @@ impl<'view> PostingCursor<'view> {
         loaded
     }
 
-    /// Populate all unloaded blocks from the reader's cache. Returns
-    /// the number of blocks successfully loaded.
-    pub fn populate_all_from_cache(
-        &mut self,
-        reader: &'view BlockfileReader<'view, u32, SparsePostingBlock>,
-        encoded_dim: &str,
-    ) -> usize {
-        let CursorSource::Lazy { raw_blocks } = &mut self.source else {
-            return 0;
-        };
-        let mut loaded = 0;
-        for (idx, slot) in raw_blocks.iter_mut().enumerate().take(self.block_count) {
-            if slot.is_some() {
+    /// Append indices of unloaded blocks overlapping [window_start, window_end]
+    /// to `out`. Walks forward from the current scan position; blocks before
+    /// the cursor's current block are not revisited (they were either already
+    /// processed or intentionally skipped).
+    pub fn collect_overlapping_blocks(
+        &self,
+        window_start: u32,
+        window_end: u32,
+        out: &mut Vec<usize>,
+    ) {
+        if !self.is_lazy() {
+            return;
+        }
+        for bi in self.block_idx..self.block_count {
+            if self.is_block_loaded(bi) {
                 continue;
             }
-            if let Some(bytes) = reader.get_raw_from_cache(encoded_dim, idx as u32) {
-                *slot = Some(bytes);
-                loaded += 1;
+            let block_start = if bi == 0 {
+                0
+            } else {
+                self.dir_max_offsets[bi - 1] + 1
+            };
+            if block_start > window_end {
+                break;
             }
+            if self.dir_max_offsets[bi] < window_start {
+                continue;
+            }
+            out.push(bi);
         }
-        loaded
     }
 
     // ── Internal: buffer management ──────────────────────────────────
