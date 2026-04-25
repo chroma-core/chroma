@@ -601,6 +601,7 @@ impl<'me> MaxScoreReader<'me> {
 
         const WINDOW_WIDTH: u32 = 4096;
         const BITMAP_WORDS: usize = (WINDOW_WIDTH as usize).div_ceil(64);
+        const LOAD_WIDTH: u32 = WINDOW_WIDTH * 256;
         let mut accum = vec![0.0f32; WINDOW_WIDTH as usize];
         let mut bitmap = [0u64; BITMAP_WORDS];
         let mut cand_docs: Vec<u32> = Vec::with_capacity(WINDOW_WIDTH as usize);
@@ -613,6 +614,7 @@ impl<'me> MaxScoreReader<'me> {
             .unwrap_or(0);
 
         let mut window_start = 0u32;
+        let mut load_end = 0u32;
         let mut keys_to_load: Vec<(String, u32)> = Vec::new();
         let mut keys_per_term: Vec<Vec<usize>> = (0..terms.len()).map(|_| Vec::new()).collect();
         let mut overlapping: Vec<usize> = Vec::new();
@@ -638,15 +640,12 @@ impl<'me> MaxScoreReader<'me> {
                 }
             }
 
-            // ── Pre-Phase-1: load blocks overlapping this window ───
-            // Each posting block (~131K offsets) typically spans many
-            // windows, so most iterations find zero new blocks to load.
-            // Essential terms load unconditionally; non-essential terms
-            // are gated by a partial-score-aware bound.
-            {
-                let essential_budget: f32 =
-                    terms[essential_idx..].iter().map(|t| t.window_score).sum();
-                let block_load_floor = threshold - essential_budget;
+            // ── Chunked prefetch: load all blocks for the next
+            // LOAD_WIDTH-offset chunk. Fires roughly once per ~256
+            // windows; most iterations skip this entirely. ────────
+            if load_end < window_end {
+                let load_start = load_end + 1;
+                load_end += LOAD_WIDTH;
 
                 keys_to_load.clear();
                 for v in keys_per_term.iter_mut() {
@@ -656,14 +655,8 @@ impl<'me> MaxScoreReader<'me> {
                 for (ti, t) in terms.iter().enumerate() {
                     overlapping.clear();
                     t.cursor
-                        .collect_overlapping_blocks(window_start, window_end, &mut overlapping);
-                    let is_essential = ti >= essential_idx;
+                        .collect_overlapping_blocks(load_start, load_end, &mut overlapping);
                     for &bi in &overlapping {
-                        if !is_essential
-                            && t.query_weight * t.cursor.dir_max_weights[bi] <= block_load_floor
-                        {
-                            continue;
-                        }
                         keys_to_load.push((t.encoded_dim.clone(), bi as u32));
                         keys_per_term[ti].push(bi);
                     }
