@@ -564,6 +564,30 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         self.load_blocks(&target_block_ids).await;
     }
 
+    /// Synchronous raw-byte lookup in already-loaded blocks only.
+    /// Returns `None` if the block is not cached, the key is absent,
+    /// or the value type does not support `get_raw_bytes`.
+    pub(crate) fn get_raw_from_cache(&self, prefix: &str, key: K) -> Option<&[u8]> {
+        let search_key = CompositeKey::new(prefix.to_string(), key.clone());
+        let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
+        let guard = self.loaded_blocks.read();
+        let block: &Block = guard.get(&target_block_id)?;
+        // Safety: the Block is heap-allocated (Box<Block>) and is never
+        // removed from loaded_blocks. The returned &[u8] points into
+        // Arrow buffers owned by the Block. Same lifetime-extension
+        // argument used in get_block's transmute.
+        let block: &'me Block = unsafe { transmute::<&Block, &Block>(block) };
+        block.get_raw::<K, V>(prefix, key)
+    }
+
+    /// Number of Arrow blocks whose key range overlaps this prefix.
+    pub(crate) fn count_blocks_for_prefix(&self, prefix: &str) -> usize {
+        self.root
+            .sparse_index
+            .get_block_ids_range(prefix..=prefix)
+            .len()
+    }
+
     pub(crate) async fn get(
         &'me self,
         prefix: &str,

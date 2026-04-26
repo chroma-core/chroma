@@ -1,7 +1,4 @@
-use std::{
-    cmp::Ordering,
-    collections::{BinaryHeap, HashMap},
-};
+use std::collections::HashMap;
 
 use chroma_blockstore::BlockfileReader;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -9,7 +6,7 @@ use chroma_types::SignedRoaringBitmap;
 use futures::future::join;
 use thiserror::Error;
 
-use crate::sparse::types::{encode_u32, DIMENSION_PREFIX};
+use crate::sparse::types::{encode_u32, Score, TopKHeap, DIMENSION_PREFIX};
 
 #[derive(Debug, Error)]
 pub enum SparseReaderError {
@@ -39,30 +36,6 @@ struct CursorBody<B, D> {
     dimension_upper_bound: f32,
     query: f32,
     value: f32,
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Score {
-    pub score: f32,
-    pub offset: u32,
-}
-
-impl Eq for Score {}
-
-// Reverse order by score for a min heap
-impl Ord for Score {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.score
-            .total_cmp(&other.score)
-            .then(self.offset.cmp(&other.offset))
-            .reverse()
-    }
-}
-
-impl PartialOrd for Score {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
 }
 
 #[derive(Clone)]
@@ -206,8 +179,8 @@ impl<'me> SparseReader<'me> {
         let Some(mut first_unchecked_offset) = heads.first().map(|head| head.offset) else {
             return Ok(Vec::new());
         };
-        let mut threshold = f32::MIN;
-        let mut top_scores = BinaryHeap::with_capacity(k as usize);
+        let mut top_scores = TopKHeap::new(k as usize);
+        let mut threshold = top_scores.threshold();
 
         loop {
             let mut accumulated_dimension_upper_bound = 0.0;
@@ -258,21 +231,7 @@ impl<'me> SparseReader<'me> {
                         body.query * body.value
                     })
                     .sum();
-                if (top_scores.len() as u32) < k {
-                    top_scores.push(Score { score, offset });
-                } else if top_scores
-                    .peek()
-                    .map(|score| score.score)
-                    .unwrap_or(f32::MIN)
-                    < score
-                {
-                    top_scores.pop();
-                    top_scores.push(Score { score, offset });
-                    threshold = top_scores
-                        .peek()
-                        .map(|score| score.score)
-                        .unwrap_or_default();
-                }
+                threshold = top_scores.push(score, offset);
                 first_unchecked_offset = pivot_offset + 1;
                 first_unchecked_offset
             } else {

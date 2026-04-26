@@ -1652,6 +1652,7 @@ mod tests {
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -1832,6 +1833,7 @@ mod tests {
             &metadata_segment_shard,
             &blockfile_provider,
             None,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1989,6 +1991,7 @@ mod tests {
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
+                None,
                 None,
             )
             .await
@@ -2161,6 +2164,7 @@ mod tests {
             &metadata_segment_shard,
             &blockfile_provider,
             None,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -2319,6 +2323,7 @@ mod tests {
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
+                None,
                 None,
             )
             .await
@@ -2510,6 +2515,7 @@ mod tests {
             &database_id,
             &metadata_segment_shard,
             &blockfile_provider,
+            None,
             None,
         )
         .await

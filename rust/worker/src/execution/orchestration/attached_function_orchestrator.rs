@@ -705,6 +705,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
                     &message.metadata_segment,
                     &self.output_context.blockfile_provider,
                     cmek.clone(),
+                    collection.schema.as_ref(),
                 )
                 .await,
                 ctx,

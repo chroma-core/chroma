@@ -679,6 +679,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                     &metadata_segment,
                     &self.context.blockfile_provider,
                     cmek.clone(),
+                    collection.schema.as_ref(),
                 )
                 .await,
                 ctx,

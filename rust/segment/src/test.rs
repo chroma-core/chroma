@@ -120,6 +120,7 @@ impl TestDistributedSegment {
             &metadata_segment_shard,
             &self.blockfile_provider,
             None,
+            None,
         )
         .await
         .expect("Should be able to initialize metadata writer.");

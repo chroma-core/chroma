@@ -23,6 +23,7 @@ pub const U32_METADATA: &str = "u32_metadata";
 
 pub const SPARSE_MAX: &str = "sparse_max";
 pub const SPARSE_OFFSET_VALUE: &str = "sparse_offset_value";
+pub const SPARSE_POSTING: &str = "sparse_posting";
 
 pub const HNSW_PATH: &str = "hnsw_path";
 pub const VERSION_MAP_PATH: &str = "version_map_path";

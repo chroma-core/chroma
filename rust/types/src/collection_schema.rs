@@ -423,6 +423,37 @@ impl Schema {
         defaults_enabled || key_enabled
     }
 
+    /// Check if any sparse index is configured to use MaxScore.
+    pub fn is_maxscore_enabled(&self) -> bool {
+        let check = |sv: &SparseVectorValueType| -> bool {
+            sv.sparse_vector_index.as_ref().is_some_and(|idx| {
+                idx.enabled && matches!(idx.config.algorithm, SparseIndexAlgorithm::MaxScore)
+            })
+        };
+        self.defaults.sparse_vector.as_ref().is_some_and(check)
+            || self
+                .keys
+                .values()
+                .any(|vt| vt.sparse_vector.as_ref().is_some_and(check))
+    }
+
+    /// Set the sparse index algorithm on all sparse index configs
+    /// (defaults and every key-specific config).
+    pub fn set_sparse_algorithm(&mut self, algorithm: SparseIndexAlgorithm) {
+        if let Some(sv) = &mut self.defaults.sparse_vector {
+            if let Some(idx) = &mut sv.sparse_vector_index {
+                idx.config.algorithm = algorithm.clone();
+            }
+        }
+        for vt in self.keys.values_mut() {
+            if let Some(sv) = &mut vt.sparse_vector {
+                if let Some(idx) = &mut sv.sparse_vector_index {
+                    idx.config.algorithm = algorithm.clone();
+                }
+            }
+        }
+    }
+
     pub fn is_fts_enabled(&self) -> bool {
         // Check key-specific override first, then fall back to global defaults
         self.keys
@@ -488,6 +519,7 @@ impl Default for Schema {
                         embedding_function: None,
                         source_key: None,
                         bm25: None,
+                        algorithm: SparseIndexAlgorithm::Wand,
                     },
                 }),
             }),
@@ -861,6 +893,7 @@ impl Schema {
                         embedding_function: Some(EmbeddingFunctionConfiguration::Unknown),
                         source_key: None,
                         bm25: Some(false),
+                        algorithm: SparseIndexAlgorithm::Wand,
                     },
                 }),
             }),
@@ -1668,6 +1701,11 @@ impl Schema {
                 .or(default.embedding_function.clone()),
             source_key: user.source_key.clone().or(default.source_key.clone()),
             bm25: user.bm25.or(default.bm25),
+            algorithm: if !is_default_sparse_algorithm(&user.algorithm) {
+                user.algorithm.clone()
+            } else {
+                default.algorithm.clone()
+            },
         }
     }
 
@@ -2992,6 +3030,23 @@ impl SpannIndexConfig {
     }
 }
 
+/// Sparse vector index algorithm.
+///
+/// Controls which posting list format and query engine are used for
+/// sparse vector search within a collection.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum SparseIndexAlgorithm {
+    #[default]
+    Wand,
+    MaxScore,
+}
+
+fn is_default_sparse_algorithm(v: &SparseIndexAlgorithm) -> bool {
+    v == &SparseIndexAlgorithm::default()
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
@@ -3005,6 +3060,12 @@ pub struct SparseVectorIndexConfig {
     /// Whether this embedding is BM25
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bm25: Option<bool>,
+    /// Sparse index algorithm (cloud-only, tenant-gated).
+    /// Omitted from JSON when set to the default (Wand) so that old
+    /// servers/clients that do not know about this field can still
+    /// deserialize the schema.
+    #[serde(default, skip_serializing_if = "is_default_sparse_algorithm")]
+    pub algorithm: SparseIndexAlgorithm,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -3616,6 +3677,7 @@ mod tests {
                             embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
                             source_key: None,
                             bm25: None,
+                            algorithm: SparseIndexAlgorithm::Wand,
                         },
                     }),
                 }),
@@ -4004,12 +4066,14 @@ mod tests {
             embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
             source_key: Some("default_sparse_key".to_string()),
             bm25: None,
+            algorithm: SparseIndexAlgorithm::Wand,
         };
 
         let user_config = SparseVectorIndexConfig {
             embedding_function: None,                        // Will use default
             source_key: Some("user_sparse_key".to_string()), // Override
             bm25: None,
+            algorithm: SparseIndexAlgorithm::Wand,
         };
 
         let result = Schema::merge_sparse_vector_index_config(&default_config, &user_config);
@@ -4021,6 +4085,86 @@ mod tests {
             result.embedding_function,
             Some(EmbeddingFunctionConfiguration::Legacy)
         );
+    }
+
+    #[test]
+    fn test_sparse_algorithm_serde_roundtrip() {
+        // Old schema JSON without algorithm field -> defaults to Wand
+        let json_no_algorithm = r#"{
+            "embedding_function": null,
+            "source_key": null,
+            "bm25": null
+        }"#;
+        let config: SparseVectorIndexConfig = serde_json::from_str(json_no_algorithm).unwrap();
+        assert_eq!(config.algorithm, SparseIndexAlgorithm::Wand);
+
+        // Serialize with Wand -> algorithm field absent from JSON
+        let serialized = serde_json::to_string(&config).unwrap();
+        assert!(
+            !serialized.contains("algorithm"),
+            "Wand (default) must not appear in JSON: {serialized}"
+        );
+
+        // Deserialize with "algorithm": "max_score" -> MaxScore
+        let json_maxscore = r#"{
+            "embedding_function": null,
+            "source_key": null,
+            "bm25": null,
+            "algorithm": "max_score"
+        }"#;
+        let config: SparseVectorIndexConfig = serde_json::from_str(json_maxscore).unwrap();
+        assert_eq!(config.algorithm, SparseIndexAlgorithm::MaxScore);
+
+        // Serialize with MaxScore -> algorithm field present in JSON
+        let serialized = serde_json::to_string(&config).unwrap();
+        assert!(
+            serialized.contains(r#""algorithm":"max_score""#),
+            "MaxScore must appear in JSON: {serialized}"
+        );
+    }
+
+    #[test]
+    fn test_is_maxscore_enabled() {
+        // Default schema -> Wand -> false
+        let schema = Schema::default();
+        assert!(!schema.is_maxscore_enabled());
+
+        // Schema with sparse enabled but Wand algorithm -> false
+        let mut schema = Schema::new_default(KnnIndex::Hnsw);
+        schema
+            .keys
+            .entry("sparse_key".to_string())
+            .or_default()
+            .sparse_vector = Some(SparseVectorValueType {
+            sparse_vector_index: Some(SparseVectorIndexType {
+                enabled: true,
+                config: SparseVectorIndexConfig {
+                    embedding_function: None,
+                    source_key: None,
+                    bm25: None,
+                    algorithm: SparseIndexAlgorithm::Wand,
+                },
+            }),
+        });
+        assert!(!schema.is_maxscore_enabled());
+
+        // Set algorithm to MaxScore -> true
+        schema.set_sparse_algorithm(SparseIndexAlgorithm::MaxScore);
+        assert!(schema.is_maxscore_enabled());
+
+        // Disabled index with MaxScore -> false
+        schema
+            .keys
+            .get_mut("sparse_key")
+            .unwrap()
+            .sparse_vector
+            .as_mut()
+            .unwrap()
+            .sparse_vector_index
+            .as_mut()
+            .unwrap()
+            .enabled = false;
+        assert!(!schema.is_maxscore_enabled());
     }
 
     #[test]
@@ -5869,6 +6013,7 @@ mod tests {
                 embedding_function: None,
                 source_key: None,
                 bm25: None,
+                algorithm: SparseIndexAlgorithm::Wand,
             }),
         );
         assert!(result.is_err());
@@ -5885,6 +6030,7 @@ mod tests {
                     embedding_function: None,
                     source_key: None,
                     bm25: None,
+                    algorithm: SparseIndexAlgorithm::Wand,
                 }),
             )
             .expect("first sparse should succeed")
@@ -5894,6 +6040,7 @@ mod tests {
                     embedding_function: None,
                     source_key: None,
                     bm25: None,
+                    algorithm: SparseIndexAlgorithm::Wand,
                 }),
             );
         assert!(result.is_err());
@@ -5962,6 +6109,7 @@ mod tests {
                     embedding_function: None,
                     source_key: None,
                     bm25: None,
+                    algorithm: SparseIndexAlgorithm::Wand,
                 }),
             )
             .expect("create should succeed")
@@ -5971,6 +6119,7 @@ mod tests {
                     embedding_function: None,
                     source_key: None,
                     bm25: None,
+                    algorithm: SparseIndexAlgorithm::Wand,
                 }),
             );
         assert!(result.is_err());
@@ -6796,6 +6945,7 @@ mod tests {
                         embedding_function,
                         source_key,
                         bm25,
+                        algorithm: SparseIndexAlgorithm::Wand,
                     }
                 })
         }
