@@ -201,6 +201,7 @@ impl ChromaCollection {
             read_level: ReadLevel,
         }
         self.send_with_query::<(), CountQueryParams, u32>(
+            true,
             "count",
             "count",
             Method::GET,
@@ -232,6 +233,7 @@ impl ChromaCollection {
     /// ```
     pub async fn get_indexing_status(&self) -> Result<IndexStatusResponse, ChromaHttpClientError> {
         self.send::<(), IndexStatusResponse>(
+            true,
             "indexing_status",
             "indexing_status",
             Method::GET,
@@ -281,6 +283,7 @@ impl ChromaCollection {
     ) -> Result<(), ChromaHttpClientError> {
         // Returns empty map ({})
         self.send::<_, serde_json::Value>(
+            false,
             "modify",
             "",
             Method::PUT,
@@ -351,7 +354,7 @@ impl ChromaCollection {
             include.unwrap_or_else(IncludeList::default_get),
         )?;
         let request = request.into_payload()?;
-        self.send("get", "get", Method::POST, Some(request)).await
+        self.send(true, "get", "get", Method::POST, Some(request)).await
     }
 
     /// Performs vector similarity search against the collection.
@@ -406,7 +409,7 @@ impl ChromaCollection {
             include.unwrap_or_else(IncludeList::default_query),
         )?;
         let request = request.into_payload()?;
-        self.send("query", "query", Method::POST, Some(request))
+        self.send(true, "query", "query", Method::POST, Some(request))
             .await
     }
 
@@ -605,7 +608,7 @@ impl ChromaCollection {
             read_level,
         )?;
         let request = request.into_payload();
-        self.send("search", "search", Method::POST, Some(request))
+        self.send(true, "search", "search", Method::POST, Some(request))
             .await
     }
 
@@ -656,7 +659,7 @@ impl ChromaCollection {
             metadatas,
         )?;
         let request = request.into_payload();
-        self.send("add", "add", Method::POST, Some(request)).await
+        self.send(false, "add", "add", Method::POST, Some(request)).await
     }
 
     /// Modifies existing records in the collection.
@@ -706,7 +709,7 @@ impl ChromaCollection {
             metadatas,
         )?;
         let request = request.into_payload();
-        self.send("update", "update", Method::POST, Some(request))
+        self.send(false, "update", "update", Method::POST, Some(request))
             .await
     }
 
@@ -757,7 +760,7 @@ impl ChromaCollection {
             metadatas,
         )?;
         let request = request.into_payload();
-        self.send("upsert", "upsert", Method::POST, Some(request))
+        self.send(false, "upsert", "upsert", Method::POST, Some(request))
             .await
     }
 
@@ -801,7 +804,7 @@ impl ChromaCollection {
             limit,
         )?;
         let request = request.into_payload()?;
-        self.send("delete", "delete", Method::POST, Some(request))
+        self.send(false, "delete", "delete", Method::POST, Some(request))
             .await
     }
 
@@ -837,7 +840,7 @@ impl ChromaCollection {
             new_name: new_name.into(),
         };
         let collection: Collection = self
-            .send("fork", "fork", Method::POST, Some(request))
+            .send(false, "fork", "fork", Method::POST, Some(request))
             .await?;
         Ok(ChromaCollection {
             client: self.client.clone(),
@@ -866,7 +869,7 @@ impl ChromaCollection {
     /// ```
     pub async fn fork_count(&self) -> Result<usize, ChromaHttpClientError> {
         let response: ForkCountResponse = self
-            .send::<(), _>("fork_count", "fork_count", Method::GET, None)
+            .send::<(), _>(true, "fork_count", "fork_count", Method::GET, None)
             .await?;
         Ok(response.count)
     }
@@ -874,12 +877,20 @@ impl ChromaCollection {
     /// Internal transport method that constructs collection-specific API paths and delegates to the client.
     async fn send<Body: Serialize, Response: DeserializeOwned>(
         &self,
+        read_only: bool,
         operation: &str,
         path: &str,
         method: Method,
         body: Option<Body>,
     ) -> Result<Response, ChromaHttpClientError> {
-        self.send_with_query::<Body, (), Response>(operation, path, method, body, None::<()>)
+        self.send_with_query::<Body, (), Response>(
+            read_only,
+            operation,
+            path,
+            method,
+            body,
+            None::<()>,
+        )
             .await
     }
 
@@ -890,6 +901,7 @@ impl ChromaCollection {
         Response: DeserializeOwned,
     >(
         &self,
+        read_only: bool,
         operation: &str,
         path: &str,
         method: Method,
@@ -903,9 +915,15 @@ impl ChromaCollection {
         );
         let path = path.trim_end_matches("/");
 
-        self.client
-            .send(&operation_name, method, path, body, query_params)
-            .await
+        if read_only {
+            self.client
+                .send_read_only(&operation_name, method, path, body, query_params)
+                .await
+        } else {
+            self.client
+                .send(&operation_name, method, path, body, query_params)
+                .await
+        }
     }
 }
 

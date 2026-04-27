@@ -118,6 +118,11 @@ const DEFAULT_CLOUD_ENDPOINT: &str = "https://api.trychroma.com";
 pub struct ChromaHttpClientOptions {
     /// The base URL of the Chroma server (e.g., `https://api.trychroma.com`).
     pub endpoint: reqwest::Url,
+    /// Additional Chroma endpoints to use for failover after the primary `endpoint`.
+    ///
+    /// When empty, the client talks only to `endpoint`. When populated, the client will
+    /// try `endpoint` first and then each additional endpoint in order for read-only requests.
+    pub endpoints: Vec<reqwest::Url>,
     /// Authentication strategy to use for API requests.
     pub auth_method: ChromaAuthMethod,
     /// Retry configuration for failed requests.
@@ -132,6 +137,7 @@ impl Default for ChromaHttpClientOptions {
     fn default() -> Self {
         ChromaHttpClientOptions {
             endpoint: DEFAULT_LOCAL_ENDPOINT.parse().expect("valid URL"),
+            endpoints: Vec::new(),
             auth_method: ChromaAuthMethod::None,
             retry_options: ChromaRetryOptions::default(),
             tenant_id: None,
@@ -287,10 +293,22 @@ impl ChromaHttpClientOptions {
         Ok(ChromaHttpClientOptions {
             auth_method: ChromaAuthMethod::cloud_api_key(&api_key)?,
             endpoint: DEFAULT_CLOUD_ENDPOINT.parse().expect("valid URL"),
+            endpoints: Vec::new(),
             retry_options: ChromaRetryOptions::default(),
             tenant_id: None,
             database_name: None,
         })
+    }
+
+    pub(crate) fn all_endpoints(&self) -> Vec<reqwest::Url> {
+        let mut endpoints = Vec::with_capacity(1 + self.endpoints.len());
+        endpoints.push(self.endpoint.clone());
+        for endpoint in &self.endpoints {
+            if !endpoints.iter().any(|existing| existing == endpoint) {
+                endpoints.push(endpoint.clone());
+            }
+        }
+        endpoints
     }
 
     /// Constructs HTTP headers from the authentication method.

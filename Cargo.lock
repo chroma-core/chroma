@@ -1553,6 +1553,7 @@ dependencies = [
  "chroma-error",
  "chroma-types",
  "dotenvy",
+ "failsafe",
  "futures-util",
  "httpmock",
  "murmur3",
@@ -3394,6 +3395,18 @@ dependencies = [
  "pulp",
  "qd",
  "reborrow",
+]
+
+[[package]]
+name = "failsafe"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6b1dc7c28e66a8f5dc32b7043b735e93d9eea8ea6e7be5507dae5850ab7ac70"
+dependencies = [
+ "futures-core",
+ "parking_lot",
+ "pin-project",
+ "rand 0.8.5",
 ]
 
 [[package]]

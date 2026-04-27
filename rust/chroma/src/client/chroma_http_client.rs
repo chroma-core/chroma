@@ -6,6 +6,8 @@ use chroma_types::Collection;
 use chroma_types::Metadata;
 use chroma_types::Schema;
 use chroma_types::WhereError;
+use failsafe::futures::CircuitBreaker as _;
+use failsafe::FailurePredicate;
 use parking_lot::Mutex;
 use reqwest::Method;
 use reqwest::StatusCode;
@@ -46,6 +48,9 @@ pub enum ChromaHttpClientError {
     /// Request parameters failed validation checks before transmission.
     #[error("Validation error: {0}")]
     ValidationError(#[from] ChromaValidationError),
+    /// Every configured backend was unavailable because its circuit breaker rejected the call.
+    #[error("No backend is currently available")]
+    NoBackendAvailable,
     // NOTE(rescrv):  The where validation drops the ChromaValidationError.  Bigger refactor.
     // TODO(rescrv):  Address the above note.
     /// Where clause failed validation checks.
@@ -69,6 +74,61 @@ impl From<WhereError> for ChromaHttpClientError {
 #[cfg(feature = "opentelemetry")]
 static METRICS: std::sync::LazyLock<crate::client::metrics::Metrics> =
     std::sync::LazyLock::new(crate::client::metrics::Metrics::new);
+
+// Default failsafe policy: trip a backend when either the weighted success
+// rate drops below 80% across a 30s window with at least 5 requests, or when
+// 5 retryable failures happen consecutively. Once tripped, the backend is
+// rejected for an equal-jittered backoff that starts at 10s and grows up to
+// 300s. In this client, only errors matched by `BackendFailurePredicate`
+// contribute to those failure counters.
+type BackendCircuitBreaker = failsafe::StateMachine<
+    failsafe::failure_policy::OrElse<
+        failsafe::failure_policy::SuccessRateOverTimeWindow<failsafe::backoff::EqualJittered>,
+        failsafe::failure_policy::ConsecutiveFailures<failsafe::backoff::EqualJittered>,
+    >,
+    (),
+>;
+
+#[derive(Debug, Clone)]
+struct Backend {
+    base_url: reqwest::Url,
+    client: reqwest::Client,
+    breaker: Option<Arc<BackendCircuitBreaker>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RequestRouting {
+    ReadOnly,
+    SingleBackend,
+}
+
+#[derive(Debug)]
+enum BackendSendError {
+    Rejected,
+    Request(ChromaHttpClientError),
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BackendFailurePredicate;
+
+impl FailurePredicate<ChromaHttpClientError> for BackendFailurePredicate {
+    fn is_err(&self, err: &ChromaHttpClientError) -> bool {
+        match err {
+            ChromaHttpClientError::RequestError(_) | ChromaHttpClientError::SerdeError(_) => true,
+            ChromaHttpClientError::ApiError(_, status) => {
+                *status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
+            }
+            ChromaHttpClientError::CouldNotResolveDatabaseId(_)
+            | ChromaHttpClientError::ValidationError(_)
+            | ChromaHttpClientError::NoBackendAvailable
+            | ChromaHttpClientError::InvalidWhere => false,
+        }
+    }
+}
+
+fn new_backend_circuit_breaker() -> Arc<BackendCircuitBreaker> {
+    Arc::new(failsafe::Config::new().build())
+}
 
 /// Client handle for interacting with Chroma
 ///
@@ -110,7 +170,7 @@ static METRICS: std::sync::LazyLock<crate::client::metrics::Metrics> =
 #[derive(Debug)]
 pub struct ChromaHttpClient {
     base_url: reqwest::Url,
-    client: reqwest::Client,
+    clients: Vec<Backend>,
     retry_policy: ExponentialBuilder,
     tenant_id: Arc<Mutex<Option<String>>>,
     database_name: Arc<Mutex<Option<String>>>,
@@ -127,7 +187,7 @@ impl Clone for ChromaHttpClient {
     fn clone(&self) -> Self {
         ChromaHttpClient {
             base_url: self.base_url.clone(),
-            client: self.client.clone(),
+            clients: self.clients.clone(),
             retry_policy: self.retry_policy,
             tenant_id: Arc::new(Mutex::new(self.tenant_id.lock().clone())),
             database_name: Arc::new(Mutex::new(self.database_name.lock().clone())),
@@ -184,9 +244,21 @@ impl ChromaHttpClient {
             .build()
             .expect("Failed to initialize TLS backend");
 
+        let endpoints = options.all_endpoints();
+        let use_circuit_breakers = endpoints.len() > 1;
+        let clients = endpoints
+            .iter()
+            .cloned()
+            .map(|base_url| Backend {
+                base_url,
+                client: client.clone(),
+                breaker: use_circuit_breakers.then(new_backend_circuit_breaker),
+            })
+            .collect::<Vec<_>>();
+
         ChromaHttpClient {
             base_url: options.endpoint.clone(),
-            client,
+            clients,
             retry_policy: options.retry_options.into(),
             tenant_id: Arc::new(Mutex::new(options.tenant_id)),
             database_name: Arc::new(Mutex::new(options.database_name)),
@@ -392,7 +464,7 @@ impl ChromaHttpClient {
     pub async fn list_databases(&self) -> Result<Vec<Database>, ChromaHttpClientError> {
         let tenant_id = self.get_tenant_id().await?;
 
-        self.send::<(), (), _>(
+        self.send_read_only::<(), (), _>(
             "list_databases",
             Method::GET,
             format!("/api/v2/tenants/{}/databases", tenant_id),
@@ -448,7 +520,7 @@ impl ChromaHttpClient {
     pub async fn get_auth_identity(
         &self,
     ) -> Result<GetUserIdentityResponse, ChromaHttpClientError> {
-        self.send::<(), (), _>(
+        self.send_read_only::<(), (), _>(
             "get_auth_identity",
             Method::GET,
             "/api/v2/auth/identity".to_string(),
@@ -478,7 +550,7 @@ impl ChromaHttpClient {
     /// # }
     /// ```
     pub async fn heartbeat(&self) -> Result<HeartbeatResponse, ChromaHttpClientError> {
-        self.send::<(), (), _>(
+        self.send_read_only::<(), (), _>(
             "heartbeat",
             Method::GET,
             "/api/v2/heartbeat".to_string(),
@@ -569,7 +641,7 @@ impl ChromaHttpClient {
         let database_name = self.get_database_name().await?;
 
         let collection: chroma_types::Collection = self
-            .send::<(), _, chroma_types::Collection>(
+            .send_read_only::<(), _, chroma_types::Collection>(
                 "get_collection",
                 Method::GET,
                 format!(
@@ -618,7 +690,7 @@ impl ChromaHttpClient {
         let database_name = self.get_database_name().await?;
 
         let collection: chroma_types::Collection = self
-            .send::<(), _, chroma_types::Collection>(
+            .send_read_only::<(), _, chroma_types::Collection>(
                 "get_collection_by_id",
                 Method::GET,
                 format!(
@@ -709,7 +781,7 @@ impl ChromaHttpClient {
         let tenant_id = self.get_tenant_id().await?;
         let database_name = self.get_database_name().await?;
 
-        self.send::<(), (), _>(
+        self.send_read_only::<(), (), _>(
             "count_collections",
             Method::GET,
             format!(
@@ -764,7 +836,7 @@ impl ChromaHttpClient {
         }
 
         let collections = self
-            .send::<(), _, Vec<Collection>>(
+            .send_read_only::<(), _, Vec<Collection>>(
                 "list_collections",
                 Method::GET,
                 format!(
@@ -819,21 +891,6 @@ impl ChromaHttpClient {
         })
     }
 
-    /// Executes an HTTP request with automatic retry logic and OpenTelemetry metrics.
-    ///
-    /// This is the core transport method used by all higher-level operations. It handles:
-    /// - Request serialization and query parameter encoding
-    /// - Exponential backoff retry for GET requests and 429 responses
-    /// - Response deserialization with detailed tracing
-    /// - Metrics recording when the `opentelemetry` feature is enabled
-    ///
-    /// # Retry Behavior
-    ///
-    /// Retries automatically for:
-    /// - Any GET request that fails with a retryable error
-    /// - Any request (GET/POST/DELETE) that receives a 429 (Too Many Requests) response
-    ///
-    /// Non-GET requests with other error statuses fail immediately without retry.
     pub(crate) async fn send<
         Body: Serialize,
         QueryParams: Serialize,
@@ -846,16 +903,143 @@ impl ChromaHttpClient {
         body: Option<Body>,
         query_params: Option<QueryParams>,
     ) -> Result<Response, ChromaHttpClientError> {
-        let url = self.base_url.join(path.as_ref()).expect(
+        self.send_with_routing(
+            RequestRouting::SingleBackend,
+            operation_name,
+            method,
+            path.as_ref(),
+            body.as_ref(),
+            query_params.as_ref(),
+        )
+        .await
+    }
+
+    pub(crate) async fn send_read_only<
+        Body: Serialize,
+        QueryParams: Serialize,
+        Response: DeserializeOwned,
+    >(
+        &self,
+        operation_name: &str,
+        method: Method,
+        path: impl AsRef<str>,
+        body: Option<Body>,
+        query_params: Option<QueryParams>,
+    ) -> Result<Response, ChromaHttpClientError> {
+        self.send_with_routing(
+            RequestRouting::ReadOnly,
+            operation_name,
+            method,
+            path.as_ref(),
+            body.as_ref(),
+            query_params.as_ref(),
+        )
+        .await
+    }
+
+    async fn send_with_routing<
+        Body: Serialize + ?Sized,
+        QueryParams: Serialize + ?Sized,
+        Response: DeserializeOwned,
+    >(
+        &self,
+        routing: RequestRouting,
+        operation_name: &str,
+        method: Method,
+        path: &str,
+        body: Option<&Body>,
+        query_params: Option<&QueryParams>,
+    ) -> Result<Response, ChromaHttpClientError> {
+        let mut last_error = None;
+
+        for backend in &self.clients {
+            match self
+                .send_with_backend(
+                    backend,
+                    operation_name,
+                    &method,
+                    path,
+                    body,
+                    query_params,
+                )
+                .await
+            {
+                Ok(response) => return Ok(response),
+                Err(BackendSendError::Rejected) => continue,
+                Err(BackendSendError::Request(err)) => {
+                    if routing == RequestRouting::SingleBackend {
+                        return Err(err);
+                    }
+                    last_error = Some(err);
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or(ChromaHttpClientError::NoBackendAvailable))
+    }
+
+    async fn send_with_backend<
+        Body: Serialize + ?Sized,
+        QueryParams: Serialize + ?Sized,
+        Response: DeserializeOwned,
+    >(
+        &self,
+        backend: &Backend,
+        operation_name: &str,
+        method: &Method,
+        path: &str,
+        body: Option<&Body>,
+        query_params: Option<&QueryParams>,
+    ) -> Result<Response, BackendSendError> {
+        if let Some(breaker) = backend.breaker.as_ref() {
+            match breaker
+                .call_with(
+                    BackendFailurePredicate,
+                    self.send_on_backend(
+                        backend,
+                        operation_name,
+                        method,
+                        path,
+                        body,
+                        query_params,
+                    ),
+                )
+                .await
+            {
+                Ok(response) => Ok(response),
+                Err(failsafe::Error::Inner(err)) => Err(BackendSendError::Request(err)),
+                Err(failsafe::Error::Rejected) => Err(BackendSendError::Rejected),
+            }
+        } else {
+            self.send_on_backend(backend, operation_name, method, path, body, query_params)
+                .await
+                .map_err(BackendSendError::Request)
+        }
+    }
+
+    async fn send_on_backend<
+        Body: Serialize + ?Sized,
+        QueryParams: Serialize + ?Sized,
+        Response: DeserializeOwned,
+    >(
+        &self,
+        backend: &Backend,
+        operation_name: &str,
+        method: &Method,
+        path: &str,
+        body: Option<&Body>,
+        query_params: Option<&QueryParams>,
+    ) -> Result<Response, ChromaHttpClientError> {
+        let url = backend.base_url.join(path).expect(
             "The base URL is valid and we control all path construction, so this should never fail",
         );
 
         let attempt = || async {
-            let mut request = self.client.request(method.clone(), url.clone());
-            if let Some(body) = &body {
+            let mut request = backend.client.request(method.clone(), url.clone());
+            if let Some(body) = body {
                 request = request.json(body);
             }
-            if let Some(query_params) = &query_params {
+            if let Some(query_params) = query_params {
                 request = request.query(query_params);
             }
 
@@ -903,7 +1087,7 @@ impl ChromaHttpClient {
                 err.status()
                     .map(|status| status == StatusCode::TOO_MANY_REQUESTS)
                     .unwrap_or_default()
-                    || (method == Method::GET
+                    || (*method == Method::GET
                         && err.status().map(|s| s.is_server_error()).unwrap_or(true))
             })
             .await;
@@ -1099,6 +1283,115 @@ mod tests {
 
         assert_eq!(response, serde_json::json!({"status": "ok"}));
         assert_eq!(mock.calls(), 2);
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_single_backend_has_no_circuit_breaker() {
+        let client = ChromaHttpClient::default();
+        assert_eq!(client.clients.len(), 1);
+        assert!(client.clients[0].breaker.is_none());
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_read_only_requests_fail_over_to_subsequent_backend() {
+        let first = MockServer::start_async().await;
+        let second = MockServer::start_async().await;
+
+        let first_mock = first
+            .mock_async(|when, then| {
+                when.method("POST").path("/read-only");
+                then.status(500).body("Internal Server Error");
+            })
+            .await;
+        let second_mock = second
+            .mock_async(|when, then| {
+                when.method("POST").path("/read-only");
+                then.status(200).body(r#"{"value": "ok"}"#);
+            })
+            .await;
+
+        let client = ChromaHttpClient::new(ChromaHttpClientOptions {
+            endpoint: first.base_url().parse().unwrap(),
+            endpoints: vec![second.base_url().parse().unwrap()],
+            retry_options: ChromaRetryOptions {
+                max_retries: 1,
+                min_delay: Duration::from_millis(1),
+                max_delay: Duration::from_millis(1),
+                jitter: false,
+            },
+            ..Default::default()
+        });
+
+        let response: serde_json::Value = client
+            .send_read_only::<serde_json::Value, (), serde_json::Value>(
+                "read_only",
+                Method::POST,
+                "/read-only",
+                Some(serde_json::json!({"request": "body"})),
+                None::<()>,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response, serde_json::json!({"value": "ok"}));
+        assert_eq!(first_mock.calls(), 1);
+        assert_eq!(second_mock.calls(), 1);
+        assert!(client.clients.iter().all(|backend| backend.breaker.is_some()));
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_mutating_requests_do_not_fail_over_to_subsequent_backend() {
+        let first = MockServer::start_async().await;
+        let second = MockServer::start_async().await;
+
+        let first_mock = first
+            .mock_async(|when, then| {
+                when.method("POST").path("/write-once");
+                then.status(500).body("Internal Server Error");
+            })
+            .await;
+        let second_mock = second
+            .mock_async(|when, then| {
+                when.method("POST").path("/write-once");
+                then.status(200).body(r#"{"value": "ok"}"#);
+            })
+            .await;
+
+        let client = ChromaHttpClient::new(ChromaHttpClientOptions {
+            endpoint: first.base_url().parse().unwrap(),
+            endpoints: vec![second.base_url().parse().unwrap()],
+            retry_options: ChromaRetryOptions {
+                max_retries: 1,
+                min_delay: Duration::from_millis(1),
+                max_delay: Duration::from_millis(1),
+                jitter: false,
+            },
+            ..Default::default()
+        });
+
+        let err = client
+            .send::<serde_json::Value, (), serde_json::Value>(
+                "write_once",
+                Method::POST,
+                "/write-once",
+                Some(serde_json::json!({"request": "body"})),
+                None::<()>,
+            )
+            .await
+            .unwrap_err();
+
+        match err {
+            ChromaHttpClientError::ApiError(_, status) => {
+                assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+            }
+            other => panic!("Expected ApiError, got {other:?}"),
+        }
+
+        assert_eq!(first_mock.calls(), 1);
+        assert_eq!(second_mock.calls(), 0);
     }
 
     #[tokio::test]
