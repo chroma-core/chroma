@@ -365,6 +365,10 @@ def _wait_for_minio_files_deleted(collection_uuid: str) -> None:
         time.sleep(1)
 
 
+def round_robin(round_index, round_around):
+    return round_around[round_index % len(round_around)]
+
+
 @pytest.mark.skipif(
     not MULTI_REGION_ENABLED,
     reason="MCMR GC coverage requires a multi-region Kubernetes cluster",
@@ -372,18 +376,20 @@ def _wait_for_minio_files_deleted(collection_uuid: str) -> None:
 def test_add_gc_hard_deletes_mcmr_collection() -> None:
     client1, client2 = _create_mcmr_clients()
     _create_isolated_database_mcmr(client1, client2, "tilt-spanning")
+    clients = [client1, client2]
 
     collection_name = f"test_add_gc_{uuid.uuid4().hex}"
     coll1 = client1.create_collection(name=collection_name)
     coll2 = client2.get_collection(name=collection_name)
     collection_uuid = str(coll1.id)
+    collections = [client1, client2]
 
     current_version1 = cast(int, coll1.get_model()["version"])
     current_version2 = cast(int, coll2.get_model()["version"])
 
     for round_index in range(COMPACTION_ROUNDS):
-        writer_client = client1 if round_index % 2 == 0 else client2
-        writer_collection = coll1 if round_index % 2 == 0 else coll2
+        writer_client = round_robin(round_index, clients)
+        writer_collection = round_robin(round_index, collections)
         _add_round(writer_client, writer_collection, round_index)
 
         current_version1 = wait_for_version_increase(
