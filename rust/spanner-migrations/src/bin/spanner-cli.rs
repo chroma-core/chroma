@@ -1,6 +1,20 @@
 use std::path::Path;
 
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
+
 const KNOWN_PATH: &str = "/opt/homebrew/share/google-cloud-sdk/bin/spanner-cli";
+
+#[cfg(unix)]
+fn exit_code(exit: std::process::ExitStatus) -> i32 {
+    exit.code()
+        .unwrap_or_else(|| exit.signal().map_or(1, |signal| 128 + signal))
+}
+
+#[cfg(not(unix))]
+fn exit_code(exit: std::process::ExitStatus) -> i32 {
+    exit.code().unwrap_or(1)
+}
 
 fn main() {
     if Path::new(KNOWN_PATH).exists() {
@@ -17,7 +31,7 @@ fn main() {
                 eprintln!("failed while waiting for spanner-cli: {}", err);
                 std::process::exit(1);
             });
-        std::process::exit(exit.code().unwrap_or(if exit.success() { 0 } else { 1 }));
+        std::process::exit(exit_code(exit));
     }
     eprintln!(
         "spanner-cli not found at its known location.
