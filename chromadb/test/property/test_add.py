@@ -1,6 +1,4 @@
-import uuid
-from random import randint
-from typing import cast, List, Any, Dict
+from typing import cast, List
 import hypothesis
 import numpy as np
 import pytest
@@ -20,6 +18,7 @@ from chromadb.test.conftest import (
 )
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
+from chromadb.test.property.recordset_utils import create_large_recordset
 from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
 from chromadb.utils.batch_utils import create_batches
 
@@ -229,27 +228,6 @@ def _test_add(
             n_results=n_results,
             embedding_function=collection.embedding_function,
         )
-
-
-# Hypothesis struggles to generate large record sets so we explicitly create
-# a large record set
-def create_large_recordset(
-    min_size: int = 45000,
-    max_size: int = 50000,
-) -> strategies.RecordSet:
-    size = randint(min_size, max_size)
-
-    ids = [str(uuid.uuid4()) for _ in range(size)]
-    metadatas = [{"some_key": f"{i}"} for i in range(size)]
-    documents = [f"Document {i}" for i in range(size)]
-    embeddings = [[1, 2, 3] for _ in range(size)]
-    record_set = strategies.RecordSet(
-        ids=ids,
-        embeddings=cast(Embeddings, embeddings),
-        metadatas=metadatas,
-        documents=documents,
-    )
-    return record_set
 
 
 @multi_region_test

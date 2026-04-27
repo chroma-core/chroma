@@ -1,7 +1,5 @@
 import os
 import subprocess
-import uuid
-from random import randint
 from typing import cast, List
 
 import hypothesis
@@ -18,6 +16,7 @@ from chromadb.test.conftest import (
 )
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
+from chromadb.test.property.recordset_utils import create_large_recordset
 from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
 from chromadb.utils.batch_utils import create_batches
 
@@ -28,25 +27,6 @@ REPO_ROOT = os.path.dirname(
 CHROMA_FAULT_CMD = ["cargo", "run", "--bin", "chroma-fault", "--"]
 
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
-
-
-def create_large_recordset(
-    min_size: int = 45000,
-    max_size: int = 50000,
-) -> strategies.RecordSet:
-    """Create a large record set that Hypothesis struggles to generate."""
-    size = randint(min_size, max_size)
-    ids = [str(uuid.uuid4()) for _ in range(size)]
-    metadatas = [{"some_key": f"{i}"} for i in range(size)]
-    documents = [f"Document {i}" for i in range(size)]
-    embeddings = [[1, 2, 3] for _ in range(size)]
-    record_set = strategies.RecordSet(
-        ids=ids,
-        embeddings=cast(Embeddings, embeddings),
-        metadatas=metadatas,
-        documents=documents,
-    )
-    return record_set
 
 
 def _inject_fault(label: str, tilt_instance: str = "chroma") -> None:
