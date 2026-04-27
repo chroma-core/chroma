@@ -382,7 +382,7 @@ def test_add_gc_hard_deletes_mcmr_collection() -> None:
     coll1 = client1.create_collection(name=collection_name)
     coll2 = client2.get_collection(name=collection_name)
     collection_uuid = str(coll1.id)
-    collections = [client1, client2]
+    collections = [coll1, coll2]
 
     current_version1 = cast(int, coll1.get_model()["version"])
     current_version2 = cast(int, coll2.get_model()["version"])
