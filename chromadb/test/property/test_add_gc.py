@@ -289,7 +289,11 @@ def _list_minio_files_for_collection(bucket: str, collection_uuid: str) -> List[
             if _xml_local_name(element.tag) != "Contents":
                 continue
             key = _child_text(element, "Key")
-            if key is not None and collection_uuid in key:
+            if (
+                key is not None
+                and collection_uuid in key
+                and "/versionfiles/" not in key
+            ):
                 keys.append(key)
 
         is_truncated = _child_text(root, "IsTruncated") == "true"
