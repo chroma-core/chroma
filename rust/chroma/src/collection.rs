@@ -354,7 +354,8 @@ impl ChromaCollection {
             include.unwrap_or_else(IncludeList::default_get),
         )?;
         let request = request.into_payload()?;
-        self.send(true, "get", "get", Method::POST, Some(request)).await
+        self.send(true, "get", "get", Method::POST, Some(request))
+            .await
     }
 
     /// Performs vector similarity search against the collection.
@@ -659,7 +660,8 @@ impl ChromaCollection {
             metadatas,
         )?;
         let request = request.into_payload();
-        self.send(false, "add", "add", Method::POST, Some(request)).await
+        self.send(false, "add", "add", Method::POST, Some(request))
+            .await
     }
 
     /// Modifies existing records in the collection.
@@ -884,14 +886,9 @@ impl ChromaCollection {
         body: Option<Body>,
     ) -> Result<Response, ChromaHttpClientError> {
         self.send_with_query::<Body, (), Response>(
-            read_only,
-            operation,
-            path,
-            method,
-            body,
-            None::<()>,
+            read_only, operation, path, method, body, None::<()>,
         )
-            .await
+        .await
     }
 
     /// Internal transport method with query parameter support.

@@ -954,14 +954,7 @@ impl ChromaHttpClient {
 
         for backend in &self.clients {
             match self
-                .send_with_backend(
-                    backend,
-                    operation_name,
-                    &method,
-                    path,
-                    body,
-                    query_params,
-                )
+                .send_with_backend(backend, operation_name, &method, path, body, query_params)
                 .await
             {
                 Ok(response) => return Ok(response),
@@ -995,14 +988,7 @@ impl ChromaHttpClient {
             match breaker
                 .call_with(
                     BackendFailurePredicate,
-                    self.send_on_backend(
-                        backend,
-                        operation_name,
-                        method,
-                        path,
-                        body,
-                        query_params,
-                    ),
+                    self.send_on_backend(backend, operation_name, method, path, body, query_params),
                 )
                 .await
             {
@@ -1338,7 +1324,10 @@ mod tests {
         assert_eq!(response, serde_json::json!({"value": "ok"}));
         assert_eq!(first_mock.calls(), 1);
         assert_eq!(second_mock.calls(), 1);
-        assert!(client.clients.iter().all(|backend| backend.breaker.is_some()));
+        assert!(client
+            .clients
+            .iter()
+            .all(|backend| backend.breaker.is_some()));
     }
 
     #[tokio::test]
