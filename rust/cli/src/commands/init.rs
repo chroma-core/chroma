@@ -1,24 +1,26 @@
 use crate::client::dashboard_client::DashboardClient;
-use crate::commands::db::{create_env_connection, validate_db_name, DbError};
+use crate::commands::db::{create_env_connection, DbError};
 use crate::commands::login::{browser_login, LoginArgs};
 use crate::commands::profile::ProfileError;
 use crate::commands::skills::{install_skill, InstallSkillArgs};
 use crate::config_store::{ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
-use crate::ui::{
-    print_section_header, print_status_line, print_summary_panel, FilterableSelectItem,
-    PanelSelectPrompt,
+use crate::tui::style::accent_bold;
+use crate::tui::widgets::summary_panel::print_summary_panel;
+use crate::tui::widgets::{
+    print_section_header, print_status_line, FilterableSelectItem, PanelSelectPrompt,
 };
-use crate::utils::{cloud_client, CliError, Profile, Profiles};
+use crate::utils::{cloud_client, validate_db_name, CliError, Profile, Profiles};
 use chroma::ChromaHttpClient;
 use clap::Parser;
-use colored::Colorize;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum InitError {
     #[error("Failed to get runtime for init command")]
     RuntimeError,
+    #[error("Login completed but no profile was created")]
+    LoginDidNotCreateProfile,
 }
 
 #[derive(Parser, Debug)]
@@ -52,7 +54,7 @@ async fn run_init(
     );
 
     if prompt_install_skills(term)? {
-        install_skill(InstallSkillArgs::for_skill("chroma-cloud"), term).await?;
+        install_skill(InstallSkillArgs::for_init("chroma-cloud"), term).await?;
     }
 
     term.println(&format!(
@@ -76,6 +78,9 @@ async fn resolve_profile(
             "No profile found. Opening your browser to log in...",
         );
         browser_login(LoginArgs::default(), dashboard_client, store, term, false).await?;
+        if store.read_profiles()?.is_empty() {
+            return Err(InitError::LoginDidNotCreateProfile.into());
+        }
     }
 
     let profiles = store.read_profiles()?;
@@ -137,12 +142,7 @@ async fn resolve_database(
 ) -> Result<String, CliError> {
     let dbs = client.list_databases().await?;
     let name = if dbs.is_empty() {
-        term.println(
-            &"No databases found. Let's create one."
-                .blue()
-                .bold()
-                .to_string(),
-        );
+        term.println(&accent_bold("No databases found. Let's create one.").to_string());
         term.println("What is the name of your new DB?");
         let raw = term.prompt_input()?;
         let name = validate_db_name(&raw)?;
@@ -243,6 +243,17 @@ mod tests {
     }
 
     #[test]
+    fn select_profile_name_falls_back_to_index_zero_for_unknown_current() {
+        let profiles = make_profiles(&["alpha", "beta", "gamma"]);
+        let mut term = TestTerminal::new().with_inputs(vec!["0"]);
+
+        let name = select_profile_name(&profiles, "ghost", &mut term).unwrap();
+
+        assert_eq!(name, "alpha");
+        assert_eq!(term.last_panel_default_index, Some(0));
+    }
+
+    #[test]
     fn prompt_install_skills_true_when_selecting_yes() {
         let mut term = TestTerminal::new().with_inputs(vec!["0"]);
         assert!(prompt_install_skills(&mut term).unwrap());
@@ -312,6 +323,36 @@ mod tests {
             let name = resolve_database(&client, &mut term).await.unwrap();
             assert_eq!(name, "my-new-db");
         }
+
+        #[tokio::test]
+        async fn resolve_database_rejects_invalid_name_when_empty_list() {
+            let server = MockServer::start();
+            let client = mock_client(&server);
+            mock_list_databases(&server, &[]);
+
+            let mut term = TestTerminal::new().with_inputs(vec!["bad name!"]);
+            let err = resolve_database(&client, &mut term).await.unwrap_err();
+
+            assert!(matches!(err, CliError::Db(DbError::InvalidDbName)));
+        }
+
+        #[tokio::test]
+        async fn resolve_database_propagates_list_error() {
+            let server = MockServer::start();
+            let client = mock_client(&server);
+            server.mock(|when, then| {
+                when.method("GET")
+                    .path("/api/v2/tenants/test-tenant/databases");
+                then.status(500)
+                    .header("content-type", "application/json")
+                    .json_body(serde_json::json!({"error": "boom"}));
+            });
+
+            let mut term = TestTerminal::new();
+            let err = resolve_database(&client, &mut term).await.unwrap_err();
+
+            assert!(matches!(err, CliError::ChromaClient(_)));
+        }
     }
 
     #[test]
@@ -343,5 +384,21 @@ mod tests {
 
         assert_eq!(name, "alpha");
         assert_eq!(store.read_config().unwrap().current_profile, "alpha");
+    }
+
+    #[test]
+    fn resolve_profile_does_not_rewrite_config_when_current_unchanged() {
+        let store = InMemoryConfigStore::new(make_profiles(&["solo"]), make_config("solo"));
+        let dashboard_client = DashboardClient::default();
+        let mut term = TestTerminal::new();
+
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let (name, _profile) = runtime
+            .block_on(async { resolve_profile(&dashboard_client, &store, &mut term).await })
+            .unwrap();
+
+        assert_eq!(name, "solo");
+        assert_eq!(store.read_config().unwrap().current_profile, "solo");
+        assert_eq!(store.config_write_count(), 0);
     }
 }

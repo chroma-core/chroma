@@ -1,58 +1,10 @@
-use crate::style;
+use super::{truncate_line_for_width, PANEL_MAX_WIDTH};
 use crate::terminal::Terminal;
+use crate::tui::style;
 use crossterm::terminal;
 use textwrap::wrap;
 
-const SUMMARY_PANEL_MAX_WIDTH: usize = 92;
 const SUMMARY_PANEL_MIN_INNER_WIDTH: usize = 20;
-
-#[derive(Debug, Clone)]
-pub struct FilterableSelectItem {
-    pub label: String,
-    pub summary: String,
-}
-
-pub struct PanelSelectPrompt<'a> {
-    pub tag: &'a str,
-    pub title: &'a str,
-    pub context_lines: &'a [String],
-    pub items: &'a [FilterableSelectItem],
-    pub default_selected_index: usize,
-    pub empty_message: &'a str,
-}
-
-pub struct FilterableMultiSelectPrompt<'a> {
-    pub tag: &'a str,
-    pub title: &'a str,
-    pub preface_lines: &'a [String],
-    pub prompt: &'a str,
-    pub included_heading: Option<&'a str>,
-    pub included_items: &'a [FilterableSelectItem],
-    pub selectable_heading: &'a str,
-    pub selectable_items: &'a [FilterableSelectItem],
-    pub default_selected_indices: &'a [usize],
-    pub empty_message: &'a str,
-}
-
-pub fn print_section_header(term: &mut dyn Terminal, title: &str) {
-    term.println(&format!("{}", style::section_header(title)));
-}
-
-pub fn print_command_hint(term: &mut dyn Terminal, label: &str, command: &str) {
-    term.println(&format!(
-        "{} {}",
-        style::accent_bold(label),
-        style::command(command)
-    ));
-}
-
-pub fn print_status_line(term: &mut dyn Terminal, action: &str, detail: &str) {
-    term.println(&format!("{} {}", style::status_label(action), detail));
-}
-
-pub fn print_success_banner(term: &mut dyn Terminal, message: &str) {
-    term.println(&format!("\n{}", style::accent_bold(message)));
-}
 
 pub fn print_summary_panel(term: &mut dyn Terminal, label: &str, value: &str) {
     term.println("");
@@ -63,8 +15,8 @@ pub fn print_summary_panel(term: &mut dyn Terminal, label: &str, value: &str) {
 
 fn resolve_summary_panel_width() -> usize {
     terminal::size()
-        .map(|(cols, _)| usize::from(cols).clamp(5, SUMMARY_PANEL_MAX_WIDTH))
-        .unwrap_or(SUMMARY_PANEL_MAX_WIDTH)
+        .map(|(cols, _)| usize::from(cols).clamp(5, PANEL_MAX_WIDTH))
+        .unwrap_or(PANEL_MAX_WIDTH)
 }
 
 fn build_summary_panel_lines(label: &str, value: &str, panel_width: usize) -> Vec<String> {
@@ -123,32 +75,14 @@ fn build_summary_top_border(label: &str, panel_width: usize) -> String {
         return format!("┌{}┐", "─".repeat(available));
     }
 
-    let label = truncate_summary_line(label, available.saturating_sub(3));
+    let label = truncate_line_for_width(label, available.saturating_sub(3));
     let remaining = available.saturating_sub(label.chars().count() + 3);
     format!("┌─ {} {}┐", label, "─".repeat(remaining))
 }
 
-fn truncate_summary_line(line: &str, width: usize) -> String {
-    let char_count = line.chars().count();
-    if char_count <= width {
-        return line.to_string();
-    }
-
-    if width <= 3 {
-        return line.chars().take(width).collect();
-    }
-
-    let mut truncated = line.chars().take(width - 3).collect::<String>();
-    truncated.push_str("...");
-    truncated
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        build_summary_panel_lines, print_command_hint, print_section_header, print_status_line,
-        print_success_banner, print_summary_panel,
-    };
+    use super::*;
     use crate::terminal::test_terminal::TestTerminal;
 
     #[test]
@@ -182,21 +116,5 @@ mod tests {
         assert!(lines.len() > 4);
         assert!(lines.iter().all(|line| line.chars().count() <= 40));
         assert!(lines.iter().any(|line| line.contains("additional:")));
-    }
-
-    #[test]
-    fn shared_text_helpers_keep_command_output_styles_consistent() {
-        let mut term = TestTerminal::new();
-
-        print_section_header(&mut term, "Available skills");
-        print_command_hint(&mut term, "Install with:", "chroma skills install foo");
-        print_status_line(&mut term, "Installing", "foo into codex");
-        print_success_banner(&mut term, "Installed foo successfully.");
-
-        assert_eq!(term.output.len(), 4);
-        assert!(term.output[0].contains("Available skills"));
-        assert!(term.output[1].contains("Install with:"));
-        assert!(term.output[2].contains("Installing foo into codex"));
-        assert!(term.output[3].contains("Installed foo successfully."));
     }
 }

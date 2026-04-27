@@ -11,7 +11,7 @@ use crate::commands::skills::SkillsError;
 use crate::commands::update::UpdateError;
 use crate::commands::vacuum::VacuumError;
 use crate::commands::webpage::WebPageError;
-use crate::ui_utils::Theme;
+use crate::ui_utils::{validate_uri, Theme};
 use chroma::client::{
     ChromaAuthMethod, ChromaHttpClientError, ChromaHttpClientOptions, ChromaRetryOptions,
 };
@@ -241,6 +241,16 @@ pub fn local_client(host: &str) -> Result<ChromaHttpClient, CliError> {
     Ok(ChromaHttpClient::new(options))
 }
 
+pub fn validate_db_name(db_name: &str) -> Result<String, CliError> {
+    validate_uri(db_name.to_string()).map_err(|_| {
+        if db_name.is_empty() {
+            CliError::Db(DbError::EmptyDbName)
+        } else {
+            CliError::Db(DbError::InvalidDbName)
+        }
+    })
+}
+
 pub fn local_client_default() -> Result<ChromaHttpClient, CliError> {
     let options = ChromaHttpClientOptions {
         endpoint: ChromaHttpClientOptions::default().endpoint,
@@ -250,4 +260,36 @@ pub fn local_client_default() -> Result<ChromaHttpClient, CliError> {
         database_name: Some("default_database".to_string()),
     };
     Ok(ChromaHttpClient::new(options))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_db_name_valid() {
+        assert_eq!(validate_db_name("my-db_01").unwrap(), "my-db_01");
+    }
+
+    #[test]
+    fn test_validate_db_name_empty() {
+        let err = validate_db_name("").unwrap_err();
+        assert!(matches!(err, CliError::Db(DbError::EmptyDbName)));
+    }
+
+    #[test]
+    fn test_validate_db_name_special_chars() {
+        assert!(matches!(
+            validate_db_name("my db").unwrap_err(),
+            CliError::Db(DbError::InvalidDbName)
+        ));
+        assert!(matches!(
+            validate_db_name("my.db").unwrap_err(),
+            CliError::Db(DbError::InvalidDbName)
+        ));
+        assert!(matches!(
+            validate_db_name("my/db").unwrap_err(),
+            CliError::Db(DbError::InvalidDbName)
+        ));
+    }
 }

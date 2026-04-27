@@ -1,78 +1,25 @@
-use crate::style;
-use crate::terminal::{SystemTerminal, Terminal};
-use crate::ui::{
-    print_command_hint, print_section_header, print_status_line, print_success_banner,
-    print_summary_panel, FilterableMultiSelectPrompt, FilterableSelectItem, PanelSelectPrompt,
+use super::agents::{AgentDefinition, InstallContext, AGENTS};
+use super::registry::{
+    fetch_skills_registry, registry_file_paths, skill_relative_path, RegistrySkill, SkillsRegistry,
+    SKILLS_RAW_BASE_URL, SKILLS_REGISTRY_URL,
 };
-use crate::utils::{CliError, UtilsError};
-use clap::{Parser, Subcommand, ValueEnum};
+use super::SkillsError;
+use crate::terminal::Terminal;
+use crate::tui::widgets::summary_panel::print_summary_panel;
+use crate::tui::widgets::{
+    print_status_line, print_success_banner, FilterableMultiSelectPrompt, FilterableSelectItem,
+    PanelSelectPrompt,
+};
+use crate::utils::CliError;
+use clap::{Parser, ValueEnum};
 use colored::Colorize;
 use reqwest::header::USER_AGENT;
 use reqwest::Client;
-use serde::Deserialize;
-use std::collections::{BTreeMap, BTreeSet};
-use std::env;
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
-use thiserror::Error;
 
-const SKILLS_REGISTRY_URL: &str =
-    "https://raw.githubusercontent.com/chroma-core/agent-skills/main/skills/registry.json";
-const SKILLS_RAW_BASE_URL: &str =
-    "https://raw.githubusercontent.com/chroma-core/agent-skills/main/skills/";
 const DEFAULT_SKILL_NAME: &str = "skill";
-
-#[derive(Debug, Error)]
-pub enum SkillsError {
-    #[error("Failed to get runtime for skills commands")]
-    RuntimeError,
-    #[error("Failed to fetch the skills registry")]
-    RegistryFetchFailed,
-    #[error("Failed to parse the skills registry")]
-    RegistryParseFailed,
-    #[error("No such skill {0}")]
-    NoSuchSkill(String),
-    #[error("The skills registry entry for {0} is invalid")]
-    InvalidRegistryEntry(String),
-    #[error("Failed to download skill {0}")]
-    SkillDownloadFailed(String),
-    #[error("Downloaded skill {0} did not contain any files")]
-    EmptySkill(String),
-    #[error("No supported agents were detected on this machine")]
-    NoDetectedAgents,
-    #[error("No agents were selected for installation")]
-    NoAgentsSelected,
-    #[error("No such agent {0}")]
-    NoSuchAgent(String),
-    #[error("Global installation is not supported for agent {0}")]
-    GlobalInstallUnsupported(String),
-    #[error("Failed to read the current working directory")]
-    CurrentDirUnavailable,
-    #[error("Computed install path escaped its base directory")]
-    UnsafeInstallPath,
-    #[error("Failed to create skills directory")]
-    CreateDirFailed,
-    #[error("Failed to remove existing skill installation")]
-    RemoveExistingFailed,
-    #[error("Failed to write skill files")]
-    WriteSkillFailed,
-    #[error("Failed to create skill symlink")]
-    SymlinkFailed,
-}
-
-#[derive(Parser, Debug)]
-pub struct SkillsArgs {
-    #[command(subcommand)]
-    command: Option<SkillsSubcommand>,
-}
-
-#[derive(Subcommand, Debug)]
-enum SkillsSubcommand {
-    #[command(about = "List available Chroma skills")]
-    List,
-    #[command(about = "Install a Chroma skill")]
-    Install(InstallSkillArgs),
-}
 
 #[derive(Parser, Debug, Default)]
 pub struct InstallSkillArgs {
@@ -98,9 +45,11 @@ pub struct InstallSkillArgs {
 }
 
 impl InstallSkillArgs {
-    pub(crate) fn for_skill(name: impl Into<String>) -> Self {
+    pub(crate) fn for_init(name: impl Into<String>) -> Self {
         Self {
             name: Some(name.into()),
+            scope: Some(InstallScope::Project),
+            mode: Some(InstallMode::Symlink),
             ..Self::default()
         }
     }
@@ -150,524 +99,16 @@ impl InstallMode {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct AgentDefinition {
-    id: &'static str,
-    display_name: &'static str,
-    universal: bool,
-    project_dir: &'static str,
-    global_dir: GlobalDirKind,
-    detection: DetectionKind,
-    selectable: bool,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum GlobalDirKind {
-    HomeDotSkills(&'static str),
-    HomeAgentsSkills,
-    XdgAgentsSkills,
-    Antigravity,
-    Claude,
-    Openclaw,
-    Codex,
-    Cortex,
-    Crush,
-    Deepagents,
-    Gemini,
-    Goose,
-    Kimi,
-    Opencode,
-    Pi,
-    Windsurf,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum DetectionKind {
-    HomeDot(&'static str),
-    CwdOrHomeDot(&'static str),
-    Amp,
-    Antigravity,
-    Claude,
-    Openclaw,
-    Codex,
-    Cortex,
-    Crush,
-    Goose,
-    Opencode,
-    Pi,
-    Replit,
-    Windsurf,
-}
-
-#[derive(Debug, Clone)]
-struct InstallContext {
-    cwd: PathBuf,
-    home: PathBuf,
-    xdg_config: PathBuf,
-}
-
 #[derive(Debug, Clone)]
 struct RemoteSkillFile {
     relative_path: PathBuf,
     contents: Vec<u8>,
 }
 
-#[derive(Debug, Deserialize)]
-struct SkillsRegistry {
-    skills: Vec<RegistrySkill>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RegistrySkill {
-    name: String,
-    description: String,
-    path: String,
-    #[serde(default)]
-    topics: Vec<RegistryTopic>,
-    #[serde(default)]
-    general: Vec<RegistryGeneralDoc>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RegistryTopic {
-    paths: BTreeMap<String, String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RegistryGeneralDoc {
-    path: String,
-}
-
-const AGENTS: &[AgentDefinition] = &[
-    AgentDefinition {
-        id: "amp",
-        display_name: "Amp",
-        universal: true,
-        project_dir: ".agents/skills",
-        global_dir: GlobalDirKind::XdgAgentsSkills,
-        detection: DetectionKind::Amp,
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "antigravity",
-        display_name: "Antigravity",
-        universal: true,
-        project_dir: ".agents/skills",
-        global_dir: GlobalDirKind::Antigravity,
-        detection: DetectionKind::Antigravity,
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "augment",
-        display_name: "Augment",
-        universal: false,
-        project_dir: ".augment/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".augment"),
-        detection: DetectionKind::HomeDot(".augment"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "bob",
-        display_name: "IBM Bob",
-        universal: false,
-        project_dir: ".bob/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".bob"),
-        detection: DetectionKind::HomeDot(".bob"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "claude-code",
-        display_name: "Claude Code",
-        universal: false,
-        project_dir: ".claude/skills",
-        global_dir: GlobalDirKind::Claude,
-        detection: DetectionKind::Claude,
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "openclaw",
-        display_name: "OpenClaw",
-        universal: false,
-        project_dir: "skills",
-        global_dir: GlobalDirKind::Openclaw,
-        detection: DetectionKind::Openclaw,
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "cline",
-        display_name: "Cline",
-        universal: true,
-        project_dir: ".agents/skills",
-        global_dir: GlobalDirKind::HomeAgentsSkills,
-        detection: DetectionKind::HomeDot(".cline"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "codebuddy",
-        display_name: "CodeBuddy",
-        universal: false,
-        project_dir: ".codebuddy/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".codebuddy"),
-        detection: DetectionKind::CwdOrHomeDot(".codebuddy"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "codex",
-        display_name: "Codex",
-        universal: true,
-        project_dir: ".agents/skills",
-        global_dir: GlobalDirKind::Codex,
-        detection: DetectionKind::Codex,
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "command-code",
-        display_name: "Command Code",
-        universal: false,
-        project_dir: ".commandcode/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".commandcode"),
-        detection: DetectionKind::HomeDot(".commandcode"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "continue",
-        display_name: "Continue",
-        universal: false,
-        project_dir: ".continue/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".continue"),
-        detection: DetectionKind::CwdOrHomeDot(".continue"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "cortex",
-        display_name: "Cortex Code",
-        universal: false,
-        project_dir: ".cortex/skills",
-        global_dir: GlobalDirKind::Cortex,
-        detection: DetectionKind::Cortex,
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "crush",
-        display_name: "Crush",
-        universal: false,
-        project_dir: ".crush/skills",
-        global_dir: GlobalDirKind::Crush,
-        detection: DetectionKind::Crush,
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "cursor",
-        display_name: "Cursor",
-        universal: true,
-        project_dir: ".agents/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".cursor"),
-        detection: DetectionKind::HomeDot(".cursor"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "deepagents",
-        display_name: "Deep Agents",
-        universal: true,
-        project_dir: ".agents/skills",
-        global_dir: GlobalDirKind::Deepagents,
-        detection: DetectionKind::HomeDot(".deepagents"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "droid",
-        display_name: "Droid",
-        universal: false,
-        project_dir: ".factory/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".factory"),
-        detection: DetectionKind::HomeDot(".factory"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "firebender",
-        display_name: "Firebender",
-        universal: true,
-        project_dir: ".agents/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".firebender"),
-        detection: DetectionKind::HomeDot(".firebender"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "gemini-cli",
-        display_name: "Gemini CLI",
-        universal: true,
-        project_dir: ".agents/skills",
-        global_dir: GlobalDirKind::Gemini,
-        detection: DetectionKind::HomeDot(".gemini"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "github-copilot",
-        display_name: "GitHub Copilot",
-        universal: true,
-        project_dir: ".agents/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".copilot"),
-        detection: DetectionKind::HomeDot(".copilot"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "goose",
-        display_name: "Goose",
-        universal: false,
-        project_dir: ".goose/skills",
-        global_dir: GlobalDirKind::Goose,
-        detection: DetectionKind::Goose,
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "junie",
-        display_name: "Junie",
-        universal: false,
-        project_dir: ".junie/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".junie"),
-        detection: DetectionKind::HomeDot(".junie"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "iflow-cli",
-        display_name: "iFlow CLI",
-        universal: false,
-        project_dir: ".iflow/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".iflow"),
-        detection: DetectionKind::HomeDot(".iflow"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "kilo",
-        display_name: "Kilo Code",
-        universal: false,
-        project_dir: ".kilocode/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".kilocode"),
-        detection: DetectionKind::HomeDot(".kilocode"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "kimi-cli",
-        display_name: "Kimi Code CLI",
-        universal: true,
-        project_dir: ".agents/skills",
-        global_dir: GlobalDirKind::Kimi,
-        detection: DetectionKind::HomeDot(".kimi"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "kiro-cli",
-        display_name: "Kiro CLI",
-        universal: false,
-        project_dir: ".kiro/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".kiro"),
-        detection: DetectionKind::HomeDot(".kiro"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "kode",
-        display_name: "Kode",
-        universal: false,
-        project_dir: ".kode/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".kode"),
-        detection: DetectionKind::HomeDot(".kode"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "mcpjam",
-        display_name: "MCPJam",
-        universal: false,
-        project_dir: ".mcpjam/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".mcpjam"),
-        detection: DetectionKind::HomeDot(".mcpjam"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "mistral-vibe",
-        display_name: "Mistral Vibe",
-        universal: false,
-        project_dir: ".vibe/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".vibe"),
-        detection: DetectionKind::HomeDot(".vibe"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "mux",
-        display_name: "Mux",
-        universal: false,
-        project_dir: ".mux/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".mux"),
-        detection: DetectionKind::HomeDot(".mux"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "opencode",
-        display_name: "OpenCode",
-        universal: true,
-        project_dir: ".agents/skills",
-        global_dir: GlobalDirKind::Opencode,
-        detection: DetectionKind::Opencode,
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "openhands",
-        display_name: "OpenHands",
-        universal: false,
-        project_dir: ".openhands/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".openhands"),
-        detection: DetectionKind::HomeDot(".openhands"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "pi",
-        display_name: "Pi",
-        universal: false,
-        project_dir: ".pi/skills",
-        global_dir: GlobalDirKind::Pi,
-        detection: DetectionKind::Pi,
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "qoder",
-        display_name: "Qoder",
-        universal: false,
-        project_dir: ".qoder/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".qoder"),
-        detection: DetectionKind::HomeDot(".qoder"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "qwen-code",
-        display_name: "Qwen Code",
-        universal: false,
-        project_dir: ".qwen/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".qwen"),
-        detection: DetectionKind::HomeDot(".qwen"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "replit",
-        display_name: "Replit",
-        universal: true,
-        project_dir: ".agents/skills",
-        global_dir: GlobalDirKind::XdgAgentsSkills,
-        detection: DetectionKind::Replit,
-        selectable: false,
-    },
-    AgentDefinition {
-        id: "roo",
-        display_name: "Roo Code",
-        universal: false,
-        project_dir: ".roo/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".roo"),
-        detection: DetectionKind::HomeDot(".roo"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "trae",
-        display_name: "Trae",
-        universal: false,
-        project_dir: ".trae/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".trae"),
-        detection: DetectionKind::HomeDot(".trae"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "trae-cn",
-        display_name: "Trae CN",
-        universal: false,
-        project_dir: ".trae/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".trae-cn"),
-        detection: DetectionKind::HomeDot(".trae-cn"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "warp",
-        display_name: "Warp",
-        universal: true,
-        project_dir: ".agents/skills",
-        global_dir: GlobalDirKind::HomeAgentsSkills,
-        detection: DetectionKind::HomeDot(".warp"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "windsurf",
-        display_name: "Windsurf",
-        universal: false,
-        project_dir: ".windsurf/skills",
-        global_dir: GlobalDirKind::Windsurf,
-        detection: DetectionKind::Windsurf,
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "zencoder",
-        display_name: "Zencoder",
-        universal: false,
-        project_dir: ".zencoder/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".zencoder"),
-        detection: DetectionKind::HomeDot(".zencoder"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "neovate",
-        display_name: "Neovate",
-        universal: false,
-        project_dir: ".neovate/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".neovate"),
-        detection: DetectionKind::HomeDot(".neovate"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "pochi",
-        display_name: "Pochi",
-        universal: false,
-        project_dir: ".pochi/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".pochi"),
-        detection: DetectionKind::HomeDot(".pochi"),
-        selectable: true,
-    },
-    AgentDefinition {
-        id: "adal",
-        display_name: "AdaL",
-        universal: false,
-        project_dir: ".adal/skills",
-        global_dir: GlobalDirKind::HomeDotSkills(".adal"),
-        detection: DetectionKind::HomeDot(".adal"),
-        selectable: true,
-    },
-];
-
-pub fn skills(args: SkillsArgs) -> Result<(), CliError> {
-    let mut term = SystemTerminal;
-    let runtime = tokio::runtime::Runtime::new().map_err(|_| SkillsError::RuntimeError)?;
-    runtime.block_on(async {
-        match args.command {
-            None | Some(SkillsSubcommand::List) => list_skills(&mut term).await,
-            Some(SkillsSubcommand::Install(install_args)) => {
-                install_skill(install_args, &mut term).await
-            }
-        }
-    })
-}
-
-async fn list_skills(term: &mut dyn Terminal) -> Result<(), CliError> {
-    let registry = fetch_skills_registry().await?;
-    print_section_header(term, "Available Chroma skills:");
-    for skill in registry.skills {
-        term.println(&format!(
-            "{} {} - {}",
-            style::list_marker(),
-            skill.name.bold(),
-            skill.description
-        ));
-    }
-    term.println("");
-    print_command_hint(
-        term,
-        "Install a skill with:",
-        "chroma skills install <skill-name>",
-    );
-    Ok(())
+#[derive(Debug)]
+struct InstallResult {
+    #[cfg_attr(not(test), allow(dead_code))]
+    install_kind: String,
 }
 
 pub(crate) async fn install_skill(
@@ -675,7 +116,8 @@ pub(crate) async fn install_skill(
     term: &mut dyn Terminal,
 ) -> Result<(), CliError> {
     let context = InstallContext::current()?;
-    let registry = fetch_skills_registry().await?;
+    let client = Client::new();
+    let registry = fetch_skills_registry(&client).await?;
     let skill = resolve_skill(&registry, args.name, term)?;
     let scope = resolve_scope(args.scope, term)?;
     let mode = resolve_mode(args.mode, term)?;
@@ -693,7 +135,7 @@ pub(crate) async fn install_skill(
         ),
     );
 
-    let files = download_skill_files(skill).await?;
+    let files = download_skill_files(&client, skill).await?;
     install_skill_files(skill, &files, &agents, scope, mode, &context)?;
 
     print_success_banner(term, &format!("Installed {} successfully.", skill.name));
@@ -1112,23 +554,29 @@ fn summarize_selected_agents(agents: &[&AgentDefinition], scope: InstallScope) -
     }
 }
 
-async fn download_skill_files(skill: &RegistrySkill) -> Result<Vec<RemoteSkillFile>, CliError> {
-    let client = Client::new();
+async fn download_skill_files(
+    client: &Client,
+    skill: &RegistrySkill,
+) -> Result<Vec<RemoteSkillFile>, CliError> {
     let mut files = Vec::new();
 
     for remote_path in registry_file_paths(skill)? {
         let url = format!("{SKILLS_RAW_BASE_URL}{remote_path}");
+        let download_failed = || SkillsError::SkillDownloadFailed {
+            skill: skill.name.clone(),
+            file: remote_path.clone(),
+        };
         let bytes = client
             .get(url)
             .header(USER_AGENT, "chroma-cli")
             .send()
             .await
-            .map_err(|_| SkillsError::SkillDownloadFailed(skill.name.clone()))?
+            .map_err(|_| download_failed())?
             .error_for_status()
-            .map_err(|_| SkillsError::SkillDownloadFailed(skill.name.clone()))?
+            .map_err(|_| download_failed())?
             .bytes()
             .await
-            .map_err(|_| SkillsError::SkillDownloadFailed(skill.name.clone()))?;
+            .map_err(|_| download_failed())?;
 
         files.push(RemoteSkillFile {
             relative_path: skill_relative_path(skill, &remote_path)?,
@@ -1141,84 +589,6 @@ async fn download_skill_files(skill: &RegistrySkill) -> Result<Vec<RemoteSkillFi
     }
 
     Ok(files)
-}
-
-async fn fetch_skills_registry() -> Result<SkillsRegistry, CliError> {
-    let client = Client::new();
-    let response = client
-        .get(SKILLS_REGISTRY_URL)
-        .header(USER_AGENT, "chroma-cli")
-        .send()
-        .await
-        .map_err(|_| SkillsError::RegistryFetchFailed)?;
-
-    let response = response
-        .error_for_status()
-        .map_err(|_| SkillsError::RegistryFetchFailed)?;
-
-    response
-        .json::<SkillsRegistry>()
-        .await
-        .map_err(|_| SkillsError::RegistryParseFailed.into())
-}
-
-fn registry_file_paths(skill: &RegistrySkill) -> Result<Vec<String>, CliError> {
-    let skill_root = skill_root_dir(skill)?;
-    let mut seen = BTreeSet::new();
-    let mut paths = Vec::new();
-
-    for path in skill_registry_paths(skill) {
-        let normalized = normalized_skill_registry_path(skill, &path, &skill_root)?;
-        if seen.insert(normalized.clone()) {
-            paths.push(normalized);
-        }
-    }
-
-    Ok(paths)
-}
-
-fn skill_registry_paths(skill: &RegistrySkill) -> Vec<String> {
-    let mut paths = vec![skill.path.clone()];
-    paths.extend(skill.general.iter().map(|entry| entry.path.clone()));
-    for topic in &skill.topics {
-        paths.extend(topic.paths.values().cloned());
-    }
-    paths
-}
-
-fn skill_root_dir(skill: &RegistrySkill) -> Result<PathBuf, CliError> {
-    Path::new(&skill.path)
-        .parent()
-        .map(Path::to_path_buf)
-        .ok_or_else(|| SkillsError::InvalidRegistryEntry(skill.name.clone()).into())
-}
-
-fn normalized_skill_registry_path(
-    skill: &RegistrySkill,
-    remote_path: &str,
-    skill_root: &Path,
-) -> Result<String, CliError> {
-    let path = Path::new(remote_path);
-    let relative = path
-        .strip_prefix(skill_root)
-        .map_err(|_| SkillsError::InvalidRegistryEntry(skill.name.clone()))?;
-    safe_join(Path::new("skills"), skill_root)?;
-    safe_join(skill_root, relative)?;
-    Ok(path.to_string_lossy().into_owned())
-}
-
-fn skill_relative_path(skill: &RegistrySkill, remote_path: &str) -> Result<PathBuf, CliError> {
-    let skill_root = skill_root_dir(skill)?;
-    Path::new(remote_path)
-        .strip_prefix(&skill_root)
-        .map(Path::to_path_buf)
-        .map_err(|_| SkillsError::InvalidRegistryEntry(skill.name.clone()).into())
-}
-
-#[derive(Debug)]
-struct InstallResult {
-    #[cfg_attr(not(test), allow(dead_code))]
-    install_kind: String,
 }
 
 fn install_skill_files(
@@ -1414,7 +784,7 @@ fn sanitize_skill_name(name: &str) -> String {
     }
 }
 
-fn safe_join(base: &Path, relative: &Path) -> Result<PathBuf, CliError> {
+pub(super) fn safe_join(base: &Path, relative: &Path) -> Result<PathBuf, CliError> {
     let mut result = PathBuf::from(base);
 
     for component in relative.components() {
@@ -1430,112 +800,15 @@ fn safe_join(base: &Path, relative: &Path) -> Result<PathBuf, CliError> {
     Ok(result)
 }
 
-impl InstallContext {
-    fn current() -> Result<Self, CliError> {
-        let cwd = env::current_dir().map_err(|_| SkillsError::CurrentDirUnavailable)?;
-        let home = dirs::home_dir().ok_or(UtilsError::HomeDirNotFound)?;
-        let xdg_config = dirs::config_dir().unwrap_or_else(|| home.join(".config"));
-        Ok(Self {
-            cwd,
-            home,
-            xdg_config,
-        })
-    }
-}
-
-impl AgentDefinition {
-    fn global_dir(&self, context: &InstallContext) -> Option<PathBuf> {
-        match self.global_dir {
-            GlobalDirKind::HomeDotSkills(dir) => Some(context.home.join(dir).join("skills")),
-            GlobalDirKind::HomeAgentsSkills => Some(context.home.join(".agents/skills")),
-            GlobalDirKind::XdgAgentsSkills => Some(context.xdg_config.join("agents/skills")),
-            GlobalDirKind::Antigravity => Some(context.home.join(".gemini/antigravity/skills")),
-            GlobalDirKind::Claude => {
-                let base = env::var_os("CLAUDE_CONFIG_DIR")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| context.home.join(".claude"));
-                Some(base.join("skills"))
-            }
-            GlobalDirKind::Openclaw => {
-                let candidates = [
-                    context.home.join(".openclaw/skills"),
-                    context.home.join(".clawdbot/skills"),
-                    context.home.join(".moltbot/skills"),
-                ];
-                for candidate in candidates {
-                    if candidate.exists() {
-                        return Some(candidate);
-                    }
-                }
-                Some(context.home.join(".openclaw/skills"))
-            }
-            GlobalDirKind::Codex => {
-                let base = env::var_os("CODEX_HOME")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| context.home.join(".codex"));
-                Some(base.join("skills"))
-            }
-            GlobalDirKind::Cortex => Some(context.home.join(".snowflake/cortex/skills")),
-            GlobalDirKind::Crush => Some(context.home.join(".config/crush/skills")),
-            GlobalDirKind::Deepagents => Some(context.home.join(".deepagents/agent/skills")),
-            GlobalDirKind::Gemini => Some(context.home.join(".gemini/skills")),
-            GlobalDirKind::Goose => Some(context.xdg_config.join("goose/skills")),
-            GlobalDirKind::Kimi => Some(context.home.join(".config/agents/skills")),
-            GlobalDirKind::Opencode => Some(context.xdg_config.join("opencode/skills")),
-            GlobalDirKind::Pi => Some(context.home.join(".pi/agent/skills")),
-            GlobalDirKind::Windsurf => Some(context.home.join(".codeium/windsurf/skills")),
-        }
-    }
-
-    fn is_installed(&self, context: &InstallContext) -> bool {
-        match self.detection {
-            DetectionKind::HomeDot(dir) => context.home.join(dir).exists(),
-            DetectionKind::CwdOrHomeDot(dir) => {
-                context.cwd.join(dir).exists() || context.home.join(dir).exists()
-            }
-            DetectionKind::Amp => context.xdg_config.join("amp").exists(),
-            DetectionKind::Antigravity => context.home.join(".gemini/antigravity").exists(),
-            DetectionKind::Claude => env::var_os("CLAUDE_CONFIG_DIR")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| context.home.join(".claude"))
-                .exists(),
-            DetectionKind::Openclaw => {
-                context.home.join(".openclaw").exists()
-                    || context.home.join(".clawdbot").exists()
-                    || context.home.join(".moltbot").exists()
-            }
-            DetectionKind::Codex => {
-                env::var_os("CODEX_HOME")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| context.home.join(".codex"))
-                    .exists()
-                    || Path::new("/etc/codex").exists()
-            }
-            DetectionKind::Cortex => context.home.join(".snowflake/cortex").exists(),
-            DetectionKind::Crush => context.home.join(".config/crush").exists(),
-            DetectionKind::Goose => context.xdg_config.join("goose").exists(),
-            DetectionKind::Opencode => context.xdg_config.join("opencode").exists(),
-            DetectionKind::Pi => context.home.join(".pi/agent").exists(),
-            DetectionKind::Replit => context.cwd.join(".replit").exists(),
-            DetectionKind::Windsurf => context.home.join(".codeium/windsurf").exists(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::registry::sample_registry_skill;
     use super::*;
     use crate::terminal::test_terminal::TestTerminal;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use tempfile::TempDir;
 
-    fn temp_dir(label: &str) -> PathBuf {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let dir = env::temp_dir().join(format!("chroma-cli-{}-{}", label, unique));
-        fs::create_dir_all(&dir).unwrap();
-        dir
+    fn temp_dir(label: &str) -> TempDir {
+        TempDir::with_prefix(format!("chroma-cli-{}-", label)).unwrap()
     }
 
     fn normalized_output(term: &TestTerminal) -> String {
@@ -1581,29 +854,6 @@ mod tests {
         ]
     }
 
-    fn sample_registry_skill() -> RegistrySkill {
-        RegistrySkill {
-            name: "chroma-cloud".to_string(),
-            description: "Cloud skill".to_string(),
-            path: "chroma-cloud/SKILL.md".to_string(),
-            topics: vec![RegistryTopic {
-                paths: BTreeMap::from([
-                    (
-                        "typescript".to_string(),
-                        "chroma-cloud/querying/typescript.md".to_string(),
-                    ),
-                    (
-                        "python".to_string(),
-                        "chroma-cloud/querying/python.md".to_string(),
-                    ),
-                ]),
-            }],
-            general: vec![RegistryGeneralDoc {
-                path: "chroma-cloud/cli.md".to_string(),
-            }],
-        }
-    }
-
     #[test]
     fn sanitize_skill_name_removes_unsafe_characters() {
         assert_eq!(sanitize_skill_name("../Chroma Cloud!!"), "chroma-cloud");
@@ -1621,7 +871,7 @@ mod tests {
     #[test]
     fn copy_mode_installs_files_into_agent_directory() {
         let root = temp_dir("copy");
-        let context = test_context(&root);
+        let context = test_context(root.path());
         let files = sample_files();
         let skill = sample_registry_skill();
         let agent = AGENTS.iter().find(|agent| agent.id == "augment").unwrap();
@@ -1645,14 +895,12 @@ mod tests {
             .cwd
             .join(".augment/skills/chroma-cloud/docs/guide.md")
             .exists());
-
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn symlink_mode_writes_canonical_install_for_universal_agent() {
         let root = temp_dir("symlink");
-        let context = test_context(&root);
+        let context = test_context(root.path());
         let files = sample_files();
         let skill = sample_registry_skill();
         let agent = AGENTS.iter().find(|agent| agent.id == "codex").unwrap();
@@ -1673,8 +921,6 @@ mod tests {
             .join(".agents/skills/chroma-cloud/SKILL.md")
             .exists());
         assert_eq!(results[0].install_kind, "canonical");
-
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1727,7 +973,7 @@ mod tests {
     #[test]
     fn project_picker_includes_universal_agents_and_selected_additional_agents() {
         let root = temp_dir("project-picker");
-        let context = test_context(&root);
+        let context = test_context(root.path());
         let additional_agents = AGENTS
             .iter()
             .filter(|agent| agent.selectable && !agent.universal)
@@ -1754,14 +1000,12 @@ mod tests {
         assert!(term.output.iter().any(|line| line.contains("Agents")));
         assert!(term.output.iter().any(|line| line.contains("Amp")));
         assert!(term.output.iter().any(|line| line.contains("Augment")));
-
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn project_picker_defaults_to_claude_code() {
         let root = temp_dir("project-picker-default");
-        let context = test_context(&root);
+        let context = test_context(root.path());
         let mut term = TestTerminal::new().with_inputs(vec![""]);
 
         let agents =
@@ -1776,14 +1020,12 @@ mod tests {
         assert!(agents.iter().any(|agent| agent.id == "claude-code"));
         assert!(term.output.iter().any(|line| line.contains("Agents")));
         assert!(normalized_output(&term).contains("Claude Code"));
-
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn project_picker_skips_detected_agents_shortcut() {
         let root = temp_dir("project-picker-detected");
-        let context = test_context(&root);
+        let context = test_context(root.path());
         fs::create_dir_all(context.home.join(".claude")).unwrap();
 
         let additional_agents = AGENTS
@@ -1804,14 +1046,12 @@ mod tests {
         assert!(agents.iter().any(|agent| agent.id == "augment"));
         assert!(term.output.iter().any(|line| line.contains("Agents")));
         assert!(term.output.iter().any(|line| line.contains("Augment")));
-
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn all_detected_flag_still_uses_detected_agents() {
         let root = temp_dir("all-detected");
-        let context = test_context(&root);
+        let context = test_context(root.path());
         fs::create_dir_all(context.home.join(".claude")).unwrap();
         fs::create_dir_all(context.home.join(".cursor")).unwrap();
         let mut term = TestTerminal::new();
@@ -1824,14 +1064,12 @@ mod tests {
         assert_eq!(agents[1].id, "cursor");
         assert!(term.output.iter().any(|line| line.contains("Agents")));
         assert!(term.output.iter().any(|line| line.contains("Cursor")));
-
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn global_picker_requires_at_least_one_selection() {
         let root = temp_dir("global-picker-empty");
-        let context = test_context(&root);
+        let context = test_context(root.path());
         let mut term = TestTerminal::new().with_inputs(vec![""]);
 
         let result = resolve_agents(vec![], false, InstallScope::Global, &context, &mut term);
@@ -1840,14 +1078,12 @@ mod tests {
             result,
             Err(CliError::Skills(SkillsError::NoAgentsSelected))
         ));
-
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn global_picker_resolves_selected_agents() {
         let root = temp_dir("global-picker");
-        let context = test_context(&root);
+        let context = test_context(root.path());
         let selectable_agents = AGENTS
             .iter()
             .filter(|agent| agent.selectable)
@@ -1869,27 +1105,5 @@ mod tests {
         assert_eq!(agents.len(), 2);
         assert_eq!(agents[0].id, "codex");
         assert_eq!(agents[1].id, "augment");
-
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn registry_file_paths_include_declared_skill_files() {
-        let skill = sample_registry_skill();
-        let files = registry_file_paths(&skill).unwrap();
-
-        assert_eq!(
-            files,
-            vec![
-                "chroma-cloud/SKILL.md".to_string(),
-                "chroma-cloud/cli.md".to_string(),
-                "chroma-cloud/querying/python.md".to_string(),
-                "chroma-cloud/querying/typescript.md".to_string(),
-            ]
-        );
-        assert_eq!(
-            skill_relative_path(&skill, "chroma-cloud/querying/typescript.md").unwrap(),
-            PathBuf::from("querying/typescript.md")
-        );
     }
 }

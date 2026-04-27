@@ -12,11 +12,11 @@ pub fn accent_bold(text: impl Into<String>) -> ColoredString {
 }
 
 pub fn section_header(text: impl Into<String>) -> ColoredString {
-    color(text, ACCENT_COLOR).bold()
+    accent_bold(text)
 }
 
 pub fn status_label(text: impl Into<String>) -> ColoredString {
-    color(text, ACCENT_COLOR).bold()
+    accent_bold(text)
 }
 
 pub fn command(text: impl Into<String>) -> ColoredString {
