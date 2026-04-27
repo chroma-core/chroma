@@ -1483,6 +1483,7 @@ mod tests {
             system,
             storage,
             Log::InMemory(InMemoryLog::new()),
+            None,
             root_manager,
             crate::types::CleanupMode::DeleteV2,
             1,

@@ -546,6 +546,7 @@ mod tests {
             mode: CleanupMode::DeleteV2,
             storage: storage.clone(),
             logs: Log::InMemory(InMemoryLog::new()),
+            regions_and_topologies: None,
             enable_dangerous_option_to_ignore_min_versions_for_wal3: false,
         }
         .run(&DeleteUnusedLogsInput {
@@ -588,6 +589,7 @@ mod tests {
             mode: CleanupMode::DryRunV2,
             storage: storage.clone(),
             logs: Log::InMemory(InMemoryLog::new()),
+            regions_and_topologies: None,
             enable_dangerous_option_to_ignore_min_versions_for_wal3: false,
         }
         .run(&DeleteUnusedLogsInput {
@@ -620,6 +622,7 @@ mod tests {
             mode: CleanupMode::DeleteV2,
             storage: storage.clone(),
             logs: Log::InMemory(InMemoryLog::new()),
+            regions_and_topologies: None,
             enable_dangerous_option_to_ignore_min_versions_for_wal3: false,
         }
         .run(&DeleteUnusedLogsInput {

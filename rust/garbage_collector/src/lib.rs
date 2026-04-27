@@ -240,6 +240,7 @@ mod tests {
             SysDb::Test(TestSysDb::new()),
             storage.clone(),
             Log::InMemory(InMemoryLog::new()),
+            None,
             Box::new(RendezvousHashingAssignmentPolicy::default()),
             RootManager::new(storage, Box::new(NopCache)),
         );
@@ -295,6 +296,7 @@ mod tests {
             sysdb,
             storage.clone(),
             Log::InMemory(InMemoryLog::new()),
+            None,
             Box::new(RendezvousHashingAssignmentPolicy::default()),
             RootManager::new(storage, Box::new(NopCache)),
         );

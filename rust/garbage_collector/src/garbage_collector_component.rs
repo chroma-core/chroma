@@ -864,6 +864,7 @@ mod tests {
             sysdb_client,
             storage.clone(),
             Log::InMemory(InMemoryLog::new()),
+            None,
             assignment_policy,
             RootManager::new(storage, Box::new(NopCache)),
         )
