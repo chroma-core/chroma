@@ -373,6 +373,7 @@ def round_robin(round_index, round_around):
     not MULTI_REGION_ENABLED,
     reason="MCMR GC coverage requires a multi-region Kubernetes cluster",
 )
+@pytest.mark.skip_single_region
 def test_add_gc_hard_deletes_mcmr_collection() -> None:
     client1, client2 = _create_mcmr_clients()
     _create_isolated_database_mcmr(client1, client2, "tilt-spanning")
