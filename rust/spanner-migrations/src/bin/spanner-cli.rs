@@ -25,12 +25,10 @@ fn main() {
                 eprintln!("failed to spawn spanner-cli: {}", err);
                 std::process::exit(1);
             });
-        let exit = pid
-            .wait()
-            .unwrap_or_else(|err| {
-                eprintln!("failed while waiting for spanner-cli: {}", err);
-                std::process::exit(1);
-            });
+        let exit = pid.wait().unwrap_or_else(|err| {
+            eprintln!("failed while waiting for spanner-cli: {}", err);
+            std::process::exit(1);
+        });
         std::process::exit(exit_code(exit));
     }
     eprintln!(
