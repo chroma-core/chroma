@@ -13,7 +13,7 @@ use chroma_cache::CacheConfig;
 use chroma_config::helpers::{deserialize_duration_from_seconds, serialize_duration_to_seconds};
 use chroma_config::spanner::{SpannerChannelConfig, SpannerConfig, SpannerSessionPoolConfig};
 use chroma_config::Configurable;
-use chroma_error::ChromaError;
+use chroma_error::{ChromaError, status_from_chroma_error};
 use chroma_faults::FaultRegistry;
 use chroma_log::config::GrpcLogConfig;
 use chroma_storage::config::StorageConfig;
@@ -96,10 +96,6 @@ fn status_with_backoff_reason(
         reason.parse().expect("valid ascii metadata value"),
     );
     Status::with_metadata(code, message, metadata)
-}
-
-fn status_from_chroma_error(err: impl ChromaError + std::fmt::Display) -> Status {
-    Status::new(err.code().into(), err.to_string())
 }
 
 /// Converts a SpannerSessionPoolConfig to the library's SessionConfig.
