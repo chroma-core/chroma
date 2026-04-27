@@ -13,7 +13,7 @@ use chroma_cache::CacheConfig;
 use chroma_config::helpers::{deserialize_duration_from_seconds, serialize_duration_to_seconds};
 use chroma_config::spanner::{SpannerChannelConfig, SpannerConfig, SpannerSessionPoolConfig};
 use chroma_config::Configurable;
-use chroma_error::{ChromaError, status_from_chroma_error};
+use chroma_error::{status_from_chroma_error, ChromaError};
 use chroma_faults::FaultRegistry;
 use chroma_log::config::GrpcLogConfig;
 use chroma_storage::config::StorageConfig;
