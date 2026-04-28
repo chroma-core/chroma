@@ -22,8 +22,8 @@ use chroma_system::{
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    Chunk, CollectionUuid, JobId, LogRecord, SegmentFlushInfo, SegmentScope, SegmentShard,
-    SegmentShardError,
+    Chunk, CollectionUuid, JobId, LogRecord, SchemaMismatchError, SegmentFlushInfo, SegmentScope,
+    SegmentShard, SegmentShardError,
 };
 use opentelemetry::trace::TraceContextExt;
 use std::sync::{atomic::AtomicU32, Arc};
@@ -99,6 +99,10 @@ pub enum LogFetchOrchestratorError {
     RecvError(#[from] RecvError),
     #[error("Error creating quantized spann writer: {0}")]
     QuantizedSpannSegment(#[from] chroma_segment::quantized_spann::QuantizedSpannSegmentError),
+    #[error("Schema/file_path mismatch: {0}")]
+    SchemaMismatch(SchemaMismatchError),
+    #[error("Multi-shard migration via rebuild is not supported: {0}")]
+    MultiShardMigrationNotSupported(SchemaMismatchError),
     #[error(transparent)]
     SegmentShard(#[from] SegmentShardError),
     #[error("Error creating spann writer: {0}")]
@@ -119,6 +123,10 @@ impl ChromaError for LogFetchOrchestratorError {
     fn code(&self) -> ErrorCodes {
         match self {
             LogFetchOrchestratorError::Aborted => ErrorCodes::Aborted,
+            LogFetchOrchestratorError::SchemaMismatch(_)
+            | LogFetchOrchestratorError::MultiShardMigrationNotSupported(_) => {
+                ErrorCodes::FailedPrecondition
+            }
             _ => ErrorCodes::Internal,
         }
     }
@@ -138,10 +146,12 @@ impl ChromaError for LogFetchOrchestratorError {
                 Self::InvariantViolation(_) => true,
                 Self::MaterializeLogs(e) => e.should_trace_error(),
                 Self::MetadataSegment(e) => e.should_trace_error(),
+                Self::MultiShardMigrationNotSupported(_) => true,
                 Self::Panic(e) => e.should_trace_error(),
                 Self::Partition(e) => e.should_trace_error(),
                 Self::PrefetchSegment(e) => e.should_trace_error(),
                 Self::QuantizedSpannSegment(e) => e.should_trace_error(),
+                Self::SchemaMismatch(_) => true,
                 Self::SegmentShard(e) => e.should_trace_error(),
                 Self::RecordSegmentReader(e) => e.should_trace_error(),
                 Self::RecordSegmentReaderShard(e) => e.should_trace_error(),
@@ -630,6 +640,69 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                 return;
             }
         };
+
+        // Check that on-disk file_path shape matches what the schema implies.
+        // During migration the two diverge; incremental compaction is blocked
+        // until a rebuild reconciles them.
+        if let Some(schema) = collection.schema.as_ref() {
+            let mismatch = output
+                .vector_segment
+                .matches_schema(schema)
+                .err()
+                .or_else(|| output.metadata_segment.matches_schema(schema).err())
+                .or_else(|| output.record_segment.matches_schema(schema).err());
+
+            if let Some(m) = mismatch {
+                if !self.context.is_rebuild() {
+                    tracing::error!(
+                        collection_id = %collection.collection_id,
+                        mismatch = %m,
+                        "Schema/file_path mismatch — blocking incremental compaction. \
+                         Run rebuild to migrate. This is expected during schema migrations."
+                    );
+                    self.terminate_with_result(
+                        Err(LogFetchOrchestratorError::SchemaMismatch(m)),
+                        ctx,
+                    )
+                    .await;
+                    return;
+                }
+
+                let num_shards = match output.record_segment.num_shards() {
+                    Ok(n) => n,
+                    Err(e) => {
+                        self.terminate_with_result(
+                            Err(LogFetchOrchestratorError::SegmentShard(e)),
+                            ctx,
+                        )
+                        .await;
+                        return;
+                    }
+                };
+                if num_shards > 1 {
+                    tracing::error!(
+                        collection_id = %collection.collection_id,
+                        mismatch = %m,
+                        num_shards,
+                        "Multi-shard migration via rebuild is not supported."
+                    );
+                    self.terminate_with_result(
+                        Err(LogFetchOrchestratorError::MultiShardMigrationNotSupported(
+                            m,
+                        )),
+                        ctx,
+                    )
+                    .await;
+                    return;
+                }
+
+                tracing::info!(
+                    collection_id = %collection.collection_id,
+                    mismatch = %m,
+                    "Migrating collection shape via rebuild"
+                );
+            }
+        }
 
         let mut metadata_segment = output.metadata_segment.clone();
         let mut record_segment = output.record_segment.clone();
