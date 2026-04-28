@@ -26,7 +26,7 @@ export default withChroma(nextConfig);
 
 ## Cannot return the results in a contiguous 2D array. Probably ef or M is too small
 
-This error happens when the HNSW index fails to retrieve the requested number of results for a query, given its structure and your data. he way to resolve this is to either decrease the number of results you request from a query (n_result), or increase the HNSW parameters `M`, `ef_construction`, and `ef_search`. You can read more about HNSW configurations [here](/docs/collections/configure).
+This error happens when the HNSW index fails to retrieve the requested number of results for a query, given its structure and your data. he way to resolve this is to either decrease the number of results you request from a query (n_result), or increase the HNSW parameters `M`, `ef_construction`, and `ef_search`. You can read more about HNSW configurations [here](/oss/collections/configure).
 
 ## Using .get or .query, embeddings say `None`
 
@@ -81,4 +81,4 @@ If you encounter an error like this during setup and are using Docker - you may 
 
 ## My data directory is too large
 
-If you were using Chroma prior to v0.5.6, you may be able to significantly shrink your database by [vacuuming it](/docs/cli/vacuum). After vacuuming once, automatic pruning (a new feature in v0.5.6) is enabled and will keep your database size in check.
+If you were using Chroma prior to v0.5.6, you may be able to significantly shrink your database by [vacuuming it](/oss/cli/vacuum). After vacuuming once, automatic pruning (a new feature in v0.5.6) is enabled and will keep your database size in check.

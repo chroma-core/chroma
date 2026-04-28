@@ -1,0 +1,163 @@
+---
+title: "Update Data"
+description: "Learn how to update and upsert data in Chroma collections."
+---
+
+Any property of records in a collection can be updated with `.update`:
+
+<CodeGroup>
+```python Python
+import chromadb
+
+# Run an in-memory Chroma server. Use PersistentClient(path="...") for local
+# persistence, or HttpClient(host=..., port=...) to connect to a running server.
+client = chromadb.Client()
+
+collection = client.get_collection(name="my-collection")
+
+collection.update(
+    ids=["id1", "id2", "id3"],
+    embeddings=[[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2]],
+    metadatas=[{"chapter": 3, "verse": 16}, {"chapter": 3, "verse": 5}, {"chapter": 29, "verse": 11}],
+    documents=["doc1", "doc2", "doc3"],
+)
+```
+
+```typescript TypeScript
+import { ChromaClient } from "chromadb";
+
+// Assumes a Chroma server is running at http://localhost:8000
+// Start one with: npx chroma run --path ./chroma-data
+const client = new ChromaClient();
+
+const collection = await client.getCollection({ name: "my-collection" });
+
+await collection.update({
+  ids: ["id1", "id2", "id3"],
+  embeddings: [
+    [1.1, 2.3, 3.2],
+    [4.5, 6.9, 4.4],
+    [1.1, 2.3, 3.2],
+  ],
+  metadatas: [
+    { chapter: 3, verse: 16 },
+    { chapter: 3, verse: 5 },
+    { chapter: 29, verse: 11 },
+  ],
+  documents: ["doc1", "doc2", "doc3"],
+});
+```
+
+```rust Rust
+use chroma::ChromaHttpClient;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Assumes a Chroma server is running at http://localhost:8000
+    // Start one with: chroma run --path ./chroma-data
+    let client = ChromaHttpClient::new(Default::default());
+
+    let collection = client.get_collection("my-collection").await?;
+
+    collection
+        .update(
+            vec!["id1".to_string(), "id2".to_string(), "id3".to_string()],
+            Some(vec![
+                Some(vec![1.1, 2.3, 3.2]),
+                Some(vec![4.5, 6.9, 4.4]),
+                Some(vec![1.1, 2.3, 3.2]),
+            ]),
+            Some(vec![
+                Some("doc1".to_string()),
+                Some("doc2".to_string()),
+                Some("doc3".to_string()),
+            ]),
+            None,
+            None,
+        )
+        .await?;
+
+    Ok(())
+}
+```
+</CodeGroup>
+
+If an `id` is not found in the collection, an error will be logged and the update will be ignored. If `documents` are supplied without corresponding `embeddings`, the embeddings will be recomputed with the collection's embedding function.
+
+Metadata values can include arrays — see [Adding Data](/oss/collections/add-data#metadata) for supported metadata types.
+
+If the supplied `embeddings` are not the same dimension as the collection, an exception will be raised.
+
+Chroma also supports an `upsert` operation, which updates existing items, or adds them if they don't yet exist.
+
+<CodeGroup>
+```python Python
+import chromadb
+
+client = chromadb.Client()
+collection = client.get_or_create_collection(name="my-collection")
+
+collection.upsert(
+    ids=["id1", "id2", "id3"],
+    embeddings=[[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2]],
+    metadatas=[{"chapter": 3, "verse": 16}, {"chapter": 3, "verse": 5}, {"chapter": 29, "verse": 11}],
+    documents=["doc1", "doc2", "doc3"],
+)
+```
+
+```typescript TypeScript
+import { ChromaClient } from "chromadb";
+
+const client = new ChromaClient();
+const collection = await client.getOrCreateCollection({ name: "my-collection" });
+
+await collection.upsert({
+  ids: ["id1", "id2", "id3"],
+  embeddings: [
+    [1.1, 2.3, 3.2],
+    [4.5, 6.9, 4.4],
+    [1.1, 2.3, 3.2],
+  ],
+  metadatas: [
+    { chapter: "3", verse: "16" },
+    { chapter: "3", verse: "5" },
+    { chapter: "29", verse: "11" },
+  ],
+  documents: ["doc1", "doc2", "doc3"],
+});
+```
+
+```rust Rust
+use chroma::ChromaHttpClient;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = ChromaHttpClient::new(Default::default());
+    let collection = client
+        .get_or_create_collection("my-collection", None, None)
+        .await?;
+
+    collection
+        .upsert(
+            vec!["id1".to_string(), "id2".to_string(), "id3".to_string()],
+            vec![
+                vec![1.1, 2.3, 3.2],
+                vec![4.5, 6.9, 4.4],
+                vec![1.1, 2.3, 3.2],
+            ],
+            Some(vec![
+                Some("doc1".to_string()),
+                Some("doc2".to_string()),
+                Some("doc3".to_string()),
+            ]),
+            None,
+            None,
+        )
+        .await?;
+
+    Ok(())
+}
+```
+</CodeGroup>
+
+If an `id` is not present in the collection, the corresponding items will be created as per `add`. Items with existing `id`s will be updated as per `update`.

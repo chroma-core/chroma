@@ -42,6 +42,24 @@
   mask-repeat: no-repeat;
 }
 
+/* Chroma OSS tab icon - Mintlify renders custom SVGs as <img>, so currentColor
+   can't reach the SVG's strokes. Hide the img and paint the icon via mask-image
+   so it inherits the tab's text color. */
+a:has(> img[src$="chroma_logo_icon.svg"]) > img[src$="chroma_logo_icon.svg"] {
+  display: none;
+}
+
+a:has(> img[src$="chroma_logo_icon.svg"])::before {
+  content: "";
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  background-color: currentColor;
+  -webkit-mask: url("/images/chroma_logo_icon.svg") no-repeat center / contain;
+  mask: url("/images/chroma_logo_icon.svg") no-repeat center / contain;
+}
+
 /* Override "Powered by Mintlify" → "Mintlify is powered by Chroma" */
 a[href*="mintlify.com?utm_campaign=poweredBy"] span {
   display: none;

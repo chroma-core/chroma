@@ -1,0 +1,292 @@
+---
+title: "Getting Started"
+sidebarTitle: "Getting Started"
+---
+
+Our fully managed hosted service, **Chroma Cloud** is here. [Sign up for free](https://trychroma.com/signup?utm_source=docs-getting-started).
+
+**Chroma Cloud** is a managed offering of [Distributed Chroma](/reference/architecture/distributed), operated by the same database engineers who build Chroma. Chroma Cloud implements the same APIs as open-source Chroma, but runs on a distributed vector indexing system to support much larger scale than a single instance of open-source Chroma. Chroma Cloud runs in various regions across AWS and GCP and supports multi-region replication. Chroma Cloud is serverless - you don't have to provision servers or think about operations, and is billed [based on usage](/cloud/pricing)
+
+## Quick Start
+
+The example below connects to Chroma Cloud, configures a collection for hybrid search (dense + sparse), adds a few documents, and runs a hybrid query combining semantic and keyword retrieval with Reciprocal Rank Fusion.
+
+<CodeGroup>
+```python Python
+import chromadb
+from chromadb import Schema, SparseVectorIndexConfig, K, Search, Knn, Rrf
+from chromadb.utils.embedding_functions import ChromaCloudSpladeEmbeddingFunction
+
+# 1. Create a CloudClient (config is inherited from environment variables)
+client = chromadb.CloudClient()
+
+# 2. Build a schema with a sparse vector index for hybrid search.
+#    Sparse embeddings will be generated from the document text (K.DOCUMENT)
+#    and stored in the "sparse_embedding" metadata key.
+sparse_ef = ChromaCloudSpladeEmbeddingFunction()
+schema = Schema().create_index(
+    config=SparseVectorIndexConfig(
+        source_key=K.DOCUMENT,
+        embedding_function=sparse_ef,
+    ),
+    key="sparse_embedding",
+)
+
+# 3. Get or create the collection with this schema
+collection = client.get_or_create_collection(
+    name="quickstart",
+    schema=schema,
+)
+
+# 4. Add documents - dense and sparse embeddings are generated automatically
+collection.add(
+    ids=["doc1", "doc2", "doc3"],
+    documents=[
+        "The quick brown fox jumps over the lazy dog",
+        "A fast auburn fox leaps over a sleepy canine",
+        "Machine learning is a subset of artificial intelligence",
+    ],
+    metadatas=[
+        {"category": "animals"},
+        {"category": "animals"},
+        {"category": "technology"},
+    ],
+)
+
+# 5. Query with hybrid search: combine dense semantic and sparse keyword
+#    rankings using Reciprocal Rank Fusion.
+hybrid_rank = Rrf(
+    ranks=[
+        Knn(query="fox animal", return_rank=True),
+        Knn(query="fox animal", key="sparse_embedding", return_rank=True),
+    ],
+    weights=[0.7, 0.3],
+    k=60,
+)
+
+search = (Search()
+    .rank(hybrid_rank)
+    .limit(10)
+    .select(K.DOCUMENT, K.SCORE))
+
+results = collection.search(search)
+
+for row in results.rows()[0]:
+    print(f"Score: {row['score']:.3f} - {row['document']}")
+```
+
+```typescript TypeScript
+import {
+  CloudClient,
+  Schema,
+  SparseVectorIndexConfig,
+  K,
+  Search,
+  Knn,
+  Rrf,
+} from "chromadb";
+import { ChromaCloudSpladeEmbeddingFunction } from "@chroma-core/chroma-cloud-splade";
+
+// 1. Create a CloudClient (config is inherited from environment variables)
+const client = new CloudClient();
+
+// 2. Build a schema with a sparse vector index for hybrid search.
+//    Sparse embeddings will be generated from the document text (K.DOCUMENT)
+//    and stored in the "sparse_embedding" metadata key.
+const sparseEf = new ChromaCloudSpladeEmbeddingFunction({
+  apiKeyEnvVar: "CHROMA_API_KEY",
+});
+const schema = new Schema().createIndex(
+  new SparseVectorIndexConfig({
+    sourceKey: K.DOCUMENT,
+    embeddingFunction: sparseEf,
+  }),
+  "sparse_embedding",
+);
+
+// 3. Get or create the collection with this schema
+const collection = await client.getOrCreateCollection({
+  name: "quickstart",
+  schema,
+});
+
+// 4. Add documents - dense and sparse embeddings are generated automatically
+await collection.add({
+  ids: ["doc1", "doc2", "doc3"],
+  documents: [
+    "The quick brown fox jumps over the lazy dog",
+    "A fast auburn fox leaps over a sleepy canine",
+    "Machine learning is a subset of artificial intelligence",
+  ],
+  metadatas: [
+    { category: "animals" },
+    { category: "animals" },
+    { category: "technology" },
+  ],
+});
+
+// 5. Query with hybrid search: combine dense semantic and sparse keyword
+//    rankings using Reciprocal Rank Fusion.
+const hybridRank = Rrf({
+  ranks: [
+    Knn({ query: "fox animal", returnRank: true }),
+    Knn({ query: "fox animal", key: "sparse_embedding", returnRank: true }),
+  ],
+  weights: [0.7, 0.3],
+  k: 60,
+});
+
+const search = new Search()
+  .rank(hybridRank)
+  .limit(10)
+  .select(K.DOCUMENT, K.SCORE);
+
+const results = await collection.search(search);
+
+for (const row of results.rows()[0]) {
+  console.log(`Score: ${row.score.toFixed(3)} - ${row.document}`);
+}
+```
+
+```rust Rust
+use chroma::embed::bm25::BM25SparseEmbeddingFunction;
+use chroma::types::{
+    rrf, Key, Metadata, QueryVector, RankExpr, Schema, SearchPayload, SparseVectorIndexConfig,
+};
+use chroma::ChromaHttpClient;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // 1. Create a CloudClient (config is inherited from environment variables)
+    let client = ChromaHttpClient::cloud()?;
+
+    // 2. Build a schema with a sparse vector index for hybrid search.
+    //    In Rust, sparse embeddings are computed client-side (BM25 shown here)
+    //    and stored in the "sparse_embedding" metadata key.
+    let schema = Schema::default().create_index(
+        Some("sparse_embedding"),
+        SparseVectorIndexConfig {
+            embedding_function: None,
+            source_key: None,
+            bm25: Some(true),
+        }
+        .into(),
+    )?;
+
+    // 3. Get or create the collection with this schema
+    let collection = client
+        .get_or_create_collection("quickstart", Some(schema), None)
+        .await?;
+
+    // 4. Add documents with dense embeddings and BM25 sparse vectors
+    let ids = vec!["doc1".to_string(), "doc2".to_string(), "doc3".to_string()];
+    let documents = vec![
+        "The quick brown fox jumps over the lazy dog",
+        "A fast auburn fox leaps over a sleepy canine",
+        "Machine learning is a subset of artificial intelligence",
+    ];
+    let dense_embeddings = vec![
+        vec![0.9, 0.1, 0.0],
+        vec![0.8, 0.2, 0.0],
+        vec![0.0, 0.1, 0.9],
+    ];
+    let categories = ["animals", "animals", "technology"];
+
+    let bm25 = BM25SparseEmbeddingFunction::default_murmur3_abs();
+    let metadatas: Vec<Option<Metadata>> = documents
+        .iter()
+        .zip(categories.iter())
+        .map(|(doc, category)| {
+            let mut metadata = Metadata::new();
+            metadata.insert("category".into(), (*category).into());
+            let sparse = bm25.encode(doc).expect("BM25 encoding failed");
+            metadata.insert("sparse_embedding".into(), sparse.into());
+            Some(metadata)
+        })
+        .collect();
+
+    collection
+        .add(
+            ids,
+            dense_embeddings,
+            Some(documents.iter().map(|d| Some(d.to_string())).collect()),
+            None,
+            Some(metadatas),
+        )
+        .await?;
+
+    // 5. Query with hybrid search: combine dense semantic and sparse keyword
+    //    rankings using Reciprocal Rank Fusion.
+    let dense_query = vec![1.0, 0.0, 0.0];
+    let sparse_query = bm25.encode("fox animal")?;
+
+    let dense_rank = RankExpr::Knn {
+        query: QueryVector::Dense(dense_query),
+        key: Key::Embedding,
+        limit: 100,
+        default: None,
+        return_rank: true,
+    };
+    let sparse_rank = RankExpr::Knn {
+        query: QueryVector::Sparse(sparse_query),
+        key: Key::field("sparse_embedding"),
+        limit: 100,
+        default: None,
+        return_rank: true,
+    };
+    let hybrid_rank = rrf(
+        vec![dense_rank, sparse_rank],
+        Some(60),             // k
+        Some(vec![0.7, 0.3]), // weights
+        false,                // normalize
+    )?;
+
+    let search = SearchPayload::default()
+        .rank(hybrid_rank)
+        .limit(Some(10), 0)
+        .select([Key::Document, Key::Score]);
+
+    let response = collection.search(vec![search]).await?;
+
+    for (i, _id) in response.ids[0].iter().enumerate() {
+        let score = response.scores[0]
+            .as_ref()
+            .and_then(|s| s.get(i))
+            .and_then(|s| *s)
+            .map(|s| format!("{:.3}", s))
+            .unwrap_or_else(|| "N/A".to_string());
+        let document = response.documents[0]
+            .as_ref()
+            .and_then(|d| d.get(i))
+            .and_then(|d| d.as_ref())
+            .cloned()
+            .unwrap_or_default();
+        println!("Score: {} - {}", score, document);
+    }
+
+    Ok(())
+}
+```
+</CodeGroup>
+
+### Easy to use and operate
+
+Chroma Cloud is designed to require minimal configuration while still delivering top-tier performance, scale, and reliability. You can get started in under 30 seconds, and as your workload grows, Chroma Cloud handles scaling automatically-no tuning, provisioning, or operations required. Its architecture is built around a custom Rust-based execution engine and high-performance vector and full-text indexes, enabling fast query performance even under heavy loads.
+
+### Reliability
+
+Reliability and accuracy are core to the design. Chroma Cloud is thoroughly tested, with production systems achieving over 90% recall and being continuously monitored for correctness. Thanks to its object storage-based persistence layer, Chroma Cloud is often an order of magnitude more cost-effective than alternatives, without compromising on performance or durability.
+
+### Security and Deployment
+
+Chroma Cloud is SOC 2 Type II certified, and offers deployment flexibility to match your needs. You can sign up for our fully-managed multi-tenant cluster currently running in AWS us-east-1 or contact us for single-tenant deployment managed by Chroma or hosted in your own VPC (BYOC). If you ever want to self-host open source Chroma, we will help you transition your data from Cloud to your self-managed deployment.
+
+### Dashboard
+
+Our web dashboard lets your team work together to view your data, and ensure data quality in your collections with ease. It also serves as a touchpoint for you to view billing data and usage telemetry.
+
+### Advanced Search API
+
+Chroma Cloud introduces a powerful [Search API](/cloud/search-api/overview) that enables hybrid search with advanced filtering, custom ranking expressions, and batch operations. Combine vector similarity with metadata filtering using an intuitive builder pattern or flexible dictionary syntax.
+
+Chroma Cloud is open-source at its core, expanded to support high availability and distributed workloads. Whether you're building a prototype or running a mission-critical production workload, Chroma Cloud is the fastest path to reliable, scalable, and accurate retrieval.
