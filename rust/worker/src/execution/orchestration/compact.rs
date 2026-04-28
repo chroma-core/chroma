@@ -1060,9 +1060,11 @@ mod tests {
     use chroma_system::{ComponentHandle, Dispatcher, DispatcherConfig, Orchestrator, System};
     use chroma_types::{
         operator::{Filter, Limit, Projection, ProjectionRecord},
-        Collection, DocumentExpression, DocumentOperator, MetadataExpression, PrimitiveOperator,
-        Segment, SegmentShard, SegmentType, SegmentUuid, Where,
+        Collection, CollectionAndSegments, CollectionUuid, DocumentExpression, DocumentOperator,
+        LogRecord, MetadataExpression, PrimitiveOperator, Segment, SegmentShard, SegmentType,
+        SegmentUuid, UpdateMetadataValue, Where,
     };
+    use chroma_types::{Operation, OperationRecord};
     use futures::TryStreamExt;
     use regex::Regex;
 
@@ -1194,6 +1196,248 @@ mod tests {
             .into_iter()
             .map(|record| (record.id.clone(), record))
             .collect()
+    }
+
+    async fn create_spann_test_collection(
+        sysdb: &mut SysDb,
+        test_segments: &mut TestDistributedSegment,
+    ) -> DatabaseName {
+        test_segments.collection.config =
+            chroma_types::InternalCollectionConfiguration::default_spann();
+        test_segments.collection.schema = Some(
+            chroma_types::Schema::try_from(&test_segments.collection.config)
+                .expect("Should be able to create schema from config"),
+        );
+        test_segments.vector_segment.r#type = SegmentType::Spann;
+
+        let database_name = DatabaseName::new(test_segments.collection.database.clone())
+            .expect("database name should be valid");
+        sysdb
+            .create_collection(
+                test_segments.collection.tenant.clone(),
+                database_name.clone(),
+                test_segments.collection.collection_id,
+                test_segments.collection.name.clone(),
+                vec![
+                    test_segments.record_segment.clone(),
+                    test_segments.metadata_segment.clone(),
+                    test_segments.vector_segment.clone(),
+                ],
+                Some(test_segments.collection.config.clone()),
+                Some(test_segments.collection.schema.clone().unwrap()),
+                None,
+                test_segments.collection.dimension,
+                false,
+            )
+            .await
+            .expect("Collection create should be successful");
+
+        database_name
+    }
+
+    fn append_logs(
+        log: &mut InMemoryLog,
+        collection_id: CollectionUuid,
+        records: &[LogRecord],
+        next_log_offset: &mut i64,
+    ) {
+        for record in records {
+            let mut record = record.clone();
+            record.log_offset = *next_log_offset;
+            log.add_log(
+                collection_id,
+                InternalLogRecord {
+                    collection_id,
+                    log_offset: *next_log_offset,
+                    log_ts: *next_log_offset + 1,
+                    record,
+                },
+            );
+            *next_log_offset += 1;
+        }
+    }
+
+    fn make_pending_log_record(
+        id: &str,
+        operation: Operation,
+        document: Option<&str>,
+    ) -> LogRecord {
+        let metadata = match operation {
+            Operation::Add | Operation::Update | Operation::Upsert => Some(HashMap::from([(
+                "pending_wal_marker".to_string(),
+                UpdateMetadataValue::Str(format!("marker-{id}")),
+            )])),
+            Operation::Delete | Operation::BackfillFn => None,
+        };
+        LogRecord {
+            log_offset: 0,
+            record: OperationRecord {
+                id: id.to_string(),
+                embedding: match operation {
+                    Operation::Add | Operation::Upsert => Some(vec![0.0; 6]),
+                    Operation::Update | Operation::Delete | Operation::BackfillFn => None,
+                },
+                encoding: None,
+                metadata,
+                document: document.map(ToString::to_string),
+                operation,
+            },
+        }
+    }
+
+    async fn get_all_records_for_all_shards(
+        system: &System,
+        dispatcher_handle: &ComponentHandle<Dispatcher>,
+        blockfile_provider: BlockfileProvider,
+        log: Log,
+        cas: CollectionAndSegments,
+        bloom_filter_manager: Option<chroma_segment::bloom_filter::BloomFilterManager>,
+    ) -> HashMap<String, ProjectionRecord> {
+        let num_shards = cas
+            .record_segment
+            .num_shards()
+            .expect("record segment shard count should be valid") as u32;
+        let start_log_offset_id = cas.collection.log_position.saturating_add(1).max(0) as u64;
+        let database_name =
+            DatabaseName::new(cas.collection.database.clone()).expect("database name is valid");
+        let mut log_for_scout = log.clone();
+        let log_upper_bound_offset = log_for_scout
+            .scout_logs(
+                &cas.collection.tenant,
+                database_name.clone(),
+                cas.collection.collection_id,
+                start_log_offset_id,
+            )
+            .await
+            .expect("Should scout log upper bound") as i64;
+        let mut records = HashMap::new();
+
+        for shard_index in 0..num_shards {
+            let fetch_log = FetchLogOperator {
+                log_client: log.clone(),
+                batch_size: 50,
+                start_log_offset_id,
+                maximum_fetch_count: None,
+                collection_uuid: cas.collection.collection_id,
+                tenant: cas.collection.tenant.clone(),
+                database_name: database_name.clone(),
+                fetch_log_concurrency: 10,
+                fragment_fetcher: None,
+                log_upper_bound_offset,
+            };
+            let get_orchestrator = GetOrchestrator::new(
+                blockfile_provider.clone(),
+                dispatcher_handle.clone(),
+                1000,
+                cas.clone(),
+                fetch_log,
+                Filter {
+                    query_ids: None,
+                    where_clause: None,
+                },
+                Limit {
+                    offset: 0,
+                    limit: None,
+                },
+                Projection {
+                    document: true,
+                    embedding: true,
+                    metadata: true,
+                },
+                bloom_filter_manager.clone(),
+                shard_index,
+                num_shards,
+            );
+
+            let shard_result = get_orchestrator
+                .run(system.clone())
+                .await
+                .expect("Get orchestrator should not fail");
+            for record in shard_result.result.records {
+                let previous = records.insert(record.id.clone(), record);
+                assert!(
+                    previous.is_none(),
+                    "record should be returned by only one shard"
+                );
+            }
+        }
+
+        records
+    }
+
+    fn assert_record_maps_equal(
+        expected: &HashMap<String, ProjectionRecord>,
+        actual: &HashMap<String, ProjectionRecord>,
+        context: &str,
+    ) {
+        assert_eq!(
+            expected.len(),
+            actual.len(),
+            "{context}: record count should match"
+        );
+        for (id, expected_record) in expected {
+            let actual_record = actual
+                .get(id)
+                .unwrap_or_else(|| panic!("{context}: missing record {id}"));
+            assert_eq!(
+                expected_record, actual_record,
+                "{context}: record {id} should match"
+            );
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn assert_sharded_records_match_baseline(
+        system: &System,
+        dispatcher_handle: &ComponentHandle<Dispatcher>,
+        baseline_segments: &TestDistributedSegment,
+        baseline_sysdb: &mut SysDb,
+        baseline_collection_id: CollectionUuid,
+        baseline_log: &InMemoryLog,
+        sharded_segments: &TestDistributedSegment,
+        sharded_sysdb: &mut SysDb,
+        sharded_collection_id: CollectionUuid,
+        sharded_log: &InMemoryLog,
+        expected_sharded_record_shards: usize,
+        context: &str,
+    ) {
+        let baseline_cas = baseline_sysdb
+            .get_collection_with_segments(None, baseline_collection_id)
+            .await
+            .expect("Should get baseline collection");
+        let sharded_cas = sharded_sysdb
+            .get_collection_with_segments(None, sharded_collection_id)
+            .await
+            .expect("Should get sharded collection");
+
+        let sharded_num_record_shards = sharded_cas
+            .record_segment
+            .num_shards()
+            .expect("sharded record segment shard count should be valid");
+        assert_eq!(
+            sharded_num_record_shards, expected_sharded_record_shards,
+            "{context}: sharded collection should have expected record shard count"
+        );
+
+        let baseline_records = get_all_records_for_all_shards(
+            system,
+            dispatcher_handle,
+            baseline_segments.blockfile_provider.clone(),
+            Log::InMemory(baseline_log.clone()),
+            baseline_cas,
+            baseline_segments.bloom_filter_manager.clone(),
+        )
+        .await;
+        let sharded_records = get_all_records_for_all_shards(
+            system,
+            dispatcher_handle,
+            sharded_segments.blockfile_provider.clone(),
+            Log::InMemory(sharded_log.clone()),
+            sharded_cas,
+            sharded_segments.bloom_filter_manager.clone(),
+        )
+        .await;
+        assert_record_maps_equal(&baseline_records, &sharded_records, context);
     }
 
     #[tokio::test]
@@ -4350,6 +4594,1027 @@ mod tests {
 
             // Update old_cas for next iteration
             old_cas = new_cas;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sharded_worker_reads_match_unsharded_baseline() {
+        let config = RootConfig::default();
+        let system = System::default();
+        let registry = Registry::new();
+        let dispatcher = Dispatcher::try_from_config(&config.query_service.dispatcher, &registry)
+            .await
+            .expect("Should be able to initialize dispatcher");
+        let dispatcher_handle = system.start_component(dispatcher);
+
+        let mut baseline_sysdb = SysDb::Test(TestSysDb::new());
+        let mut baseline_segments = TestDistributedSegment::new_with_dimension(6).await;
+        let baseline_database_name =
+            create_spann_test_collection(&mut baseline_sysdb, &mut baseline_segments).await;
+        let baseline_collection_id = baseline_segments.collection.collection_id;
+        let mut baseline_log = InMemoryLog::new();
+        let mut baseline_log_offset = 0i64;
+
+        let mut sharded_sysdb = SysDb::Test(TestSysDb::new());
+        let mut sharded_segments = TestDistributedSegment::new_with_dimension(6).await;
+        let sharded_database_name =
+            create_spann_test_collection(&mut sharded_sysdb, &mut sharded_segments).await;
+        let sharded_collection_id = sharded_segments.collection.collection_id;
+        let mut sharded_log = InMemoryLog::new();
+        let mut sharded_log_offset = 0i64;
+
+        // Feed the exact same generated records into both logs so record payloads
+        // are byte-for-byte comparable even though the collections differ.
+        for batch_num in 0..2 {
+            let start = batch_num * 60 + 1;
+            let end = (batch_num + 1) * 60;
+            let batch_logs = add_delete_generator.generate_vec(start..=end);
+
+            append_logs(
+                &mut baseline_log,
+                baseline_collection_id,
+                &batch_logs,
+                &mut baseline_log_offset,
+            );
+            append_logs(
+                &mut sharded_log,
+                sharded_collection_id,
+                &batch_logs,
+                &mut sharded_log_offset,
+            );
+
+            let baseline_compact_result = Box::pin(compact(
+                system.clone(),
+                baseline_collection_id,
+                baseline_database_name.clone(),
+                None,
+                1,
+                10,
+                100,
+                1000,
+                Log::InMemory(baseline_log.clone()),
+                baseline_sysdb.clone(),
+                baseline_segments.blockfile_provider.clone(),
+                baseline_segments.hnsw_provider.clone(),
+                baseline_segments.spann_provider.clone(),
+                dispatcher_handle.clone(),
+                false,
+                None,
+                None,
+                None,
+                None,
+            ))
+            .await;
+            assert!(
+                baseline_compact_result.is_ok(),
+                "Baseline compaction batch {} failed: {:?}",
+                batch_num,
+                baseline_compact_result.err()
+            );
+
+            let sharded_compact_result = Box::pin(compact(
+                system.clone(),
+                sharded_collection_id,
+                sharded_database_name.clone(),
+                None,
+                1,
+                10,
+                100,
+                1000,
+                Log::InMemory(sharded_log.clone()),
+                sharded_sysdb.clone(),
+                sharded_segments.blockfile_provider.clone(),
+                sharded_segments.hnsw_provider.clone(),
+                sharded_segments.spann_provider.clone(),
+                dispatcher_handle.clone(),
+                false,
+                None,
+                None,
+                Some(50),
+                None,
+            ))
+            .await;
+            assert!(
+                sharded_compact_result.is_ok(),
+                "Sharded compaction batch {} failed: {:?}",
+                batch_num,
+                sharded_compact_result.err()
+            );
+
+            assert_sharded_records_match_baseline(
+                &system,
+                &dispatcher_handle,
+                &baseline_segments,
+                &mut baseline_sysdb,
+                baseline_collection_id,
+                &baseline_log,
+                &sharded_segments,
+                &mut sharded_sysdb,
+                sharded_collection_id,
+                &sharded_log,
+                batch_num + 1,
+                &format!("after compaction batch {batch_num}"),
+            )
+            .await;
+        }
+
+        let pending_logs = add_delete_generator.generate_vec(121..=132);
+        append_logs(
+            &mut baseline_log,
+            baseline_collection_id,
+            &pending_logs,
+            &mut baseline_log_offset,
+        );
+        append_logs(
+            &mut sharded_log,
+            sharded_collection_id,
+            &pending_logs,
+            &mut sharded_log_offset,
+        );
+
+        assert_sharded_records_match_baseline(
+            &system,
+            &dispatcher_handle,
+            &baseline_segments,
+            &mut baseline_sysdb,
+            baseline_collection_id,
+            &baseline_log,
+            &sharded_segments,
+            &mut sharded_sysdb,
+            sharded_collection_id,
+            &sharded_log,
+            2,
+            "with pending WAL",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_sharded_worker_reads_route_cross_shard_pending_updates_and_deletes() {
+        let config = RootConfig::default();
+        let system = System::default();
+        let registry = Registry::new();
+        let dispatcher = Dispatcher::try_from_config(&config.query_service.dispatcher, &registry)
+            .await
+            .expect("Should be able to initialize dispatcher");
+        let dispatcher_handle = system.start_component(dispatcher);
+
+        let mut baseline_sysdb = SysDb::Test(TestSysDb::new());
+        let mut baseline_segments = TestDistributedSegment::new_with_dimension(6).await;
+        let baseline_database_name =
+            create_spann_test_collection(&mut baseline_sysdb, &mut baseline_segments).await;
+        let baseline_collection_id = baseline_segments.collection.collection_id;
+        let mut baseline_log = InMemoryLog::new();
+        let mut baseline_log_offset = 0i64;
+
+        let mut sharded_sysdb = SysDb::Test(TestSysDb::new());
+        let mut sharded_segments = TestDistributedSegment::new_with_dimension(6).await;
+        let sharded_database_name =
+            create_spann_test_collection(&mut sharded_sysdb, &mut sharded_segments).await;
+        let sharded_collection_id = sharded_segments.collection.collection_id;
+        let mut sharded_log = InMemoryLog::new();
+        let mut sharded_log_offset = 0i64;
+
+        for batch_num in 0..2 {
+            let start = batch_num * 60 + 1;
+            let end = (batch_num + 1) * 60;
+            let batch_logs = add_delete_generator.generate_vec(start..=end);
+
+            append_logs(
+                &mut baseline_log,
+                baseline_collection_id,
+                &batch_logs,
+                &mut baseline_log_offset,
+            );
+            append_logs(
+                &mut sharded_log,
+                sharded_collection_id,
+                &batch_logs,
+                &mut sharded_log_offset,
+            );
+
+            let baseline_compact_result = Box::pin(compact(
+                system.clone(),
+                baseline_collection_id,
+                baseline_database_name.clone(),
+                None,
+                1,
+                10,
+                100,
+                1000,
+                Log::InMemory(baseline_log.clone()),
+                baseline_sysdb.clone(),
+                baseline_segments.blockfile_provider.clone(),
+                baseline_segments.hnsw_provider.clone(),
+                baseline_segments.spann_provider.clone(),
+                dispatcher_handle.clone(),
+                false,
+                None,
+                None,
+                None,
+                None,
+            ))
+            .await;
+            assert!(
+                baseline_compact_result.is_ok(),
+                "Baseline compaction batch {} failed: {:?}",
+                batch_num,
+                baseline_compact_result.err()
+            );
+
+            let sharded_compact_result = Box::pin(compact(
+                system.clone(),
+                sharded_collection_id,
+                sharded_database_name.clone(),
+                None,
+                1,
+                10,
+                100,
+                1000,
+                Log::InMemory(sharded_log.clone()),
+                sharded_sysdb.clone(),
+                sharded_segments.blockfile_provider.clone(),
+                sharded_segments.hnsw_provider.clone(),
+                sharded_segments.spann_provider.clone(),
+                dispatcher_handle.clone(),
+                false,
+                None,
+                None,
+                Some(50),
+                None,
+            ))
+            .await;
+            assert!(
+                sharded_compact_result.is_ok(),
+                "Sharded compaction batch {} failed: {:?}",
+                batch_num,
+                sharded_compact_result.err()
+            );
+        }
+
+        assert_sharded_records_match_baseline(
+            &system,
+            &dispatcher_handle,
+            &baseline_segments,
+            &mut baseline_sysdb,
+            baseline_collection_id,
+            &baseline_log,
+            &sharded_segments,
+            &mut sharded_sysdb,
+            sharded_collection_id,
+            &sharded_log,
+            2,
+            "before cross-shard pending WAL",
+        )
+        .await;
+
+        let pending_updates = vec![
+            make_pending_log_record(
+                "id_25",
+                Operation::Update,
+                Some("updated document from shard 0"),
+            ),
+            make_pending_log_record(
+                "id_55",
+                Operation::Update,
+                Some("updated document from shard 1"),
+            ),
+            make_pending_log_record("id_101", Operation::Add, Some("brand new pending document")),
+        ];
+        append_logs(
+            &mut baseline_log,
+            baseline_collection_id,
+            &pending_updates,
+            &mut baseline_log_offset,
+        );
+        append_logs(
+            &mut sharded_log,
+            sharded_collection_id,
+            &pending_updates,
+            &mut sharded_log_offset,
+        );
+
+        let baseline_cas_after_updates = baseline_sysdb
+            .get_collection_with_segments(None, baseline_collection_id)
+            .await
+            .expect("Should get baseline collection after pending updates");
+        let sharded_cas_after_updates = sharded_sysdb
+            .get_collection_with_segments(None, sharded_collection_id)
+            .await
+            .expect("Should get sharded collection after pending updates");
+        let baseline_records_after_updates = get_all_records_for_all_shards(
+            &system,
+            &dispatcher_handle,
+            baseline_segments.blockfile_provider.clone(),
+            Log::InMemory(baseline_log.clone()),
+            baseline_cas_after_updates,
+            baseline_segments.bloom_filter_manager.clone(),
+        )
+        .await;
+        let sharded_records_after_updates = get_all_records_for_all_shards(
+            &system,
+            &dispatcher_handle,
+            sharded_segments.blockfile_provider.clone(),
+            Log::InMemory(sharded_log.clone()),
+            sharded_cas_after_updates,
+            sharded_segments.bloom_filter_manager.clone(),
+        )
+        .await;
+        assert_record_maps_equal(
+            &baseline_records_after_updates,
+            &sharded_records_after_updates,
+            "after cross-shard pending updates",
+        );
+        assert_eq!(
+            sharded_records_after_updates
+                .get("id_25")
+                .and_then(|record| record.document.as_deref()),
+            Some("updated document from shard 0")
+        );
+        assert_eq!(
+            sharded_records_after_updates
+                .get("id_55")
+                .and_then(|record| record.document.as_deref()),
+            Some("updated document from shard 1")
+        );
+        assert_eq!(
+            sharded_records_after_updates
+                .get("id_101")
+                .and_then(|record| record.document.as_deref()),
+            Some("brand new pending document")
+        );
+
+        let pending_deletes = vec![
+            make_pending_log_record("id_26", Operation::Delete, None),
+            make_pending_log_record("id_56", Operation::Delete, None),
+        ];
+        append_logs(
+            &mut baseline_log,
+            baseline_collection_id,
+            &pending_deletes,
+            &mut baseline_log_offset,
+        );
+        append_logs(
+            &mut sharded_log,
+            sharded_collection_id,
+            &pending_deletes,
+            &mut sharded_log_offset,
+        );
+
+        let baseline_cas_after_deletes = baseline_sysdb
+            .get_collection_with_segments(None, baseline_collection_id)
+            .await
+            .expect("Should get baseline collection after pending deletes");
+        let sharded_cas_after_deletes = sharded_sysdb
+            .get_collection_with_segments(None, sharded_collection_id)
+            .await
+            .expect("Should get sharded collection after pending deletes");
+        let baseline_records_after_deletes = get_all_records_for_all_shards(
+            &system,
+            &dispatcher_handle,
+            baseline_segments.blockfile_provider.clone(),
+            Log::InMemory(baseline_log.clone()),
+            baseline_cas_after_deletes,
+            baseline_segments.bloom_filter_manager.clone(),
+        )
+        .await;
+        let sharded_records_after_deletes = get_all_records_for_all_shards(
+            &system,
+            &dispatcher_handle,
+            sharded_segments.blockfile_provider.clone(),
+            Log::InMemory(sharded_log.clone()),
+            sharded_cas_after_deletes,
+            sharded_segments.bloom_filter_manager.clone(),
+        )
+        .await;
+        assert_record_maps_equal(
+            &baseline_records_after_deletes,
+            &sharded_records_after_deletes,
+            "after cross-shard pending deletes",
+        );
+        assert!(
+            !sharded_records_after_deletes.contains_key("id_26"),
+            "pending delete should remove shard 0 record"
+        );
+        assert!(
+            !sharded_records_after_deletes.contains_key("id_56"),
+            "pending delete should remove shard 1 record"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sharded_compaction_applies_cross_shard_updates_and_deletes() {
+        let config = RootConfig::default();
+        let system = System::default();
+        let registry = Registry::new();
+        let dispatcher = Dispatcher::try_from_config(&config.query_service.dispatcher, &registry)
+            .await
+            .expect("Should be able to initialize dispatcher");
+        let dispatcher_handle = system.start_component(dispatcher);
+
+        let mut baseline_sysdb = SysDb::Test(TestSysDb::new());
+        let mut baseline_segments = TestDistributedSegment::new_with_dimension(6).await;
+        let baseline_database_name =
+            create_spann_test_collection(&mut baseline_sysdb, &mut baseline_segments).await;
+        let baseline_collection_id = baseline_segments.collection.collection_id;
+        let mut baseline_log = InMemoryLog::new();
+        let mut baseline_log_offset = 0i64;
+
+        let mut sharded_sysdb = SysDb::Test(TestSysDb::new());
+        let mut sharded_segments = TestDistributedSegment::new_with_dimension(6).await;
+        let sharded_database_name =
+            create_spann_test_collection(&mut sharded_sysdb, &mut sharded_segments).await;
+        let sharded_collection_id = sharded_segments.collection.collection_id;
+        let mut sharded_log = InMemoryLog::new();
+        let mut sharded_log_offset = 0i64;
+
+        for batch_num in 0..2 {
+            let start = batch_num * 60 + 1;
+            let end = (batch_num + 1) * 60;
+            let batch_logs = add_delete_generator.generate_vec(start..=end);
+
+            append_logs(
+                &mut baseline_log,
+                baseline_collection_id,
+                &batch_logs,
+                &mut baseline_log_offset,
+            );
+            append_logs(
+                &mut sharded_log,
+                sharded_collection_id,
+                &batch_logs,
+                &mut sharded_log_offset,
+            );
+
+            let baseline_compact_result = Box::pin(compact(
+                system.clone(),
+                baseline_collection_id,
+                baseline_database_name.clone(),
+                None,
+                1,
+                10,
+                100,
+                1000,
+                Log::InMemory(baseline_log.clone()),
+                baseline_sysdb.clone(),
+                baseline_segments.blockfile_provider.clone(),
+                baseline_segments.hnsw_provider.clone(),
+                baseline_segments.spann_provider.clone(),
+                dispatcher_handle.clone(),
+                false,
+                None,
+                None,
+                None,
+                None,
+            ))
+            .await;
+            assert!(
+                baseline_compact_result.is_ok(),
+                "Baseline compaction batch {} failed: {:?}",
+                batch_num,
+                baseline_compact_result.err()
+            );
+
+            let sharded_compact_result = Box::pin(compact(
+                system.clone(),
+                sharded_collection_id,
+                sharded_database_name.clone(),
+                None,
+                1,
+                10,
+                100,
+                1000,
+                Log::InMemory(sharded_log.clone()),
+                sharded_sysdb.clone(),
+                sharded_segments.blockfile_provider.clone(),
+                sharded_segments.hnsw_provider.clone(),
+                sharded_segments.spann_provider.clone(),
+                dispatcher_handle.clone(),
+                false,
+                None,
+                None,
+                Some(50),
+                None,
+            ))
+            .await;
+            assert!(
+                sharded_compact_result.is_ok(),
+                "Sharded compaction batch {} failed: {:?}",
+                batch_num,
+                sharded_compact_result.err()
+            );
+        }
+
+        assert_sharded_records_match_baseline(
+            &system,
+            &dispatcher_handle,
+            &baseline_segments,
+            &mut baseline_sysdb,
+            baseline_collection_id,
+            &baseline_log,
+            &sharded_segments,
+            &mut sharded_sysdb,
+            sharded_collection_id,
+            &sharded_log,
+            2,
+            "before compacted cross-shard mutations",
+        )
+        .await;
+
+        let compacted_mutations = vec![
+            make_pending_log_record(
+                "id_25",
+                Operation::Update,
+                Some("compacted update from shard 0"),
+            ),
+            make_pending_log_record(
+                "id_55",
+                Operation::Update,
+                Some("compacted update from shard 1"),
+            ),
+            make_pending_log_record("id_101", Operation::Add, Some("compacted new document")),
+            make_pending_log_record("id_26", Operation::Delete, None),
+            make_pending_log_record("id_56", Operation::Delete, None),
+        ];
+        append_logs(
+            &mut baseline_log,
+            baseline_collection_id,
+            &compacted_mutations,
+            &mut baseline_log_offset,
+        );
+        append_logs(
+            &mut sharded_log,
+            sharded_collection_id,
+            &compacted_mutations,
+            &mut sharded_log_offset,
+        );
+
+        let baseline_compact_result = Box::pin(compact(
+            system.clone(),
+            baseline_collection_id,
+            baseline_database_name.clone(),
+            None,
+            1,
+            10,
+            100,
+            1000,
+            Log::InMemory(baseline_log.clone()),
+            baseline_sysdb.clone(),
+            baseline_segments.blockfile_provider.clone(),
+            baseline_segments.hnsw_provider.clone(),
+            baseline_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            false,
+            None,
+            None,
+            None,
+            None,
+        ))
+        .await;
+        assert!(
+            baseline_compact_result.is_ok(),
+            "Baseline compaction with cross-shard mutations failed: {:?}",
+            baseline_compact_result.err()
+        );
+
+        let sharded_compact_result = Box::pin(compact(
+            system.clone(),
+            sharded_collection_id,
+            sharded_database_name.clone(),
+            None,
+            1,
+            10,
+            100,
+            1000,
+            Log::InMemory(sharded_log.clone()),
+            sharded_sysdb.clone(),
+            sharded_segments.blockfile_provider.clone(),
+            sharded_segments.hnsw_provider.clone(),
+            sharded_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            false,
+            None,
+            None,
+            Some(50),
+            None,
+        ))
+        .await;
+        assert!(
+            sharded_compact_result.is_ok(),
+            "Sharded compaction with cross-shard mutations failed: {:?}",
+            sharded_compact_result.err()
+        );
+
+        let baseline_cas_after_compaction = baseline_sysdb
+            .get_collection_with_segments(None, baseline_collection_id)
+            .await
+            .expect("Should get baseline collection after compacted mutations");
+        let sharded_cas_after_compaction = sharded_sysdb
+            .get_collection_with_segments(None, sharded_collection_id)
+            .await
+            .expect("Should get sharded collection after compacted mutations");
+        assert_eq!(
+            sharded_cas_after_compaction
+                .record_segment
+                .num_shards()
+                .expect("sharded record segment shard count should be valid"),
+            2,
+            "compacting cross-shard mutations should not create another shard"
+        );
+
+        let baseline_records_after_compaction = get_all_records_for_all_shards(
+            &system,
+            &dispatcher_handle,
+            baseline_segments.blockfile_provider.clone(),
+            Log::InMemory(baseline_log.clone()),
+            baseline_cas_after_compaction,
+            baseline_segments.bloom_filter_manager.clone(),
+        )
+        .await;
+        let sharded_records_after_compaction = get_all_records_for_all_shards(
+            &system,
+            &dispatcher_handle,
+            sharded_segments.blockfile_provider.clone(),
+            Log::InMemory(sharded_log.clone()),
+            sharded_cas_after_compaction,
+            sharded_segments.bloom_filter_manager.clone(),
+        )
+        .await;
+        assert_record_maps_equal(
+            &baseline_records_after_compaction,
+            &sharded_records_after_compaction,
+            "after compacted cross-shard mutations",
+        );
+        assert_eq!(
+            sharded_records_after_compaction
+                .get("id_25")
+                .and_then(|record| record.document.as_deref()),
+            Some("compacted update from shard 0")
+        );
+        assert_eq!(
+            sharded_records_after_compaction
+                .get("id_55")
+                .and_then(|record| record.document.as_deref()),
+            Some("compacted update from shard 1")
+        );
+        assert_eq!(
+            sharded_records_after_compaction
+                .get("id_101")
+                .and_then(|record| record.document.as_deref()),
+            Some("compacted new document")
+        );
+        assert!(
+            !sharded_records_after_compaction.contains_key("id_26"),
+            "compacted delete should remove shard 0 record"
+        );
+        assert!(
+            !sharded_records_after_compaction.contains_key("id_56"),
+            "compacted delete should remove shard 1 record"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sharded_compaction_with_empty_materialized_logs_keeps_shards() {
+        let config = RootConfig::default();
+        let system = System::default();
+        let registry = Registry::new();
+        let dispatcher = Dispatcher::try_from_config(&config.query_service.dispatcher, &registry)
+            .await
+            .expect("Should be able to initialize dispatcher");
+        let dispatcher_handle = system.start_component(dispatcher);
+
+        let mut baseline_sysdb = SysDb::Test(TestSysDb::new());
+        let mut baseline_segments = TestDistributedSegment::new_with_dimension(6).await;
+        let baseline_database_name =
+            create_spann_test_collection(&mut baseline_sysdb, &mut baseline_segments).await;
+        let baseline_collection_id = baseline_segments.collection.collection_id;
+        let mut baseline_log = InMemoryLog::new();
+        let mut baseline_log_offset = 0i64;
+
+        let mut sharded_sysdb = SysDb::Test(TestSysDb::new());
+        let mut sharded_segments = TestDistributedSegment::new_with_dimension(6).await;
+        let sharded_database_name =
+            create_spann_test_collection(&mut sharded_sysdb, &mut sharded_segments).await;
+        let sharded_collection_id = sharded_segments.collection.collection_id;
+        let mut sharded_log = InMemoryLog::new();
+        let mut sharded_log_offset = 0i64;
+
+        let initial_logs = add_delete_generator.generate_vec(1..=60);
+        append_logs(
+            &mut baseline_log,
+            baseline_collection_id,
+            &initial_logs,
+            &mut baseline_log_offset,
+        );
+        append_logs(
+            &mut sharded_log,
+            sharded_collection_id,
+            &initial_logs,
+            &mut sharded_log_offset,
+        );
+
+        let baseline_compact_result = Box::pin(compact(
+            system.clone(),
+            baseline_collection_id,
+            baseline_database_name.clone(),
+            None,
+            1,
+            10,
+            100,
+            1000,
+            Log::InMemory(baseline_log.clone()),
+            baseline_sysdb.clone(),
+            baseline_segments.blockfile_provider.clone(),
+            baseline_segments.hnsw_provider.clone(),
+            baseline_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            false,
+            None,
+            None,
+            None,
+            None,
+        ))
+        .await;
+        assert!(
+            baseline_compact_result.is_ok(),
+            "Baseline compaction failed: {:?}",
+            baseline_compact_result.err()
+        );
+
+        let sharded_compact_result = Box::pin(compact(
+            system.clone(),
+            sharded_collection_id,
+            sharded_database_name.clone(),
+            None,
+            1,
+            10,
+            100,
+            1000,
+            Log::InMemory(sharded_log.clone()),
+            sharded_sysdb.clone(),
+            sharded_segments.blockfile_provider.clone(),
+            sharded_segments.hnsw_provider.clone(),
+            sharded_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            false,
+            None,
+            None,
+            Some(10),
+            None,
+        ))
+        .await;
+        assert!(
+            sharded_compact_result.is_ok(),
+            "Sharded compaction failed: {:?}",
+            sharded_compact_result.err()
+        );
+
+        assert_sharded_records_match_baseline(
+            &system,
+            &dispatcher_handle,
+            &baseline_segments,
+            &mut baseline_sysdb,
+            baseline_collection_id,
+            &baseline_log,
+            &sharded_segments,
+            &mut sharded_sysdb,
+            sharded_collection_id,
+            &sharded_log,
+            2,
+            "before empty materialized compaction",
+        )
+        .await;
+
+        let empty_materialized_logs = vec![
+            make_pending_log_record(
+                "id_cancelled_before_compaction",
+                Operation::Add,
+                Some("cancelled before compaction"),
+            ),
+            make_pending_log_record("id_cancelled_before_compaction", Operation::Delete, None),
+        ];
+        append_logs(
+            &mut baseline_log,
+            baseline_collection_id,
+            &empty_materialized_logs,
+            &mut baseline_log_offset,
+        );
+        append_logs(
+            &mut sharded_log,
+            sharded_collection_id,
+            &empty_materialized_logs,
+            &mut sharded_log_offset,
+        );
+
+        let baseline_empty_compact_result = Box::pin(compact(
+            system.clone(),
+            baseline_collection_id,
+            baseline_database_name.clone(),
+            None,
+            1,
+            10,
+            100,
+            1000,
+            Log::InMemory(baseline_log.clone()),
+            baseline_sysdb.clone(),
+            baseline_segments.blockfile_provider.clone(),
+            baseline_segments.hnsw_provider.clone(),
+            baseline_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            false,
+            None,
+            None,
+            None,
+            None,
+        ))
+        .await;
+        assert!(
+            baseline_empty_compact_result.is_ok(),
+            "Baseline empty materialized compaction failed: {:?}",
+            baseline_empty_compact_result.err()
+        );
+
+        let sharded_empty_compact_result = Box::pin(compact(
+            system.clone(),
+            sharded_collection_id,
+            sharded_database_name.clone(),
+            None,
+            1,
+            10,
+            100,
+            1000,
+            Log::InMemory(sharded_log.clone()),
+            sharded_sysdb.clone(),
+            sharded_segments.blockfile_provider.clone(),
+            sharded_segments.hnsw_provider.clone(),
+            sharded_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            false,
+            None,
+            None,
+            Some(10),
+            None,
+        ))
+        .await;
+        assert!(
+            sharded_empty_compact_result.is_ok(),
+            "Sharded empty materialized compaction failed: {:?}",
+            sharded_empty_compact_result.err()
+        );
+
+        let sharded_cas_after_empty_compaction = sharded_sysdb
+            .get_collection_with_segments(None, sharded_collection_id)
+            .await
+            .expect("Should get sharded collection after empty materialized compaction");
+        assert_eq!(
+            sharded_cas_after_empty_compaction
+                .record_segment
+                .num_shards()
+                .expect("sharded record segment shard count should be valid"),
+            2,
+            "empty materialized compaction should not create another shard"
+        );
+
+        assert_sharded_records_match_baseline(
+            &system,
+            &dispatcher_handle,
+            &baseline_segments,
+            &mut baseline_sysdb,
+            baseline_collection_id,
+            &baseline_log,
+            &sharded_segments,
+            &mut sharded_sysdb,
+            sharded_collection_id,
+            &sharded_log,
+            2,
+            "after empty materialized compaction",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_sharded_worker_reads_match_baseline_with_large_partitioned_compactions() {
+        const NUM_BATCHES: usize = 6;
+        const LOGS_PER_BATCH: usize = 1200;
+        const MAX_PARTITION_SIZE: usize = 120;
+        const MAX_COMPACTION_SIZE: usize = LOGS_PER_BATCH;
+        const SHARD_SIZE: u64 = 250;
+
+        let config = RootConfig::default();
+        let system = System::default();
+        let registry = Registry::new();
+        let dispatcher = Dispatcher::try_from_config(&config.query_service.dispatcher, &registry)
+            .await
+            .expect("Should be able to initialize dispatcher");
+        let dispatcher_handle = system.start_component(dispatcher);
+
+        let mut baseline_sysdb = SysDb::Test(TestSysDb::new());
+        let mut baseline_segments = TestDistributedSegment::new_with_dimension(6).await;
+        let baseline_database_name =
+            create_spann_test_collection(&mut baseline_sysdb, &mut baseline_segments).await;
+        let baseline_collection_id = baseline_segments.collection.collection_id;
+        let mut baseline_log = InMemoryLog::new();
+        let mut baseline_log_offset = 0i64;
+
+        let mut sharded_sysdb = SysDb::Test(TestSysDb::new());
+        let mut sharded_segments = TestDistributedSegment::new_with_dimension(6).await;
+        let sharded_database_name =
+            create_spann_test_collection(&mut sharded_sysdb, &mut sharded_segments).await;
+        let sharded_collection_id = sharded_segments.collection.collection_id;
+        let mut sharded_log = InMemoryLog::new();
+        let mut sharded_log_offset = 0i64;
+
+        for batch_num in 0..NUM_BATCHES {
+            let start = batch_num * LOGS_PER_BATCH + 1;
+            let end = (batch_num + 1) * LOGS_PER_BATCH;
+            let batch_logs = add_delete_generator.generate_vec(start..=end);
+
+            append_logs(
+                &mut baseline_log,
+                baseline_collection_id,
+                &batch_logs,
+                &mut baseline_log_offset,
+            );
+            append_logs(
+                &mut sharded_log,
+                sharded_collection_id,
+                &batch_logs,
+                &mut sharded_log_offset,
+            );
+
+            let baseline_compact_result = Box::pin(compact(
+                system.clone(),
+                baseline_collection_id,
+                baseline_database_name.clone(),
+                None,
+                1,
+                10,
+                MAX_COMPACTION_SIZE,
+                MAX_PARTITION_SIZE,
+                Log::InMemory(baseline_log.clone()),
+                baseline_sysdb.clone(),
+                baseline_segments.blockfile_provider.clone(),
+                baseline_segments.hnsw_provider.clone(),
+                baseline_segments.spann_provider.clone(),
+                dispatcher_handle.clone(),
+                false,
+                None,
+                None,
+                None,
+                None,
+            ))
+            .await;
+            assert!(
+                baseline_compact_result.is_ok(),
+                "Baseline compaction batch {} failed: {:?}",
+                batch_num,
+                baseline_compact_result.err()
+            );
+
+            let sharded_compact_result = Box::pin(compact(
+                system.clone(),
+                sharded_collection_id,
+                sharded_database_name.clone(),
+                None,
+                1,
+                10,
+                MAX_COMPACTION_SIZE,
+                MAX_PARTITION_SIZE,
+                Log::InMemory(sharded_log.clone()),
+                sharded_sysdb.clone(),
+                sharded_segments.blockfile_provider.clone(),
+                sharded_segments.hnsw_provider.clone(),
+                sharded_segments.spann_provider.clone(),
+                dispatcher_handle.clone(),
+                false,
+                None,
+                None,
+                Some(SHARD_SIZE),
+                None,
+            ))
+            .await;
+            assert!(
+                sharded_compact_result.is_ok(),
+                "Sharded compaction batch {} failed: {:?}",
+                batch_num,
+                sharded_compact_result.err()
+            );
+
+            assert_sharded_records_match_baseline(
+                &system,
+                &dispatcher_handle,
+                &baseline_segments,
+                &mut baseline_sysdb,
+                baseline_collection_id,
+                &baseline_log,
+                &sharded_segments,
+                &mut sharded_sysdb,
+                sharded_collection_id,
+                &sharded_log,
+                batch_num + 2,
+                &format!("after large partitioned compaction batch {batch_num}"),
+            )
+            .await;
         }
     }
 
