@@ -697,6 +697,7 @@ impl SpannerBackend {
                                 "tenant",
                                 "database_id",
                                 "index_schema",
+                                "is_deleted",
                                 "created_at",
                                 "updated_at",
                             ],
@@ -706,6 +707,7 @@ impl SpannerBackend {
                                 &tenant_id_str,
                                 &database_id,
                                 &index_schema_json,
+                                &false,
                                 &commit_ts,
                                 &commit_ts,
                             ],
@@ -1389,26 +1391,77 @@ impl SpannerBackend {
                     let commit_ts = "spanner.commit_timestamp()";
                     let mut mutations = Vec::new();
 
-                    // Handle soft delete operation
-                    if let Some(true) = is_deleted {
-                        // For soft delete, the new name should be provided in the request
-                        let new_name = name.as_ref().ok_or_else(|| {
-                            SysDbError::InvalidArgument("name is required for soft delete operation".to_string())
-                        })?;
-
-                        mutations.push(update(
-                            "collections",
-                            &["collection_id", "name", "is_deleted", "updated_at"],
-                            &[&collection_id, new_name, &true, &commit_ts],
-                        ));
-                    }
-
                     // Determine what needs to be updated
                     let has_collection_changes = (name.is_some() && is_deleted != Some(true)) || dimension.is_some();
                     let has_metadata_changes = metadata.is_some() || reset_metadata;
                     let has_config_changes = new_configuration.as_ref().is_some_and(|c| {
                         c.hnsw.is_some() || c.spann.is_some() || c.embedding_function.is_some()
                     });
+
+                    // Check if we need to query collection_compaction_cursors for all regions
+                    let needs_all_regions = is_deleted.is_some() || has_config_changes;
+
+                    // Fetch region data once if needed
+                    let region_data: Option<Vec<(String, Option<String>)>> = if needs_all_regions {
+                        let mut cursor_stmt = Statement::new(
+                            "SELECT region, index_schema FROM collection_compaction_cursors WHERE collection_id = @collection_id",
+                        );
+                        cursor_stmt.add_param("collection_id", &collection_id);
+
+                        let mut cursor_iter = tx.query(cursor_stmt).instrument(tracing::debug_span!("get_collection_cursors")).await?;
+                        let mut data = Vec::new();
+
+                        while let Some(row) = cursor_iter.next().await? {
+                            let region: String = row.column_by_name("region").map_err(SysDbError::FailedToReadColumn)?;
+                            let schema_json: Option<String> = if has_config_changes {
+                                Some(row.column_by_name("index_schema").map_err(SysDbError::FailedToReadColumn)?)
+                            } else {
+                                None
+                            };
+                            data.push((region, schema_json));
+                        }
+
+                        if data.is_empty() {
+                            return Err(SysDbError::Internal("collection has no cursors in any region".to_string()));
+                        }
+
+                        Some(data)
+                    } else {
+                        None
+                    };
+
+                    // Handle soft delete/restore operation
+                    if let Some(is_deleted_value) = is_deleted {
+                        if is_deleted_value {
+                            // For soft delete, the new name should be provided in the request
+                            let new_name = name.as_ref().ok_or_else(|| {
+                                SysDbError::InvalidArgument("name is required for soft delete operation".to_string())
+                            })?;
+
+                            mutations.push(update(
+                                "collections",
+                                &["collection_id", "name", "is_deleted", "updated_at"],
+                                &[&collection_id, new_name, &is_deleted_value, &commit_ts],
+                            ));
+                        } else {
+                            mutations.push(update(
+                                "collections",
+                                &["collection_id", "is_deleted", "updated_at"],
+                                &[&collection_id, &is_deleted_value, &commit_ts],
+                            ));
+                        }
+
+                        // Update is_deleted in collection_compaction_cursors for all regions
+                        if let Some(ref regions) = region_data {
+                            for (region, _) in regions {
+                                mutations.push(update(
+                                    "collection_compaction_cursors",
+                                    &["collection_id", "region", "is_deleted", "updated_at"],
+                                    &[&collection_id, region, &is_deleted_value, &commit_ts],
+                                ));
+                            }
+                        }
+                    }
 
                     // Build collection update mutation if name or dimension changed
                     if has_collection_changes {
@@ -1509,44 +1562,45 @@ impl SpannerBackend {
                     // Handle configuration updates (spann and embedding_function only)
                     // Updates schema for ALL regions
                     if has_config_changes {
-                        // Safe to unwrap: has_config_changes implies new_configuration is Some with hnsw, spann, or embedding_function
-                        let config = new_configuration.as_ref().unwrap();
+                        // has_config_changes is only true when new_configuration is Some
+                        let config = match new_configuration.as_ref() {
+                            Some(cfg) => cfg,
+                            None => {
+                                return Err(SysDbError::Internal(
+                                    "has_config_changes is true but new_configuration is None - this is a bug".to_string()
+                                ));
+                            }
+                        };
 
-                        // Read current schemas from all regions
-                        let mut schema_stmt = Statement::new(
-                            "SELECT region, index_schema FROM collection_compaction_cursors WHERE collection_id = @collection_id",
-                        );
-                        schema_stmt.add_param("collection_id", &collection_id);
+                        // Use the region data we already fetched
+                        if let Some(ref regions) = region_data {
+                            // Update schema for each region
+                            for (region, schema_json_opt) in regions {
+                                // schema_json_opt should always be Some when has_config_changes is true
+                                let current_schema_json = match schema_json_opt {
+                                    Some(schema) => schema,
+                                    None => {
+                                        return Err(SysDbError::Internal(
+                                            format!("Missing schema for region {} when config changes requested", region)
+                                        ));
+                                    }
+                                };
 
-                        let mut schema_iter = tx.query(schema_stmt).instrument(tracing::debug_span!("get_collection_schemas")).await?;
-                        let mut region_schemas: Vec<(String, String)> = Vec::new();
+                                let mut schema: chroma_types::Schema = serde_json::from_str(current_schema_json)
+                                    .map_err(|e| SysDbError::Internal(format!("failed to parse schema for region {}: {}", region, e)))?;
 
-                        while let Some(row) = schema_iter.next().await? {
-                            let region: String = row.column_by_name("region").map_err(SysDbError::FailedToReadColumn)?;
-                            let schema_json: String = row.column_by_name("index_schema").map_err(SysDbError::FailedToReadColumn)?;
-                            region_schemas.push((region, schema_json));
-                        }
+                                // Apply updates (errors if hnsw is set)
+                                schema.apply_update_configuration(config)?;
 
-                        if region_schemas.is_empty() {
-                            return Err(SysDbError::Internal("collection has no schema in any region".to_string()));
-                        }
+                                let new_schema_json = serde_json::to_string(&schema)
+                                    .map_err(|e| SysDbError::Internal(format!("failed to serialize schema for region {}: {}", region, e)))?;
 
-                        // Update schema for each region
-                        for (region, current_schema_json) in region_schemas {
-                            let mut schema: chroma_types::Schema = serde_json::from_str(&current_schema_json)
-                                .map_err(|e| SysDbError::Internal(format!("failed to parse schema for region {}: {}", region, e)))?;
-
-                            // Apply updates (errors if hnsw is set)
-                            schema.apply_update_configuration(config)?;
-
-                            let new_schema_json = serde_json::to_string(&schema)
-                                .map_err(|e| SysDbError::Internal(format!("failed to serialize schema for region {}: {}", region, e)))?;
-
-                            mutations.push(update(
-                                "collection_compaction_cursors",
-                                &["collection_id", "region", "index_schema", "updated_at"],
-                                &[&collection_id, &region, &new_schema_json, &commit_ts],
-                            ));
+                                mutations.push(update(
+                                    "collection_compaction_cursors",
+                                    &["collection_id", "region", "index_schema", "updated_at"],
+                                    &[&collection_id, region, &new_schema_json, &commit_ts],
+                                ));
+                            }
                         }
                     }
 
