@@ -5,7 +5,7 @@ sidebarTitle: "Getting Started"
 
 Our fully managed hosted service, **Chroma Cloud** is here. [Sign up for free](https://trychroma.com/signup?utm_source=docs-getting-started).
 
-**Chroma Cloud** is a managed offering of [Distributed Chroma](/reference/architecture/distributed), operated by the same database engineers who build Chroma. Chroma Cloud implements the same APIs as open-source Chroma, but runs on a distributed vector indexing system to support much larger scale than a single instance of open-source Chroma. Chroma Cloud runs in various regions across AWS and GCP and supports multi-region replication. Chroma Cloud is serverless - you don't have to provision servers or think about operations, and is billed [based on usage](/cloud/pricing)
+**Chroma Cloud** is a managed offering of [Distributed Chroma](/reference/architecture/distributed), operated by the same database engineers who build Chroma. Chroma Cloud implements the same APIs as open-source Chroma, but runs on a distributed vector indexing system to support much larger scale than a single instance of open-source Chroma. Chroma Cloud runs in [multiple regions](#regions) across AWS and GCP — each database stays entirely within the region you choose. Chroma Cloud is serverless - you don't have to provision servers or think about operations, and is billed [based on usage](/cloud/pricing)
 
 ### Easy to use and operate
 
@@ -17,7 +17,29 @@ Reliability and accuracy are core to the design. Chroma Cloud is thoroughly test
 
 ### Security and Deployment
 
-Chroma Cloud is SOC 2 Type II certified, and offers deployment flexibility to match your needs. You can sign up for our fully-managed multi-tenant cluster currently running in AWS us-east-1 or contact us for single-tenant deployment managed by Chroma or hosted in your own VPC (BYOC). If you ever want to self-host open source Chroma, we will help you transition your data from Cloud to your self-managed deployment.
+Chroma Cloud is SOC 2 Type II certified, and offers deployment flexibility to match your needs. You can sign up for our fully-managed multi-tenant cluster running in AWS `us-east-1` or GCP `europe-west1`, or contact us for single-tenant deployment managed by Chroma or hosted in your own VPC (BYOC). If you ever want to self-host open source Chroma, we will help you transition your data from Cloud to your self-managed deployment.
+
+### Regions
+
+Chroma Cloud's multi-tenant offering currently runs in two regions:
+
+| Region | Slug | Endpoint |
+|--------|------|----------|
+| AWS US East (N. Virginia) | `aws-us-east-1` | `api.trychroma.com` (default) |
+| GCP Europe West 1 (Belgium) | `gcp-europe-west1` | `europe-west1.gcp.trychroma.com` |
+
+Each database is created in a single region and stays there — your data is stored and processed entirely within the region you select. Pick the region when creating a database in the dashboard, or pass it when creating a database via the API. Existing US databases are unaffected; to move data to the EU, create a new database in `gcp-europe-west1` and reindex.
+
+Connecting to a non-default region only requires pointing the client at the right host. See [Connecting to a non-default region](/docs/run-chroma/clients#connecting-to-a-non-default-region) for SDK examples.
+
+#### Feature availability by region
+
+| Feature | `aws-us-east-1` | `gcp-europe-west1` |
+|---------|----------------|--------------------|
+| Core API (collections, search, forking) | ✓ | ✓ |
+| Chroma Sync (S3, GitHub, Web, file upload) | ✓ | — |
+| Chroma CLI (`chroma db`, `chroma browse`) | ✓ | — |
+| Chroma Search Agent | ✓ | — |
 
 ### Dashboard
 

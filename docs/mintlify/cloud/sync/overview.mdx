@@ -6,15 +6,17 @@ Chroma Sync exposes endpoints for developers to chunk, embed, and index various 
 
 # Key Concepts
 
-Chroma Sync has three primary concepts: **source types**, **sources** and **invocations**.
+Chroma Sync has three primary concepts: **source types**, **sources**, and **invocations**.
 
 # Source Types
 
-A source type defines a kind of entity that contains data that can be chunked, embedded, and indexed. Each source type defines its own schema for configuring sources of its type. Chroma Sync currently supports three source types: **S3 buckets**, **GitHub repositories**, and **web scraping**. If there is a specific source type for which you would like support, please reach out to [engineering@trychroma.com](mailto:engineering@trychroma.com).
+A source type defines a kind of entity that contains data that can be chunked, embedded, and indexed. Each source type defines its own schema for configuring sources of its type. Chroma Sync supports four source types: **S3 buckets**, **GitHub repositories**, **web scraping**, and **direct file upload**. If there is a specific source type for which you would like support, please reach out to [engineering@trychroma.com](mailto:engineering@trychroma.com).
 
 ## S3
 
 The S3 source type allows developers to sync files from Amazon S3 buckets into Chroma. It supports documents (PDFs, Office files, images, ebooks), code, and plain text. S3 sources can be configured with auto-sync to automatically index files as they are uploaded to S3. For a detailed walkthrough, see [S3 Sync docs](/cloud/sync/s3).
+
+AWS credentials can be saved in the Chroma dashboard once and reused across multiple S3 sources. See [AWS Credentials](/cloud/sync/s3#aws-credentials).
 
 ## GitHub Repositories
 
@@ -33,6 +35,10 @@ The platform tier grants access to the Chroma Sync API and is ideal for companie
 ## Web
 
 The web source type allows developers to scrape the contents of web pages into Chroma. Given a starting URL, Sync will crawl the page and its links up to a specified depth.
+
+## File Upload
+
+The file upload source type lets you push individual files directly to Chroma over HTTP without staging them in S3 or GitHub first. Each database has at most one file-upload source, which is created automatically the first time you call the upload endpoint for that database. For a detailed walkthrough, see [File Upload docs](/cloud/sync/file-upload).
 
 # Sources
 
@@ -104,7 +110,7 @@ A source of the S3 type is configured with a bucket name, region, collection nam
 - `bucket_name` is the name of the S3 bucket to sync from.
 - `region` is the AWS region of the bucket.
 - `collection_name` is the default target collection name for synced data.
-- `aws_credential_id` is the ID of AWS credentials.
+- `aws_credential_id` is the ID of AWS credentials saved in the Chroma dashboard. As an alternative, you can pass `aws_access_key_id` and `aws_secret_access_key` inline; Chroma will save them on your team and return a credential ID for reuse.
 - `path_prefix` (optional) limits which S3 keys can be synced. Only keys starting with this prefix are allowed.
 - `auto_sync` (optional) sets the auto-sync mode: `none` (default), `direct`, or `metadata`. See [S3 Auto-Sync](/cloud/sync/s3#auto-sync).
 
@@ -138,6 +144,10 @@ A source of the web type is configured with a starting URL and a few other optio
     "max_depth": 2
 }
 ```
+
+## File Upload
+
+File-upload sources are not created via `POST /api/v1/sources`. Instead, the first call to [`POST /api/v1/add-file`](/cloud/sync/file-upload) for a database creates the source automatically; subsequent uploads to the same database reuse it. Each database has at most one file-upload source.
 
 # Invocations
 
@@ -187,5 +197,9 @@ Invocations on sources of the GitHub repository type are sync runs over an indiv
 ```
 
 - `ref_identifier` is either the commit SHA-256 or the name of the branch from which to retrieve the code to be synced. If a branch is provided, the code will be retrieved from the branch's latest commit.
+
+## File Upload
+
+Invocations on file-upload sources are created by calling [`POST /api/v1/add-file`](/cloud/sync/file-upload) directly with a multipart form, not by calling `POST /api/v1/sources/{source_id}/invocations`. Each call to `add-file` creates one invocation that indexes the uploaded file into the target collection.
 
 For all API endpoints, see the [Sync API Reference](/reference/sync-api).
