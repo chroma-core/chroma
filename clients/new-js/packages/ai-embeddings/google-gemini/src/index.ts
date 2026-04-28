@@ -6,6 +6,9 @@ import {
 } from "chromadb";
 import { validateConfigSchema } from "@chroma-core/ai-embeddings-common";
 import { GoogleGenAI } from "@google/genai";
+import packageJson from "../package.json";
+
+const version = packageJson.version;
 
 const NAME = "google-gemini";
 
@@ -53,7 +56,14 @@ export class GoogleGeminiEmbeddingFunction implements EmbeddingFunction {
     this.apiKeyEnvVar = apiKeyEnvVar;
     this.taskType = taskType;
     this.dimension = dimension;
-    this.client = new GoogleGenAI({ apiKey });
+    this.client = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          "x-goog-api-client": `chroma/${version}`,
+        },
+      },
+    });
   }
 
   public async generate(texts: string[]): Promise<number[][]> {

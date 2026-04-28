@@ -1,4 +1,6 @@
 from typing import Dict, Optional, Union
+__version__ = "1.5.8"
+
 import logging
 from chromadb.api.client import Client as ClientCreator
 from chromadb.api.client import (
@@ -108,7 +110,6 @@ logger = logging.getLogger(__name__)
 
 __settings = Settings()
 
-__version__ = "1.5.8"
 
 
 # Workaround to deal with Colab's old sqlite3 version

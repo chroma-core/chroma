@@ -1,4 +1,5 @@
 from chromadb.api.types import Embeddings, Documents, EmbeddingFunction, Space
+from chromadb import __version__
 from typing import List, Dict, Any, cast, Optional
 import os
 import numpy as np
@@ -63,8 +64,16 @@ class GoogleGeminiEmbeddingFunction(EmbeddingFunction[Documents]):
                 f"The {self.api_key_env_var} environment variable must be set if vertexai is not enabled."
             )
 
+        from google.genai import types
+
         self.client = genai.Client(
-            api_key=self.api_key, vertexai=vertexai, project=project, location=location
+            api_key=self.api_key,
+            vertexai=vertexai,
+            project=project,
+            location=location,
+            http_options=types.HttpOptions(
+                headers={"x-goog-api-client": f"chroma/{__version__}"}
+            ),
         )
 
     def __call__(self, input: Documents) -> Embeddings:
@@ -254,7 +263,10 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
         self.task_type = task_type
         self.dimension = dimension
 
-        genai.configure(api_key=self.api_key)
+        genai.configure(
+            api_key=self.api_key,
+            client_options={"headers": {"x-goog-api-client": f"chroma/{__version__}"}},
+        )
         self._genai = genai
 
     def __call__(self, input: Documents) -> Embeddings:
@@ -399,7 +411,10 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
 
         self.model_name = model_name
 
-        palm.configure(api_key=self.api_key)
+        palm.configure(
+            api_key=self.api_key,
+            client_options={"headers": {"x-goog-api-client": f"chroma/{__version__}"}},
+        )
         self._palm = palm
 
     def __call__(self, input: Documents) -> Embeddings:
@@ -526,7 +541,11 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
         self.project_id = project_id
         self.region = region
 
-        vertexai.init(project=project_id, location=region)
+        vertexai.init(
+            project=project_id,
+            location=region,
+            request_metadata=[("x-goog-api-client", f"chroma/{__version__}")],
+        )
         self._model = TextEmbeddingModel.from_pretrained(model_name)
 
     def __call__(self, input: Documents) -> Embeddings:
