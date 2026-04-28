@@ -5,7 +5,7 @@ description: Upload individual files directly to Chroma Cloud.
 
 The file upload API lets you upload a single file directly to sync. You send a `POST` to `https://sync.trychroma.com/api/v1/add-file` with the file and a target collection; Chroma chunks, embeds, and indexes it just like any other Sync source.
 
-Every upload names a target collection. If a collection with that name already exists in the database, the new content is added to it. Otherwise the collection is created on the first upload.
+File uploads can name a target collection, which sync will [get or create](/docs/collections/manage-collections#getting-collections).
 
 ## Walkthrough
 
@@ -14,16 +14,16 @@ Every upload names a target collection. If a collection with that name already e
 There are two ways to upload files from the dashboard:
 
 - **From the Add data page.** Open a database, choose **Add data**, and select **File upload**. Drop or pick one or more files; Chroma chunks and embeds them into a collection named `file_upload` (created on the first upload).
-- **From a collection page.** Open any collection and click **Upload files**. Files are uploaded into that collection.
+- **From a collection page.** On a collection page, if the [Schema](/cloud/schema/overview) is compatible with sync - an "Upload files" button will be visible. Select this button to upload files into that collection.
 
-Both flows accept the same file types: PDFs, Office documents, spreadsheets, presentations, HTML, ebooks, images, and any UTF-8 text or markdown file. The 200 MB-per-file limit is enforced in the browser before the upload starts.
+Both flows accept the same [file types](/cloud/sync/s3#supported-file-types): PDFs, Office documents, spreadsheets, presentations, HTML, ebooks, images, and any UTF-8 text or markdown file. The 200 MB-per-file limit is enforced in the browser before the upload starts.
 
 ### Uploading via the API
 
 The endpoint is multipart `POST /api/v1/add-file`. Two rules to be aware of:
 
 - The header `x-upload-content-length` (file size in bytes) is required.
-- `database_name` and `collection_name` **must appear before** the `file` part. Chroma authorizes the request and acquires an upload slot before streaming any bytes — so these fields have to arrive first.
+- `database_name` and `collection_name` **must appear before** the `file` part.
 
 ```bash
 curl -X POST https://sync.trychroma.com/api/v1/add-file \
