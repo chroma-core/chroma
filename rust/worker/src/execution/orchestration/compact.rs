@@ -5274,6 +5274,225 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_sharded_compaction_with_empty_materialized_logs_keeps_shards() {
+        let config = RootConfig::default();
+        let system = System::default();
+        let registry = Registry::new();
+        let dispatcher = Dispatcher::try_from_config(&config.query_service.dispatcher, &registry)
+            .await
+            .expect("Should be able to initialize dispatcher");
+        let dispatcher_handle = system.start_component(dispatcher);
+
+        let mut baseline_sysdb = SysDb::Test(TestSysDb::new());
+        let mut baseline_segments = TestDistributedSegment::new_with_dimension(6).await;
+        let baseline_database_name =
+            create_spann_test_collection(&mut baseline_sysdb, &mut baseline_segments).await;
+        let baseline_collection_id = baseline_segments.collection.collection_id;
+        let mut baseline_log = InMemoryLog::new();
+        let mut baseline_log_offset = 0i64;
+
+        let mut sharded_sysdb = SysDb::Test(TestSysDb::new());
+        let mut sharded_segments = TestDistributedSegment::new_with_dimension(6).await;
+        let sharded_database_name =
+            create_spann_test_collection(&mut sharded_sysdb, &mut sharded_segments).await;
+        let sharded_collection_id = sharded_segments.collection.collection_id;
+        let mut sharded_log = InMemoryLog::new();
+        let mut sharded_log_offset = 0i64;
+
+        let initial_logs = add_delete_generator.generate_vec(1..=60);
+        append_logs(
+            &mut baseline_log,
+            baseline_collection_id,
+            &initial_logs,
+            &mut baseline_log_offset,
+        );
+        append_logs(
+            &mut sharded_log,
+            sharded_collection_id,
+            &initial_logs,
+            &mut sharded_log_offset,
+        );
+
+        let baseline_compact_result = Box::pin(compact(
+            system.clone(),
+            baseline_collection_id,
+            baseline_database_name.clone(),
+            None,
+            1,
+            10,
+            100,
+            1000,
+            Log::InMemory(baseline_log.clone()),
+            baseline_sysdb.clone(),
+            baseline_segments.blockfile_provider.clone(),
+            baseline_segments.hnsw_provider.clone(),
+            baseline_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            false,
+            None,
+            None,
+            None,
+            None,
+        ))
+        .await;
+        assert!(
+            baseline_compact_result.is_ok(),
+            "Baseline compaction failed: {:?}",
+            baseline_compact_result.err()
+        );
+
+        let sharded_compact_result = Box::pin(compact(
+            system.clone(),
+            sharded_collection_id,
+            sharded_database_name.clone(),
+            None,
+            1,
+            10,
+            100,
+            1000,
+            Log::InMemory(sharded_log.clone()),
+            sharded_sysdb.clone(),
+            sharded_segments.blockfile_provider.clone(),
+            sharded_segments.hnsw_provider.clone(),
+            sharded_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            false,
+            None,
+            None,
+            Some(10),
+            None,
+        ))
+        .await;
+        assert!(
+            sharded_compact_result.is_ok(),
+            "Sharded compaction failed: {:?}",
+            sharded_compact_result.err()
+        );
+
+        assert_sharded_records_match_baseline(
+            &system,
+            &dispatcher_handle,
+            &baseline_segments,
+            &mut baseline_sysdb,
+            baseline_collection_id,
+            &baseline_log,
+            &sharded_segments,
+            &mut sharded_sysdb,
+            sharded_collection_id,
+            &sharded_log,
+            2,
+            "before empty materialized compaction",
+        )
+        .await;
+
+        let empty_materialized_logs = vec![
+            make_pending_log_record(
+                "id_cancelled_before_compaction",
+                Operation::Add,
+                Some("cancelled before compaction"),
+            ),
+            make_pending_log_record("id_cancelled_before_compaction", Operation::Delete, None),
+        ];
+        append_logs(
+            &mut baseline_log,
+            baseline_collection_id,
+            &empty_materialized_logs,
+            &mut baseline_log_offset,
+        );
+        append_logs(
+            &mut sharded_log,
+            sharded_collection_id,
+            &empty_materialized_logs,
+            &mut sharded_log_offset,
+        );
+
+        let baseline_empty_compact_result = Box::pin(compact(
+            system.clone(),
+            baseline_collection_id,
+            baseline_database_name.clone(),
+            None,
+            1,
+            10,
+            100,
+            1000,
+            Log::InMemory(baseline_log.clone()),
+            baseline_sysdb.clone(),
+            baseline_segments.blockfile_provider.clone(),
+            baseline_segments.hnsw_provider.clone(),
+            baseline_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            false,
+            None,
+            None,
+            None,
+            None,
+        ))
+        .await;
+        assert!(
+            baseline_empty_compact_result.is_ok(),
+            "Baseline empty materialized compaction failed: {:?}",
+            baseline_empty_compact_result.err()
+        );
+
+        let sharded_empty_compact_result = Box::pin(compact(
+            system.clone(),
+            sharded_collection_id,
+            sharded_database_name.clone(),
+            None,
+            1,
+            10,
+            100,
+            1000,
+            Log::InMemory(sharded_log.clone()),
+            sharded_sysdb.clone(),
+            sharded_segments.blockfile_provider.clone(),
+            sharded_segments.hnsw_provider.clone(),
+            sharded_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            false,
+            None,
+            None,
+            Some(10),
+            None,
+        ))
+        .await;
+        assert!(
+            sharded_empty_compact_result.is_ok(),
+            "Sharded empty materialized compaction failed: {:?}",
+            sharded_empty_compact_result.err()
+        );
+
+        let sharded_cas_after_empty_compaction = sharded_sysdb
+            .get_collection_with_segments(None, sharded_collection_id)
+            .await
+            .expect("Should get sharded collection after empty materialized compaction");
+        assert_eq!(
+            sharded_cas_after_empty_compaction
+                .record_segment
+                .num_shards()
+                .expect("sharded record segment shard count should be valid"),
+            2,
+            "empty materialized compaction should not create another shard"
+        );
+
+        assert_sharded_records_match_baseline(
+            &system,
+            &dispatcher_handle,
+            &baseline_segments,
+            &mut baseline_sysdb,
+            baseline_collection_id,
+            &baseline_log,
+            &sharded_segments,
+            &mut sharded_sysdb,
+            sharded_collection_id,
+            &sharded_log,
+            2,
+            "after empty materialized compaction",
+        )
+        .await;
+    }
+
+    #[tokio::test]
     async fn test_sharded_worker_reads_match_baseline_with_large_partitioned_compactions() {
         const NUM_BATCHES: usize = 6;
         const LOGS_PER_BATCH: usize = 1200;
