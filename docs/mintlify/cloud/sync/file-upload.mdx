@@ -3,9 +3,9 @@ title: File Upload
 description: Upload individual files directly to Chroma Cloud.
 ---
 
-The file upload API lets you upload a single file directly to sync. You send a multipart `POST` to `https://sync.trychroma.com/api/v1/add-file` with the file and a target collection; Chroma chunks, embeds, and indexes it just like any other Sync source.
+The file upload API lets you upload a single file directly to sync. You send a `POST` to `https://sync.trychroma.com/api/v1/add-file` with the file and a target collection; Chroma chunks, embeds, and indexes it just like any other Sync source.
 
-Each upload specifies a `collection_name`. If a collection with that name already exists in the database, the new content is added to it. Otherwise the collection is created on the first upload.
+Every upload names a target collection. If a collection with that name already exists in the database, the new content is added to it. Otherwise the collection is created on the first upload.
 
 ## Walkthrough
 
