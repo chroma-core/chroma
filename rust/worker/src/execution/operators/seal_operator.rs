@@ -120,6 +120,13 @@ pub struct SealOutput {
     pub split_materialized_outputs: Vec<PartitionedMaterializeLogsResult>,
 }
 
+/// Implementation of the SealOperator.
+///
+/// IMPORTANT: This operator assumes it will create at most one new shard during the sealing
+/// process. It does not perform recursive splitting - if the active shard exceeds the configured
+/// shard size, it will only split once, moving overflow records into a single new shard.
+/// The new shard may itself exceed the shard size limit, but further splitting would require
+/// another compaction cycle.
 #[async_trait]
 impl Operator<SealInput, SealOutput> for SealOperator {
     type Error = SealOperatorError;
@@ -235,9 +242,15 @@ fn split_materialized_outputs_by_count(
     let mut pq = BinaryHeap::new();
 
     for (partition_idx, partition) in outputs.iter().enumerate() {
+        debug_assert!(
+            !partition.shards.is_empty(),
+            "Partition {} has no shards - this is an invariant violation",
+            partition_idx
+        );
+
         if let Some(active_shard) = partition.shards.last() {
             let mut iter = active_shard.iter();
-            if let Some(first_record) = next_add_new(&mut iter) {
+            if let Some(first_record) = advance_to_next_add_new(&mut iter) {
                 pq.push(PartitionCursor {
                     offset_id: first_record.get_offset_id(),
                     partition_idx,
@@ -269,17 +282,12 @@ fn split_materialized_outputs_by_count(
 
         records_processed += 1;
 
-        if records_processed == count_to_stay {
-            let next_from_same = next_add_new(&mut cursor.iter).map(|r| r.get_offset_id());
-            let next_from_pq = pq.peek().map(|c| c.offset_id);
-            break next_from_same
-                .into_iter()
-                .chain(next_from_pq)
-                .min()
-                .unwrap_or(u32::MAX);
+        if records_processed > count_to_stay {
+            // This cursor's offset_id is the pivot - it's the first record to be moved
+            break cursor.offset_id;
         }
 
-        if let Some(next_record) = next_add_new(&mut cursor.iter) {
+        if let Some(next_record) = advance_to_next_add_new(&mut cursor.iter) {
             cursor.offset_id = next_record.get_offset_id();
             pq.push(cursor);
         }
@@ -288,7 +296,7 @@ fn split_materialized_outputs_by_count(
     split_materialized_outputs(outputs, pivot_offset_id)
 }
 
-fn next_add_new<'a>(
+fn advance_to_next_add_new<'a>(
     iter: &mut MaterializeLogsResultIter<'a>,
 ) -> Option<chroma_segment::types::BorrowedMaterializedLogRecord<'a>> {
     iter.find(|r| r.get_operation() == MaterializedLogOperation::AddNew)

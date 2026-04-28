@@ -577,11 +577,13 @@ impl PartitionedMaterializeLogsResult {
         pivot_offset_id: u32,
         next_new_offset_id: Option<&AtomicU32>,
     ) -> Option<PartitionedMaterializeLogsResult> {
-        let mut new_partitioned = self.clone();
-        let active_shard = new_partitioned.shards.last_mut()?;
-        let new_active_shard = active_shard.split(pivot_offset_id, next_new_offset_id);
-        new_partitioned.shards.push(new_active_shard);
-        Some(new_partitioned)
+        let mut new = self.clone();
+        let new_shard = new
+            .shards
+            .last_mut()?
+            .split(pivot_offset_id, next_new_offset_id);
+        new.shards.push(new_shard);
+        Some(new)
     }
 
     pub fn get_active_record_delta(&self) -> i32 {

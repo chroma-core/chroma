@@ -1029,7 +1029,8 @@ pub async fn compact(
 #[cfg(test)]
 mod tests {
     use chroma_log::test::{
-        add_delete_net_zero_generator, upsert_generator, TEST_EMBEDDING_DIMENSION,
+        add_delete_generator, add_delete_net_zero_generator, upsert_generator,
+        TEST_EMBEDDING_DIMENSION,
     };
     use chroma_types::{DatabaseName, SegmentScope, SegmentType};
     use std::collections::{HashMap, HashSet};
@@ -1048,7 +1049,7 @@ mod tests {
     use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::GarbageCollectionContext};
     use chroma_log::{
         in_memory_log::{InMemoryLog, InternalLogRecord},
-        test::{add_delete_generator, LogGenerator},
+        test::LogGenerator,
         Log,
     };
     use chroma_segment::{
@@ -1061,7 +1062,7 @@ mod tests {
     use chroma_types::{
         operator::{Filter, Limit, Projection, ProjectionRecord},
         Collection, DocumentExpression, DocumentOperator, MetadataExpression, PrimitiveOperator,
-        Segment, SegmentShard, SegmentType, SegmentUuid, Where,
+        Segment, SegmentShard, SegmentUuid, Where,
     };
     use futures::TryStreamExt;
     use regex::Regex;
@@ -3673,12 +3674,11 @@ mod tests {
                 system.clone(),
                 collection_id,
                 database_name.clone(),
-                false,          // No rebuild
-                HashSet::new(), // No segment scopes
-                1,              // fetch_log_batch_size
-                10,             // fetch_log_concurrency
-                1000,           // max_compaction_size - reduced to below shard size
-                10,             // max_partition_size
+                None, // No rebuild
+                1,    // fetch_log_batch_size
+                10,   // fetch_log_concurrency
+                1000, // max_compaction_size - reduced to below shard size
+                10,   // max_partition_size
                 Log::InMemory(in_memory_log.clone()),
                 sysdb.clone(),
                 test_segments.blockfile_provider.clone(),
