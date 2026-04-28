@@ -592,6 +592,7 @@ mod tests {
         fn mock_client(server: &MockServer) -> ChromaHttpClient {
             ChromaHttpClient::new(ChromaHttpClientOptions {
                 endpoint: server.base_url().parse().unwrap(),
+                endpoints: Vec::new(),
                 auth_method: ChromaAuthMethod::None,
                 retry_options: ChromaRetryOptions::default(),
                 tenant_id: Some("test-tenant".to_string()),
@@ -914,6 +915,7 @@ mod tests {
         fn local_client() -> ChromaHttpClient {
             ChromaHttpClient::new(ChromaHttpClientOptions {
                 endpoint: "http://localhost:8000".parse().unwrap(),
+                endpoints: Vec::new(),
                 auth_method: ChromaAuthMethod::None,
                 retry_options: ChromaRetryOptions::default(),
                 tenant_id: Some("default_tenant".to_string()),

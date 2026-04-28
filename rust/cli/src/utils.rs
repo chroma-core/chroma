@@ -227,6 +227,7 @@ pub fn local_client(host: &str) -> Result<ChromaHttpClient, CliError> {
         endpoint: host
             .parse()
             .map_err(|_| UtilsError::InvalidUrl(host.to_string()))?,
+        endpoints: Vec::new(),
         auth_method: ChromaAuthMethod::None,
         retry_options: ChromaRetryOptions::default(),
         tenant_id: Some("default_tenant".to_string()),
@@ -238,6 +239,7 @@ pub fn local_client(host: &str) -> Result<ChromaHttpClient, CliError> {
 pub fn local_client_default() -> Result<ChromaHttpClient, CliError> {
     let options = ChromaHttpClientOptions {
         endpoint: ChromaHttpClientOptions::default().endpoint,
+        endpoints: Vec::new(),
         auth_method: ChromaAuthMethod::None,
         retry_options: ChromaRetryOptions::default(),
         tenant_id: Some("default_tenant".to_string()),
