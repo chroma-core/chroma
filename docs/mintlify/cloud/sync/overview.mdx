@@ -38,7 +38,7 @@ The web source type allows developers to scrape the contents of web pages into C
 
 ## File Upload
 
-The file upload source type lets you push individual files directly to Chroma over HTTP without staging them in S3 or GitHub first. Each database has at most one file-upload source, which is created automatically the first time you call the upload endpoint for that database. For a detailed walkthrough, see [File Upload docs](/cloud/sync/file-upload).
+The file upload source type lets you upload individual files directly to sync. Each upload specifies a target collection that is created or appended to. For a detailed walkthrough, see [File Upload docs](/cloud/sync/file-upload).
 
 # Sources
 
@@ -147,7 +147,7 @@ A source of the web type is configured with a starting URL and a few other optio
 
 ## File Upload
 
-File-upload sources are not created via `POST /api/v1/sources`. Instead, the first call to [`POST /api/v1/add-file`](/cloud/sync/file-upload) for a database creates the source automatically; subsequent uploads to the same database reuse it. Each database has at most one file-upload source.
+File uploads do not require pre-configuring a source. Just call [`POST /api/v1/add-file`](/cloud/sync/file-upload) with the target `database_name` and `collection_name`, and Chroma handles the rest.
 
 # Invocations
 
@@ -200,6 +200,6 @@ Invocations on sources of the GitHub repository type are sync runs over an indiv
 
 ## File Upload
 
-Invocations on file-upload sources are created by calling [`POST /api/v1/add-file`](/cloud/sync/file-upload) directly with a multipart form, not by calling `POST /api/v1/sources/{source_id}/invocations`. Each call to `add-file` creates one invocation that indexes the uploaded file into the target collection.
+Each call to [`POST /api/v1/add-file`](/cloud/sync/file-upload) creates one invocation that indexes the uploaded file into the target collection.
 
 For all API endpoints, see the [Sync API Reference](/reference/sync-api).

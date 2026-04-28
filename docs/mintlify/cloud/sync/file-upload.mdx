@@ -1,21 +1,22 @@
 ---
 title: File Upload
-description: Push individual files directly into Chroma Cloud over HTTP.
+description: Upload individual files directly to Chroma Cloud.
 ---
 
-The file upload API lets you index a single file in Chroma without first staging it in S3 or GitHub. You send a multipart `POST` to `https://sync.trychroma.com/api/v1/add-file` with the file and target collection; Chroma chunks, embeds, and indexes it just like any other Sync source.
+The file upload API lets you upload a single file directly to sync. You send a multipart `POST` to `https://sync.trychroma.com/api/v1/add-file` with the file and a target collection; Chroma chunks, embeds, and indexes it just like any other Sync source.
 
-The first time you upload to a database, Chroma creates a `file_upload` source for that database automatically. Every subsequent upload to the same database reuses that source. You don't need to (and can't) create file-upload sources via `POST /api/v1/sources`.
+Each upload specifies a `collection_name`. If a collection with that name already exists in the database, the new content is added to it. Otherwise the collection is created on the first upload.
 
 ## Walkthrough
 
 ### Uploading via the Dashboard
 
-1. Open a collection in Chroma Cloud and click **Add data**.
-2. Choose **Upload file** and drag a file or pick one from your computer.
-3. Optionally set a custom document ID and metadata, then submit.
+There are two ways to upload files from the dashboard:
 
-The dashboard creates an invocation and shows progress on the collection's Sync page. The file is processed using the [same pipeline](/cloud/sync/s3#supported-file-types) as S3 sources — documents are converted to markdown, code is chunked with tree-sitter, and everything else is split line-by-line.
+- **From the Add data page.** Open a database, choose **Add data**, and select **File upload**. Drop or pick one or more files; Chroma chunks and embeds them into a collection named `file_upload` (created on the first upload).
+- **From a collection page.** Open any collection and click **Upload files**. Files are uploaded into that collection.
+
+Both flows accept the same file types: PDFs, Office documents, spreadsheets, presentations, HTML, ebooks, images, and any UTF-8 text or markdown file. The 200 MB-per-file limit is enforced in the browser before the upload starts.
 
 ### Uploading via the API
 
@@ -24,8 +25,7 @@ The endpoint is multipart `POST /api/v1/add-file`. Two rules to be aware of:
 - The header `x-upload-content-length` (file size in bytes) is required.
 - `database_name` and `collection_name` **must appear before** the `file` part. Chroma authorizes the request and acquires an upload slot before streaming any bytes — so these fields have to arrive first.
 
-<CodeGroup>
-```bash curl
+```bash
 curl -X POST https://sync.trychroma.com/api/v1/add-file \
   -H "x-chroma-token: $CHROMA_API_KEY" \
   -H "x-upload-content-length: $(stat -f%z report.pdf)" \
@@ -35,65 +35,6 @@ curl -X POST https://sync.trychroma.com/api/v1/add-file \
   -F 'metadata={"author":"Jane Doe","year":2024}' \
   -F "file=@report.pdf"
 ```
-
-```python Python
-import os
-import requests
-
-path = "report.pdf"
-
-with open(path, "rb") as f:
-    response = requests.post(
-        "https://sync.trychroma.com/api/v1/add-file",
-        headers={
-            "x-chroma-token": os.environ["CHROMA_API_KEY"],
-            "x-upload-content-length": str(os.path.getsize(path)),
-        },
-        # Order matters: database_name and collection_name must come before file.
-        files=[
-            ("database_name", (None, "my-db")),
-            ("collection_name", (None, "my-collection")),
-            ("custom_id", (None, "report-2024-q4")),
-            ("metadata", (None, '{"author":"Jane Doe","year":2024}')),
-            ("file", ("report.pdf", f, "application/pdf")),
-        ],
-    )
-
-response.raise_for_status()
-print(response.json())  # {"invocation_id": "..."}
-```
-
-```typescript TypeScript
-import { readFileSync, statSync } from "node:fs";
-
-const path = "report.pdf";
-const data = readFileSync(path);
-
-const form = new FormData();
-// Order matters: database_name and collection_name must come before file.
-form.append("database_name", "my-db");
-form.append("collection_name", "my-collection");
-form.append("custom_id", "report-2024-q4");
-form.append("metadata", JSON.stringify({ author: "Jane Doe", year: 2024 }));
-form.append("file", new Blob([data], { type: "application/pdf" }), "report.pdf");
-
-const response = await fetch("https://sync.trychroma.com/api/v1/add-file", {
-  method: "POST",
-  headers: {
-    "x-chroma-token": process.env.CHROMA_API_KEY!,
-    "x-upload-content-length": String(statSync(path).size),
-  },
-  body: form,
-});
-
-if (!response.ok) {
-  throw new Error(`Upload failed: ${response.status}`);
-}
-
-const { invocation_id } = await response.json();
-console.log(invocation_id);
-```
-</CodeGroup>
 
 A successful request returns `201 Created` with the invocation ID:
 
@@ -110,7 +51,7 @@ You can then poll [`GET /api/v1/invocations/{invocation_id}`](/reference/sync-ap
 | Field | Required | Description |
 |-------|----------|-------------|
 | `database_name` | Yes | Database in which to index the file. **Must come before `file`.** |
-| `collection_name` | Yes | Target collection. Created on first use. **Must come before `file`.** |
+| `collection_name` | Yes | Target collection. Created on first use, otherwise appended to. **Must come before `file`.** |
 | `file` | Yes | File content. Maximum 200 MiB. The filename in the part header is used as the document name. |
 | `custom_id` | No | Custom document ID (max 120 bytes). Chunk IDs become `custom_id-{chunk}` instead of `sha256(filename)-{chunk}`. |
 | `metadata` | No | JSON object of additional metadata merged with chunk metadata. Maximum 16 KiB. Keys reserved by Chroma (e.g. `chroma_*`) are rejected. |
