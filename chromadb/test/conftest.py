@@ -1008,10 +1008,6 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     if "database_name" in metafunc.fixturenames:
         params = [pytest.param(DEFAULT_DATABASE, id="classic")]
         if MULTI_REGION_ENABLED and metafunc.definition.get_closest_marker(
-            "skip_single_region"
-        ):
-            params = []
-        if MULTI_REGION_ENABLED and metafunc.definition.get_closest_marker(
             "test_with_multi_region"
         ):
             params.append(
