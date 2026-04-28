@@ -27,7 +27,7 @@ from chromadb.utils.batch_utils import create_batches
 
 GC_NAMESPACES = ("chroma", "chroma2")
 GC_POD_NAME = "garbage-collector-0"
-MINIO_S3_ENDPOINT = "http://localhost:9001"
+MINIO_S3_ENDPOINT = "http://localhost:9000"
 MINIO_BUCKETS = ("chroma-storage", "chroma-storage2")
 MINIO_ACCESS_KEY = "minio"
 MINIO_SECRET_KEY = "minio123"
