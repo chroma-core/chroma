@@ -984,6 +984,10 @@ pub struct LeafMissDiagnostic {
 
 pub struct SearchTimings {
     pub navigate_nanos: u64,
+    /// Time spent fetching f32 leaf centroids and reranking the leaf beam
+    /// with full-precision distance (gated by `config.rerank_leaves_f32`).
+    /// 0 when the rerank is disabled.
+    pub rerank_centroid_nanos: u64,
     pub quantize_nanos: u64,
     pub distance_nanos: u64,
     pub sort_dedup_nanos: u64,

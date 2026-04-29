@@ -42,6 +42,12 @@ pub struct HierarchicalSpannConfig {
     pub write_navigation: NavigationMode,
     /// If true, NPA uses full precision f32 distances; if false, NPA uses quantized distances.
     pub fp_npa: bool,
+    /// If true, the reader reranks the final leaf beam using full-precision
+    /// f32 distances against each leaf's centroid (fetched on-demand from
+    /// the `vector_data` blockfile under `PREFIX_CENTROID`). The reranked
+    /// order replaces the RaBitQ quantized scores returned by
+    /// `navigate_4bit`.
+    pub rerank_leaves_f32: bool,
 }
 
 impl Default for HierarchicalSpannConfig {
@@ -64,6 +70,7 @@ impl Default for HierarchicalSpannConfig {
             reassign_neighbor_count: 32,
             write_navigation: NavigationMode::Fp,
             fp_npa: true,
+            rerank_leaves_f32: false,
         }
     }
 }

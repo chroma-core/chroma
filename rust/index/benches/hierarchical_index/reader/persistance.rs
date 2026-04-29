@@ -180,6 +180,33 @@ impl HierarchicalSpannReader {
         Ok(())
     }
 
+    /// Concurrently fetch f32 centroids (PREFIX_CENTROID) for the given
+    /// leaf ids without touching posting data. Used by the leaf-beam f32
+    /// rerank path. Returns one entry per id; `None` for any id whose
+    /// centroid is missing in the vector_data blockfile (e.g. degenerate
+    /// empty-index root leaf).
+    pub async fn fetch_leaf_centroids(
+        &self,
+        leaf_ids: &[NodeId],
+    ) -> Result<Vec<Option<Vec<f32>>>, Box<dyn ChromaError>> {
+        use futures::stream::{self, StreamExt, TryStreamExt};
+
+        const CONCURRENCY: usize = 32;
+
+        let reader = &self.vector_data_reader;
+        // `buffered` (vs. `buffer_unordered`) preserves the input order so
+        // the returned vec aligns 1:1 with `leaf_ids`.
+        let centroids: Vec<Option<Vec<f32>>> =
+            stream::iter(leaf_ids.iter().copied().map(|leaf_id| async move {
+                let c = reader.get(PREFIX_CENTROID, leaf_id).await?;
+                Ok::<Option<Vec<f32>>, Box<dyn ChromaError>>(c.map(|s| s.to_vec()))
+            }))
+            .buffered(CONCURRENCY)
+            .try_collect()
+            .await?;
+        Ok(centroids)
+    }
+
     /// Lazily load raw f32 embeddings for vector reranking.
     pub async fn load_embeddings(&self, ids: &[u32]) -> Result<(), Box<dyn ChromaError>> {
         let missing_ids: Vec<u32> = ids

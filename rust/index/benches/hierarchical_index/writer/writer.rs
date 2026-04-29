@@ -454,9 +454,9 @@ impl HierarchicalSpannWriter {
         policy: &ReadBeamPolicy,
     ) -> Vec<(NodeId, f32)> {
         // if mode is not NavigationMode::FourBit  print warning
-        if _mode != NavigationMode::FourBit {
-            println!("Warning: NavigationMode is not NavigationMode::Fp. Others disabled. Using full precision f32 instead.");
-        }
+        // if _mode != NavigationMode::FourBit {
+        //     println!("Warning: NavigationMode is not NavigationMode::Fp. Others disabled. Using full precision f32 instead.");
+        // }
         // match mode {
         //     NavigationMode::Fp => self.navigate_f32(query, policy),
         //     NavigationMode::FourBit => self.navigate_4bit(query, policy),
