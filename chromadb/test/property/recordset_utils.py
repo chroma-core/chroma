@@ -11,7 +11,7 @@ def create_large_recordset(
     min_size: int = 45000,
     max_size: int = 50000,
     *,
-    embedding: Sequence[int | float] = (1, 2, 3),
+    embedding: Sequence = (1, 2, 3),
 ) -> strategies.RecordSet:
     """Build a large record set without relying on Hypothesis generation."""
     size = randint(min_size, max_size)
