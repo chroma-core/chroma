@@ -124,23 +124,15 @@ impl HierarchicalSpannReader {
         policy: &ReadBeamPolicy,
     ) -> Result<(Vec<(u32, f32)>, usize, usize, SearchTimings), Box<dyn ChromaError>> {
         let nav_t0 = Instant::now();
-        let mut leaves = self.navigate_4bit(query, policy);
+        let leaves = self.navigate_4bit(query, policy);
         let navigate_nanos = nav_t0.elapsed().as_nanos() as u64;
-
-        let rerank_centroid_nanos = if self.config.rerank_leaves_f32 {
-            self.rerank_leaves_with_f32_centroids(query, &mut leaves)
-                .await?
-        } else {
-            0
-        };
 
         for &(leaf_id, _) in &leaves {
             self.load_node_posting_list(leaf_id).await?;
         }
 
-        let (deduped, scanned, leaves_scanned, mut timings) =
+        let (deduped, scanned, leaves_scanned, timings) =
             self.score_leaves(query, k, rerank_vectors, &leaves, navigate_nanos);
-        timings.rerank_centroid_nanos = rerank_centroid_nanos;
 
         if rerank_vectors > 1 {
             let ids_to_load: Vec<u32> = deduped.iter().map(|(id, _)| *id).collect();
@@ -153,9 +145,7 @@ impl HierarchicalSpannReader {
 
     /// Synchronous search. Requires that posting data is already loaded
     /// (via `load_all_postings()`). Embeddings for vector reranking must
-    /// also be pre-loaded if `rerank_vectors > 1`. The `rerank_leaves_f32`
-    /// path also requires `load_all_postings()` (which populates each
-    /// leaf's f32 centroid alongside its posting data).
+    /// also be pre-loaded if `rerank_vectors > 1`.
     pub fn search_with_policy_sync(
         &self,
         query: &[f32],
@@ -164,18 +154,11 @@ impl HierarchicalSpannReader {
         policy: &ReadBeamPolicy,
     ) -> (Vec<(u32, f32)>, usize, usize, SearchTimings) {
         let nav_t0 = Instant::now();
-        let mut leaves = self.navigate_4bit(query, policy);
+        let leaves = self.navigate_4bit(query, policy);
         let navigate_nanos = nav_t0.elapsed().as_nanos() as u64;
 
-        let rerank_centroid_nanos = if self.config.rerank_leaves_f32 {
-            self.rerank_leaves_with_f32_centroids_sync(query, &mut leaves)
-        } else {
-            0
-        };
-
-        let (deduped, scanned, leaves_scanned, mut timings) =
+        let (deduped, scanned, leaves_scanned, timings) =
             self.score_leaves(query, k, rerank_vectors, &leaves, navigate_nanos);
-        timings.rerank_centroid_nanos = rerank_centroid_nanos;
 
         if rerank_vectors > 1 {
             self.rerank(query, k, deduped, scanned, leaves_scanned, timings)
@@ -199,15 +182,8 @@ impl HierarchicalSpannReader {
         policy: &ReadBeamPolicy,
     ) -> Result<(Vec<(u32, f32)>, usize, usize, SearchTimings), Box<dyn ChromaError>> {
         let nav_t0 = Instant::now();
-        let mut leaves = self.navigate_4bit(query, policy);
+        let leaves = self.navigate_4bit(query, policy);
         let navigate_nanos = nav_t0.elapsed().as_nanos() as u64;
-
-        let rerank_centroid_nanos = if self.config.rerank_leaves_f32 {
-            self.rerank_leaves_with_f32_centroids(query, &mut leaves)
-                .await?
-        } else {
-            0
-        };
 
         // Drive up to LAZY_RECALL_CONCURRENCY posting `load_node` calls
         // concurrently. `load_node` is idempotent (early-returns once a
@@ -226,7 +202,6 @@ impl HierarchicalSpannReader {
 
         let (deduped, scanned, leaves_scanned, mut timings) =
             self.score_leaves(query, k, rerank_vectors, &leaves, navigate_nanos);
-        timings.rerank_centroid_nanos = rerank_centroid_nanos;
 
         if rerank_vectors > 1 {
             let rr_t0 = Instant::now();
@@ -353,7 +328,6 @@ impl HierarchicalSpannReader {
             leaves_scanned,
             SearchTimings {
                 navigate_nanos,
-                rerank_centroid_nanos: 0,
                 quantize_nanos,
                 distance_nanos,
                 sort_dedup_nanos,
@@ -387,71 +361,6 @@ impl HierarchicalSpannReader {
         timings.rerank_nanos = rr_t0.elapsed().as_nanos() as u64;
         reranked.truncate(k);
         (reranked, scanned, leaves_scanned, timings)
-    }
-
-    // =========================================================================
-    // Last-layer rerank with full-precision leaf centroids
-    // =========================================================================
-
-    /// Async last-layer rerank: fetches each beam-leaf's f32 centroid from
-    /// the `vector_data` blockfile (PREFIX_CENTROID) and replaces the
-    /// quantized score returned by `navigate_4bit` with a full-precision
-    /// distance. Re-sorts `leaves` ascending by the new distance. Returns
-    /// the wall-clock cost in nanoseconds for the rerank step (centroid
-    /// fetch + dist + re-sort).
-    ///
-    /// On a missing centroid (e.g. degenerate empty-index root leaf) the
-    /// quantized score is preserved so the subsequent sort never sees a
-    /// NaN. With `leaves.len() <= 1` no I/O is performed.
-    async fn rerank_leaves_with_f32_centroids(
-        &self,
-        query: &[f32],
-        leaves: &mut Vec<(NodeId, f32)>,
-    ) -> Result<u64, Box<dyn ChromaError>> {
-        if leaves.len() <= 1 {
-            return Ok(0);
-        }
-
-        let t0 = Instant::now();
-        let leaf_ids: Vec<NodeId> = leaves.iter().map(|(id, _)| *id).collect();
-        let centroids = self.fetch_leaf_centroids(&leaf_ids).await?;
-
-        for (entry, centroid_opt) in leaves.iter_mut().zip(centroids.into_iter()) {
-            if let Some(centroid) = centroid_opt {
-                if !centroid.is_empty() {
-                    entry.1 = self.dist(query, &centroid);
-                }
-            }
-        }
-        leaves.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-        Ok(t0.elapsed().as_nanos() as u64)
-    }
-
-    /// Sync companion to `rerank_leaves_with_f32_centroids`. Reads
-    /// `leaf.centroid` from `self.nodes`, which `load_all_postings()`
-    /// populates alongside posting data. Falls back to the quantized
-    /// score for any leaf whose f32 centroid hasn't been loaded.
-    fn rerank_leaves_with_f32_centroids_sync(
-        &self,
-        query: &[f32],
-        leaves: &mut Vec<(NodeId, f32)>,
-    ) -> u64 {
-        if leaves.len() <= 1 {
-            return 0;
-        }
-
-        let t0 = Instant::now();
-        for entry in leaves.iter_mut() {
-            if let Some(node_ref) = self.nodes.get(&entry.0) {
-                if let TreeNode::Leaf(leaf) = node_ref.value() {
-                    if !leaf.centroid.is_empty() {
-                        entry.1 = self.dist(query, &leaf.centroid);
-                    }
-                }
-            }
-        }
-        leaves.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-        t0.elapsed().as_nanos() as u64
     }
 
     // =========================================================================

@@ -229,14 +229,6 @@ struct Args {
     #[arg(long)]
     fp_npa: bool,
 
-    /// Rerank the final leaf beam returned by `navigate_4bit` using full
-    /// precision f32 distances against each leaf's centroid (fetched from
-    /// the vector_data blockfile under PREFIX_CENTROID). Adds latency for
-    /// centroid I/O on the lazy path; adds a small CPU cost on the sync
-    /// path (centroids are already in memory after `load_all_postings`).
-    #[arg(long)]
-    rerank_leaves_f32: bool,
-
     /// Tau values for recall sweep, comma-separated
     #[arg(long, default_value = "1.5,2.0")]
     recall_tau_values: String,
@@ -941,7 +933,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         reassign_neighbor_count: 32,
         write_navigation: write_nav,
         fp_npa: args.fp_npa,
-        rerank_leaves_f32: args.rerank_leaves_f32,
     };
 
     println!("=== 1-Bit Quantized Hierarchical SPANN Writer Benchmark ===");
@@ -1874,10 +1865,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             ));
         }
         header.push_str(&format!(
-            " {:>10} | {:>15} | {:>7} | {:>7} | {:>7} | {:>8} | {:>10} | {:>15} | {:>15} | {:>15} | {:>15} | {:>15} | {:>15} | {:>14} |",
+            " {:>10} | {:>15} | {:>7} | {:>7} | {:>7} | {:>8} | {:>10} | {:>15} | {:>15} | {:>15} | {:>15} | {:>15} | {:>14} |",
             "opt R@100", "scanned_vectors", "scan MB", "tot MB", "MB/s", "R@100", "avg lat",
-            "lat_nav", "lat_rerank_c", "lat_quant", "lat_dist", "lat_sort", "lat_rerank",
-            "lat_dist / vec",
+            "lat_nav", "lat_quant", "lat_dist", "lat_sort", "lat_rerank", "lat_dist / vec",
         ));
 
         let mut separator = format!("  |{:-^8}|{:-^8}|", "", "",);
@@ -1894,8 +1884,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             ));
         }
         separator.push_str(&format!(
-            "{:-^12}|{:-^17}|{:-^9}|{:-^9}|{:-^9}|{:-^10}|{:-^12}|{:-^17}|{:-^17}|{:-^17}|{:-^17}|{:-^17}|{:-^17}|{:-^16}|",
-            "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "{:-^12}|{:-^17}|{:-^9}|{:-^9}|{:-^9}|{:-^10}|{:-^12}|{:-^17}|{:-^17}|{:-^17}|{:-^17}|{:-^17}|{:-^16}|",
+            "", "", "", "", "", "", "", "", "", "", "", "", "",
         ));
 
         println!("\n=== Index Quality ===");
@@ -2095,7 +2085,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             args.beam_tau, args.read_beam_min, args.read_beam_max, tau_values,
         );
         println!("  Rerank vectors: {:?}", args.recall_rerank_vectors,);
-        println!("  Rerank leaves (f32 centroids): {}", args.rerank_leaves_f32);
         println!("  Brute-force GT: {}", args.brute_force_gt,);
         if !read_level_taus.is_empty() || !read_level_min_pcts.is_empty() {
             println!(
@@ -2244,7 +2233,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     let mut level_beam_sums = vec![0u64; num_levels];
                     let mut level_candidates_sums = vec![0u64; num_levels];
                     let mut total_nav_nanos = 0u64;
-                    let mut total_rrc_nanos = 0u64;
                     let mut total_qq_nanos = 0u64;
                     let mut total_dq_nanos = 0u64;
                     let mut total_sort_nanos = 0u64;
@@ -2255,7 +2243,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         total_nanos += qr.nanos;
                         total_scanned += qr.scanned;
                         total_nav_nanos += qr.timings.navigate_nanos;
-                        total_rrc_nanos += qr.timings.rerank_centroid_nanos;
                         total_qq_nanos += qr.timings.quantize_nanos;
                         total_dq_nanos += qr.timings.distance_nanos;
                         total_sort_nanos += qr.timings.sort_dedup_nanos;
@@ -2321,7 +2308,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
                     let nq = num_queries as u64;
                     let avg_nav = total_nav_nanos / nq;
-                    let avg_rrc = total_rrc_nanos / nq;
                     let avg_qq = total_qq_nanos / nq;
                     let avg_dq = total_dq_nanos / nq;
                     let avg_sort = total_sort_nanos / nq;
@@ -2346,7 +2332,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     let scanned_label =
                         format!("{} ({:.2}%)", format_count(avg_scanned), scanned_pct);
                     row.push_str(&format!(
-                            " {:>9.2}% | {:>15} | {:>7} | {:>7} | {:>7} | {:>7.2}% | {:>10} | {:>15} | {:>15} | {:>15} | {:>15} | {:>15} | {:>15} | {:>14} |",
+                            " {:>9.2}% | {:>15} | {:>7} | {:>7} | {:>7} | {:>7.2}% | {:>10} | {:>15} | {:>15} | {:>15} | {:>15} | {:>15} | {:>14} |",
                             avg_optimal * 100.0,
                             scanned_label,
                             format_mb(scan_mb),
@@ -2355,7 +2341,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             avg_r100 * 100.0,
                             format_latency(avg_lat),
                             format!("{} ({:.0}%)", format_latency(avg_nav), pct(avg_nav)),
-                            format!("{} ({:.0}%)", format_latency(avg_rrc), pct(avg_rrc)),
                             format!("{} ({:.0}%)", format_latency(avg_qq), pct(avg_qq)),
                             format!("{} ({:.0}%)", format_latency(avg_dq), pct(avg_dq)),
                             format!("{} ({:.0}%)", format_latency(avg_sort), pct(avg_sort)),
@@ -2838,9 +2823,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("R@100           - fraction of true top-100 neighbors in final results");
         println!("avg lat         - average end-to-end search latency per query");
         println!("lat_nav         - time in navigate() (tree traversal to find leaves)");
-        println!(
-            "lat_rerank_c    - time reranking the leaf beam with f32 centroids (0 when --rerank-leaves-f32 is off)"
-        );
         println!("lat_quant       - time building QuantizedQuery per leaf (residual, norms)");
         println!("lat_dist        - time scoring vectors against quantized query (includes version checks)");
         println!("lat_sort        - time deduplicating + sorting all scored vectors");
