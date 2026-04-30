@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::operators::truncate_dirty_log::{
@@ -15,9 +15,7 @@ use chroma_error::ChromaError;
 use chroma_log::Log;
 use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_storage::Storage;
-use chroma_sysdb::{
-    CollectionToGcInfo, GetCollectionsOptions, GetCollectionsToGcError, SysDb, SysDbConfig,
-};
+use chroma_sysdb::{CollectionToGcInfo, GetCollectionsOptions, SysDb, SysDbConfig};
 use chroma_system::{
     wrap, Component, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, System,
     TaskResult,
@@ -54,7 +52,7 @@ pub(crate) struct GarbageCollector {
     job_duration_ms_metric: Histogram<u64>,
     total_files_deleted_metric: Counter<u64>,
     total_versions_deleted_metric: Counter<u64>,
-    manual_collections: Mutex<HashMap<CollectionUuid, DatabaseName>>,
+    manual_collections: Mutex<HashSet<CollectionUuid>>,
 }
 
 impl Debug for GarbageCollector {
@@ -116,7 +114,7 @@ impl GarbageCollector {
                 .u64_counter("garbage_collector.total_versions_deleted")
                 .with_description("Total number of versions deleted during garbage collection")
                 .build(),
-            manual_collections: Mutex::new(HashMap::default()),
+            manual_collections: Mutex::new(HashSet::default()),
         }
     }
 
@@ -126,40 +124,6 @@ impl GarbageCollector {
 
     pub(crate) fn set_system(&mut self, system: chroma_system::System) {
         self.system = Some(system);
-    }
-
-    async fn garbage_collect_hard_delete_log(
-        &self,
-        collection_id: CollectionUuid,
-        database_name: Option<DatabaseName>,
-    ) -> Result<GarbageCollectorResponse, GarbageCollectCollectionError> {
-        let dispatcher = self
-            .dispatcher
-            .as_ref()
-            .ok_or(GarbageCollectCollectionError::Uninitialized)?;
-        let system = self
-            .system
-            .as_ref()
-            .ok_or(GarbageCollectCollectionError::Uninitialized)?;
-
-        let orchestrator =
-            crate::log_only_orchestrator::HardDeleteLogOnlyGarbageCollectorOrchestrator::new(
-                dispatcher.clone(),
-                self.storage.clone(),
-                self.logs.clone(),
-                self.regions_and_topologies.clone(),
-                collection_id,
-                database_name,
-            );
-
-        let result = match orchestrator.run(system.clone()).await {
-            Ok(res) => res,
-            Err(e) => {
-                tracing::error!("Failed to run garbage collection orchestrator v2: {:?}", e);
-                return Err(GarbageCollectCollectionError::OrchestratorV2Error(e));
-            }
-        };
-        Ok(result)
     }
 
     async fn garbage_collect_attached_functions(
@@ -315,6 +279,49 @@ impl GarbageCollector {
         Ok(result)
     }
 
+    async fn lookup_manual_collection_to_gc(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<Option<CollectionToGcInfo>, GarbageCollectCollectionError> {
+        let mut collections = self
+            .sysdb_client
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(collection_id),
+                ..Default::default()
+            })
+            .await?;
+
+        if collections.is_empty() {
+            return Ok(None);
+        }
+        if collections.len() > 1 {
+            tracing::error!(
+                "Multiple collections returned when querying for manual GC ID: {}",
+                collection_id
+            );
+            return Ok(None);
+        }
+
+        let collection = collections.remove(0);
+        let Some(database) = DatabaseName::new(&collection.database) else {
+            tracing::error!(
+                "Collection {} has invalid database name for manual GC: {}",
+                collection.collection_id,
+                collection.database
+            );
+            return Ok(None);
+        };
+
+        Ok(Some(CollectionToGcInfo {
+            id: collection.collection_id,
+            tenant: collection.tenant,
+            database,
+            name: collection.name,
+            version_file_path: collection.version_file_path.unwrap_or_default(),
+            lineage_file_path: collection.lineage_file_path,
+        }))
+    }
+
     async fn truncate_dirty_log(&self, ctx: &ComponentContext<Self>) {
         let Some(mut dispatcher) = self.dispatcher.as_ref().cloned() else {
             tracing::error!("Uninitialized dispatcher for garbage collector");
@@ -420,11 +427,10 @@ impl GarbageCollector {
             return Err(GarbageCollectCollectionError::NoSuchCollection);
         }
         let mut manual_collections = self.manual_collections.lock();
-        if let Some(database_name) = DatabaseName::new(&collection_info[0].database) {
-            manual_collections.insert(collection_id, database_name);
-        } else {
+        if DatabaseName::new(&collection_info[0].database).is_none() {
             return Err(GarbageCollectCollectionError::NoSuchCollection);
         }
+        manual_collections.insert(collection_id);
         Ok(())
     }
 }
@@ -548,21 +554,20 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
             while collections_to_gc.len() + manual.len()
                 < self.config.max_collections_to_gc as usize
             {
-                if let Some(&c) = manual_collections.keys().next() {
-                    let db_name = manual_collections.remove(&c);
-                    manual.push((c, db_name));
+                if let Some(&c) = manual_collections.iter().next() {
+                    manual_collections.remove(&c);
+                    manual.push(c);
                 } else {
                     break;
                 }
             }
         }
-        let mut collections_to_hard_delete_log = vec![];
-        for (collection_id, db_name) in manual {
+        for collection_id in manual {
             if collections_to_gc.iter().any(|c| c.id == collection_id) {
                 continue;
             }
-            match self.sysdb_client.get_collection_to_gc(collection_id).await {
-                Ok(collection_info) => {
+            match self.lookup_manual_collection_to_gc(collection_id).await {
+                Ok(Some(collection_info)) => {
                     tracing::event!(
                         Level::INFO,
                         name = "manually collecting",
@@ -570,8 +575,11 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
                     );
                     collections_to_gc.push(collection_info);
                 }
-                Err(GetCollectionsToGcError::NoSuchCollection) => {
-                    collections_to_hard_delete_log.push((collection_id, db_name));
+                Ok(None) => {
+                    tracing::info!(
+                        collection_id = %collection_id,
+                        "Skipping manual GC request because the collection no longer exists"
+                    );
                 }
                 Err(err) => {
                     tracing::event!(
@@ -632,14 +640,7 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
                 )
                 .instrument(instrumented_span)) as std::pin::Pin<Box<dyn std::future::Future<Output = Result<GarbageCollectorResponse, GarbageCollectCollectionError>> + Send + '_>>
             });
-        let jobs_iter2 = collections_to_hard_delete_log.into_iter().map(|(collection_id, db_name)| {
-                tracing::event!(Level::INFO, "hard delete log-only");
-                let instrumented_span = span!(parent: None, tracing::Level::INFO, "Garbage collection job (hard delete log)", collection_id =? collection_id);
-                Span::current().add_link(instrumented_span.context().span().span_context().clone());
-                Box::pin(self.garbage_collect_hard_delete_log(collection_id, db_name).instrument(instrumented_span)) as std::pin::Pin<Box<dyn std::future::Future<Output = Result<GarbageCollectorResponse, GarbageCollectCollectionError>> + Send + '_>>
-        });
         let mut jobs_stream1 = futures::stream::iter(jobs_iter1).buffer_unordered(100);
-        let mut jobs_stream2 = futures::stream::iter(jobs_iter2).buffer_unordered(100);
 
         let mut num_completed_jobs = 0;
         let mut num_failed_jobs = 0;
@@ -651,25 +652,6 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
                         manual_collections.remove(&result.collection_id);
                     }
                     tracing::info!("Garbage collection completed. Deleted {} files over {} versions for collection {}.", result.num_files_deleted, result.num_versions_deleted, result.collection_id);
-                    num_completed_jobs += 1;
-                }
-                Err(e) => {
-                    tracing::error!("Garbage collection failed: {:?}", e);
-                    num_failed_jobs += 1;
-                }
-            }
-        }
-        // NOTE(rescrv):  I'm not proud of this duplication, but I cannot coerce the
-        // futures::stream::iter above to take a chain of two different futures.  It just won't
-        // compile.
-        while let Some(job_result) = jobs_stream2.next().await {
-            match job_result {
-                Ok(result) => {
-                    {
-                        let mut manual_collections = self.manual_collections.lock();
-                        manual_collections.remove(&result.collection_id);
-                    }
-                    tracing::info!("Garbage collection hard delete completed. Deleted all log files collection {}.", result.collection_id);
                     num_completed_jobs += 1;
                 }
                 Err(e) => {
@@ -968,12 +950,11 @@ mod tests {
         let (_storage_dir, storage) = test_storage();
         let mut sysdb = SysDb::Test(TestSysDb::new());
         let collection_id = CollectionUuid::new();
-        let database_name = DatabaseName::new("test_db").expect("valid database name");
 
         sysdb
             .create_collection(
                 "test-tenant".to_string(),
-                database_name.clone(),
+                DatabaseName::new("test_db").expect("valid database name"),
                 collection_id,
                 "test-collection".to_string(),
                 vec![],
@@ -1000,7 +981,7 @@ mod tests {
 
         assert_eq!(
             garbage_collector.manual_collections.lock().clone(),
-            HashMap::from([(collection_id, database_name)])
+            HashSet::from([collection_id])
         );
     }
 
@@ -1023,6 +1004,45 @@ mod tests {
             err,
             GarbageCollectCollectionError::NoSuchCollection
         ));
+    }
+
+    #[tokio::test]
+    async fn test_lookup_manual_collection_to_gc_returns_none_after_collection_is_removed() {
+        let (_storage_dir, storage) = test_storage();
+        let mut test_sysdb = TestSysDb::new();
+        let collection_id = CollectionUuid::new();
+        let database_name = DatabaseName::new("test_db").expect("valid database name");
+
+        SysDb::Test(test_sysdb.clone())
+            .create_collection(
+                "test-tenant".to_string(),
+                database_name,
+                collection_id,
+                "test-collection".to_string(),
+                vec![],
+                None,
+                None,
+                None,
+                None,
+                false,
+            )
+            .await
+            .expect("collection should be created");
+        test_sysdb.remove_collection(collection_id);
+
+        let mut garbage_collector = new_test_garbage_collector(
+            test_gc_config("gc-a"),
+            SysDb::Test(test_sysdb),
+            storage,
+            Box::new(TestAssignmentPolicy::default()),
+        );
+
+        let collection_to_gc = garbage_collector
+            .lookup_manual_collection_to_gc(collection_id)
+            .await
+            .expect("manual collection lookup should succeed");
+
+        assert!(collection_to_gc.is_none());
     }
 
     async fn wait_for_new_version(
