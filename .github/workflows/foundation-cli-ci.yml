@@ -1,0 +1,57 @@
+name: Foundation CLI CI
+
+# Dedicated CI for rust/foundation — excluded from pr.yml's rust change detection
+# to avoid triggering the expensive full workspace test suite (K8s, benchmarks, etc.).
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'rust/foundation/**'
+      - '.github/workflows/foundation-cli-*.yml'
+  pull_request:
+    paths:
+      - 'rust/foundation/**'
+      - '.github/workflows/foundation-cli-*.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check formatting
+        run: cargo fmt -p foundation --check --manifest-path rust/foundation/Cargo.toml
+
+      - name: Clippy
+        run: cargo clippy -p foundation --all-targets --manifest-path rust/foundation/Cargo.toml -- -D warnings
+
+  test:
+    name: Test
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build
+        run: cargo build --bin foundation --manifest-path rust/foundation/Cargo.toml
+
+      - name: Test
+        run: cargo nextest run -p foundation --manifest-path rust/foundation/Cargo.toml --no-tests=pass

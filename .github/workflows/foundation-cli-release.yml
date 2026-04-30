@@ -1,0 +1,126 @@
+name: Release Foundation CLI
+
+on:
+  push:
+    tags:
+      - 'foundation-cli-v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. foundation-cli-v0.1.0)'
+        required: true
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }}/${{ matrix.arch }})
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        include:
+          # M0: macOS arm64 only (internal team, all on Apple Silicon)
+          - os: darwin
+            arch: arm64
+            rust_target: aarch64-apple-darwin
+            runner: macos-15
+          # M0+: uncomment to expand platform support
+          # - os: linux
+          #   arch: amd64
+          #   rust_target: x86_64-unknown-linux-gnu
+          #   runner: blacksmith-4vcpu-ubuntu-2404
+          # - os: darwin
+          #   arch: amd64
+          #   rust_target: x86_64-apple-darwin
+          #   runner: macos-15
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Rust
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate and resolve tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+            # Verify the tag exists and points to the current commit.
+            # This prevents publishing a release whose tag_name does not match
+            # the built commit, which would produce incorrect binaries.
+            git fetch --tags
+            TAG_COMMIT=$(git rev-list -n 1 "$TAG" 2>/dev/null || echo "")
+            if [ -z "$TAG_COMMIT" ]; then
+              echo "Error: tag '$TAG' does not exist" >&2
+              exit 1
+            fi
+            if [ "$TAG_COMMIT" != "${{ github.sha }}" ]; then
+              echo "Error: tag '$TAG' points to $TAG_COMMIT but workflow is running on ${{ github.sha }}" >&2
+              exit 1
+            fi
+            echo "VERSION=${TAG#foundation-cli-v}" >> $GITHUB_ENV
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/foundation-cli-v}" >> $GITHUB_ENV
+          fi
+
+      - name: Get prerelease status
+        run: |
+          if [[ $VERSION == *"alpha"* ]] || [[ $VERSION == *"beta"* ]]; then
+            echo "PRERELEASE=true" >> $GITHUB_ENV
+          else
+            echo "PRERELEASE=false" >> $GITHUB_ENV
+          fi
+
+      - name: Set build date
+        run: echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_ENV
+
+      - name: Generate package name
+        run: |
+          PACKAGE_NAME="foundation-cli-v${{ env.VERSION }}_${{ matrix.os }}_${{ matrix.arch }}.tar.gz"
+          echo "PACKAGE_NAME=${PACKAGE_NAME}" >> $GITHUB_ENV
+
+      - name: Generate release notes
+        run: |
+          DATE=$(date '+%Y-%m-%d')
+          echo "DATE=$DATE" >> $GITHUB_ENV
+
+          PREVIOUS_TAG=$(git tag -l 'foundation-cli-v*' --sort=-v:refname | sed -n 2p)
+          if [ -z "$PREVIOUS_TAG" ]; then
+            PREVIOUS_TAG=$(git rev-list --max-parents=0 HEAD)
+          fi
+
+          echo "# v${{ env.VERSION }} (${DATE})" > RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+          git log --pretty=format:"* %s" ${PREVIOUS_TAG}..HEAD -- \
+            ./rust/foundation .github/workflows/foundation-cli-release.yml >> RELEASE_NOTES.md
+
+      - name: Build
+        run: |
+          rustup target add ${{ matrix.rust_target }}
+          export FOUNDATION_VERSION=${{ env.VERSION }}
+          export FOUNDATION_COMMIT=${{ github.sha }}
+          export FOUNDATION_DATE=${{ env.BUILD_DATE }}
+          cargo build --release --bin foundation --target ${{ matrix.rust_target }} --manifest-path rust/foundation/Cargo.toml
+          mkdir -p rust/foundation/target/foundation-release
+          cp rust/foundation/target/${{ matrix.rust_target }}/release/foundation rust/foundation/target/foundation-release/foundation
+
+      - name: Package
+        run: |
+          cd rust/foundation/target/foundation-release
+          tar -czf ${{ env.PACKAGE_NAME }} foundation
+          echo "### :package: Produced ${{ env.PACKAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ env.PRERELEASE }}
+          files: rust/foundation/target/foundation-release/${{ env.PACKAGE_NAME }}
+          body_path: RELEASE_NOTES.md
+          name: foundation-cli-v${{ env.VERSION }}
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
