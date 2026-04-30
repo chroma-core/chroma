@@ -384,7 +384,6 @@ def _delete_collection_and_assert_gc_hard_delete(
     captured_stdout = {namespace: [] for namespace in GC_NAMESPACES}
     captured_stderr: Dict[str, str] = {}
     try:
-        time.sleep(1)
         client.delete_collection(collection_name)
         _wait_for_gc_hard_delete_log(watchers, captured_stdout, collection_uuid)
     finally:
