@@ -73,6 +73,7 @@ class UpdateCollection(BaseModel):
 
 class CreateDatabase(BaseModel):
     name: str
+    metadata: Optional[Dict[str, Any]] = None
 
 
 class CreateTenant(BaseModel):

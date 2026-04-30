@@ -133,12 +133,36 @@ func (tc *Catalog) CreateDatabase(ctx context.Context, createDatabase *model.Cre
 			log.Error("error inserting database", zap.Error(err))
 			return err
 		}
+
+		// Insert metadata if provided
+		if createDatabase.Metadata != nil {
+			dbMetadata := convertDatabaseMetadataToDB(createDatabase.ID, createDatabase.Metadata)
+			if len(dbMetadata) > 0 {
+				err = tc.metaDomain.DatabaseMetadataDb(txCtx).Insert(dbMetadata)
+				if err != nil {
+					log.Error("error inserting database metadata", zap.Error(err))
+					return err
+				}
+			}
+		}
+
 		databaseList, err := tc.metaDomain.DatabaseDb(txCtx).GetDatabases(createDatabase.Tenant, createDatabase.Name)
 		if err != nil {
 			log.Error("error getting database", zap.Error(err))
 			return err
 		}
-		result = convertDatabaseToModel(databaseList[0])
+
+		// Fetch metadata for the created database
+		var metadata []*dbmodel.DatabaseMetadata
+		if createDatabase.Metadata != nil {
+			metadata, err = tc.metaDomain.DatabaseMetadataDb(txCtx).GetByDatabaseID(databaseList[0].ID)
+			if err != nil {
+				log.Error("error getting database metadata", zap.Error(err))
+				return err
+			}
+		}
+
+		result = convertDatabaseToModel(databaseList[0], metadata)
 		return nil
 	})
 	if err != nil {
@@ -157,11 +181,14 @@ func (tc *Catalog) GetDatabases(ctx context.Context, getDatabase *model.GetDatab
 	if len(databases) == 0 {
 		return nil, common.ErrDatabaseNotFound
 	}
-	result := make([]*model.Database, 0, len(databases))
-	for _, database := range databases {
-		result = append(result, convertDatabaseToModel(database))
+
+	// Fetch metadata for the database
+	metadata, err := tc.metaDomain.DatabaseMetadataDb(ctx).GetByDatabaseID(databases[0].ID)
+	if err != nil {
+		return nil, err
 	}
-	return result[0], nil
+
+	return convertDatabaseToModel(databases[0], metadata), nil
 }
 
 func (tc *Catalog) ListDatabases(ctx context.Context, listDatabases *model.ListDatabases, ts types.Timestamp) ([]*model.Database, error) {
@@ -169,9 +196,26 @@ func (tc *Catalog) ListDatabases(ctx context.Context, listDatabases *model.ListD
 	if err != nil {
 		return nil, err
 	}
+
+	// Fetch metadata for all databases in a single query
+	databaseIDs := make([]string, len(databases))
+	for i, db := range databases {
+		databaseIDs[i] = db.ID
+	}
+	allMetadata, err := tc.metaDomain.DatabaseMetadataDb(ctx).GetByDatabaseIDs(databaseIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	// Group metadata by database ID
+	metadataByDB := make(map[string][]*dbmodel.DatabaseMetadata)
+	for _, m := range allMetadata {
+		metadataByDB[m.DatabaseID] = append(metadataByDB[m.DatabaseID], m)
+	}
+
 	result := make([]*model.Database, 0, len(databases))
 	for _, database := range databases {
-		result = append(result, convertDatabaseToModel(database))
+		result = append(result, convertDatabaseToModel(database, metadataByDB[database.ID]))
 	}
 	return result, nil
 }

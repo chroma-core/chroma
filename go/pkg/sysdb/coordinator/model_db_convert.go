@@ -212,11 +212,66 @@ func convertSegmentMetadataToDB(segmentID string, metadata *model.SegmentMetadat
 	return dbSegmentMetadataList
 }
 
-func convertDatabaseToModel(dbDatabase *dbmodel.Database) *model.Database {
+func convertDatabaseMetadataToModel(databaseMetadataList []*dbmodel.DatabaseMetadata) *model.CollectionMetadata[model.CollectionMetadataValueType] {
+	if databaseMetadataList == nil || len(databaseMetadataList) == 0 {
+		return nil
+	}
+	metadata := model.NewCollectionMetadata[model.CollectionMetadataValueType]()
+	for _, databaseMetadata := range databaseMetadataList {
+		if databaseMetadata.Key != nil {
+			switch {
+			case databaseMetadata.BoolValue != nil:
+				metadata.Add(*databaseMetadata.Key, &model.CollectionMetadataValueBoolType{Value: *databaseMetadata.BoolValue})
+			case databaseMetadata.StrValue != nil:
+				metadata.Add(*databaseMetadata.Key, &model.CollectionMetadataValueStringType{Value: *databaseMetadata.StrValue})
+			case databaseMetadata.IntValue != nil:
+				metadata.Add(*databaseMetadata.Key, &model.CollectionMetadataValueInt64Type{Value: *databaseMetadata.IntValue})
+			case databaseMetadata.FloatValue != nil:
+				metadata.Add(*databaseMetadata.Key, &model.CollectionMetadataValueFloat64Type{Value: *databaseMetadata.FloatValue})
+			default:
+			}
+		}
+	}
+	if metadata.Empty() {
+		return nil
+	}
+	return metadata
+}
+
+func convertDatabaseMetadataToDB(databaseID string, metadata *model.CollectionMetadata[model.CollectionMetadataValueType]) []*dbmodel.DatabaseMetadata {
+	if metadata == nil {
+		return nil
+	}
+	dbDatabaseMetadataList := make([]*dbmodel.DatabaseMetadata, 0, len(metadata.Metadata))
+	for key, value := range metadata.Metadata {
+		keyCopy := key
+		dbDatabaseMetadata := &dbmodel.DatabaseMetadata{
+			DatabaseID: databaseID,
+			Key:        &keyCopy,
+		}
+		switch v := (value).(type) {
+		case *model.CollectionMetadataValueBoolType:
+			dbDatabaseMetadata.BoolValue = &v.Value
+		case *model.CollectionMetadataValueStringType:
+			dbDatabaseMetadata.StrValue = &v.Value
+		case *model.CollectionMetadataValueInt64Type:
+			dbDatabaseMetadata.IntValue = &v.Value
+		case *model.CollectionMetadataValueFloat64Type:
+			dbDatabaseMetadata.FloatValue = &v.Value
+		default:
+			log.Error("unknown database metadata type", zap.Any("value", v))
+		}
+		dbDatabaseMetadataList = append(dbDatabaseMetadataList, dbDatabaseMetadata)
+	}
+	return dbDatabaseMetadataList
+}
+
+func convertDatabaseToModel(dbDatabase *dbmodel.Database, metadata []*dbmodel.DatabaseMetadata) *model.Database {
 	return &model.Database{
-		ID:     dbDatabase.ID,
-		Name:   dbDatabase.Name,
-		Tenant: dbDatabase.TenantID,
+		ID:       dbDatabase.ID,
+		Name:     dbDatabase.Name,
+		Tenant:   dbDatabase.TenantID,
+		Metadata: convertDatabaseMetadataToModel(metadata),
 	}
 }
 

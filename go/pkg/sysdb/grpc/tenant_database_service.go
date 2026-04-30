@@ -16,12 +16,21 @@ import (
 
 func (s *Server) CreateDatabase(ctx context.Context, req *coordinatorpb.CreateDatabaseRequest) (*coordinatorpb.CreateDatabaseResponse, error) {
 	res := &coordinatorpb.CreateDatabaseResponse{}
-	createDatabase := &model.CreateDatabase{
-		ID:     req.GetId(),
-		Name:   req.GetName(),
-		Tenant: req.GetTenant(),
+
+	// Convert metadata from proto to model
+	metadata, err := convertCollectionMetadataToModel(req.GetMetadata())
+	if err != nil {
+		log.Error("error converting metadata", zap.String("request", req.String()), zap.Error(err))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
-	_, err := s.coordinator.CreateDatabase(ctx, createDatabase)
+
+	createDatabase := &model.CreateDatabase{
+		ID:       req.GetId(),
+		Name:     req.GetName(),
+		Tenant:   req.GetTenant(),
+		Metadata: metadata,
+	}
+	_, err = s.coordinator.CreateDatabase(ctx, createDatabase)
 	if err != nil {
 		log.Error("error CreateDatabase", zap.String("request", req.String()), zap.Error(err))
 		if errors.Is(err, common.ErrDatabaseUniqueConstraintViolation) {
@@ -48,9 +57,10 @@ func (s *Server) GetDatabase(ctx context.Context, req *coordinatorpb.GetDatabase
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	res.Database = &coordinatorpb.Database{
-		Id:     database.ID,
-		Name:   database.Name,
-		Tenant: database.Tenant,
+		Id:       database.ID,
+		Name:     database.Name,
+		Tenant:   database.Tenant,
+		Metadata: convertCollectionMetadataToProto(database.Metadata),
 	}
 	return res, nil
 }
@@ -72,9 +82,10 @@ func (s *Server) ListDatabases(ctx context.Context, req *coordinatorpb.ListDatab
 	}
 	for _, database := range databases {
 		res.Databases = append(res.Databases, &coordinatorpb.Database{
-			Id:     database.ID,
-			Name:   database.Name,
-			Tenant: database.Tenant,
+			Id:       database.ID,
+			Name:     database.Name,
+			Tenant:   database.Tenant,
+			Metadata: convertCollectionMetadataToProto(database.Metadata),
 		})
 	}
 	return res, nil

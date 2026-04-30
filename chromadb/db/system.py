@@ -26,7 +26,11 @@ class SysDB(Component):
 
     @abstractmethod
     def create_database(
-        self, id: UUID, name: str, tenant: str = DEFAULT_TENANT
+        self,
+        id: UUID,
+        name: str,
+        tenant: str = DEFAULT_TENANT,
+        metadata: Optional[Metadata] = None,
     ) -> None:
         """Create a new database in the System database. Raises an Error if the Database
         already exists."""

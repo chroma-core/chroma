@@ -154,7 +154,12 @@ class SegmentAPI(ServerAPI):
 
     @trace_method("SegmentAPI.create_database", OpenTelemetryGranularity.OPERATION)
     @override
-    def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+    def create_database(
+        self,
+        name: str,
+        tenant: str = DEFAULT_TENANT,
+        metadata: Optional[t.Metadata] = None,
+    ) -> None:
         if len(name) < 3:
             raise ValueError("Database name must be at least 3 characters long")
 
@@ -168,6 +173,7 @@ class SegmentAPI(ServerAPI):
             id=uuid4(),
             name=name,
             tenant=tenant,
+            metadata=metadata,
         )
 
     @trace_method("SegmentAPI.get_database", OpenTelemetryGranularity.OPERATION)

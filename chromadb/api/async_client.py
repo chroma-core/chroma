@@ -36,7 +36,7 @@ from chromadb.api.types import (
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.errors import ChromaError
-from chromadb.types import Database, Tenant, Where, WhereDocument
+from chromadb.types import Database, Tenant, Where, WhereDocument, Metadata
 
 
 class AsyncClient(SharedSystemClient, AsyncClientAPI):
@@ -528,8 +528,13 @@ class AsyncAdminClient(SharedSystemClient, AsyncAdminAPI):
         self._server = self._system.instance(AsyncServerAPI)
 
     @override
-    async def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
-        return await self._server.create_database(name=name, tenant=tenant)
+    async def create_database(
+        self,
+        name: str,
+        tenant: str = DEFAULT_TENANT,
+        metadata: Optional[Metadata] = None,
+    ) -> None:
+        return await self._server.create_database(name=name, tenant=tenant, metadata=metadata)
 
     @override
     async def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:

@@ -67,7 +67,11 @@ class SqlSysDB(SqlDB, SysDB):
 
     @override
     def create_database(
-        self, id: UUID, name: str, tenant: str = DEFAULT_TENANT
+        self,
+        id: UUID,
+        name: str,
+        tenant: str = DEFAULT_TENANT,
+        metadata: Optional[Metadata] = None,
     ) -> None:
         with self.tx() as cur:
             # Get the tenant id for the tenant name and then insert the database with the id, name and tenant id
@@ -94,6 +98,46 @@ class SqlSysDB(SqlDB, SysDB):
                     f"Database {name} already exists for tenant {tenant}"
                 ) from e
 
+            # Insert metadata if provided
+            if metadata:
+                database_metadata = Table("database_metadata")
+                for key, value in metadata.items():
+                    str_value = None
+                    int_value = None
+                    float_value = None
+                    bool_value = None
+                    if isinstance(value, str):
+                        str_value = value
+                    elif isinstance(value, bool):
+                        bool_value = value
+                    elif isinstance(value, int):
+                        int_value = value
+                    elif isinstance(value, float):
+                        float_value = value
+
+                    insert_metadata = (
+                        self.querybuilder()
+                        .into(database_metadata)
+                        .columns(
+                            database_metadata.database_id,
+                            database_metadata.key,
+                            database_metadata.str_value,
+                            database_metadata.int_value,
+                            database_metadata.float_value,
+                            database_metadata.bool_value,
+                        )
+                        .insert(
+                            ParameterValue(self.uuid_to_db(id)),
+                            ParameterValue(key),
+                            ParameterValue(str_value),
+                            ParameterValue(int_value),
+                            ParameterValue(float_value),
+                            ParameterValue(bool_value),
+                        )
+                    )
+                    sql, params = get_sql(insert_metadata, self.parameter_format())
+                    cur.execute(sql, params)
+
     @override
     def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
         with self.tx() as cur:
@@ -116,11 +160,48 @@ class SqlSysDB(SqlDB, SysDB):
                     f"Database {name} not found for tenant {tenant}. Are you sure it exists?"
                 )
             id: UUID = cast(UUID, self.uuid_from_db(row[0]))
+
+            # Fetch metadata
+            metadata = self._get_database_metadata(cur, id)
+
             return Database(
                 id=id,
                 name=row[1],
                 tenant=tenant,
+                metadata=metadata,
             )
+
+    def _get_database_metadata(self, cur: Cursor, database_id: UUID) -> Optional[Metadata]:
+        """Fetch metadata for a database."""
+        database_metadata = Table("database_metadata")
+        q = (
+            self.querybuilder()
+            .from_(database_metadata)
+            .select(
+                database_metadata.key,
+                database_metadata.str_value,
+                database_metadata.int_value,
+                database_metadata.float_value,
+                database_metadata.bool_value,
+            )
+            .where(database_metadata.database_id == ParameterValue(self.uuid_to_db(database_id)))
+        )
+        sql, params = get_sql(q, self.parameter_format())
+        rows = cur.execute(sql, params).fetchall()
+        if not rows:
+            return None
+        metadata: Metadata = {}
+        for row in rows:
+            key = row[0]
+            if row[1] is not None:
+                metadata[key] = row[1]  # str_value
+            elif row[2] is not None:
+                metadata[key] = row[2]  # int_value
+            elif row[3] is not None:
+                metadata[key] = row[3]  # float_value
+            elif row[4] is not None:
+                metadata[key] = row[4]  # bool_value
+        return metadata if metadata else None
 
     @override
     def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
@@ -173,14 +254,19 @@ class SqlSysDB(SqlDB, SysDB):
             )
             sql, params = get_sql(q, self.parameter_format())
             rows = cur.execute(sql, params).fetchall()
-            return [
-                Database(
-                    id=cast(UUID, self.uuid_from_db(row[0])),
-                    name=row[1],
-                    tenant=tenant,
+            result = []
+            for row in rows:
+                db_id = cast(UUID, self.uuid_from_db(row[0]))
+                metadata = self._get_database_metadata(cur, db_id)
+                result.append(
+                    Database(
+                        id=db_id,
+                        name=row[1],
+                        tenant=tenant,
+                        metadata=metadata,
+                    )
                 )
-                for row in rows
-            ]
+            return result
 
     @override
     def create_tenant(self, name: str) -> None:

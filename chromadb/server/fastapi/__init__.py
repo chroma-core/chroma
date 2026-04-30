@@ -592,7 +592,7 @@ class FastAPI(Server):
 
             self._set_request_context(request=request)
 
-            return self._api.create_database(db.name, tenant)
+            return self._api.create_database(db.name, tenant, metadata=db.metadata)
 
         await to_thread.run_sync(
             process_create_database,
@@ -1694,7 +1694,7 @@ class FastAPI(Server):
             if maybe_database:
                 db.name = maybe_database
 
-            return self._api.create_database(db.name, tenant)
+            return self._api.create_database(db.name, tenant, metadata=db.metadata)
 
         await to_thread.run_sync(
             process_create_database,

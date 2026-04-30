@@ -17,7 +17,7 @@ from chromadb.api.collection_configuration import (
 )
 from chromadb import __version__
 from chromadb.api.base_http_client import BaseHTTPClient
-from chromadb.types import Database, Tenant, Collection as CollectionModel
+from chromadb.types import Database, Tenant, Collection as CollectionModel, Metadata
 from chromadb.api import ServerAPI
 from chromadb.execution.expression.plan import Search
 
@@ -146,12 +146,16 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         self,
         name: str,
         tenant: str = DEFAULT_TENANT,
+        metadata: Optional[Metadata] = None,
     ) -> None:
         """Creates a database"""
+        body: Dict[str, Any] = {"name": name}
+        if metadata is not None:
+            body["metadata"] = metadata
         self._make_request(
             "post",
             f"/tenants/{tenant}/databases",
-            json={"name": name},
+            json=body,
         )
 
     # Migrated to rust in distributed.
@@ -168,7 +172,10 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             f"/tenants/{tenant}/databases/{name}",
         )
         return Database(
-            id=resp_json["id"], name=resp_json["name"], tenant=resp_json["tenant"]
+            id=resp_json["id"],
+            name=resp_json["name"],
+            tenant=resp_json["tenant"],
+            metadata=resp_json.get("metadata"),
         )
 
     @trace_method("FastAPI.delete_database", OpenTelemetryGranularity.OPERATION)
@@ -204,7 +211,12 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             ),
         )
         databases = [
-            Database(id=db["id"], name=db["name"], tenant=db["tenant"])
+            Database(
+                id=db["id"],
+                name=db["name"],
+                tenant=db["tenant"],
+                metadata=db.get("metadata"),
+            )
             for db in json_databases
         ]
         return databases

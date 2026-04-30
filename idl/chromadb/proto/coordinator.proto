@@ -12,6 +12,7 @@ message CreateDatabaseRequest {
   string id = 1;
   string name = 2;
   string tenant = 3;
+  optional UpdateMetadata metadata = 4;
 }
 
 message CreateDatabaseResponse {

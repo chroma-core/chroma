@@ -70,12 +70,20 @@ impl SqliteSysDb {
         id: uuid::Uuid,
         name: &str,
         tenant: &str,
+        metadata: Option<Metadata>,
     ) -> Result<CreateDatabaseResponse, CreateDatabaseError> {
+        let mut tx = self
+            .db
+            .get_conn()
+            .begin()
+            .await
+            .map_err(|e| CreateDatabaseError::Internal(e.into()))?;
+
         sqlx::query("INSERT INTO databases (id, name, tenant_id) VALUES ($1, $2, $3)")
             .bind(id.to_string())
             .bind(name)
             .bind(tenant)
-            .execute(self.db.get_conn())
+            .execute(&mut *tx)
             .await
             .map_err(|e| match e {
                 sqlx::Error::Database(ref db_err)
@@ -86,6 +94,21 @@ impl SqliteSysDb {
                 _ => CreateDatabaseError::Internal(e.into()),
             })?;
 
+        // Insert metadata if provided
+        if let Some(metadata) = metadata {
+            chroma_sqlite::helpers::update_metadata::<chroma_sqlite::table::DatabaseMetadata, _, _>(
+                &mut *tx,
+                id.to_string(),
+                metadata.into_iter().map(|(k, v)| (k, v.into())).collect(),
+            )
+            .await
+            .map_err(|e| CreateDatabaseError::Internal(e.boxed()))?;
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| CreateDatabaseError::Internal(e.into()))?;
+
         Ok(CreateDatabaseResponse {})
     }
 
@@ -94,24 +117,50 @@ impl SqliteSysDb {
         name: &str,
         tenant: &str,
     ) -> Result<Database, GetDatabaseError> {
-        sqlx::query("SELECT id, name, tenant_id FROM databases WHERE name = $1 AND tenant_id = $2")
-            .bind(name)
-            .bind(tenant)
-            .fetch_one(self.db.get_conn())
+        let mut rows = sqlx::query(
+            r#"
+            SELECT d.id, d.name, d.tenant_id,
+                   m.key, m.str_value, m.int_value, m.float_value, m.bool_value
+            FROM databases d
+            LEFT JOIN database_metadata m ON d.id = m.database_id
+            WHERE d.name = $1 AND d.tenant_id = $2
+            "#,
+        )
+        .bind(name)
+        .bind(tenant)
+        .fetch(self.db.get_conn());
+
+        let mut first_row: Option<SqliteRow> = None;
+        let mut metadata_rows: Vec<SqliteRow> = Vec::new();
+
+        while let Some(row) = rows
+            .try_next()
             .await
-            .map_err(|e| match e {
-                sqlx::Error::RowNotFound => GetDatabaseError::NotFound(name.to_string()),
-                _ => GetDatabaseError::Internal(e.into()),
-            })
-            .and_then(|row| {
-                let id = Uuid::from_str(row.get::<&str, _>(0))
-                    .map_err(|e| GetDatabaseError::InvalidID(e.to_string()))?;
-                Ok(Database {
-                    id,
-                    name: row.get(1),
-                    tenant: row.get(2),
-                })
-            })
+            .map_err(|e| GetDatabaseError::Internal(e.into()))?
+        {
+            if first_row.is_none() {
+                first_row = Some(row);
+            } else {
+                metadata_rows.push(row);
+            }
+        }
+
+        let first_row = first_row.ok_or_else(|| GetDatabaseError::NotFound(name.to_string()))?;
+        let id = Uuid::from_str(first_row.get::<&str, _>(0))
+            .map_err(|e| GetDatabaseError::InvalidID(e.to_string()))?;
+
+        // Combine first_row with metadata_rows for metadata extraction
+        let all_rows: Vec<&SqliteRow> = std::iter::once(&first_row)
+            .chain(metadata_rows.iter())
+            .collect();
+        let metadata = self.database_metadata_from_rows(all_rows.into_iter());
+
+        Ok(Database {
+            id,
+            name: first_row.get(1),
+            tenant: first_row.get(2),
+            metadata,
+        })
     }
 
     pub(crate) async fn delete_database(
@@ -177,19 +226,27 @@ impl SqliteSysDb {
     ) -> Result<Vec<Database>, ListDatabasesError> {
         let mut rows = sqlx::query(
             r#"
-                SELECT id, name, tenant_id
-                FROM databases
-                WHERE tenant_id = $1
-                ORDER BY name
-                LIMIT $2 OFFSET $3
+                SELECT d.id, d.name, d.tenant_id,
+                       m.key, m.str_value, m.int_value, m.float_value, m.bool_value
+                FROM (
+                    SELECT id, name, tenant_id
+                    FROM databases
+                    WHERE tenant_id = $1
+                    ORDER BY name
+                    LIMIT $2 OFFSET $3
+                ) d
+                LEFT JOIN database_metadata m ON d.id = m.database_id
             "#,
         )
-        .bind(tenant_id)
+        .bind(&tenant_id)
         .bind(limit.unwrap_or(u32::MAX))
         .bind(offset)
         .fetch(self.db.get_conn());
 
-        let mut databases = Vec::new();
+        // Group rows by database ID
+        let mut rows_by_database_id: std::collections::HashMap<Uuid, Vec<SqliteRow>> =
+            std::collections::HashMap::new();
+
         while let Some(row) = rows
             .try_next()
             .await
@@ -197,12 +254,27 @@ impl SqliteSysDb {
         {
             let id = Uuid::from_str(row.get::<&str, _>(0))
                 .map_err(|e| ListDatabasesError::InvalidID(e.to_string()))?;
+
+            rows_by_database_id.entry(id).or_default().push(row);
+        }
+
+        let mut databases = Vec::new();
+        for (id, db_rows) in rows_by_database_id {
+            if db_rows.is_empty() {
+                continue;
+            }
+            let first_row = db_rows.first().unwrap();
+            let metadata = self.database_metadata_from_rows(db_rows.iter());
             databases.push(Database {
                 id,
-                name: row.get(1),
-                tenant: row.get(2),
+                name: first_row.get(1),
+                tenant: first_row.get(2),
+                metadata,
             });
         }
+
+        // Sort by name to maintain consistent ordering
+        databases.sort_by(|a, b| a.name.cmp(&b.name));
 
         Ok(databases)
     }
@@ -1112,6 +1184,39 @@ impl SqliteSysDb {
         .await?;
 
         Ok(deleted_rows.rows_affected() > 0)
+    }
+
+    fn database_metadata_from_rows<'row>(
+        &self,
+        rows: impl Iterator<Item = &'row SqliteRow>,
+    ) -> Option<Metadata> {
+        let metadata: Metadata = rows
+            .filter_map(|row| {
+                // Column indices: 0=id, 1=name, 2=tenant_id, 3=key, 4=str_value, 5=int_value, 6=float_value, 7=bool_value
+                let key: Option<&str> = row.get(3);
+                let key = match key {
+                    Some(k) => k,
+                    None => return None, // No metadata key means no metadata for this row
+                };
+
+                if let Some(str_value) = row.get::<Option<String>, _>(4) {
+                    Some((key.to_string(), MetadataValue::Str(str_value)))
+                } else if let Some(int_value) = row.get::<Option<i64>, _>(5) {
+                    Some((key.to_string(), MetadataValue::Int(int_value)))
+                } else if let Some(float_value) = row.get::<Option<f64>, _>(6) {
+                    Some((key.to_string(), MetadataValue::Float(float_value)))
+                } else {
+                    row.get::<Option<bool>, _>(7)
+                        .map(|bool_value| (key.to_string(), MetadataValue::Bool(bool_value)))
+                }
+            })
+            .collect();
+
+        if metadata.is_empty() {
+            None
+        } else {
+            Some(metadata)
+        }
     }
 
     // TODO: reuse logic from metadata reader

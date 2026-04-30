@@ -37,7 +37,7 @@ from chromadb.api.types import (
 )
 from chromadb.execution.expression.plan import Search
 from chromadb.config import Component, Settings
-from chromadb.types import Database, Tenant, Collection as CollectionModel
+from chromadb.types import Database, Tenant, Collection as CollectionModel, Metadata
 
 
 class AsyncBaseAPI(ABC):
@@ -530,11 +530,18 @@ class AsyncClientAPI(AsyncBaseAPI, ABC):
 
 class AsyncAdminAPI(ABC):
     @abstractmethod
-    async def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+    async def create_database(
+        self,
+        name: str,
+        tenant: str = DEFAULT_TENANT,
+        metadata: Optional[Metadata] = None,
+    ) -> None:
         """Create a new database. Raises an error if the database already exists.
 
         Args:
-            database: The name of the database to create.
+            name: The name of the database to create.
+            tenant: The tenant for the database.
+            metadata: Optional metadata for the database.
 
         """
         pass

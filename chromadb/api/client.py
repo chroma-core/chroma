@@ -38,7 +38,7 @@ from chromadb.config import Settings, System
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
 from chromadb.api.models.Collection import Collection
 from chromadb.errors import ChromaAuthError, ChromaError
-from chromadb.types import Database, Tenant, Where, WhereDocument
+from chromadb.types import Database, Tenant, Where, WhereDocument, Metadata
 
 
 class Client(SharedSystemClient, ClientAPI):
@@ -671,14 +671,20 @@ class AdminClient(SharedSystemClient, AdminAPI):
         self._server = self._system.instance(ServerAPI)
 
     @override
-    def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+    def create_database(
+        self,
+        name: str,
+        tenant: str = DEFAULT_TENANT,
+        metadata: Optional[Metadata] = None,
+    ) -> None:
         """Create a database in a tenant.
 
         Args:
             name: Database name.
             tenant: Tenant that owns the database.
+            metadata: Optional metadata for the database.
         """
-        return self._server.create_database(name=name, tenant=tenant)
+        return self._server.create_database(name=name, tenant=tenant, metadata=metadata)
 
     @override
     def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:

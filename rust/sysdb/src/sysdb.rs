@@ -147,15 +147,16 @@ impl SysDb {
         database_id: Uuid,
         database_name: DatabaseName,
         tenant: String,
+        metadata: Option<Metadata>,
     ) -> Result<CreateDatabaseResponse, CreateDatabaseError> {
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.create_database(database_id, database_name, tenant)
+                grpc.create_database(database_id, database_name, tenant, metadata)
                     .await
             }
             SysDb::Sqlite(sqlite) => {
                 sqlite
-                    .create_database(database_id, database_name.as_ref(), &tenant)
+                    .create_database(database_id, database_name.as_ref(), &tenant, metadata)
                     .await
             }
             SysDb::Test(_) => {
@@ -1006,11 +1007,13 @@ impl GrpcSysDb {
         database_id: Uuid,
         database_name: DatabaseName,
         tenant: String,
+        metadata: Option<Metadata>,
     ) -> Result<CreateDatabaseResponse, CreateDatabaseError> {
         let req = chroma_proto::CreateDatabaseRequest {
             id: database_id.to_string(),
             name: database_name.as_ref().to_string(),
             tenant,
+            metadata: metadata.map(|m| m.into()),
         };
         let res = self.client(&database_name)?.create_database(req).await;
         match res {

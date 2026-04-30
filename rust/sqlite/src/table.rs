@@ -64,6 +64,47 @@ pub enum Databases {
 }
 
 #[derive(Iden)]
+pub enum DatabaseMetadata {
+    Table,
+    DatabaseId,
+    Key,
+    StrValue,
+    IntValue,
+    FloatValue,
+    BoolValue,
+}
+
+impl MetadataTable for DatabaseMetadata {
+    fn table_name() -> Self {
+        DatabaseMetadata::Table
+    }
+
+    fn id_column() -> Self {
+        DatabaseMetadata::DatabaseId
+    }
+
+    fn key_column() -> Self {
+        DatabaseMetadata::Key
+    }
+
+    fn str_value_column() -> Self {
+        DatabaseMetadata::StrValue
+    }
+
+    fn int_value_column() -> Self {
+        DatabaseMetadata::IntValue
+    }
+
+    fn float_value_column() -> Self {
+        DatabaseMetadata::FloatValue
+    }
+
+    fn bool_value_column() -> Self {
+        DatabaseMetadata::BoolValue
+    }
+}
+
+#[derive(Iden)]
 pub enum CollectionMetadata {
     Table,
     CollectionId,

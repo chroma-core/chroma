@@ -17,6 +17,10 @@ func (*MetaDomain) DatabaseDb(ctx context.Context) dbmodel.IDatabaseDb {
 	return &databaseDb{dbcore.GetDB(ctx)}
 }
 
+func (*MetaDomain) DatabaseMetadataDb(ctx context.Context) dbmodel.IDatabaseMetadataDb {
+	return &databaseMetadataDb{dbcore.GetDB(ctx)}
+}
+
 func (*MetaDomain) TenantDb(ctx context.Context) dbmodel.ITenantDb {
 	return &tenantDb{dbcore.GetDB(ctx)}
 }

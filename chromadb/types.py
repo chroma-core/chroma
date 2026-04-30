@@ -199,10 +199,11 @@ class Collection(
         )
 
 
-class Database(TypedDict):
+class Database(TypedDict, total=False):
     id: UUID
     name: str
     tenant: str
+    metadata: Optional[Metadata]
 
 
 class Tenant(TypedDict):

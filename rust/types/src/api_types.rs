@@ -360,18 +360,22 @@ pub struct CreateDatabaseRequest {
     pub database_id: Uuid,
     pub tenant_id: String,
     pub database_name: DatabaseName,
+    #[validate(custom(function = "validate_optional_metadata"))]
+    pub metadata: Option<Metadata>,
 }
 
 impl CreateDatabaseRequest {
     pub fn try_new(
         tenant_id: String,
         database_name: DatabaseName,
+        metadata: Option<Metadata>,
     ) -> Result<Self, ChromaValidationError> {
         let database_id = Uuid::new_v4();
         let request = Self {
             database_id,
             tenant_id,
             database_name,
+            metadata,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -426,6 +430,8 @@ pub struct Database {
     pub id: Uuid,
     pub name: String,
     pub tenant: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Metadata>,
 }
 
 #[cfg(feature = "pyo3")]
@@ -448,6 +454,11 @@ impl Database {
     pub fn tenant(&self) -> &str {
         &self.tenant
     }
+
+    #[getter]
+    pub fn metadata(&self) -> Option<Metadata> {
+        self.metadata.clone()
+    }
 }
 
 impl From<Database> for crate::chroma_proto::Database {
@@ -456,6 +467,7 @@ impl From<Database> for crate::chroma_proto::Database {
             id: d.id.to_string(),
             name: d.name,
             tenant: d.tenant,
+            metadata: d.metadata.map(|m| m.into()),
         }
     }
 }

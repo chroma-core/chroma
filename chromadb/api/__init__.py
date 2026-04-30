@@ -76,7 +76,7 @@ from chromadb.api.types import (
 
 from chromadb.auth import UserIdentity
 from chromadb.config import Component, Settings
-from chromadb.types import Database, Tenant, Collection as CollectionModel
+from chromadb.types import Database, Tenant, Collection as CollectionModel, Metadata
 from chromadb.api.models.Collection import Collection
 from chromadb.api.models.AttachedFunction import AttachedFunction
 
@@ -578,11 +578,18 @@ class ClientAPI(BaseAPI, ABC):
 
 class AdminAPI(ABC):
     @abstractmethod
-    def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+    def create_database(
+        self,
+        name: str,
+        tenant: str = DEFAULT_TENANT,
+        metadata: Optional[Metadata] = None,
+    ) -> None:
         """Create a new database. Raises an error if the database already exists.
 
         Args:
-            database: The name of the database to create.
+            name: The name of the database to create.
+            tenant: The tenant for the database.
+            metadata: Optional metadata for the database.
 
         """
         pass

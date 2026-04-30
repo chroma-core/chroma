@@ -3,17 +3,19 @@ package model
 import "github.com/chroma-core/chroma/go/pkg/types"
 
 type Database struct {
-	ID     string
-	Name   string
-	Tenant string
-	Ts     types.Timestamp
+	ID       string
+	Name     string
+	Tenant   string
+	Ts       types.Timestamp
+	Metadata *CollectionMetadata[CollectionMetadataValueType]
 }
 
 type CreateDatabase struct {
-	ID     string
-	Name   string
-	Tenant string
-	Ts     types.Timestamp
+	ID       string
+	Name     string
+	Tenant   string
+	Ts       types.Timestamp
+	Metadata *CollectionMetadata[CollectionMetadataValueType]
 }
 
 type GetDatabase struct {

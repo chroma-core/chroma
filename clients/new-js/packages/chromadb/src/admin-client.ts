@@ -1,6 +1,6 @@
 import { defaultAdminClientArgs, HttpMethod, normalizeMethod } from "./utils";
 import { createClient, createConfig } from "@hey-api/client-fetch";
-import { Database, DatabaseService, TenantService } from "./api";
+import { Database, DatabaseService, TenantService, HashMap } from "./api";
 import { chromaFetch } from "./chroma-fetch";
 
 /**
@@ -64,18 +64,21 @@ export class AdminClient {
    * @param options - Database creation options
    * @param options.name - Name of the database to create
    * @param options.tenant - Tenant that will own the database
+   * @param options.metadata - Optional metadata for the database
    */
   public async createDatabase({
     name,
     tenant,
+    metadata,
   }: {
     name: string;
     tenant: string;
+    metadata?: HashMap | null;
   }): Promise<void> {
     await DatabaseService.createDatabase({
       client: this.apiClient,
       path: { tenant },
-      body: { name },
+      body: { name, metadata },
     });
   }
 
