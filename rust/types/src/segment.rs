@@ -17,6 +17,7 @@ pub const MAX_OFFSET_ID: &str = "max_offset_id";
 pub const USER_ID_BLOOM_FILTER: &str = "user_id_bloom_filter";
 
 pub const FULL_TEXT_PLS: &str = "full_text_pls";
+pub const FULL_TEXT_TOKEN: &str = "full_text_token";
 pub const STRING_METADATA: &str = "string_metadata";
 pub const BOOL_METADATA: &str = "bool_metadata";
 pub const F32_METADATA: &str = "f32_metadata";
