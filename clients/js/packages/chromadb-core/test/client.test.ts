@@ -32,18 +32,18 @@ describe("client test", () => {
     const collections = await client.listCollections();
     expect(collections).toBeDefined();
     expect(Array.isArray(collections)).toBe(true);
-    expect(collections.length).toBe(0);
+    expect(collections).toHaveLength(0);
 
     await client.createCollection({ name: "test" });
     const collections2 = await client.listCollections();
     expect(collections2).toBeDefined();
     expect(Array.isArray(collections2)).toBe(true);
-    expect(collections2.length).toBe(1);
+    expect(collections2).toHaveLength(1);
 
     await client.reset();
     const collections3 = await client.listCollections();
     expect(collections3).toBeDefined();
     expect(Array.isArray(collections3)).toBe(true);
-    expect(collections3.length).toBe(0);
+    expect(collections3).toHaveLength(0);
   });
 });
