@@ -46,10 +46,8 @@ jobs:
               # Go paths: chorma backend is partially go
               - 'go/**'
             # Rust and related - run rust when any of these change
-            # Note: rust/foundation/** is excluded — it has its own CI (foundation-cli-ci.yml)
             rust:
               - 'rust/**'
-              - '!rust/foundation/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'idl/**'

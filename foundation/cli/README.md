@@ -54,13 +54,13 @@ foundation completion fish > ~/.config/fish/completions/foundation.fish
 Requires Rust (stable). From the repo root:
 
 ```sh
-cargo build --bin foundation --manifest-path rust/foundation/Cargo.toml
-./rust/foundation/target/debug/foundation --help
+cargo build --bin foundation --manifest-path foundation/Cargo.toml
+./foundation/target/debug/foundation --help
 ```
 
 Run tests:
 ```sh
-cargo nextest run -p foundation --manifest-path rust/foundation/Cargo.toml
+cargo nextest run -p foundation --manifest-path foundation/Cargo.toml
 ```
 
 ## Links

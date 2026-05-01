@@ -96,7 +96,7 @@ jobs:
           echo "# v${{ env.VERSION }} (${DATE})" > RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
           git log --pretty=format:"* %s" ${PREVIOUS_TAG}..HEAD -- \
-            ./rust/foundation .github/workflows/foundation-cli-release.yml >> RELEASE_NOTES.md
+            ./foundation .github/workflows/foundation-cli-release.yml >> RELEASE_NOTES.md
 
       - name: Build
         run: |
@@ -104,13 +104,13 @@ jobs:
           export FOUNDATION_VERSION=${{ env.VERSION }}
           export FOUNDATION_COMMIT=${{ github.sha }}
           export FOUNDATION_DATE=${{ env.BUILD_DATE }}
-          cargo build --release --bin foundation --target ${{ matrix.rust_target }} --manifest-path rust/foundation/Cargo.toml
-          mkdir -p rust/foundation/target/foundation-release
-          cp rust/foundation/target/${{ matrix.rust_target }}/release/foundation rust/foundation/target/foundation-release/foundation
+          cargo build --release --bin foundation --target ${{ matrix.rust_target }} --manifest-path foundation/Cargo.toml
+          mkdir -p foundation/target/foundation-release
+          cp foundation/target/${{ matrix.rust_target }}/release/foundation foundation/target/foundation-release/foundation
 
       - name: Package
         run: |
-          cd rust/foundation/target/foundation-release
+          cd foundation/target/foundation-release
           tar -czf ${{ env.PACKAGE_NAME }} foundation
           echo "### :package: Produced ${{ env.PACKAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
 
@@ -118,7 +118,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           prerelease: ${{ env.PRERELEASE }}
-          files: rust/foundation/target/foundation-release/${{ env.PACKAGE_NAME }}
+          files: foundation/target/foundation-release/${{ env.PACKAGE_NAME }}
           body_path: RELEASE_NOTES.md
           name: foundation-cli-v${{ env.VERSION }}
           tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
