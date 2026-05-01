@@ -1,6 +1,7 @@
 pub mod completion;
 pub mod version;
 
+use crate::commands::login::{LoginArgs, LogoutArgs};
 use clap::{Parser, Subcommand};
 use clap_complete::Shell;
 
@@ -24,4 +25,10 @@ pub enum Commands {
         #[arg(value_enum)]
         shell: Shell,
     },
+    /// Log in to Chroma Foundation
+    Login(LoginArgs),
+    /// Log out of Chroma Foundation
+    Logout(LogoutArgs),
+    /// Show the currently authenticated user and profile
+    Whoami,
 }
