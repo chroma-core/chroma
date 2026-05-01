@@ -19,6 +19,9 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 open = { workspace = true }
 home = { workspace = true }
+toml = { workspace = true }
+colored = { workspace = true }
+dialoguer = { workspace = true }
 
 [build-dependencies]
 chrono = { workspace = true }
