@@ -45,3 +45,8 @@ target/
 
 # Rapid test data
 testdata
+
+# Allow Claude Code rules to be tracked
+!.claude/
+!.claude/rules/
+!.claude/rules/*.md
