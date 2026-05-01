@@ -236,16 +236,14 @@ pub trait HeapScheduler: Send + Sync {
     /// Check if multiple task invocations have completed.
     async fn are_done(&self, items: &[(UnitOfSchedulingUuid, Uuid)]) -> Result<Vec<bool>, Error>;
 
-    /// Get the schedule for a specific task by ID.
-    // TODO(codex):  Shouldn't this be a UnitOfSchedulingUuid?
-    async fn get_schedule(&self, id: Uuid) -> Result<Option<Schedule>, Error> {
+    /// Get the schedule for a specific task by scheduling UUID.
+    async fn get_schedule(&self, id: UnitOfSchedulingUuid) -> Result<Option<Schedule>, Error> {
         let mut results = self.get_schedules(&[id]).await?;
         Ok(results.pop())
     }
 
-    /// Get schedules for multiple tasks.
-    // TODO(codex):  Shouldn't this be a UnitOfSchedulingUuid?
-    async fn get_schedules(&self, ids: &[Uuid]) -> Result<Vec<Schedule>, Error>;
+    /// Get schedules for multiple tasks by scheduling UUID.
+    async fn get_schedules(&self, ids: &[UnitOfSchedulingUuid]) -> Result<Vec<Schedule>, Error>;
 }
 
 /// A scheduled task instance stored in the heap.
@@ -793,7 +791,10 @@ mod tests {
             Ok(vec![false; items.len()])
         }
 
-        async fn get_schedules(&self, _ids: &[Uuid]) -> Result<Vec<Schedule>, Error> {
+        async fn get_schedules(
+            &self,
+            _ids: &[UnitOfSchedulingUuid],
+        ) -> Result<Vec<Schedule>, Error> {
             Ok(Vec::new())
         }
     }
@@ -834,7 +835,10 @@ mod tests {
                 .collect())
         }
 
-        async fn get_schedules(&self, _ids: &[Uuid]) -> Result<Vec<Schedule>, Error> {
+        async fn get_schedules(
+            &self,
+            _ids: &[UnitOfSchedulingUuid],
+        ) -> Result<Vec<Schedule>, Error> {
             Ok(Vec::new())
         }
     }
