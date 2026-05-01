@@ -23,7 +23,8 @@ use chroma_types::chroma_proto::{
     CreateTenantResponse, DeleteCollectionRequest, DeleteCollectionResponse,
     DeleteCollectionVersionRequest, DeleteCollectionVersionResponse, DeleteDatabaseRequest,
     DeleteDatabaseResponse, DeleteSegmentRequest, DeleteSegmentResponse, DetachFunctionRequest,
-    DetachFunctionResponse, FinishAttachedFunctionDeletionRequest,
+    DetachFunctionResponse, FinalizeAsyncAttachedFunctionRepairRequest,
+    FinalizeAsyncAttachedFunctionRepairResponse, FinishAttachedFunctionDeletionRequest,
     FinishAttachedFunctionDeletionResponse, FinishCollectionDeletionRequest,
     FinishCollectionDeletionResponse, FinishCreateAttachedFunctionRequest,
     FinishCreateAttachedFunctionResponse, FinishDatabaseDeletionRequest,
@@ -43,8 +44,9 @@ use chroma_types::chroma_proto::{
     ListDatabasesRequest, ListDatabasesResponse, MarkVersionForDeletionRequest,
     MarkVersionForDeletionResponse, ResetStateResponse, RestoreCollectionRequest,
     RestoreCollectionResponse, SetLastCompactionTimeForTenantRequest, SetTenantResourceNameRequest,
-    SetTenantResourceNameResponse, UpdateCollectionRequest, UpdateCollectionResponse,
-    UpdateSegmentRequest, UpdateSegmentResponse,
+    SetTenantResourceNameResponse, TryFinishAsyncAttachedFunctionInvocationRequest,
+    TryFinishAsyncAttachedFunctionInvocationResponse, UpdateCollectionRequest,
+    UpdateCollectionResponse, UpdateSegmentRequest, UpdateSegmentResponse,
 };
 use chroma_types::{Collection, CollectionUuid, DatabaseName};
 use std::collections::{HashMap, HashSet};
@@ -967,6 +969,24 @@ impl SysDb for SysdbService {
         let _internal_resp = internal_req.run(backend).await?;
 
         Ok(Response::new(IncrementCompactionFailureCountResponse {}))
+    }
+
+    async fn try_finish_async_attached_function_invocation(
+        &self,
+        _request: Request<TryFinishAsyncAttachedFunctionInvocationRequest>,
+    ) -> Result<Response<TryFinishAsyncAttachedFunctionInvocationResponse>, Status> {
+        Err(Status::unimplemented(
+            "try_finish_async_attached_function_invocation is not supported",
+        ))
+    }
+
+    async fn finalize_async_attached_function_repair(
+        &self,
+        _request: Request<FinalizeAsyncAttachedFunctionRepairRequest>,
+    ) -> Result<Response<FinalizeAsyncAttachedFunctionRepairResponse>, Status> {
+        Err(Status::unimplemented(
+            "finalize_async_attached_function_repair is not supported",
+        ))
     }
 }
 

@@ -663,9 +663,6 @@ func (s *Coordinator) GetAttachedFunctionsToGc(ctx context.Context, req *coordin
 		}
 	}
 
-	log.Info("GetAttachedFunctionsToGc: completed successfully",
-		zap.Int("count", len(attachedFunctions)))
-
 	return &coordinatorpb.GetAttachedFunctionsToGcResponse{
 		AttachedFunctions: protoAttachedFunctions,
 	}, nil
@@ -692,4 +689,128 @@ func (s *Coordinator) FinishAttachedFunctionDeletion(ctx context.Context, req *c
 		zap.String("attached_function_id", attachedFunctionID.String()))
 
 	return &coordinatorpb.FinishAttachedFunctionDeletionResponse{}, nil
+}
+
+// TryFinishAsyncAttachedFunctionInvocation updates the completion offset for an async attached function
+func (s *Coordinator) TryFinishAsyncAttachedFunctionInvocation(ctx context.Context, req *coordinatorpb.TryFinishAsyncAttachedFunctionInvocationRequest) (*coordinatorpb.TryFinishAsyncAttachedFunctionInvocationResponse, error) {
+	log := log.With(zap.String("attached_function_id", req.AttachedFunctionId))
+
+	// Parse UUIDs
+	attachedFunctionID, err := uuid.Parse(req.AttachedFunctionId)
+	if err != nil {
+		log.Error("Invalid attached function ID", zap.Error(err))
+		return nil, status.Errorf(codes.InvalidArgument, "invalid attached_function_id: %v", err)
+	}
+
+	collectionID, err := types.ToUniqueID(&req.CollectionId)
+	if err != nil {
+		log.Error("Invalid collection ID", zap.Error(err))
+		return nil, status.Errorf(codes.InvalidArgument, "invalid collection_id: %v", err)
+	}
+
+	var witnessedLogOffset int64
+
+	err = s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		attachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(&attachedFunctionID, nil, nil, true)
+		if err != nil {
+			log.Error("Failed to get attached function", zap.Error(err))
+			return err
+		}
+		if len(attachedFunctions) == 0 {
+			log.Error("Attached function not found", zap.String("id", attachedFunctionID.String()))
+			return status.Errorf(codes.NotFound, "attached function not found")
+		}
+
+		attachedFunction := attachedFunctions[0]
+
+		// Get the associated function to check if it's async
+		function, err := s.catalog.metaDomain.FunctionDb(txCtx).GetByID(attachedFunction.FunctionID)
+		if err != nil {
+			log.Error("Failed to get function", zap.Error(err))
+			return err
+		}
+
+		if !function.IsAsync {
+			log.Error("Attached function is not async", zap.Bool("is_async", function.IsAsync))
+			return status.Errorf(codes.InvalidArgument, "attached function is not async")
+		}
+
+		collectionIDs := []string{collectionID.String()}
+		collections, err := s.catalog.metaDomain.CollectionDb(txCtx).GetCollections(collectionIDs, nil, "", "", nil, nil, false)
+		if err != nil {
+			log.Error("Failed to get collection", zap.Error(err))
+			return err
+		}
+		if len(collections) == 0 {
+			log.Error("Collection not found", zap.String("collection_id", collectionID.String()))
+			return status.Errorf(codes.NotFound, "collection not found")
+		}
+
+		if attachedFunction.InputCollectionID != req.CollectionId {
+			log.Error("Collection ID mismatch",
+				zap.String("expected", attachedFunction.InputCollectionID),
+				zap.String("provided", req.CollectionId))
+			return status.Errorf(codes.InvalidArgument, "collection_id does not match attached function's input_collection_id")
+		}
+
+		witnessedLogOffset = collections[0].Collection.LogPosition
+
+		// UpdateCompletionOffsetAndHeapEntry now atomically computes heap_entry_pending based on the
+		// collection's log position at update time, avoiding TOCTOU race condition
+		err = s.catalog.metaDomain.AttachedFunctionDb(txCtx).UpdateCompletionOffsetAndHeapEntry(
+			attachedFunctionID, collectionID.String(), int64(req.NewCompletionOffset))
+		if err != nil {
+			log.Error("Failed to update completion offset and heap_entry_pending", zap.Error(err))
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if int64(req.NewCompletionOffset) < witnessedLogOffset {
+		log.Warn("Completion offset is behind collection log position - repair needed",
+			zap.Uint64("new_completion_offset", req.NewCompletionOffset),
+			zap.Int64("collection_log_position", witnessedLogOffset))
+		return &coordinatorpb.TryFinishAsyncAttachedFunctionInvocationResponse{
+			Result: &coordinatorpb.TryFinishAsyncAttachedFunctionInvocationResponse_NeedsRepair{
+				NeedsRepair: &coordinatorpb.FinishAsyncNeedsRepair{
+					CurrentCollectionLogOffset: uint64(witnessedLogOffset),
+				},
+			},
+		}, nil
+	}
+
+	return &coordinatorpb.TryFinishAsyncAttachedFunctionInvocationResponse{
+		Result: &coordinatorpb.TryFinishAsyncAttachedFunctionInvocationResponse_Success{
+			Success: &coordinatorpb.FinishAsyncSuccess{
+				UpdatedCompletionOffset: req.NewCompletionOffset,
+			},
+		},
+	}, nil
+}
+
+// FinalizeAsyncAttachedFunctionRepair sets heap_entry_pending back to false after repair
+func (s *Coordinator) FinalizeAsyncAttachedFunctionRepair(ctx context.Context, req *coordinatorpb.FinalizeAsyncAttachedFunctionRepairRequest) (*coordinatorpb.FinalizeAsyncAttachedFunctionRepairResponse, error) {
+	log := log.With(zap.String("attached_function_id", req.AttachedFunctionId))
+	log.Info("FinalizeAsyncAttachedFunctionRepair called")
+
+	// Parse UUID
+	attachedFunctionID, err := uuid.Parse(req.AttachedFunctionId)
+	if err != nil {
+		log.Error("Invalid attached function ID", zap.Error(err))
+		return nil, status.Errorf(codes.InvalidArgument, "invalid attached_function_id: %v", err)
+	}
+
+	err = s.catalog.metaDomain.AttachedFunctionDb(ctx).UpdateHeapEntryPending(attachedFunctionID, false)
+	if err != nil {
+		log.Error("Failed to update heap_entry_pending", zap.Error(err))
+		return nil, err
+	}
+
+	log.Info("Successfully finalized repair for attached function")
+	return &coordinatorpb.FinalizeAsyncAttachedFunctionRepairResponse{}, nil
 }

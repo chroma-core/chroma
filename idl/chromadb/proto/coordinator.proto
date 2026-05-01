@@ -622,6 +622,42 @@ message DetachFunctionResponse {
   bool success = 1;
 }
 
+message FinishAttachedFunctionDeletionRequest {
+  string attached_function_id = 1;
+}
+
+message FinishAttachedFunctionDeletionResponse {
+  bool success = 1;
+}
+
+
+message TryFinishAsyncAttachedFunctionInvocationRequest {
+  string attached_function_id = 1;
+  string collection_id = 2;
+  uint64 new_completion_offset = 3;
+}
+
+message TryFinishAsyncAttachedFunctionInvocationResponse {
+  oneof result {
+    FinishAsyncSuccess success = 1;
+    FinishAsyncNeedsRepair needs_repair = 2;
+  }
+}
+
+message FinishAsyncSuccess {
+  uint64 updated_completion_offset = 1;
+}
+
+message FinishAsyncNeedsRepair {
+  uint64 current_collection_log_offset = 1;
+}
+
+message FinalizeAsyncAttachedFunctionRepairRequest {
+  string attached_function_id = 1;
+}
+
+message FinalizeAsyncAttachedFunctionRepairResponse {}
+
 message FinishCreateAttachedFunctionRequest {
   string id = 1;
   string output_collection_schema_str = 2;  // Schema JSON for the output collection
@@ -664,12 +700,6 @@ message GetAttachedFunctionsToGcRequest {
 message GetAttachedFunctionsToGcResponse {
   repeated AttachedFunction attached_functions = 1;
 }
-
-message FinishAttachedFunctionDeletionRequest {
-  string attached_function_id = 1;
-}
-
-message FinishAttachedFunctionDeletionResponse {}
 
 message IncrementCompactionFailureCountRequest {
   string collection_id = 1;
@@ -724,5 +754,7 @@ service SysDB {
   rpc GetAttachedFunctionsToGc(GetAttachedFunctionsToGcRequest) returns (GetAttachedFunctionsToGcResponse) {}
   rpc FinishAttachedFunctionDeletion(FinishAttachedFunctionDeletionRequest) returns (FinishAttachedFunctionDeletionResponse) {}
   rpc FlushCollectionCompactionAndAttachedFunction(FlushCollectionCompactionAndAttachedFunctionRequest) returns (FlushCollectionCompactionAndAttachedFunctionResponse) {}
+  rpc TryFinishAsyncAttachedFunctionInvocation(TryFinishAsyncAttachedFunctionInvocationRequest) returns (TryFinishAsyncAttachedFunctionInvocationResponse) {}
+  rpc FinalizeAsyncAttachedFunctionRepair(FinalizeAsyncAttachedFunctionRepairRequest) returns (FinalizeAsyncAttachedFunctionRepairResponse) {}
   rpc IncrementCompactionFailureCount(IncrementCompactionFailureCountRequest) returns (IncrementCompactionFailureCountResponse) {}
 }

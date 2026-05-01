@@ -127,3 +127,43 @@ func (s *Server) FinishAttachedFunctionDeletion(ctx context.Context, req *coordi
 	log.Info("FinishAttachedFunctionDeletion succeeded", zap.String("id", req.AttachedFunctionId))
 	return res, nil
 }
+
+func (s *Server) TryFinishAsyncAttachedFunctionInvocation(ctx context.Context, req *coordinatorpb.TryFinishAsyncAttachedFunctionInvocationRequest) (*coordinatorpb.TryFinishAsyncAttachedFunctionInvocationResponse, error) {
+	log.Info("TryFinishAsyncAttachedFunctionInvocation",
+		zap.String("attached_function_id", req.AttachedFunctionId),
+		zap.String("collection_id", req.CollectionId),
+		zap.Uint64("new_completion_offset", req.NewCompletionOffset))
+
+	res, err := s.coordinator.TryFinishAsyncAttachedFunctionInvocation(ctx, req)
+	if err != nil {
+		log.Error("TryFinishAsyncAttachedFunctionInvocation failed", zap.Error(err))
+		// If it's already a gRPC status error, return it directly
+		if _, ok := status.FromError(err); ok {
+			return nil, err
+		}
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	log.Info("TryFinishAsyncAttachedFunctionInvocation completed",
+		zap.String("attached_function_id", req.AttachedFunctionId))
+	return res, nil
+}
+
+func (s *Server) FinalizeAsyncAttachedFunctionRepair(ctx context.Context, req *coordinatorpb.FinalizeAsyncAttachedFunctionRepairRequest) (*coordinatorpb.FinalizeAsyncAttachedFunctionRepairResponse, error) {
+	log.Info("FinalizeAsyncAttachedFunctionRepair",
+		zap.String("attached_function_id", req.AttachedFunctionId))
+
+	res, err := s.coordinator.FinalizeAsyncAttachedFunctionRepair(ctx, req)
+	if err != nil {
+		log.Error("FinalizeAsyncAttachedFunctionRepair failed", zap.Error(err))
+		// If it's already a gRPC status error, return it directly
+		if _, ok := status.FromError(err); ok {
+			return nil, err
+		}
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	log.Info("FinalizeAsyncAttachedFunctionRepair completed",
+		zap.String("attached_function_id", req.AttachedFunctionId))
+	return res, nil
+}

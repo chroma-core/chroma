@@ -27,6 +27,7 @@ type AttachedFunction struct {
 	GlobalParent            *uuid.UUID `gorm:"column:global_parent;type:uuid;default:null"`
 	OldestWrittenNonce      *uuid.UUID `gorm:"column:oldest_written_nonce;type:uuid;default:null"`
 	IsReady                 bool       `gorm:"column:is_ready;type:boolean;not null;default:false"`
+	HeapEntryPending        bool       `gorm:"column:heap_entry_pending;not null;default:false"`
 }
 
 func (v AttachedFunction) TableName() string {
@@ -44,6 +45,8 @@ type IAttachedFunctionDb interface {
 	// - onlyReady: If true, only returns attached functions where is_ready = true
 	GetAttachedFunctions(id *uuid.UUID, name *string, inputCollectionID *string, onlyReady bool) ([]*AttachedFunction, error)
 	Update(attachedFunction *AttachedFunction) error
+	UpdateCompletionOffsetAndHeapEntry(id uuid.UUID, collectionID string, newOffset int64) error
+	UpdateHeapEntryPending(id uuid.UUID, heapEntryPending bool) error
 	Finish(id uuid.UUID) error
 	SoftDelete(inputCollectionID string, name string) error
 	SoftDeleteByID(id uuid.UUID, inputCollectionID uuid.UUID) error
