@@ -88,8 +88,8 @@ func (suite *ListAttachedFunctionsTestSuite) TestListAttachedFunctions_Success()
 	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()
 	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &collectionID, true).Return(attachedFunctions, nil).Once()
 
-	functionOne := &dbmodel.Function{ID: functionID1, Name: "function-one"}
-	functionTwo := &dbmodel.Function{ID: functionID2, Name: "function-two"}
+	functionOne := &dbmodel.Function{ID: functionID1, Name: "function-one", IsAsync: false}
+	functionTwo := &dbmodel.Function{ID: functionID2, Name: "function-two", IsAsync: true}
 
 	suite.mockMetaDomain.On("FunctionDb", ctx).Return(suite.mockFunctionDb).Once()
 	suite.mockFunctionDb.
@@ -117,10 +117,12 @@ func (suite *ListAttachedFunctionsTestSuite) TestListAttachedFunctions_Success()
 
 	suite.Equal("function-one", resp.AttachedFunctions[0].FunctionName)
 	suite.Equal(uint64(10), resp.AttachedFunctions[0].CompletionOffset)
+	suite.False(resp.AttachedFunctions[0].IsAsync)
 	suite.NotNil(resp.AttachedFunctions[0].Params)
 
 	suite.Equal("function-two", resp.AttachedFunctions[1].FunctionName)
 	suite.Equal(uint64(20), resp.AttachedFunctions[1].CompletionOffset)
+	suite.True(resp.AttachedFunctions[1].IsAsync)
 	suite.NotNil(resp.AttachedFunctions[1].Params)
 	suite.Len(resp.AttachedFunctions[1].Params.Fields, 0)
 }
@@ -200,7 +202,7 @@ func (suite *ListAttachedFunctionsTestSuite) TestListAttachedFunctions_InvalidPa
 	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()
 	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &collectionID, true).Return([]*dbmodel.AttachedFunction{attachedFunction}, nil).Once()
 
-	functionModel := &dbmodel.Function{ID: functionID, Name: "function"}
+	functionModel := &dbmodel.Function{ID: functionID, Name: "function", IsAsync: false}
 
 	suite.mockMetaDomain.On("FunctionDb", ctx).Return(suite.mockFunctionDb).Once()
 	suite.mockFunctionDb.On("GetByIDs", []uuid.UUID{functionID}).Return([]*dbmodel.Function{functionModel}, nil).Once()

@@ -78,7 +78,7 @@ func (suite *AttachFunctionTestSuite) setupAttachFunctionMocks(ctx context.Conte
 
 	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Once()
 	suite.mockFunctionDb.On("GetByName", functionName).
-		Return(&dbmodel.Function{ID: functionID, Name: functionName}, nil).Once()
+		Return(&dbmodel.Function{ID: functionID, Name: functionName, IsAsync: false}, nil).Once()
 
 	suite.mockMetaDomain.On("CollectionDb", mock.Anything).Return(suite.mockCollectionDb).Once()
 	suite.mockCollectionDb.On("GetCollections",
@@ -176,7 +176,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_SuccessfulCreation() {
 	// Look up function
 	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Once()
 	suite.mockFunctionDb.On("GetByName", functionName).
-		Return(&dbmodel.Function{ID: functionID, Name: functionName}, nil).Once()
+		Return(&dbmodel.Function{ID: functionID, Name: functionName, IsAsync: false}, nil).Once()
 
 	// Check input collection exists
 	suite.mockMetaDomain.On("CollectionDb", mock.Anything).Return(suite.mockCollectionDb).Once()
@@ -272,6 +272,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Alrea
 		MinRecordsForInvocation: int64(MinRecordsForInvocation),
 		CreatedAt:               now,
 		UpdatedAt:               now,
+		IsReady:                 true,
 	}
 
 	// ===== Phase 1: Transaction checks if attached function exists =====
@@ -362,7 +363,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow() {
 
 	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Once()
 	suite.mockFunctionDb.On("GetByName", functionName).
-		Return(&dbmodel.Function{ID: functionID, Name: functionName}, nil).Once()
+		Return(&dbmodel.Function{ID: functionID, Name: functionName, IsAsync: false}, nil).Once()
 
 	suite.mockMetaDomain.On("CollectionDb", mock.Anything).Return(suite.mockCollectionDb).Once()
 	suite.mockCollectionDb.On("GetCollections",
@@ -397,6 +398,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow() {
 		MinRecordsForInvocation: int64(MinRecordsForInvocation),
 		CreatedAt:               now,
 		UpdatedAt:               now,
+		IsReady:                 false, // Key point: it's not ready
 	}
 
 	// ========== SECOND ATTEMPT: Recovery Succeeds ==========
@@ -559,6 +561,7 @@ func TestGetAttachedFunctionsToGc_TimestampConsistency(t *testing.T) {
 			MinRecordsForInvocation: 10,
 			CreatedAt:               testTime,
 			UpdatedAt:               testTime,
+			IsReady:                 true,
 		},
 	}
 

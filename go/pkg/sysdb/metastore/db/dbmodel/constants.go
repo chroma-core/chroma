@@ -22,6 +22,10 @@ var (
 	// FunctionStatistics is the UUID for the built-in statistics function
 	// Must match: migration 20251029223300.sql and rust/types/src/functions.rs::FUNCTION_STATISTICS_ID
 	FunctionStatistics = uuid.MustParse("304b58ad-a5cb-41dc-b88f-36dd3bf1d401")
+
+	// FunctionDummyAsync is the UUID for the built-in dummy_async function
+	// Must match: migration 20260501105846.sql and rust/types/src/functions.rs::FUNCTION_DUMMY_ASYNC_ID
+	FunctionDummyAsync = uuid.MustParse("1db3d179-37a7-4c44-a301-687c1da69d7b")
 )
 
 // Function names - must stay in sync with database and Rust constants.
@@ -31,6 +35,9 @@ const (
 
 	// FunctionNameStatistics must match rust/types/src/functions.rs::FUNCTION_STATISTICS_NAME
 	FunctionNameStatistics = "statistics"
+
+	// FunctionNameDummyAsync must match rust/types/src/functions.rs::FUNCTION_DUMMY_ASYNC_NAME
+	FunctionNameDummyAsync = "dummy_async"
 )
 
 // functionIDToName maps function UUIDs to their names.
@@ -38,6 +45,7 @@ const (
 var functionIDToName = map[uuid.UUID]string{
 	FunctionRecordCounter: FunctionNameRecordCounter,
 	FunctionStatistics:    FunctionNameStatistics,
+	FunctionDummyAsync:    FunctionNameDummyAsync,
 }
 
 // GetFunctionNameByID returns the function name for a given function ID.

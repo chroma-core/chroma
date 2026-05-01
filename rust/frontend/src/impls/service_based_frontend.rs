@@ -3023,8 +3023,8 @@ mod tests {
         // Validate that hardcoded Rust function constants match the live database.
         // This prevents drift between constants and database migrations.
         use chroma_types::{
-            FUNCTION_RECORD_COUNTER_ID, FUNCTION_RECORD_COUNTER_NAME, FUNCTION_STATISTICS_ID,
-            FUNCTION_STATISTICS_NAME,
+            FUNCTION_DUMMY_ASYNC_ID, FUNCTION_DUMMY_ASYNC_NAME, FUNCTION_RECORD_COUNTER_ID,
+            FUNCTION_RECORD_COUNTER_NAME, FUNCTION_STATISTICS_ID, FUNCTION_STATISTICS_NAME,
         };
         use std::collections::HashMap;
 
@@ -3033,6 +3033,7 @@ mod tests {
         let expected_functions: HashMap<&str, uuid::Uuid> = [
             (FUNCTION_RECORD_COUNTER_NAME, FUNCTION_RECORD_COUNTER_ID),
             (FUNCTION_STATISTICS_NAME, FUNCTION_STATISTICS_ID),
+            (FUNCTION_DUMMY_ASYNC_NAME, FUNCTION_DUMMY_ASYNC_ID),
         ]
         .iter()
         .cloned()

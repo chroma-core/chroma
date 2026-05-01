@@ -18,3 +18,10 @@ pub const FUNCTION_STATISTICS_ID: Uuid = Uuid::from_bytes([
 ]);
 /// Name of the built-in statistics function
 pub const FUNCTION_STATISTICS_NAME: &str = "statistics";
+
+/// UUID for the built-in dummy_async function
+pub const FUNCTION_DUMMY_ASYNC_ID: Uuid = Uuid::from_bytes([
+    0x1d, 0xb3, 0xd1, 0x79, 0x37, 0xa7, 0x4c, 0x44, 0xa3, 0x01, 0x68, 0x7c, 0x1d, 0xa6, 0x9d, 0x7b,
+]);
+/// Name of the built-in dummy_async function
+pub const FUNCTION_DUMMY_ASYNC_NAME: &str = "dummy_async";

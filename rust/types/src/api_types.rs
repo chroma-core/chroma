@@ -8,8 +8,8 @@ use crate::operator::KnnProjectionRecord;
 use crate::operator::ProjectionRecord;
 use crate::operator::SearchResult;
 use crate::operators_generated::{
-    FUNCTION_RECORD_COUNTER_ID, FUNCTION_RECORD_COUNTER_NAME, FUNCTION_STATISTICS_ID,
-    FUNCTION_STATISTICS_NAME,
+    FUNCTION_DUMMY_ASYNC_ID, FUNCTION_DUMMY_ASYNC_NAME, FUNCTION_RECORD_COUNTER_ID,
+    FUNCTION_RECORD_COUNTER_NAME, FUNCTION_STATISTICS_ID, FUNCTION_STATISTICS_NAME,
 };
 use crate::plan::PlanToProtoError;
 use crate::plan::ReadLevel;
@@ -2594,6 +2594,7 @@ impl AttachedFunctionApiResponse {
         let function_name = match af.function_id {
             id if id == FUNCTION_RECORD_COUNTER_ID => FUNCTION_RECORD_COUNTER_NAME.to_string(),
             id if id == FUNCTION_STATISTICS_ID => FUNCTION_STATISTICS_NAME.to_string(),
+            id if id == FUNCTION_DUMMY_ASYNC_ID => FUNCTION_DUMMY_ASYNC_NAME.to_string(),
             _ => {
                 return Err(GetAttachedFunctionError::UnknownFunctionId(af.function_id));
             }

@@ -13,8 +13,8 @@ use chroma_segment::{
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{
     Chunk, CollectionUuid, LogRecord, MaterializedLogOperation, Operation, OperationRecord,
-    Segment, SegmentShard, SegmentShardError, UpdateMetadataValue, FUNCTION_RECORD_COUNTER_ID,
-    FUNCTION_STATISTICS_ID,
+    Segment, SegmentShard, SegmentShardError, UpdateMetadataValue, FUNCTION_DUMMY_ASYNC_ID,
+    FUNCTION_RECORD_COUNTER_ID, FUNCTION_STATISTICS_ID,
 };
 use std::sync::Arc;
 use thiserror::Error;
@@ -167,6 +167,14 @@ impl ExecuteAttachedFunctionOperator {
             // For statistics, use StatisticsFunctionExecutor with CounterFunctionFactory
             FUNCTION_STATISTICS_ID => {
                 Arc::new(StatisticsFunctionExecutor(Box::new(CounterFunctionFactory)))
+            }
+            // For dummy_async - this is an async function, so it should be handled elsewhere
+            FUNCTION_DUMMY_ASYNC_ID => {
+                tracing::error!("Async functions like dummy_async should not be executed in ExecuteAttachedFunctionOperator");
+                return Err(ExecuteAttachedFunctionError::InvalidUuid(format!(
+                    "Async function {} cannot be executed synchronously",
+                    function_id
+                )));
             }
             _ => {
                 tracing::error!("Unknown function_id UUID: {}", function_id);

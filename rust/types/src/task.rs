@@ -66,6 +66,9 @@ pub struct AttachedFunction {
     /// Whether the attached function has been soft-deleted
     #[serde(skip, default)]
     pub is_deleted: bool,
+    /// Whether the attached function runs asynchronously
+    #[serde(skip, default)]
+    pub is_async: bool,
     /// Timestamp when the attached function was created
     #[serde(default = "default_systemtime")]
     pub created_at: SystemTime,
@@ -153,6 +156,7 @@ impl TryFrom<crate::chroma_proto::AttachedFunction> for AttachedFunction {
             completion_offset: attached_function.completion_offset,
             min_records_for_invocation: attached_function.min_records_for_invocation,
             is_deleted: false, // Not available in proto, would need to be fetched separately
+            is_async: attached_function.is_async,
             created_at,
             updated_at,
         })

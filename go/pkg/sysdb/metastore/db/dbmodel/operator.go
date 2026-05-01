@@ -9,6 +9,7 @@ type Function struct {
 	Name          string    `gorm:"column:name;type:text;not null;unique"`
 	IsIncremental bool      `gorm:"column:is_incremental;type:bool;not null"`
 	ReturnType    string    `gorm:"column:return_type;type:jsonb;not null"`
+	IsAsync       bool      `gorm:"column:is_async;type:bool;not null;default:false"`
 }
 
 func (v Function) TableName() string {

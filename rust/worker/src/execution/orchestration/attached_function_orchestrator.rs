@@ -58,6 +58,7 @@ pub struct FunctionContext {
     pub attached_function_id: AttachedFunctionUuid,
     pub function_id: Uuid,
     pub updated_completion_offset: u64,
+    pub is_async: bool,
 }
 
 #[derive(Debug)]
@@ -348,7 +349,11 @@ impl AttachedFunctionOrchestrator {
         };
 
         // Update the completion offset from the input collection's pulled log offset
-        function_context.updated_completion_offset = collection_info.pulled_log_offset as u64;
+        // For async functions, we don't update the completion offset here as they will
+        // be processed through a separate queue mechanism
+        if !function_context.is_async {
+            function_context.updated_completion_offset = collection_info.pulled_log_offset as u64;
+        }
 
         let materialized_output = materialized_output
             .into_iter()
@@ -555,6 +560,7 @@ impl Handler<TaskResult<GetAttachedFunctionOutput, GetAttachedFunctionOperatorEr
                         attached_function_id: attached_function.id,
                         function_id: attached_function.function_id,
                         updated_completion_offset: attached_function.completion_offset,
+                        is_async: attached_function.is_async,
                     })
                     .is_err()
                 {

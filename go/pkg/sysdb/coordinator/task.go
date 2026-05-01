@@ -267,6 +267,7 @@ func attachedFunctionToProto(attachedFunction *dbmodel.AttachedFunction, functio
 		DatabaseId:              attachedFunction.DatabaseID,
 		CreatedAt:               uint64(attachedFunction.CreatedAt.UnixMicro()),
 		UpdatedAt:               uint64(attachedFunction.UpdatedAt.UnixMicro()),
+		IsAsync:                 function.IsAsync,
 	}
 	if attachedFunction.OutputCollectionID != nil {
 		attachedFunctionProto.OutputCollectionId = attachedFunction.OutputCollectionID
