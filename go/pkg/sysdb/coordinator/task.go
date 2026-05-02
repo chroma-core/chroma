@@ -814,3 +814,49 @@ func (s *Coordinator) FinalizeAsyncAttachedFunctionRepair(ctx context.Context, r
 	log.Info("Successfully finalized repair for attached function")
 	return &coordinatorpb.FinalizeAsyncAttachedFunctionRepairResponse{}, nil
 }
+
+// AreInvocationsDone checks if multiple attached function invocations have completed
+// by comparing current completion_offset against provided old completion offsets.
+func (s *Coordinator) AreInvocationsDone(ctx context.Context, req *coordinatorpb.AreInvocationsDoneRequest) (*coordinatorpb.AreInvocationsDoneResponse, error) {
+	log := log.With(zap.String("method", "AreInvocationsDone"))
+
+	if len(req.Items) == 0 {
+		return &coordinatorpb.AreInvocationsDoneResponse{Done: []bool{}}, nil
+	}
+
+	// Convert proto request items to dbmodel items
+	items := make([]dbmodel.InvocationCheckItem, len(req.Items))
+	for i, item := range req.Items {
+		functionID, err := uuid.Parse(item.FunctionId)
+		if err != nil {
+			log.Error("AreInvocationsDone: invalid function_id", zap.Error(err), zap.String("function_id", item.FunctionId))
+			return nil, status.Errorf(codes.InvalidArgument, "invalid function_id at index %d: %v", i, err)
+		}
+
+		// Validate input collection ID as UUID
+		_, err = uuid.Parse(item.InputCollectionId)
+		if err != nil {
+			log.Error("AreInvocationsDone: invalid input_collection_id", zap.Error(err), zap.String("input_collection_id", item.InputCollectionId))
+			return nil, status.Errorf(codes.InvalidArgument, "invalid input_collection_id at index %d: %v", i, err)
+		}
+
+		items[i] = dbmodel.InvocationCheckItem{
+			FunctionID:        functionID,
+			InputCollectionID: item.InputCollectionId,
+			CompletionOffset:  item.CompletionOffset,
+		}
+	}
+
+	// Call the database method
+	done, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).AreInvocationsDone(items)
+	if err != nil {
+		log.Error("AreInvocationsDone: failed to check invocation status", zap.Error(err))
+		return nil, err
+	}
+
+	log.Debug("AreInvocationsDone: completed successfully",
+		zap.Int("items_count", len(items)),
+		zap.Int("results_count", len(done)))
+
+	return &coordinatorpb.AreInvocationsDoneResponse{Done: done}, nil
+}

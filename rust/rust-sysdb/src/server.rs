@@ -13,7 +13,8 @@ use chroma_storage::Storage;
 use chroma_types::chroma_proto::collection_version_info::VersionChangeReason;
 use chroma_types::chroma_proto::{
     sys_db_server::{SysDb, SysDbServer},
-    AttachFunctionRequest, AttachFunctionResponse, BatchGetCollectionSoftDeleteStatusRequest,
+    AreInvocationsDoneRequest, AreInvocationsDoneResponse, AttachFunctionRequest,
+    AttachFunctionResponse, BatchGetCollectionSoftDeleteStatusRequest,
     BatchGetCollectionSoftDeleteStatusResponse, BatchGetCollectionVersionFilePathsRequest,
     BatchGetCollectionVersionFilePathsResponse, CheckCollectionsRequest, CheckCollectionsResponse,
     CleanupExpiredPartialAttachedFunctionsRequest, CleanupExpiredPartialAttachedFunctionsResponse,
@@ -986,6 +987,15 @@ impl SysDb for SysdbService {
     ) -> Result<Response<FinalizeAsyncAttachedFunctionRepairResponse>, Status> {
         Err(Status::unimplemented(
             "finalize_async_attached_function_repair is not supported",
+        ))
+    }
+
+    async fn are_invocations_done(
+        &self,
+        _request: Request<AreInvocationsDoneRequest>,
+    ) -> Result<Response<AreInvocationsDoneResponse>, Status> {
+        Err(Status::unimplemented(
+            "are_invocations_done is not supported",
         ))
     }
 }

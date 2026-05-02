@@ -16,6 +16,36 @@ type IAttachedFunctionDb struct {
 	mock.Mock
 }
 
+// AreInvocationsDone provides a mock function with given fields: items
+func (_m *IAttachedFunctionDb) AreInvocationsDone(items []dbmodel.InvocationCheckItem) ([]bool, error) {
+	ret := _m.Called(items)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AreInvocationsDone")
+	}
+
+	var r0 []bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func([]dbmodel.InvocationCheckItem) ([]bool, error)); ok {
+		return rf(items)
+	}
+	if rf, ok := ret.Get(0).(func([]dbmodel.InvocationCheckItem) []bool); ok {
+		r0 = rf(items)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]bool)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func([]dbmodel.InvocationCheckItem) error); ok {
+		r1 = rf(items)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // CleanupExpiredPartial provides a mock function with given fields: maxAgeSeconds
 func (_m *IAttachedFunctionDb) CleanupExpiredPartial(maxAgeSeconds uint64) ([]uuid.UUID, error) {
 	ret := _m.Called(maxAgeSeconds)

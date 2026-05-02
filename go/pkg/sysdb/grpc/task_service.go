@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
@@ -165,5 +166,38 @@ func (s *Server) FinalizeAsyncAttachedFunctionRepair(ctx context.Context, req *c
 
 	log.Info("FinalizeAsyncAttachedFunctionRepair completed",
 		zap.String("attached_function_id", req.AttachedFunctionId))
+	return res, nil
+}
+
+func (s *Server) AreInvocationsDone(ctx context.Context, req *coordinatorpb.AreInvocationsDoneRequest) (*coordinatorpb.AreInvocationsDoneResponse, error) {
+	log.Info("AreInvocationsDone",
+		zap.Int("items_count", len(req.Items)))
+
+	// Check if the number of items exceeds the limit
+	if len(req.Items) > s.maxAreInvocationsDoneItems {
+		log.Error("AreInvocationsDone: too many items",
+			zap.Int("items_count", len(req.Items)),
+			zap.Int("max_allowed", s.maxAreInvocationsDoneItems))
+		grpcErr, err := grpcutils.BuildInvalidArgumentGrpcError("items",
+			fmt.Sprintf("too many items: %d (max allowed: %d)", len(req.Items), s.maxAreInvocationsDoneItems))
+		if err != nil {
+			return nil, grpcutils.BuildInternalGrpcError(err.Error())
+		}
+		return nil, grpcErr
+	}
+
+	res, err := s.coordinator.AreInvocationsDone(ctx, req)
+	if err != nil {
+		log.Error("AreInvocationsDone failed", zap.Error(err))
+		// If it's already a gRPC status error, return it directly
+		if _, ok := status.FromError(err); ok {
+			return nil, err
+		}
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	log.Info("AreInvocationsDone completed",
+		zap.Int("items_count", len(req.Items)),
+		zap.Int("results_count", len(res.Done)))
 	return res, nil
 }

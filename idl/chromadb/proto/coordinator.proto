@@ -701,6 +701,20 @@ message GetAttachedFunctionsToGcResponse {
   repeated AttachedFunction attached_functions = 1;
 }
 
+message InvocationCheckItem {
+  string function_id = 1;
+  string input_collection_id = 2;
+  int64 completion_offset = 3;
+}
+
+message AreInvocationsDoneRequest {
+  repeated InvocationCheckItem items = 1;
+}
+
+message AreInvocationsDoneResponse {
+  repeated bool done = 1;
+}
+
 message IncrementCompactionFailureCountRequest {
   string collection_id = 1;
   optional string database_name = 2;
@@ -753,6 +767,7 @@ service SysDB {
   rpc GetFunctions(GetFunctionsRequest) returns (GetFunctionsResponse) {}
   rpc GetAttachedFunctionsToGc(GetAttachedFunctionsToGcRequest) returns (GetAttachedFunctionsToGcResponse) {}
   rpc FinishAttachedFunctionDeletion(FinishAttachedFunctionDeletionRequest) returns (FinishAttachedFunctionDeletionResponse) {}
+  rpc AreInvocationsDone(AreInvocationsDoneRequest) returns (AreInvocationsDoneResponse) {}
   rpc FlushCollectionCompactionAndAttachedFunction(FlushCollectionCompactionAndAttachedFunctionRequest) returns (FlushCollectionCompactionAndAttachedFunctionResponse) {}
   rpc TryFinishAsyncAttachedFunctionInvocation(TryFinishAsyncAttachedFunctionInvocationRequest) returns (TryFinishAsyncAttachedFunctionInvocationResponse) {}
   rpc FinalizeAsyncAttachedFunctionRepair(FinalizeAsyncAttachedFunctionRepairRequest) returns (FinalizeAsyncAttachedFunctionRepairResponse) {}

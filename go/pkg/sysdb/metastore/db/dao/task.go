@@ -387,3 +387,73 @@ func (s *attachedFunctionDb) HardDeleteAttachedFunction(id uuid.UUID) error {
 
 	return nil
 }
+
+// AreInvocationsDone checks if multiple attached function invocations have completed
+// by comparing current completion_offset against provided completion_offset and checking
+// heap_entry_pending flag. Returns a slice of booleans indicating completion status for each input item.
+func (s *attachedFunctionDb) AreInvocationsDone(items []dbmodel.InvocationCheckItem) ([]bool, error) {
+	if len(items) == 0 {
+		return []bool{}, nil
+	}
+
+	// Prepare arrays for UNNEST
+	ordinals := make([]int64, len(items))
+	fnIDs := make([]string, len(items))
+	collectionIDs := make([]string, len(items))
+	completionOffsets := make([]int64, len(items))
+
+	for i, item := range items {
+		ordinals[i] = int64(i)
+		fnIDs[i] = item.FunctionID.String()
+		collectionIDs[i] = item.InputCollectionID
+		completionOffsets[i] = item.CompletionOffset
+	}
+
+	rows, err := s.db.Raw(`
+		WITH input_items(ord, fn_id, collection_id, completion_offset) AS (
+			SELECT * FROM UNNEST(
+				$1::bigint[],
+				$2::text[],
+				$3::text[],
+				$4::bigint[]
+			)
+		)
+		SELECT ii.ord,
+		       CASE
+		           WHEN af.id IS NULL THEN true  -- Hard deleted (not in DB)
+		           WHEN af.is_deleted THEN true   -- Soft deleted
+		           ELSE af.completion_offset > ii.completion_offset AND NOT af.heap_entry_pending
+		       END AS is_done
+		FROM input_items ii
+		LEFT JOIN attached_functions af
+			ON af.id = ii.fn_id::uuid
+			AND af.input_collection_id = ii.collection_id::uuid
+		ORDER BY ii.ord
+	`, ordinals, fnIDs, collectionIDs, completionOffsets).Rows()
+
+	if err != nil {
+		log.Error("AreInvocationsDone: query failed", zap.Error(err))
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := make([]bool, len(items))
+	for rows.Next() {
+		var ord int64
+		var isDone bool
+		if err := rows.Scan(&ord, &isDone); err != nil {
+			log.Error("AreInvocationsDone: scan failed", zap.Error(err))
+			return nil, err
+		}
+		if ord >= 0 && ord < int64(len(results)) {
+			results[ord] = isDone
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Error("AreInvocationsDone: rows iteration error", zap.Error(err))
+		return nil, err
+	}
+
+	return results, nil
+}
