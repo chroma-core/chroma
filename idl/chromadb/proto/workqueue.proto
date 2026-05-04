@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package chroma;
+
+import "google/protobuf/empty.proto";
+
+message WorkQueueRecord {
+    string fn_id = 1;
+    string input_coll_id = 2;
+    int64 completion_offset = 3;
+}
+
+message PushWorkRequest {
+    string fn_id = 1;
+    string input_coll_id = 2;
+    int64 completion_offset = 3;
+}
+
+message FinishWorkRequest {
+    string fn_id = 1;
+    string input_coll_id = 2;
+    int64 completion_offset = 3;
+}
+
+message GetWorkRequest {
+    string shard_id = 1;
+    uint32 limit = 2;
+}
+
+message WorkItemResult {
+    string fn_id = 1;
+    string input_coll_id = 2;
+    int64 completion_offset = 3;
+}
+
+message GetWorkResponse {
+    repeated WorkItemResult items = 1;
+}
+
+service WorkQueueService {
+    rpc PushWork(PushWorkRequest) returns (google.protobuf.Empty);
+    rpc FinishWork(FinishWorkRequest) returns (google.protobuf.Empty);
+    rpc GetWork(GetWorkRequest) returns (GetWorkResponse);
+}
