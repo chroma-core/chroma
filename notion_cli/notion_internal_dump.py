@@ -18,26 +18,38 @@ Why this exists:
 
 Phases:
   Phase 0 — auth (run this once per session, ~30s):
-    login             RECOMMENDED. End-to-end umbrella: confirms with
-                      the user, then walks 1) saved token on disk,
-                      2) installed browser cookie stores, 3) managed
-                      Chrome via CDP (Option B), 4) embedded Playwright
-                      Chromium with lazy install (Option C). The latter
-                      two avoid the Touch ID prompt and Chrome's
-                      cookie-flush-on-quit problem entirely.
+    login             RECOMMENDED. End-to-end umbrella that walks:
+                        1. saved token on disk,
+                        2. installed browser cookie stores (every
+                           Chromium-family + Firefox-family + Safari
+                           profile we can find on mac/Linux/Windows --
+                           Chrome, Edge, Brave, Arc, Atlas, Opera,
+                           Vivaldi, DDG, Sidekick, Comet, Yandex,
+                           Wavebox, Firefox + LibreWolf/Waterfox/
+                           Floorp/Zen, Safari),
+                        3. managed Chromium-family browser via CDP
+                           (any one we find -- Chrome / Edge / Brave /
+                           Arc / Atlas / Vivaldi / Opera / etc.).
+                      No managed-Playwright fallback in step 3 by
+                      design: if no browser is installed at all we
+                      bail with install instructions rather than
+                      silently downloading ~150MB.
 
-    Escape hatches (use these directly if you want to skip the umbrella):
-      login-chrome      Just Option B (managed system Chrome via CDP).
-      login-playwright  Just Option C (embedded Playwright Chromium).
+    Escape hatches (use directly to bypass the umbrella):
+      login-chrome      Just step 3 -- managed system browser via CDP.
       login-browser     Legacy: scan installed browsers + watch cookie
                         files for the next write. Useful when you're
-                        already signed in to Notion in some browser.
+                        already signed in to Notion in some browser
+                        but Chrome is buffering the cookie flush.
       login-extension   Tiny Chrome MV3 extension at
                         notion_cli/extension/ reads token_v2 +
-                        file_token via the privileged chrome.cookies
-                        API and POSTs them to a local listener. Kept
-                        for completeness; not on the recommended path.
+                        file_token via chrome.cookies API and POSTs
+                        them to a local listener.
       login-paste       Manual fallback: paste token_v2 from DevTools.
+      login-playwright  DEPRECATED: embedded Playwright Chromium (~150MB
+                        first-run download). Removed from the umbrella's
+                        auto-fallback; use only if you can't install a
+                        system browser.
 
   Phase 1 — validate permissions (cheap, run this first):
     discover     /api/v3/search across the chosen space; print page count.
@@ -221,25 +233,232 @@ def _persist_env_var(key: str, value: str) -> Path:
     return path
 
 
-def _all_chrome_cookie_files() -> list[str]:
-    """All Chrome/Chromium cookie SQLite files we know how to look at."""
+def _chromium_app_roots() -> list[tuple[str, str]]:
+    """Per-OS catalogue of every Chromium-family browser's profile root.
+
+    Returns [(family_label, root_dir), ...] filtered to dirs that exist
+    on disk. Each `root_dir` is the level under which we glob for
+    `*/Cookies` (per-profile) or `Cookies` (single-profile browsers).
+
+    Family labels are short ASCII slugs that show up in the human
+    cookie-source label (e.g. "chrome:Default", "atlas:Default").
+    """
+    home = os.path.expanduser("~")
+    if sys.platform == "darwin":
+        candidates = [
+            ("chrome",            f"{home}/Library/Application Support/Google/Chrome"),
+            ("chrome-beta",       f"{home}/Library/Application Support/Google/Chrome Beta"),
+            ("chrome-canary",     f"{home}/Library/Application Support/Google/Chrome Canary"),
+            ("chrome-dev",        f"{home}/Library/Application Support/Google/Chrome Dev"),
+            ("chromium",          f"{home}/Library/Application Support/Chromium"),
+            ("edge",              f"{home}/Library/Application Support/Microsoft Edge"),
+            ("edge-beta",         f"{home}/Library/Application Support/Microsoft Edge Beta"),
+            ("edge-dev",          f"{home}/Library/Application Support/Microsoft Edge Dev"),
+            ("edge-canary",       f"{home}/Library/Application Support/Microsoft Edge Canary"),
+            ("brave",             f"{home}/Library/Application Support/BraveSoftware/Brave-Browser"),
+            ("brave-beta",        f"{home}/Library/Application Support/BraveSoftware/Brave-Browser-Beta"),
+            ("brave-nightly",     f"{home}/Library/Application Support/BraveSoftware/Brave-Browser-Nightly"),
+            ("opera",             f"{home}/Library/Application Support/com.operasoftware.Opera"),
+            ("opera-gx",          f"{home}/Library/Application Support/com.operasoftware.OperaGX"),
+            ("opera-developer",   f"{home}/Library/Application Support/com.operasoftware.OperaDeveloper"),
+            ("vivaldi",           f"{home}/Library/Application Support/Vivaldi"),
+            ("arc",               f"{home}/Library/Application Support/Arc/User Data"),
+            ("atlas",             f"{home}/Library/Application Support/Atlas"),
+            ("atlas-openai",      f"{home}/Library/Application Support/com.openai.atlas"),
+            ("atlas-bundle",      f"{home}/Library/Application Support/OpenAI/Atlas"),
+            ("ddg",               f"{home}/Library/Application Support/DuckDuckGo"),
+            ("sidekick",          f"{home}/Library/Application Support/Sidekick"),
+            ("comet",             f"{home}/Library/Application Support/Comet"),
+            ("yandex",            f"{home}/Library/Application Support/Yandex/YandexBrowser"),
+            ("wavebox",           f"{home}/Library/Application Support/WaveboxApp"),
+            ("dia",               f"{home}/Library/Application Support/Dia"),
+            ("zen",               f"{home}/Library/Application Support/Zen"),
+        ]
+    elif sys.platform.startswith("linux"):
+        candidates = [
+            ("chrome",            f"{home}/.config/google-chrome"),
+            ("chrome-beta",       f"{home}/.config/google-chrome-beta"),
+            ("chrome-unstable",   f"{home}/.config/google-chrome-unstable"),
+            ("chromium",          f"{home}/.config/chromium"),
+            ("edge",              f"{home}/.config/microsoft-edge"),
+            ("edge-beta",         f"{home}/.config/microsoft-edge-beta"),
+            ("edge-dev",          f"{home}/.config/microsoft-edge-dev"),
+            ("brave",             f"{home}/.config/BraveSoftware/Brave-Browser"),
+            ("brave-beta",        f"{home}/.config/BraveSoftware/Brave-Browser-Beta"),
+            ("vivaldi",           f"{home}/.config/vivaldi"),
+            ("opera",             f"{home}/.config/opera"),
+            ("opera-gx",          f"{home}/.config/opera-gx"),
+            ("yandex",            f"{home}/.config/yandex-browser"),
+            ("ddg",               f"{home}/.config/DuckDuckGo"),
+            # snap installs
+            ("chromium-snap",     f"{home}/snap/chromium/common/chromium"),
+            ("chrome-snap",       f"{home}/snap/google-chrome/current/.config/google-chrome"),
+            # flatpak installs
+            ("chrome-flatpak",    f"{home}/.var/app/com.google.Chrome/config/google-chrome"),
+            ("brave-flatpak",     f"{home}/.var/app/com.brave.Browser/config/BraveSoftware/Brave-Browser"),
+            ("chromium-flatpak",  f"{home}/.var/app/org.chromium.Chromium/config/chromium"),
+            ("edge-flatpak",      f"{home}/.var/app/com.microsoft.Edge/config/microsoft-edge"),
+            ("vivaldi-flatpak",   f"{home}/.var/app/com.vivaldi.Vivaldi/config/vivaldi"),
+        ]
+    elif sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA", "")
+        appdata = os.environ.get("APPDATA", "")
+        candidates = [
+            ("chrome",            f"{local}\\Google\\Chrome\\User Data"),
+            ("chrome-beta",       f"{local}\\Google\\Chrome Beta\\User Data"),
+            ("chrome-sxs",        f"{local}\\Google\\Chrome SxS\\User Data"),
+            ("chromium",          f"{local}\\Chromium\\User Data"),
+            ("edge",              f"{local}\\Microsoft\\Edge\\User Data"),
+            ("edge-beta",         f"{local}\\Microsoft\\Edge Beta\\User Data"),
+            ("edge-dev",          f"{local}\\Microsoft\\Edge Dev\\User Data"),
+            ("edge-canary",       f"{local}\\Microsoft\\Edge SxS\\User Data"),
+            ("brave",             f"{local}\\BraveSoftware\\Brave-Browser\\User Data"),
+            ("brave-beta",        f"{local}\\BraveSoftware\\Brave-Browser-Beta\\User Data"),
+            ("opera",             f"{appdata}\\Opera Software\\Opera Stable"),
+            ("opera-gx",          f"{appdata}\\Opera Software\\Opera GX Stable"),
+            ("vivaldi",           f"{local}\\Vivaldi\\User Data"),
+            ("yandex",            f"{local}\\Yandex\\YandexBrowser\\User Data"),
+            ("ddg",               f"{local}\\DuckDuckGo\\User Data"),
+            ("atlas",             f"{local}\\OpenAI\\Atlas\\User Data"),
+        ]
+    else:
+        candidates = []
+    return [(fam, root) for fam, root in candidates if os.path.isdir(root)]
+
+
+def _all_chromium_cookie_files() -> list[tuple[str, str]]:
+    """Discover every Chromium-family cookie SQLite on disk.
+
+    Returns [(label, cookie_file), ...] where label is e.g.
+    'chrome:Default', 'arc:Profile 1', 'atlas:Default'. Handles both
+    the modern Chrome `Network/Cookies` layout and the legacy
+    `Cookies`-at-profile-root layout, plus single-profile browsers
+    (Opera) that put the cookie file at the User-Data root with no
+    profile subdir.
+    """
     import glob
-    roots = [
-        os.path.expanduser("~/Library/Application Support/Google/Chrome"),
-        os.path.expanduser("~/Library/Application Support/Google/Chrome Beta"),
-        os.path.expanduser("~/Library/Application Support/Google/Chrome Canary"),
-        os.path.expanduser("~/Library/Application Support/Arc/User Data"),
-        os.path.expanduser("~/Library/Application Support/BraveSoftware/Brave-Browser"),
-        os.path.expanduser("~/Library/Application Support/Microsoft Edge"),
-        os.path.expanduser("~/Library/Application Support/Vivaldi"),
-    ]
-    out: list[str] = []
-    for root in roots:
-        if not os.path.isdir(root):
+    out: list[tuple[str, str]] = []
+    for family, root in _chromium_app_roots():
+        sep = os.sep
+        # Three possible layouts:
+        #   <root>/<profile>/Network/Cookies   (Chromium >= M97)
+        #   <root>/<profile>/Cookies           (older Chromium / non-Chrome)
+        #   <root>/Cookies                     (single-profile browsers, e.g. Opera)
+        modern = glob.glob(os.path.join(root, "*", "Network", "Cookies"))
+        per_profile = glob.glob(os.path.join(root, "*", "Cookies"))
+        single = glob.glob(os.path.join(root, "Cookies"))
+        for path in modern + per_profile + single:
+            rel = path[len(root):].strip(sep).split(sep)
+            if rel == ["Cookies"]:
+                profile = "Default"
+            elif "Network" in rel:
+                # ['Profile X', 'Network', 'Cookies'] -> 'Profile X'
+                profile = rel[rel.index("Network") - 1]
+            else:
+                # ['Profile X', 'Cookies'] -> 'Profile X'
+                profile = rel[0]
+            out.append((f"{family}:{profile}", path))
+    # Dedupe (Network/Cookies + legacy Cookies for the same profile both glob'd)
+    seen: set[tuple[str, str]] = set()
+    deduped: list[tuple[str, str]] = []
+    for label, path in out:
+        key = (label, path)
+        if key in seen:
             continue
-        for path in glob.glob(f"{root}/*/Cookies") + glob.glob(f"{root}/*/Network/Cookies"):
-            out.append(path)
+        seen.add(key)
+        deduped.append((label, path))
+    return deduped
+
+
+def _all_chrome_cookie_files() -> list[str]:
+    """Backwards-compat shim used by the legacy login-browser flow's
+    cookie-file mtime watcher. Returns just the file paths.
+    """
+    return [path for _label, path in _all_chromium_cookie_files()]
+
+
+def _firefox_family_roots() -> list[tuple[str, str]]:
+    """Per-OS catalogue of every Firefox-family browser's profiles root.
+
+    Returns [(family_label, profiles_dir), ...] filtered to dirs that
+    exist. Each profiles_dir contains one subdir per profile; the
+    cookie file is `<profile>/cookies.sqlite`.
+    """
+    home = os.path.expanduser("~")
+    if sys.platform == "darwin":
+        candidates = [
+            ("firefox",         f"{home}/Library/Application Support/Firefox/Profiles"),
+            ("firefox-dev",     f"{home}/Library/Application Support/Firefox Developer Edition/Profiles"),
+            ("firefox-nightly", f"{home}/Library/Application Support/Firefox Nightly/Profiles"),
+            ("librewolf",       f"{home}/Library/Application Support/LibreWolf/Profiles"),
+            ("waterfox",        f"{home}/Library/Application Support/Waterfox/Profiles"),
+            ("floorp",          f"{home}/Library/Application Support/Floorp/Profiles"),
+            ("zen",             f"{home}/Library/Application Support/zen/Profiles"),
+            ("tor",             f"{home}/Library/Application Support/TorBrowser-Data/Browser"),
+        ]
+    elif sys.platform.startswith("linux"):
+        candidates = [
+            ("firefox",         f"{home}/.mozilla/firefox"),
+            ("firefox-snap",    f"{home}/snap/firefox/common/.mozilla/firefox"),
+            ("firefox-flatpak", f"{home}/.var/app/org.mozilla.firefox/.mozilla/firefox"),
+            ("librewolf",       f"{home}/.librewolf"),
+            ("librewolf-flatpak", f"{home}/.var/app/io.gitlab.librewolf-community/.librewolf"),
+            ("waterfox",        f"{home}/.waterfox"),
+            ("floorp",          f"{home}/.floorp"),
+            ("zen",             f"{home}/.zen"),
+        ]
+    elif sys.platform == "win32":
+        appdata = os.environ.get("APPDATA", "")
+        candidates = [
+            ("firefox",         f"{appdata}\\Mozilla\\Firefox\\Profiles"),
+            ("firefox-dev",     f"{appdata}\\Mozilla\\Firefox Developer Edition\\Profiles"),
+            ("librewolf",       f"{appdata}\\librewolf\\Profiles"),
+            ("waterfox",        f"{appdata}\\Waterfox\\Profiles"),
+            ("floorp",          f"{appdata}\\Floorp\\Profiles"),
+            ("zen",             f"{appdata}\\zen\\Profiles"),
+        ]
+    else:
+        candidates = []
+    return [(fam, root) for fam, root in candidates if os.path.isdir(root)]
+
+
+def _all_firefox_cookie_files() -> list[tuple[str, str]]:
+    """Discover every Firefox-family cookies.sqlite on disk.
+
+    Returns [(label, cookie_file), ...] where label is e.g.
+    'firefox:default-release' or 'librewolf:default'.
+    """
+    import glob
+    out: list[tuple[str, str]] = []
+    for family, root in _firefox_family_roots():
+        for prof in sorted(glob.glob(os.path.join(root, "*"))):
+            cookies = os.path.join(prof, "cookies.sqlite")
+            if not os.path.isfile(cookies):
+                continue
+            base = os.path.basename(prof)
+            # Firefox profile dirs are typically `<random>.<name>`; drop
+            # the random hash to keep the label readable.
+            profile_name = base.split(".", 1)[-1] if "." in base else base
+            out.append((f"{family}:{profile_name or 'default'}", cookies))
     return out
+
+
+def _safari_cookies_path() -> Optional[str]:
+    """macOS Safari binary cookies file location, if Safari is installed
+    and we have read access. (Sandboxed Containers path was added when
+    Safari became sandboxed; the legacy path still works on older
+    macOS.)
+    """
+    if sys.platform != "darwin":
+        return None
+    home = os.path.expanduser("~")
+    for p in (
+        f"{home}/Library/Cookies/Cookies.binarycookies",
+        f"{home}/Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies",
+    ):
+        if os.path.isfile(p):
+            return p
+    return None
 
 
 CookieKey = tuple[str, str, str]
@@ -362,10 +581,48 @@ def _extract_notion_cookies_from(
     return out
 
 
+def _extract_notion_cookies_firefox_at(
+    cookie_file: str, *, label: str, verbose: bool = False
+) -> dict[CookieKey, dict]:
+    """browser_cookie3.firefox(cookie_file=...) variant for arbitrary
+    Firefox-family profiles (LibreWolf / Waterfox / Floorp / Tor / Zen
+    / Firefox Dev/Nightly + flatpak/snap installs).
+    """
+    try:
+        import browser_cookie3  # type: ignore
+    except Exception:
+        _vlog(verbose, "browser_cookie3 not installed")
+        return {}
+    try:
+        cj = browser_cookie3.firefox(cookie_file=cookie_file, domain_name="notion")
+    except Exception as e:
+        _vlog(verbose, f"{label}: firefox extraction failed: {e}")
+        return {}
+    out: dict[CookieKey, dict] = {}
+    for c in cj:
+        if "notion" not in c.domain:
+            continue
+        out[(c.name, c.domain, c.path)] = {
+            "name": c.name,
+            "value": c.value or "",
+            "domain": c.domain,
+            "path": c.path,
+            "httponly": getattr(c, "_rest", {}).get("HttpOnly", False),
+        }
+    if verbose:
+        tok = next((v for k, v in out.items() if k[0] == "token_v2"), None)
+        if tok:
+            _vlog(verbose, f"{label}: token_v2 present (len={len(tok['value'])})")
+        else:
+            names = sorted({k[0] for k in out.keys()})
+            _vlog(verbose, f"{label}: token_v2 MISSING. notion cookies: {names or '[]'}")
+    return out
+
+
 def _extract_notion_cookies_via(
     name: str, *, verbose: bool = False
 ) -> dict[CookieKey, dict]:
-    """Use one of browser_cookie3's named extractors (firefox, safari, etc.).
+    """Use one of browser_cookie3's named no-arg extractors (e.g. safari).
     Returns the same shape as `_extract_notion_cookies_from`.
     """
     try:
@@ -401,35 +658,71 @@ def _extract_notion_cookies_via(
     return out
 
 
+def _enumerate_browser_cookie_sources() -> list[tuple[str, str, str]]:
+    """Discover every browser cookie store on this machine that we know
+    how to read. Returns [(family_kind, label, cookie_file_or_marker), ...]
+    where:
+      - family_kind is 'chromium' | 'firefox' | 'safari'
+      - label is e.g. 'chrome:Default' / 'firefox:default-release' / 'safari'
+      - the third element is the cookie file path, or the literal
+        string 'safari' for the no-arg Safari extractor.
+    """
+    sources: list[tuple[str, str, str]] = []
+    for label, path in _all_chromium_cookie_files():
+        sources.append(("chromium", label, path))
+    for label, path in _all_firefox_cookie_files():
+        sources.append(("firefox", label, path))
+    if _safari_cookies_path() is not None:
+        sources.append(("safari", "safari", "safari"))
+    return sources
+
+
 def all_browser_sessions(
     *, verbose: bool = False
 ) -> list[tuple[str, dict[CookieKey, dict]]]:
-    """Enumerate every browser/profile that currently has a Notion `token_v2`
-    cookie. Returns [(label, cookies)] where label is human-readable
-    ("chrome:Default", "firefox", ...) and cookies is the full notion.so /
+    """Enumerate every browser/profile that currently has a Notion
+    `token_v2` cookie. Returns [(label, cookies)] where label is
+    human-readable ('chrome:Default', 'firefox:default-release',
+    'safari', 'arc:Profile 1', ...) and cookies is the full notion.so /
     notion.com cookie set keyed by (name, domain, path).
     """
     out: list[tuple[str, dict[CookieKey, dict]]] = []
-    for cf in _all_chrome_cookie_files():
-        cookies = _extract_notion_cookies_from(cf, verbose=verbose)
+    for kind, label, target in _enumerate_browser_cookie_sources():
+        if kind == "chromium":
+            cookies = _extract_notion_cookies_from(target, verbose=verbose)
+        elif kind == "firefox":
+            cookies = _extract_notion_cookies_firefox_at(target, label=label, verbose=verbose)
+        elif kind == "safari":
+            cookies = _extract_notion_cookies_via("safari", verbose=verbose)
+        else:
+            continue
         if any(c["name"] == "token_v2" for c in cookies.values()):
-            out.append((_short_chrome_label(cf), cookies))
-    for name in ("firefox", "safari"):
-        cookies = _extract_notion_cookies_via(name, verbose=verbose)
-        if any(c["name"] == "token_v2" for c in cookies.values()):
-            out.append((name, cookies))
+            out.append((label, cookies))
     return out
 
 
 def _short_chrome_label(cookie_file: str) -> str:
-    """Turn a long Cookies path into something like 'chrome:Profile 2'."""
+    """Turn a long Cookies path into something like 'chrome:Profile 2'.
+
+    Used by the legacy login-browser flow's mtime-watching loop. For
+    new code prefer the labels emitted by `_all_chromium_cookie_files`,
+    which are derived from the same OS-aware catalogue.
+    """
+    # Reverse-lookup against the catalogue so labels stay consistent
+    # across mac / Linux / Windows and across browser families.
+    for label, path in _all_chromium_cookie_files():
+        if path == cookie_file:
+            return label
+    # Fallback: best-effort guess from the path components.
     parts = Path(cookie_file).parts
     profile = "?"
     family = "chrome"
     for i, p in enumerate(parts):
         if p == "Application Support" and i + 1 < len(parts):
             family = parts[i + 1].lower().replace(" ", "-")
-        if p in ("Cookies",) and i >= 2:
+        elif p == "User Data" and i >= 1:
+            family = parts[i - 1].lower().replace(" ", "-")
+        if p == "Cookies" and i >= 2:
             profile = parts[i - 2] if parts[i - 1] == "Network" else parts[i - 1]
     return f"{family}:{profile}"
 
@@ -1486,42 +1779,103 @@ def cmd_login_extension(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
-# Common install locations for Chromium-family browsers we know how to
-# drive over CDP. Order matters — first hit wins.
-CHROMIUM_BINARY_CANDIDATES = (
-    # macOS
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta",
-    "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium",
-    "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-    "/Applications/Arc.app/Contents/MacOS/Arc",
-    "/Applications/Vivaldi.app/Contents/MacOS/Vivaldi",
-    # Linux (Debian/Ubuntu/Arch/Fedora common locations)
-    "/usr/bin/google-chrome",
-    "/usr/bin/google-chrome-stable",
-    "/usr/bin/chromium",
-    "/usr/bin/chromium-browser",
-    "/snap/bin/chromium",
-)
+# Per-OS catalogue of Chromium-family browsers we can drive via CDP.
+# Order matters -- first hit wins, so we list Chrome stable before
+# variants the user is less likely to have explicitly chosen.
+def _chromium_binary_candidates() -> list[str]:
+    if sys.platform == "darwin":
+        return [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta",
+            "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+            "/Applications/Microsoft Edge Beta.app/Contents/MacOS/Microsoft Edge Beta",
+            "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+            "/Applications/Brave Browser Beta.app/Contents/MacOS/Brave Browser Beta",
+            "/Applications/Brave Browser Nightly.app/Contents/MacOS/Brave Browser Nightly",
+            "/Applications/Arc.app/Contents/MacOS/Arc",
+            "/Applications/Atlas.app/Contents/MacOS/Atlas",
+            "/Applications/Dia.app/Contents/MacOS/Dia",
+            "/Applications/Vivaldi.app/Contents/MacOS/Vivaldi",
+            "/Applications/Opera.app/Contents/MacOS/Opera",
+            "/Applications/Opera GX.app/Contents/MacOS/Opera",
+            "/Applications/Yandex.app/Contents/MacOS/Yandex",
+            "/Applications/DuckDuckGo.app/Contents/MacOS/DuckDuckGo",
+            "/Applications/Sidekick.app/Contents/MacOS/Sidekick",
+            "/Applications/Comet.app/Contents/MacOS/Comet",
+            "/Applications/Wavebox.app/Contents/MacOS/Wavebox",
+        ]
+    if sys.platform.startswith("linux"):
+        return [
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+            "/usr/bin/google-chrome-beta",
+            "/usr/bin/google-chrome-unstable",
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+            "/snap/bin/chromium",
+            "/snap/bin/google-chrome",
+            "/usr/bin/microsoft-edge",
+            "/usr/bin/microsoft-edge-beta",
+            "/usr/bin/microsoft-edge-dev",
+            "/usr/bin/brave-browser",
+            "/usr/bin/brave-browser-beta",
+            "/usr/bin/vivaldi",
+            "/usr/bin/vivaldi-stable",
+            "/usr/bin/opera",
+            "/usr/bin/yandex-browser",
+        ]
+    if sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA", "")
+        prog = os.environ.get("ProgramFiles", "")
+        prog86 = os.environ.get("ProgramFiles(x86)", "")
+        out: list[str] = []
+        for base in (local, prog, prog86):
+            if not base:
+                continue
+            out.extend([
+                f"{base}\\Google\\Chrome\\Application\\chrome.exe",
+                f"{base}\\Google\\Chrome Beta\\Application\\chrome.exe",
+                f"{base}\\Google\\Chrome SxS\\Application\\chrome.exe",
+                f"{base}\\Chromium\\Application\\chrome.exe",
+                f"{base}\\Microsoft\\Edge\\Application\\msedge.exe",
+                f"{base}\\Microsoft\\Edge Beta\\Application\\msedge.exe",
+                f"{base}\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
+                f"{base}\\Vivaldi\\Application\\vivaldi.exe",
+                f"{base}\\Yandex\\YandexBrowser\\Application\\browser.exe",
+                f"{base}\\OpenAI\\Atlas\\Application\\atlas.exe",
+            ])
+        return out
+    return []
 
 
 def _find_chrome_binary(explicit: Optional[str] = None) -> Optional[str]:
     """Return the path to a Chromium-family browser we can drive via CDP.
 
-    Honors --chrome-binary first, then a curated list of well-known
-    install paths, then $PATH.
+    Honors --chrome-binary first, then the per-OS curated list of
+    install paths, then $PATH (Linux only -- macOS and Windows install
+    binaries inside .app / Application bundles, not on PATH).
     """
     if explicit:
         return explicit if os.path.isfile(explicit) else None
-    for p in CHROMIUM_BINARY_CANDIDATES:
+    for p in _chromium_binary_candidates():
         if os.path.isfile(p) and os.access(p, os.X_OK):
             return p
-    for cmd in ("google-chrome", "chrome", "chromium", "chromium-browser"):
-        path = shutil.which(cmd)
-        if path:
-            return path
+    if sys.platform.startswith("linux"):
+        for cmd in (
+            "google-chrome",
+            "google-chrome-stable",
+            "chromium",
+            "chromium-browser",
+            "microsoft-edge",
+            "brave-browser",
+            "vivaldi",
+            "opera",
+        ):
+            path = shutil.which(cmd)
+            if path:
+                return path
     return None
 
 
@@ -1727,11 +2081,27 @@ def _terminate(proc: subprocess.Popen) -> None:
 
 
 def cmd_login_playwright(args: argparse.Namespace) -> int:
-    """Option C: drive an embedded Playwright Chromium with a managed
-    persistent profile. Same UX as `login-chrome` but uses a
-    Playwright-bundled browser instead of system Chrome -- works on
-    machines where Chrome isn't installed.
+    """DEPRECATED escape hatch. Drives an embedded Playwright Chromium
+    with a managed persistent profile -- same UX as `login-chrome` but
+    uses a Playwright-bundled browser instead of a system one.
+
+    No longer wired into the `login` umbrella's auto-fallback chain
+    because (a) silently downloading ~150MB of browser binaries during
+    a login flow is a poor default, and (b) the umbrella's expanded
+    browser scanner now finds installed Chromium-family browsers
+    across mac/Linux/Windows including Atlas, Brave, Edge, Opera,
+    Vivaldi, etc., so the practical "no Chrome anywhere" case is rare.
+
+    Kept available for users who genuinely cannot install a browser
+    system-wide. Will likely be removed once we're confident the
+    umbrella's coverage is sufficient.
     """
+    print(
+        "[deprecated] `login-playwright` is no longer on the recommended login\n"
+        "             path. Prefer `login` (umbrella) or `login-chrome`. See\n"
+        "             the docstring on this subcommand for context.",
+        file=sys.stderr,
+    )
     try:
         from playwright.sync_api import sync_playwright  # type: ignore[import-not-found]
     except ImportError:
@@ -1982,24 +2352,44 @@ def _try_saved_token(args: argparse.Namespace, pinned: Optional[str], *, force: 
 
 
 def _try_browser_cookie_scan(args: argparse.Namespace, pinned: Optional[str], *, verbose: bool = False) -> Optional[int]:
-    """One-shot scan of every Chromium / Firefox / Safari profile on
-    disk for a currently-signed-in Notion session. Returns exit code if
-    a session was picked, None if nothing was found.
+    """One-shot scan of every browser profile on disk (Chromium-family +
+    Firefox-family + Safari, mac/Linux/Windows) for a currently-signed-in
+    Notion session. Returns exit code if a session was picked, None if
+    nothing was found.
 
     Caveat: triggers a macOS Touch ID / Keychain prompt the first time
-    we read Chrome's cookie database in this Python process. We mention
-    this in the prompt so users aren't surprised.
+    we read Chrome's cookie database in this Python process. On Linux
+    Chrome may prompt for the keyring password. On Windows DPAPI is
+    silent for the current user.
     """
+    sources = _enumerate_browser_cookie_sources()
     print("Step 2: scanning installed browsers for an existing Notion session ...")
+    if not sources:
+        print("  no browser cookie stores found on disk; continuing to next step.")
+        return None
+
+    # Group by family for a compact summary.
+    by_family: dict[str, list[str]] = {}
+    for _kind, label, _target in sources:
+        family = label.split(":", 1)[0]
+        by_family.setdefault(family, []).append(label)
+    families_summary = ", ".join(
+        f"{fam} ({len(profs)})" if len(profs) > 1 else fam
+        for fam, profs in sorted(by_family.items())
+    )
+    print(f"  found {len(sources)} profile(s) across: {families_summary}")
     if sys.platform == "darwin":
-        print("  (macOS may show a Touch ID / Keychain prompt to read Chrome cookies.)")
+        print("  (macOS may prompt for Touch ID / your password to decrypt some cookie stores.)")
+    elif sys.platform.startswith("linux"):
+        print("  (Linux may prompt for your login keyring password to decrypt some cookie stores.)")
+
     try:
         sessions = find_all_working_sessions(verbose=verbose)
     except Exception as e:
         print(f"  scan failed: {e}; continuing to next step.")
         return None
     if not sessions:
-        print("  no active Notion session found in any installed browser.")
+        print("  no active Notion session found in any of those profiles.")
         return None
     return _pick_session_and_workspace(sessions, args, pinned)
 
@@ -2074,19 +2464,25 @@ def cmd_login(args: argparse.Namespace) -> int:
 
       1. Confirm the user actually wants to hand us a Notion session.
       2. Disk fast-path: validate any token-v2 already saved here.
-      3. Installed browsers: scan every Chromium / Firefox / Safari
-         profile for an existing signed-in Notion session.
-      4. Managed Chrome (Option B): if Chrome / Brave / Edge / Arc /
-         Vivaldi / Chromium is installed, launch it with a managed
-         persistent profile + remote debugging, ask the user to sign
-         in, scrape token_v2 + file_token via CDP.
-      5. Managed Playwright Chromium (Option C): otherwise lazily
-         install playwright + the bundled chromium browser, launch it
-         with a managed persistent profile, ask the user to sign in,
-         scrape cookies via the Playwright cookies() API.
+      3. Installed browsers: scan every Chromium-family + Firefox-family
+         + Safari profile we can find on disk (mac/Linux/Windows) for
+         an existing signed-in Notion session. Catches the common case
+         where the user is already logged in to Notion in some browser.
+      4. Managed browser via CDP: if any Chromium-family browser is
+         installed (Chrome / Edge / Brave / Arc / Atlas / Vivaldi /
+         Opera / etc.), launch it with a managed persistent profile +
+         remote debugging, ask the user to sign in, scrape token_v2 +
+         file_token via CDP. Subsequent runs reuse the profile and
+         finish in ~3s.
 
-    --yes skips every confirmation (CI mode). --force skips step 2.
-    --no-browser-scan skips step 3 (bypasses the Touch ID prompt).
+    No Chromium-family browser anywhere? We bail with a clear error
+    and a list of escape hatches (`login-paste`, install-Chrome link,
+    deprecated `login-playwright`).
+
+    --yes              skip every confirmation (CI mode).
+    --force            skip the disk fast-path.
+    --no-browser-scan  skip the installed-browser cookie-store scan
+                       (bypasses the Touch ID / keyring prompt).
     """
     pinned = (args.space_id or os.environ.get("NOTION_INTERNAL_SPACE_ID") or "").strip() or None
     verbose = bool(getattr(args, "verbose", False))
@@ -2148,39 +2544,40 @@ def cmd_login(args: argparse.Namespace) -> int:
         )
         return cmd_login_chrome(sub)
 
-    # Step 3b: Chrome not installed -> Playwright (Option C, lazy install)
-    print("  no Chromium-family browser found in well-known locations.")
-    print("  Falling back to an embedded Playwright Chromium.")
+    # Step 3b: no Chromium-family browser -> bail with helpful guidance.
+    # We deliberately do NOT auto-fall-back to Playwright Chromium here:
+    # downloading ~150MB of browser binaries silently is too surprising
+    # for a login flow, and once we have to ask permission to install
+    # a browser the right answer is "the user should install one once".
+    # `login-playwright` is still available as a deprecated escape
+    # hatch for users who genuinely can't install a browser system-wide.
+    print("  no Chromium-family browser found on this machine.")
     print()
-    if not _is_playwright_runnable():
-        print("  Playwright (or its bundled chromium) isn't installed yet.")
-        print("  We'll run:")
-        print(f"    {sys.executable} -m pip install playwright")
-        print(f"    {sys.executable} -m playwright install chromium  # downloads ~150MB")
-        print()
-        if not args.yes and not _confirm("OK to install now?", default=True):
-            print("aborted.")
-            return 130
-        rc = _install_playwright_with_chromium()
-        if rc != 0:
-            return rc
-
+    print("To finish login, choose one of:")
+    print("  - Install a browser we can drive over CDP (any one is fine):")
+    if sys.platform == "darwin":
+        print("      Chrome:  https://www.google.com/chrome/")
+        print("      Edge:    https://www.microsoft.com/edge")
+        print("      Brave:   https://brave.com/download/")
+    elif sys.platform.startswith("linux"):
+        print("      Debian/Ubuntu:  sudo apt install chromium-browser")
+        print("      Fedora:         sudo dnf install chromium")
+        print("      Arch:           sudo pacman -S chromium")
+        print("      or Chrome .deb / .rpm from https://www.google.com/chrome/")
+    elif sys.platform == "win32":
+        print("      Chrome:  https://www.google.com/chrome/")
+        print("      Edge is preinstalled on Windows 10/11 -- did the scanner miss it?")
+        print("      If so, pass --chrome-binary explicitly to login-chrome.")
+    print("    Then re-run `./notion_internal_dump.sh login`.")
     print()
-    print("  We'll open a fresh Chromium window with a managed profile at")
-    print(f"    {_default_playwright_profile_dir()}")
-    print("  Sign in to Notion in that window. We'll detect the session via the")
-    print("  Playwright cookies() API and close the window automatically.")
+    print("  - Manual paste: open notion.so in any browser, sign in, copy")
+    print("    `token_v2` from DevTools (Application -> Cookies), and run")
+    print("    `./notion_internal_dump.sh login-paste`.")
     print()
-    if not args.yes and not _confirm("OK to launch it now?", default=True):
-        print("aborted.")
-        return 130
-    sub = _delegate_namespace(
-        args,
-        profile_dir="",
-        poll_interval=1.5,
-        keep_open=getattr(args, "keep_open", False),
-    )
-    return cmd_login_playwright(sub)
+    print("  - Last resort: `./notion_internal_dump.sh login-playwright` will")
+    print("    download a ~150MB embedded Chromium for you. Deprecated but")
+    print("    still works.")
+    return 5
 
 
 def cmd_login_browser_scrape(args: argparse.Namespace) -> int:
@@ -2954,7 +3351,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     p_login = sub.add_parser(
         "login",
-        help="recommended end-to-end login: disk -> installed browsers -> managed Chrome (Option B) -> managed Playwright Chromium (Option C, lazy-install)",
+        help="recommended end-to-end login: disk -> installed browsers (every Chromium / Firefox / Safari profile we can find on mac/Linux/Windows) -> managed Chromium-family browser via CDP",
     )
     _add_common_token(p_login)
     p_login.add_argument(
@@ -3132,7 +3529,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     p_pw = sub.add_parser(
         "login-playwright",
-        help="launch embedded Playwright Chromium with a managed profile, scrape token_v2 once you sign in",
+        help="DEPRECATED escape hatch: launch embedded Playwright Chromium (~150MB download) and scrape token_v2 once you sign in. Removed from the `login` umbrella's auto-fallback; install Chrome / Edge / Brave / etc. instead and use `login`",
     )
     _add_common_token(p_pw)
     p_pw.add_argument(
