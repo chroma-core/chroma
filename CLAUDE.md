@@ -5,7 +5,7 @@
 Use the `[TYPE](scope): Description` format:
 
 ```
-[ENH](foundation-cli): Add login command
+[ENH](rust-client): Add retry middleware
 [BUG](rust-client): Fix connection timeout on retry
 [TST](gc): Add MCMR hard delete integration test
 [DOC](api): Update embeddings endpoint docs
@@ -16,7 +16,7 @@ Common types: `ENH` (feature/enhancement), `BUG` (fix), `TST` (test), `DOC`
 (docs), `CHORE` (maintenance/refactor), `BLD` (build system changes).
 
 Scope is optional but encouraged — use the component name (e.g.
-`foundation-cli`, `rust-client`, `gc`, `dashboard-api`).
+`rust-client`, `gc`, `dashboard-api`).
 
 ### 50/72 Rule
 
