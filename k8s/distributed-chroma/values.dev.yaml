@@ -21,7 +21,7 @@ rustFrontendService:
     - name: CHROMA_ALLOW_RESET
       value: "true"
     - name: RUST_BACKTRACE
-      value: 'value: "1"'
+      value: "1"
   resources:
     limits:
       cpu: 100m
@@ -31,7 +31,7 @@ rustFrontendService:
 queryService:
   env:
     - name: RUST_BACKTRACE
-      value: 'value: "1"'
+      value: "1"
   jemallocConfig: "prof:true,prof_active:true,lg_prof_sample:19"
   resources:
     limits:
@@ -42,7 +42,7 @@ queryService:
 compactionService:
   env:
     - name: RUST_BACKTRACE
-      value: 'value: "1"'
+      value: "1"
   cache:
     hostPath: '/local/cache/chroma-compaction-service'
     type: DirectoryOrCreate
@@ -51,7 +51,7 @@ compactionService:
 workQueueService:
   env:
     - name: RUST_BACKTRACE
-      value: 'value: "1"'
+      value: "1"
   replicaCount: 1
   cache:
     hostPath: '/local/cache/chroma-work-queue-service'
@@ -62,8 +62,18 @@ workQueueService:
   resources:
     limits:
       cpu: 200m
+      memory: 512Mi
     requests:
       cpu: 200m
+      memory: 512Mi
+  configuration: |
+    work_queue:
+      enabled: true
+      storage_path: "work-queue/queue.parquet"
+      persistence:
+        time_threshold_seconds: 30
+        operation_threshold: 100
+      grpc_port: 50054
 
 rustLogService:
   replicaCount: 1

@@ -38,6 +38,12 @@ impl ChromaError for WorkQueueError {
     }
 }
 
+impl From<WorkQueueError> for tonic::Status {
+    fn from(err: WorkQueueError) -> Self {
+        tonic::Status::new(err.code().into(), err.to_string())
+    }
+}
+
 // Stub types for future sysdb integration
 #[derive(Debug, Clone)]
 #[allow(dead_code)]

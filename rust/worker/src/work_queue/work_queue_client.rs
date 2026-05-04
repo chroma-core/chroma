@@ -14,13 +14,13 @@ pub struct WorkQueueClient {
 #[allow(dead_code)]
 impl WorkQueueClient {
     pub async fn new(endpoint: String) -> Result<Self, Box<dyn ChromaError>> {
-        let client = WorkQueueServiceClient::connect(endpoint)
-            .await
-            .map_err(|e| {
+        let client = WorkQueueServiceClient::connect(endpoint).await.map_err(
+            |e: tonic::transport::Error| {
                 let err: Box<dyn ChromaError> =
                     Box::new(WorkQueueClientError::ConnectionError(e.to_string()));
                 err
-            })?;
+            },
+        )?;
 
         Ok(Self { client })
     }

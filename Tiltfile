@@ -123,13 +123,27 @@ if config.tilt_subcommand == "ci":
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'],
     disable_push=True
   )
+  # TODO: Add CI build for work-queue-service once CI image is available
+  # custom_build(
+  #   'work-queue-service',
+  #   'docker image tag work-queue-service:ci $EXPECTED_REF',
+  #   ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'],
+  #   disable_push=True
+  # )
 else:
   docker_build(
     'compaction-service',
     '.',
     only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
     dockerfile='./rust/Dockerfile',
-    target='compaction_service'
+    target='compaction_service',
+  )
+  docker_build(
+    'work-queue-service',
+    '.',
+    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
+    dockerfile='./rust/Dockerfile',
+    target='work_queue_service',
   )
 
 if config.tilt_subcommand == "ci":
@@ -378,6 +392,8 @@ groups = {
     'sysdb-migration-latest:job:chroma',
     'rust-log-service:statefulset:chroma',
     'sysdb:deployment:chroma',
+    'rust-sysdb-migration-latest',
+    'rust-sysdb-service:deployment:chroma',
     'rust-frontend-service:deployment:chroma',
     'query-service:statefulset:chroma',
     'compaction-service:statefulset:chroma',
@@ -388,22 +404,20 @@ groups = {
     'prometheus',
     'otel-collector',
     'minio-deployment',
+    'spanner-deployment',
   ],
   'multi_region': [
     'k8s_setup2',
     'postgres:deployment:chroma2',
     'sysdb-migration-latest:job:chroma2',
-    'rust-sysdb-migration-latest',
     'rust-log-service:statefulset:chroma2',
     'sysdb:deployment:chroma2',
-    'rust-sysdb-service:deployment:chroma',
     'rust-sysdb-service:deployment:chroma2',
     'rust-frontend-service:deployment:chroma2',
     'query-service:statefulset:chroma2',
     'compaction-service:statefulset:chroma2',
     'work-queue-service:statefulset:chroma2',
     'garbage-collector:statefulset:chroma2',
-    'spanner-deployment',
   ],
 }
 
