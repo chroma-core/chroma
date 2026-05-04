@@ -45,3 +45,11 @@ pub enum FinishResult {
     Success,
     NeedsRepair,
 }
+
+// Response type for FinishWork operations
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub enum FinishWorkResponse {
+    Success,
+    NeedsRepair { fn_id: AttachedFunctionUuid },
+}

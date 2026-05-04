@@ -369,8 +369,8 @@ impl Handler<GetWorkMessage> for WorkQueueManager {
     type Result = ();
 
     async fn handle(&mut self, msg: GetWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
-        // TODO: Add memberlist and rendezvous hashing
         // For now, return all items up to limit
+        // TODO: In the future, this will be filtered based on work assignment
 
         let items: Vec<_> = self
             .state
