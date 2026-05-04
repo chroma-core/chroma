@@ -11,7 +11,7 @@ pub struct WorkQueueRecord {
     pub insertion_order: u64,
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 #[allow(dead_code)]
 pub enum WorkQueueError {
     #[error("Storage error: {0}")]
