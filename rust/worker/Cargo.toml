@@ -28,6 +28,8 @@ tikv-jemallocator = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 arrow = { workspace = true }
+bytes = { workspace = true }
+parquet = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
 async-trait = { workspace = true }

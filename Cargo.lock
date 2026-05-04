@@ -11319,6 +11319,7 @@ version = "0.1.0"
 dependencies = [
  "arrow",
  "async-trait",
+ "bytes",
  "chroma-benchmark",
  "chroma-blockstore",
  "chroma-cache",
@@ -11348,6 +11349,7 @@ dependencies = [
  "num_cpus",
  "opentelemetry",
  "parking_lot",
+ "parquet",
  "proptest",
  "proptest-state-machine",
  "prost 0.14.3",
