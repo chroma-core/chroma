@@ -8,12 +8,14 @@ use chroma_config::Configurable;
 use chroma_memberlist::memberlist_provider::{
     CustomResourceMemberlistProvider, MemberlistProvider,
 };
+use chroma_storage::Storage;
 use clap::Parser;
 use compactor::compaction_client::CompactionClient;
 use compactor::compaction_server::CompactionServer;
 use tokio::runtime::Handle;
 use tokio::select;
 use tokio::signal::unix::{signal, SignalKind};
+use work_queue::WorkQueueManager;
 
 // Required for benchmark
 pub mod config;
@@ -83,7 +85,7 @@ pub async fn query_service_entrypoint() {
 
 pub async fn compaction_service_entrypoint() {
     // Check if the config path is set in the env var
-    let config = match std::env::var(CONFIG_PATH_ENV_VAR) {
+    let root_config = match std::env::var(CONFIG_PATH_ENV_VAR) {
         Ok(config_path) => {
             eprintln!("loading from {config_path}");
             config::RootConfig::load_from_path(&config_path)
@@ -94,7 +96,8 @@ pub async fn compaction_service_entrypoint() {
         }
     };
 
-    let config = config.compaction_service;
+    let config = root_config.compaction_service.clone();
+    let work_queue_config = root_config.work_queue.clone();
     let registry = Registry::new();
 
     chroma_tracing::init_otel_tracing(
@@ -144,6 +147,19 @@ pub async fn compaction_service_entrypoint() {
     let mut compaction_manager_handle = system.start_component(compaction_manager);
     memberlist.subscribe(compaction_manager_handle.receiver());
 
+    // Create storage for work queue
+    let storage = match Storage::try_from_config(&config.storage, &registry).await {
+        Ok(storage) => storage,
+        Err(err) => {
+            println!("Failed to create storage: {:?}", err);
+            return;
+        }
+    };
+
+    // Create and start work queue manager
+    let work_queue_manager = WorkQueueManager::new(storage, work_queue_config.clone());
+    let mut work_queue_handle = system.start_component(work_queue_manager);
+
     let mut memberlist_handle = system.start_component(memberlist);
 
     let compaction_server = CompactionServer {
@@ -154,6 +170,21 @@ pub async fn compaction_service_entrypoint() {
 
     let server_join_handle = tokio::spawn(async move {
         let _ = compaction_server.run().await;
+    });
+
+    // Start work queue gRPC server
+    let work_queue_server = work_queue::work_queue_server::WorkQueueServer::new(work_queue_handle.clone());
+    let server = work_queue_server.into_service();
+    let port = 50054;
+
+    let work_queue_server_handle = tokio::spawn(async move {
+        let addr = format!("0.0.0.0:{}", port).parse().unwrap();
+        println!("Work queue gRPC server listening on {}", addr);
+        tonic::transport::Server::builder()
+            .add_service(server)
+            .serve(addr)
+            .await
+            .unwrap();
     });
 
     let mut sigterm = match signal(SignalKind::terminate()) {
@@ -174,9 +205,18 @@ pub async fn compaction_service_entrypoint() {
             let _ = dispatcher_handle.join().await;
             compaction_manager_handle.stop();
             let _ = compaction_manager_handle.join().await;
+
+            // Stop work queue
+            work_queue_handle.stop();
+            let _ = work_queue_handle.join().await;
+
             system.stop().await;
             system.join().await;
             let _ = server_join_handle.await;
+
+            // Wait for work queue server to stop
+            work_queue_server_handle.abort();
+            let _ = work_queue_server_handle.await;
         },
     };
     println!("Server stopped");

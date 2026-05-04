@@ -1,0 +1,9 @@
+work_queue:
+  enabled: true
+  storage_path: "s3://chroma-minio:9000/work-queue/queue.parquet"
+  persistence:
+    time_threshold_seconds: 5
+    operation_threshold: 10
+    memory_threshold: 100
+  use_sysdb_filtering: false
+  grpc_port: 50054

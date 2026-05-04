@@ -26,6 +26,10 @@ pub struct RootConfig {
     /// The configuration for the compaction service.
     #[serde(default)]
     pub compaction_service: CompactionServiceConfig,
+
+    /// The configuration for the work queue service.
+    #[serde(default)]
+    pub work_queue: crate::work_queue::config::WorkQueueConfig,
 }
 
 impl RootConfig {
