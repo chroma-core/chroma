@@ -17,8 +17,26 @@ Why this exists:
 
 Phases:
   Phase 0 — auth (run this once per session, ~30s):
-    login        Guided in-terminal login: opens notion.so, polls your browser
-                 cookie store, validates, prompts for workspace, saves token.
+    login             RECOMMENDED. End-to-end umbrella: confirms with
+                      the user, then walks 1) saved token on disk,
+                      2) installed browser cookie stores, 3) managed
+                      Chrome via CDP (Option B), 4) embedded Playwright
+                      Chromium with lazy install (Option C). The latter
+                      two avoid the Touch ID prompt and Chrome's
+                      cookie-flush-on-quit problem entirely.
+
+    Escape hatches (use these directly if you want to skip the umbrella):
+      login-chrome      Just Option B (managed system Chrome via CDP).
+      login-playwright  Just Option C (embedded Playwright Chromium).
+      login-browser     Legacy: scan installed browsers + watch cookie
+                        files for the next write. Useful when you're
+                        already signed in to Notion in some browser.
+      login-extension   Tiny Chrome MV3 extension at
+                        notion_cli/extension/ reads token_v2 +
+                        file_token via the privileged chrome.cookies
+                        API and POSTs them to a local listener. Kept
+                        for completeness; not on the recommended path.
+      login-paste       Manual fallback: paste token_v2 from DevTools.
 
   Phase 1 — validate permissions (cheap, run this first):
     discover     /api/v3/search across the chosen space; print page count.
@@ -31,18 +49,28 @@ Phases:
 Auth (token_v2 cookie sources, priority order):
   1. --token-v2 flag
   2. NOTION_TOKEN_V2 env
-  3. foundation_notes/notion_cli/notion-token-v2.txt (one line, written
-     by `login`)
-  4. browser_cookie3 auto-extract from any Chromium-family browser, Firefox,
-     or Safari (if `pip install browser_cookie3` succeeded). Triggers a
-     Touch ID / Keychain prompt on macOS the first time.
+  3. notion_cli/notion-token-v2.txt (written by any of the login-*
+     subcommands)
+  4. browser_cookie3 auto-extract from any Chromium-family browser,
+     Firefox, or Safari (only if browser_cookie3 is installed). Triggers
+     a Touch ID / Keychain prompt on macOS the first time.
+
+file_token (used to download exported zips from file.notion.so):
+  Saved to notion_cli/notion-file-token.txt by login, login-extension,
+  login-chrome, and login-playwright. If present together with
+  notion-token-v2.txt, the dump path uses both directly and skips the
+  runtime browser scrape entirely (no Touch ID prompt during dump).
+
+Browser-driven login profiles (sticky between runs):
+  ~/.cache/notion-cli-chrome      (login-chrome — system Chrome)
+  ~/.cache/notion-cli-playwright  (login-playwright — embedded Chromium)
+  Override with --profile-dir.
 
 Manual cookie copy (fallback if `login` can't read your browser):
   1. Open notion.so in any browser, sign in.
   2. DevTools (Cmd-Opt-I) → Application → Storage → Cookies → www.notion.so.
   3. Copy the Value of `token_v2` (long opaque blob) into
-     foundation_notes/notion_cli/notion-token-v2.txt OR export
-     NOTION_TOKEN_V2.
+     notion_cli/notion-token-v2.txt OR export NOTION_TOKEN_V2.
 
 Env (loads foundation_notes/.env):
   NOTION_TOKEN_V2          Notion session cookie (see above).
@@ -53,11 +81,15 @@ Env (loads foundation_notes/.env):
 from __future__ import annotations
 
 import argparse
+import http.server
 import json
 import os
 import queue
+import secrets
 import select
 import shutil
+import socket
+import subprocess
 import sys
 import threading
 import time
@@ -120,6 +152,47 @@ def _env_path() -> Path:
 
 def _default_token_path() -> Path:
     return Path(__file__).resolve().parent / "notion-token-v2.txt"
+
+
+def _default_file_token_path() -> Path:
+    return Path(__file__).resolve().parent / "notion-file-token.txt"
+
+
+def _extension_dir() -> Path:
+    return Path(__file__).resolve().parent / "extension"
+
+
+def _read_one_line(path: Path) -> Optional[str]:
+    if not path.exists():
+        return None
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if line and not line.startswith("#"):
+            return line
+    return None
+
+
+def _save_file_token(value: str) -> Path:
+    path = _default_file_token_path()
+    path.write_text(value + "\n", encoding="utf-8")
+    return path
+
+
+def _saved_token_v2() -> Optional[str]:
+    """token_v2 from env / saved file ONLY (no browser cookie scrape).
+
+    Used by code paths that want to avoid triggering Chrome's Touch ID /
+    Keychain prompt at runtime. Distinct from `load_token_v2`, which
+    falls back to scraping the browser cookie store.
+    """
+    env = os.environ.get("NOTION_TOKEN_V2", "").strip()
+    if env:
+        return env
+    return _read_one_line(_default_token_path())
+
+
+def _saved_file_token() -> Optional[str]:
+    return _read_one_line(_default_file_token_path())
 
 
 def _persist_env_var(key: str, value: str) -> Path:
@@ -376,6 +449,43 @@ def load_browser_cookies() -> dict[CookieKey, dict]:
     return sessions[0][1]
 
 
+def saved_credentials_as_browser_cookies() -> dict[CookieKey, dict]:
+    """Build a browser_cookies-shaped dict from on-disk saved tokens
+    (notion-token-v2.txt + notion-file-token.txt). Returns {} if either
+    is missing.
+
+    Lets the download path (`_download` + `cookie_header_for`) use saved
+    credentials WITHOUT scraping the live browser cookie store, which
+    avoids Touch ID prompts and stale-cache issues every time the user
+    runs the dump.
+    """
+    t2 = _saved_token_v2()
+    ft = _saved_file_token()
+    if not t2 or not ft:
+        return {}
+    out: dict[CookieKey, dict] = {}
+    # token_v2 is set by Notion on .www.notion.so (the API host) AND on
+    # other variants. cookie_header_for() does host/path matching, so we
+    # claim .notion.so / "/" to match both www.notion.so and
+    # file.notion.so requests.
+    out[("token_v2", ".notion.so", "/")] = {
+        "name": "token_v2",
+        "value": t2,
+        "domain": ".notion.so",
+        "path": "/",
+        "httponly": True,
+    }
+    # file_token's real path on Notion is /f, only sent to file.notion.so.
+    out[("file_token", ".notion.so", "/f")] = {
+        "name": "file_token",
+        "value": ft,
+        "domain": ".notion.so",
+        "path": "/f",
+        "httponly": True,
+    }
+    return out
+
+
 def _api_host() -> str:
     from urllib.parse import urlparse
     return urlparse(API_BASE).hostname or "www.notion.so"
@@ -604,6 +714,122 @@ def _parse_retry_after(headers: Any, default_s: float) -> float:
         # HTTP also allows an HTTP-date here; not worth parsing for our
         # purposes -- just fall back.
         return default_s
+
+
+# ---------------------------------------------------------------------------
+# Handoff server (used by cmd_login_extension)
+# ---------------------------------------------------------------------------
+
+
+def _pick_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+class HandoffServer:
+    """One-shot localhost HTTP server that waits for the browser
+    extension to POST a Notion session at /handoff. Authenticates the
+    POST against a single-use nonce we generate per launch.
+
+    The server keeps running on bad nonces / wrong paths so that random
+    background tabs hitting the port can't deny-of-service the real
+    handoff. Only a POST that matches the nonce flips the completion
+    event and stops the server.
+    """
+
+    def __init__(self, nonce: str) -> None:
+        self.nonce = nonce
+        self.received: Optional[dict] = None
+        self.received_event = threading.Event()
+        self.errors: list[str] = []
+        self._server: Optional[http.server.ThreadingHTTPServer] = None
+        self._thread: Optional[threading.Thread] = None
+
+    def serve(self, port: int) -> None:
+        self._server = http.server.ThreadingHTTPServer(
+            ("127.0.0.1", port), self._make_handler()
+        )
+        self._thread = threading.Thread(
+            target=self._server.serve_forever,
+            name="notion-cli-handoff",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        if self._server is not None:
+            try:
+                self._server.shutdown()
+                self._server.server_close()
+            except Exception:
+                pass
+            self._server = None
+
+    def wait(self, timeout: float) -> bool:
+        return self.received_event.wait(timeout=timeout)
+
+    def _make_handler(self):
+        outer = self
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args, **kwargs):
+                pass
+
+            def _cors(self):
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header(
+                    "Access-Control-Allow-Methods", "POST, OPTIONS, GET"
+                )
+                self.send_header(
+                    "Access-Control-Allow-Headers", "Content-Type"
+                )
+
+            def do_OPTIONS(self):  # noqa: N802
+                self.send_response(204)
+                self._cors()
+                self.end_headers()
+
+            def do_GET(self):  # noqa: N802
+                self.send_response(200)
+                self._cors()
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(b"notion_cli handoff server is up\n")
+
+            def do_POST(self):  # noqa: N802
+                if self.path != "/handoff":
+                    self.send_response(404)
+                    self._cors()
+                    self.end_headers()
+                    return
+                length = int(self.headers.get("Content-Length") or 0)
+                raw = self.rfile.read(length) if length else b""
+                try:
+                    body = json.loads(raw.decode("utf-8"))
+                except Exception as e:
+                    outer.errors.append(f"bad json: {e}")
+                    self.send_response(400)
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(b"bad json")
+                    return
+                if not isinstance(body, dict) or body.get("nonce") != outer.nonce:
+                    outer.errors.append("nonce mismatch")
+                    self.send_response(403)
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(b"nonce mismatch")
+                    return
+                outer.received = body
+                self.send_response(200)
+                self._cors()
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(b"ok")
+                outer.received_event.set()
+
+        return H
 
 
 # ---------------------------------------------------------------------------
@@ -1041,8 +1267,19 @@ def _maybe_pick_and_save_space(
 def _accept_session(
     session: dict, args: argparse.Namespace, pinned: Optional[str]
 ) -> int:
-    """Save the session's token, print summary, persist the space pin."""
+    """Save the session's token, print summary, persist the space pin.
+    Also opportunistically saves file_token if the same session jar
+    contained one (so the dump path can skip its own cookie scrape).
+    """
     _save_token(session["token"], session["label"])
+    cookies = session.get("cookies") or {}
+    file_token = next(
+        (c["value"] for c in cookies.values() if c["name"] == "file_token"),
+        None,
+    )
+    if file_token:
+        ft_path = _save_file_token(file_token)
+        print(f"  saved file_token -> {ft_path}  (from {session['label']})")
     _print_session_summary(session["label"], session["uc"])
     _maybe_pick_and_save_space(session["uc"], no_pick=args.no_pick, pinned=pinned)
     print()
@@ -1110,6 +1347,476 @@ def _pick_session_and_workspace(
             chosen, chosen_sid, _name = flat[int(ans) - 1]
             return _accept_session(chosen, args, chosen_sid)
         print("  invalid choice, try again")
+
+
+def _print_extension_install_instructions() -> None:
+    ext_dir = _extension_dir()
+    print()
+    print("=== Notion login (browser extension handoff) ===")
+    print()
+    print("This flow asks a tiny Chrome extension to read your live Notion")
+    print("session cookie and hand it to this terminal -- no Touch ID, no")
+    print("disk scrape, no manual paste.")
+    print()
+    print("One-time install (skip if already installed):")
+    print("  1. Open Chrome (or any Chromium browser: Edge, Brave, Arc, ...)")
+    print("  2. Visit chrome://extensions in that browser.")
+    print("  3. Toggle 'Developer mode' ON (top-right).")
+    print("  4. Click 'Load unpacked' and select this directory:")
+    print(f"        {ext_dir}")
+    print("  5. Confirm 'Notion CLI helper' shows up in the extensions list.")
+    print()
+    print("Then make sure you're signed in to https://www.notion.so in any")
+    print("tab in that same browser profile.")
+    print()
+
+
+def cmd_login_extension(args: argparse.Namespace) -> int:
+    """Browser-extension handoff flow: opens notion.so in your default
+    browser with a one-time nonce in the URL; the helper extension reads
+    your session cookies via the privileged chrome.cookies API and POSTs
+    them back to a localhost listener owned by this script.
+    """
+    pinned = (
+        args.space_id or os.environ.get("NOTION_INTERNAL_SPACE_ID") or ""
+    ).strip() or None
+
+    if not args.no_install_help:
+        _print_extension_install_instructions()
+
+    nonce = secrets.token_hex(16)
+    port = args.port or _pick_free_port()
+    server = HandoffServer(nonce)
+    try:
+        server.serve(port)
+    except OSError as e:
+        print(
+            f"error: could not bind 127.0.0.1:{port} ({e}). Try --port 0 "
+            f"to pick a free port automatically.",
+            file=sys.stderr,
+        )
+        return 5
+
+    handoff_url = (
+        f"https://www.notion.so/?cli-handoff={port}&nonce={nonce}"
+    )
+    print(f"Listening on http://127.0.0.1:{port}/handoff (nonce {nonce[:6]}...)")
+    print(f"Opening: {handoff_url}")
+    print(f"(Press Ctrl-C to abort. Will time out after {args.timeout}s.)")
+
+    if not args.no_browser:
+        try:
+            webbrowser.open(handoff_url)
+        except Exception:
+            pass
+
+    try:
+        ok = server.wait(args.timeout)
+    except KeyboardInterrupt:
+        print("\naborted.")
+        server.stop()
+        return 130
+    server.stop()
+
+    if not ok:
+        print()
+        print(f"timed out after {args.timeout}s waiting for the extension.")
+        last_errs = server.errors[-3:]
+        if last_errs:
+            print(f"  recent server errors: {last_errs}")
+        print(
+            "  things to check:\n"
+            "    - is the helper extension installed in the SAME Chrome "
+            "profile that's signed in to Notion?\n"
+            "    - did the notion.so tab actually open with "
+            "?cli-handoff=...&nonce=... in the URL?\n"
+            "    - is anything else blocking 127.0.0.1 on this port?\n"
+            "  fall back: ./notion_internal_dump.sh login-paste"
+        )
+        return 6
+
+    body = server.received or {}
+    token = (body.get("token_v2") or "").strip()
+    file_token = (body.get("file_token") or "").strip() or None
+    if not token:
+        print(
+            "error: extension reported no token_v2 cookie. Make sure you're "
+            "signed in to https://www.notion.so in that browser profile, "
+            "then re-run.",
+            file=sys.stderr,
+        )
+        return 7
+
+    print()
+    print(f"  received from extension v{body.get('extension_version','?')}:")
+    print(
+        f"    token_v2     len={len(token)} domain="
+        f"{body.get('token_v2_domain') or '?'}"
+    )
+    if file_token:
+        print(
+            f"    file_token   len={len(file_token)} domain="
+            f"{body.get('file_token_domain') or '?'}"
+        )
+    else:
+        print("    file_token   MISSING (downloads from file.notion.so will 403)")
+
+    print("  validating against /api/v3/loadUserContent ...")
+    try:
+        uc = NotionInternal(token).load_user_content()
+    except Exception as e:
+        print(f"  validation FAILED: {e}", file=sys.stderr)
+        return 8
+    print("  validated.")
+
+    _save_token(token, "browser extension")
+    if file_token:
+        ft_path = _save_file_token(file_token)
+        print(f"  saved file_token -> {ft_path}")
+    _print_session_summary("browser extension", uc)
+    _maybe_pick_and_save_space(uc, no_pick=args.no_pick, pinned=pinned)
+    print()
+    print("Done. Run `./notion_internal_dump.sh dump` (or grab) next.")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Browser-driven login (Option B: CDP-attached Chrome / Option C: Playwright)
+# ---------------------------------------------------------------------------
+
+
+# Common install locations for Chromium-family browsers we know how to
+# drive over CDP. Order matters — first hit wins.
+CHROMIUM_BINARY_CANDIDATES = (
+    # macOS
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta",
+    "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    "/Applications/Arc.app/Contents/MacOS/Arc",
+    "/Applications/Vivaldi.app/Contents/MacOS/Vivaldi",
+    # Linux (Debian/Ubuntu/Arch/Fedora common locations)
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/snap/bin/chromium",
+)
+
+
+def _find_chrome_binary(explicit: Optional[str] = None) -> Optional[str]:
+    """Return the path to a Chromium-family browser we can drive via CDP.
+
+    Honors --chrome-binary first, then a curated list of well-known
+    install paths, then $PATH.
+    """
+    if explicit:
+        return explicit if os.path.isfile(explicit) else None
+    for p in CHROMIUM_BINARY_CANDIDATES:
+        if os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
+    for cmd in ("google-chrome", "chrome", "chromium", "chromium-browser"):
+        path = shutil.which(cmd)
+        if path:
+            return path
+    return None
+
+
+def _default_chrome_profile_dir() -> Path:
+    return Path(os.path.expanduser("~/.cache/notion-cli-chrome"))
+
+
+def _default_playwright_profile_dir() -> Path:
+    return Path(os.path.expanduser("~/.cache/notion-cli-playwright"))
+
+
+def _scan_for_token(cookies: list[dict]) -> tuple[Optional[str], Optional[str], list[str]]:
+    """Inspect a flat cookies list (CDP or Playwright shape) and return
+    (token_v2, file_token, notion_cookie_names). Both shapes use {name,
+    value, domain, ...} keys.
+    """
+    notion = [c for c in cookies if "notion" in (c.get("domain") or "")]
+    api_host = _api_host()
+    t2 = None
+    for c in notion:
+        if c.get("name") != "token_v2" or not c.get("value"):
+            continue
+        if _cookie_domain_matches_host(c.get("domain") or "", api_host):
+            t2 = c["value"]
+            break
+    if t2 is None:
+        for c in notion:
+            if c.get("name") == "token_v2" and c.get("value"):
+                t2 = c["value"]
+                break
+    ft = next(
+        (c["value"] for c in notion if c.get("name") == "file_token" and c.get("value")),
+        None,
+    )
+    names = sorted({c["name"] for c in notion})
+    return t2, ft, names
+
+
+def _validate_and_save_session(
+    token: str,
+    file_token: Optional[str],
+    *,
+    source_label: str,
+    args: argparse.Namespace,
+) -> int:
+    """Validate token_v2 against /api/v3/loadUserContent, persist both
+    cookies, print summary, prompt for workspace pin. Used by all the
+    browser-driven login flows.
+    """
+    print("  validating against /api/v3/loadUserContent ...")
+    try:
+        uc = NotionInternal(token).load_user_content()
+    except Exception as e:
+        print(f"  validation FAILED: {e}", file=sys.stderr)
+        return 8
+    print("  validated.")
+    _save_token(token, source_label)
+    if file_token:
+        ft_path = _save_file_token(file_token)
+        print(f"  saved file_token -> {ft_path}")
+    _print_session_summary(source_label, uc)
+    pinned = (args.space_id or os.environ.get("NOTION_INTERNAL_SPACE_ID") or "").strip() or None
+    _maybe_pick_and_save_space(uc, no_pick=args.no_pick, pinned=pinned)
+    print()
+    print("Done. Run `./notion_internal_dump.sh dump` (or grab) next.")
+    return 0
+
+
+def cmd_login_chrome(args: argparse.Namespace) -> int:
+    """Option B: launch the user's installed Chrome with a managed
+    persistent profile + remote debugging, attach via CDP, poll
+    Storage.getCookies until token_v2 appears, save both cookies.
+
+    Subsequent runs reuse the persistent profile, so the user is still
+    signed in -- the whole flow takes ~3s after the first login.
+    """
+    from _cdp import CDP  # local import keeps the module load cost off other commands
+
+    chrome = _find_chrome_binary(args.chrome_binary)
+    if not chrome:
+        print(
+            "error: no Chromium-family browser found in well-known locations.\n"
+            "  Try --chrome-binary <path>, or install Google Chrome from\n"
+            "  https://www.google.com/chrome/ and re-run.\n"
+            "  As a fallback, use `login-playwright` which downloads its\n"
+            "  own browser binary.",
+            file=sys.stderr,
+        )
+        return 5
+
+    profile_dir = Path(args.profile_dir or _default_chrome_profile_dir())
+    profile_dir.mkdir(parents=True, exist_ok=True)
+    port = args.port or _pick_free_port()
+
+    print()
+    print("=== Notion login (Chrome via CDP) ===")
+    print(f"  binary:   {chrome}")
+    print(f"  profile:  {profile_dir}  (persistent across runs)")
+    print(f"  cdp port: {port}")
+    print()
+
+    cmd = [
+        chrome,
+        f"--user-data-dir={profile_dir}",
+        f"--remote-debugging-port={port}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-features=Translate",
+        "https://www.notion.so/login",
+    ]
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+    print("waiting for the browser to expose CDP ...")
+    version_url = f"http://127.0.0.1:{port}/json/version"
+    ws_url: Optional[str] = None
+    deadline = time.time() + 20.0
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            print(f"error: chrome exited early with code {proc.returncode}", file=sys.stderr)
+            return 6
+        try:
+            with urllib.request.urlopen(version_url, timeout=1.0) as r:
+                info = json.loads(r.read().decode("utf-8"))
+            ws_url = info.get("webSocketDebuggerUrl")
+            if ws_url:
+                print(f"  connected: {info.get('Browser','?')}")
+                break
+        except Exception:
+            time.sleep(0.3)
+    if not ws_url:
+        print(f"error: chrome didn't expose CDP within 20s on port {port}", file=sys.stderr)
+        if not args.keep_open:
+            _terminate(proc)
+        return 6
+
+    cdp = CDP(ws_url)
+    print(f"polling cookies every {args.poll_interval:.1f}s (max {args.timeout}s) ...")
+    end = time.time() + args.timeout
+    last_status = ""
+    token = None
+    file_token = None
+    try:
+        while time.time() < end:
+            try:
+                cookies = cdp.get_cookies()
+            except Exception as e:
+                print(f"  cdp error: {e}; retrying...")
+                time.sleep(args.poll_interval)
+                continue
+            t2, ft, names = _scan_for_token(cookies)
+            if t2:
+                token, file_token = t2, ft
+                break
+            status = (
+                f"  {len(names)} notion cookie(s); waiting for sign-in: {names}"
+                if names
+                else "  no notion cookies yet; waiting for sign-in..."
+            )
+            if status != last_status:
+                print(status)
+                last_status = status
+            time.sleep(args.poll_interval)
+    finally:
+        cdp.close()
+
+    if not token:
+        print(f"error: timed out after {args.timeout}s", file=sys.stderr)
+        if not args.keep_open:
+            _terminate(proc)
+        return 7
+
+    print(
+        f"  got token_v2 (len={len(token)}), "
+        f"file_token={'present' if file_token else 'MISSING'}"
+    )
+    rc = _validate_and_save_session(
+        token, file_token, source_label="chrome (CDP)", args=args
+    )
+    if not args.keep_open:
+        _terminate(proc)
+    else:
+        print(f"  (Chrome left running; pid {proc.pid}. Quit it manually when done.)")
+    return rc
+
+
+def _terminate(proc: subprocess.Popen) -> None:
+    """Try a graceful shutdown of a launched browser, then SIGKILL."""
+    try:
+        proc.terminate()
+        proc.wait(timeout=5.0)
+    except subprocess.TimeoutExpired:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+def cmd_login_playwright(args: argparse.Namespace) -> int:
+    """Option C: drive an embedded Playwright Chromium with a managed
+    persistent profile. Same UX as `login-chrome` but uses a
+    Playwright-bundled browser instead of system Chrome -- works on
+    machines where Chrome isn't installed.
+    """
+    try:
+        from playwright.sync_api import sync_playwright  # type: ignore[import-not-found]
+    except ImportError:
+        print(
+            "error: playwright not installed. Install it with:\n"
+            "  pip install playwright\n"
+            "  playwright install chromium\n"
+            "Or use `login-chrome` if you have Chrome installed.",
+            file=sys.stderr,
+        )
+        return 5
+
+    profile_dir = Path(args.profile_dir or _default_playwright_profile_dir())
+    profile_dir.mkdir(parents=True, exist_ok=True)
+
+    print()
+    print("=== Notion login (Playwright Chromium) ===")
+    print(f"  profile: {profile_dir}  (persistent across runs)")
+    print()
+
+    token: Optional[str] = None
+    file_token: Optional[str] = None
+    with sync_playwright() as p:
+        try:
+            ctx = p.chromium.launch_persistent_context(
+                str(profile_dir),
+                headless=False,
+                args=["--no-first-run", "--no-default-browser-check"],
+            )
+        except Exception as e:
+            print(
+                f"error: playwright failed to launch chromium ({e}).\n"
+                f"If this is the first run, do: playwright install chromium",
+                file=sys.stderr,
+            )
+            return 6
+        page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        try:
+            page.goto("https://www.notion.so/login", wait_until="domcontentloaded", timeout=30000)
+        except Exception as e:
+            print(f"  navigation warning: {e}")  # not fatal; cookie may already be present
+
+        print(f"polling cookies every {args.poll_interval:.1f}s (max {args.timeout}s) ...")
+        end = time.time() + args.timeout
+        last_status = ""
+        try:
+            while time.time() < end:
+                try:
+                    cookies = ctx.cookies()
+                except Exception as e:
+                    print(f"  playwright cookies() error: {e}; retrying...")
+                    time.sleep(args.poll_interval)
+                    continue
+                t2, ft, names = _scan_for_token(cookies)
+                if t2:
+                    token, file_token = t2, ft
+                    break
+                status = (
+                    f"  {len(names)} notion cookie(s); waiting for sign-in: {names}"
+                    if names
+                    else "  no notion cookies yet; waiting for sign-in..."
+                )
+                if status != last_status:
+                    print(status)
+                    last_status = status
+                time.sleep(args.poll_interval)
+        finally:
+            if not args.keep_open:
+                try:
+                    ctx.close()
+                except Exception:
+                    pass
+            else:
+                print("  (Playwright Chromium left running; close it manually.)")
+
+    if not token:
+        print(f"error: timed out after {args.timeout}s", file=sys.stderr)
+        return 7
+
+    print(
+        f"  got token_v2 (len={len(token)}), "
+        f"file_token={'present' if file_token else 'MISSING'}"
+    )
+    return _validate_and_save_session(
+        token, file_token, source_label="playwright", args=args
+    )
 
 
 def cmd_login_paste(args: argparse.Namespace) -> int:
@@ -1226,9 +1933,268 @@ def _wait_for_input_or_timeout(seconds: float) -> Optional[str]:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Login helpers shared between `login-browser` (legacy) and `login` (umbrella).
+# ---------------------------------------------------------------------------
+
+
+def _confirm(prompt: str, *, default: bool = True) -> bool:
+    """Y/n prompt. EOF / Ctrl-C / non-tty -> False unless default=True
+    and we got a clean empty line. Defaults are inclusive for ergonomics
+    -- the user can still hit Ctrl-C any time."""
+    suffix = "[Y/n]" if default else "[y/N]"
+    if not sys.stdin.isatty():
+        return default
+    try:
+        ans = input(f"{prompt} {suffix} ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+    if not ans:
+        return default
+    return ans in ("y", "yes")
+
+
+def _try_saved_token(args: argparse.Namespace, pinned: Optional[str], *, force: bool = False) -> Optional[int]:
+    """Disk fast-path: validate any token already saved by a previous
+    login and short-circuit if it works. Returns an exit code if it
+    succeeded (or if a saved token failed validation in a way the user
+    should see), or None if there was nothing on disk to try.
+    """
+    if force:
+        return None
+    existing = load_token_v2(args.token_v2)
+    if not existing:
+        return None
+    print("Step 1: validating saved token on disk ...")
+    try:
+        uc = NotionInternal(existing).load_user_content()
+    except Exception as e:
+        print(f"  saved/env token didn't validate ({e}); continuing to next step.")
+        return None
+    print("  ok, still valid.")
+    _print_session_summary("saved/env token", uc)
+    _maybe_pick_and_save_space(uc, no_pick=args.no_pick, pinned=pinned)
+    print()
+    print("Already authenticated. Use --force to re-run the login flow.")
+    return 0
+
+
+def _try_browser_cookie_scan(args: argparse.Namespace, pinned: Optional[str], *, verbose: bool = False) -> Optional[int]:
+    """One-shot scan of every Chromium / Firefox / Safari profile on
+    disk for a currently-signed-in Notion session. Returns exit code if
+    a session was picked, None if nothing was found.
+
+    Caveat: triggers a macOS Touch ID / Keychain prompt the first time
+    we read Chrome's cookie database in this Python process. We mention
+    this in the prompt so users aren't surprised.
+    """
+    print("Step 2: scanning installed browsers for an existing Notion session ...")
+    if sys.platform == "darwin":
+        print("  (macOS may show a Touch ID / Keychain prompt to read Chrome cookies.)")
+    try:
+        sessions = find_all_working_sessions(verbose=verbose)
+    except Exception as e:
+        print(f"  scan failed: {e}; continuing to next step.")
+        return None
+    if not sessions:
+        print("  no active Notion session found in any installed browser.")
+        return None
+    return _pick_session_and_workspace(sessions, args, pinned)
+
+
+# ---------------------------------------------------------------------------
+# Lazy Playwright install (used by the `login` umbrella's Option C fallback).
+# ---------------------------------------------------------------------------
+
+
+def _is_playwright_runnable() -> bool:
+    """True iff the playwright Python package is importable AND its
+    bundled chromium has been downloaded. We only need a path check,
+    not a launch -- launch_persistent_context would open a window we
+    don't want yet.
+    """
+    try:
+        from playwright.sync_api import sync_playwright  # type: ignore[import-not-found]
+    except ImportError:
+        return False
+    try:
+        with sync_playwright() as p:
+            exe = p.chromium.executable_path
+        return bool(exe) and os.path.isfile(exe)
+    except Exception:
+        return False
+
+
+def _install_playwright_with_chromium() -> int:
+    """Run `pip install playwright` then `playwright install chromium`,
+    streaming output so the user sees progress on the (~150MB) browser
+    download. Returns 0 on success, nonzero exit code on failure.
+    """
+    print("Installing playwright (Python package) ...")
+    rc = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "playwright"]
+    ).returncode
+    if rc != 0:
+        print(f"  pip install failed (exit {rc}).")
+        return 5
+    print()
+    print("Downloading chromium browser binary (~150MB; this can take a minute) ...")
+    rc = subprocess.run(
+        [sys.executable, "-m", "playwright", "install", "chromium"]
+    ).returncode
+    if rc != 0:
+        print(f"  `playwright install chromium` failed (exit {rc}).")
+        return 5
+    print("  ok, playwright + chromium ready.")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Argument synthesis: forwards umbrella args to the child login commands
+# without polluting the umbrella's own --help with launcher knobs.
+# ---------------------------------------------------------------------------
+
+
+def _delegate_namespace(src: argparse.Namespace, **overrides: Any) -> argparse.Namespace:
+    """Return a copy of `src` with `overrides` applied. Used to forward
+    a subset of the umbrella's args plus default launcher knobs to
+    cmd_login_chrome / cmd_login_playwright.
+    """
+    out = argparse.Namespace(**vars(src))
+    for k, v in overrides.items():
+        setattr(out, k, v)
+    return out
+
+
 def cmd_login(args: argparse.Namespace) -> int:
-    """Smart guided login. Tries existing creds, then existing browser
-    sessions, then walks the user through opening Notion and signing in.
+    """Top-level umbrella login. Walks the user through the full chain
+    in priority order:
+
+      1. Confirm the user actually wants to hand us a Notion session.
+      2. Disk fast-path: validate any token-v2 already saved here.
+      3. Installed browsers: scan every Chromium / Firefox / Safari
+         profile for an existing signed-in Notion session.
+      4. Managed Chrome (Option B): if Chrome / Brave / Edge / Arc /
+         Vivaldi / Chromium is installed, launch it with a managed
+         persistent profile + remote debugging, ask the user to sign
+         in, scrape token_v2 + file_token via CDP.
+      5. Managed Playwright Chromium (Option C): otherwise lazily
+         install playwright + the bundled chromium browser, launch it
+         with a managed persistent profile, ask the user to sign in,
+         scrape cookies via the Playwright cookies() API.
+
+    --yes skips every confirmation (CI mode). --force skips step 2.
+    --no-browser-scan skips step 3 (bypasses the Touch ID prompt).
+    """
+    pinned = (args.space_id or os.environ.get("NOTION_INTERNAL_SPACE_ID") or "").strip() or None
+    verbose = bool(getattr(args, "verbose", False))
+
+    print()
+    print("=== Notion login ===")
+    print()
+    print("To dump your Notion data we use the same /api/v3 endpoints the web")
+    print("app uses, authenticated by your browser session cookie (`token_v2`).")
+    print("That cookie is HttpOnly so we have to read it from a browser cookie")
+    print("store rather than via JavaScript.")
+    print()
+    print("This flow will, in order:")
+    print("  1. Check for a token already saved by a previous run on this machine.")
+    print("  2. Scan your installed browsers for an active Notion session.")
+    print("  3. If neither works, open a browser window and ask you to sign in.")
+    print()
+    if not args.yes and not _confirm("OK to proceed?", default=True):
+        print("aborted.")
+        return 130
+
+    # Step 1: disk
+    rc = _try_saved_token(args, pinned, force=args.force)
+    if rc is not None:
+        return rc
+
+    # Step 2: installed browser cookie stores (skippable to avoid Touch ID)
+    if not args.no_browser_scan:
+        rc = _try_browser_cookie_scan(args, pinned, verbose=verbose)
+        if rc is not None:
+            return rc
+    else:
+        print("Step 2: skipped (--no-browser-scan).")
+
+    print()
+    print("Step 3: opening a managed browser so you can sign in ...")
+
+    chrome = _find_chrome_binary()
+    if chrome:
+        nice_name = os.path.basename(chrome.split(".app/")[0]) if ".app/" in chrome else os.path.basename(chrome)
+        print(f"  found Chromium-family browser: {nice_name}")
+        print(f"  ({chrome})")
+        print()
+        print("  We'll open a fresh window with a managed profile at")
+        print(f"    {_default_chrome_profile_dir()}")
+        print("  Sign in to Notion in that window. We'll detect the session over CDP")
+        print("  and close the window automatically.")
+        print()
+        if not args.yes and not _confirm("OK to launch it now?", default=True):
+            print("aborted.")
+            return 130
+        sub = _delegate_namespace(
+            args,
+            chrome_binary="",
+            profile_dir="",
+            port=0,
+            poll_interval=1.5,
+            keep_open=getattr(args, "keep_open", False),
+        )
+        return cmd_login_chrome(sub)
+
+    # Step 3b: Chrome not installed -> Playwright (Option C, lazy install)
+    print("  no Chromium-family browser found in well-known locations.")
+    print("  Falling back to an embedded Playwright Chromium.")
+    print()
+    if not _is_playwright_runnable():
+        print("  Playwright (or its bundled chromium) isn't installed yet.")
+        print("  We'll run:")
+        print(f"    {sys.executable} -m pip install playwright")
+        print(f"    {sys.executable} -m playwright install chromium  # downloads ~150MB")
+        print()
+        if not args.yes and not _confirm("OK to install now?", default=True):
+            print("aborted.")
+            return 130
+        rc = _install_playwright_with_chromium()
+        if rc != 0:
+            return rc
+
+    print()
+    print("  We'll open a fresh Chromium window with a managed profile at")
+    print(f"    {_default_playwright_profile_dir()}")
+    print("  Sign in to Notion in that window. We'll detect the session via the")
+    print("  Playwright cookies() API and close the window automatically.")
+    print()
+    if not args.yes and not _confirm("OK to launch it now?", default=True):
+        print("aborted.")
+        return 130
+    sub = _delegate_namespace(
+        args,
+        profile_dir="",
+        poll_interval=1.5,
+        keep_open=getattr(args, "keep_open", False),
+    )
+    return cmd_login_playwright(sub)
+
+
+def cmd_login_browser_scrape(args: argparse.Namespace) -> int:
+    """Browser-cookie-store login (the legacy default). Tries existing
+    creds, then scans every Chromium-family + Firefox + Safari profile
+    for an active Notion session, then walks the user through opening
+    Notion in their existing default browser and watching the cookie
+    file for writes.
+
+    Kept as the `login-browser` escape hatch for when the user has
+    already signed in to Notion in some browser and just wants the CLI
+    to find that session. The high-level `login` umbrella prefers
+    managed-browser flows (login-chrome / login-playwright) for the
+    interactive case because Chrome buffers cookie writes for minutes
+    and macOS triggers Touch ID for every Keychain decrypt.
     """
     pinned = (args.space_id or os.environ.get("NOTION_INTERNAL_SPACE_ID") or "").strip() or None
     verbose = bool(getattr(args, "verbose", False))
@@ -1787,26 +2753,46 @@ def cmd_dump(args: argparse.Namespace) -> int:
     )
     print(f"space:  {space_name!r} ({space_id})")
 
-    browser_cookies = load_browser_cookies()
-    has_file_token = any(c["name"] == "file_token" for c in browser_cookies.values())
-    if not has_file_token:
+    saved = saved_credentials_as_browser_cookies()
+    if saved:
+        browser_cookies = saved
         print(
-            "WARNING: no `file_token` cookie found in any browser profile. "
-            "exportBlock tasks will succeed but downloading the resulting zip "
-            "from file.notion.so will return HTTP 403 — the file proxy auths "
-            "via `file_token` (HttpOnly, .notion.so, path /f) which only "
-            "exists in your logged-in Chrome session.",
-            file=sys.stderr,
-        )
-        print(
-            "Quickest fix: open notion.so in Google Chrome, sign in fully, then "
-            "re-run. The script auto-discovers cookies across all Chrome / Arc / "
-            "Brave profiles and uses whichever profile holds the live session.",
-            file=sys.stderr,
+            f"auth: using saved token_v2 + file_token "
+            f"(no browser cookie scrape, no Touch ID)"
         )
     else:
-        n_profiles_relevant = sum(1 for c in browser_cookies.values() if c["name"] in ("token_v2", "file_token", "p_sync_session"))
-        print(f"browser cookies loaded: {len(browser_cookies)} total ({n_profiles_relevant} session-bearing)")
+        browser_cookies = load_browser_cookies()
+        has_file_token = any(
+            c["name"] == "file_token" for c in browser_cookies.values()
+        )
+        if not has_file_token:
+            print(
+                "WARNING: no `file_token` cookie found in any browser "
+                "profile. exportBlock tasks will succeed but downloading "
+                "the resulting zip from file.notion.so will return HTTP "
+                "403 — the file proxy auths via `file_token` (HttpOnly, "
+                ".notion.so, path /f) which only exists in your logged-in "
+                "Chrome session.",
+                file=sys.stderr,
+            )
+            print(
+                "Quickest fix: run "
+                "`./notion_internal_dump.sh login-extension` (the helper "
+                "extension reads file_token directly from your browser "
+                "without the Touch ID prompt). Or open notion.so in "
+                "Chrome, sign in fully, then re-run.",
+                file=sys.stderr,
+            )
+        else:
+            n_profiles_relevant = sum(
+                1
+                for c in browser_cookies.values()
+                if c["name"] in ("token_v2", "file_token", "p_sync_session")
+            )
+            print(
+                f"browser cookies loaded: {len(browser_cookies)} total "
+                f"({n_profiles_relevant} session-bearing)"
+            )
 
     output = Path(args.output).resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -1967,42 +2953,85 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     p_login = sub.add_parser(
         "login",
-        help="guided browser login: open notion.so, detect session, validate, save",
+        help="recommended end-to-end login: disk -> installed browsers -> managed Chrome (Option B) -> managed Playwright Chromium (Option C, lazy-install)",
     )
     _add_common_token(p_login)
     p_login.add_argument(
-        "--force",
+        "--yes", "-y",
         action="store_true",
-        help="re-run the login flow even if a saved token already validates",
+        help="skip every confirmation prompt (CI mode)",
     )
     p_login.add_argument(
-        "--no-browser",
+        "--force",
         action="store_true",
-        help="don't auto-open the browser; just print the URL and poll",
+        help="re-run even if a saved token on disk still validates",
+    )
+    p_login.add_argument(
+        "--no-browser-scan",
+        action="store_true",
+        help="skip the installed-browser cookie-store scan (avoids macOS Touch ID prompt)",
     )
     p_login.add_argument(
         "--no-pick",
         action="store_true",
-        help="don't prompt for which workspace to pin (skips writing NOTION_INTERNAL_SPACE_ID)",
+        help="don't prompt for which workspace to pin",
     )
     p_login.add_argument(
         "--timeout",
         type=int,
         default=300,
-        help="seconds to wait for sign-in before giving up (default 300)",
+        help="seconds to wait for sign-in in the managed browser (default 300)",
     )
     p_login.add_argument(
+        "--keep-open",
+        action="store_true",
+        help="leave the managed browser window open after capturing the token",
+    )
+    p_login.add_argument(
+        "--verbose",
+        action="store_true",
+        help="print per-poll diagnostics during the browser-cookie-store scan step",
+    )
+    p_login.set_defaults(func=cmd_login)
+
+    p_lbrowser = sub.add_parser(
+        "login-browser",
+        help="legacy: scan installed browsers for an active Notion session, then watch their cookie files for new writes (escape hatch for `login`)",
+    )
+    _add_common_token(p_lbrowser)
+    p_lbrowser.add_argument(
+        "--force",
+        action="store_true",
+        help="re-run the login flow even if a saved token already validates",
+    )
+    p_lbrowser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="don't auto-open the browser; just print the URL and poll",
+    )
+    p_lbrowser.add_argument(
+        "--no-pick",
+        action="store_true",
+        help="don't prompt for which workspace to pin (skips writing NOTION_INTERNAL_SPACE_ID)",
+    )
+    p_lbrowser.add_argument(
+        "--timeout",
+        type=int,
+        default=300,
+        help="seconds to wait for sign-in before giving up (default 300)",
+    )
+    p_lbrowser.add_argument(
         "--poll-interval",
         type=float,
         default=2.0,
         help="seconds between cookie-store polls (default 2.0)",
     )
-    p_login.add_argument(
+    p_lbrowser.add_argument(
         "--verbose",
         action="store_true",
         help="print per-poll diagnostics (cookie file mtimes, extraction details, validation errors)",
     )
-    p_login.set_defaults(func=cmd_login)
+    p_lbrowser.set_defaults(func=cmd_login_browser_scrape)
 
     p_paste = sub.add_parser(
         "login-paste",
@@ -2020,6 +3049,119 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="don't prompt for which workspace to pin",
     )
     p_paste.set_defaults(func=cmd_login_paste)
+
+    p_ext = sub.add_parser(
+        "login-extension",
+        help="browser-extension handoff: helper extension reads token_v2 + file_token and POSTs to localhost",
+    )
+    _add_common_token(p_ext)
+    p_ext.add_argument(
+        "--port",
+        type=int,
+        default=0,
+        help="localhost port to listen on (default 0 = pick free)",
+    )
+    p_ext.add_argument(
+        "--timeout",
+        type=int,
+        default=180,
+        help="seconds to wait for the extension to respond (default 180)",
+    )
+    p_ext.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="don't auto-open the handoff URL; just print it",
+    )
+    p_ext.add_argument(
+        "--no-pick",
+        action="store_true",
+        help="don't prompt for which workspace to pin",
+    )
+    p_ext.add_argument(
+        "--no-install-help",
+        action="store_true",
+        help="skip the chrome://extensions install instructions block",
+    )
+    p_ext.set_defaults(func=cmd_login_extension)
+
+    p_chrome = sub.add_parser(
+        "login-chrome",
+        help="launch system Chrome with a managed profile + CDP, scrape token_v2 once you sign in",
+    )
+    _add_common_token(p_chrome)
+    p_chrome.add_argument(
+        "--chrome-binary",
+        default="",
+        help="explicit path to Chrome / Chromium / Edge / Brave / Arc / Vivaldi binary",
+    )
+    p_chrome.add_argument(
+        "--profile-dir",
+        default="",
+        help=f"persistent user-data-dir (default {_default_chrome_profile_dir()})",
+    )
+    p_chrome.add_argument(
+        "--port",
+        type=int,
+        default=0,
+        help="CDP debugging port (default 0 = pick free)",
+    )
+    p_chrome.add_argument(
+        "--timeout",
+        type=int,
+        default=300,
+        help="seconds to wait for sign-in (default 300)",
+    )
+    p_chrome.add_argument(
+        "--poll-interval",
+        type=float,
+        default=1.5,
+        help="seconds between cookie polls (default 1.5)",
+    )
+    p_chrome.add_argument(
+        "--keep-open",
+        action="store_true",
+        help="leave the Chrome window open after capturing the token",
+    )
+    p_chrome.add_argument(
+        "--no-pick",
+        action="store_true",
+        help="don't prompt for which workspace to pin",
+    )
+    p_chrome.set_defaults(func=cmd_login_chrome)
+
+    p_pw = sub.add_parser(
+        "login-playwright",
+        help="launch embedded Playwright Chromium with a managed profile, scrape token_v2 once you sign in",
+    )
+    _add_common_token(p_pw)
+    p_pw.add_argument(
+        "--profile-dir",
+        default="",
+        help=f"persistent user-data-dir (default {_default_playwright_profile_dir()})",
+    )
+    p_pw.add_argument(
+        "--timeout",
+        type=int,
+        default=300,
+        help="seconds to wait for sign-in (default 300)",
+    )
+    p_pw.add_argument(
+        "--poll-interval",
+        type=float,
+        default=1.5,
+        help="seconds between cookie polls (default 1.5)",
+    )
+    p_pw.add_argument(
+        "--keep-open",
+        action="store_true",
+        help="leave the Playwright Chromium window open after capturing the token",
+    )
+    p_pw.add_argument(
+        "--no-pick",
+        action="store_true",
+        help="don't prompt for which workspace to pin",
+    )
+    p_pw.set_defaults(func=cmd_login_playwright)
 
     p_disc = sub.add_parser("discover", help="walk sidebar containers + (optional) /api/v3/search")
     _add_common_token(p_disc)

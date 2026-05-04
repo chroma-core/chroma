@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Notion CLI helper",
+  "short_name": "notion-cli-helper",
+  "version": "0.1.0",
+  "description": "Hands your Notion session cookies (token_v2 + file_token) to the local notion_cli helper script when it asks. Privileged-context cookie reader; nothing happens unless you load a notion.so URL with ?cli-handoff= on it.",
+  "permissions": ["cookies"],
+  "host_permissions": [
+    "https://*.notion.so/*",
+    "https://*.notion.com/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.notion.so/*",
+        "https://*.notion.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ]
+}
