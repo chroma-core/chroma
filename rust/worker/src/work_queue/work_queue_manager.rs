@@ -1,9 +1,10 @@
+use crate::work_queue::distribution::WorkDistributor;
 use crate::work_queue::state::QueueState;
 use crate::work_queue::types::{FinishResult, WorkQueueError, WorkQueueRecord};
 use async_trait::async_trait;
 use chroma_error::ChromaError;
-use chroma_storage::Storage;
-use chroma_system::{Component, ComponentContext, ComponentRuntime, Handler, System};
+use chroma_storage::{GetOptions, PutMode, PutOptions, Storage};
+use chroma_system::{Component, ComponentContext, ComponentRuntime, Handler};
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
 use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
@@ -37,7 +38,6 @@ pub struct GetWorkMessage {
 pub struct PeriodicPersistMessage;
 
 // Component implementation
-#[derive(Debug)]
 pub struct WorkQueueManager {
     state: QueueState,
     storage: Storage,
@@ -46,10 +46,27 @@ pub struct WorkQueueManager {
     last_persist: Instant,
     operations_since_persist: u64,
     config: crate::work_queue::config::WorkQueueConfig,
+    distributor: Option<WorkDistributor>,
+    my_shard_id: String,
+}
+
+impl std::fmt::Debug for WorkQueueManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WorkQueueManager")
+            .field("state", &self.state)
+            .field("storage_path", &self.storage_path)
+            .field("operations_since_persist", &self.operations_since_persist)
+            .field("my_shard_id", &self.my_shard_id)
+            .finish()
+    }
 }
 
 impl WorkQueueManager {
-    pub fn new(storage: Storage, config: crate::work_queue::config::WorkQueueConfig) -> Self {
+    pub fn new(
+        storage: Storage,
+        config: crate::work_queue::config::WorkQueueConfig,
+        my_shard_id: String,
+    ) -> Self {
         Self {
             state: QueueState::new(),
             storage,
@@ -58,21 +75,31 @@ impl WorkQueueManager {
             last_persist: Instant::now(),
             operations_since_persist: 0,
             config,
+            distributor: None, // TODO: inject when memberlist is available
+            my_shard_id,
         }
     }
 
+    pub fn set_memberlist(&mut self, members: Vec<chroma_memberlist::memberlist_provider::Member>) {
+        self.distributor = Some(WorkDistributor::new(members));
+    }
+
     async fn load_state(&mut self) -> Result<(), WorkQueueError> {
-        match self.storage.get_bytes(&self.storage_path).await {
+        match self
+            .storage
+            .get_with_e_tag(&self.storage_path, GetOptions::default())
+            .await
+        {
             Ok((bytes, etag)) => {
                 self.state = QueueState::from_parquet_bytes(&bytes)?;
-                self.state.current_etag = Some(etag);
+                self.state.current_etag = etag;
                 info!(
                     "Loaded work queue state with {} items",
                     self.state.pending_work.len()
                 );
                 Ok(())
             }
-            Err(e) if e.to_string().contains("not found") => {
+            Err(chroma_storage::StorageError::NotFound) => {
                 info!("No existing work queue state found, starting fresh");
                 Ok(())
             }
@@ -87,17 +114,30 @@ impl WorkQueueManager {
 
         let bytes = self.state.to_parquet_bytes()?;
 
+        let put_options = if let Some(etag) = &self.state.current_etag {
+            PutOptions {
+                mode: PutMode::IfMatch(etag.clone()),
+                ..Default::default()
+            }
+        } else {
+            PutOptions::default()
+        };
+
         match self
             .storage
-            .put_bytes_with_etag(
-                &self.storage_path,
-                bytes,
-                self.state.current_etag.as_deref(),
-            )
+            .put_bytes(&self.storage_path, bytes, put_options)
             .await
         {
-            Ok(new_etag) => {
+            Ok(Some(new_etag)) => {
                 self.state.current_etag = Some(new_etag);
+                self.state.dirty = false;
+                self.operations_since_persist = 0;
+                self.last_persist = Instant::now();
+                info!("Persisted work queue state");
+                Ok(())
+            }
+            Ok(None) => {
+                // No etag returned
                 self.state.dirty = false;
                 self.operations_since_persist = 0;
                 self.last_persist = Instant::now();
@@ -106,7 +146,7 @@ impl WorkQueueManager {
             }
             Err(e) if e.to_string().contains("precondition") => {
                 error!("ETag mismatch - another instance is active");
-                panic!("Work queue ETag mismatch - shutting down");
+                panic!("Split-brain detected!");
             }
             Err(e) => Err(WorkQueueError::Storage(e.to_string())),
         }
@@ -314,16 +354,26 @@ impl Handler<GetWorkMessage> for WorkQueueManager {
     type Result = ();
 
     async fn handle(&mut self, msg: GetWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
-        // TODO: Add memberlist and rendezvous hashing
-        // For now, return all items up to limit
-
-        let items: Vec<_> = self
-            .state
-            .pending_work
-            .iter()
-            .take(msg.limit * 2)
-            .cloned()
-            .collect();
+        // Filter items by shard using rendezvous hashing
+        let items: Vec<_> = if let Some(ref distributor) = self.distributor {
+            self.state
+                .pending_work
+                .iter()
+                .filter(|record| {
+                    distributor.is_my_work(&record.fn_id, &record.input_coll_id, &msg.shard_id)
+                })
+                .take(msg.limit * 2)
+                .cloned()
+                .collect()
+        } else {
+            // No distributor available, return all items
+            self.state
+                .pending_work
+                .iter()
+                .take(msg.limit * 2)
+                .cloned()
+                .collect()
+        };
 
         // STUB: Check invocations done
         if self.config.use_sysdb_filtering {
@@ -331,7 +381,7 @@ impl Handler<GetWorkMessage> for WorkQueueManager {
             let filtered: Vec<_> = items
                 .into_iter()
                 .zip(done_flags.iter())
-                .filter(|(_, done)| !done)
+                .filter(|(_, done)| !**done)
                 .map(|(item, _)| item)
                 .take(msg.limit)
                 .collect();
