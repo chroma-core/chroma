@@ -2,7 +2,7 @@
 """
 Notion CDC — proof-of-concept change data capture (internal integration).
 
-Why internal integration HERE (vs OAuth used by the bulk dumper):
+Why an internal integration:
   - CDC is long-lived. We want the sync identity to be a bot that's
     independent of any specific human; an OAuth token bound to a single
     user can disappear when that user leaves the workspace.
@@ -11,6 +11,11 @@ Why internal integration HERE (vs OAuth used by the bulk dumper):
   - One-time setup lives in `setup-token` below: workspace owner creates
     one internal integration, shares root pages with it, the script
     validates and writes the token to disk.
+
+  (Note: bulk backfill is handled by `notion_internal_dump.py`, which
+  goes through the undocumented /api/v3 with a session cookie -- a
+  different tradeoff. CDC stays on the official API because durability
+  matters more than coverage here.)
 
 Subcommands:
 
@@ -181,8 +186,8 @@ def cmd_setup_token(args: argparse.Namespace) -> int:
     print("--- Notion internal-integration setup (for ongoing CDC) ---")
     print()
     print("CDC uses an INTERNAL integration so the syncing identity is a bot")
-    print("decoupled from any human user. (The bulk dumper uses public OAuth")
-    print("for fast multi-token backfill — different tool, different need.)")
+    print("decoupled from any human user. The bot's token outlives any one")
+    print("person's account, which matters because syncs run forever.")
     print()
     print("Steps (the workspace OWNER must do this; there is no API for it):")
     print(f"  1. Open: {NOTION_INTEGRATIONS_URL}")

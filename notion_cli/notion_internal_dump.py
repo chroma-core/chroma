@@ -3,13 +3,14 @@
 Notion internal-API dump — bypass the Full-access OAuth picker.
 
 Why this exists:
-  Notion's PUBLIC OAuth API (used by notion_bulk_dump.py) only sees pages
-  where the authorizing user has FULL access. In a typical company workspace
-  a regular Member has Full access only on their Private pages, so the OAuth
-  picker hides the entire teamspace tree. This script bypasses that by using
+  Notion's public OAuth API only surfaces pages where the authorizing user
+  has FULL access. In a typical company workspace a regular Member has Full
+  access only on their Private pages, so the OAuth picker hides the entire
+  teamspace tree -- which makes OAuth a non-starter for "developer dumps
+  their company's Notion as a Member". This script bypasses that by using
   the same /api/v3 endpoints that Notion's web app uses, authenticated by
   the user's session cookie (token_v2). Those endpoints return everything
-  the user can VIEW — Can edit, Can comment, Can view all qualify.
+  the user can VIEW -- Can edit, Can comment, Can view all qualify.
 
   ToS note: this is undocumented and arguably against Notion's terms of
   service ("scrape", "data mining"). Used responsibly (modest rate, personal
