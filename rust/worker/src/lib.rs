@@ -1,6 +1,7 @@
 mod compactor;
 mod server;
 mod utils;
+pub(crate) mod work_queue;
 
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
