@@ -86,6 +86,10 @@ pub struct FullTextQuery {
     pub tokens: Vec<String>,
     /// Last token if the query ends with it — may be a prefix of a longer word.
     pub suffix: Option<String>,
+    /// True when the query produces exactly one token that is both prefix
+    /// and suffix. The search layer should OR both prefix and suffix
+    /// dictionary lookups for this token.
+    pub singleton: bool,
 }
 
 /// Word-based text analyzer for the full-text index.
@@ -158,10 +162,13 @@ impl WordAnalyzer {
             None
         };
 
+        let singleton = prefix.is_some() && tokens.is_empty() && suffix == prefix;
+
         Ok(FullTextQuery {
             prefix,
             tokens,
             suffix,
+            singleton,
         })
     }
 }
@@ -258,6 +265,7 @@ mod tests {
         assert_eq!(q.prefix.as_deref(), Some("hello"));
         assert!(q.tokens.is_empty());
         assert_eq!(q.suffix.as_deref(), Some("hello"));
+        assert!(q.singleton);
     }
 
     #[test]
@@ -266,6 +274,7 @@ mod tests {
         assert_eq!(q.prefix.as_deref(), Some("hello"));
         assert!(q.tokens.is_empty());
         assert_eq!(q.suffix.as_deref(), Some("world"));
+        assert!(!q.singleton);
     }
 
     #[test]
