@@ -59,7 +59,7 @@ pub struct DumpFlags {
     /// subtree link drift for ~10-20x faster syncs on big containers.
     /// Pair with a periodic `--full` resync (e.g. weekly) to absorb that
     /// drift.
-    #[arg(long)]
+    #[arg(long, default_value_t = true)]
     pub subtree_export: bool,
     /// Upper bound on subtree-vs-container page ratio for `--subtree-export`
     /// to actually take effect. e.g. `0.5` means subtree mode kicks in only
