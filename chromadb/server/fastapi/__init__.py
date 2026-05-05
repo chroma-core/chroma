@@ -841,6 +841,7 @@ class FastAPI(Server):
                 name=create.name,
                 configuration=configuration,
                 metadata=create.metadata,
+                description=create.description,
                 get_or_create=create.get_or_create,
                 tenant=tenant,
                 database=database,
@@ -955,6 +956,7 @@ class FastAPI(Server):
                 new_name=update.new_name,
                 new_metadata=update.new_metadata,
                 new_configuration=configuration,
+                new_description=update.new_description,
                 tenant=tenant,
                 database=database_name,
             )
@@ -1904,6 +1906,7 @@ class FastAPI(Server):
                 name=create.name,
                 configuration=configuration,
                 metadata=create.metadata,
+                description=create.description,
                 get_or_create=create.get_or_create,
                 tenant=tenant,
                 database=database,
@@ -1992,6 +1995,7 @@ class FastAPI(Server):
                 new_name=update.new_name,
                 new_metadata=update.new_metadata,
                 new_configuration=configuration,
+                new_description=update.new_description,
             )
 
         await to_thread.run_sync(

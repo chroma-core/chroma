@@ -283,6 +283,7 @@ class SqlSysDB(SqlDB, SysDB):
         configuration: CreateCollectionConfiguration,
         segments: Sequence[Segment],
         metadata: Optional[Metadata] = None,
+        description: Optional[str] = None,
         dimension: Optional[int] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
@@ -319,6 +320,7 @@ class SqlSysDB(SqlDB, SysDB):
             ),
             serialized_schema=None,
             metadata=metadata,
+            description=description,
             dimension=dimension,
             tenant=tenant,
             database=database,
@@ -338,6 +340,7 @@ class SqlSysDB(SqlDB, SysDB):
                     collections.config_json_str,
                     collections.dimension,
                     collections.database_id,
+                    collections.description,
                 )
                 .insert(
                     ParameterValue(self.uuid_to_db(collection["id"])),
@@ -354,6 +357,7 @@ class SqlSysDB(SqlDB, SysDB):
                     .from_(databases)
                     .where(databases.name == ParameterValue(database))
                     .where(databases.tenant_id == ParameterValue(tenant)),
+                    ParameterValue(collection["description"]),
                 )
             )
             sql, params = get_sql(insert_collection, self.parameter_format())
@@ -494,6 +498,7 @@ class SqlSysDB(SqlDB, SysDB):
                 metadata_t.int_value,
                 metadata_t.float_value,
                 metadata_t.bool_value,
+                collections_t.description,
             )
             .left_join(metadata_t)
             .on(collections_t.id == metadata_t.collection_id)
@@ -544,6 +549,8 @@ class SqlSysDB(SqlDB, SysDB):
                         collection_id, metadata
                     )
 
+                description = str(rows[0][11]) if rows[0][11] else None
+
                 collections.append(
                     Collection(
                         id=cast(UUID, id),
@@ -553,6 +560,7 @@ class SqlSysDB(SqlDB, SysDB):
                         ),
                         serialized_schema=None,
                         metadata=metadata,
+                        description=description,
                         dimension=dimension,
                         tenant=str(rows[0][5]),
                         database=str(rows[0][4]),
@@ -723,6 +731,7 @@ class SqlSysDB(SqlDB, SysDB):
         configuration: OptionalArgument[
             Optional[UpdateCollectionConfiguration]
         ] = Unspecified(),
+        description: OptionalArgument[Optional[str]] = Unspecified(),
     ) -> None:
         add_attributes_to_current_span(
             {

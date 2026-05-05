@@ -225,6 +225,7 @@ class SegmentAPI(ServerAPI):
         schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
+        description: Optional[str] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -248,6 +249,7 @@ class SegmentAPI(ServerAPI):
             id=id,
             name=name,
             metadata=metadata,
+            description=description,
             serialized_schema=None,
             configuration_json=create_collection_configuration_to_json(
                 configuration or CreateCollectionConfiguration(), metadata
@@ -265,6 +267,7 @@ class SegmentAPI(ServerAPI):
             configuration=configuration or CreateCollectionConfiguration(),
             segments=[],  # Passing empty till backend changes are deployed.
             metadata=model.metadata,
+            description=description,
             dimension=None,  # This is lazily populated on the first add
             get_or_create=get_or_create,
             tenant=tenant,
@@ -303,6 +306,7 @@ class SegmentAPI(ServerAPI):
         schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
+        description: Optional[str] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
@@ -310,6 +314,7 @@ class SegmentAPI(ServerAPI):
             name=name,
             schema=schema,
             metadata=metadata,
+            description=description,
             configuration=configuration,
             get_or_create=True,
             tenant=tenant,
@@ -394,6 +399,7 @@ class SegmentAPI(ServerAPI):
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
         new_configuration: Optional[UpdateCollectionConfiguration] = None,
+        new_description: Optional[str] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
@@ -414,31 +420,18 @@ class SegmentAPI(ServerAPI):
             metadata=new_metadata,
         )
 
-        # TODO eventually we'll want to use OptionalArgument and Unspecified in the
-        # signature of `_modify` but not changing the API right now.
-        if new_name and new_metadata and new_configuration:
-            self._sysdb.update_collection(
-                id,
-                name=new_name,
-                metadata=new_metadata,
-                configuration=new_configuration,
-            )
-        elif new_name and new_metadata:
-            self._sysdb.update_collection(id, name=new_name, metadata=new_metadata)
-        elif new_name and new_configuration:
-            self._sysdb.update_collection(
-                id, name=new_name, configuration=new_configuration
-            )
-        elif new_metadata and new_configuration:
-            self._sysdb.update_collection(
-                id, metadata=new_metadata, configuration=new_configuration
-            )
-        elif new_name:
-            self._sysdb.update_collection(id, name=new_name)
-        elif new_metadata:
-            self._sysdb.update_collection(id, metadata=new_metadata)
-        elif new_configuration:
-            self._sysdb.update_collection(id, configuration=new_configuration)
+        # Build kwargs for update_collection, only passing specified fields
+        kwargs: dict = {}
+        if new_name:
+            kwargs["name"] = new_name
+        if new_metadata:
+            kwargs["metadata"] = new_metadata
+        if new_configuration:
+            kwargs["configuration"] = new_configuration
+        if new_description is not None:
+            kwargs["description"] = new_description
+        if kwargs:
+            self._sysdb.update_collection(id, **kwargs)
 
     @override
     def _fork(

@@ -62,6 +62,7 @@ class CreateCollection(BaseModel):
     # we default to None.
     configuration: Optional[Dict[str, Any]] = None
     metadata: Optional[CollectionMetadata] = None
+    description: Optional[str] = None
     get_or_create: bool = False
 
 
@@ -69,6 +70,7 @@ class UpdateCollection(BaseModel):
     new_name: Optional[str] = None
     new_metadata: Optional[CollectionMetadata] = None
     new_configuration: Optional[Dict[str, Any]] = None
+    new_description: Optional[str] = None
 
 
 class CreateDatabase(BaseModel):

@@ -125,6 +125,7 @@ class BaseAPI(ABC):
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
         new_configuration: Optional[UpdateCollectionConfiguration] = None,
+        new_description: Optional[str] = None,
     ) -> None:
         """[Internal] Modify a collection by UUID. Can update the name and/or metadata.
 
@@ -135,6 +136,8 @@ class BaseAPI(ABC):
             new_metadata: The new metadata to associate with the collection.
                                       Defaults to None.
             new_configuration: The new configuration to associate with the collection.
+                                      Defaults to None.
+            new_description: The new description for the collection.
                                       Defaults to None.
         """
         pass
@@ -419,6 +422,7 @@ class ClientAPI(BaseAPI, ABC):
         schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
+        description: Optional[str] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = DefaultEmbeddingFunction(),  # type: ignore
@@ -429,6 +433,7 @@ class ClientAPI(BaseAPI, ABC):
         Args:
             name: The name of the collection to create.
             metadata: Optional metadata to associate with the collection.
+            description: Optional description for the collection.
             embedding_function: Optional function to use to embed documents.
                                 Uses the default embedding function if not provided.
             get_or_create: If True, return the existing collection if it exists.
@@ -520,6 +525,7 @@ class ClientAPI(BaseAPI, ABC):
         schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
+        description: Optional[str] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = DefaultEmbeddingFunction(),  # type: ignore
@@ -673,6 +679,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
+        description: Optional[str] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -717,6 +724,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
+        description: Optional[str] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
@@ -740,6 +748,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
         new_configuration: Optional[UpdateCollectionConfiguration] = None,
+        new_description: Optional[str] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:

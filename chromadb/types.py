@@ -81,6 +81,7 @@ class Collection(
         Dict[str, Any]
     ]  # Dict[str, Any] needed by pydantic 1.x as it doesn't work well Union types and converts all types to str
     dimension: Optional[int]
+    description: Optional[str]
     tenant: str
     database: str
     # The version and log position is only used in the distributed version of chroma
@@ -100,6 +101,7 @@ class Collection(
         database: str,
         version: int = 0,
         log_position: int = 0,
+        description: Optional[str] = None,
     ):
         super().__init__(
             id=id,
@@ -108,6 +110,7 @@ class Collection(
             metadata=metadata,
             configuration_json=configuration_json,
             dimension=dimension,
+            description=description,
             tenant=tenant,
             database=database,
             version=version,
@@ -192,6 +195,7 @@ class Collection(
             serialized_schema=json_map.get("schema", None),
             metadata=json_map.get("metadata", None),
             dimension=json_map.get("dimension", None),
+            description=json_map.get("description", None),
             tenant=json_map["tenant"],
             database=json_map["database"],
             version=json_map.get("version", 0),

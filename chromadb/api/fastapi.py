@@ -272,6 +272,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
+        description: Optional[str] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -289,6 +290,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             json={
                 "name": name,
                 "metadata": metadata,
+                "description": description,
                 "configuration": config_json,
                 "schema": serialized_schema,
                 "get_or_create": get_or_create,
@@ -342,12 +344,14 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
+        description: Optional[str] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
         return self.create_collection(
             name=name,
             metadata=metadata,
+            description=description,
             configuration=configuration,
             schema=schema,
             get_or_create=True,
@@ -363,6 +367,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
         new_configuration: Optional[UpdateCollectionConfiguration] = None,
+        new_description: Optional[str] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
@@ -378,6 +383,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
                 )
                 if new_configuration
                 else None,
+                "new_description": new_description,
             },
         )
 

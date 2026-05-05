@@ -246,6 +246,9 @@ def from_proto_collection(collection: chroma_pb.Collection) -> Collection:
         dimension=collection.dimension
         if collection.HasField("dimension") and collection.dimension
         else None,
+        description=collection.description
+        if collection.HasField("description")
+        else None,
         database=collection.database,
         tenant=collection.tenant,
         version=collection.version,
@@ -264,6 +267,7 @@ def to_proto_collection(collection: Collection) -> chroma_pb.Collection:
         if collection["metadata"] is None
         else to_proto_update_metadata(collection["metadata"]),
         dimension=collection["dimension"],
+        description=collection["description"],
         tenant=collection["tenant"],
         database=collection["database"],
         log_position=collection["log_position"],

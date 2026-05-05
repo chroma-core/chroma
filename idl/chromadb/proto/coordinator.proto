@@ -135,6 +135,7 @@ message CreateCollectionRequest {
   // a single atomic operation.
   repeated Segment segments = 9;  // Optional.
   optional string schema_str = 10;
+  optional string description = 11;
 }
 
 message CreateCollectionResponse {
@@ -245,6 +246,7 @@ message UpdateCollectionRequest {
     bool reset_metadata = 6;
   }
   optional string configuration_json_str = 7;
+  optional string description = 8;
 }
 
 message UpdateCollectionResponse {

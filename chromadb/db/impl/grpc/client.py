@@ -320,6 +320,7 @@ class GrpcSysDB(SysDB):
         configuration: CreateCollectionConfiguration,
         segments: Sequence[Segment],
         metadata: Optional[Metadata] = None,
+        description: Optional[str] = None,
         dimension: Optional[int] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
@@ -334,6 +335,7 @@ class GrpcSysDB(SysDB):
                 ),
                 metadata=to_proto_update_metadata(metadata) if metadata else None,
                 dimension=dimension,
+                description=description,
                 get_or_create=get_or_create,
                 tenant=tenant,
                 database=database,
@@ -503,6 +505,7 @@ class GrpcSysDB(SysDB):
         configuration: OptionalArgument[
             Optional[UpdateCollectionConfiguration]
         ] = Unspecified(),
+        description: OptionalArgument[Optional[str]] = Unspecified(),
     ) -> None:
         try:
             write_name = None
@@ -523,6 +526,10 @@ class GrpcSysDB(SysDB):
                     Union[UpdateCollectionConfiguration, None], configuration
                 )
 
+            write_description = None
+            if description != Unspecified():
+                write_description = cast(Union[str, None], description)
+
             request = UpdateCollectionRequest(
                 id=id.hex,
                 name=write_name,
@@ -535,6 +542,7 @@ class GrpcSysDB(SysDB):
                 )
                 if write_configuration
                 else None,
+                description=write_description,
             )
             if metadata is None:
                 request.ClearField("metadata")

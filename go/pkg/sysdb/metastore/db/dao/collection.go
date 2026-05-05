@@ -151,6 +151,7 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 		ConfigurationJsonStr       *string    `gorm:"column:configuration_json_str"`
 		SchemaStr                  *string    `gorm:"column:schema_str"`
 		Dimension                  *int32     `gorm:"column:dimension"`
+		Description                *string    `gorm:"column:description"`
 		DatabaseID                 string     `gorm:"column:database_id"`
 		CollectionTs               *int64     `gorm:"column:collection_ts"`
 		IsDeleted                  bool       `gorm:"column:is_deleted"`
@@ -187,6 +188,7 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 		"collections.configuration_json_str, " +
 		"collections.schema_str, " +
 		"collections.dimension, " +
+		"collections.description, " +
 		"collections.database_id AS database_id, " +
 		"collections.ts as collection_ts, " +
 		"collections.is_deleted, " +
@@ -297,6 +299,7 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 				ConfigurationJsonStr:       r.ConfigurationJsonStr,
 				SchemaStr:                  r.SchemaStr,
 				Dimension:                  r.Dimension,
+				Description:                r.Description,
 				DatabaseID:                 r.DatabaseID,
 				IsDeleted:                  r.IsDeleted,
 				LogPosition:                r.LogPosition,
@@ -499,6 +502,9 @@ func generateCollectionUpdatesWithoutID(in *dbmodel.Collection) map[string]inter
 	}
 	if in.Dimension != nil {
 		ret["dimension"] = *in.Dimension
+	}
+	if in.Description != nil {
+		ret["description"] = *in.Description
 	}
 	if in.IsDeleted {
 		ret["is_deleted"] = true

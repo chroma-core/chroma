@@ -169,6 +169,10 @@ class CollectionCommon(Generic[ClientT]):
         return cast(CollectionMetadata, self._model.metadata)
 
     @property
+    def description(self) -> Optional[str]:
+        return self._model.description
+
+    @property
     def tenant(self) -> str:
         return self._model.tenant
 
@@ -560,11 +564,14 @@ class CollectionCommon(Generic[ClientT]):
         name: Optional[str],
         metadata: Optional[CollectionMetadata],
         configuration: Optional[UpdateCollectionConfiguration],
+        description: Optional[str] = None,
     ) -> None:
         if name:
             self._model["name"] = name
         if metadata:
             self._model["metadata"] = metadata
+        if description is not None:
+            self._model["description"] = description
         if configuration:
             self._model.set_configuration(
                 overwrite_collection_configuration(
