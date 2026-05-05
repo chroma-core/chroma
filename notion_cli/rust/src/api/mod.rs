@@ -1,6 +1,7 @@
 //! Notion `/api/v3` client + supporting machinery.
 //!
-//! This is a faithful port of the relevant slices of `notion_internal_dump.py`:
+//! Originally ported from the python prototype's `NotionInternal` class
+//! (now removed -- python only handles login as `notion_auth.py`):
 //! the rate-limited `NotionInternal` HTTP client, the `RateLimitedError` /
 //! `RateLimitGate` shared cooldown, the per-client `TokenBucket`, and the
 //! `TaskPool` that batches `getTasks` polling across many concurrent

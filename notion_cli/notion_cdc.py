@@ -12,10 +12,11 @@ Why an internal integration:
     one internal integration, shares root pages with it, the script
     validates and writes the token to disk.
 
-  (Note: bulk backfill is handled by `notion_internal_dump.py`, which
-  goes through the undocumented /api/v3 with a session cookie -- a
-  different tradeoff. CDC stays on the official API because durability
-  matters more than coverage here.)
+  (Note: bulk backfill is handled by `notion_auth.py` for login + the
+  `notion-internal-dump` rust binary for discover/dump/sync, which goes
+  through the undocumented /api/v3 with a session cookie -- a different
+  tradeoff. CDC stays on the official API because durability matters
+  more than coverage here.)
 
 Subcommands:
 

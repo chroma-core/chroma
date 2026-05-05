@@ -4,7 +4,7 @@
 // notion.so URL contains ?cli-handoff=PORT&nonce=NONCE), reads
 // token_v2 + file_token via the privileged chrome.cookies API, and POSTs
 // them to http://127.0.0.1:PORT/handoff. The CLI half of this dance is in
-// notion_cli/notion_internal_dump.py (cmd_login_extension).
+// notion_cli/notion_auth.py (cmd_login_extension).
 
 const NOTION_DOMAINS = ["notion.so", "notion.com"];
 

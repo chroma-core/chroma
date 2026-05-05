@@ -102,7 +102,6 @@ import argparse
 import http.server
 import json
 import os
-import queue
 import secrets
 import select
 import shutil
@@ -114,7 +113,7 @@ import time
 import urllib.error
 import urllib.request
 import webbrowser
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -1333,16 +1332,6 @@ def _walk_record_map(record_map: dict, kind: str) -> dict[str, dict]:
     return out
 
 
-def _block_title(block: dict) -> str:
-    props = (block or {}).get("properties") or {}
-    title = props.get("title") or []
-    chunks: list[str] = []
-    for piece in title:
-        if isinstance(piece, list) and piece and isinstance(piece[0], str):
-            chunks.append(piece[0])
-    return ("".join(chunks)).strip() or "(untitled)"
-
-
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
@@ -2472,7 +2461,7 @@ def cmd_probe(args: argparse.Namespace) -> int:
     if not token:
         print(
             "error: no token_v2; run "
-            "`./notion_internal_dump.sh login` first",
+            "`./notion_auth.sh login` first",
             file=sys.stderr,
         )
         return 2
@@ -2556,7 +2545,7 @@ def _add_common_token(p: argparse.ArgumentParser) -> None:
 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Notion internal-API dump (token_v2 cookie)",
+        description="Notion auth: capture token_v2 + file_token for the rust dump path",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )

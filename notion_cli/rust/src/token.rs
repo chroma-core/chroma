@@ -1,6 +1,6 @@
 //! Token loading: matches the on-disk locations the Python CLI writes.
 //!
-//! Resolution order (matches `_saved_token_v2` in `notion_internal_dump.py`
+//! Resolution order (matches `_saved_token_v2` in `notion_auth.py`
 //! plus a search for the `notion_cli/` directory relative to the binary's
 //! working directory so users can run from anywhere in the repo):
 //!
@@ -9,7 +9,7 @@
 //! 3. The `.env` file at `<repo_root>/.env` -- looked up by walking up from
 //!    CWD looking for a directory containing `notion_cli/`
 //! 4. `<notion_cli_dir>/notion-token-v2.txt`
-//! 5. Fail with a pointer to `./notion_internal_dump.sh login`
+//! 5. Fail with a pointer to `./notion_auth.sh login`
 //!
 //! The `file_token` cookie is similar but only ever lives in the
 //! `notion-file-token.txt` file (no env var fallback).
@@ -83,7 +83,7 @@ pub fn load(token_v2_arg: Option<&str>) -> Result<Tokens> {
         }
     }
     Err(anyhow!(
-        "no token_v2 found. Run `./notion_internal_dump.sh login` (in \
+        "no token_v2 found. Run `./notion_auth.sh login` (in \
          notion_cli/) to obtain a session, or pass --token-v2 / set \
          NOTION_TOKEN_V2."
     ))

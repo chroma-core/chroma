@@ -2,9 +2,9 @@
 
 A local CLI + daemon that dumps a Notion workspace via the undocumented
 `/api/v3` endpoints, then keeps that on-disk dump synced incrementally.
-Login lives in Python (`notion_internal_dump.py`); the daemon-shaped
-operations (`discover`, `dump`, `sync`, `sync-install`) are a Rust binary
-under `rust/`. See `--help` on either for usage.
+Login lives in Python (`notion_auth.py` / `notion_auth.sh`); the
+daemon-shaped operations (`discover`, `dump`, `sync`, `sync-install`)
+are a Rust binary under `rust/`. See `--help` on either for usage.
 
 Output layout (default `notion-internal-dump/`):
 

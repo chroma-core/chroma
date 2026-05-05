@@ -2,7 +2,7 @@
 //!
 //! Daemon-shaped half of the notion-internal-dump CLI.
 //!
-//! Login still lives in Python (`./notion_internal_dump.sh login` and friends);
+//! Login still lives in Python (`./notion_auth.sh login` and friends);
 //! this binary picks up the saved tokens and handles the discover / dump /
 //! sync / sync-install path:
 //!

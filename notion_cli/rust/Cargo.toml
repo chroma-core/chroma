@@ -7,7 +7,7 @@
 name = "notion-internal-dump"
 version = "0.1.0"
 edition = "2021"
-description = "Rust port of the notion_internal_dump.py daemon path: incremental discover + dump + sync + per-file Merkle changelog. Login still lives in Python (notion_internal_dump.py login)."
+description = "Daemon path for the notion_cli tool: incremental discover + dump + sync + per-file Merkle changelog. Login still lives in Python (notion_auth.py login)."
 publish = false
 
 [[bin]]
