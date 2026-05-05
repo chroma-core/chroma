@@ -47,10 +47,6 @@ Subcommands:
                       files for the next write. Useful when you're
                       already signed in to Notion in some browser
                       but Chrome is buffering the cookie flush.
-    login-extension   Tiny Chrome MV3 extension at
-                      notion_cli/extension/ reads token_v2 +
-                      file_token via chrome.cookies API and POSTs
-                      them to a local listener.
     login-paste       Manual fallback: paste token_v2 from DevTools.
 
   probe             Diagnostic: hit /api/v3 endpoints with the saved
@@ -75,10 +71,10 @@ and the rust binary):
 
 file_token (used by the rust dump path to download exported zips from
 file.notion.so):
-  Saved to notion_cli/notion-file-token.txt by login, login-extension,
-  and login-chrome. If present alongside notion-token-v2.txt the rust
-  dump uses both directly and skips the runtime browser scrape entirely
-  (no Touch ID prompt during dump).
+  Saved to notion_cli/notion-file-token.txt by login and login-chrome.
+  If present alongside notion-token-v2.txt the rust dump uses both
+  directly and skips the runtime browser scrape entirely (no Touch ID
+  prompt during dump).
 
 Browser-driven login profile (sticky between runs):
   ~/.cache/notion-cli-chrome      (login-chrome — system Chrome)
@@ -99,10 +95,8 @@ Env (loads foundation_notes/.env):
 from __future__ import annotations
 
 import argparse
-import http.server
 import json
 import os
-import secrets
 import select
 import shutil
 import socket
@@ -162,10 +156,6 @@ def _default_token_path() -> Path:
 
 def _default_file_token_path() -> Path:
     return Path(__file__).resolve().parent / "notion-file-token.txt"
-
-
-def _extension_dir() -> Path:
-    return Path(__file__).resolve().parent / "extension"
 
 
 def _read_one_line(path: Path) -> Optional[str]:
@@ -1004,7 +994,7 @@ def _parse_retry_after(headers: Any, default_s: float) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Handoff server (used by cmd_login_extension)
+# Free-port picker (used by cmd_login_chrome's CDP debugging port)
 # ---------------------------------------------------------------------------
 
 
@@ -1012,111 +1002,6 @@ def _pick_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
-
-
-class HandoffServer:
-    """One-shot localhost HTTP server that waits for the browser
-    extension to POST a Notion session at /handoff. Authenticates the
-    POST against a single-use nonce we generate per launch.
-
-    The server keeps running on bad nonces / wrong paths so that random
-    background tabs hitting the port can't deny-of-service the real
-    handoff. Only a POST that matches the nonce flips the completion
-    event and stops the server.
-    """
-
-    def __init__(self, nonce: str) -> None:
-        self.nonce = nonce
-        self.received: Optional[dict] = None
-        self.received_event = threading.Event()
-        self.errors: list[str] = []
-        self._server: Optional[http.server.ThreadingHTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
-
-    def serve(self, port: int) -> None:
-        self._server = http.server.ThreadingHTTPServer(
-            ("127.0.0.1", port), self._make_handler()
-        )
-        self._thread = threading.Thread(
-            target=self._server.serve_forever,
-            name="notion-cli-handoff",
-            daemon=True,
-        )
-        self._thread.start()
-
-    def stop(self) -> None:
-        if self._server is not None:
-            try:
-                self._server.shutdown()
-                self._server.server_close()
-            except Exception:
-                pass
-            self._server = None
-
-    def wait(self, timeout: float) -> bool:
-        return self.received_event.wait(timeout=timeout)
-
-    def _make_handler(self):
-        outer = self
-
-        class H(http.server.BaseHTTPRequestHandler):
-            def log_message(self, *args, **kwargs):
-                pass
-
-            def _cors(self):
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.send_header(
-                    "Access-Control-Allow-Methods", "POST, OPTIONS, GET"
-                )
-                self.send_header(
-                    "Access-Control-Allow-Headers", "Content-Type"
-                )
-
-            def do_OPTIONS(self):  # noqa: N802
-                self.send_response(204)
-                self._cors()
-                self.end_headers()
-
-            def do_GET(self):  # noqa: N802
-                self.send_response(200)
-                self._cors()
-                self.send_header("Content-Type", "text/plain; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(b"notion_cli handoff server is up\n")
-
-            def do_POST(self):  # noqa: N802
-                if self.path != "/handoff":
-                    self.send_response(404)
-                    self._cors()
-                    self.end_headers()
-                    return
-                length = int(self.headers.get("Content-Length") or 0)
-                raw = self.rfile.read(length) if length else b""
-                try:
-                    body = json.loads(raw.decode("utf-8"))
-                except Exception as e:
-                    outer.errors.append(f"bad json: {e}")
-                    self.send_response(400)
-                    self._cors()
-                    self.end_headers()
-                    self.wfile.write(b"bad json")
-                    return
-                if not isinstance(body, dict) or body.get("nonce") != outer.nonce:
-                    outer.errors.append("nonce mismatch")
-                    self.send_response(403)
-                    self._cors()
-                    self.end_headers()
-                    self.wfile.write(b"nonce mismatch")
-                    return
-                outer.received = body
-                self.send_response(200)
-                self._cors()
-                self.send_header("Content-Type", "text/plain; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(b"ok")
-                outer.received_event.set()
-
-        return H
 
 
 # ---------------------------------------------------------------------------
@@ -1527,138 +1412,6 @@ def _pick_session_and_workspace(
             chosen, chosen_sid, _name = flat[int(ans) - 1]
             return _accept_session(chosen, args, chosen_sid)
         print("  invalid choice, try again")
-
-
-def _print_extension_install_instructions() -> None:
-    ext_dir = _extension_dir()
-    print()
-    print("=== Notion login (browser extension handoff) ===")
-    print()
-    print("This flow asks a tiny Chrome extension to read your live Notion")
-    print("session cookie and hand it to this terminal -- no Touch ID, no")
-    print("disk scrape, no manual paste.")
-    print()
-    print("One-time install (skip if already installed):")
-    print("  1. Open Chrome (or any Chromium browser: Edge, Brave, Arc, ...)")
-    print("  2. Visit chrome://extensions in that browser.")
-    print("  3. Toggle 'Developer mode' ON (top-right).")
-    print("  4. Click 'Load unpacked' and select this directory:")
-    print(f"        {ext_dir}")
-    print("  5. Confirm 'Notion CLI helper' shows up in the extensions list.")
-    print()
-    print("Then make sure you're signed in to https://www.notion.so in any")
-    print("tab in that same browser profile.")
-    print()
-
-
-def cmd_login_extension(args: argparse.Namespace) -> int:
-    """Browser-extension handoff flow: opens notion.so in your default
-    browser with a one-time nonce in the URL; the helper extension reads
-    your session cookies via the privileged chrome.cookies API and POSTs
-    them back to a localhost listener owned by this script.
-    """
-    pinned = (
-        args.space_id or os.environ.get("NOTION_INTERNAL_SPACE_ID") or ""
-    ).strip() or None
-
-    if not args.no_install_help:
-        _print_extension_install_instructions()
-
-    nonce = secrets.token_hex(16)
-    port = args.port or _pick_free_port()
-    server = HandoffServer(nonce)
-    try:
-        server.serve(port)
-    except OSError as e:
-        print(
-            f"error: could not bind 127.0.0.1:{port} ({e}). Try --port 0 "
-            f"to pick a free port automatically.",
-            file=sys.stderr,
-        )
-        return 5
-
-    handoff_url = (
-        f"https://www.notion.so/?cli-handoff={port}&nonce={nonce}"
-    )
-    print(f"Listening on http://127.0.0.1:{port}/handoff (nonce {nonce[:6]}...)")
-    print(f"Opening: {handoff_url}")
-    print(f"(Press Ctrl-C to abort. Will time out after {args.timeout}s.)")
-
-    if not args.no_browser:
-        try:
-            webbrowser.open(handoff_url)
-        except Exception:
-            pass
-
-    try:
-        ok = server.wait(args.timeout)
-    except KeyboardInterrupt:
-        print("\naborted.")
-        server.stop()
-        return 130
-    server.stop()
-
-    if not ok:
-        print()
-        print(f"timed out after {args.timeout}s waiting for the extension.")
-        last_errs = server.errors[-3:]
-        if last_errs:
-            print(f"  recent server errors: {last_errs}")
-        print(
-            "  things to check:\n"
-            "    - is the helper extension installed in the SAME Chrome "
-            "profile that's signed in to Notion?\n"
-            "    - did the notion.so tab actually open with "
-            "?cli-handoff=...&nonce=... in the URL?\n"
-            "    - is anything else blocking 127.0.0.1 on this port?\n"
-            "  fall back: ./notion_auth.sh login-paste"
-        )
-        return 6
-
-    body = server.received or {}
-    token = (body.get("token_v2") or "").strip()
-    file_token = (body.get("file_token") or "").strip() or None
-    if not token:
-        print(
-            "error: extension reported no token_v2 cookie. Make sure you're "
-            "signed in to https://www.notion.so in that browser profile, "
-            "then re-run.",
-            file=sys.stderr,
-        )
-        return 7
-
-    print()
-    print(f"  received from extension v{body.get('extension_version','?')}:")
-    print(
-        f"    token_v2     len={len(token)} domain="
-        f"{body.get('token_v2_domain') or '?'}"
-    )
-    if file_token:
-        print(
-            f"    file_token   len={len(file_token)} domain="
-            f"{body.get('file_token_domain') or '?'}"
-        )
-    else:
-        print("    file_token   MISSING (downloads from file.notion.so will 403)")
-
-    print("  validating against /api/v3/loadUserContent ...")
-    try:
-        uc = NotionInternal(token).load_user_content()
-    except Exception as e:
-        print(f"  validation FAILED: {e}", file=sys.stderr)
-        return 8
-    print("  validated.")
-
-    _save_token(token, "browser extension")
-    if file_token:
-        ft_path = _save_file_token(file_token)
-        print(f"  saved file_token -> {ft_path}")
-    _print_session_summary("browser extension", uc)
-    _maybe_pick_and_save_space(uc, no_pick=args.no_pick, pinned=pinned)
-    print()
-    print("Done. Run `./rust/target/release/notion-internal-dump grab` next "
-              "(or `sync` for incremental updates after the first run).")
-    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -2649,40 +2402,6 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="don't prompt for which workspace to pin",
     )
     p_paste.set_defaults(func=cmd_login_paste)
-
-    p_ext = sub.add_parser(
-        "login-extension",
-        help="browser-extension handoff: helper extension reads token_v2 + file_token and POSTs to localhost",
-    )
-    _add_common_token(p_ext)
-    p_ext.add_argument(
-        "--port",
-        type=int,
-        default=0,
-        help="localhost port to listen on (default 0 = pick free)",
-    )
-    p_ext.add_argument(
-        "--timeout",
-        type=int,
-        default=180,
-        help="seconds to wait for the extension to respond (default 180)",
-    )
-    p_ext.add_argument(
-        "--no-browser",
-        action="store_true",
-        help="don't auto-open the handoff URL; just print it",
-    )
-    p_ext.add_argument(
-        "--no-pick",
-        action="store_true",
-        help="don't prompt for which workspace to pin",
-    )
-    p_ext.add_argument(
-        "--no-install-help",
-        action="store_true",
-        help="skip the chrome://extensions install instructions block",
-    )
-    p_ext.set_defaults(func=cmd_login_extension)
 
     p_chrome = sub.add_parser(
         "login-chrome",
