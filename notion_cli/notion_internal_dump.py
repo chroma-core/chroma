@@ -30,10 +30,11 @@ Phases:
                         3. managed Chromium-family browser via CDP
                            (any one we find -- Chrome / Edge / Brave /
                            Arc / Atlas / Vivaldi / Opera / etc.).
-                      No managed-Playwright fallback in step 3 by
-                      design: if no browser is installed at all we
-                      bail with install instructions rather than
-                      silently downloading ~150MB.
+                      If no Chromium-family browser is installed we
+                      bail with clear install instructions rather than
+                      shipping our own browser binary. Keeps the CLI
+                      distribution small (no embedded Chromium /
+                      Playwright dependency).
 
     Escape hatches (use directly to bypass the umbrella):
       login-chrome      Just step 3 -- managed system browser via CDP.
@@ -46,10 +47,6 @@ Phases:
                         file_token via chrome.cookies API and POSTs
                         them to a local listener.
       login-paste       Manual fallback: paste token_v2 from DevTools.
-      login-playwright  DEPRECATED: embedded Playwright Chromium (~150MB
-                        first-run download). Removed from the umbrella's
-                        auto-fallback; use only if you can't install a
-                        system browser.
 
   Phase 1 — validate permissions (cheap, run this first):
     discover     /api/v3/search across the chosen space; print page count.
@@ -70,13 +67,12 @@ Auth (token_v2 cookie sources, priority order):
 
 file_token (used to download exported zips from file.notion.so):
   Saved to notion_cli/notion-file-token.txt by login, login-extension,
-  login-chrome, and login-playwright. If present together with
-  notion-token-v2.txt, the dump path uses both directly and skips the
-  runtime browser scrape entirely (no Touch ID prompt during dump).
+  and login-chrome. If present together with notion-token-v2.txt, the
+  dump path uses both directly and skips the runtime browser scrape
+  entirely (no Touch ID prompt during dump).
 
-Browser-driven login profiles (sticky between runs):
+Browser-driven login profile (sticky between runs):
   ~/.cache/notion-cli-chrome      (login-chrome — system Chrome)
-  ~/.cache/notion-cli-playwright  (login-playwright — embedded Chromium)
   Override with --profile-dir.
 
 Manual cookie copy (fallback if `login` can't read your browser):
@@ -1775,7 +1771,8 @@ def cmd_login_extension(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Browser-driven login (Option B: CDP-attached Chrome / Option C: Playwright)
+# Browser-driven login: launch a Chromium-family browser via CDP, watch its
+# cookie store until the user signs in, scrape token_v2 + file_token.
 # ---------------------------------------------------------------------------
 
 
@@ -1883,14 +1880,10 @@ def _default_chrome_profile_dir() -> Path:
     return Path(os.path.expanduser("~/.cache/notion-cli-chrome"))
 
 
-def _default_playwright_profile_dir() -> Path:
-    return Path(os.path.expanduser("~/.cache/notion-cli-playwright"))
-
-
 def _scan_for_token(cookies: list[dict]) -> tuple[Optional[str], Optional[str], list[str]]:
-    """Inspect a flat cookies list (CDP or Playwright shape) and return
-    (token_v2, file_token, notion_cookie_names). Both shapes use {name,
-    value, domain, ...} keys.
+    """Inspect a flat cookies list (CDP shape) and return
+    (token_v2, file_token, notion_cookie_names). Cookies use the standard
+    {name, value, domain, ...} keys.
     """
     notion = [c for c in cookies if "notion" in (c.get("domain") or "")]
     api_host = _api_host()
@@ -1958,10 +1951,11 @@ def cmd_login_chrome(args: argparse.Namespace) -> int:
     if not chrome:
         print(
             "error: no Chromium-family browser found in well-known locations.\n"
-            "  Try --chrome-binary <path>, or install Google Chrome from\n"
-            "  https://www.google.com/chrome/ and re-run.\n"
-            "  As a fallback, use `login-playwright` which downloads its\n"
-            "  own browser binary.",
+            "  Try --chrome-binary <path>, or install one of:\n"
+            "    - Google Chrome:    https://www.google.com/chrome/\n"
+            "    - Microsoft Edge:   https://www.microsoft.com/edge\n"
+            "    - Brave:            https://brave.com/download/\n"
+            "  Or use `login-paste` to paste your token_v2 from DevTools.",
             file=sys.stderr,
         )
         return 5
@@ -2078,116 +2072,6 @@ def _terminate(proc: subprocess.Popen) -> None:
             pass
     except Exception:
         pass
-
-
-def cmd_login_playwright(args: argparse.Namespace) -> int:
-    """DEPRECATED escape hatch. Drives an embedded Playwright Chromium
-    with a managed persistent profile -- same UX as `login-chrome` but
-    uses a Playwright-bundled browser instead of a system one.
-
-    No longer wired into the `login` umbrella's auto-fallback chain
-    because (a) silently downloading ~150MB of browser binaries during
-    a login flow is a poor default, and (b) the umbrella's expanded
-    browser scanner now finds installed Chromium-family browsers
-    across mac/Linux/Windows including Atlas, Brave, Edge, Opera,
-    Vivaldi, etc., so the practical "no Chrome anywhere" case is rare.
-
-    Kept available for users who genuinely cannot install a browser
-    system-wide. Will likely be removed once we're confident the
-    umbrella's coverage is sufficient.
-    """
-    print(
-        "[deprecated] `login-playwright` is no longer on the recommended login\n"
-        "             path. Prefer `login` (umbrella) or `login-chrome`. See\n"
-        "             the docstring on this subcommand for context.",
-        file=sys.stderr,
-    )
-    try:
-        from playwright.sync_api import sync_playwright  # type: ignore[import-not-found]
-    except ImportError:
-        print(
-            "error: playwright not installed. Install it with:\n"
-            "  pip install playwright\n"
-            "  playwright install chromium\n"
-            "Or use `login-chrome` if you have Chrome installed.",
-            file=sys.stderr,
-        )
-        return 5
-
-    profile_dir = Path(args.profile_dir or _default_playwright_profile_dir())
-    profile_dir.mkdir(parents=True, exist_ok=True)
-
-    print()
-    print("=== Notion login (Playwright Chromium) ===")
-    print(f"  profile: {profile_dir}  (persistent across runs)")
-    print()
-
-    token: Optional[str] = None
-    file_token: Optional[str] = None
-    with sync_playwright() as p:
-        try:
-            ctx = p.chromium.launch_persistent_context(
-                str(profile_dir),
-                headless=False,
-                args=["--no-first-run", "--no-default-browser-check"],
-            )
-        except Exception as e:
-            print(
-                f"error: playwright failed to launch chromium ({e}).\n"
-                f"If this is the first run, do: playwright install chromium",
-                file=sys.stderr,
-            )
-            return 6
-        page = ctx.pages[0] if ctx.pages else ctx.new_page()
-        try:
-            page.goto("https://www.notion.so/login", wait_until="domcontentloaded", timeout=30000)
-        except Exception as e:
-            print(f"  navigation warning: {e}")  # not fatal; cookie may already be present
-
-        print(f"polling cookies every {args.poll_interval:.1f}s (max {args.timeout}s) ...")
-        end = time.time() + args.timeout
-        last_status = ""
-        try:
-            while time.time() < end:
-                try:
-                    cookies = ctx.cookies()
-                except Exception as e:
-                    print(f"  playwright cookies() error: {e}; retrying...")
-                    time.sleep(args.poll_interval)
-                    continue
-                t2, ft, names = _scan_for_token(cookies)
-                if t2:
-                    token, file_token = t2, ft
-                    break
-                status = (
-                    f"  {len(names)} notion cookie(s); waiting for sign-in: {names}"
-                    if names
-                    else "  no notion cookies yet; waiting for sign-in..."
-                )
-                if status != last_status:
-                    print(status)
-                    last_status = status
-                time.sleep(args.poll_interval)
-        finally:
-            if not args.keep_open:
-                try:
-                    ctx.close()
-                except Exception:
-                    pass
-            else:
-                print("  (Playwright Chromium left running; close it manually.)")
-
-    if not token:
-        print(f"error: timed out after {args.timeout}s", file=sys.stderr)
-        return 7
-
-    print(
-        f"  got token_v2 (len={len(token)}), "
-        f"file_token={'present' if file_token else 'MISSING'}"
-    )
-    return _validate_and_save_session(
-        token, file_token, source_label="playwright", args=args
-    )
 
 
 def cmd_login_paste(args: argparse.Namespace) -> int:
@@ -2395,53 +2279,6 @@ def _try_browser_cookie_scan(args: argparse.Namespace, pinned: Optional[str], *,
 
 
 # ---------------------------------------------------------------------------
-# Lazy Playwright install (used by the `login` umbrella's Option C fallback).
-# ---------------------------------------------------------------------------
-
-
-def _is_playwright_runnable() -> bool:
-    """True iff the playwright Python package is importable AND its
-    bundled chromium has been downloaded. We only need a path check,
-    not a launch -- launch_persistent_context would open a window we
-    don't want yet.
-    """
-    try:
-        from playwright.sync_api import sync_playwright  # type: ignore[import-not-found]
-    except ImportError:
-        return False
-    try:
-        with sync_playwright() as p:
-            exe = p.chromium.executable_path
-        return bool(exe) and os.path.isfile(exe)
-    except Exception:
-        return False
-
-
-def _install_playwright_with_chromium() -> int:
-    """Run `pip install playwright` then `playwright install chromium`,
-    streaming output so the user sees progress on the (~150MB) browser
-    download. Returns 0 on success, nonzero exit code on failure.
-    """
-    print("Installing playwright (Python package) ...")
-    rc = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "playwright"]
-    ).returncode
-    if rc != 0:
-        print(f"  pip install failed (exit {rc}).")
-        return 5
-    print()
-    print("Downloading chromium browser binary (~150MB; this can take a minute) ...")
-    rc = subprocess.run(
-        [sys.executable, "-m", "playwright", "install", "chromium"]
-    ).returncode
-    if rc != 0:
-        print(f"  `playwright install chromium` failed (exit {rc}).")
-        return 5
-    print("  ok, playwright + chromium ready.")
-    return 0
-
-
-# ---------------------------------------------------------------------------
 # Argument synthesis: forwards umbrella args to the child login commands
 # without polluting the umbrella's own --help with launcher knobs.
 # ---------------------------------------------------------------------------
@@ -2450,7 +2287,7 @@ def _install_playwright_with_chromium() -> int:
 def _delegate_namespace(src: argparse.Namespace, **overrides: Any) -> argparse.Namespace:
     """Return a copy of `src` with `overrides` applied. Used to forward
     a subset of the umbrella's args plus default launcher knobs to
-    cmd_login_chrome / cmd_login_playwright.
+    cmd_login_chrome.
     """
     out = argparse.Namespace(**vars(src))
     for k, v in overrides.items():
@@ -2476,8 +2313,9 @@ def cmd_login(args: argparse.Namespace) -> int:
          finish in ~3s.
 
     No Chromium-family browser anywhere? We bail with a clear error
-    and a list of escape hatches (`login-paste`, install-Chrome link,
-    deprecated `login-playwright`).
+    and a list of escape hatches (`login-paste`, install-Chrome link).
+    We deliberately don't ship a browser binary -- if you need one we
+    point you at the install pages.
 
     --yes              skip every confirmation (CI mode).
     --force            skip the disk fast-path.
@@ -2545,12 +2383,9 @@ def cmd_login(args: argparse.Namespace) -> int:
         return cmd_login_chrome(sub)
 
     # Step 3b: no Chromium-family browser -> bail with helpful guidance.
-    # We deliberately do NOT auto-fall-back to Playwright Chromium here:
-    # downloading ~150MB of browser binaries silently is too surprising
-    # for a login flow, and once we have to ask permission to install
-    # a browser the right answer is "the user should install one once".
-    # `login-playwright` is still available as a deprecated escape
-    # hatch for users who genuinely can't install a browser system-wide.
+    # We deliberately don't ship a browser binary in this CLI -- once we
+    # have to ask permission to install a browser the right answer is
+    # "the user should install one once."
     print("  no Chromium-family browser found on this machine.")
     print()
     print("To finish login, choose one of:")
@@ -2573,10 +2408,6 @@ def cmd_login(args: argparse.Namespace) -> int:
     print("  - Manual paste: open notion.so in any browser, sign in, copy")
     print("    `token_v2` from DevTools (Application -> Cookies), and run")
     print("    `./notion_internal_dump.sh login-paste`.")
-    print()
-    print("  - Last resort: `./notion_internal_dump.sh login-playwright` will")
-    print("    download a ~150MB embedded Chromium for you. Deprecated but")
-    print("    still works.")
     return 5
 
 
@@ -2589,10 +2420,10 @@ def cmd_login_browser_scrape(args: argparse.Namespace) -> int:
 
     Kept as the `login-browser` escape hatch for when the user has
     already signed in to Notion in some browser and just wants the CLI
-    to find that session. The high-level `login` umbrella prefers
-    managed-browser flows (login-chrome / login-playwright) for the
-    interactive case because Chrome buffers cookie writes for minutes
-    and macOS triggers Touch ID for every Keychain decrypt.
+    to find that session. The high-level `login` umbrella prefers the
+    managed-browser flow (login-chrome) for the interactive case because
+    Chrome buffers cookie writes for minutes and macOS triggers Touch ID
+    for every Keychain decrypt.
     """
     pinned = (args.space_id or os.environ.get("NOTION_INTERNAL_SPACE_ID") or "").strip() or None
     verbose = bool(getattr(args, "verbose", False))
@@ -3526,40 +3357,6 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="don't prompt for which workspace to pin",
     )
     p_chrome.set_defaults(func=cmd_login_chrome)
-
-    p_pw = sub.add_parser(
-        "login-playwright",
-        help="DEPRECATED escape hatch: launch embedded Playwright Chromium (~150MB download) and scrape token_v2 once you sign in. Removed from the `login` umbrella's auto-fallback; install Chrome / Edge / Brave / etc. instead and use `login`",
-    )
-    _add_common_token(p_pw)
-    p_pw.add_argument(
-        "--profile-dir",
-        default="",
-        help=f"persistent user-data-dir (default {_default_playwright_profile_dir()})",
-    )
-    p_pw.add_argument(
-        "--timeout",
-        type=int,
-        default=300,
-        help="seconds to wait for sign-in (default 300)",
-    )
-    p_pw.add_argument(
-        "--poll-interval",
-        type=float,
-        default=1.5,
-        help="seconds between cookie polls (default 1.5)",
-    )
-    p_pw.add_argument(
-        "--keep-open",
-        action="store_true",
-        help="leave the Playwright Chromium window open after capturing the token",
-    )
-    p_pw.add_argument(
-        "--no-pick",
-        action="store_true",
-        help="don't prompt for which workspace to pin",
-    )
-    p_pw.set_defaults(func=cmd_login_playwright)
 
     p_disc = sub.add_parser("discover", help="walk sidebar containers + (optional) /api/v3/search")
     _add_common_token(p_disc)

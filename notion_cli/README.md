@@ -33,16 +33,23 @@ _state/last_run.json                     latest sync_run_id, started/ended,
 The interactive login flow leans on `browser_cookie3` (cross-platform
 extraction of Notion cookies from every Chromium-family browser, every
 Firefox variant, and Safari, including macOS Keychain / Linux NSS /
-Windows DPAPI handling) and Playwright as a "no browser installed"
-fallback. The Rust ecosystem has nothing comparable: cookie-extraction
-crates (`rookie`, `cookie-store`) cover a subset of browsers, no clean
-Touch ID story, and Playwright has no maintained Rust binding. Could be
-ported with ~2k LoC of platform-specific decryption — the ROI is poor
-because login runs once every few weeks and takes ~30s.
+Windows DPAPI handling). The Rust ecosystem has nothing comparable:
+cookie-extraction crates (`rookie`, `cookie-store`) cover a subset of
+browsers and have no clean Touch ID story. Could be ported with ~2k
+LoC of platform-specific decryption — the ROI is poor because login
+runs once every few weeks and takes ~30s.
 
 The daemon path (HTTP, async, file IO, hashing) is exactly what Rust is
 good at, and it's the long-running hot path. So the line is drawn there:
 Python writes plain-text token files; Rust reads them.
+
+We deliberately don't ship a browser binary in the CLI distribution. The
+older `login-playwright` escape hatch (which downloaded ~150MB of
+Chromium on first use) was removed: if no Chromium-family browser is
+installed at all, `login` bails with platform-specific install
+instructions and points users at `login-paste` for the manual route.
+Keeps the CLI small and avoids surprising large downloads during what
+should be a fast, interactive flow.
 
 ### Why `--full` is still required even with `--subtree-export`
 
