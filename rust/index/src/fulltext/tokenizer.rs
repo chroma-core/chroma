@@ -1,10 +1,10 @@
 use tantivy::tokenizer::{
-    AsciiFoldingFilter, LowerCaser, RemoveLongFilter, SimpleTokenizer, TextAnalyzer, Token,
-    TokenFilter, TokenStream, Tokenizer,
+    AsciiFoldingFilter, LowerCaser, NgramTokenizer, RemoveLongFilter, SimpleTokenizer,
+    TextAnalyzer, Token, TokenFilter, TokenStream, Tokenizer,
 };
 use thiserror::Error;
 
-const MIN_TOKEN_LENGTH: usize = 3;
+const TRIGRAM_LENGTH: usize = 3;
 const MAX_TOKEN_LENGTH: usize = 128;
 
 /// `TokenFilter` that removes tokens shorter than a given number of bytes.
@@ -67,7 +67,7 @@ impl<T: TokenStream> TokenStream for RemoveShortFilterStream<T> {
 
 #[derive(Debug, Error)]
 pub enum QueryError {
-    #[error("Query \"{query}\" has no token with at least {MIN_TOKEN_LENGTH} characters")]
+    #[error("Query \"{query}\" has no token with at least {TRIGRAM_LENGTH} characters")]
     NoSelectiveToken { query: String },
 }
 
@@ -94,32 +94,40 @@ pub struct FullTextQuery {
 
 /// Word-based text analyzer for the full-text index.
 ///
-/// Pipeline: `SimpleTokenizer` (split on non-alphanumeric) → `LowerCaser`
-/// → `AsciiFoldingFilter` (Unicode normalization) → `RemoveShortFilter(3)`
-/// → `RemoveLongFilter(128)`.
+/// Two pipelines:
+/// - **Word tokenizer**: `SimpleTokenizer` → `LowerCaser` → `AsciiFoldingFilter`
+///   → `RemoveShortFilter(3)` → `RemoveLongFilter(128)`.
+/// - **Trigram tokenizer**: `NgramTokenizer(3,3)` → `LowerCaser`.
 #[derive(Clone)]
 pub struct WordAnalyzer {
-    inner: TextAnalyzer,
+    word_tokenizer: TextAnalyzer,
+    trigram_tokenizer: TextAnalyzer,
 }
 
 impl WordAnalyzer {
     pub fn new() -> Self {
         Self {
-            inner: TextAnalyzer::builder(SimpleTokenizer::default())
+            word_tokenizer: TextAnalyzer::builder(SimpleTokenizer::default())
                 .filter(LowerCaser)
                 .filter(AsciiFoldingFilter)
                 .filter(RemoveShortFilter {
-                    min_length: MIN_TOKEN_LENGTH,
+                    min_length: TRIGRAM_LENGTH,
                 })
                 .filter(RemoveLongFilter::limit(MAX_TOKEN_LENGTH))
                 .build(),
+            trigram_tokenizer: TextAnalyzer::builder(
+                NgramTokenizer::new(TRIGRAM_LENGTH, TRIGRAM_LENGTH, false)
+                    .expect("valid ngram parameters"),
+            )
+            .filter(LowerCaser)
+            .build(),
         }
     }
 
     /// Tokenize text, returning owned token strings.
     pub fn tokenize(&mut self, text: &str) -> Vec<String> {
         let mut tokens = Vec::new();
-        let mut stream = self.inner.token_stream(text);
+        let mut stream = self.word_tokenizer.token_stream(text);
         while let Some(token) = stream.next() {
             tokens.push(token.text.clone());
         }
@@ -130,7 +138,7 @@ impl WordAnalyzer {
     ///
     /// Returns `Err` if no token survives the analyzer.
     pub fn tokenize_query(&mut self, query: &str) -> Result<FullTextQuery, QueryError> {
-        let mut stream = self.inner.token_stream(query);
+        let mut stream = self.word_tokenizer.token_stream(query);
 
         let mut prefix = None;
         let mut tokens = Vec::new();
@@ -170,6 +178,21 @@ impl WordAnalyzer {
             suffix,
             singleton,
         })
+    }
+
+    /// Extract deduplicated character trigrams from a string.
+    /// The output is lowercased.
+    ///
+    /// E.g., `trigrams("Hello")` → `["hel", "ell", "llo"]`.
+    pub fn trigrams(&mut self, s: &str) -> Vec<String> {
+        let mut trigrams = Vec::new();
+        let mut stream = self.trigram_tokenizer.token_stream(s);
+        while let Some(token) = stream.next() {
+            if !trigrams.contains(&token.text) {
+                trigrams.push(token.text.clone());
+            }
+        }
+        trigrams
     }
 }
 
@@ -380,5 +403,32 @@ mod tests {
     fn test_query_error_contains_query() {
         let err = WordAnalyzer::new().tokenize_query("a").unwrap_err();
         assert!(err.to_string().contains("a"));
+    }
+
+    // --- trigrams ---
+
+    #[test]
+    fn test_trigrams_basic() {
+        let mut a = WordAnalyzer::new();
+        assert_eq!(a.trigrams("hello"), vec!["hel", "ell", "llo"]);
+    }
+
+    #[test]
+    fn test_trigrams_short() {
+        let mut a = WordAnalyzer::new();
+        assert!(a.trigrams("ab").is_empty());
+        assert_eq!(a.trigrams("abc"), vec!["abc"]);
+    }
+
+    #[test]
+    fn test_trigrams_dedup() {
+        let mut a = WordAnalyzer::new();
+        assert_eq!(a.trigrams("aaaa"), vec!["aaa"]);
+    }
+
+    #[test]
+    fn test_trigrams_lowercase() {
+        let mut a = WordAnalyzer::new();
+        assert_eq!(a.trigrams("Hello"), vec!["hel", "ell", "llo"]);
     }
 }
