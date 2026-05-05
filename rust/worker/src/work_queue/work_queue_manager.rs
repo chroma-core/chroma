@@ -1,5 +1,4 @@
-// V1: WorkDistributor import commented out
-// use crate::work_queue::distribution::WorkDistributor;
+use crate::work_queue::distribution::WorkDistributor;
 use crate::work_queue::state::QueueState;
 use crate::work_queue::types::{FinishResult, WorkQueueError, WorkQueueRecord};
 
@@ -76,10 +75,9 @@ impl WorkQueueManager {
         }
     }
 
-    // V1: Memberlist methods commented out
-    // pub fn set_memberlist(&mut self, members: Vec<chroma_memberlist::memberlist_provider::Member>) {
-    //     self.distributor = Some(WorkDistributor::new(members));
-    // }
+    pub fn set_memberlist(&mut self, members: Vec<chroma_memberlist::memberlist_provider::Member>) {
+        self.distributor = Some(WorkDistributor::new(members));
+    }
 
     async fn load_state(&mut self) -> Result<(), WorkQueueError> {
         match self
@@ -230,7 +228,6 @@ impl WorkQueueManager {
             }
         }
     }
-
     // STUB: Will call sysdb's TryFinishAsyncAttachedFunctionInvocation
     async fn try_finish_invocation_stub(
         &self,
