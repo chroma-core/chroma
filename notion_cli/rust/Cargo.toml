@@ -7,7 +7,7 @@
 name = "notion-internal-dump"
 version = "0.1.0"
 edition = "2021"
-description = "Daemon path for the notion_cli tool: incremental discover + dump + sync + per-file Merkle changelog. Login still lives in Python (notion_auth.py login)."
+description = "Single-binary notion CLI: login (cookie scan + managed-CDP browser) + discover + dump + sync + per-file Merkle changelog."
 publish = false
 
 [[bin]]
@@ -18,7 +18,7 @@ path = "src/main.rs"
 anyhow = "1"
 thiserror = "1"
 clap = { version = "4", features = ["derive", "env"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs", "signal"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs", "signal", "process"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "gzip", "stream"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -38,6 +38,19 @@ urlencoding = "2"
 bytes = "1"
 uuid = { version = "1", features = ["v4"] }
 indicatif = "0.17"
+# Auth (login) deps:
+#   rookie         -- cross-browser cookie extraction (Chrome/Firefox/Safari/...)
+#   chromiumoxide  -- async CDP client for the managed-Chrome login flow
+#   webbrowser     -- best-effort cross-platform "open this URL"
+#   atty           -- detect whether stdin is a tty (for the workspace-picker UX)
+#   rpassword      -- intentionally NOT pulled in: we want to *show* the
+#                     pasted token_v2 so the user can sanity-check what we
+#                     captured, plus the value is a single line, not a
+#                     password.
+rookie = "0.5"
+chromiumoxide = "0.9"
+webbrowser = "1"
+atty = "0.2"
 
 [profile.release]
 opt-level = 3

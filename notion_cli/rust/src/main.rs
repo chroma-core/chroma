@@ -1,11 +1,14 @@
 //! notion-internal-dump (Rust)
 //!
-//! Daemon-shaped half of the notion-internal-dump CLI.
+//! Single-binary notion CLI. Subcommands:
 //!
-//! Login still lives in Python (`./notion_auth.sh login` and friends);
-//! this binary picks up the saved tokens and handles the discover / dump /
-//! sync / sync-install path:
-//!
+//!   - `login` captures `token_v2` (+ `file_token` when present) from
+//!     the user's existing browser cookie store via `rookie`, falling
+//!     back to a managed Chromium-family browser via `chromiumoxide` /
+//!     CDP if no signed-in session is on disk. `--paste` /
+//!     `--cookie-file <path>` are escape hatches.
+//!   - `probe` hits each /api/v3 endpoint we use and dumps the raw
+//!     responses to `probe.*.json` for diagnostic purposes.
 //!   - `discover` walks `/api/v3/search` and writes
 //!     `<output>/sidebar.jsonl` + `<output>/discovery.jsonl`
 //!   - `dump` runs `enqueueExportBlock` for every dirty top-level container
@@ -28,12 +31,13 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 mod api;
+mod auth;
 mod cmd;
 mod sync;
 mod token;
 mod util;
 
-use cmd::{discover, dump, sync_cmd, sync_install};
+use cmd::{discover, dump, login, probe, sync_cmd, sync_install};
 
 const DEFAULT_OUTPUT: &str = "./notion-internal-dump";
 const DEFAULT_RPS: f64 = 1.0;
@@ -48,7 +52,7 @@ const DEFAULT_SYNC_INTERVAL_S: u64 = 900;
 #[derive(Parser, Debug)]
 #[command(
     name = "notion-internal-dump",
-    about = "Notion internal-API dump (Rust port: discover/dump/sync/sync-install)",
+    about = "Notion internal-API CLI: login + discover/dump/sync/sync-install",
     long_about = None,
     propagate_version = true,
 )]
@@ -59,6 +63,11 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Cmd {
+    /// capture token_v2 (+ file_token) from a browser; saves to disk for
+    /// the dump path. Tries disk -> rookie cookie scan -> managed-Chrome CDP.
+    Login(login::Args),
+    /// diagnostic: hit /api/v3 endpoints and dump raw responses
+    Probe(probe::Args),
     /// walk sidebar containers + /api/v3/search, write sidebar.jsonl + discovery.jsonl
     Discover(discover::Args),
     /// exportBlock per top-level container, download zips. incremental by default.
@@ -88,6 +97,8 @@ async fn main() -> Result<()> {
     init_tracing();
     let cli = Cli::parse();
     match cli.cmd {
+        Cmd::Login(a) => login::run(a).await,
+        Cmd::Probe(a) => probe::run(a).await,
         Cmd::Discover(a) => discover::run(a).await,
         Cmd::Dump(a) => dump::run(a).await,
         Cmd::Grab(a) => {

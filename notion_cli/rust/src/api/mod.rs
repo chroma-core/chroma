@@ -1,11 +1,10 @@
 //! Notion `/api/v3` client + supporting machinery.
 //!
-//! Originally ported from the python prototype's `NotionInternal` class
-//! (now removed -- python only handles login as `notion_auth.py`):
-//! the rate-limited `NotionInternal` HTTP client, the `RateLimitedError` /
-//! `RateLimitGate` shared cooldown, the per-client `TokenBucket`, and the
-//! `TaskPool` that batches `getTasks` polling across many concurrent
-//! `enqueueExportBlock` jobs.
+//! The rate-limited `NotionInternal` HTTP client, the `RateLimitedError`
+//! / `RateLimitGate` shared cooldown, the per-client `TokenBucket`, and
+//! the `TaskPool` that batches `getTasks` polling across many concurrent
+//! `enqueueExportBlock` jobs. Originally ported from the python
+//! prototype's `NotionInternal` class.
 
 pub mod client;
 pub mod export;

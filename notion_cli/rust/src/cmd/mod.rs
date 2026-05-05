@@ -2,5 +2,7 @@
 
 pub mod discover;
 pub mod dump;
+pub mod login;
+pub mod probe;
 pub mod sync_cmd;
 pub mod sync_install;

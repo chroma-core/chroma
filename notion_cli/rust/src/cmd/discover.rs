@@ -46,7 +46,7 @@ pub async fn run(args: Args) -> Result<()> {
         .ok_or_else(|| {
             anyhow!(
                 "no space_id. Pass --space-id, set NOTION_INTERNAL_SPACE_ID, \
-                 or run the python `login` command which writes the pinned \
+                 or run `notion-internal-dump login` which writes the pinned \
                  space to .env."
             )
         })?;

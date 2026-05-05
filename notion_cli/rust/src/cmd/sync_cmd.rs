@@ -3,7 +3,7 @@
 //! Same engine as `dump` but:
 //!   - quiet by default (one-line summary if there's nothing to do)
 //!   - never prompts for a workspace pin (assumes NOTION_INTERNAL_SPACE_ID
-//!     is set, which the python `login` command writes to .env)
+//!     is set, which `notion-internal-dump login` writes to .env)
 //!   - exit codes are stable for schedulers:
 //!       0  = success (including "no-op")
 //!       2  = config / credentials problem (token missing, space missing)
@@ -80,7 +80,7 @@ pub struct Args {
 pub async fn run(args: Args) -> Result<()> {
     let tokens = token::load(args.token_v2.as_deref())?;
     let space_id = token::load_space_id(args.space_id.as_deref())?
-        .ok_or_else(|| anyhow!("sync: no NOTION_INTERNAL_SPACE_ID; run python `login` first"))?;
+        .ok_or_else(|| anyhow!("sync: no NOTION_INTERNAL_SPACE_ID; run `notion-internal-dump login` first"))?;
 
     if let Some(every) = args.every {
         loop {

@@ -2,9 +2,17 @@
 
 A local CLI + daemon that dumps a Notion workspace via the undocumented
 `/api/v3` endpoints, then keeps that on-disk dump synced incrementally.
-Login lives in Python (`notion_auth.py` / `notion_auth.sh`); the
-daemon-shaped operations (`discover`, `dump`, `sync`, `sync-install`)
-are a Rust binary under `rust/`. See `--help` on either for usage.
+Single static Rust binary under `rust/` -- `login`, `probe`, `discover`,
+`dump`, `grab`, `sync`, `sync-install`, `sync-uninstall`. See `--help`
+on the binary for usage:
+
+```sh
+cd rust && cargo build --release
+./target/release/notion-internal-dump --help
+./target/release/notion-internal-dump login        # capture token_v2
+./target/release/notion-internal-dump grab         # one-shot full dump
+./target/release/notion-internal-dump sync         # incremental
+```
 
 Output layout (default `notion-internal-dump/`):
 
@@ -28,28 +36,41 @@ _state/last_run.json                     latest sync_run_id, started/ended,
 
 ## Design notes
 
-### Why login stays in Python while everything else is Rust
+### Why everything is Rust now
 
-The interactive login flow leans on `browser_cookie3` (cross-platform
-extraction of Notion cookies from every Chromium-family browser, every
-Firefox variant, and Safari, including macOS Keychain / Linux NSS /
-Windows DPAPI handling). The Rust ecosystem has nothing comparable:
-cookie-extraction crates (`rookie`, `cookie-store`) cover a subset of
-browsers and have no clean Touch ID story. Could be ported with ~2k
-LoC of platform-specific decryption — the ROI is poor because login
-runs once every few weeks and takes ~30s.
+Earlier versions kept `login` + `probe` in Python on the assumption that
+nothing in the Rust ecosystem matched `browser_cookie3` for cross-browser
+cookie extraction. That assumption is stale: by 2026 the
+[`rookie`](https://docs.rs/rookie) crate (`0.5.6+`) covers
+Chrome/Edge/Brave/Chromium/Opera/Opera GX/Vivaldi/Arc/Zen/LibreWolf/Cachy
++ Firefox + Safari on Win/macOS/Linux, with the same macOS-Keychain /
+Linux-NSS / Windows-DPAPI handling, and
+[`chromiumoxide`](https://docs.rs/chromiumoxide) (`0.9+`) is a
+production-grade async CDP client that subsumes our prior
+`subprocess.Popen + manual JSON-RPC` Python loop. Together they replaced
+~470 LoC of Python cookie-store enumeration with ~50 LoC of orchestration
+and ~280 LoC of CDP polling with ~150 LoC. End result: single static
+binary, no Python dependency on the user's machine, faster cold start
+(no `python3` boot per-login), one set of error paths to maintain.
 
-The daemon path (HTTP, async, file IO, hashing) is exactly what Rust is
-good at, and it's the long-running hot path. So the line is drawn there:
-Python writes plain-text token files; Rust reads them.
+The escape hatches:
 
-We deliberately don't ship a browser binary in the CLI distribution. The
-older `login-playwright` escape hatch (which downloaded ~150MB of
+- `login --paste` — paste `token_v2` from DevTools (covers headless
+  boxes / weird display setups).
+- `login --chrome` — skip the cookie-store scan, jump straight to the
+  managed-Chromium CDP flow (useful when the user wants the picker UI).
+- `login --cookie-file <path>` — point `rookie::any_browser` at one
+  specific cookie database. Catches the long tail (Atlas, Sidekick,
+  Comet, Dia, Wavebox, Yandex, Tor, snap/flatpak Firefox containers)
+  that rookie's named-browser list doesn't enumerate by default. The
+  CLI prints a per-OS hint table when the umbrella scan misses
+  everything.
+
+We deliberately don't ship a browser binary in the CLI distribution.
+The older `login-playwright` escape hatch (which downloaded ~150MB of
 Chromium on first use) was removed: if no Chromium-family browser is
 installed at all, `login` bails with platform-specific install
-instructions and points users at `login-paste` for the manual route.
-Keeps the CLI small and avoids surprising large downloads during what
-should be a fast, interactive flow.
+instructions and points users at `--paste` for the manual route.
 
 ### Why `--full` is still required even with `--subtree-export`
 

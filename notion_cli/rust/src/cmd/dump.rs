@@ -95,8 +95,7 @@ pub async fn run(args: Args) -> Result<()> {
         eprintln!(
             "WARNING: no file_token cookie on disk -- enqueueing exports \
              will succeed but downloading from file.notion.so returns 403. \
-             Run `./notion_auth.sh login` (Python) to capture both \
-             cookies."
+             Run `notion-internal-dump login` to capture both cookies."
         );
     }
     let space_id = token::load_space_id(args.space_id.as_deref())?
