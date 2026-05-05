@@ -545,6 +545,7 @@ impl GarbageCollector {
             .sysdb_client
             .get_collections(GetCollectionsOptions {
                 collection_ids: Some(vec![collection_id]),
+                include_soft_deleted: true,
                 ..Default::default()
             })
             .await?;
