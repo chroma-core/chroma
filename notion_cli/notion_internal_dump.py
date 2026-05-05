@@ -1,62 +1,70 @@
 #!/usr/bin/env python3
 """
-Notion internal-API dump — bypass the Full-access OAuth picker.
+Notion auth — capture the session cookie that the dump path needs.
 
 Why this exists:
-  Notion's public OAuth API only surfaces pages where the authorizing user
-  has FULL access. In a typical company workspace a regular Member has Full
-  access only on their Private pages, so the OAuth picker hides the entire
-  teamspace tree -- which makes OAuth a non-starter for "developer dumps
-  their company's Notion as a Member". This script bypasses that by using
-  the same /api/v3 endpoints that Notion's web app uses, authenticated by
-  the user's session cookie (token_v2). Those endpoints return everything
-  the user can VIEW -- Can edit, Can comment, Can view all qualify.
+  The /api/v3 endpoints we dump from authenticate via the user's `token_v2`
+  session cookie (and `file_token` for the file proxy). This script is the
+  cross-platform "find or fetch those cookies" tool. Once it has written
+  notion_cli/notion-token-v2.txt + notion_cli/notion-file-token.txt to
+  disk, the rust binary at notion_cli/rust/target/release/notion-internal-dump
+  takes over for discover / dump / sync.
 
   ToS note: this is undocumented and arguably against Notion's terms of
   service ("scrape", "data mining"). Used responsibly (modest rate, personal
   / internal use), enforcement is rare. Don't republish, don't hammer.
 
-Phases:
-  Phase 0 — auth (run this once per session, ~30s):
-    login             RECOMMENDED. End-to-end umbrella that walks:
-                        1. saved token on disk,
-                        2. installed browser cookie stores (every
-                           Chromium-family + Firefox-family + Safari
-                           profile we can find on mac/Linux/Windows --
-                           Chrome, Edge, Brave, Arc, Atlas, Opera,
-                           Vivaldi, DDG, Sidekick, Comet, Yandex,
-                           Wavebox, Firefox + LibreWolf/Waterfox/
-                           Floorp/Zen, Safari),
-                        3. managed Chromium-family browser via CDP
-                           (any one we find -- Chrome / Edge / Brave /
-                           Arc / Atlas / Vivaldi / Opera / etc.).
-                      If no Chromium-family browser is installed we
-                      bail with clear install instructions rather than
-                      shipping our own browser binary. Keeps the CLI
-                      distribution small (no embedded Chromium /
-                      Playwright dependency).
+  History: this file used to also contain `discover`, `dump`, `grab` (and
+  the supporting search / export / poller machinery). All of that is now in
+  the rust crate at notion_cli/rust/. Keeping login + probe in python
+  because (a) browser_cookie3 has no clean rust equivalent and login is the
+  one path that has to touch a dozen platform-specific cookie stores, and
+  (b) probe is a tiny diagnostic on top of the same /api/v3 plumbing the
+  login validators use.
 
-    Escape hatches (use directly to bypass the umbrella):
-      login-chrome      Just step 3 -- managed system browser via CDP.
-      login-browser     Legacy: scan installed browsers + watch cookie
-                        files for the next write. Useful when you're
-                        already signed in to Notion in some browser
-                        but Chrome is buffering the cookie flush.
-      login-extension   Tiny Chrome MV3 extension at
-                        notion_cli/extension/ reads token_v2 +
-                        file_token via chrome.cookies API and POSTs
-                        them to a local listener.
-      login-paste       Manual fallback: paste token_v2 from DevTools.
+Subcommands:
+  login             RECOMMENDED. End-to-end umbrella that walks:
+                      1. saved token on disk,
+                      2. installed browser cookie stores (every
+                         Chromium-family + Firefox-family + Safari
+                         profile we can find on mac/Linux/Windows --
+                         Chrome, Edge, Brave, Arc, Atlas, Opera,
+                         Vivaldi, DDG, Sidekick, Comet, Yandex,
+                         Wavebox, Firefox + LibreWolf/Waterfox/
+                         Floorp/Zen, Safari),
+                      3. managed Chromium-family browser via CDP
+                         (any one we find -- Chrome / Edge / Brave /
+                         Arc / Atlas / Vivaldi / Opera / etc.).
+                    If no Chromium-family browser is installed we
+                    bail with clear install instructions rather than
+                    shipping our own browser binary. Keeps the CLI
+                    distribution small (no embedded Chromium /
+                    Playwright dependency).
 
-  Phase 1 — validate permissions (cheap, run this first):
-    discover     /api/v3/search across the chosen space; print page count.
+  Escape hatches (use directly to bypass the umbrella):
+    login-chrome      Just step 3 -- managed system browser via CDP.
+    login-browser     Legacy: scan installed browsers + watch cookie
+                      files for the next write. Useful when you're
+                      already signed in to Notion in some browser
+                      but Chrome is buffering the cookie flush.
+    login-extension   Tiny Chrome MV3 extension at
+                      notion_cli/extension/ reads token_v2 +
+                      file_token via chrome.cookies API and POSTs
+                      them to a local listener.
+    login-paste       Manual fallback: paste token_v2 from DevTools.
 
-  Phase 2 — bulk export at scale (the actual dump):
-    dump         Enqueue exportBlock for top-level containers, poll, download
-                 zips, unzip into <output>/exports/<container>/.
-    grab         All-in-one: discover → dump.
+  probe             Diagnostic: hit /api/v3 endpoints with the saved
+                    token, dump the raw responses to probe.*.json. Use
+                    when the rust dump path is failing in a way that
+                    smells server-side (schema drift, perms change).
 
-Auth (token_v2 cookie sources, priority order):
+Once `login` succeeds, run the rust binary for discover / dump / sync:
+  ./rust/target/release/notion-internal-dump grab          # one-shot
+  ./rust/target/release/notion-internal-dump sync          # incremental
+  ./rust/target/release/notion-internal-dump --help
+
+Auth (token_v2 cookie sources, priority order, used by both this script
+and the rust binary):
   1. --token-v2 flag
   2. NOTION_TOKEN_V2 env
   3. notion_cli/notion-token-v2.txt (written by any of the login-*
@@ -65,11 +73,12 @@ Auth (token_v2 cookie sources, priority order):
      Firefox, or Safari (only if browser_cookie3 is installed). Triggers
      a Touch ID / Keychain prompt on macOS the first time.
 
-file_token (used to download exported zips from file.notion.so):
+file_token (used by the rust dump path to download exported zips from
+file.notion.so):
   Saved to notion_cli/notion-file-token.txt by login, login-extension,
-  and login-chrome. If present together with notion-token-v2.txt, the
-  dump path uses both directly and skips the runtime browser scrape
-  entirely (no Touch ID prompt during dump).
+  and login-chrome. If present alongside notion-token-v2.txt the rust
+  dump uses both directly and skips the runtime browser scrape entirely
+  (no Touch ID prompt during dump).
 
 Browser-driven login profile (sticky between runs):
   ~/.cache/notion-cli-chrome      (login-chrome — system Chrome)
@@ -105,8 +114,6 @@ import time
 import urllib.error
 import urllib.request
 import webbrowser
-import zipfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -118,19 +125,10 @@ USER_AGENT = (
 )
 DEFAULT_TIMEOUT = 30
 DEFAULT_RPS = 6.0
-DEFAULT_POLL_RPS = 3.0
-# Notion's per-user concurrent server-side export task limit appears to be
-# around 4-5. Going higher just causes 429s on getTasks; the actual
-# throughput is the same or worse because workers waste cycles waiting out
-# the rate-limit cooldown. 4 is the sweet spot.
-DEFAULT_EXPORT_PARALLEL = 4
-DEFAULT_POLL_INTERVAL = 5.0
-DEFAULT_TASK_TIMEOUT = 1800
 DEFAULT_OUTPUT = "./notion-internal-dump"
 # When a 429 response has no Retry-After header, fall back to this and
-# exponentially back off from it, capped at MAX_BACKOFF_S.
+# exponentially back off from it.
 DEFAULT_BACKOFF_INITIAL_S = 5.0
-MAX_BACKOFF_S = 60.0
 
 
 # ---------------------------------------------------------------------------
@@ -1123,104 +1121,6 @@ class HandoffServer:
 
 
 # ---------------------------------------------------------------------------
-# Shared task poller
-# ---------------------------------------------------------------------------
-
-
-class TaskPool:
-    """One poller thread shared across all worker threads. Periodically
-    calls client.get_tasks([all in-flight task ids]) in a single batched
-    request, then signals the corresponding worker via threading.Event.
-
-    Replaces N independent polling loops with one, dropping polling RPS
-    from N/poll_interval to 1/poll_interval regardless of worker
-    parallelism. That largely eliminates getTasks 429s, because Notion's
-    per-user rate limit on task-related calls is the dominant constraint.
-    """
-
-    def __init__(
-        self,
-        client: "NotionInternal",
-        *,
-        poll_interval: float,
-        poll_bucket: TokenBucket,
-    ) -> None:
-        self.client = client
-        self.poll_interval = float(poll_interval)
-        self.poll_bucket = poll_bucket
-        self._lock = threading.Lock()
-        self._pending: dict[str, threading.Event] = {}
-        self._results: dict[str, dict] = {}
-        self._shutdown = threading.Event()
-        self._thread: Optional[threading.Thread] = None
-        self.poll_count = 0
-        self.batched_count = 0  # sum of per-call task-id list sizes
-
-    def start(self) -> None:
-        if self._thread is not None:
-            return
-        self._thread = threading.Thread(
-            target=self._poll_loop,
-            name="notion-task-poller",
-            daemon=True,
-        )
-        self._thread.start()
-
-    def stop(self) -> None:
-        self._shutdown.set()
-        if self._thread is not None:
-            self._thread.join(timeout=max(self.poll_interval * 2, 5.0))
-
-    def register(self, task_id: str) -> threading.Event:
-        ev = threading.Event()
-        with self._lock:
-            self._pending[task_id] = ev
-        return ev
-
-    def status(self, task_id: str) -> Optional[dict]:
-        with self._lock:
-            return self._results.get(task_id)
-
-    def _poll_loop(self) -> None:
-        backoff = self.poll_interval
-        while not self._shutdown.is_set():
-            if self._shutdown.wait(backoff):
-                return
-            with self._lock:
-                pending = list(self._pending.keys())
-            if not pending:
-                backoff = self.poll_interval
-                continue
-            self.poll_bucket.take()
-            try:
-                resp = self.client.get_tasks(pending)
-            except RateLimitedError as e:
-                # gate.trip() already happened in _post; sleep our own
-                # backoff so we don't fire again the instant the gate
-                # cooldown expires (which would be a thundering herd of
-                # one).
-                backoff = min(MAX_BACKOFF_S, max(backoff * 2, e.retry_after))
-                continue
-            except Exception:
-                backoff = self.poll_interval
-                continue
-            self.poll_count += 1
-            self.batched_count += len(pending)
-            backoff = self.poll_interval
-            with self._lock:
-                for t in resp.get("results") or []:
-                    tid = t.get("id")
-                    if not tid or tid not in self._pending:
-                        continue
-                    state = t.get("state") or "in_progress"
-                    self._results[tid] = t
-                    if state in ("success", "failure"):
-                        ev = self._pending.pop(tid, None)
-                        if ev is not None:
-                            ev.set()
-
-
-# ---------------------------------------------------------------------------
 # /api/v3 client
 # ---------------------------------------------------------------------------
 
@@ -1573,7 +1473,8 @@ def _accept_session(
     _print_session_summary(session["label"], session["uc"])
     _maybe_pick_and_save_space(session["uc"], no_pick=args.no_pick, pinned=pinned)
     print()
-    print("Done. Run `./notion_internal_dump.sh dump` (or grab) next.")
+    print("Done. Run `./rust/target/release/notion-internal-dump grab` next "
+              "(or `sync` for incremental updates after the first run).")
     return 0
 
 
@@ -1721,7 +1622,7 @@ def cmd_login_extension(args: argparse.Namespace) -> int:
             "    - did the notion.so tab actually open with "
             "?cli-handoff=...&nonce=... in the URL?\n"
             "    - is anything else blocking 127.0.0.1 on this port?\n"
-            "  fall back: ./notion_internal_dump.sh login-paste"
+            "  fall back: ./notion_auth.sh login-paste"
         )
         return 6
 
@@ -1766,7 +1667,8 @@ def cmd_login_extension(args: argparse.Namespace) -> int:
     _print_session_summary("browser extension", uc)
     _maybe_pick_and_save_space(uc, no_pick=args.no_pick, pinned=pinned)
     print()
-    print("Done. Run `./notion_internal_dump.sh dump` (or grab) next.")
+    print("Done. Run `./rust/target/release/notion-internal-dump grab` next "
+              "(or `sync` for incremental updates after the first run).")
     return 0
 
 
@@ -1933,7 +1835,8 @@ def _validate_and_save_session(
     pinned = (args.space_id or os.environ.get("NOTION_INTERNAL_SPACE_ID") or "").strip() or None
     _maybe_pick_and_save_space(uc, no_pick=args.no_pick, pinned=pinned)
     print()
-    print("Done. Run `./notion_internal_dump.sh dump` (or grab) next.")
+    print("Done. Run `./rust/target/release/notion-internal-dump grab` next "
+              "(or `sync` for incremental updates after the first run).")
     return 0
 
 
@@ -2126,7 +2029,8 @@ def cmd_login_paste(args: argparse.Namespace) -> int:
         _print_session_summary("manual paste", uc)
         _maybe_pick_and_save_space(uc, no_pick=args.no_pick, pinned=pinned)
         print()
-        print("Done. Run `./notion_internal_dump.sh dump` (or grab) next.")
+        print("Done. Run `./rust/target/release/notion-internal-dump grab` next "
+              "(or `sync` for incremental updates after the first run).")
         return 0
 
 
@@ -2403,11 +2307,11 @@ def cmd_login(args: argparse.Namespace) -> int:
         print("      Chrome:  https://www.google.com/chrome/")
         print("      Edge is preinstalled on Windows 10/11 -- did the scanner miss it?")
         print("      If so, pass --chrome-binary explicitly to login-chrome.")
-    print("    Then re-run `./notion_internal_dump.sh login`.")
+    print("    Then re-run `./notion_auth.sh login`.")
     print()
     print("  - Manual paste: open notion.so in any browser, sign in, copy")
     print("    `token_v2` from DevTools (Application -> Cookies), and run")
-    print("    `./notion_internal_dump.sh login-paste`.")
+    print("    `./notion_auth.sh login-paste`.")
     return 5
 
 
@@ -2562,182 +2466,6 @@ def cmd_login_browser_scrape(args: argparse.Namespace) -> int:
     return 4
 
 
-def _search_all(
-    client: NotionInternal,
-    space_id: str,
-    *,
-    page_size: int = 1000,
-    max_pages: int = 100000,
-    progress: bool = True,
-) -> tuple[dict[str, dict], dict[str, dict]]:
-    """Paginate /api/v3/search until exhausted or max_pages hit.
-
-    Returns (blocks_by_id, teams_by_id). Each value is the inner record dict
-    (already unwrapped from its wrapper). De-duplicates across pages.
-    """
-    blocks: dict[str, dict] = {}
-    teams: dict[str, dict] = {}
-    spaces: dict[str, dict] = {}
-
-    seen_ids: set[str] = set()
-    total_seen = 0
-    last_batch_new = page_size
-    batch = 0
-    while last_batch_new > 0 and total_seen < max_pages:
-        batch += 1
-        resp = client.search(space_id, query="", limit=page_size, variant="minimal")
-        results = resp.get("results") or []
-        if not isinstance(results, list):
-            break
-        rmap = resp.get("recordMap") or {}
-        blocks.update(_walk_record_map(rmap, "block"))
-        teams.update(_walk_record_map(rmap, "team"))
-        spaces.update(_walk_record_map(rmap, "space"))
-        new_count = 0
-        for r in results:
-            bid = r.get("id")
-            if bid and bid not in seen_ids:
-                seen_ids.add(bid)
-                new_count += 1
-        last_batch_new = new_count
-        total_seen += new_count
-        if progress:
-            print(
-                f"  [search batch {batch}] returned={len(results)} new={new_count} "
-                f"unique_pages={total_seen} blocks_in_map={len(blocks)} "
-                f"teams_in_map={len(teams)}"
-            )
-        if len(results) < page_size:
-            break
-    return blocks, teams
-
-
-def _walk_sidebar_top_level(client: NotionInternal, space_id: str) -> list[dict]:
-    """Top-level container pages = pages with parent_table in {space, team}.
-
-    We get them by paginating /api/v3/search across the space and filtering
-    the recordMap.block table. This is the only path that surfaces teamspace
-    pages reliably; getSpaces / syncRecordValues only return the user's
-    Private pages and the bare space metadata.
-    """
-    blocks, teams = _search_all(client, space_id, progress=True)
-    out: list[dict] = []
-    for bid, b in blocks.items():
-        if b.get("parent_table") == "space" and b.get("parent_id") == space_id:
-            out.append({
-                "id": bid,
-                "title": _block_title(b),
-                "kind": "space_page",
-                "type": b.get("type"),
-                "last_edited_time": b.get("last_edited_time"),
-            })
-        elif b.get("parent_table") == "team":
-            tid = b.get("parent_id") or ""
-            t = teams.get(tid) or {}
-            if t and t.get("space_id") and t["space_id"] != space_id:
-                continue
-            out.append({
-                "id": bid,
-                "title": _block_title(b),
-                "kind": "teamspace_page",
-                "type": b.get("type"),
-                "teamspace_id": tid,
-                "teamspace_name": t.get("name"),
-                "last_edited_time": b.get("last_edited_time"),
-            })
-    out.sort(key=lambda r: (r.get("kind") or "", r.get("teamspace_name") or "", r.get("title") or ""))
-    return out
-
-
-def cmd_discover(args: argparse.Namespace) -> int:
-    token = load_token_v2(args.token_v2)
-    if not token:
-        print(
-            "error: no token_v2; run "
-            "`./notion_internal_dump.sh login` first",
-            file=sys.stderr,
-        )
-        return 2
-    client = NotionInternal(token, rps=args.rps)
-    space_id, space_name = _resolve_space(
-        client, args.space_id or os.environ.get("NOTION_INTERNAL_SPACE_ID")
-    )
-    print(f"space:  {space_name!r} ({space_id})")
-
-    print(f"--- /api/v3/search (page_size {args.page_size}, max_pages {args.max_pages}) ---")
-    t0 = time.time()
-    blocks, teams = _search_all(
-        client, space_id, page_size=args.page_size, max_pages=args.max_pages
-    )
-    dt = time.time() - t0
-    print(f"blocks discovered: {len(blocks)}")
-    print(f"teams discovered:  {len(teams)}")
-    print(f"discovery wall:    {dt:.1f}s")
-
-    sidebar: list[dict] = []
-    for bid, b in blocks.items():
-        pt = b.get("parent_table")
-        pid = b.get("parent_id")
-        if pt == "space" and pid == space_id:
-            sidebar.append({
-                "id": bid,
-                "title": _block_title(b),
-                "kind": "space_page",
-                "type": b.get("type"),
-                "last_edited_time": b.get("last_edited_time"),
-            })
-        elif pt == "team":
-            t = teams.get(pid or "") or {}
-            if t.get("space_id") and t["space_id"] != space_id:
-                continue
-            sidebar.append({
-                "id": bid,
-                "title": _block_title(b),
-                "kind": "teamspace_page",
-                "type": b.get("type"),
-                "teamspace_id": pid,
-                "teamspace_name": t.get("name"),
-                "last_edited_time": b.get("last_edited_time"),
-            })
-    sidebar.sort(key=lambda r: (r.get("kind") or "", r.get("teamspace_name") or "", r.get("title") or ""))
-
-    n_private = sum(1 for s in sidebar if s.get("kind") == "space_page")
-    n_team = sum(1 for s in sidebar if s.get("kind") == "teamspace_page")
-    teamspace_names = sorted({s["teamspace_name"] for s in sidebar if s.get("teamspace_name")})
-    print()
-    print(f"sidebar (top-level containers): {len(sidebar)}  "
-          f"(space_page={n_private}  teamspace_page={n_team})")
-    if teamspace_names:
-        print(f"teamspaces represented: {', '.join(teamspace_names)}")
-    for s in sidebar:
-        ts = f" [{s['teamspace_name']}]" if s.get("teamspace_name") else ""
-        print(f"  {s.get('kind','?'):14s}  {s['id']}  {s['title']!r}{ts}")
-
-    output = Path(args.output).resolve()
-    output.mkdir(parents=True, exist_ok=True)
-    sidebar_path = output / "sidebar.jsonl"
-    with sidebar_path.open("w", encoding="utf-8") as f:
-        for s in sidebar:
-            s2 = dict(s)
-            s2["space_id"] = space_id
-            f.write(json.dumps(s2) + "\n")
-    discovery_path = output / "discovery.jsonl"
-    with discovery_path.open("w", encoding="utf-8") as f:
-        for bid, b in blocks.items():
-            f.write(json.dumps({
-                "id": bid,
-                "title": _block_title(b),
-                "type": b.get("type"),
-                "parent_table": b.get("parent_table"),
-                "parent_id": b.get("parent_id"),
-                "last_edited_time": b.get("last_edited_time"),
-                "space_id": space_id,
-            }) + "\n")
-    print(f"wrote: {sidebar_path}")
-    print(f"wrote: {discovery_path}")
-    return 0
-
-
 def cmd_probe(args: argparse.Namespace) -> int:
     """Hit each /api/v3 endpoint we care about, dump shape + sample data."""
     token = load_token_v2(args.token_v2)
@@ -2817,339 +2545,6 @@ def cmd_probe(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Phase 2: dump via exportBlock
-# ---------------------------------------------------------------------------
-
-
-def _download(
-    url: str,
-    dest: Path,
-    *,
-    timeout: int = 600,
-    browser_cookies: Optional[dict[CookieKey, dict]] = None,
-) -> int:
-    headers: dict[str, str] = {"User-Agent": USER_AGENT}
-    if browser_cookies:
-        cookie_hdr = cookie_header_for(browser_cookies, url)
-        if cookie_hdr:
-            headers["Cookie"] = cookie_hdr
-    req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=timeout) as resp, dest.open("wb") as f:
-        total = 0
-        while True:
-            chunk = resp.read(1 << 20)
-            if not chunk:
-                break
-            f.write(chunk)
-            total += len(chunk)
-    return total
-
-
-def _export_one(
-    client: NotionInternal,
-    container: dict,
-    space_id: str,
-    output_root: Path,
-    *,
-    task_pool: TaskPool,
-    task_timeout: float,
-    include_files: str,
-    unzip: bool,
-    browser_cookies: Optional[dict[CookieKey, dict]] = None,
-) -> dict:
-    label = (container.get("title") or container["id"])[:40]
-    started = time.time()
-    enqueue_backoff = DEFAULT_BACKOFF_INITIAL_S
-    enqueue_deadline = started + task_timeout
-    while True:
-        try:
-            task_id = client.enqueue_export_block(
-                container["id"],
-                space_id,
-                include_files=include_files,
-            )
-            break
-        except RateLimitedError as e:
-            if time.time() >= enqueue_deadline:
-                return {
-                    "container": container,
-                    "ok": False,
-                    "phase": "enqueue",
-                    "error": f"timed out under rate limiting: {e}",
-                    "elapsed_s": time.time() - started,
-                }
-            sleep_s = min(MAX_BACKOFF_S, max(enqueue_backoff, e.retry_after))
-            time.sleep(sleep_s)
-            enqueue_backoff = min(MAX_BACKOFF_S, enqueue_backoff * 2)
-            continue
-        except Exception as e:
-            return {
-                "container": container,
-                "ok": False,
-                "phase": "enqueue",
-                "error": str(e),
-                "elapsed_s": time.time() - started,
-            }
-    completion = task_pool.register(task_id)
-    remaining = max(0.0, started + task_timeout - time.time())
-    completed = completion.wait(timeout=remaining)
-    final = task_pool.status(task_id) or {}
-    state = final.get("state") or "in_progress"
-    status = final.get("status") or {}
-    pages_exported = status.get("pagesExported") or 0
-    if not completed:
-        return {
-            "container": container,
-            "ok": False,
-            "phase": "timeout",
-            "task_id": task_id,
-            "error": f"task did not finish in {task_timeout}s (state={state})",
-            "elapsed_s": time.time() - started,
-        }
-    if state == "failure":
-        return {
-            "container": container,
-            "ok": False,
-            "phase": "task",
-            "task_id": task_id,
-            "error": json.dumps(status)[:500],
-            "elapsed_s": time.time() - started,
-        }
-    export_url = status.get("exportURL") or ""
-    if not export_url:
-        return {
-            "container": container,
-            "ok": False,
-            "phase": "no_url",
-            "task_id": task_id,
-            "error": f"task succeeded but no exportURL (status={status})",
-            "elapsed_s": time.time() - started,
-        }
-    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in label) or container["id"]
-    dest_dir = output_root / "exports" / f"{safe}__{container['id']}"
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    zip_path = dest_dir / "export.zip"
-    try:
-        size = _download(export_url, zip_path, browser_cookies=browser_cookies)
-    except Exception as e:
-        return {
-            "container": container,
-            "ok": False,
-            "phase": "download",
-            "task_id": task_id,
-            "error": str(e),
-            "elapsed_s": time.time() - started,
-        }
-    if unzip:
-        try:
-            with zipfile.ZipFile(zip_path) as zf:
-                zf.extractall(dest_dir / "unzipped")
-        except Exception as e:
-            return {
-                "container": container,
-                "ok": True,
-                "phase": "unzip_failed",
-                "task_id": task_id,
-                "zip": str(zip_path),
-                "bytes": size,
-                "error": str(e),
-                "elapsed_s": time.time() - started,
-                "pages_exported": pages_exported,
-            }
-    return {
-        "container": container,
-        "ok": True,
-        "task_id": task_id,
-        "zip": str(zip_path),
-        "bytes": size,
-        "pages_exported": pages_exported,
-        "elapsed_s": time.time() - started,
-    }
-
-
-def cmd_dump(args: argparse.Namespace) -> int:
-    token = load_token_v2(args.token_v2)
-    if not token:
-        print(
-            "error: no token_v2; run "
-            "`./notion_internal_dump.sh login` first",
-            file=sys.stderr,
-        )
-        return 2
-    client = NotionInternal(token, rps=args.rps)
-    space_id, space_name = _resolve_space(
-        client, args.space_id or os.environ.get("NOTION_INTERNAL_SPACE_ID")
-    )
-    print(f"space:  {space_name!r} ({space_id})")
-
-    saved = saved_credentials_as_browser_cookies()
-    if saved:
-        browser_cookies = saved
-        print(
-            f"auth: using saved token_v2 + file_token "
-            f"(no browser cookie scrape, no Touch ID)"
-        )
-    else:
-        browser_cookies = load_browser_cookies()
-        has_file_token = any(
-            c["name"] == "file_token" for c in browser_cookies.values()
-        )
-        if not has_file_token:
-            print(
-                "WARNING: no `file_token` cookie found in any browser "
-                "profile. exportBlock tasks will succeed but downloading "
-                "the resulting zip from file.notion.so will return HTTP "
-                "403 — the file proxy auths via `file_token` (HttpOnly, "
-                ".notion.so, path /f) which only exists in your logged-in "
-                "Chrome session.",
-                file=sys.stderr,
-            )
-            print(
-                "Quickest fix: run "
-                "`./notion_internal_dump.sh login-extension` (the helper "
-                "extension reads file_token directly from your browser "
-                "without the Touch ID prompt). Or open notion.so in "
-                "Chrome, sign in fully, then re-run.",
-                file=sys.stderr,
-            )
-        else:
-            n_profiles_relevant = sum(
-                1
-                for c in browser_cookies.values()
-                if c["name"] in ("token_v2", "file_token", "p_sync_session")
-            )
-            print(
-                f"browser cookies loaded: {len(browser_cookies)} total "
-                f"({n_profiles_relevant} session-bearing)"
-            )
-
-    output = Path(args.output).resolve()
-    output.mkdir(parents=True, exist_ok=True)
-
-    sidebar = _walk_sidebar_top_level(client, space_id)
-    if args.only:
-        wanted = set(args.only.split(","))
-        sidebar = [s for s in sidebar if s["id"] in wanted or (s.get("title") in wanted)]
-    if args.skip:
-        skip = set(args.skip.split(","))
-        sidebar = [s for s in sidebar if s["id"] not in skip and (s.get("title") not in skip)]
-    if not sidebar:
-        print("nothing to export (sidebar empty after filters)", file=sys.stderr)
-        return 3
-
-    print(
-        f"exporting {len(sidebar)} container(s) with {args.parallel} worker(s) "
-        f"+ 1 shared poller @ {args.poll_interval:.1f}s"
-    )
-    poll_bucket = TokenBucket(args.poll_rps)
-    task_pool = TaskPool(
-        client, poll_interval=args.poll_interval, poll_bucket=poll_bucket
-    )
-    task_pool.start()
-    results: list[dict] = []
-    started = time.time()
-    summary_path = output / "dump.summary.jsonl"
-    summary_path.unlink(missing_ok=True)
-    try:
-        with ThreadPoolExecutor(max_workers=args.parallel) as ex:
-            futs = {
-                ex.submit(
-                    _export_one,
-                    client,
-                    c,
-                    space_id,
-                    output,
-                    task_pool=task_pool,
-                    task_timeout=args.task_timeout,
-                    include_files=args.include_files,
-                    unzip=not args.no_unzip,
-                    browser_cookies=browser_cookies,
-                ): c
-                for c in sidebar
-            }
-            done = 0
-            counter_w = len(str(len(sidebar)))
-            for f in as_completed(futs):
-                res = f.result()
-                results.append(res)
-                done += 1
-                with summary_path.open("a", encoding="utf-8") as sf:
-                    sf.write(json.dumps(res) + "\n")
-                label = (res["container"].get("title") or res["container"]["id"])[:40]
-                tag = "OK  " if res.get("ok") else "FAIL"
-                title_field = f"{label:<40}"
-                if res.get("ok"):
-                    n = int(res.get("pages_exported", 0) or 0)
-                    pages_str = f"{n:>3} {'page ' if n == 1 else 'pages'}"
-                    size_mb = res.get("bytes", 0) / 1e6
-                    extra = (
-                        f"  {pages_str}"
-                        f"  {size_mb:>5.1f} MB"
-                        f"  {res['elapsed_s']:>5.1f}s"
-                    )
-                else:
-                    err = (res.get("error") or "")[:100]
-                    extra = f"  phase={res.get('phase')} err={err}"
-                print(
-                    f"[{done:>{counter_w}}/{len(sidebar)}] {tag}  "
-                    f"{title_field}{extra}"
-                )
-    finally:
-        task_pool.stop()
-
-    elapsed = time.time() - started
-    ok = sum(1 for r in results if r.get("ok"))
-    fail = len(results) - ok
-    total_bytes = sum(r.get("bytes", 0) for r in results if r.get("ok"))
-    pages = sum(r.get("pages_exported", 0) for r in results if r.get("ok"))
-    print()
-    print("--- dump summary ---")
-    print(f"containers:  ok={ok}  fail={fail}")
-    print(f"pages:       {pages} (server-reported)")
-    print(f"zips total:  {total_bytes/1e6:.2f} MB")
-    print(f"wall time:   {elapsed:.1f}s")
-    if elapsed > 0 and total_bytes > 0:
-        print(
-            f"throughput:  {(total_bytes/1e6)/elapsed:.2f} MB/s "
-            f"({pages/elapsed:.1f} pages/s)"
-        )
-    cooldown_pct = 100.0 * client.gate.total_wait_s / max(elapsed, 1e-6)
-    print(
-        f"rate-limit:  {client.gate.trips} trip(s), "
-        f"{client.gate.total_wait_s:.1f}s total cooldown "
-        f"({cooldown_pct:.1f}% of wall)"
-    )
-    avg_batch = (
-        task_pool.batched_count / task_pool.poll_count
-        if task_pool.poll_count else 0.0
-    )
-    naive_polls = int(elapsed / max(args.poll_interval, 1e-6)) * args.parallel
-    print(
-        f"poller:      {task_pool.poll_count} batched call(s), "
-        f"avg {avg_batch:.1f} task ids/call "
-        f"(vs ~{naive_polls} with per-worker polling)"
-    )
-    if client.gate.trips > 0 and args.parallel > 2:
-        print(
-            f"  hint: try --parallel {max(2, args.parallel // 2)} next time "
-            f"to reduce enqueue rate-limit pressure further."
-        )
-    print(f"summary:     {summary_path}")
-    return 0 if fail == 0 else 4
-
-
-def cmd_grab(args: argparse.Namespace) -> int:
-    print()
-    print("=== Phase 1/2: discover ===")
-    rc = cmd_discover(args)
-    if rc != 0:
-        return rc
-    print()
-    print("=== Phase 2/2: dump ===")
-    return cmd_dump(args)
-
-
-# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -3157,19 +2552,6 @@ def cmd_grab(args: argparse.Namespace) -> int:
 def _add_common_token(p: argparse.ArgumentParser) -> None:
     p.add_argument("--token-v2", default="", help="Notion session cookie (overrides env / file)")
     p.add_argument("--space-id", default="", help="space id to target (skip prompt)")
-
-
-def _add_dump_flags(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--output", default=DEFAULT_OUTPUT, help="output directory")
-    p.add_argument("--rps", type=float, default=DEFAULT_RPS, help=f"req/s for /api/v3 (default {DEFAULT_RPS})")
-    p.add_argument("--poll-rps", type=float, default=DEFAULT_POLL_RPS, help=f"req/s for getTasks polling (default {DEFAULT_POLL_RPS})")
-    p.add_argument("--parallel", type=int, default=DEFAULT_EXPORT_PARALLEL, help=f"concurrent export tasks (default {DEFAULT_EXPORT_PARALLEL}). Notion's per-user concurrent task limit is around 4-5; going higher just causes 429s and isn't actually faster.")
-    p.add_argument("--poll-interval", type=float, default=DEFAULT_POLL_INTERVAL, help=f"seconds between getTasks polls per task (default {DEFAULT_POLL_INTERVAL})")
-    p.add_argument("--task-timeout", type=float, default=DEFAULT_TASK_TIMEOUT, help=f"max seconds to wait for a single export task (default {DEFAULT_TASK_TIMEOUT})")
-    p.add_argument("--include-files", default="everything", choices=["everything", "no_files"], help="include file attachments in the zip")
-    p.add_argument("--no-unzip", action="store_true", help="don't auto-unzip downloaded zips")
-    p.add_argument("--only", default="", help="comma-separated container ids/titles to include")
-    p.add_argument("--skip", default="", help="comma-separated container ids/titles to skip")
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -3358,31 +2740,16 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     p_chrome.set_defaults(func=cmd_login_chrome)
 
-    p_disc = sub.add_parser("discover", help="walk sidebar containers + (optional) /api/v3/search")
-    _add_common_token(p_disc)
-    p_disc.add_argument("--output", default=DEFAULT_OUTPUT, help="output directory")
-    p_disc.add_argument("--rps", type=float, default=DEFAULT_RPS, help="req/s")
-    p_disc.add_argument("--page-size", type=int, default=300, help="search batch size (Notion may cap at 1000)")
-    p_disc.add_argument("--max-pages", type=int, default=100000, help="cap on pages discovered via search")
-    p_disc.set_defaults(func=cmd_discover)
-
-    p_probe = sub.add_parser("probe", help="diagnostic: dump raw responses from key endpoints")
+    p_probe = sub.add_parser(
+        "probe",
+        help="diagnostic: hit /api/v3 endpoints with the saved token and dump "
+             "the raw responses. Useful when something has shifted server-side "
+             "and the rust dump path is failing.",
+    )
     _add_common_token(p_probe)
     p_probe.add_argument("--output", default=DEFAULT_OUTPUT, help="where to write probe.*.json")
     p_probe.add_argument("--rps", type=float, default=DEFAULT_RPS, help="req/s")
     p_probe.set_defaults(func=cmd_probe)
-
-    p_dump = sub.add_parser("dump", help="exportBlock per top-level container, download zips")
-    _add_common_token(p_dump)
-    _add_dump_flags(p_dump)
-    p_dump.set_defaults(func=cmd_dump)
-
-    p_grab = sub.add_parser("grab", help="discover + dump (the all-in-one)")
-    _add_common_token(p_grab)
-    p_grab.add_argument("--page-size", type=int, default=300)
-    p_grab.add_argument("--max-pages", type=int, default=100000)
-    _add_dump_flags(p_grab)
-    p_grab.set_defaults(func=cmd_grab)
 
     args = parser.parse_args(argv)
     return args.func(args)
