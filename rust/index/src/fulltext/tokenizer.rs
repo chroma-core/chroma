@@ -4,7 +4,7 @@ use tantivy::tokenizer::{
 };
 use thiserror::Error;
 
-const MIN_TOKEN_LENGTH: usize = 2;
+const MIN_TOKEN_LENGTH: usize = 3;
 const MAX_TOKEN_LENGTH: usize = 128;
 
 /// `TokenFilter` that removes tokens shorter than a given number of bytes.
@@ -95,7 +95,7 @@ pub struct FullTextQuery {
 /// Word-based text analyzer for the full-text index.
 ///
 /// Pipeline: `SimpleTokenizer` (split on non-alphanumeric) → `LowerCaser`
-/// → `AsciiFoldingFilter` (Unicode normalization) → `RemoveShortFilter(2)`
+/// → `AsciiFoldingFilter` (Unicode normalization) → `RemoveShortFilter(3)`
 /// → `RemoveLongFilter(128)`.
 #[derive(Clone)]
 pub struct WordAnalyzer {
@@ -192,9 +192,10 @@ mod tests {
     #[test]
     fn test_short_tokens_removed() {
         let mut a = WordAnalyzer::new();
+        // "a" (1), "is" (2) removed; "the" (3) kept with min_length=3
         assert_eq!(
             a.tokenize("a is the big house"),
-            vec!["is", "the", "big", "house"]
+            vec!["the", "big", "house"]
         );
     }
 
@@ -360,8 +361,9 @@ mod tests {
     }
 
     #[test]
-    fn test_query_accept_two_chars() {
-        assert!(WordAnalyzer::new().tokenize_query("ab").is_ok());
+    fn test_query_reject_two_chars() {
+        // "ab" is 2 chars, below MIN_TOKEN_LENGTH=3.
+        assert!(WordAnalyzer::new().tokenize_query("ab").is_err());
     }
 
     #[test]
