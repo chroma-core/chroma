@@ -1,0 +1,49 @@
+[workspace]
+# Self-contained: deliberately not part of the chroma workspace at
+# /Users/chroma/workspace/chroma/Cargo.toml. notion_cli/rust ships its own
+# Cargo.lock and target/ so it can be vendored / built independently.
+
+[package]
+name = "notion-internal-dump"
+version = "0.1.0"
+edition = "2021"
+description = "Rust port of the notion_internal_dump.py daemon path: incremental discover + dump + sync + per-file Merkle changelog. Login still lives in Python (notion_internal_dump.py login)."
+publish = false
+
+[[bin]]
+name = "notion-internal-dump"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+thiserror = "1"
+clap = { version = "4", features = ["derive", "env"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs", "signal"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "gzip", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+rs_merkle = "1.5"
+hex = "0.4"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+chrono = { version = "0.4", features = ["serde"] }
+walkdir = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dirs = "5"
+parking_lot = "0.12"
+futures = "0.3"
+url = "2"
+urlencoding = "2"
+bytes = "1"
+uuid = { version = "1", features = ["v4"] }
+indicatif = "0.17"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 1
