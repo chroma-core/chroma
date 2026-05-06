@@ -564,7 +564,10 @@ class CollectionCommon(Generic[ClientT]):
         if name:
             self._model["name"] = name
         if metadata:
-            self._model["metadata"] = metadata
+            # Merge into existing metadata rather than replacing it entirely,
+            # consistent with how record-level metadata updates work (#1247).
+            existing = self._model.get("metadata") or {}
+            self._model["metadata"] = {**existing, **metadata}
         if configuration:
             self._model.set_configuration(
                 overwrite_collection_configuration(
