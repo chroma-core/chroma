@@ -349,6 +349,10 @@ pub struct CompactionServiceConfig {
     #[serde(default)]
     pub fragment_fetcher_cache: chroma_cache::CacheConfig,
 
+    /// The configuration for the work queue service.
+    #[serde(default)]
+    pub work_queue: crate::work_queue::config::WorkQueueConfig,
+
     /// Optional separate storage configuration for fragment pulling.
     ///
     /// When set, the fragment fetcher uses this storage (with its own admission
