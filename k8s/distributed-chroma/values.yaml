@@ -61,13 +61,20 @@ compactionService:
   image:
     repository: 'compaction-service'
     tag: 'latest'
+  env:
+  cache:
+    hostPath: '/local/cache/chroma-compaction-service'
+    type: DirectoryOrCreate
+    mountPath: '/cache/'
+    additionalVolumes: []
+  replicaCount: 2
 workQueueService:
   image:
     repository: 'work-queue-service'
     tag: 'latest'
   env:
   cache:
-    hostPath: '/local/cache/chroma-compaction-service'
+    hostPath: '/local/cache/chroma-work-queue-service'
     type: DirectoryOrCreate
     mountPath: '/cache/'
     additionalVolumes: []
