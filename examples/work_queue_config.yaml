@@ -4,6 +4,5 @@ work_queue:
   persistence:
     time_threshold_seconds: 5
     operation_threshold: 10
-    memory_threshold: 100
   use_sysdb_filtering: false
   grpc_port: 50054

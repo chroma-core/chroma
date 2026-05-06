@@ -233,7 +233,7 @@ compaction_service:
     grpc_port: 50054
     storage_path: "workqueue_state.parquet"
     persistence:
-      time_threshold_seconds: 30
+      time_threshold_seconds: 2
       operation_threshold: 100
 log_service:
   num_records_before_backpressure: 100000
