@@ -143,7 +143,7 @@ impl FullTextBitmapWriter {
         bucket_ids.sort_unstable();
 
         for bucket_id in bucket_ids {
-            let Some(delta) = self.delta.get(&bucket_id) else {
+            let Some((_, delta)) = self.delta.remove(&bucket_id) else {
                 continue;
             };
 
@@ -155,11 +155,9 @@ impl FullTextBitmapWriter {
             bitmap |= &delta.adds;
 
             if bitmap.is_empty() {
-                // Bucket became empty after deletes — remove from blockfile.
-                let _ = self
-                    .bitmap_writer
+                self.bitmap_writer
                     .delete::<u32, RoaringBitmap>("", bucket_id)
-                    .await;
+                    .await?;
             } else {
                 self.bitmap_writer.set("", bucket_id, bitmap).await?;
             }
