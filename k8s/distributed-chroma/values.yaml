@@ -61,6 +61,10 @@ compactionService:
   image:
     repository: 'compaction-service'
     tag: 'latest'
+workQueueService:
+  image:
+    repository: 'work-queue-service'
+    tag: 'latest'
   env:
   cache:
     hostPath: '/local/cache/chroma-compaction-service'

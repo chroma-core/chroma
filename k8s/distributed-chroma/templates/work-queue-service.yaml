@@ -1,0 +1,107 @@
+{{if .Values.workQueueService.configuration}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: work-queue-service-config
+  namespace: {{ .Values.namespace }}
+data:
+  config.yaml: |
+{{ .Values.workQueueService.configuration | indent 4 }}
+---
+{{ end }}
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: work-queue-service
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: {{ .Values.workQueueService.replicaCount }}
+  selector:
+    matchLabels:
+      app: work-queue-service
+  template:
+    metadata:
+      labels:
+        app: work-queue-service
+        member-type: work-queue-service
+    spec:
+      serviceAccountName: work-queue-service-serviceaccount
+      volumes:
+        {{if .Values.workQueueService.configuration}}
+        - name: work-queue-service-config
+          configMap:
+            name: work-queue-service-config
+        {{ end }}
+        {{if .Values.workQueueService.cache}}
+        - name: work-queue-service-cache
+          hostPath:
+            path: {{ .Values.workQueueService.cache.hostPath }}
+            type: {{ .Values.workQueueService.cache.type }}
+        {{ end }}
+      containers:
+        - name: work-queue-service
+          image: "{{ .Values.workQueueService.image.repository }}:{{ .Values.workQueueService.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          readinessProbe:
+            periodSeconds: 1
+            failureThreshold: 30 # 30 seconds to allow for initial startup
+            grpc:
+              port: 50054
+          volumeMounts:
+            {{if .Values.workQueueService.configuration}}
+            - name: work-queue-service-config
+              mountPath: /config/
+            {{ end }}
+            {{if .Values.workQueueService.cache}}
+            - name: work-queue-service-cache
+              mountPath: {{ .Values.workQueueService.cache.mountPath }}
+            {{ end }}
+          ports:
+            - containerPort: 50054
+            - containerPort: 6060
+              protocol: TCP
+              name: pprof
+          env:
+            {{if .Values.workQueueService.configuration}}
+            - name: CONFIG_PATH
+              value: /config/config.yaml
+            {{ end }}
+            {{ range .Values.workQueueService.env }}
+            - name: {{ .name }}
+              # TODO properly use flow control here to check which type of value we need.
+{{ .value | nindent 14 }}
+            {{ end }}
+            {{ if .Values.workQueueService.jemallocConfig }}
+            - name: _RJEM_MALLOC_CONF
+              value: {{ .Values.workQueueService.jemallocConfig }}
+            {{ end }}
+            - name: CHROMA_WORK_QUEUE_SERVICE__MY_MEMBER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          {{ if .Values.workQueueService.resources }}
+          resources:
+            limits:
+              cpu: {{ .Values.workQueueService.resources.limits.cpu }}
+              memory: {{ .Values.workQueueService.resources.limits.memory }}
+            requests:
+              cpu: {{ .Values.workQueueService.resources.requests.cpu }}
+              memory: {{ .Values.workQueueService.resources.requests.memory }}
+          {{ end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: work-queue-service
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    app: work-queue-service
+  clusterIP: None
+  ports:
+    - name: grpc
+      port: 50054
+      targetPort: 50054

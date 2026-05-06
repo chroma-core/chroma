@@ -8,9 +8,8 @@ mod tests {
     async fn test_work_queue_basic_operations() {
         let storage = Storage::for_test();
         let config = config::WorkQueueConfig::default();
-        let my_shard_id = "test-shard-1".to_string();
 
-        let mut manager = WorkQueueManager::new(storage, config, my_shard_id);
+        let mut manager = WorkQueueManager::new(storage, config);
 
         // Test push work
         let (tx, rx) = tokio::sync::oneshot::channel();

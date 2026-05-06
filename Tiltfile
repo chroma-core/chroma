@@ -134,6 +134,22 @@ else:
 
 if config.tilt_subcommand == "ci":
   custom_build(
+    'work-queue-service',
+    'docker image tag work-queue-service:ci $EXPECTED_REF',
+    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'],
+    disable_push=True
+  )
+else:
+  docker_build(
+    'work-queue-service',
+    '.',
+    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
+    dockerfile='./rust/Dockerfile',
+    target='work_queue_service'
+  )
+
+if config.tilt_subcommand == "ci":
+  custom_build(
     'garbage-collector',
     'docker image tag garbage-collector:ci $EXPECTED_REF',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'],
@@ -233,6 +249,7 @@ k8s_resource(
     'pod-watcher:Role:chroma',
     'query-service-memberlist:MemberList:chroma',
     'compaction-service-memberlist:MemberList:chroma',
+    'work-queue-service-memberlist:MemberList:chroma',
     'garbage-collection-service-memberlist:MemberList:chroma',
     'rust-log-service-memberlist:MemberList:chroma',
 
@@ -240,6 +257,7 @@ k8s_resource(
     'sysdb-serviceaccount-rolebinding:RoleBinding:chroma',
     'sysdb-query-service-memberlist-binding:RoleBinding:chroma',
     'sysdb-compaction-service-memberlist-binding:RoleBinding:chroma',
+    'sysdb-work-queue-service-memberlist-binding:RoleBinding:chroma',
     'sysdb-rust-log-service-memberlist-binding:RoleBinding:chroma',
 
     'query-service-serviceaccount:ServiceAccount:chroma',
@@ -253,6 +271,12 @@ k8s_resource(
     'compaction-service-memberlist-readerwriter-binding:RoleBinding:chroma',
     'compaction-service-serviceaccount:ServiceAccount:chroma',
     'compaction-service-serviceaccount-rolebinding:RoleBinding:chroma',
+
+    'work-queue-service-memberlist-readerwriter:Role:chroma',
+    'work-queue-service-work-queue-service-memberlist-binding:RoleBinding:chroma',
+    'work-queue-service-memberlist-readerwriter-binding:RoleBinding:chroma',
+    'work-queue-service-serviceaccount:ServiceAccount:chroma',
+    'work-queue-service-serviceaccount-rolebinding:RoleBinding:chroma',
 
     'rust-frontend-service-serviceaccount:ServiceAccount:chroma',
     'rust-frontend-service-rolebinding:RoleBinding:chroma',
@@ -277,6 +301,7 @@ k8s_resource(
     'pod-watcher:Role:chroma2',
     'query-service-memberlist:MemberList:chroma2',
     'compaction-service-memberlist:MemberList:chroma2',
+    'work-queue-service-memberlist:MemberList:chroma2',
     'garbage-collection-service-memberlist:MemberList:chroma2',
     'rust-log-service-memberlist:MemberList:chroma2',
 
@@ -284,6 +309,7 @@ k8s_resource(
     'sysdb-serviceaccount-rolebinding:RoleBinding:chroma2',
     'sysdb-query-service-memberlist-binding:RoleBinding:chroma2',
     'sysdb-compaction-service-memberlist-binding:RoleBinding:chroma2',
+    'sysdb-work-queue-service-memberlist-binding:RoleBinding:chroma2',
     'sysdb-rust-log-service-memberlist-binding:RoleBinding:chroma2',
 
     'query-service-serviceaccount:ServiceAccount:chroma2',
@@ -297,6 +323,12 @@ k8s_resource(
     'compaction-service-memberlist-readerwriter-binding:RoleBinding:chroma2',
     'compaction-service-serviceaccount:ServiceAccount:chroma2',
     'compaction-service-serviceaccount-rolebinding:RoleBinding:chroma2',
+
+    'work-queue-service-memberlist-readerwriter:Role:chroma2',
+    'work-queue-service-work-queue-service-memberlist-binding:RoleBinding:chroma2',
+    'work-queue-service-memberlist-readerwriter-binding:RoleBinding:chroma2',
+    'work-queue-service-serviceaccount:ServiceAccount:chroma2',
+    'work-queue-service-serviceaccount-rolebinding:RoleBinding:chroma2',
 
     'rust-frontend-service-serviceaccount:ServiceAccount:chroma2',
     'rust-frontend-service-rolebinding:RoleBinding:chroma2',
@@ -321,6 +353,7 @@ k8s_resource('rust-sysdb-service:deployment:chroma', resource_deps = ['k8s_setup
 k8s_resource('rust-frontend-service:deployment:chroma', resource_deps=['sysdb:deployment:chroma', 'rust-log-service:statefulset:chroma'], labels=["chroma"], port_forwards='8000:8000')
 k8s_resource('query-service:statefulset:chroma', resource_deps=['sysdb:deployment:chroma'], labels=["chroma"], port_forwards='50053:50051')
 k8s_resource('compaction-service:statefulset:chroma', resource_deps=['sysdb:deployment:chroma'], labels=["chroma"], port_forwards="50057:50051")
+k8s_resource('work-queue-service:statefulset:chroma', resource_deps=['sysdb:deployment:chroma'], labels=["chroma"], port_forwards="50058:50054")
 k8s_resource('garbage-collector:statefulset:chroma', resource_deps=['k8s_setup', 'minio-deployment', 'rust-log-service:statefulset:chroma'], labels=["chroma"], port_forwards='50055:50055')
 
 # Production Chroma 2
@@ -334,6 +367,7 @@ k8s_resource('rust-sysdb-service:deployment:chroma2', resource_deps=['k8s_setup2
 k8s_resource('rust-frontend-service:deployment:chroma2', resource_deps=['sysdb:deployment:chroma2', 'rust-log-service:statefulset:chroma2', 'rust-frontend-service:deployment:chroma'], labels=["chroma2"], port_forwards='8001:8000')
 k8s_resource('query-service:statefulset:chroma2', resource_deps=['sysdb:deployment:chroma2', 'query-service:statefulset:chroma'], labels=["chroma2"], port_forwards='60053:50051')
 k8s_resource('compaction-service:statefulset:chroma2', resource_deps=['sysdb:deployment:chroma2', 'compaction-service:statefulset:chroma'], labels=["chroma2"])
+k8s_resource('work-queue-service:statefulset:chroma2', resource_deps=['sysdb:deployment:chroma2', 'work-queue-service:statefulset:chroma'], labels=["chroma2"])
 k8s_resource('garbage-collector:statefulset:chroma2', resource_deps=['k8s_setup2', 'minio-deployment', 'rust-log-service:statefulset:chroma2', 'garbage-collector:statefulset:chroma'], labels=["chroma2"], port_forwards='60055:50055')
 
 # Observability
@@ -363,6 +397,7 @@ groups = {
     'rust-frontend-service:deployment:chroma',
     'query-service:statefulset:chroma',
     'compaction-service:statefulset:chroma',
+    'work-queue-service:statefulset:chroma',
     'garbage-collector:statefulset:chroma',
     'jaeger',
     'grafana',
@@ -382,6 +417,7 @@ groups = {
     'rust-frontend-service:deployment:chroma2',
     'query-service:statefulset:chroma2',
     'compaction-service:statefulset:chroma2',
+    'work-queue-service:statefulset:chroma2',
     'garbage-collector:statefulset:chroma2',
     'spanner-deployment',
   ],
