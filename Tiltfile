@@ -196,7 +196,7 @@ if os.environ.get('ADDITIONAL_DISTRIBUTED_CHROMA_VALUES'):
 # We manually call helm template so we can call set-file
 k8s_yaml(
   local(
-    'helm template --set-file rustFrontendService.configuration=' + rfe_config_file + ',rustLogService.configuration=' + worker_config_file + ',heapTenderService.configuration=' + worker_config_file + ',compactionService.configuration=' + worker_config_file + ',queryService.configuration=' + worker_config_file + ',garbageCollector.configuration=' + worker_config_file + ',rustSysdbService.configuration=' + worker_config_file + ' --values ' + distributed_chroma_values + ' k8s/distributed-chroma'
+    'helm template --set-file rustFrontendService.configuration=' + rfe_config_file + ',rustLogService.configuration=' + worker_config_file + ',heapTenderService.configuration=' + worker_config_file + ',compactionService.configuration=' + worker_config_file + ',queryService.configuration=' + worker_config_file + ',garbageCollector.configuration=' + worker_config_file + ',rustSysdbService.configuration=' + worker_config_file + ',workQueueService.configuration=' + worker_config_file + ' --values ' + distributed_chroma_values + ' k8s/distributed-chroma'
   ),
 )
 
@@ -208,7 +208,7 @@ if os.environ.get('ADDITIONAL_DISTRIBUTED_CHROMA2_VALUES'):
 
 k8s_yaml(
   local(
-    'helm template --set-file rustFrontendService.configuration=' + rfe2_config_file + ',rustLogService.configuration=rust/worker/chroma_mcmr2.yaml,heapTenderService.configuration=rust/worker/chroma_mcmr2.yaml,compactionService.configuration=rust/worker/chroma_mcmr2.yaml,queryService.configuration=rust/worker/chroma_mcmr2.yaml,garbageCollector.configuration=rust/worker/chroma_mcmr2.yaml,rustSysdbService.configuration=rust/worker/chroma_mcmr2.yaml,rustSysdbMigration.configuration=rust/worker/chroma_mcmr2.yaml --values ' + distributed_chroma2_values + ' k8s/distributed-chroma'
+    'helm template --set-file rustFrontendService.configuration=' + rfe2_config_file + ',rustLogService.configuration=rust/worker/chroma_mcmr2.yaml,heapTenderService.configuration=rust/worker/chroma_mcmr2.yaml,compactionService.configuration=rust/worker/chroma_mcmr2.yaml,queryService.configuration=rust/worker/chroma_mcmr2.yaml,garbageCollector.configuration=rust/worker/chroma_mcmr2.yaml,rustSysdbService.configuration=rust/worker/chroma_mcmr2.yaml,workQueueService.configuration=rust/worker/chroma_mcmr2.yaml,rustSysdbMigration.configuration=rust/worker/chroma_mcmr2.yaml --values ' + distributed_chroma2_values + ' k8s/distributed-chroma'
   ),
 )
 
