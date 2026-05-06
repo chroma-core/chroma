@@ -230,7 +230,7 @@ compaction_service:
   work_queue:
     enabled: true
     grpc_port: 50054
-    storage_path: "s3://chroma/work-queue/queue.parquet"
+    storage_path: "workqueue_state.parquet"
     persistence:
       time_threshold_seconds: 30
       operation_threshold: 100
