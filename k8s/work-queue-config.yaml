@@ -8,8 +8,7 @@ data:
       enabled: false
       storage_path: "s3://chroma/work-queue/queue.parquet"
       persistence:
-        time_threshold_seconds: 30
+        time_threshold_seconds: 2
         operation_threshold: 100
-        memory_threshold: 10000
       use_sysdb_filtering: false
       grpc_port: 50054
