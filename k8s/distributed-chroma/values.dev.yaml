@@ -43,6 +43,21 @@ compactionService:
   env:
     - name: RUST_BACKTRACE
       value: 'value: "1"'
+workQueueService:
+  configuration: |
+    compaction_service:
+      work_queue:
+        enabled: true
+        grpc_port: 50054
+        storage_path: "s3://chroma/work-queue/queue.parquet"
+        persistence:
+          time_threshold_seconds: 30
+          operation_threshold: 100
+          pending_threshold: 10000
+  env:
+    - name: RUST_BACKTRACE
+      value: 'value: "1"'
+  replicaCount: 1
   jemallocConfig: "prof:true,prof_active:true,lg_prof_sample:19"
   resources:
     limits:

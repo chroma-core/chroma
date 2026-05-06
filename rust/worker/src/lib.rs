@@ -1,14 +1,13 @@
 mod compactor;
 mod server;
 mod utils;
-pub(crate) mod work_queue;
+pub mod work_queue;
 
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_memberlist::memberlist_provider::{
     CustomResourceMemberlistProvider, MemberlistProvider,
 };
-use chroma_storage::Storage;
 use clap::Parser;
 use compactor::compaction_client::CompactionClient;
 use compactor::compaction_server::CompactionServer;
@@ -97,7 +96,6 @@ pub async fn compaction_service_entrypoint() {
     };
 
     let config = root_config.compaction_service.clone();
-    let work_queue_config = root_config.work_queue.clone();
     let registry = Registry::new();
 
     chroma_tracing::init_otel_tracing(
