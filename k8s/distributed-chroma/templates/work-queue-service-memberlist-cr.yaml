@@ -1,15 +1,10 @@
-apiVersion: v1
+apiVersion: chroma.cluster/v1
 kind: MemberList
 metadata:
   name: work-queue-service-memberlist
   namespace: {{ .Values.namespace }}
 spec:
-  memberSelector:
-    matchLabels:
-      member-type: work-queue-service
-  memberName:
-    valueFrom:
-      fieldPath: metadata.name
+  members:
 ---
 apiVersion: v1
 kind: ServiceAccount
