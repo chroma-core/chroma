@@ -275,6 +275,7 @@ k8s_resource(
     'work-queue-service-memberlist-readerwriter:Role:chroma',
     'work-queue-service-work-queue-service-memberlist-binding:RoleBinding:chroma',
     'work-queue-service-memberlist-readerwriter-binding:RoleBinding:chroma',
+    'work-queue-service-compaction-service-memberlist-binding:RoleBinding:chroma',
     'work-queue-service-serviceaccount:ServiceAccount:chroma',
     'work-queue-service-serviceaccount-rolebinding:RoleBinding:chroma',
 
@@ -327,6 +328,7 @@ k8s_resource(
     'work-queue-service-memberlist-readerwriter:Role:chroma2',
     'work-queue-service-work-queue-service-memberlist-binding:RoleBinding:chroma2',
     'work-queue-service-memberlist-readerwriter-binding:RoleBinding:chroma2',
+    'work-queue-service-compaction-service-memberlist-binding:RoleBinding:chroma2',
     'work-queue-service-serviceaccount:ServiceAccount:chroma2',
     'work-queue-service-serviceaccount-rolebinding:RoleBinding:chroma2',
 

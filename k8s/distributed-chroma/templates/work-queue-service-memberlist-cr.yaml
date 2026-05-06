@@ -78,3 +78,19 @@ subjects:
   - kind: ServiceAccount
     name: sysdb-serviceaccount
     namespace: {{ .Values.namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  # This allows the work-queue-service-serviceaccount to read
+  # the compaction-service-memberlist for memberlist provider.
+  name: work-queue-service-compaction-service-memberlist-binding
+  namespace: {{ .Values.namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: compaction-service-memberlist-readerwriter
+subjects:
+  - kind: ServiceAccount
+    name: work-queue-service-serviceaccount
+    namespace: {{ .Values.namespace }}
