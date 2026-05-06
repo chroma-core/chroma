@@ -235,7 +235,6 @@ compaction_service:
     persistence:
       time_threshold_seconds: 30
       operation_threshold: 100
-      pending_threshold: 10000
 log_service:
   num_records_before_backpressure: 100000
   record_count_threshold: 10
