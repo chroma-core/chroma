@@ -8,7 +8,7 @@ enum WorkResponse {
 }
 use async_trait::async_trait;
 use chroma_error::ChromaError;
-use chroma_storage::{GetOptions, PutMode, PutOptions, Storage};
+use chroma_storage::{ETag, GetOptions, PutMode, PutOptions, Storage};
 use chroma_system::{Component, ComponentContext, ComponentRuntime, Handler};
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
 use std::time::Duration;
