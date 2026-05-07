@@ -6,7 +6,7 @@ use worker::work_queue::work_queue_client::WorkQueueClient;
 #[command(about = "CLI for interacting with the work queue service", long_about = None)]
 struct Cli {
     /// Work queue service endpoint
-    #[arg(short, long, default_value = "http://localhost:50054")]
+    #[arg(short, long, default_value = "http://localhost:50058")]
     endpoint: String,
 
     #[command(subcommand)]

@@ -73,11 +73,6 @@ workQueueService:
     repository: 'work-queue-service'
     tag: 'latest'
   env:
-  cache:
-    hostPath: '/local/cache/chroma-work-queue-service'
-    type: DirectoryOrCreate
-    mountPath: '/cache/'
-    additionalVolumes: []
   replicaCount: 1
   configuration: |
     work_queue:

@@ -83,7 +83,7 @@ pub async fn query_service_entrypoint() {
 
 pub async fn compaction_service_entrypoint() {
     // Check if the config path is set in the env var
-    let root_config = match std::env::var(CONFIG_PATH_ENV_VAR) {
+    let config = match std::env::var(CONFIG_PATH_ENV_VAR) {
         Ok(config_path) => {
             eprintln!("loading from {config_path}");
             config::RootConfig::load_from_path(&config_path)
@@ -94,7 +94,7 @@ pub async fn compaction_service_entrypoint() {
         }
     };
 
-    let config = root_config.compaction_service.clone();
+    let config = config.compaction_service;
     let registry = Registry::new();
 
     chroma_tracing::init_otel_tracing(

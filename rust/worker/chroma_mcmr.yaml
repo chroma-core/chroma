@@ -228,8 +228,6 @@ compaction_service:
           name: "usearch_cache"
           capacity: 8192 # 8192 MiB = 8GB
   work_queue:
-    enabled: true
-    grpc_port: 50054
     storage_path: "workqueue_state.parquet"
     persistence:
       time_threshold_seconds: 2
