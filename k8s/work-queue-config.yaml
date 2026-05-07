@@ -5,10 +5,7 @@ metadata:
 data:
   config.yaml: |
     work_queue:
-      enabled: false
-      storage_path: "s3://chroma/work-queue/queue.parquet"
+      storage_path: "work-queue/queue.parquet"
       persistence:
         time_threshold_seconds: 2
-        operation_threshold: 100
-      use_sysdb_filtering: false
-      grpc_port: 50054
+        pending_threshold: 100
