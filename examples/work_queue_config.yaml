@@ -1,8 +1,19 @@
 work_queue:
-  enabled: true
-  storage_path: "s3://chroma-minio:9000/work-queue/queue.parquet"
+  storage_path: "work-queue/queue.parquet"
   persistence:
     time_threshold_seconds: 5
-    operation_threshold: 10
-  use_sysdb_filtering: false
-  grpc_port: 50054
+    pending_threshold: 10
+
+work_queue_service:
+  service_name: "work-queue-service"
+  my_port: 50051
+  otel_endpoint: "http://otel-collector:4317"
+  sysdb:
+    host: "sysdb.chroma"
+    port: 50051
+  storage:
+    s3:
+      bucket: "chroma"
+      access_key_id: "minio"
+      secret_access_key: "minio123"
+      endpoint: "http://minio.chroma.svc.cluster.local:9000"

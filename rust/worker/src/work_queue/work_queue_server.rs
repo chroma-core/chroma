@@ -1,4 +1,4 @@
-use crate::work_queue::types::FinishResult;
+use crate::work_queue::types::{FinishResult, WorkQueueError};
 use crate::work_queue::work_queue_manager::{
     FinishWorkMessage, GetWorkMessage, PushWorkMessage, WorkQueueManager,
 };
@@ -66,7 +66,7 @@ impl WorkQueueService for WorkQueueServer {
         response_rx
             .await
             .map_err(|e| Status::internal(format!("Failed to receive response: {}", e)))?
-            .map_err(|e| Status::internal(format!("Operation failed: {}", e)))?;
+            .map_err(|e: WorkQueueError| Status::internal(format!("Work queue error: {:?}", e)))?;
 
         Ok(Response::new(()))
     }
@@ -99,7 +99,7 @@ impl WorkQueueService for WorkQueueServer {
         let result = response_rx
             .await
             .map_err(|e| Status::internal(format!("Failed to receive response: {}", e)))?
-            .map_err(|e| Status::internal(format!("Operation failed: {}", e)))?;
+            .map_err(|e: WorkQueueError| Status::internal(format!("Work queue error: {:?}", e)))?;
 
         // Handle the result
         match result {
@@ -139,7 +139,7 @@ impl WorkQueueService for WorkQueueServer {
         let items = response_rx
             .await
             .map_err(|e| Status::internal(format!("Failed to receive response: {}", e)))?
-            .map_err(|e| Status::internal(format!("Operation failed: {}", e)))?;
+            .map_err(|e: WorkQueueError| Status::internal(format!("Work queue error: {:?}", e)))?;
 
         let results: Vec<WorkItemResult> = items
             .into_iter()

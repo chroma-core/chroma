@@ -8,7 +8,7 @@ enum WorkResponse {
 }
 use async_trait::async_trait;
 use chroma_error::ChromaError;
-use chroma_storage::{ETag, GetOptions, PutMode, PutOptions, Storage};
+use chroma_storage::{GetOptions, PutMode, PutOptions, Storage};
 use chroma_system::{Component, ComponentContext, ComponentRuntime, Handler};
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
 use std::time::Duration;
@@ -312,7 +312,6 @@ impl Handler<PushWorkMessage> for WorkQueueManager {
     type Result = ();
 
     async fn handle(&mut self, msg: PushWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
-        // Push work and queue response atomically
         self.push_work_and_queue_response(
             msg.fn_id,
             msg.input_coll_id,
@@ -405,6 +404,10 @@ impl Handler<PeriodicPersistMessage> for WorkQueueManager {
         _msg: PeriodicPersistMessage,
         ctx: &ComponentContext<WorkQueueManager>,
     ) {
+<<<<<<< HEAD
+=======
+        // Persist if dirty or if we have pending responses waiting
+>>>>>>> 36a59fe48 (get rid of weird port setting)
         if let Err(e) = self.persist().await {
             tracing::error!("Periodic persist failed: {}", e);
         }

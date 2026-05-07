@@ -10,6 +10,56 @@ use std::time::Duration;
 
 const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
 
+#[derive(Deserialize, Serialize, Debug, Default, Clone)]
+/// # Description
+/// The primary config for the work queue service.
+pub struct WorkQueueServiceConfig {
+    /// The service name to be used for OpenTelemetry.
+    #[serde(default = "WorkQueueServiceConfig::default_service_name")]
+    pub service_name: String,
+
+    /// The OpenTelemetry endpoint to send traces to.
+    #[serde(default = "WorkQueueServiceConfig::default_otel_endpoint")]
+    pub otel_endpoint: String,
+
+    /// Additional RUST_LOG style filters to apply for tracing.
+    #[serde(default = "WorkQueueServiceConfig::default_otel_filters")]
+    pub otel_filters: Vec<OtelFilter>,
+
+    /// The port to listen on for gRPC requests.
+    #[serde(default = "WorkQueueServiceConfig::default_my_port")]
+    pub my_port: u16,
+
+    /// The configuration for connecting to the chroma metadata (sysdb) service.
+    #[serde(default)]
+    pub sysdb: SysDbConfig,
+
+    /// The configuration for connecting to the chroma data storage (S3, etc.) service.
+    #[serde(alias = "storage", default)]
+    pub storage: chroma_storage::config::StorageConfig,
+}
+
+impl WorkQueueServiceConfig {
+    fn default_service_name() -> String {
+        "work-queue-service".to_string()
+    }
+
+    fn default_otel_endpoint() -> String {
+        "http://otel-collector:4317".to_string()
+    }
+
+    fn default_otel_filters() -> Vec<OtelFilter> {
+        vec![OtelFilter {
+            crate_name: "worker".to_string(),
+            filter_level: OtelFilterLevel::Trace,
+        }]
+    }
+
+    fn default_my_port() -> u16 {
+        50051
+    }
+}
+
 #[derive(Deserialize, Serialize, Debug)]
 /// # Description
 /// The RootConfig object wraps the query and compaction config objects so that
@@ -27,9 +77,13 @@ pub struct RootConfig {
     #[serde(default)]
     pub compaction_service: CompactionServiceConfig,
 
-    /// The configuration for the work queue service.
+    /// The configuration for the work queue.
     #[serde(default)]
     pub work_queue: crate::work_queue::config::WorkQueueConfig,
+
+    /// The configuration for the work queue service.
+    #[serde(default)]
+    pub work_queue_service: WorkQueueServiceConfig,
 }
 
 impl RootConfig {
@@ -348,10 +402,6 @@ pub struct CompactionServiceConfig {
     /// The cache configuration for the fragment fetcher used by pointer-based log fetch.
     #[serde(default)]
     pub fragment_fetcher_cache: chroma_cache::CacheConfig,
-
-    /// The configuration for the work queue service.
-    #[serde(default)]
-    pub work_queue: crate::work_queue::config::WorkQueueConfig,
 
     /// Optional separate storage configuration for fragment pulling.
     ///

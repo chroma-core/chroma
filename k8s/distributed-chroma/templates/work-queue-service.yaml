@@ -49,7 +49,7 @@ spec:
             periodSeconds: 1
             failureThreshold: 30 # 30 seconds to allow for initial startup
             grpc:
-              port: 50054
+              port: 50051
           volumeMounts:
             {{if .Values.workQueueService.configuration}}
             - name: work-queue-service-config
@@ -60,7 +60,7 @@ spec:
               mountPath: {{ .Values.workQueueService.cache.mountPath }}
             {{ end }}
           ports:
-            - containerPort: 50054
+            - containerPort: 50051
             - containerPort: 6060
               protocol: TCP
               name: pprof
@@ -78,10 +78,6 @@ spec:
             - name: _RJEM_MALLOC_CONF
               value: {{ .Values.workQueueService.jemallocConfig }}
             {{ end }}
-            - name: CHROMA_WORK_QUEUE_SERVICE__MY_MEMBER_ID
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
           {{ if .Values.workQueueService.resources }}
           resources:
             limits:
@@ -103,8 +99,8 @@ spec:
   clusterIP: None
   ports:
     - name: grpc
-      port: 50054
-      targetPort: 50054
+      port: 50051
+      targetPort: 50051
 
 ---
 
