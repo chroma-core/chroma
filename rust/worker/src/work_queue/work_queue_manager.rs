@@ -60,6 +60,8 @@ pub struct WorkQueueManager {
     pending_push_responses: Vec<oneshot::Sender<Result<(), WorkQueueError>>>,
     // Pending responses waiting for persistence (finish work responses)
     pending_finish_responses: Vec<oneshot::Sender<Result<FinishResult, WorkQueueError>>>,
+    // Work distribution for sharding
+    distributor: Option<WorkDistributor>,
 }
 
 impl WorkQueueManager {
@@ -72,6 +74,7 @@ impl WorkQueueManager {
             config,
             pending_push_responses: Vec::new(),
             pending_finish_responses: Vec::new(),
+            distributor: None,
         }
     }
 
