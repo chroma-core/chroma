@@ -1,6 +1,6 @@
 use crate::config::RootConfig;
-use crate::work_queue::work_queue_manager::WorkQueueManager;
 use crate::work_queue::work_queue_server::WorkQueueServer;
+use crate::work_queue::WorkQueueManager;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_storage::Storage;
@@ -52,17 +52,52 @@ pub async fn service_entrypoint() {
     let port = service_config.my_port;
 
     // Create health service for readiness probe
-    let (_health_reporter, health_service) = tonic_health::server::health_reporter();
+    let (health_reporter, health_service) = tonic_health::server::health_reporter();
 
-    let addr = format!("0.0.0.0:{}", port).parse().unwrap();
+    let server_join_handle = tokio::spawn(async move {
+        // Set service as serving for health checks
+        health_reporter.set_serving::<chroma_types::chroma_proto::work_queue_service_server::WorkQueueServiceServer<WorkQueueServer>>().await;
 
-    println!("Work queue service starting on {}", addr);
+        let addr = format!("0.0.0.0:{}", port).parse().unwrap();
+        println!("Work queue gRPC server listening on {}", addr);
+        tonic::transport::Server::builder()
+            .add_service(server)
+            .add_service(health_service)
+            .serve(addr)
+            .await
+            .unwrap();
+    });
 
-    // Start server (this blocks forever)
-    tonic::transport::Server::builder()
-        .add_service(server)
-        .add_service(health_service)
-        .serve(addr)
-        .await
-        .expect("Failed to start work queue service");
+    // Set up signal handlers
+    let mut sigterm = signal(SignalKind::terminate()).unwrap();
+    select! {
+        _ = sigterm.recv() => {
+            println!("Received SIGTERM, shutting down work queue service");
+        },
+        _ = tokio::signal::ctrl_c() => {
+            println!("Received Ctrl+C, shutting down work queue service");
+        },
+        res = server_join_handle => {
+            match res {
+                Ok(_) => println!("Server task ended unexpectedly"),
+                Err(e) => println!("Server task error: {:?}", e),
+            }
+        }
+    };
+
+    // Shutdown procedure
+    match tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        work_queue_handle.stop();
+        system.stop().await;
+        system.join().await;
+    })
+    .await
+    {
+        Ok(_) => println!("Clean shutdown completed"),
+        Err(_) => {
+            println!("Shutdown timeout, forcing exit");
+        }
+    };
+
+    println!("Work queue service stopped");
 }

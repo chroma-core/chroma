@@ -1,0 +1,16 @@
+work_queue:
+  storage_path: "work-queue/queue.parquet"
+  persistence:
+    time_threshold_seconds: 5
+    pending_threshold: 10
+
+work_queue_service:
+  service_name: "work-queue-service"
+  my_port: 50051
+  otel_endpoint: "http://localhost:4317"
+  sysdb:
+    host: "localhost"
+    port: 50051
+  storage:
+    local:
+      root: "/tmp/chroma-storage"
