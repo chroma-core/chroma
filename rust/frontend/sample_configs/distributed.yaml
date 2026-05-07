@@ -86,4 +86,5 @@ tenants_to_migrate_immediately:
 tenants_to_migrate_immediately_threshold: "ffffffff-ffff-ffff-ffff-ffffffffffff"
 tenants_with_quantization_enabled: []
 tenants_with_maxscore_enabled: []
+tenants_with_token_bitmap_fts_enabled: []
 enable_log_scouting: true

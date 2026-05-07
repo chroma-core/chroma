@@ -237,7 +237,9 @@ type FloatInvertedIndexConfig struct{}
 
 type BoolInvertedIndexConfig struct{}
 
-type FtsIndexConfig struct{}
+type FtsIndexConfig struct {
+	Algorithm *string `json:"algorithm,omitempty"`
+}
 
 type SparseVectorIndexConfig struct {
 	EmbeddingFunction *EmbeddingFunctionConfiguration `json:"embedding_function,omitempty"`

@@ -12,9 +12,9 @@
 use std::collections::HashSet;
 
 use chroma_types::{
-    CollectionUuid, CreateCollectionError, InternalCollectionConfiguration, KnnIndex, Quantization,
-    Schema, SchemaError, Segment, SegmentScope, SegmentType, SegmentUuid, SparseIndexAlgorithm,
-    VectorIndexConfiguration,
+    CollectionUuid, CreateCollectionError, FtsAlgorithm, InternalCollectionConfiguration, KnnIndex,
+    Quantization, Schema, SchemaError, Segment, SegmentScope, SegmentType, SegmentUuid,
+    SparseIndexAlgorithm, VectorIndexConfiguration,
 };
 
 /// Discriminant for which executor will serve the collection. Carries no
@@ -31,8 +31,9 @@ pub enum ExecutorKind {
 /// planner stays stateless.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TenantFeatureFlags {
-    pub enable_quantization: bool,
     pub enable_maxscore: bool,
+    pub enable_quantization: bool,
+    pub enable_token_bitmap_fts: bool,
 }
 
 /// The output of planning a create-collection: everything the caller needs
@@ -149,6 +150,9 @@ pub fn plan_create_collection(
         }
         if tenant_flags.enable_maxscore {
             schema.set_sparse_algorithm(SparseIndexAlgorithm::MaxScore);
+        }
+        if tenant_flags.enable_token_bitmap_fts {
+            schema.set_fts_algorithm(FtsAlgorithm::TokenBitmap);
         }
     }
 

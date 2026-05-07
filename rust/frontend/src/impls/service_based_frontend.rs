@@ -84,6 +84,7 @@ pub struct ServiceBasedFrontend {
     min_records_for_invocation: u64,
     tenants_with_quantization_enabled: Vec<String>,
     tenants_with_maxscore_enabled: Vec<String>,
+    tenants_with_token_bitmap_fts_enabled: Vec<String>,
     enable_log_scouting: bool,
 }
 
@@ -101,6 +102,7 @@ impl ServiceBasedFrontend {
         min_records_for_invocation: u64,
         tenants_with_quantization_enabled: Vec<String>,
         tenants_with_maxscore_enabled: Vec<String>,
+        tenants_with_token_bitmap_fts_enabled: Vec<String>,
         enable_log_scouting: bool,
     ) -> Self {
         let meter = global::meter("chroma");
@@ -150,6 +152,7 @@ impl ServiceBasedFrontend {
             min_records_for_invocation,
             tenants_with_quantization_enabled,
             tenants_with_maxscore_enabled,
+            tenants_with_token_bitmap_fts_enabled,
             enable_log_scouting,
         }
     }
@@ -799,6 +802,13 @@ impl ServiceBasedFrontend {
             .any(|t| t == "*" || t == tenant_id)
     }
 
+    /// Check if TokenBitmap FTS index should be enabled for the given tenant.
+    fn should_enable_token_bitmap_fts_for_tenant(&self, tenant_id: &str) -> bool {
+        self.tenants_with_token_bitmap_fts_enabled
+            .iter()
+            .any(|t| t == "*" || t == tenant_id)
+    }
+
     pub fn get_default_knn_index(&self) -> KnnIndex {
         self.default_knn_index
     }
@@ -1167,6 +1177,7 @@ impl ServiceBasedFrontend {
             frontend_core::collection_ops::TenantFeatureFlags {
                 enable_quantization: self.should_enable_quantization_for_tenant(&tenant_id),
                 enable_maxscore: self.should_enable_maxscore_for_tenant(&tenant_id),
+                enable_token_bitmap_fts: self.should_enable_token_bitmap_fts_for_tenant(&tenant_id),
             },
         )?;
 
@@ -2773,6 +2784,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             config.min_records_for_invocation,
             config.tenants_with_quantization_enabled.clone(),
             config.tenants_with_maxscore_enabled.clone(),
+            config.tenants_with_token_bitmap_fts_enabled.clone(),
             config.enable_log_scouting,
         ))
     }
