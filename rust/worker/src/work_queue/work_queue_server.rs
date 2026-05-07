@@ -66,7 +66,7 @@ impl WorkQueueService for WorkQueueServer {
         response_rx
             .await
             .map_err(|e| Status::internal(format!("Failed to receive response: {}", e)))?
-            .map_err(|e: crate::work_queue::WorkQueueError| e)?;
+            .map_err(|e: WorkQueueError| e)?;
 
         Ok(Response::new(()))
     }
@@ -99,7 +99,7 @@ impl WorkQueueService for WorkQueueServer {
         let result = response_rx
             .await
             .map_err(|e| Status::internal(format!("Failed to receive response: {}", e)))?
-            .map_err(|e: crate::work_queue::WorkQueueError| e)?;
+            .map_err(|e: WorkQueueError| e)?;
 
         // Handle the result
         match result {
@@ -139,7 +139,7 @@ impl WorkQueueService for WorkQueueServer {
         let items = response_rx
             .await
             .map_err(|e| Status::internal(format!("Failed to receive response: {}", e)))?
-            .map_err(|e: crate::work_queue::WorkQueueError| e)?;
+            .map_err(|e: WorkQueueError| e)?;
 
         let results: Vec<WorkItemResult> = items
             .into_iter()

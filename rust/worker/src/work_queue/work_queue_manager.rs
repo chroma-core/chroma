@@ -453,10 +453,7 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
         let mut config = create_test_config();
         config.storage_path = "queue.parquet".to_string(); // Use relative path within temp dir
-        (
-            WorkQueueManager::new(storage, config, "test-shard".to_string()),
-            temp_dir,
-        )
+        (WorkQueueManager::new(storage, config), temp_dir)
     }
 
     #[tokio::test]
@@ -543,8 +540,7 @@ mod tests {
         // Create and persist state
         {
             let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
-            let mut manager =
-                WorkQueueManager::new(storage, config.clone(), "test-shard".to_string());
+            let mut manager = WorkQueueManager::new(storage, config.clone());
             manager.state.push_work(
                 AttachedFunctionUuid(Uuid::new_v4()),
                 CollectionUuid(Uuid::new_v4()),
@@ -561,7 +557,7 @@ mod tests {
         // Load state in new manager
         {
             let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
-            let mut manager = WorkQueueManager::new(storage, config, "test-shard".to_string());
+            let mut manager = WorkQueueManager::new(storage, config);
             manager.load_state().await.unwrap();
             assert_eq!(manager.state.pending_work.len(), 2);
             assert_eq!(manager.state.pending_work[0].completion_offset, 100);

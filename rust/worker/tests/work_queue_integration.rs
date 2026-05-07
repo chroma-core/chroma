@@ -18,13 +18,11 @@ mod work_queue_integration_tests {
         let storage_path = format!("test-work-queue-{}.parquet", Uuid::new_v4());
 
         let config = WorkQueueConfig {
-            enabled: true,
             storage_path: storage_path.clone(),
             persistence: PersistenceConfig {
                 time_threshold_seconds: 1,
-                operation_threshold: 2,
+                pending_threshold: 2,
             },
-            grpc_port: 50054,
         };
 
         // Create manager and verify persistence
@@ -54,13 +52,11 @@ mod work_queue_integration_tests {
         let storage_path = format!("test-work-queue-conflict-{}.parquet", Uuid::new_v4());
 
         let config = WorkQueueConfig {
-            enabled: true,
             storage_path: storage_path.clone(),
             persistence: PersistenceConfig {
                 time_threshold_seconds: 60,
-                operation_threshold: 1000,
+                pending_threshold: 1000,
             },
-            grpc_port: 50054,
         };
 
         // Create two managers pointing to same storage
