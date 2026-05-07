@@ -1607,9 +1607,11 @@ def _create_extra_fields_validator(valid_fields: list[str]) -> Any:
 class FtsIndexConfig(BaseModel):
     """Configuration for Full-Text Search index. No parameters required."""
 
-    model_config = {"extra": "forbid"}
-
-    pass
+    _validate_extra_fields = _create_extra_fields_validator(
+        [
+            "algorithm",
+        ]
+    )
 
 
 class HnswIndexConfig(BaseModel):

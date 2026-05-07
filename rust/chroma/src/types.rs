@@ -51,6 +51,7 @@ pub use chroma_types::FloatInvertedIndexType;
 pub use chroma_types::FloatListValueType;
 pub use chroma_types::FloatValueType;
 pub use chroma_types::ForkCollectionRequest;
+pub use chroma_types::FtsAlgorithm;
 pub use chroma_types::FtsIndexConfig;
 pub use chroma_types::FtsIndexType;
 pub use chroma_types::GetCollectionWithSegmentsError;
