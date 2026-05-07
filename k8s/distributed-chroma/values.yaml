@@ -73,37 +73,7 @@ workQueueService:
     repository: 'work-queue-service'
     tag: 'latest'
   env:
-  cache:
-    hostPath: '/local/cache/chroma-work-queue-service'
-    type: DirectoryOrCreate
-    mountPath: '/cache/'
-    additionalVolumes: []
   replicaCount: 1
-  configuration: |
-    work_queue:
-      storage_path: "work-queue/queue.parquet"
-      persistence:
-        time_threshold_seconds: 30
-        pending_threshold: 100
-    work_queue_service:
-      service_name: "work-queue-service"
-      my_port: 50051
-      otel_endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"
-      otel_filters:
-        - crate_name: "worker"
-          filter_level: "Trace"
-      sysdb:
-        host: "sysdb.chroma"
-        port: 50051
-      storage:
-        s3:
-          bucket: 'chroma'
-          credentials:
-            static:
-              access_key_id: 'minio'
-              secret_access_key: 'minio123'
-          endpoint: 'http://minio.chroma.svc.cluster.local:9000'
-          region: 'us-east-1'
 sysdbMigration:
   image:
     repository: 'sysdb-migration'

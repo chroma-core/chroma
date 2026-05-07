@@ -270,9 +270,6 @@ k8s_resource(
     'compaction-service-serviceaccount:ServiceAccount:chroma',
     'compaction-service-serviceaccount-rolebinding:RoleBinding:chroma',
 
-    'work-queue-service-serviceaccount:ServiceAccount:chroma',
-    'work-queue-service-serviceaccount-rolebinding:RoleBinding:chroma',
-
     'rust-frontend-service-serviceaccount:ServiceAccount:chroma',
     'rust-frontend-service-rolebinding:RoleBinding:chroma',
     'rust-frontend-service-query-service-memberlist-binding:RoleBinding:chroma',
@@ -316,9 +313,6 @@ k8s_resource(
     'compaction-service-memberlist-readerwriter-binding:RoleBinding:chroma2',
     'compaction-service-serviceaccount:ServiceAccount:chroma2',
     'compaction-service-serviceaccount-rolebinding:RoleBinding:chroma2',
-
-    'work-queue-service-serviceaccount:ServiceAccount:chroma2',
-    'work-queue-service-serviceaccount-rolebinding:RoleBinding:chroma2',
 
     'rust-frontend-service-serviceaccount:ServiceAccount:chroma2',
     'rust-frontend-service-rolebinding:RoleBinding:chroma2',

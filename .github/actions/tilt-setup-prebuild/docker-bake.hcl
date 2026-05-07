@@ -61,6 +61,12 @@ target "load-service" {
   tags = [ "load-service:ci" ]
 }
 
+target "work-queue-service" {
+  dockerfile = "rust/Dockerfile"
+  target = "work_queue_service"
+  tags = [ "work-queue-service:ci" ]
+}
+
 
 group "default" {
   targets = [
@@ -73,6 +79,7 @@ group "default" {
     "query-service",
     "compactor-service",
     "garbage-collector",
-    "load-service"
+    "load-service",
+    "work-queue-service"
   ]
 }

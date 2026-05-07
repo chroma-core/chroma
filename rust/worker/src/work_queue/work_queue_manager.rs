@@ -1,3 +1,5 @@
+// V1: WorkDistributor import commented out
+// use crate::work_queue::distribution::WorkDistributor;
 use crate::work_queue::state::QueueState;
 use crate::work_queue::types::{FinishResult, WorkQueueError, WorkQueueRecord};
 
@@ -48,7 +50,6 @@ pub struct PeriodicPersistMessage;
 
 // Component implementation
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct WorkQueueManager {
     state: QueueState,
     storage: Storage,
@@ -63,7 +64,6 @@ pub struct WorkQueueManager {
 }
 
 impl WorkQueueManager {
-    #[allow(dead_code)]
     pub fn new(storage: Storage, config: crate::work_queue::config::WorkQueueConfig) -> Self {
         Self {
             state: QueueState::new(),
@@ -75,6 +75,11 @@ impl WorkQueueManager {
             pending_finish_responses: Vec::new(),
         }
     }
+
+    // V1: Memberlist methods commented out
+    // pub fn set_memberlist(&mut self, members: Vec<chroma_memberlist::memberlist_provider::Member>) {
+    //     self.distributor = Some(WorkDistributor::new(members));
+    // }
 
     async fn load_state(&mut self) -> Result<(), WorkQueueError> {
         match self
@@ -360,6 +365,11 @@ impl Handler<FinishWorkMessage> for WorkQueueManager {
                 .await;
             }
         }
+
+        // Check if persist needed
+        if self.should_persist() {
+            let _ = self.persist().await;
+        }
     }
 }
 
@@ -404,10 +414,6 @@ impl Handler<PeriodicPersistMessage> for WorkQueueManager {
         _msg: PeriodicPersistMessage,
         ctx: &ComponentContext<WorkQueueManager>,
     ) {
-<<<<<<< HEAD
-=======
-        // Persist if dirty or if we have pending responses waiting
->>>>>>> 36a59fe48 (get rid of weird port setting)
         if let Err(e) = self.persist().await {
             tracing::error!("Periodic persist failed: {}", e);
         }

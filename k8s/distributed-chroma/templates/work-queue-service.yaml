@@ -26,20 +26,12 @@ spec:
     metadata:
       labels:
         app: work-queue-service
-        member-type: work-queue-service
     spec:
-      serviceAccountName: work-queue-service-serviceaccount
       volumes:
         {{if .Values.workQueueService.configuration}}
         - name: work-queue-service-config
           configMap:
             name: work-queue-service-config
-        {{ end }}
-        {{if .Values.workQueueService.cache}}
-        - name: work-queue-service-cache
-          hostPath:
-            path: {{ .Values.workQueueService.cache.hostPath }}
-            type: {{ .Values.workQueueService.cache.type }}
         {{ end }}
       containers:
         - name: work-queue-service
@@ -55,15 +47,10 @@ spec:
             - name: work-queue-service-config
               mountPath: /config/
             {{ end }}
-            {{if .Values.workQueueService.cache}}
-            - name: work-queue-service-cache
-              mountPath: {{ .Values.workQueueService.cache.mountPath }}
-            {{ end }}
           ports:
             - containerPort: 50051
-            - containerPort: 6060
               protocol: TCP
-              name: pprof
+              name: grpc
           env:
             {{if .Values.workQueueService.configuration}}
             - name: CONFIG_PATH
@@ -74,10 +61,6 @@ spec:
               # TODO properly use flow control here to check which type of value we need.
 {{ .value | nindent 14 }}
             {{ end }}
-            {{ if .Values.workQueueService.jemallocConfig }}
-            - name: _RJEM_MALLOC_CONF
-              value: {{ .Values.workQueueService.jemallocConfig }}
-            {{ end }}
           {{ if .Values.workQueueService.resources }}
           resources:
             limits:
@@ -87,7 +70,9 @@ spec:
               cpu: {{ .Values.workQueueService.resources.requests.cpu }}
               memory: {{ .Values.workQueueService.resources.requests.memory }}
           {{ end }}
+
 ---
+
 apiVersion: v1
 kind: Service
 metadata:
@@ -96,32 +81,7 @@ metadata:
 spec:
   selector:
     app: work-queue-service
-  clusterIP: None
   ports:
     - name: grpc
       port: 50051
       targetPort: 50051
-
----
-
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: work-queue-service-serviceaccount
-  namespace: {{ .Values.namespace }}
-
----
-
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: work-queue-service-serviceaccount-rolebinding
-  namespace: {{ .Values.namespace }}
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: pod-watcher
-subjects:
-- kind: ServiceAccount
-  name: work-queue-service-serviceaccount
-  namespace: {{ .Values.namespace }}
