@@ -10,6 +10,8 @@ use std::collections::{HashMap, VecDeque};
 use std::str::FromStr;
 use std::sync::Arc;
 
+use chroma_storage::ETag;
+
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct QueueState {
@@ -18,7 +20,7 @@ pub struct QueueState {
     // Deduplication index: (fn_id, input_coll_id) -> completion_offset
     pub dedup_index: HashMap<(AttachedFunctionUuid, CollectionUuid), i64>,
     // Current ETag from storage
-    pub current_etag: Option<String>,
+    pub current_etag: Option<ETag>,
     // Monotonic counter for FIFO ordering
     pub next_insertion_order: u64,
     // Persistence tracking
@@ -213,6 +215,68 @@ impl QueueState {
             .unwrap_or(0);
 
         Ok(state)
+    }
+
+    pub fn push_work(
+        &mut self,
+        fn_id: AttachedFunctionUuid,
+        input_coll_id: CollectionUuid,
+        completion_offset: i64,
+    ) -> bool {
+        let key = (fn_id, input_coll_id);
+
+        if let Some(&existing_offset) = self.dedup_index.get(&key) {
+            if completion_offset <= existing_offset {
+                return false;
+            }
+        }
+
+        self.pending_work
+            .retain(|r| !(r.fn_id == fn_id && r.input_coll_id == input_coll_id));
+
+        let record = WorkQueueRecord {
+            fn_id,
+            input_coll_id,
+            completion_offset,
+            insertion_order: self.next_insertion_order,
+        };
+
+        self.next_insertion_order += 1;
+        self.dedup_index.insert(key, completion_offset);
+        self.pending_work.push_back(record);
+        self.dirty = true;
+
+        true
+    }
+
+    pub fn finish_work_success(
+        &mut self,
+        fn_id: &AttachedFunctionUuid,
+        input_coll_id: &CollectionUuid,
+        completion_offset: i64,
+    ) {
+        let key = (*fn_id, *input_coll_id);
+
+        self.pending_work.retain(|r| {
+            !(r.fn_id == *fn_id
+                && r.input_coll_id == *input_coll_id
+                && r.completion_offset <= completion_offset)
+        });
+
+        let max_remaining = self
+            .pending_work
+            .iter()
+            .filter(|r| r.fn_id == *fn_id && r.input_coll_id == *input_coll_id)
+            .map(|r| r.completion_offset)
+            .max();
+
+        if let Some(max) = max_remaining {
+            self.dedup_index.insert(key, max);
+        } else {
+            self.dedup_index.remove(&key);
+        }
+
+        self.dirty = true;
     }
 }
 
