@@ -249,34 +249,31 @@ impl QueueState {
         true
     }
 
+    /// Mark work as successfully completed
+    /// Returns true if any work was actually removed
     pub fn finish_work_success(
         &mut self,
         fn_id: &AttachedFunctionUuid,
         input_coll_id: &CollectionUuid,
         completion_offset: i64,
-    ) {
+    ) -> bool {
         let key = (*fn_id, *input_coll_id);
 
-        self.pending_work.retain(|r| {
-            !(r.fn_id == *fn_id
-                && r.input_coll_id == *input_coll_id
-                && r.completion_offset <= completion_offset)
-        });
+        // Check if there's an entry to remove
+        if let Some(&existing_offset) = self.dedup_index.get(&key) {
+            if existing_offset <= completion_offset {
+                // Remove the single entry for this key
+                self.pending_work
+                    .retain(|r| !(r.fn_id == *fn_id && r.input_coll_id == *input_coll_id));
 
-        let max_remaining = self
-            .pending_work
-            .iter()
-            .filter(|r| r.fn_id == *fn_id && r.input_coll_id == *input_coll_id)
-            .map(|r| r.completion_offset)
-            .max();
-
-        if let Some(max) = max_remaining {
-            self.dedup_index.insert(key, max);
-        } else {
-            self.dedup_index.remove(&key);
+                // Remove from dedup index
+                self.dedup_index.remove(&key);
+                self.dirty = true;
+                return true;
+            }
         }
 
-        self.dirty = true;
+        false
     }
 }
 
