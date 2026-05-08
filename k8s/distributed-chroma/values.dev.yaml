@@ -74,6 +74,11 @@ workQueueService:
         time_threshold_seconds: 30
         operation_threshold: 100
       grpc_port: 50054
+      memberlist_provider:
+        custom_resource:
+          kube_namespace: "chroma"
+          memberlist_name: "work-queue-service-memberlist"
+      my_member_id: work-queue-service-0
 
 rustLogService:
   replicaCount: 1

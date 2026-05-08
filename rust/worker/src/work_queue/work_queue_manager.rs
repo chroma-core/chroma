@@ -1,5 +1,4 @@
-// V1: WorkDistributor import commented out
-// use crate::work_queue::distribution::WorkDistributor;
+use crate::work_queue::distribution::WorkDistributor;
 use crate::work_queue::state::QueueState;
 use crate::work_queue::types::{FinishResult, WorkQueueError, WorkQueueRecord};
 
@@ -61,6 +60,8 @@ pub struct WorkQueueManager {
     pending_push_responses: Vec<oneshot::Sender<Result<(), WorkQueueError>>>,
     // Pending responses waiting for persistence (finish work responses)
     pending_finish_responses: Vec<oneshot::Sender<Result<FinishResult, WorkQueueError>>>,
+    // Work distribution for sharding
+    distributor: Option<WorkDistributor>,
 }
 
 impl WorkQueueManager {
@@ -73,13 +74,13 @@ impl WorkQueueManager {
             config,
             pending_push_responses: Vec::new(),
             pending_finish_responses: Vec::new(),
+            distributor: None,
         }
     }
 
-    // V1: Memberlist methods commented out
-    // pub fn set_memberlist(&mut self, members: Vec<chroma_memberlist::memberlist_provider::Member>) {
-    //     self.distributor = Some(WorkDistributor::new(members));
-    // }
+    pub fn set_memberlist(&mut self, members: Vec<chroma_memberlist::memberlist_provider::Member>) {
+        self.distributor = Some(WorkDistributor::new(members));
+    }
 
     async fn load_state(&mut self) -> Result<(), WorkQueueError> {
         match self
@@ -230,7 +231,6 @@ impl WorkQueueManager {
             }
         }
     }
-
     // STUB: Will call sysdb's TryFinishAsyncAttachedFunctionInvocation
     async fn try_finish_invocation_stub(
         &self,
