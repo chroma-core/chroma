@@ -1,7 +1,7 @@
 mod compactor;
 mod server;
 mod utils;
-pub(crate) mod work_queue;
+pub mod work_queue;
 
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
@@ -174,6 +174,7 @@ pub async fn compaction_service_entrypoint() {
             let _ = dispatcher_handle.join().await;
             compaction_manager_handle.stop();
             let _ = compaction_manager_handle.join().await;
+
             system.stop().await;
             system.join().await;
             let _ = server_join_handle.await;

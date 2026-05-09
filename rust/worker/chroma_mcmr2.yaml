@@ -227,6 +227,35 @@ compaction_service:
         weighted_lru:
           name: "usearch_cache"
           capacity: 8192 # 8192 MiB = 8GB
+  work_queue:
+    storage_path: "workqueue_state.parquet"
+    persistence:
+      time_threshold_seconds: 2
+      pending_threshold: 100
+work_queue_service:
+  service_name: "work-queue-service"
+  my_port: 50051
+  otel_endpoint: "http://otel-collector.chroma2.svc.cluster.local:4317"
+  otel_filters:
+    - crate_name: "worker"
+      filter_level: "trace"
+  sysdb:
+    grpc:
+      host: "sysdb.chroma2"
+      port: 50051
+  storage:
+    admission_controlled_s3:
+      s3_config:
+        bucket: "chroma-storage2"
+        credentials: "Minio"
+        connect_timeout_ms: 5000
+        request_timeout_ms: 30000
+        upload_part_size_bytes: 536870912 # 512MiB
+        download_part_size_bytes: 8388608 # 8MiB
+      rate_limiting_policy:
+        count_based_policy:
+          max_concurrent_requests: 30
+          bandwidth_allocation: [0.7, 0.3]
 log_service:
   num_records_before_backpressure: 100000
   record_count_threshold: 10

@@ -1,3 +1,5 @@
+// V1: WorkDistributor import commented out
+// use crate::work_queue::distribution::WorkDistributor;
 use crate::work_queue::state::QueueState;
 use crate::work_queue::types::{FinishResult, WorkQueueError, WorkQueueRecord};
 
@@ -48,7 +50,6 @@ pub struct PeriodicPersistMessage;
 
 // Component implementation
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct WorkQueueManager {
     state: QueueState,
     storage: Storage,
@@ -63,7 +64,6 @@ pub struct WorkQueueManager {
 }
 
 impl WorkQueueManager {
-    #[allow(dead_code)]
     pub fn new(storage: Storage, config: crate::work_queue::config::WorkQueueConfig) -> Self {
         Self {
             state: QueueState::new(),
@@ -75,6 +75,11 @@ impl WorkQueueManager {
             pending_finish_responses: Vec::new(),
         }
     }
+
+    // V1: Memberlist methods commented out
+    // pub fn set_memberlist(&mut self, members: Vec<chroma_memberlist::memberlist_provider::Member>) {
+    //     self.distributor = Some(WorkDistributor::new(members));
+    // }
 
     async fn load_state(&mut self) -> Result<(), WorkQueueError> {
         match self
@@ -312,7 +317,6 @@ impl Handler<PushWorkMessage> for WorkQueueManager {
     type Result = ();
 
     async fn handle(&mut self, msg: PushWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
-        // Push work and queue response atomically
         self.push_work_and_queue_response(
             msg.fn_id,
             msg.input_coll_id,
@@ -360,6 +364,11 @@ impl Handler<FinishWorkMessage> for WorkQueueManager {
                 )
                 .await;
             }
+        }
+
+        // Check if persist needed
+        if self.should_persist() {
+            let _ = self.persist().await;
         }
     }
 }

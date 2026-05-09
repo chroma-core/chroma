@@ -1,6 +1,9 @@
 pub(crate) mod config;
+pub mod server;
 pub(crate) mod state;
 pub mod types;
-pub(crate) mod work_queue_client;
+pub mod work_queue_client;
 pub(crate) mod work_queue_manager;
-pub(crate) mod work_queue_server;
+pub mod work_queue_server;
+
+pub use server::service_entrypoint;

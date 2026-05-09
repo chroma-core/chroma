@@ -58,6 +58,12 @@ compactionService:
     type: DirectoryOrCreate
     mountPath: '/cache/'
     additionalVolumes: []
+
+workQueueService:
+  image:
+    repository: 'work-queue-service'
+    tag: 'latest'
+  env:
   replicaCount: 1
 sysdbMigration:
   image:

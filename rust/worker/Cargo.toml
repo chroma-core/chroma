@@ -18,6 +18,14 @@ path = "src/bin/compaction_service.rs"
 name = "query_service"
 path = "src/bin/query_service.rs"
 
+[[bin]]
+name = "work_queue_service"
+path = "src/bin/work_queue_service.rs"
+
+[[bin]]
+name = "work_queue_cli"
+path = "src/bin/work_queue_cli.rs"
+
 [dependencies]
 chroma-tracing = { workspace = true }
 regex = { workspace = true }
