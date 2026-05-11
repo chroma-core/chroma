@@ -46,11 +46,14 @@ use crate::execution::{
             MaterializeLogInput, MaterializeLogOperator, MaterializeLogOperatorError,
             MaterializeLogOutput,
         },
+        queue_function::{
+            QueueFunctionError, QueueFunctionInput, QueueFunctionOperator, QueueFunctionOutput,
+        },
     },
-    orchestration::compact::{CompactionContextError, ExecutionState},
+    orchestration::compact::{CompactionContext, CompactionContextError, ExecutionState},
 };
 
-use super::compact::{CollectionCompactInfo, CompactWriters, CompactionContext};
+use super::compact::{CollectionCompactInfo, CompactWriters};
 use chroma_types::AdvanceAttachedFunctionError;
 
 #[derive(Debug, Clone)]
@@ -97,6 +100,8 @@ pub enum AttachedFunctionOrchestratorError {
     NoAttachedFunction,
     #[error("Failed to execute attached function: {0}")]
     ExecuteAttachedFunction(#[from] ExecuteAttachedFunctionError),
+    #[error("Failed to queue function: {0}")]
+    QueueFunction(#[from] QueueFunctionError),
     #[error("Failed to advance attached function: {0}")]
     AdvanceAttachedFunction(#[from] AdvanceAttachedFunctionError),
     #[error("Function context not set")]
@@ -149,6 +154,7 @@ impl ChromaError for AttachedFunctionOrchestratorError {
             AttachedFunctionOrchestratorError::GetCollectionAndSegments(e) => e.code(),
             AttachedFunctionOrchestratorError::NoAttachedFunction => ErrorCodes::NotFound,
             AttachedFunctionOrchestratorError::ExecuteAttachedFunction(e) => e.code(),
+            AttachedFunctionOrchestratorError::QueueFunction(e) => e.code(),
             AttachedFunctionOrchestratorError::AdvanceAttachedFunction(e) => e.code(),
             AttachedFunctionOrchestratorError::MaterializeLog(e) => e.code(),
             AttachedFunctionOrchestratorError::FunctionContextNotSet => ErrorCodes::Internal,
@@ -182,6 +188,7 @@ impl ChromaError for AttachedFunctionOrchestratorError {
             }
             AttachedFunctionOrchestratorError::NoAttachedFunction => false,
             AttachedFunctionOrchestratorError::ExecuteAttachedFunction(e) => e.should_trace_error(),
+            AttachedFunctionOrchestratorError::QueueFunction(e) => e.should_trace_error(),
             AttachedFunctionOrchestratorError::AdvanceAttachedFunction(e) => e.should_trace_error(),
             AttachedFunctionOrchestratorError::MaterializeLog(e) => e.should_trace_error(),
             AttachedFunctionOrchestratorError::FunctionContextNotSet => true,
@@ -391,13 +398,17 @@ impl AttachedFunctionOrchestrator {
             .get_segment_writers()
             .ok()
             .and_then(|writers| writers.record_reader);
-        tracing::info!(
-            "Materializing to collection: {:?}",
-            self.output_context
-                .get_collection_info()
-                .unwrap()
-                .collection_id
-        );
+        match self.output_context.get_collection_info() {
+            Ok(collection_info) => {
+                tracing::info!(
+                    "Materializing to collection: {:?}",
+                    collection_info.collection_id
+                );
+            }
+            Err(e) => {
+                tracing::error!("Failed to get collection info for materialization: {:?}", e);
+            }
+        }
 
         let next_max_offset_ids: Vec<Arc<AtomicU32>> = record_reader
             .as_ref()
@@ -574,7 +585,41 @@ impl Handler<TaskResult<GetAttachedFunctionOutput, GetAttachedFunctionOperatorEr
                     return;
                 }
 
-                // Get the output collection ID from the attached function
+                // Check if this is an async function and handle it early
+                if attached_function.is_async {
+                    // For async functions, we don't need output collection info
+                    if let Some(work_queue_client) = &self.output_context.work_queue_client {
+                        let operator =
+                            Box::new(QueueFunctionOperator::new(work_queue_client.clone()));
+                        let input = QueueFunctionInput::new(
+                            attached_function.id,
+                            self.input_collection_info.collection_id,
+                            attached_function.completion_offset as i64,
+                        );
+                        let task = wrap(
+                            operator,
+                            input,
+                            ctx.receiver(),
+                            self.context().task_cancellation_token.clone(),
+                        );
+                        let res = self.dispatcher().send(task, None).await;
+                        self.ok_or_terminate(res, ctx).await;
+                    } else {
+                        tracing::error!(
+                            "Async attached function found but no WorkQueue client configured"
+                        );
+                        self.terminate_with_result(
+                            Err(AttachedFunctionOrchestratorError::InvariantViolation(
+                                "Async function requires WorkQueue configuration".to_string(),
+                            )),
+                            ctx,
+                        )
+                        .await;
+                    }
+                    return;
+                }
+
+                // For sync functions, we need to get the output collection info
                 let output_collection_id = match attached_function.output_collection_id {
                     Some(id) => id,
                     None => {
@@ -843,7 +888,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
 
         let input = ExecuteAttachedFunctionInput {
             materialized_logs: self.materialized_log_data.clone(), // Use the actual materialized logs from data fetch
-            tenant_id: "default".to_string(), // TODOItanujnay112): Get actual tenant ID
+            tenant_id: self.input_collection_info.collection.tenant.clone(),
             input_record_segment,
             output_collection_id: message.collection.collection_id,
             completion_offset: collection_info.pulled_log_offset as u64, // Use the completion offset from input collection
@@ -887,5 +932,35 @@ impl Handler<TaskResult<ExecuteAttachedFunctionOutput, ExecuteAttachedFunctionEr
         );
         self.materialize_log(vec![message.output_records], ctx)
             .await;
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<QueueFunctionOutput, QueueFunctionError>> for AttachedFunctionOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<QueueFunctionOutput, QueueFunctionError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let _message = match self.ok_or_terminate(message.into_inner(), ctx).await {
+            Some(msg) => msg,
+            None => return,
+        };
+
+        tracing::info!(
+            "[AttachedFunctionOrchestrator]: Async function successfully queued for external processing"
+        );
+
+        // For async functions, we don't have any output records to apply
+        // The function will be processed asynchronously by an external consumer
+        let collection_info = self.get_input_collection_info();
+        let job_id = collection_info.collection_id.into();
+        self.terminate_with_result(
+            Ok(AttachedFunctionOrchestratorResponse::NoAttachedFunction { job_id }),
+            ctx,
+        )
+        .await;
     }
 }

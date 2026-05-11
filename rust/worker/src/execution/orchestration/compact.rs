@@ -8,6 +8,7 @@ use chroma_log::Log;
 
 use crate::compactor::RebuildInfo;
 use crate::execution::operators::fragment_fetch::FragmentFetcher;
+use crate::work_queue::work_queue_client::WorkQueueClient;
 use chroma_segment::{
     blockfile_metadata::MetadataSegmentWriter,
     blockfile_record::{RecordSegmentReader, RecordSegmentWriter},
@@ -188,6 +189,7 @@ pub struct CompactionContext {
     pub fragment_fetcher: Option<Arc<FragmentFetcher>>,
     pub bloom_filter_manager: Option<BloomFilterManager>,
     pub shard_size: Option<u64>,
+    pub work_queue_client: Option<WorkQueueClient>,
     #[cfg(test)]
     pub poison_offset: Option<u32>,
 }
@@ -213,6 +215,7 @@ impl Clone for CompactionContext {
             fragment_fetcher: self.fragment_fetcher.clone(),
             bloom_filter_manager: self.bloom_filter_manager.clone(),
             shard_size: self.shard_size,
+            work_queue_client: self.work_queue_client.clone(),
             #[cfg(test)]
             poison_offset: self.poison_offset,
         }
@@ -266,6 +269,7 @@ impl CompactionContext {
             fragment_fetcher: self.fragment_fetcher.clone(),
             bloom_filter_manager: self.bloom_filter_manager.clone(),
             shard_size: self.shard_size,
+            work_queue_client: self.work_queue_client.clone(),
             #[cfg(test)]
             poison_offset: self.poison_offset,
         }
@@ -371,6 +375,7 @@ impl CompactionContext {
         fragment_fetcher: Option<Arc<FragmentFetcher>>,
         bloom_filter_manager: Option<BloomFilterManager>,
         shard_size: Option<u64>,
+        work_queue_client: Option<WorkQueueClient>,
     ) -> Self {
         let orchestrator_context = OrchestratorContext::new(dispatcher.clone());
         CompactionContext {
@@ -391,6 +396,7 @@ impl CompactionContext {
             fragment_fetcher,
             bloom_filter_manager,
             shard_size,
+            work_queue_client,
             #[cfg(test)]
             poison_offset: None,
         }
@@ -484,6 +490,7 @@ impl CompactionContext {
             self.dispatcher.clone(),
             self.fragment_fetcher.clone(),
             self.bloom_filter_manager.clone(),
+            self.work_queue_client.clone(),
         );
 
         let log_fetch_response = match log_fetch_orchestrator.run(system.clone()).await {
@@ -768,6 +775,7 @@ impl CompactionContext {
                 materialized_output,
                 function_context,
             } => {
+                // For sync functions, continue with normal flow
                 // Update self to use the output collection for apply_logs
                 self.collection_info = OnceCell::from(output_collection_info.clone());
 
@@ -995,6 +1003,7 @@ pub async fn compact(
     fragment_fetcher: Option<Arc<FragmentFetcher>>,
     bloom_filter_manager: Option<BloomFilterManager>,
     shard_size: Option<u64>,
+    work_queue_client: Option<WorkQueueClient>,
     #[cfg(test)] poison_offset: Option<u32>,
 ) -> Result<CompactionResponse, CompactionError> {
     let mut compaction_context = CompactionContext::new(
@@ -1013,6 +1022,7 @@ pub async fn compact(
         fragment_fetcher,
         bloom_filter_manager,
         shard_size,
+        work_queue_client,
     );
 
     #[cfg(test)]
@@ -1061,8 +1071,9 @@ mod tests {
     use chroma_system::{ComponentHandle, Dispatcher, DispatcherConfig, Orchestrator, System};
     use chroma_types::{
         operator::{Filter, Limit, Projection, ProjectionRecord},
-        Collection, DocumentExpression, DocumentOperator, MetadataExpression, PrimitiveOperator,
-        Segment, SegmentShard, SegmentUuid, Where,
+        Collection, CollectionUuid, DocumentExpression, DocumentOperator, MetadataExpression,
+        Operation, OperationRecord, PrimitiveOperator, Segment, SegmentShard, SegmentUuid,
+        UpdateMetadataValue, Where,
     };
     use futures::TryStreamExt;
     use regex::Regex;
@@ -1291,6 +1302,7 @@ mod tests {
             None,
             None,
             Some(20), // Small shard size to force multiple shards
+            None,     // work_queue_client
             None,
         ))
         .await;
@@ -1404,6 +1416,7 @@ mod tests {
             None,
             None,
             Some(30), // Small shard size to force multiple shards
+            None,     // work_queue_client
             None,
         ))
         .await;
@@ -1556,6 +1569,7 @@ mod tests {
             None,
             None,
             None,
+            None, // work_queue_client
             None,
         ))
         .await;
@@ -1651,6 +1665,7 @@ mod tests {
             None,
             None,
             None,
+            None, // work_queue_client
             None,
         ))
         .await;
@@ -1788,6 +1803,7 @@ mod tests {
             None,
             None,
             None,
+            None, // work_queue_client
             None,
         ))
         .await;
@@ -1843,6 +1859,7 @@ mod tests {
             None,
             None,
             None,
+            None, // work_queue_client
             None,
         ))
         .await;
@@ -1901,6 +1918,7 @@ mod tests {
             None,
             None,
             None,
+            None, // work_queue_client
             None,
         ))
         .await;
@@ -2045,6 +2063,7 @@ mod tests {
             None,
             None,
             None,
+            None, // work_queue_client
             None,
         ))
         .await;
@@ -2227,6 +2246,7 @@ mod tests {
             None,
             None,
             None,
+            None, // work_queue_client
             None,
         ))
         .await;
@@ -2423,6 +2443,7 @@ mod tests {
             None,
             None,
             None,
+            None, // work_queue_client
             Some(2),
         ))
         .await;
@@ -2621,6 +2642,7 @@ mod tests {
             None,
             None,
             Some(30), // Small shard size to force multiple shards
+            None,     // work_queue_client
             None,
         ))
         .await;
@@ -2660,6 +2682,7 @@ mod tests {
             None,
             None,
             Some(30), // Small shard size to force multiple shards
+            None,     // work_queue_client
             None,
         ))
         .await;
@@ -2894,6 +2917,7 @@ mod tests {
             None,
             None,
             Some(30), // Small shard size to force multiple shards
+            None,     // work_queue_client
             None,
         ))
         .await;
@@ -3110,6 +3134,7 @@ mod tests {
             None,
             None,
             None,
+            None, // work_queue_client
             None,
         ))
         .await;
@@ -3199,6 +3224,7 @@ mod tests {
             None,
             None,
             None,
+            None, // work_queue_client
             None,
         ))
         .await;
@@ -3450,6 +3476,7 @@ mod tests {
             None,
             None,
             None, // shard_size
+            None, // work_queue_client
         );
 
         // Start compaction 1's log_fetch_orchestrator
@@ -3504,6 +3531,7 @@ mod tests {
             None,
             None,
             None, // shard_size
+            None, // work_queue_client
         );
 
         // Now start compaction 2 and let it run completely using the compact() function
@@ -3529,6 +3557,7 @@ mod tests {
             None,
             None,
             Some(30), // Small shard size to force multiple shards
+            None,     // work_queue_client
             None,
         ));
 
@@ -3689,6 +3718,7 @@ mod tests {
                 None,
                 None,
                 Some(150), // Shard size 50 to create 1 shard per batch
+                None,      // work_queue_client
                 None,
             ))
             .await;
@@ -3810,10 +3840,6 @@ mod tests {
     /// 6. Verify statistics: red=6, blue=4, green=5, total=15
     #[tokio::test]
     async fn test_k8s_integration_rebuild_with_attached_function() {
-        use chroma_log::in_memory_log::{InMemoryLog, InternalLogRecord};
-        use chroma_segment::blockfile_record::RecordSegmentReaderShard;
-        use chroma_types::{CollectionUuid, Operation, OperationRecord, UpdateMetadataValue};
-
         // Setup test environment
         let config = RootConfig::default();
         let system = System::default();
@@ -3974,6 +4000,7 @@ mod tests {
             None,
             None,
             Some(30), // Small shard size to force multiple shards
+            None,     // work_queue_client
             None,
         ))
         .await
@@ -4064,6 +4091,7 @@ mod tests {
             None,
             None,
             None,
+            None, // poison_offset
         ))
         .await
         .expect("Second compaction should succeed");
@@ -4130,6 +4158,7 @@ mod tests {
             None,
             None,
             None,
+            None, // poison_offset
         ))
         .await
         .expect("Rebuild should succeed");
@@ -4366,6 +4395,7 @@ mod tests {
                 None,
                 None,
                 Some(50), // Shard size 50 to create 1 shard per batch
+                None,     // work_queue_client
                 None,
             ))
             .await;
@@ -4459,6 +4489,7 @@ mod tests {
                 None,
                 None,
                 Some(50), // Use same shard size as initial compaction
+                None,     // work_queue_client
                 None,
             ))
             .await;
@@ -4650,6 +4681,7 @@ mod tests {
                 None,
                 None,
                 Some(50), // Shard size 50 to create 1 shard per batch
+                None,     // work_queue_client
                 None,
             ))
             .await;
@@ -4738,6 +4770,7 @@ mod tests {
                 None,
                 None,
                 Some(50), // Use same shard size as initial compaction
+                None,     // work_queue_client
                 None,
             ))
             .await;
@@ -4822,5 +4855,241 @@ mod tests {
             // Update old_cas for next iteration
             old_cas = new_cas;
         }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_async_attached_function() {
+        // Setup test environment
+        let config = RootConfig::default();
+        let system = System::default();
+        let registry = Registry::new();
+        let dispatcher = Dispatcher::try_from_config(&config.query_service.dispatcher, &registry)
+            .await
+            .expect("Should be able to initialize dispatcher");
+        let dispatcher_handle = system.start_component(dispatcher);
+
+        // Connect to Grpc SysDb (requires Tilt running)
+        let grpc_sysdb = chroma_sysdb::GrpcSysDb::try_from_config(
+            &(
+                chroma_sysdb::GrpcSysDbConfig {
+                    host: "localhost".to_string(),
+                    port: 50051,
+                    connect_timeout_ms: 5000,
+                    request_timeout_ms: 10000,
+                    num_channels: 4,
+                },
+                None,
+            ),
+            &registry,
+        )
+        .await
+        .expect("Should connect to grpc sysdb");
+        let mut sysdb = SysDb::Grpc(grpc_sysdb);
+
+        // Connect to WorkQueue (requires Tilt running)
+        let work_queue_client = crate::work_queue::work_queue_client::WorkQueueClient::new(
+            "http://localhost:50058".to_string(),
+        )
+        .await
+        .expect("Should connect to work queue");
+
+        let test_segments = TestDistributedSegment::new().await;
+        let mut in_memory_log = InMemoryLog::new();
+
+        // Create input collection
+        let collection_id = CollectionUuid::new();
+        let database_name =
+            chroma_types::DatabaseName::new(test_segments.collection.database.clone())
+                .expect("database name should be valid");
+
+        let collection_name = format!("test_async_fn_{}", uuid::Uuid::new_v4());
+        sysdb
+            .create_collection(
+                test_segments.collection.tenant.clone(),
+                database_name.clone(),
+                collection_id,
+                collection_name,
+                vec![
+                    test_segments.record_segment.clone(),
+                    test_segments.metadata_segment.clone(),
+                    test_segments.vector_segment.clone(),
+                ],
+                None,
+                None,
+                None,
+                test_segments.collection.dimension,
+                false,
+            )
+            .await
+            .expect("Collection create should be successful");
+
+        let tenant = "default_tenant".to_string();
+        let db = "default_database".to_string();
+
+        // Set initial log position
+        sysdb
+            .flush_compaction(
+                tenant.clone(),
+                DatabaseName::new(db.clone()).expect("database name should be valid"),
+                collection_id,
+                -1,
+                0,
+                std::sync::Arc::new([]),
+                0,
+                0,
+                None,
+            )
+            .await
+            .expect("Should be able to update log_position");
+
+        // Create async attached function via sysdb
+        let test_run_id = uuid::Uuid::new_v4();
+        let attached_function_name = format!("test_async_fn_{}", test_run_id);
+        let output_collection_name = format!("test_async_output_{}", test_run_id);
+
+        let (attached_function_id, _created) = sysdb
+            .create_attached_function(
+                attached_function_name.clone(),
+                "dummy_async".to_string(), // This is the async operator
+                collection_id,
+                output_collection_name.clone(),
+                serde_json::Value::Object(serde_json::Map::new()), // Empty params
+                tenant.clone(),
+                db.clone(),
+                1, // min_records_for_invocation
+            )
+            .await
+            .expect("Attached function creation should succeed");
+
+        let mut output_schema = chroma_types::Schema::new_default(chroma_types::KnnIndex::Hnsw);
+        output_schema.source_attached_function_id = Some(attached_function_id.0.to_string());
+        let output_schema_str = serde_json::to_string(&output_schema).unwrap();
+        sysdb
+            .finish_create_attached_function(attached_function_id, output_schema_str)
+            .await
+            .unwrap();
+
+        // Add 5 records
+        for i in 0..300 {
+            let log_record = chroma_types::LogRecord {
+                log_offset: i,
+                record: OperationRecord {
+                    id: format!("record_{}", i),
+                    embedding: Some(vec![
+                        0.0;
+                        test_segments.collection.dimension.unwrap_or(384)
+                            as usize
+                    ]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            };
+
+            in_memory_log.add_log(
+                collection_id,
+                InternalLogRecord {
+                    collection_id,
+                    log_offset: i,
+                    log_ts: i,
+                    record: log_record,
+                },
+            );
+        }
+
+        let log = Log::InMemory(in_memory_log);
+
+        // Run compaction with work queue client
+        let compact_result = Box::pin(compact(
+            system.clone(),
+            collection_id,
+            database_name.clone(),
+            None,
+            50,
+            10,
+            1000,
+            50,
+            log,
+            sysdb.clone(),
+            test_segments.blockfile_provider.clone(),
+            test_segments.hnsw_provider.clone(),
+            test_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            false,
+            None,
+            None,
+            None,
+            Some(work_queue_client.clone()),
+            None, // poison_offset for test
+        ))
+        .await;
+
+        assert!(
+            compact_result.is_ok(),
+            "Compaction should succeed: {:?}",
+            compact_result.err()
+        );
+
+        // Verify the attached function was found
+        let attached_functions = sysdb
+            .get_attached_functions(
+                None,
+                Some(attached_function_name.clone()),
+                Some(collection_id),
+                true,
+            )
+            .await
+            .expect("Attached function query should succeed");
+        let attached_function_after_compact = attached_functions
+            .into_iter()
+            .next()
+            .expect("Attached function should be found");
+
+        assert!(
+            attached_function_after_compact
+                .output_collection_id
+                .is_some(),
+            "Output collection should be created"
+        );
+
+        let _output_collection_id = attached_function_after_compact
+            .output_collection_id
+            .expect("Output collection should exist");
+
+        // Check work queue for the async function
+        let mut wq_client = work_queue_client.clone();
+        let work_response = wq_client
+            .get_work("test_shard".to_string(), 10)
+            .await
+            .expect("Should be able to get work from queue");
+
+        // Filter for our specific function
+        println!("Got {} items, expected {}", work_response.items.len(), 1);
+        println!(
+            "Looking for fn_id: {}, coll_id: {}",
+            attached_function_id.0, collection_id
+        );
+
+        for item in &work_response.items {
+            println!(
+                "Work item: fn_id: {}, coll_id: {}, offset: {}",
+                item.fn_id, item.input_coll_id, item.completion_offset
+            );
+        }
+
+        let our_work_item = work_response.items.into_iter().find(|item| {
+            item.fn_id == attached_function_id.0.to_string()
+                && item.input_coll_id == collection_id.to_string()
+        });
+
+        assert!(
+            our_work_item.is_some(),
+            "Should find our async function in the work queue"
+        );
+
+        // Clean up - delete the collections
+        // Note: We don't have segment IDs easily available here, so we can't delete
+        // the collections. In a real test cleanup, you'd want to track the segment IDs.
     }
 }

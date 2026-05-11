@@ -18,6 +18,7 @@ use crate::execution::operators::repair_log_offsets::RepairLogOffsetsInput;
 use crate::execution::operators::repair_log_offsets::RepairLogOffsetsOutput;
 use crate::execution::orchestration::compact::{compact, CompactionResponse};
 use crate::utils::fragment_fetch::fragment_fetcher_for_collection as resolve_fragment_fetcher_for_collection;
+use crate::work_queue::work_queue_client::WorkQueueClient;
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::assignment::assignment_policy::AssignmentPolicy;
@@ -108,6 +109,7 @@ pub(crate) struct CompactionManagerContext {
     bloom_filter_manager: Option<BloomFilterManager>,
     shard_size: Option<u64>,
     sharding_enabled_tenant_patterns: Vec<String>,
+    work_queue_client: Option<crate::work_queue::work_queue_client::WorkQueueClient>,
 }
 
 pub(crate) struct CompactionManager {
@@ -164,6 +166,7 @@ impl CompactionManager {
         bloom_filter_manager: Option<BloomFilterManager>,
         shard_size: Option<u64>,
         sharding_enabled_tenant_patterns: Vec<String>,
+        work_queue_client: Option<WorkQueueClient>,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (compact_awaiter_tx, compact_awaiter_rx) =
             mpsc::channel::<CompactionTask>(compaction_manager_queue_size);
@@ -204,6 +207,7 @@ impl CompactionManager {
                 bloom_filter_manager,
                 shard_size,
                 sharding_enabled_tenant_patterns,
+                work_queue_client,
             },
             on_next_memberlist_signal: None,
             compact_awaiter_channel: compact_awaiter_tx,
@@ -509,6 +513,7 @@ impl CompactionManagerContext {
             fragment_fetcher,
             bloom_filter_manager,
             shard_size,
+            self.work_queue_client.clone(),
             #[cfg(test)]
             None,
         ))
@@ -697,6 +702,24 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         )
         .await?;
 
+        // Initialize WorkQueueClient if endpoint is configured
+        let work_queue_client = match &config.work_queue_endpoint {
+            Some(endpoint) => match WorkQueueClient::new(endpoint.clone()).await {
+                Ok(client) => {
+                    tracing::info!("WorkQueue client initialized for endpoint: {}", endpoint);
+                    Some(client)
+                }
+                Err(err) => {
+                    tracing::warn!("Failed to initialize WorkQueue client: {:?}", err);
+                    None
+                }
+            },
+            None => {
+                tracing::info!("WorkQueue endpoint not configured, async attached functions will not be supported");
+                None
+            }
+        };
+
         CompactionManager::new(
             system.clone(),
             scheduler,
@@ -723,6 +746,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             Some(bloom_filter_manager),
             config.compactor.shard_size,
             config.compactor.sharding_enabled_tenant_patterns.clone(),
+            work_queue_client,
         )
     }
 }
@@ -1307,8 +1331,9 @@ mod tests {
             None,           // bloom_filter_manager
             None,           // shard_size
             Vec::new(),     // sharding_enabled_tenant_patterns
+            None,           // work_queue_client
         )
-        .expect("Failed to create compaction manager in test");
+        .expect("Should create compaction manager in test");
 
         let dispatcher = Dispatcher::new(DispatcherConfig {
             num_worker_threads: 10,

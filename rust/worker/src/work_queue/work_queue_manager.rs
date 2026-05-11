@@ -366,6 +366,12 @@ impl Handler<PushWorkMessage> for WorkQueueManager {
     type Result = ();
 
     async fn handle(&mut self, msg: PushWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
+        tracing::info!(
+            "Received PushWorkMessage for fn_id: {}, input_coll_id: {}, completion_offset: {}",
+            msg.fn_id,
+            msg.input_coll_id,
+            msg.completion_offset
+        );
         self.push_work_and_queue_response(
             msg.fn_id,
             msg.input_coll_id,
@@ -469,6 +475,7 @@ impl Handler<GetWorkMessage> for WorkQueueManager {
             .map(|(item, _)| item)
             .take(msg.limit)
             .collect();
+        tracing::info!("Filtered {} items from get work response", filtered.len());
 
         if msg.response_tx.send(Ok(filtered)).is_err() {
             tracing::warn!("Failed to send get work response - receiver dropped");

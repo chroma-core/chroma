@@ -1408,6 +1408,7 @@ mod tests {
             None,
             None,
             None,
+            None, // work_queue_client
             None,
         ))
         .await

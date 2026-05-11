@@ -32,33 +32,37 @@ use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-use crate::execution::{
-    operators::{
-        fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
-        fragment_fetch::FragmentFetcher,
-        get_collection_and_segments::{
-            GetCollectionAndSegmentsError, GetCollectionAndSegmentsOperator,
-            GetCollectionAndSegmentsOutput,
+use crate::{
+    compactor::RebuildInfo,
+    execution::{
+        operators::{
+            fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
+            fragment_fetch::FragmentFetcher,
+            get_collection_and_segments::{
+                GetCollectionAndSegmentsError, GetCollectionAndSegmentsOperator,
+                GetCollectionAndSegmentsOutput,
+            },
+            materialize_logs::{
+                MaterializeLogInput, MaterializeLogOperator, MaterializeLogOperatorError,
+                MaterializeLogOutput,
+            },
+            partition_log::{PartitionError, PartitionInput, PartitionOperator, PartitionOutput},
+            prefetch_segment::{
+                PrefetchSegmentError, PrefetchSegmentInput, PrefetchSegmentOperator,
+                PrefetchSegmentOutput,
+            },
+            source_record_segment::{SourceRecordSegmentError, SourceRecordSegmentOutput},
+            source_record_segment_v2::{
+                SourceRecordSegmentV2Error, SourceRecordSegmentV2Input,
+                SourceRecordSegmentV2Operator, SourceRecordSegmentV2Output,
+            },
         },
-        materialize_logs::{
-            MaterializeLogInput, MaterializeLogOperator, MaterializeLogOperatorError,
-            MaterializeLogOutput,
-        },
-        partition_log::{PartitionError, PartitionInput, PartitionOperator, PartitionOutput},
-        prefetch_segment::{
-            PrefetchSegmentError, PrefetchSegmentInput, PrefetchSegmentOperator,
-            PrefetchSegmentOutput,
-        },
-        source_record_segment::{SourceRecordSegmentError, SourceRecordSegmentOutput},
-        source_record_segment_v2::{
-            SourceRecordSegmentV2Error, SourceRecordSegmentV2Input, SourceRecordSegmentV2Operator,
-            SourceRecordSegmentV2Output,
+        orchestration::compact::{
+            CollectionCompactInfo, CompactWriters, CompactionContext, CompactionContextError,
+            ExecutionState,
         },
     },
-    orchestration::compact::{
-        CollectionCompactInfo, CompactWriters, CompactionContext, CompactionContextError,
-        ExecutionState,
-    },
+    work_queue::work_queue_client::WorkQueueClient,
 };
 
 #[derive(Error, Debug)]
@@ -326,7 +330,7 @@ impl LogFetchOrchestrator {
     pub fn new(
         collection_id: CollectionUuid,
         database_name: chroma_types::DatabaseName,
-        rebuild_info: Option<crate::compactor::RebuildInfo>,
+        rebuild_info: Option<RebuildInfo>,
         fetch_log_batch_size: u32,
         fetch_log_concurrency: usize,
         max_compaction_size: usize,
@@ -339,6 +343,7 @@ impl LogFetchOrchestrator {
         dispatcher: ComponentHandle<Dispatcher>,
         fragment_fetcher: Option<Arc<FragmentFetcher>>,
         bloom_filter_manager: Option<BloomFilterManager>,
+        work_queue_client: Option<WorkQueueClient>,
     ) -> Self {
         let context = CompactionContext::new(
             rebuild_info,
@@ -356,6 +361,7 @@ impl LogFetchOrchestrator {
             fragment_fetcher,
             bloom_filter_manager,
             None, // shard_size
+            work_queue_client,
         );
         LogFetchOrchestrator {
             collection_id,
