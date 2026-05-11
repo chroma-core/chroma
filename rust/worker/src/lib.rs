@@ -1,4 +1,5 @@
 mod compactor;
+pub mod fn_consumer;
 mod server;
 mod utils;
 pub mod work_queue;
