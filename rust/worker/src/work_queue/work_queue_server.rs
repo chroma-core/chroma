@@ -2,10 +2,12 @@ use crate::work_queue::types::{FinishResult, WorkQueueError};
 use crate::work_queue::work_queue_manager::{
     FinishWorkMessage, GetWorkMessage, PushWorkMessage, WorkQueueManager,
 };
+use chroma_sysdb::SysDb;
 use chroma_system::ComponentHandle;
 use chroma_types::chroma_proto::{
     work_queue_service_server::{WorkQueueService, WorkQueueServiceServer},
-    FinishWorkRequest, GetWorkRequest, GetWorkResponse, PushWorkRequest, WorkItemResult,
+    FinalizeAsyncAttachedFunctionRepairRequest, FinishWorkRequest, GetWorkRequest, GetWorkResponse,
+    PushWorkRequest, WorkItemResult,
 };
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
 use std::str::FromStr;
@@ -14,12 +16,13 @@ use tonic::{Request, Response, Status};
 #[allow(dead_code)]
 pub struct WorkQueueServer {
     manager: ComponentHandle<WorkQueueManager>,
+    sysdb: SysDb,
 }
 
 #[allow(dead_code)]
 impl WorkQueueServer {
-    pub fn new(manager: ComponentHandle<WorkQueueManager>) -> Self {
-        Self { manager }
+    pub fn new(manager: ComponentHandle<WorkQueueManager>, sysdb: SysDb) -> Self {
+        Self { manager, sysdb }
     }
 
     #[allow(dead_code)]
@@ -27,15 +30,23 @@ impl WorkQueueServer {
         WorkQueueServiceServer::new(self)
     }
 
-    // Stub for repair handling - will be replaced with actual sysdb integration
-    #[allow(dead_code)]
-    async fn handle_repair_stub(&self, fn_id: &AttachedFunctionUuid) {
-        // TODO: Implement actual repair logic once sysdb integration is ready
-        // This should:
-        // 1. Call get_attached_functions() to get latest offset
-        // 2. Re-push work with new offset
-        // 3. Call FinalizeAsyncAttachedFunctionRepair()
-        tracing::info!("STUB: Handling repair for function {:?}", fn_id);
+    // Handle repair by finalizing the repair in sysdb
+    async fn handle_repair(&self, fn_id: &AttachedFunctionUuid) -> Result<(), WorkQueueError> {
+        // The work has already been re-pushed by WorkQueueManager
+        // We just need to finalize the repair
+        let repair_request = FinalizeAsyncAttachedFunctionRepairRequest {
+            attached_function_id: fn_id.to_string(),
+        };
+
+        let mut sysdb = self.sysdb.clone();
+        sysdb
+            .finalize_async_attached_function_repair(repair_request)
+            .await
+            .map_err(|e| WorkQueueError::RepairFailed(e.to_string()))?;
+
+        tracing::info!("Repair finalized for function {}", fn_id);
+
+        Ok(())
     }
 }
 
@@ -66,7 +77,7 @@ impl WorkQueueService for WorkQueueServer {
         response_rx
             .await
             .map_err(|e| Status::internal(format!("Failed to receive response: {}", e)))?
-            .map_err(|e: WorkQueueError| Status::internal(format!("Work queue error: {:?}", e)))?;
+            .map_err(|e: WorkQueueError| Status::internal(e.to_string()))?;
 
         Ok(Response::new(()))
     }
@@ -99,7 +110,7 @@ impl WorkQueueService for WorkQueueServer {
         let result = response_rx
             .await
             .map_err(|e| Status::internal(format!("Failed to receive response: {}", e)))?
-            .map_err(|e: WorkQueueError| Status::internal(format!("Work queue error: {:?}", e)))?;
+            .map_err(|e: WorkQueueError| Status::internal(e.to_string()))?;
 
         // Handle the result
         match result {
@@ -108,10 +119,10 @@ impl WorkQueueService for WorkQueueServer {
                 Ok(Response::new(()))
             }
             FinishResult::NeedsRepair => {
-                // NeedsRepair case - handle repair here
-                // TODO: Replace with actual repair handling once sysdb integration is ready
-                // Also need to check for error from this call.
-                self.handle_repair_stub(&fn_id).await;
+                // NeedsRepair case - handle repair
+                self.handle_repair(&fn_id)
+                    .await
+                    .map_err(|e| Status::internal(e.to_string()))?;
                 Ok(Response::new(()))
             }
         }
@@ -139,7 +150,7 @@ impl WorkQueueService for WorkQueueServer {
         let items = response_rx
             .await
             .map_err(|e| Status::internal(format!("Failed to receive response: {}", e)))?
-            .map_err(|e: WorkQueueError| Status::internal(format!("Work queue error: {:?}", e)))?;
+            .map_err(|e: WorkQueueError| Status::internal(e.to_string()))?;
 
         let results: Vec<WorkItemResult> = items
             .into_iter()

@@ -2757,6 +2757,61 @@ impl SysDb {
     }
 }
 
+//////////////////////////  Work Queue Operations //////////////////////////
+
+impl SysDb {
+    pub async fn try_finish_async_attached_function_invocation(
+        &mut self,
+        request: chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationRequest,
+    ) -> Result<
+        tonic::Response<
+            chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationResponse,
+        >,
+        tonic::Status,
+    > {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.client
+                    .clone()
+                    .try_finish_async_attached_function_invocation(request)
+                    .await
+            }
+            SysDb::Sqlite(_) => unimplemented!(),
+            SysDb::Test(_) => unimplemented!(),
+        }
+    }
+
+    pub async fn are_invocations_done(
+        &mut self,
+        request: chroma_types::chroma_proto::AreInvocationsDoneRequest,
+    ) -> Result<
+        tonic::Response<chroma_types::chroma_proto::AreInvocationsDoneResponse>,
+        tonic::Status,
+    > {
+        match self {
+            SysDb::Grpc(grpc) => grpc.client.clone().are_invocations_done(request).await,
+            SysDb::Sqlite(_) => unimplemented!(),
+            SysDb::Test(_) => unimplemented!(),
+        }
+    }
+
+    pub async fn finalize_async_attached_function_repair(
+        &mut self,
+        request: chroma_types::chroma_proto::FinalizeAsyncAttachedFunctionRepairRequest,
+    ) -> Result<(), tonic::Status> {
+        match self {
+            SysDb::Grpc(grpc) => grpc
+                .client
+                .clone()
+                .finalize_async_attached_function_repair(request)
+                .await
+                .map(|_| ()),
+            SysDb::Sqlite(_) => unimplemented!(),
+            SysDb::Test(_) => unimplemented!(),
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum AttachFunctionError {
     #[error("AlreadyExistsError: {0}")]

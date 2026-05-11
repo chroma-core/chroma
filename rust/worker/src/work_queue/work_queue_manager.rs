@@ -11,7 +11,13 @@ enum WorkResponse {
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_storage::{GetOptions, PutMode, PutOptions, Storage};
+use chroma_sysdb::SysDb;
 use chroma_system::{Component, ComponentContext, ComponentRuntime, Handler};
+use chroma_types::chroma_proto::{
+    try_finish_async_attached_function_invocation_response::Result as TryFinishResult,
+    AreInvocationsDoneRequest, InvocationCheckItem,
+    TryFinishAsyncAttachedFunctionInvocationRequest,
+};
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -50,26 +56,32 @@ pub struct PeriodicPersistMessage;
 
 // Component implementation
 #[derive(Debug)]
-pub struct WorkQueueManager {
+pub(crate) struct WorkQueueManager {
     state: QueueState,
     storage: Storage,
     storage_path: String,
-    #[allow(dead_code)]
-    sysdb: Option<chroma_sysdb::SysDb>,
+    sysdb: SysDb,
     config: crate::work_queue::config::WorkQueueConfig,
     // Pending responses waiting for persistence (push work responses)
     pending_push_responses: Vec<oneshot::Sender<Result<(), WorkQueueError>>>,
-    // Pending responses waiting for persistence (finish work responses)
-    pending_finish_responses: Vec<oneshot::Sender<Result<FinishResult, WorkQueueError>>>,
+    // Pending responses for finish work
+    pending_finish_responses: Vec<(
+        FinishResult,
+        oneshot::Sender<Result<FinishResult, WorkQueueError>>,
+    )>,
 }
 
 impl WorkQueueManager {
-    pub fn new(storage: Storage, config: crate::work_queue::config::WorkQueueConfig) -> Self {
+    pub fn new(
+        storage: Storage,
+        config: crate::work_queue::config::WorkQueueConfig,
+        sysdb: SysDb,
+    ) -> Self {
         Self {
             state: QueueState::new(),
             storage,
             storage_path: config.storage_path.clone(),
-            sysdb: None, // TODO: inject when sysdb integration ready
+            sysdb,
             config,
             pending_push_responses: Vec::new(),
             pending_finish_responses: Vec::new(),
@@ -170,8 +182,8 @@ impl WorkQueueManager {
             }
         }
 
-        for tx in self.pending_finish_responses.drain(..) {
-            if tx.send(Ok(FinishResult::NeedsRepair)).is_err() {
+        for (result, tx) in self.pending_finish_responses.drain(..) {
+            if tx.send(Ok(result)).is_err() {
                 tracing::error!("Failed to send finish work response - receiver dropped");
             }
         }
@@ -184,7 +196,7 @@ impl WorkQueueManager {
             }
         }
 
-        for tx in self.pending_finish_responses.drain(..) {
+        for (_, tx) in self.pending_finish_responses.drain(..) {
             if tx.send(Err(error.clone())).is_err() {
                 tracing::error!("Failed to send finish work error response - receiver dropped");
             }
@@ -220,7 +232,9 @@ impl WorkQueueManager {
 
         match response {
             WorkResponse::Push(tx) => self.pending_push_responses.push(tx),
-            WorkResponse::Repair(tx) => self.pending_finish_responses.push(tx),
+            WorkResponse::Repair(tx) => self
+                .pending_finish_responses
+                .push((FinishResult::NeedsRepair, tx)),
         }
 
         // Check if persist needed
@@ -231,31 +245,66 @@ impl WorkQueueManager {
         }
     }
 
-    // STUB: Will call sysdb's TryFinishAsyncAttachedFunctionInvocation
-    async fn try_finish_invocation_stub(
-        &self,
-        _fn_id: &AttachedFunctionUuid,
-        _input_coll_id: &CollectionUuid,
-        _completion_offset: i64,
-    ) -> FinishResult {
-        // TODO: When sysdb is available:
-        // if let Some(sysdb) = &self.sysdb {
-        //     match sysdb.try_finish_async_attached_function_invocation(
-        //         fn_id, input_coll_id, completion_offset
-        //     ).await {
-        //         Ok(TryFinishResult::Success) => FinishResult::Success,
-        //         Ok(TryFinishResult::NeedsRepair) => FinishResult::NeedsRepair,
-        //         Err(e) => panic!("sysdb error: {}", e),
-        //     }
-        // }
-        FinishResult::Success
+    // Call sysdb's TryFinishAsyncAttachedFunctionInvocation
+    async fn try_finish_invocation(
+        &mut self,
+        fn_id: &AttachedFunctionUuid,
+        input_coll_id: &CollectionUuid,
+        completion_offset: i64,
+    ) -> Result<FinishResult, WorkQueueError> {
+        let request = TryFinishAsyncAttachedFunctionInvocationRequest {
+            attached_function_id: fn_id.to_string(),
+            collection_id: input_coll_id.to_string(),
+            new_completion_offset: completion_offset as u64,
+        };
+
+        let response = self
+            .sysdb
+            .try_finish_async_attached_function_invocation(request)
+            .await
+            .map_err(|e| WorkQueueError::TryFinishFailed(e.message().to_string()))?;
+
+        let inner = response.into_inner();
+        match inner.result {
+            Some(result) => match result {
+                TryFinishResult::Success(_) => Ok(FinishResult::Success),
+                TryFinishResult::NeedsRepair(_) => Ok(FinishResult::NeedsRepair),
+            },
+            None => Err(WorkQueueError::TryFinishFailed(
+                "Empty response".to_string(),
+            )),
+        }
     }
 
-    // STUB: Will check invocation completion status
-    async fn check_invocations_done_stub(&self, items: &[WorkQueueRecord]) -> Vec<bool> {
-        // TODO: Call sysdb's AreInvocationsDone
-        // For now, return all false (not done)
-        vec![false; items.len()]
+    // Check invocation completion status
+    async fn check_invocations_done(
+        &mut self,
+        items: &[WorkQueueRecord],
+    ) -> Result<Vec<bool>, WorkQueueError> {
+        if items.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let invocation_items: Vec<InvocationCheckItem> = items
+            .iter()
+            .map(|item| InvocationCheckItem {
+                function_id: item.fn_id.to_string(),
+                input_collection_id: item.input_coll_id.to_string(),
+                completion_offset: item.completion_offset,
+            })
+            .collect();
+
+        let request = AreInvocationsDoneRequest {
+            items: invocation_items,
+        };
+
+        let response = self
+            .sysdb
+            .are_invocations_done(request)
+            .await
+            .map_err(|e| WorkQueueError::CheckInvocationsFailed(e.message().to_string()))?;
+
+        Ok(response.into_inner().done)
     }
 }
 
@@ -332,10 +381,19 @@ impl Handler<FinishWorkMessage> for WorkQueueManager {
     type Result = ();
 
     async fn handle(&mut self, msg: FinishWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
-        // STUB: Call sysdb
-        let finish_result = self
-            .try_finish_invocation_stub(&msg.fn_id, &msg.input_coll_id, msg.new_completion_offset)
-            .await;
+        // Call sysdb
+        let finish_result = match self
+            .try_finish_invocation(&msg.fn_id, &msg.input_coll_id, msg.new_completion_offset)
+            .await
+        {
+            Ok(result) => result,
+            Err(e) => {
+                if msg.response_tx.send(Err(e)).is_err() {
+                    tracing::error!("Failed to send error response");
+                }
+                return;
+            }
+        };
 
         match finish_result {
             FinishResult::Success => {
@@ -389,8 +447,21 @@ impl Handler<GetWorkMessage> for WorkQueueManager {
             .cloned()
             .collect();
 
-        // STUB: Check invocations done
-        let done_flags = self.check_invocations_done_stub(&items).await;
+        // Check invocations done
+        // TODO(tanujnay112): We won't need this if we make sure finish_work
+        // deletes the work item from the queue and we look for repair on bootup.
+        let done_flags = match self.check_invocations_done(&items).await {
+            Ok(flags) => flags,
+            Err(e) => {
+                tracing::error!("Failed to check invocations done: {}", e);
+                // If we fail to check, return empty results
+                if msg.response_tx.send(Err(e)).is_err() {
+                    tracing::warn!("Failed to send error response - receiver dropped");
+                }
+                return;
+            }
+        };
+
         let filtered: Vec<_> = items
             .into_iter()
             .zip(done_flags.iter())
@@ -430,6 +501,7 @@ impl Handler<PeriodicPersistMessage> for WorkQueueManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::work_queue::state::QueueState;
     use chroma_storage::local::LocalStorage;
     use tempfile::TempDir;
     use uuid::Uuid;
@@ -444,88 +516,89 @@ mod tests {
         }
     }
 
-    fn create_test_manager() -> (WorkQueueManager, TempDir) {
+    fn create_test_sysdb() -> SysDb {
+        // Create a test sysdb for unit tests that only test internal state.
+        // This sysdb is not connected to any backend and is purely for testing.
+        // If a test needs real sysdb interaction, it should be an integration test.
+        SysDb::Test(chroma_sysdb::test_sysdb::TestSysDb::new())
+    }
+
+    async fn create_test_manager() -> (WorkQueueManager, TempDir) {
         let temp_dir = TempDir::new().unwrap();
         let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
         let mut config = create_test_config();
         config.storage_path = "queue.parquet".to_string(); // Use relative path within temp dir
-        (WorkQueueManager::new(storage, config), temp_dir)
+        let sysdb = create_test_sysdb();
+        (WorkQueueManager::new(storage, config, sysdb), temp_dir)
     }
 
-    #[tokio::test]
-    async fn test_push_work_deduplication() {
-        let (mut manager, _temp_dir) = create_test_manager();
+    #[test]
+    fn test_push_work_deduplication() {
+        let mut state = QueueState::new();
 
         let fn_id = AttachedFunctionUuid(Uuid::new_v4());
         let coll_id = CollectionUuid(Uuid::new_v4());
 
         // Test direct state manipulation to verify deduplication logic
-        manager.state.push_work(fn_id, coll_id, 100);
-        assert_eq!(manager.state.pending_work.len(), 1);
-        assert_eq!(manager.state.pending_work[0].completion_offset, 100);
+        state.push_work(fn_id, coll_id, 100);
+        assert_eq!(state.pending_work.len(), 1);
+        assert_eq!(state.pending_work[0].completion_offset, 100);
 
         // Push with lower offset should be ignored
-        manager.state.push_work(fn_id, coll_id, 50);
-        assert_eq!(manager.state.pending_work.len(), 1);
-        assert_eq!(manager.state.pending_work[0].completion_offset, 100);
+        state.push_work(fn_id, coll_id, 50);
+        assert_eq!(state.pending_work.len(), 1);
+        assert_eq!(state.pending_work[0].completion_offset, 100);
 
         // Push with higher offset should replace
-        manager.state.push_work(fn_id, coll_id, 200);
-        assert_eq!(manager.state.pending_work.len(), 1);
-        assert_eq!(manager.state.pending_work[0].completion_offset, 200);
+        state.push_work(fn_id, coll_id, 200);
+        assert_eq!(state.pending_work.len(), 1);
+        assert_eq!(state.pending_work[0].completion_offset, 200);
 
-        assert!(manager.state.dirty);
+        assert!(state.dirty);
     }
 
-    #[tokio::test]
-    async fn test_finish_work_success() {
-        let (mut manager, _temp_dir) = create_test_manager();
+    #[test]
+    fn test_finish_work_success() {
+        let mut state = QueueState::new();
 
         let fn_id = AttachedFunctionUuid(Uuid::new_v4());
         let coll_id = CollectionUuid(Uuid::new_v4());
 
         // Push work
-        manager.state.push_work(fn_id, coll_id, 100);
-        assert_eq!(manager.state.pending_work.len(), 1);
+        state.push_work(fn_id, coll_id, 100);
+        assert_eq!(state.pending_work.len(), 1);
 
         // Finish work
-        manager.state.finish_work_success(&fn_id, &coll_id, 100);
-        assert_eq!(manager.state.pending_work.len(), 0);
-        assert!(manager.state.dirty);
+        state.finish_work_success(&fn_id, &coll_id, 100);
+        assert_eq!(state.pending_work.len(), 0);
+        assert!(state.dirty);
     }
 
-    #[tokio::test]
-    async fn test_get_work_filtering() {
-        let (mut manager, _temp_dir) = create_test_manager();
+    #[test]
+    fn test_get_work_filtering() {
+        let mut state = QueueState::new();
 
         // Add multiple work items
         for i in 0..5 {
-            manager.state.push_work(
+            state.push_work(
                 AttachedFunctionUuid(Uuid::new_v4()),
                 CollectionUuid(Uuid::new_v4()),
                 i * 100,
             );
         }
 
-        let (tx, rx) = oneshot::channel();
-        let msg = GetWorkMessage {
-            shard_id: "shard-1".to_string(),
-            limit: 3,
-            response_tx: tx,
-        };
+        assert_eq!(state.pending_work.len(), 5);
 
-        // Handle without context since we can't create one in tests
-        let filtered: Vec<_> = manager
-            .state
-            .pending_work
-            .iter()
-            .take(msg.limit)
-            .cloned()
-            .collect();
-        let _ = msg.response_tx.send(Ok(filtered));
+        // Test filtering logic (simulating what get_work does)
+        let limit = 3;
+        let filtered: Vec<_> = state.pending_work.iter().take(limit).cloned().collect();
 
-        let result = rx.await.unwrap().unwrap();
-        assert_eq!(result.len(), 3);
+        assert_eq!(filtered.len(), 3);
+
+        // Verify we got the first 3 items (FIFO order)
+        for (i, item) in filtered.iter().enumerate().take(3) {
+            assert_eq!(item.completion_offset, (i as i64) * 100);
+        }
     }
 
     #[tokio::test]
@@ -536,7 +609,8 @@ mod tests {
         // Create and persist state
         {
             let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
-            let mut manager = WorkQueueManager::new(storage, config.clone());
+            let sysdb = create_test_sysdb();
+            let mut manager = WorkQueueManager::new(storage, config.clone(), sysdb);
             manager.state.push_work(
                 AttachedFunctionUuid(Uuid::new_v4()),
                 CollectionUuid(Uuid::new_v4()),
@@ -553,7 +627,8 @@ mod tests {
         // Load state in new manager
         {
             let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
-            let mut manager = WorkQueueManager::new(storage, config);
+            let sysdb = create_test_sysdb();
+            let mut manager = WorkQueueManager::new(storage, config, sysdb);
             manager.load_state().await.unwrap();
             assert_eq!(manager.state.pending_work.len(), 2);
             assert_eq!(manager.state.pending_work[0].completion_offset, 100);
@@ -563,13 +638,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_notify_pending_responses() {
-        let (mut manager, _temp_dir) = create_test_manager();
+        let (mut manager, _temp_dir) = create_test_manager().await;
 
         // Add pending responses
         let (tx1, rx1) = oneshot::channel();
         let (tx2, rx2) = oneshot::channel();
         manager.pending_push_responses.push(tx1);
-        manager.pending_finish_responses.push(tx2);
+        manager
+            .pending_finish_responses
+            .push((FinishResult::NeedsRepair, tx2));
 
         // Notify success
         manager.notify_pending_responses();
@@ -586,13 +663,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_notify_pending_responses_error() {
-        let (mut manager, _temp_dir) = create_test_manager();
+        let (mut manager, _temp_dir) = create_test_manager().await;
 
         // Add pending responses
         let (tx1, rx1) = oneshot::channel();
         let (tx2, rx2) = oneshot::channel();
         manager.pending_push_responses.push(tx1);
-        manager.pending_finish_responses.push(tx2);
+        manager
+            .pending_finish_responses
+            .push((FinishResult::NeedsRepair, tx2));
 
         // Notify error
         let error = WorkQueueError::Storage("test error".to_string());
@@ -622,29 +701,29 @@ mod tests {
     //     // Test disabled for LocalStorage - would require S3 or mock storage
     // }
 
-    #[tokio::test]
-    async fn test_finish_work_multiple_offsets() {
-        let (mut manager, _temp_dir) = create_test_manager();
+    #[test]
+    fn test_finish_work_multiple_offsets() {
+        let mut state = QueueState::new();
 
         let fn_id = AttachedFunctionUuid(Uuid::new_v4());
         let coll_id = CollectionUuid(Uuid::new_v4());
 
         // Push multiple work items with different offsets
-        manager.state.push_work(fn_id, coll_id, 100);
-        manager.state.push_work(fn_id, coll_id, 200);
-        manager.state.push_work(fn_id, coll_id, 300);
-        assert_eq!(manager.state.pending_work.len(), 1);
-        assert_eq!(manager.state.pending_work[0].completion_offset, 300);
+        state.push_work(fn_id, coll_id, 100);
+        state.push_work(fn_id, coll_id, 200);
+        state.push_work(fn_id, coll_id, 300);
+        assert_eq!(state.pending_work.len(), 1);
+        assert_eq!(state.pending_work[0].completion_offset, 300);
 
         // Finish work up to offset 200
-        manager.state.finish_work_success(&fn_id, &coll_id, 200);
+        state.finish_work_success(&fn_id, &coll_id, 200);
 
         // Should still have work with offset 300
-        assert_eq!(manager.state.pending_work.len(), 1);
-        assert_eq!(manager.state.pending_work[0].completion_offset, 300);
+        assert_eq!(state.pending_work.len(), 1);
+        assert_eq!(state.pending_work[0].completion_offset, 300);
 
         // Finish remaining work
-        manager.state.finish_work_success(&fn_id, &coll_id, 300);
-        assert_eq!(manager.state.pending_work.len(), 0);
+        state.finish_work_success(&fn_id, &coll_id, 300);
+        assert_eq!(state.pending_work.len(), 0);
     }
 }
