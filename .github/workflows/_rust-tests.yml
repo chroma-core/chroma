@@ -182,6 +182,7 @@ jobs:
           kubectl -n chroma port-forward svc/rust-frontend-service 8000:8000 &
           kubectl -n chroma port-forward svc/minio 9000:9000 &
           kubectl -n chroma port-forward svc/jaeger 16686:16686 &
+          kubectl -n chroma port-forward svc/work-queue-service 50058:50051 &
           # Forward Spanner emulator port for rust-sysdb backend tests
           kubectl -n chroma port-forward svc/spanner 9010:9010 &
       - name: Run mcmr k8s integration tests

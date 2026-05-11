@@ -20,3 +20,4 @@ runs:
         kubectl -n chroma2 port-forward svc/rust-frontend-service 8001:8000 &
         kubectl -n chroma port-forward svc/minio 9000:9000 &
         kubectl -n chroma port-forward svc/jaeger 16686:16686 &
+        kubectl -n chroma port-forward svc/work-queue-service 50058:50051 &

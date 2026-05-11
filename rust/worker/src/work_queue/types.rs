@@ -25,6 +25,18 @@ pub enum WorkQueueError {
 
     #[error("Invalid state: {0}")]
     InvalidState(String),
+
+    #[error("SysDB error: {0}")]
+    SysDb(String),
+
+    #[error("Failed to finish async invocation: {0}")]
+    TryFinishFailed(String),
+
+    #[error("Failed to check invocations: {0}")]
+    CheckInvocationsFailed(String),
+
+    #[error("Failed to repair attached function: {0}")]
+    RepairFailed(String),
 }
 
 impl ChromaError for WorkQueueError {
@@ -34,6 +46,19 @@ impl ChromaError for WorkQueueError {
             WorkQueueError::Serialization(_) => ErrorCodes::Internal,
             WorkQueueError::ETagMismatch => ErrorCodes::AlreadyExists,
             WorkQueueError::InvalidState(_) => ErrorCodes::InvalidArgument,
+            WorkQueueError::SysDb(_) => ErrorCodes::Internal,
+            WorkQueueError::TryFinishFailed(_) => ErrorCodes::Internal,
+            WorkQueueError::CheckInvocationsFailed(_) => ErrorCodes::Internal,
+            WorkQueueError::RepairFailed(_) => ErrorCodes::Internal,
+        }
+    }
+
+    fn should_trace_error(&self) -> bool {
+        match self {
+            // ETagMismatch is expected during normal operation
+            WorkQueueError::ETagMismatch => false,
+            // All other errors should be traced
+            _ => true,
         }
     }
 }
