@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package chroma;
+
+import "google/protobuf/empty.proto";
+import "chromadb/proto/workqueue.proto";
+
+// FnConsumerService is invoked by the downstream record-processing process to
+// acknowledge progress on a streamed work item. The fn_consumer service then
+// forwards this acknowledgement to the work queue.
+service FnConsumerService {
+    rpc FinishWork(FinishWorkRequest) returns (google.protobuf.Empty);
+}
