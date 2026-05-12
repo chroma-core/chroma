@@ -5,7 +5,7 @@ from typing import Sequence
 from uuid import UUID
 import httpx
 import urllib.parse
-from overrides import override
+from chromadb.utils.compat import override
 
 from chromadb.api.models.AttachedFunction import AttachedFunction
 
@@ -63,7 +63,6 @@ from chromadb.telemetry.opentelemetry import (
 from chromadb.telemetry.product import ProductTelemetryClient
 
 logger = logging.getLogger(__name__)
-
 
 class FastAPI(BaseHTTPClient, ServerAPI):
     def __init__(self, system: System):

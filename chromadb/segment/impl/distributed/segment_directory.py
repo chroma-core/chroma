@@ -3,7 +3,8 @@ import time
 from typing import Any, Callable, Dict, List, Optional, cast
 from kubernetes import client, config, watch
 from kubernetes.client.rest import ApiException
-from overrides import EnforceOverrides, override
+from chromadb.utils.compat import EnforceOverrides, override
+
 from chromadb.config import RoutingMode, System
 from chromadb.segment.distributed import (
     Member,
@@ -25,7 +26,6 @@ WATCH_TIMEOUT_SECONDS = 60
 KUBERNETES_NAMESPACE = "chroma"
 KUBERNETES_GROUP = "chroma.cluster"
 HEADLESS_SERVICE = "svc.cluster.local"
-
 
 class MockMemberlistProvider(MemberlistProvider, EnforceOverrides):
     """A mock memberlist provider for testing"""
@@ -53,7 +53,6 @@ class MockMemberlistProvider(MemberlistProvider, EnforceOverrides):
         self._memberlist = memberlist
         for callback in self.callbacks:
             callback(memberlist)
-
 
 class CustomResourceMemberlistProvider(MemberlistProvider, EnforceOverrides):
     """A memberlist provider that uses a k8s custom resource to store the memberlist"""
@@ -217,7 +216,6 @@ class CustomResourceMemberlistProvider(MemberlistProvider, EnforceOverrides):
     def _notify(self, memberlist: Memberlist) -> None:
         for callback in self.callbacks:
             callback(memberlist)
-
 
 class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
     _memberlist_provider: MemberlistProvider

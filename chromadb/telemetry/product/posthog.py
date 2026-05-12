@@ -2,8 +2,7 @@ from chromadb.telemetry.product import (
     ProductTelemetryClient,
     ProductTelemetryEvent,
 )
-from overrides import override
-
+from chromadb.utils.compat import override
 
 class Posthog(ProductTelemetryClient):
     @override

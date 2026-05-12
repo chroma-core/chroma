@@ -7,7 +7,8 @@ import traceback
 import bcrypt
 import logging
 
-from overrides import override
+from chromadb.utils.compat import override
+
 from pydantic import SecretStr
 
 from chromadb.auth import (
@@ -24,16 +25,13 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 
-
 from typing import Dict
-
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["BasicAuthenticationServerProvider", "BasicAuthClientProvider"]
 
 AUTHORIZATION_HEADER = "Authorization"
-
 
 class BasicAuthClientProvider(ClientAuthProvider):
     """
@@ -55,7 +53,6 @@ class BasicAuthClientProvider(ClientAuthProvider):
         return {
             AUTHORIZATION_HEADER: SecretStr(f"Basic {encoded}"),
         }
-
 
 class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
     """

@@ -1,7 +1,6 @@
 from abc import abstractmethod
 from typing import Dict, Optional, Type
-from overrides import overrides, EnforceOverrides
-
+from chromadb.utils.compat import EnforceOverrides, overrides
 
 class ChromaError(Exception, EnforceOverrides):
     trace_id: Optional[str] = None
@@ -19,13 +18,11 @@ class ChromaError(Exception, EnforceOverrides):
         """Return the error name"""
         pass
 
-
 class InvalidDimensionException(ChromaError):
     @classmethod
     @overrides
     def name(cls) -> str:
         return "InvalidDimension"
-
 
 class IDAlreadyExistsError(ChromaError):
     @overrides
@@ -36,7 +33,6 @@ class IDAlreadyExistsError(ChromaError):
     @overrides
     def name(cls) -> str:
         return "IDAlreadyExists"
-
 
 class ChromaAuthError(ChromaError):
     @overrides
@@ -52,13 +48,11 @@ class ChromaAuthError(ChromaError):
     def message(self) -> str:
         return "Forbidden"
 
-
 class DuplicateIDError(ChromaError):
     @classmethod
     @overrides
     def name(cls) -> str:
         return "DuplicateID"
-
 
 class InvalidArgumentError(ChromaError):
     @overrides
@@ -70,20 +64,17 @@ class InvalidArgumentError(ChromaError):
     def name(cls) -> str:
         return "InvalidArgument"
 
-
 class InvalidUUIDError(ChromaError):
     @classmethod
     @overrides
     def name(cls) -> str:
         return "InvalidUUID"
 
-
 class InvalidHTTPVersion(ChromaError):
     @classmethod
     @overrides
     def name(cls) -> str:
         return "InvalidHTTPVersion"
-
 
 class AuthorizationError(ChromaError):
     @overrides
@@ -95,7 +86,6 @@ class AuthorizationError(ChromaError):
     def name(cls) -> str:
         return "AuthorizationError"
 
-
 class NotFoundError(ChromaError):
     @overrides
     def code(self) -> int:
@@ -105,7 +95,6 @@ class NotFoundError(ChromaError):
     @overrides
     def name(cls) -> str:
         return "NotFoundError"
-
 
 class UniqueConstraintError(ChromaError):
     @overrides
@@ -117,7 +106,6 @@ class UniqueConstraintError(ChromaError):
     def name(cls) -> str:
         return "UniqueConstraintError"
 
-
 class BatchSizeExceededError(ChromaError):
     @overrides
     def code(self) -> int:
@@ -127,7 +115,6 @@ class BatchSizeExceededError(ChromaError):
     @overrides
     def name(cls) -> str:
         return "BatchSizeExceededError"
-
 
 class VersionMismatchError(ChromaError):
     @overrides
@@ -139,7 +126,6 @@ class VersionMismatchError(ChromaError):
     def name(cls) -> str:
         return "VersionMismatchError"
 
-
 class InternalError(ChromaError):
     @overrides
     def code(self) -> int:
@@ -149,7 +135,6 @@ class InternalError(ChromaError):
     @overrides
     def name(cls) -> str:
         return "InternalError"
-
 
 class RateLimitError(ChromaError):
     @overrides
@@ -161,7 +146,6 @@ class RateLimitError(ChromaError):
     def name(cls) -> str:
         return "RateLimitError"
 
-
 class QuotaError(ChromaError):
     @overrides
     def code(self) -> int:
@@ -171,7 +155,6 @@ class QuotaError(ChromaError):
     @overrides
     def name(cls) -> str:
         return "QuotaError"
-
 
 error_types: Dict[str, Type[ChromaError]] = {
     "InvalidDimension": InvalidDimensionException,

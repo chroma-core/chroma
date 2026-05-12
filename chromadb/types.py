@@ -4,7 +4,8 @@ from typing import Any, Optional, Union, Sequence, Dict, Mapping, Generic
 
 from typing_extensions import Self
 
-from overrides import override
+from chromadb.utils.compat import override
+
 from typing_extensions import TypedDict, TypeVar
 from uuid import UUID
 from enum import Enum
@@ -40,20 +41,16 @@ from chromadb.base_types import (
 # the intent is for the value to be globally unique and semantically meaningful.
 NamespacedName = str
 
-
 class ScalarEncoding(Enum):
     FLOAT32 = "FLOAT32"
     INT32 = "INT32"
-
 
 class SegmentScope(Enum):
     VECTOR = "VECTOR"
     METADATA = "METADATA"
     RECORD = "RECORD"
 
-
 C = TypeVar("C", bound=ConfigurationInternal)
-
 
 class Configurable(Generic[C], ABC):
     """A mixin that allows a class to be configured with a configuration object"""
@@ -65,7 +62,6 @@ class Configurable(Generic[C], ABC):
     @abstractmethod
     def set_configuration(self, configuration: C) -> None:
         raise NotImplementedError()
-
 
 class Collection(
     BaseModel,
@@ -198,16 +194,13 @@ class Collection(
             log_position=json_map.get("log_position", 0),
         )
 
-
 class Database(TypedDict):
     id: UUID
     name: str
     tenant: str
 
-
 class Tenant(TypedDict):
     name: str
-
 
 class Segment(TypedDict):
     id: UUID
@@ -217,11 +210,9 @@ class Segment(TypedDict):
     metadata: Optional[Metadata]
     file_paths: Mapping[str, Sequence[str]]
 
-
 class CollectionAndSegments(TypedDict):
     collection: Collection
     segments: Sequence[Segment]
-
 
 # SeqID can be one of three types of value in our current and future plans:
 # 1. A Pulsar MessageID encoded as a 192-bit integer - This is no longer used as we removed pulsar
@@ -233,23 +224,19 @@ class CollectionAndSegments(TypedDict):
 # values are stored correctly when persisting to DBs.
 SeqId = int
 
-
 class Operation(Enum):
     ADD = "ADD"
     UPDATE = "UPDATE"
     UPSERT = "UPSERT"
     DELETE = "DELETE"
 
-
 class VectorEmbeddingRecord(TypedDict):
     id: str
     embedding: Vector
 
-
 class MetadataEmbeddingRecord(TypedDict):
     id: str
     metadata: Optional[Metadata]
-
 
 class OperationRecord(TypedDict):
     id: str
@@ -258,11 +245,9 @@ class OperationRecord(TypedDict):
     metadata: Optional[UpdateMetadata]
     operation: Operation
 
-
 class LogRecord(TypedDict):
     log_offset: int
     record: OperationRecord
-
 
 class RequestVersionContext(TypedDict):
     """The version and log position of the collection at the time of the request
@@ -283,7 +268,6 @@ class RequestVersionContext(TypedDict):
     collection_version: int
     log_position: int
 
-
 class VectorQuery(TypedDict):
     """A KNN/ANN query"""
 
@@ -294,14 +278,12 @@ class VectorQuery(TypedDict):
     options: Optional[Dict[str, Union[str, int, float, bool]]]
     request_version_context: RequestVersionContext
 
-
 class VectorQueryResult(TypedDict):
     """A KNN/ANN query result"""
 
     id: str
     distance: float
     embedding: Optional[Vector]
-
 
 class Unspecified:
     """A sentinel value used to indicate that a value should not be updated"""
@@ -314,17 +296,14 @@ class Unspecified:
 
         return cls._instance
 
-
 T = TypeVar("T")
 OptionalArgument = Union[T, Unspecified]
-
 
 @dataclass
 class CloudClientArg:
     name: str
     env_var: str
     value: Optional[str] = None
-
 
 __all__ = [
     "Metadata",

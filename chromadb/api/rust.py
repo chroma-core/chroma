@@ -50,9 +50,9 @@ from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.execution.expression.plan import Search
 import chromadb_rust_bindings
 
-
 from typing import Optional, Sequence, List, Dict, Any, Tuple
-from overrides import override
+from chromadb.utils.compat import override
+
 from uuid import UUID
 import json
 import platform
@@ -61,7 +61,6 @@ if platform.system() != "Windows":
     import resource
 elif platform.system() == "Windows":
     import ctypes
-
 
 # RustBindingsAPI is an implementation of ServerAPI which shims
 # the Rust bindings to the Python API, providing a full implementation

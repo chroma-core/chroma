@@ -1,7 +1,8 @@
 from concurrent import futures
 from typing import Any, Dict, List, cast
 from uuid import UUID
-from overrides import overrides
+from chromadb.utils.compat import overrides
+
 import json
 
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Component, System
@@ -54,7 +55,6 @@ from chromadb.proto.coordinator_pb2_grpc import (
 import grpc
 from google.protobuf.empty_pb2 import Empty
 from chromadb.types import Collection, Metadata, Segment, SegmentScope
-
 
 class GrpcMockSysDB(SysDBServicer, Component):
     """A mock sysdb implementation that can be used for testing the grpc client. It stores

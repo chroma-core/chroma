@@ -11,7 +11,8 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 import sqlite3
-from overrides import override
+from chromadb.utils.compat import override
+
 import pypika
 from typing import Sequence, cast, Optional, Type, Any
 from typing_extensions import Literal
@@ -23,7 +24,6 @@ from importlib_resources import files
 from importlib_resources.abc import Traversable
 
 logger = logging.getLogger(__name__)
-
 
 class TxWrapper(base.TxWrapper):
     _conn: Connection
@@ -58,7 +58,6 @@ class TxWrapper(base.TxWrapper):
         self._conn.cursor().close()
         self._pool.return_to_pool(self._conn)
         return False
-
 
 class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     _conn_pool: Pool

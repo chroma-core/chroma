@@ -2,10 +2,10 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Any, Callable, List
 
-from overrides import EnforceOverrides, overrides
+from chromadb.utils.compat import EnforceOverrides, overrides
+
 from chromadb.config import Component, System
 from chromadb.types import Segment
-
 
 class SegmentDirectory(Component):
     """A segment directory is a data interface that manages the location of segments. Concretely, this
@@ -24,16 +24,13 @@ class SegmentDirectory(Component):
         """Register a callback that will be called when a segment is updated"""
         pass
 
-
 @dataclass
 class Member:
     id: str
     ip: str
     node: str
 
-
 Memberlist = List[Member]
-
 
 class MemberlistProvider(Component, EnforceOverrides):
     """Returns the latest memberlist and provdes a callback for when it changes. This

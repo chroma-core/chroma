@@ -79,7 +79,8 @@ from typing import (
     TypeVar,
     Tuple,
 )
-from overrides import override
+from chromadb.utils.compat import override
+
 from uuid import UUID, uuid4
 from functools import wraps
 import time
@@ -90,7 +91,6 @@ from chromadb.execution.expression.plan import Search
 T = TypeVar("T", bound=Callable[..., Any])
 
 logger = logging.getLogger(__name__)
-
 
 # mimics s3 bucket requirements for naming
 def check_index_name(index_name: str) -> None:
@@ -112,7 +112,6 @@ def check_index_name(index_name: str) -> None:
     if re.match("^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$", index_name):
         raise ValueError(msg)
 
-
 def rate_limit(func: T) -> T:
     @wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -120,7 +119,6 @@ def rate_limit(func: T) -> T:
         return self._rate_limit_enforcer.rate_limit(func)(*args, **kwargs)
 
     return wrapper  # type: ignore
-
 
 class SegmentAPI(ServerAPI):
     """API implementation utilizing the new segment-based internal architecture"""
@@ -1060,7 +1058,6 @@ class SegmentAPI(ServerAPI):
             # Local chroma do not have record segment, and this is not used by the local executor
             record=scope_to_segment.get(t.SegmentScope.RECORD, None),  # type: ignore[arg-type]
         )
-
 
 def _records(
     operation: t.Operation,

@@ -1,6 +1,6 @@
 from typing import Optional, Sequence
 
-from overrides import overrides
+from chromadb.utils.compat import overrides
 
 from chromadb.api.types import GetResult, Metadata, QueryResult
 from chromadb.config import System
@@ -9,7 +9,6 @@ from chromadb.execution.expression.plan import CountPlan, GetPlan, KNNPlan
 from chromadb.segment import MetadataReader, VectorReader
 from chromadb.segment.impl.manager.local import LocalSegmentManager
 from chromadb.types import Collection, VectorQuery, VectorQueryResult
-
 
 def _clean_metadata(metadata: Optional[Metadata]) -> Optional[Metadata]:
     """Remove any chroma-specific metadata keys that the client shouldn't see from a metadata map."""
@@ -23,7 +22,6 @@ def _clean_metadata(metadata: Optional[Metadata]) -> Optional[Metadata]:
         return None
     return result
 
-
 def _doc(metadata: Optional[Metadata]) -> Optional[str]:
     """Retrieve the document (if any) from a Metadata map"""
 
@@ -31,14 +29,12 @@ def _doc(metadata: Optional[Metadata]) -> Optional[str]:
         return str(metadata["chroma:document"])
     return None
 
-
 def _uri(metadata: Optional[Metadata]) -> Optional[str]:
     """Retrieve the uri (if any) from a Metadata map"""
 
     if metadata and "chroma:uri" in metadata:
         return str(metadata["chroma:uri"])
     return None
-
 
 class LocalExecutor(Executor):
     _manager: LocalSegmentManager

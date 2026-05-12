@@ -7,8 +7,9 @@ from graphlib import TopologicalSorter
 from typing import Optional, List, Any, Dict, Set, Iterable, Union
 from typing import Type, TypeVar, cast
 
-from overrides import EnforceOverrides
-from overrides import override
+from chromadb.utils.compat import EnforceOverrides
+
+
 from typing_extensions import Literal
 import platform
 
@@ -53,7 +54,6 @@ _legacy_config_values = {
     "chromadb.api.local.LocalAPI",
 }
 
-
 # Map specific abstract types to the setting which specifies which
 # concrete implementation to use.
 # Please keep these sorted. We're civilized people.
@@ -83,11 +83,9 @@ _abstract_type_keys: Dict[str, str] = {
 DEFAULT_TENANT = "default_tenant"
 DEFAULT_DATABASE = "default_database"
 
-
 class APIVersion(str, Enum):
     V1 = "/api/v1"
     V2 = "/api/v2"
-
 
 # NOTE(hammadb) 1/13/2024 - This has to be in config.py instead of being localized to the module
 # that uses it because of a circular import issue. This is a temporary solution until we can
@@ -107,7 +105,6 @@ class RoutingMode(Enum):
 
     NODE = "node"
     ID = "id"
-
 
 class Settings(BaseSettings):  # type: ignore
     # ==============
@@ -319,9 +316,7 @@ class Settings(BaseSettings):  # type: ignore
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
-
 T = TypeVar("T", bound="Component")
-
 
 class Component(ABC, EnforceOverrides):
     _dependencies: Set["Component"]
@@ -359,7 +354,6 @@ class Component(ABC, EnforceOverrides):
         """Reset this component's state to its initial blank state. Only intended to be
         called from tests."""
         logger.debug(f"Resetting component {self.__class__.__name__}")
-
 
 class System(Component):
     settings: Settings
@@ -482,9 +476,7 @@ class System(Component):
         for component in reversed(list(self.components())):
             component.reset_state()
 
-
 C = TypeVar("C")
-
 
 def get_class(fqn: str, type: Type[C]) -> Type[C]:
     """Given a fully qualifed class name, import the module and return the class"""
@@ -492,7 +484,6 @@ def get_class(fqn: str, type: Type[C]) -> Type[C]:
     module = importlib.import_module(module_name)
     cls = getattr(module, class_name)
     return cast(Type[C], cls)
-
 
 def get_fqn(cls: Type[object]) -> str:
     """Given a class, return its fully qualified name"""

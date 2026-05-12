@@ -43,7 +43,8 @@ from abc import ABC, abstractmethod
 from typing import Sequence, Optional, List, Dict, Any, Tuple
 from uuid import UUID
 
-from overrides import override
+from chromadb.utils.compat import override
+
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     UpdateCollectionConfiguration,
@@ -87,7 +88,6 @@ from chromadb.api.async_api import (  # noqa: F401
     AsyncAdminAPI as AsyncAdminAPI,
     AsyncServerAPI as AsyncServerAPI,
 )
-
 
 class BaseAPI(ABC):
     @abstractmethod
@@ -385,7 +385,6 @@ class BaseAPI(ABC):
         """
         pass
 
-
 class ClientAPI(BaseAPI, ABC):
     tenant: str
     database: str
@@ -544,7 +543,6 @@ class ClientAPI(BaseAPI, ABC):
         This should only be used for testing purposes."""
         pass
 
-
 class AdminAPI(ABC):
     @abstractmethod
     def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
@@ -612,7 +610,6 @@ class AdminAPI(ABC):
 
         """
         pass
-
 
 class ServerAPI(BaseAPI, AdminAPI, Component):
     """An API instance that extends the relevant Base API methods by passing

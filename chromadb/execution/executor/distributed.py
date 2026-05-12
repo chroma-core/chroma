@@ -2,7 +2,8 @@ import threading
 import random
 from typing import Callable, Dict, List, Optional, TypeVar
 import grpc
-from overrides import overrides
+from chromadb.utils.compat import overrides
+
 from chromadb.api.types import GetResult, Metadata, QueryResult
 from chromadb.config import System
 from chromadb.execution.executor.abstract import Executor
@@ -21,7 +22,6 @@ from tenacity import (
 )
 from opentelemetry.trace import Span
 
-
 def _clean_metadata(metadata: Optional[Metadata]) -> Optional[Metadata]:
     """Remove any chroma-specific metadata keys that the client shouldn't see from a metadata map."""
     if not metadata:
@@ -34,7 +34,6 @@ def _clean_metadata(metadata: Optional[Metadata]) -> Optional[Metadata]:
         return None
     return result
 
-
 def _uri(metadata: Optional[Metadata]) -> Optional[str]:
     """Retrieve the uri (if any) from a Metadata map"""
 
@@ -42,11 +41,9 @@ def _uri(metadata: Optional[Metadata]) -> Optional[str]:
         return str(metadata["chroma:uri"])
     return None
 
-
 # Type variables for input and output types of the round-robin retry function
 I = TypeVar("I")  # noqa: E741
 O = TypeVar("O")  # noqa: E741
-
 
 class DistributedExecutor(Executor):
     _mtx: threading.Lock

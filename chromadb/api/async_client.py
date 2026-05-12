@@ -1,7 +1,7 @@
 import httpx
 from typing import Optional, Sequence
 from uuid import UUID
-from overrides import override
+from chromadb.utils.compat import override
 
 from chromadb.auth import UserIdentity
 from chromadb.auth.utils import maybe_set_tenant_and_database
@@ -37,7 +37,6 @@ from chromadb.api.types import (
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.errors import ChromaError
 from chromadb.types import Database, Tenant, Where, WhereDocument
-
 
 class AsyncClient(SharedSystemClient, AsyncClientAPI):
     """A client for Chroma. This is the main entrypoint for interacting with Chroma.
@@ -478,7 +477,6 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         return await self._server.get_max_batch_size()
 
     # endregion
-
 
 class AsyncAdminClient(SharedSystemClient, AsyncAdminAPI):
     _server: AsyncServerAPI

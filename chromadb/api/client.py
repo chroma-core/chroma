@@ -2,7 +2,8 @@ from typing import Optional, Sequence
 from types import TracebackType
 from uuid import UUID
 
-from overrides import override
+from chromadb.utils.compat import override
+
 import httpx
 from chromadb.api import AdminAPI, ClientAPI, ServerAPI
 from chromadb.api.collection_configuration import (
@@ -39,7 +40,6 @@ from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
 from chromadb.api.models.Collection import Collection
 from chromadb.errors import ChromaAuthError, ChromaError
 from chromadb.types import Database, Tenant, Where, WhereDocument
-
 
 class Client(SharedSystemClient, ClientAPI):
     """A client for Chroma. This is the main entrypoint for interacting with Chroma.
@@ -619,7 +619,6 @@ class Client(SharedSystemClient, ClientAPI):
             )
 
     # endregion
-
 
 class AdminClient(SharedSystemClient, AdminAPI):
     """Admin client for managing tenants and databases."""

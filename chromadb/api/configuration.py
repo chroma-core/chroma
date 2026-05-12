@@ -1,6 +1,7 @@
 from abc import abstractmethod
 import json
-from overrides import override
+from chromadb.utils.compat import override
+
 from typing import (
     Any,
     ClassVar,
@@ -19,21 +20,17 @@ from chromadb.serde import JSONSerializable
 
 # TODO: move out of API
 
-
 class StaticParameterError(Exception):
     """Represents an error that occurs when a static parameter is set."""
 
     pass
-
 
 class InvalidConfigurationError(ValueError):
     """Represents an error that occurs when a configuration is invalid."""
 
     pass
 
-
 ParameterValue = Union[str, int, float, bool, "ConfigurationInternal"]
-
 
 class ParameterValidator(Protocol):
     """Represents an abstract parameter validator."""
@@ -42,7 +39,6 @@ class ParameterValidator(Protocol):
     def __call__(self, value: ParameterValue) -> bool:
         """Returns whether the given value is valid."""
         raise NotImplementedError()
-
 
 class ConfigurationDefinition:
     """Represents the definition of a configuration."""
@@ -64,7 +60,6 @@ class ConfigurationDefinition:
         self.is_static = is_static
         self.default_value = default_value
 
-
 class ConfigurationParameter:
     """Represents a parameter of a configuration."""
 
@@ -83,9 +78,7 @@ class ConfigurationParameter:
             return NotImplemented
         return self.name == __value.name and self.value == __value.value
 
-
 T = TypeVar("T", bound="ConfigurationInternal")
-
 
 class ConfigurationInternal(JSONSerializable["ConfigurationInternal"]):
     """Represents an abstract configuration, used internally by Chroma."""
@@ -216,7 +209,6 @@ class ConfigurationInternal(JSONSerializable["ConfigurationInternal"]):
             parameters.append(ConfigurationParameter(name=name, value=value))
         return cls(parameters=parameters)
 
-
 class HNSWConfigurationInternal(ConfigurationInternal):
     """Internal representation of the HNSW configuration.
     Used for validation, defaults, serialization and deserialization."""
@@ -314,7 +306,6 @@ class HNSWConfigurationInternal(ConfigurationInternal):
             )
         return cls(parameters)
 
-
 # This is the user-facing interface for HNSW index configuration parameters.
 # Internally, we pass around HNSWConfigurationInternal objects, which perform
 # validation, serialization and deserialization. Users don't need to know
@@ -348,10 +339,8 @@ class HNSWConfigurationInterface(HNSWConfigurationInternal):
 
         super().__init__(parameters=parameters)
 
-
 # Alias for user convenience - the user doesn't need to know this is an 'Interface'
 HNSWConfiguration = HNSWConfigurationInterface
-
 
 class CollectionConfigurationInternal(ConfigurationInternal):
     """Internal representation of the collection configuration.
@@ -369,7 +358,6 @@ class CollectionConfigurationInternal(ConfigurationInternal):
     @override
     def configuration_validator(self) -> None:
         pass
-
 
 # This is the user-facing interface for HNSW index configuration parameters.
 # Internally, we pass around HNSWConfigurationInternal objects, which perform
@@ -390,10 +378,8 @@ class CollectionConfigurationInterface(CollectionConfigurationInternal):
         ]
         super().__init__(parameters=parameters)
 
-
 # Alias for user convenience - the user doesn't need to know this is an 'Interface'.
 CollectionConfiguration = CollectionConfigurationInterface
-
 
 class EmbeddingsQueueConfigurationInternal(ConfigurationInternal):
     definitions = {

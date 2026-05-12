@@ -23,13 +23,13 @@ from chromadb.telemetry.opentelemetry import (
     add_attributes_to_current_span,
     trace_method,
 )
-from overrides import override
+from chromadb.utils.compat import override
+
 from typing import Sequence, Optional, cast
 from uuid import UUID
 import logging
 
 logger = logging.getLogger(__name__)
-
 
 class LogService(Producer, Consumer):
     """

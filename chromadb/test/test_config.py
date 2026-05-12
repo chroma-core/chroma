@@ -1,5 +1,6 @@
 from chromadb.config import Component, System, Settings
-from overrides import overrides
+from chromadb.utils.compat import overrides
+
 from threading import local
 from unittest.mock import patch
 import pytest
@@ -8,13 +9,11 @@ import random
 
 data = local()  # use thread local just in case tests ever run in parallel
 
-
 def reset() -> None:
     global data
     data.starts = []
     data.stops = []
     data.inits = []
-
 
 class ComponentA(Component):
     def __init__(self, system: System):
@@ -31,7 +30,6 @@ class ComponentA(Component):
     def stop(self) -> None:
         data.stops += "A"
 
-
 class ComponentB(Component):
     def __init__(self, system: System):
         data.inits += "B"
@@ -47,7 +45,6 @@ class ComponentB(Component):
     def stop(self) -> None:
         data.stops += "B"
 
-
 class ComponentC(Component):
     def __init__(self, system: System):
         data.inits += "C"
@@ -62,7 +59,6 @@ class ComponentC(Component):
     def stop(self) -> None:
         data.stops += "C"
 
-
 class ComponentD(Component):
     def __init__(self, system: System):
         data.inits += "D"
@@ -75,7 +71,6 @@ class ComponentD(Component):
     @overrides
     def stop(self) -> None:
         data.stops += "D"
-
 
 # Dependency Graph for tests:
 # ┌───┐
@@ -90,7 +85,6 @@ class ComponentD(Component):
 # ┌▽───▽┐
 # │  D  │
 # └─────┘
-
 
 def test_leaf_only() -> None:
     settings = Settings()
@@ -107,7 +101,6 @@ def test_leaf_only() -> None:
     system.stop()
     assert data.stops == ["D"]
 
-
 def test_partial() -> None:
     settings = Settings()
     system = System(settings)
@@ -123,7 +116,6 @@ def test_partial() -> None:
     system.stop()
     assert data.stops == ["C", "D"]
 
-
 def test_system_startup() -> None:
     settings = Settings()
     system = System(settings)
@@ -138,7 +130,6 @@ def test_system_startup() -> None:
     assert data.starts == ["D", "C", "B", "A"]
     system.stop()
     assert data.stops == ["A", "B", "C", "D"]
-
 
 def test_system_override_order() -> None:
     settings = Settings()
@@ -162,7 +153,6 @@ def test_system_override_order() -> None:
     system.stop()
     assert data.stops == ["A", "B", "C", "D"]
 
-
 class ComponentZ(Component):
     def __init__(self, system: System):
         super().__init__(system)
@@ -175,7 +165,6 @@ class ComponentZ(Component):
     @overrides
     def stop(self) -> None:
         pass
-
 
 def test_runtime_dependencies() -> None:
     settings = Settings()
@@ -193,13 +182,11 @@ def test_runtime_dependencies() -> None:
     system.stop()
     assert data.stops == ["C", "D"]
 
-
 def test_http_client_setting_defaults() -> None:
     settings = Settings()
     assert settings.chroma_http_keepalive_secs == 40.0
     assert settings.chroma_http_max_connections is None
     assert settings.chroma_http_max_keepalive_connections is None
-
 
 def test_http_client_setting_overrides() -> None:
     settings = Settings(
@@ -211,19 +198,16 @@ def test_http_client_setting_overrides() -> None:
     assert settings.chroma_http_max_connections == 123
     assert settings.chroma_http_max_keepalive_connections == 17
 
-
 @patch.dict(os.environ, {"CHROMA_API_IMPL": "my_api_impl"}, clear=True)
 def test_uses_env() -> None:
     settings = Settings()
     assert settings.chroma_api_impl == "my_api_impl"
-
 
 @patch.dict(os.environ, {"MY_ENV_VAR": "my_env_var"}, clear=True)
 def test_ignores_extra_env_vars() -> None:
     settings = Settings()
     with pytest.raises(AttributeError):
         _ = settings.my_env_var
-
 
 def test_local_ignores_extra_settings_param() -> None:
     settings = Settings(extra_param="asdsdsds", tenant_id="test")

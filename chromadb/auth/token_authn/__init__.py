@@ -7,8 +7,8 @@ import traceback
 from enum import Enum
 from typing import cast, Dict, List, Optional, TypedDict, TypeVar
 
+from chromadb.utils.compat import override
 
-from overrides import override
 from pydantic import SecretStr
 import yaml
 
@@ -36,7 +36,6 @@ __all__ = [
     "TokenTransportHeader",
 ]
 
-
 class TokenTransportHeader(str, Enum):
     """
     Accceptable token transport headers.
@@ -49,9 +48,7 @@ class TokenTransportHeader(str, Enum):
     AUTHORIZATION = "Authorization"
     X_CHROMA_TOKEN = "X-Chroma-Token"
 
-
 valid_token_chars = set(string.digits + string.ascii_letters + string.punctuation)
-
 
 def _check_token(token: str) -> None:
     token_str = str(token)
@@ -60,12 +57,10 @@ def _check_token(token: str) -> None:
             "Invalid token. Must contain only ASCII letters, digits, and punctuation."
         )
 
-
 allowed_token_headers = [
     TokenTransportHeader.AUTHORIZATION.value,
     TokenTransportHeader.X_CHROMA_TOKEN.value,
 ]
-
 
 def _check_allowed_token_headers(token_header: str) -> None:
     if token_header not in allowed_token_headers:
@@ -73,7 +68,6 @@ def _check_allowed_token_headers(token_header: str) -> None:
             f"Invalid token transport header: {token_header}. "
             f"Must be one of {allowed_token_headers}"
         )
-
 
 class TokenAuthClientProvider(ClientAuthProvider):
     """
@@ -110,7 +104,6 @@ class TokenAuthClientProvider(ClientAuthProvider):
             self._token_transport_header.value: SecretStr(val),
         }
 
-
 class User(TypedDict):
     """
     A simple User class for use in this module only. If you need a generic
@@ -123,7 +116,6 @@ class User(TypedDict):
     tenant: Optional[str]
     databases: Optional[List[str]]
     tokens: List[str]
-
 
 class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
     """

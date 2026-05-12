@@ -1,5 +1,6 @@
 from typing import Dict, Optional, Tuple
-from overrides import overrides
+from chromadb.utils.compat import overrides
+
 from hypothesis.stateful import (
     initialize,
     invariant,
@@ -33,7 +34,6 @@ SINGLETON_TENANT = "singleton_tenant"
 SINGLETON_DATABASE = "singleton_database"
 if MULTI_REGION_ENABLED:
     SINGLETON_DATABASE = f"{MULTI_REGION_TOPOLOGY}+singleton_database"
-
 
 class SingletonTenantDatabaseCollectionStateMachine(
     TenantDatabaseCollectionStateMachine
@@ -161,7 +161,6 @@ class SingletonTenantDatabaseCollectionStateMachine(
         # Always use current tenant/database context
         return self.tenant_to_database_to_model[self.curr_tenant][self.curr_database]
 
-
 def _singleton_and_root_clients() -> Tuple[Client, Client, ClientFactories]:
     api_fixture = fastapi_fixture_admin_and_singleton_tenant_db_user()
     sys: System = next(api_fixture)
@@ -191,7 +190,6 @@ def _singleton_and_root_clients() -> Tuple[Client, Client, ClientFactories]:
 
     return singleton_client, root_client, client_factories
 
-
 def test_collections_with_tenant_database_overwrite(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -203,7 +201,6 @@ def test_collections_with_tenant_database_overwrite(
             singleton_client, root_client, client_factories
         )
     )  # type: ignore
-
 
 def test_repeat_failure(
     caplog: pytest.LogCaptureFixture,

@@ -3,9 +3,9 @@ import weakref
 from abc import ABC, abstractmethod
 from typing import Any, Set
 import threading
-from overrides import override
-from typing_extensions import Annotated
+from chromadb.utils.compat import override
 
+from typing_extensions import Annotated
 
 class Connection:
     """A threadpool connection that returns itself to the pool on close()"""
@@ -42,7 +42,6 @@ class Connection:
         """Actually closes the connection to the db"""
         self._conn.close()
 
-
 class Pool(ABC):
     """Abstract base class for a pool of connections to a sqlite database."""
 
@@ -64,7 +63,6 @@ class Pool(ABC):
     def return_to_pool(self, conn: Connection) -> None:
         """Return a connection to the pool."""
         pass
-
 
 class LockPool(Pool):
     """A pool that has a single connection per thread but uses a lock to ensure that only one thread can use it at a time.
@@ -116,7 +114,6 @@ class LockPool(Pool):
             self._lock.release()
         except RuntimeError:
             pass
-
 
 class PerThreadPool(Pool):
     """Maintains a connection per thread. For now this does not maintain a cap on the number of connections, but it could be

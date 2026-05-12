@@ -1,6 +1,7 @@
 from typing import Dict
 from fastapi import HTTPException
-from overrides import override
+from chromadb.utils.compat import override
+
 from chromadb.auth import (
     AuthzAction,
     AuthzResource,
@@ -9,7 +10,6 @@ from chromadb.auth import (
     UserIdentity,
 )
 from chromadb.config import System
-
 
 class ExampleAuthenticationProvider(ServerAuthenticationProvider):
     """In practice the tenant would likely be resolved from some other opaque value (e.g. key/token). Here, it's just passed directly as a header for simplicity."""
@@ -20,7 +20,6 @@ class ExampleAuthenticationProvider(ServerAuthenticationProvider):
             user_id="test",
             tenant=headers.get("x-tenant", None),
         )
-
 
 class ExampleAuthorizationProvider(ServerAuthorizationProvider):
     """A simple authz provider that asserts the user's tenant matches the resource's tenant."""

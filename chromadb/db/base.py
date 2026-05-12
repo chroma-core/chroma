@@ -3,13 +3,13 @@ from types import TracebackType
 from typing_extensions import Protocol, Self, Literal
 from abc import ABC, abstractmethod
 from threading import local
-from overrides import override, EnforceOverrides
+from chromadb.utils.compat import EnforceOverrides, override
+
 import pypika
 import pypika.queries
 from chromadb.config import System, Component
 from uuid import UUID
 from itertools import islice, count
-
 
 class Cursor(Protocol):
     """Reifies methods we use from a DBAPI2 Cursor since DBAPI2 is not typed."""
@@ -31,7 +31,6 @@ class Cursor(Protocol):
     def fetchall(self) -> Sequence[Tuple[Any, ...]]:
         ...
 
-
 class TxWrapper(ABC, EnforceOverrides):
     """Wrapper class for DBAPI 2.0 Connection objects, with which clients can implement transactions.
     Makes two guarantees that basic DBAPI 2.0 connections do not:
@@ -52,7 +51,6 @@ class TxWrapper(ABC, EnforceOverrides):
         traceback: Optional[TracebackType],
     ) -> Literal[False]:
         pass
-
 
 class SqlDB(Component):
     """DBAPI 2.0 interface wrapper to ensure consistent behavior between implementations"""
@@ -105,9 +103,7 @@ class SqlDB(Component):
         """Return a PyPika Parameter object for the given index"""
         return pypika.Parameter(self.parameter_format().format(idx))
 
-
 _context = local()
-
 
 class ParameterValue(pypika.Parameter):  # type: ignore
     """
@@ -131,7 +127,6 @@ class ParameterValue(pypika.Parameter):  # type: ignore
             val = _context.formatstr.format(next(_context.generator))
 
         return str(val)
-
 
 def get_sql(
     query: pypika.queries.QueryBuilder, formatstr: str = "?"

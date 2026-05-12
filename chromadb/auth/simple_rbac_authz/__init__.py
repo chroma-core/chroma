@@ -1,6 +1,7 @@
 import logging
 from typing import Dict, Set
-from overrides import override
+from chromadb.utils.compat import override
+
 import yaml
 from chromadb.auth import (
     AuthzAction,
@@ -16,9 +17,7 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 
-
 logger = logging.getLogger(__name__)
-
 
 class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
     """

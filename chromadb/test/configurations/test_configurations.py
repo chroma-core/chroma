@@ -1,4 +1,5 @@
-from overrides import overrides
+from chromadb.utils.compat import overrides
+
 import pytest
 from chromadb.api.configuration import (
     ConfigurationInternal,
@@ -8,7 +9,6 @@ from chromadb.api.configuration import (
     ConfigurationParameter,
     HNSWConfiguration,
 )
-
 
 class TestConfiguration(ConfigurationInternal):
     definitions = {
@@ -30,7 +30,6 @@ class TestConfiguration(ConfigurationInternal):
     def configuration_validator(self) -> None:
         pass
 
-
 def test_default_values() -> None:
     default_test_configuration = TestConfiguration()
     assert default_test_configuration.get_parameter("static_str_value") is not None
@@ -44,7 +43,6 @@ def test_default_values() -> None:
         == TestConfiguration.definitions["int_value"].default_value
     )
 
-
 def test_set_values() -> None:
     test_configuration = TestConfiguration()
 
@@ -53,12 +51,10 @@ def test_set_values() -> None:
     test_configuration.set_parameter("int_value", 1)
     assert test_configuration.get_parameter("int_value").value == 1
 
-
 def test_get_invalid_parameter() -> None:
     test_configuration = TestConfiguration()
     with pytest.raises(ValueError):
         test_configuration.get_parameter("invalid_name")
-
 
 def test_validation() -> None:
     valid_parameters = [
@@ -84,7 +80,6 @@ def test_validation() -> None:
     with pytest.raises(ValueError):
         TestConfiguration(parameters=invalid_parameter_names)
 
-
 def test_configuration_validation() -> None:
     class FooConfiguration(ConfigurationInternal):
         definitions = {
@@ -103,7 +98,6 @@ def test_configuration_validation() -> None:
 
     with pytest.raises(ValueError, match="foo must be 'bar'"):
         FooConfiguration(parameters=[ConfigurationParameter(name="foo", value="baz")])
-
 
 def test_hnsw_validation() -> None:
     with pytest.raises(ValueError, match="must be less than or equal"):

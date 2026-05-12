@@ -1,4 +1,5 @@
-from overrides import override
+from chromadb.utils.compat import override
+
 from typing import Any, Awaitable, Callable, TypeVar
 from functools import wraps
 
@@ -7,7 +8,6 @@ from chromadb.config import System
 
 T = TypeVar("T", bound=Callable[..., Any])
 A = TypeVar("A", bound=Awaitable[Any])
-
 
 class SimpleRateLimitEnforcer(RateLimitEnforcer):
     """
@@ -24,7 +24,6 @@ class SimpleRateLimitEnforcer(RateLimitEnforcer):
             return func(*args, **kwargs)
 
         return wrapper  # type: ignore
-
 
 class SimpleAsyncRateLimitEnforcer(RateLimitEnforcer):
     """

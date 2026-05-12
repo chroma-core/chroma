@@ -1,6 +1,7 @@
 import os
 import shutil
-from overrides import override
+from chromadb.utils.compat import override
+
 import pickle
 from typing import Dict, List, Optional, Sequence, Set, cast
 from chromadb.config import System
@@ -37,9 +38,7 @@ import numpy as np
 
 from chromadb.utils.read_write_lock import ReadRWLock, WriteRWLock
 
-
 logger = logging.getLogger(__name__)
-
 
 class PersistentData:
     """Stores the data and metadata needed for a PersistentLocalHnswSegment"""
@@ -74,7 +73,6 @@ class PersistentData:
         with open(filename, "rb") as f:
             ret = cast(PersistentData, pickle.load(f))
             return ret
-
 
 class PersistentLocalHnswSegment(LocalHnswSegment):
     METADATA_FILE: str = "index_metadata.pickle"

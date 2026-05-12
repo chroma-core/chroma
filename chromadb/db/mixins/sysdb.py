@@ -2,7 +2,8 @@ import logging
 import sys
 from typing import Optional, Sequence, Any, Tuple, cast, Dict, Union, Set
 from uuid import UUID
-from overrides import override
+from chromadb.utils.compat import override
+
 from pypika import Table, Column
 from itertools import groupby
 
@@ -48,7 +49,6 @@ from chromadb.api.collection_configuration import (
 )
 
 logger = logging.getLogger(__name__)
-
 
 class SqlSysDB(SqlDB, SysDB):
     # Used only to delete log streams on collection deletion.

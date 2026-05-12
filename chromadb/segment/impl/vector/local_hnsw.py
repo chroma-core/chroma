@@ -1,4 +1,5 @@
-from overrides import override
+from chromadb.utils.compat import override
+
 from typing import Optional, Sequence, Dict, Set, List, cast
 from uuid import UUID
 from chromadb.segment import VectorReader
@@ -32,7 +33,6 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 DEFAULT_CAPACITY = 1000
-
 
 class LocalHnswSegment(VectorReader):
     _id: UUID

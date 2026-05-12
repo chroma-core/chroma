@@ -2,7 +2,8 @@ from abc import ABC, abstractmethod
 from typing import Sequence, Optional, List
 from uuid import UUID
 
-from overrides import override
+from chromadb.utils.compat import override
+
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     UpdateCollectionConfiguration,
@@ -38,7 +39,6 @@ from chromadb.api.types import (
 from chromadb.execution.expression.plan import Search
 from chromadb.config import Component, Settings
 from chromadb.types import Database, Tenant, Collection as CollectionModel
-
 
 class AsyncBaseAPI(ABC):
     @abstractmethod
@@ -337,7 +337,6 @@ class AsyncBaseAPI(ABC):
         """
         pass
 
-
 class AsyncClientAPI(AsyncBaseAPI, ABC):
     tenant: str
     database: str
@@ -496,7 +495,6 @@ class AsyncClientAPI(AsyncBaseAPI, ABC):
         This should only be used for testing purposes."""
         pass
 
-
 class AsyncAdminAPI(ABC):
     @abstractmethod
     async def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
@@ -564,7 +562,6 @@ class AsyncAdminAPI(ABC):
 
         """
         pass
-
 
 class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
     """An API instance that extends the relevant Base API methods by passing

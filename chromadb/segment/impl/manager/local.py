@@ -17,7 +17,8 @@ import os
 
 from chromadb.config import System, get_class
 from chromadb.db.system import SysDB
-from overrides import override
+from chromadb.utils.compat import override
+
 from chromadb.segment.impl.vector.local_persistent_hnsw import (
     PersistentLocalHnswSegment,
 )
@@ -34,7 +35,6 @@ import platform
 from chromadb.utils.lru_cache import LRUCache
 from chromadb.utils.directory import get_directory_size
 
-
 if platform.system() != "Windows":
     import resource
 elif platform.system() == "Windows":
@@ -45,7 +45,6 @@ SEGMENT_TYPE_IMPLS = {
     SegmentType.HNSW_LOCAL_MEMORY: "chromadb.segment.impl.vector.local_hnsw.LocalHnswSegment",
     SegmentType.HNSW_LOCAL_PERSISTED: "chromadb.segment.impl.vector.local_persistent_hnsw.PersistentLocalHnswSegment",
 }
-
 
 class LocalSegmentManager(SegmentManager):
     _sysdb: SysDB
@@ -249,7 +248,6 @@ class LocalSegmentManager(SegmentManager):
             instance.start()
             self._instances[segment["id"]] = instance
         return self._instances[segment["id"]]
-
 
 def _segment(type: SegmentType, scope: SegmentScope, collection: Collection) -> Segment:
     """Create a metadata dict, propagating metadata correctly for the given segment type."""

@@ -5,7 +5,8 @@ import orjson
 from typing import Any, Mapping, Optional, cast, Tuple, Sequence, Dict, List
 import logging
 import httpx
-from overrides import override
+from chromadb.utils.compat import override
+
 from chromadb import __version__
 from chromadb.auth import UserIdentity
 from chromadb.api.async_api import AsyncServerAPI
@@ -57,9 +58,7 @@ from chromadb.api.types import (
     deserialize_metadata,
 )
 
-
 logger = logging.getLogger(__name__)
-
 
 class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     # We make one client per event loop to avoid unexpected issues if a client

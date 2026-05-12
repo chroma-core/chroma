@@ -2,7 +2,7 @@ from threading import Lock
 from typing import Dict, List, Sequence
 from uuid import UUID, uuid4
 
-from overrides import override
+from chromadb.utils.compat import override
 
 from chromadb.config import System
 from chromadb.db.system import SysDB
@@ -23,7 +23,6 @@ from chromadb.types import (
     Segment,
     SegmentScope,
 )
-
 
 class DistributedSegmentManager(SegmentManager):
     _sysdb: SysDB

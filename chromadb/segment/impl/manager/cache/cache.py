@@ -2,10 +2,10 @@ import threading
 import uuid
 from typing import Any, Callable
 from chromadb.types import Segment
-from overrides import override
+from chromadb.utils.compat import override
+
 from typing import Dict, Optional
 from abc import ABC, abstractmethod
-
 
 class SegmentCache(ABC):
     @abstractmethod
@@ -23,7 +23,6 @@ class SegmentCache(ABC):
     @abstractmethod
     def reset(self) -> None:
         pass
-
 
 class BasicCache(SegmentCache):
     def __init__(self):
@@ -49,7 +48,6 @@ class BasicCache(SegmentCache):
     def reset(self) -> None:
         with self.lock:
             self.cache = {}
-
 
 class SegmentLRUCache(BasicCache):
     """A simple LRU cache implementation that handles objects with dynamic sizes.

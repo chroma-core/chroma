@@ -1,6 +1,7 @@
 import hypothesis.stateful
 import hypothesis.strategies
-from overrides import overrides
+from chromadb.utils.compat import overrides
+
 import pytest
 import logging
 import hypothesis
@@ -47,23 +48,18 @@ from chromadb.test.utils.wait_for_version_increase import (
     get_collection_version,
 )
 
-
 traces: DefaultDict[str, int] = defaultdict(lambda: 0)
 
-
 VERSION_INCREASE_WAIT_TIME = 300
-
 
 def trace(key: str) -> None:
     global traces
     traces[key] += 1
 
-
 def print_traces() -> None:
     global traces
     for key, value in traces.items():
         print(f"{key}: {value}")
-
 
 dtype_shared_st: st.SearchStrategy[Union[np.float16, np.float32, np.float64]] = (
     st.shared(st.sampled_from(strategies.float_types), key="dtype")
@@ -73,7 +69,6 @@ dimension_shared_st: st.SearchStrategy[int] = st.shared(
     st.integers(min_value=2, max_value=2048), key="dimension"
 )
 
-
 @dataclass
 class EmbeddingStateMachineStates:
     initialize = "initialize"
@@ -82,9 +77,7 @@ class EmbeddingStateMachineStates:
     update_embeddings = "update_embeddings"
     upsert_embeddings = "upsert_embeddings"
 
-
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
-
 
 class EmbeddingStateMachineBase(RuleBasedStateMachine):
     collection: Collection
@@ -339,7 +332,6 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
         if new_state != EmbeddingStateMachineStates.initialize:
             self.has_collection_mutated = True
 
-
 class EmbeddingStateMachine(EmbeddingStateMachineBase):
     embedding_ids: Bundle[ID] = Bundle("embedding_ids")
 
@@ -470,7 +462,6 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
             if id not in self.unique_ids_in_log:
                 self.unique_ids_in_log.add(id)
 
-
 def test_embeddings_state(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> None:
     create_isolated_database(client)
     caplog.set_level(logging.ERROR)
@@ -481,7 +472,6 @@ def test_embeddings_state(caplog: pytest.LogCaptureFixture, client: ClientAPI) -
         ),
     )  # type: ignore
     print_traces()
-
 
 @pytest.mark.skipif(
     NOT_CLUSTER_ONLY, reason="Search API only available in distributed mode"
@@ -499,7 +489,6 @@ def test_embeddings_state_with_search(
         ),
     )  # type: ignore
     print_traces()
-
 
 def test_add_then_delete_n_minus_1(client: ClientAPI) -> None:
     create_isolated_database(client)
@@ -553,7 +542,6 @@ def test_add_then_delete_n_minus_1(client: ClientAPI) -> None:
     state.fields_match()
     state.no_duplicates()
     state.teardown()
-
 
 def test_embeddings_flake1(client: ClientAPI) -> None:
     create_isolated_database(client)
@@ -1094,7 +1082,6 @@ def test_embeddings_flake1(client: ClientAPI) -> None:
     state.no_duplicates()
     state.teardown()
 
-
 def test_update_none(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> None:
     create_isolated_database(client)
     state = EmbeddingStateMachine(client)
@@ -1148,7 +1135,6 @@ def test_update_none(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> Non
     )
     state.ann_accuracy()
     state.teardown()
-
 
 def test_add_delete_add(client: ClientAPI) -> None:
     create_isolated_database(client)
@@ -1279,7 +1265,6 @@ def test_add_delete_add(client: ClientAPI) -> None:
     if not NOT_CLUSTER_ONLY:
         state.wait_for_compaction()
 
-
 def test_multi_add(client: ClientAPI) -> None:
     create_isolated_database(client)
     coll = client.create_collection(name="foo")
@@ -1298,7 +1283,6 @@ def test_multi_add(client: ClientAPI) -> None:
     coll.delete(ids=["a"])
     assert coll.count() == 0
 
-
 def test_dup_add(client: ClientAPI) -> None:
     create_isolated_database(client)
     coll = client.create_collection(name="foo")
@@ -1306,7 +1290,6 @@ def test_dup_add(client: ClientAPI) -> None:
         coll.add(ids=["a", "a"], embeddings=[[0.0], [1.1]])  # type: ignore[arg-type]
     with pytest.raises(errors.DuplicateIDError):
         coll.upsert(ids=["a", "a"], embeddings=[[0.0], [1.1]])  # type: ignore[arg-type]
-
 
 def test_query_without_add(client: ClientAPI) -> None:
     create_isolated_database(client)
@@ -1323,7 +1306,6 @@ def test_query_without_add(client: ClientAPI) -> None:
         assert field_results is not None
         assert all([len(result) == 0 for result in field_results])
 
-
 def test_get_non_existent(client: ClientAPI) -> None:
     create_isolated_database(client)
     coll = client.create_collection(name="foo")
@@ -1332,7 +1314,6 @@ def test_get_non_existent(client: ClientAPI) -> None:
     assert len(result["metadatas"]) == 0  # type: ignore[arg-type]
     assert len(result["documents"]) == 0  # type: ignore[arg-type]
     assert len(result["embeddings"]) == 0  # type: ignore[arg-type]
-
 
 # TODO: Use SQL escaping correctly internally
 @pytest.mark.xfail(reason="We don't properly escape SQL internally, causing problems")
@@ -1345,13 +1326,11 @@ def test_escape_chars_in_ids(client: ClientAPI) -> None:
     coll.delete(ids=[id])
     assert coll.count() == 0
 
-
 def test_delete_empty_fails(client: ClientAPI) -> None:
     create_isolated_database(client)
     coll = client.create_collection(name="foo")
     with pytest.raises(ValueError):
         coll.delete()
-
 
 @pytest.mark.parametrize(
     "kwargs",
@@ -1377,7 +1356,6 @@ def test_delete_success(client: ClientAPI, kwargs: Any) -> None:
     assert "deleted" in result
     assert result["deleted"] >= 0
 
-
 @given(supported_types=st.sampled_from([np.float32, np.int32, np.int64, int, float]))
 def test_autocasting_validate_embeddings_for_compatible_types(
     supported_types: List[Any],
@@ -1402,7 +1380,6 @@ def test_autocasting_validate_embeddings_for_compatible_types(
         ]
     )
 
-
 @given(supported_types=st.sampled_from([np.float32, np.int32, np.int64, int, float]))
 def test_autocasting_validate_embeddings_with_ndarray(
     supported_types: List[Any],
@@ -1424,7 +1401,6 @@ def test_autocasting_validate_embeddings_with_ndarray(
         ]
     )
 
-
 @given(unsupported_types=st.sampled_from([str, bool]))
 def test_autocasting_validate_embeddings_incompatible_types(
     unsupported_types: List[Any],
@@ -1438,7 +1414,6 @@ def test_autocasting_validate_embeddings_incompatible_types(
         in str(e.value)
     )
 
-
 def test_0dim_embedding_validation() -> None:
     embds: Embeddings = [np.array([])]
     with pytest.raises(ValueError) as e:
@@ -1447,7 +1422,6 @@ def test_0dim_embedding_validation() -> None:
         "Expected each embedding in the embeddings to be a 1-dimensional numpy array with at least 1 int/float value. Got a 1-dimensional numpy array with no values at pos"
         in str(e)
     )
-
 
 def test_no_op_compaction(client: ClientAPI) -> None:
     create_isolated_database(client)
@@ -1459,7 +1433,6 @@ def test_no_op_compaction(client: ClientAPI) -> None:
         wait_for_version_increase(
             client, coll.name, initial_version, VERSION_INCREASE_WAIT_TIME
         )
-
 
 def test_add_then_purge(client: ClientAPI) -> None:
     create_isolated_database(client)
@@ -1493,7 +1466,6 @@ def test_add_then_purge(client: ClientAPI) -> None:
 
     # There should be no records left
     assert len(coll.get()["ids"]) == 0
-
 
 def test_encompassing_delete(client: ClientAPI) -> None:
     create_isolated_database(client)

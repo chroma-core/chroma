@@ -26,7 +26,8 @@ from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
 )
-from overrides import override
+from chromadb.utils.compat import override
+
 from collections import defaultdict
 from typing import Sequence, Optional, Dict, Set, Tuple, cast
 from uuid import UUID
@@ -34,7 +35,6 @@ from pypika import Table, functions
 import uuid
 import logging
 from chromadb.ingest.impl.utils import create_topic_name
-
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,6 @@ _operation_codes_inv = {v: k for k, v in _operation_codes.items()}
 # Set in conftest.py to rethrow errors in the "async" path during testing
 # https://doc.pytest.org/en/latest/example/simple.html#detect-if-running-from-within-a-pytest-run
 _called_from_test = False
-
 
 class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     """A SQL database that stores embeddings, allowing a traditional RDBMS to be used as

@@ -1,4 +1,5 @@
-from overrides import override
+from chromadb.utils.compat import override
+
 from typing import Any, Callable, TypeVar, Dict, Optional
 from uuid import UUID
 
@@ -16,7 +17,6 @@ from chromadb.quota import QuotaEnforcer, Action
 from chromadb.config import System
 
 T = TypeVar("T", bound=Callable[..., Any])
-
 
 class SimpleQuotaEnforcer(QuotaEnforcer):
     """

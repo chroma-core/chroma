@@ -1,4 +1,5 @@
-from overrides import overrides
+from chromadb.utils.compat import overrides
+
 from chromadb.api.client import Client
 from chromadb.config import System
 import hypothesis.strategies as st
@@ -16,7 +17,6 @@ from chromadb.test.property.test_embeddings import (
 import chromadb.test.property.strategies as strategies
 import os
 
-
 collection_persistent_st = st.shared(
     strategies.collections(
         with_hnsw_params=True,
@@ -27,7 +27,6 @@ collection_persistent_st = st.shared(
     ),
     key="coll_persistent",
 )
-
 
 # This machine shares a lot of similarity with the machine in chromadb/test/property/test_persist.py.
 # However, test_persist.py tests correctness under complete process isolation and therefore can only check invariants on a new system--whereas this machine does not have full process isolation between systems/clients but after a restart continues to exercise the state machine with the newly-created system.
@@ -76,7 +75,6 @@ class RestartablePersistedEmbeddingStateMachine(EmbeddingStateMachineBase):
         # Normally, we wouldn't have to worry about this as the system from the fixture is shared between state machine runs.
         # (This helps avoid a "too many open files" error.)
         self.system.stop()
-
 
 def test_restart_persisted_client(sqlite_persistent: System) -> None:
     # TODO: This test is broken for rust bindings and should be fixed

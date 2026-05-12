@@ -1,6 +1,7 @@
 from typing import List, Optional, Sequence, Tuple, Union, cast
 from uuid import UUID
-from overrides import overrides
+from chromadb.utils.compat import overrides
+
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     create_collection_configuration_to_json_str,
@@ -63,7 +64,6 @@ from chromadb.types import (
 )
 from google.protobuf.empty_pb2 import Empty
 import grpc
-
 
 class GrpcSysDB(SysDB):
     """A gRPC implementation of the SysDB. In the distributed system, the SysDB is also

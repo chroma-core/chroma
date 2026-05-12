@@ -21,11 +21,11 @@ from hypothesis.stateful import (
     run_state_machine_as_test,
     MultipleResults,
 )
-from overrides import overrides
+from chromadb.utils.compat import overrides
+
 from typing import Dict, cast, Union, Tuple, Set
 
 collection_st = hyst.shared(strategies.collections(with_hnsw_params=True), key="source")
-
 
 class ForkStateMachine(RuleBasedStateMachine):
     updated_collections: Bundle[
@@ -186,7 +186,6 @@ class ForkStateMachine(RuleBasedStateMachine):
             invariants.embeddings_match(collection, record_set)
             invariants.metadatas_match(collection, record_set)
             invariants.documents_match(collection, record_set)
-
 
 @skip_if_not_cluster()
 def test_fork(caplog: pytest.LogCaptureFixture, client: chromadb.api.ClientAPI) -> None:

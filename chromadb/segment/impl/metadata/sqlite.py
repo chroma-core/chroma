@@ -4,7 +4,8 @@ from chromadb.ingest import Consumer
 from chromadb.config import System
 from chromadb.types import RequestVersionContext, Segment, InclusionExclusionOperator
 from chromadb.db.impl.sqlite import SqliteDB
-from overrides import override
+from chromadb.utils.compat import override
+
 from chromadb.db.base import (
     Cursor,
     ParameterValue,
@@ -38,7 +39,6 @@ import sqlite3
 import logging
 
 logger = logging.getLogger(__name__)
-
 
 class SqliteMetadataSegment(MetadataReader):
     _consumer: Consumer
@@ -646,7 +646,6 @@ class SqliteMetadataSegment(MetadataReader):
             cur.execute(*get_sql(q0))
             cur.execute(*get_sql(q))
 
-
 def _where_clause(
     key: str,
     expr: Union[
@@ -673,7 +672,6 @@ def _where_clause(
     # Operator dict case
     operator, value = next(iter(expr.items()))
     return _value_criterion(key, value, operator, metadata_q, metadata_t, embeddings_t)
-
 
 def _value_criterion(
     key: str,
