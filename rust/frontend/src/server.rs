@@ -57,6 +57,7 @@ use crate::{
     ac::AdmissionControlledService,
     auth::{AuthenticateAndAuthorize, AuthzAction, AuthzResource},
     config::FrontendServerConfig,
+    foundation,
     quota::{Action, QuotaEnforcer, QuotaPayload},
     server_middleware::{always_json_errors_middleware, default_json_content_type_middleware},
     traced_json::TracedJson,
@@ -380,6 +381,7 @@ impl FrontendServer {
                 "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/attached_functions/{name}/detach",
                 post(detach_function),
             )
+            .merge(foundation::router())
             .merge(docs_router)
             .with_state(self)
             .layer(DefaultBodyLimit::max(max_payload_size_bytes))

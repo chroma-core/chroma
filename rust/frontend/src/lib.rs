@@ -5,6 +5,7 @@ pub mod auth;
 pub mod config;
 #[allow(dead_code)]
 pub mod executor;
+pub mod foundation;
 pub mod get_collection_with_segments_provider;
 pub mod impls;
 pub mod quota;
