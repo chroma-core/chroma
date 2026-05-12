@@ -12,6 +12,79 @@ const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
 
 #[derive(Deserialize, Serialize, Debug, Default, Clone)]
 /// # Description
+/// The primary config for the fn_consumer service. The fn_consumer polls
+/// the work queue, streams WAL records for each work item to a downstream
+/// processor, and exposes a `FinishWork` RPC that the downstream calls
+/// back to advance the queue.
+pub struct FnConsumerServiceConfig {
+    /// The service name to be used for OpenTelemetry.
+    #[serde(default = "FnConsumerServiceConfig::default_service_name")]
+    pub service_name: String,
+
+    /// The OpenTelemetry endpoint to send traces to.
+    #[serde(default = "FnConsumerServiceConfig::default_otel_endpoint")]
+    pub otel_endpoint: String,
+
+    /// Additional RUST_LOG style filters to apply for tracing.
+    #[serde(default = "FnConsumerServiceConfig::default_otel_filters")]
+    pub otel_filters: Vec<OtelFilter>,
+
+    /// The member ID of this fn_consumer instance. Passed as the
+    /// `shard_id` on `GetWork` calls. Typically set via the K8s Downward
+    /// API.
+    #[serde(default = "FnConsumerServiceConfig::default_my_member_id")]
+    pub my_member_id: String,
+
+    /// The port to listen on for gRPC requests (inbound `FinishWork`).
+    #[serde(default = "FnConsumerServiceConfig::default_my_port")]
+    pub my_port: u16,
+
+    /// The configuration for the dispatcher (task execution engine).
+    #[serde(default)]
+    pub dispatcher: chroma_system::DispatcherConfig,
+
+    /// The configuration for connecting to the chroma metadata (sysdb) service.
+    /// Used to resolve tenant/database for an input collection prior to WAL
+    /// fetch.
+    #[serde(default)]
+    pub sysdb: SysDbConfig,
+
+    /// The configuration for connecting to the chroma WAL (log) service.
+    #[serde(default)]
+    pub log: chroma_log::config::LogConfig,
+
+    /// Inner fn_consumer polling / concurrency knobs.
+    #[serde(default)]
+    pub fn_consumer: crate::fn_consumer::config::FnConsumerConfig,
+}
+
+impl FnConsumerServiceConfig {
+    fn default_service_name() -> String {
+        "fn-consumer".to_string()
+    }
+
+    fn default_otel_endpoint() -> String {
+        "http://otel-collector:4317".to_string()
+    }
+
+    fn default_otel_filters() -> Vec<OtelFilter> {
+        vec![OtelFilter {
+            crate_name: "worker".to_string(),
+            filter_level: OtelFilterLevel::Trace,
+        }]
+    }
+
+    fn default_my_member_id() -> String {
+        "fn-consumer-0".to_string()
+    }
+
+    fn default_my_port() -> u16 {
+        50051
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Default, Clone)]
+/// # Description
 /// The primary config for the work queue service.
 pub struct WorkQueueServiceConfig {
     /// The service name to be used for OpenTelemetry.
@@ -84,6 +157,10 @@ pub struct RootConfig {
     /// The configuration for the work queue service.
     #[serde(default)]
     pub work_queue_service: WorkQueueServiceConfig,
+
+    /// The configuration for the fn_consumer service.
+    #[serde(default)]
+    pub fn_consumer_service: FnConsumerServiceConfig,
 }
 
 impl RootConfig {

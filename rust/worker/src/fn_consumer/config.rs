@@ -11,6 +11,12 @@ pub struct FnConsumerConfig {
     #[serde(default = "FnConsumerConfig::default_job_expiry_seconds")]
     pub job_expiry_seconds: u64,
     pub work_queue_endpoint: String,
+    #[serde(default = "FnConsumerConfig::default_fetch_log_batch_size")]
+    pub fetch_log_batch_size: u32,
+    #[serde(default = "FnConsumerConfig::default_fetch_log_concurrency")]
+    pub fetch_log_concurrency: usize,
+    #[serde(default = "FnConsumerConfig::default_fetch_log_max_count")]
+    pub fetch_log_max_count: u32,
 }
 
 impl FnConsumerConfig {
@@ -26,6 +32,15 @@ impl FnConsumerConfig {
     fn default_job_expiry_seconds() -> u64 {
         3600
     }
+    fn default_fetch_log_batch_size() -> u32 {
+        100
+    }
+    fn default_fetch_log_concurrency() -> usize {
+        10
+    }
+    fn default_fetch_log_max_count() -> u32 {
+        10_000
+    }
 }
 
 impl Default for FnConsumerConfig {
@@ -36,6 +51,9 @@ impl Default for FnConsumerConfig {
             get_work_batch_size: Self::default_get_work_batch_size(),
             job_expiry_seconds: Self::default_job_expiry_seconds(),
             work_queue_endpoint: String::new(),
+            fetch_log_batch_size: Self::default_fetch_log_batch_size(),
+            fetch_log_concurrency: Self::default_fetch_log_concurrency(),
+            fetch_log_max_count: Self::default_fetch_log_max_count(),
         }
     }
 }

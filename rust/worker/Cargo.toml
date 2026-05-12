@@ -26,6 +26,10 @@ path = "src/bin/work_queue_service.rs"
 name = "work_queue_cli"
 path = "src/bin/work_queue_cli.rs"
 
+[[bin]]
+name = "fn_consumer"
+path = "src/bin/fn_consumer.rs"
+
 [dependencies]
 chroma-tracing = { workspace = true }
 regex = { workspace = true }
