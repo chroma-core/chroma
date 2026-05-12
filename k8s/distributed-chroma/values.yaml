@@ -74,6 +74,12 @@ workQueueService:
     tag: 'latest'
   env:
   replicaCount: 1
+fnConsumer:
+  image:
+    repository: 'fn-consumer'
+    tag: 'latest'
+  env:
+  replicaCount: 1
 sysdbMigration:
   image:
     repository: 'sysdb-migration'

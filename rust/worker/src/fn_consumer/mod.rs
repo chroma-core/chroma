@@ -1,3 +1,7 @@
 pub mod config;
 pub mod fn_consumer_manager;
+pub mod fn_consumer_server;
 pub mod orchestrator;
+pub mod server;
+
+pub use server::fn_consumer_service_entrypoint;

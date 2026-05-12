@@ -257,6 +257,20 @@ work_queue_service:
         count_based_policy:
           max_concurrent_requests: 30
           bandwidth_allocation: [0.7, 0.3]
+fn_consumer_service:
+  service_name: "fn-consumer"
+  my_member_id: "fn-consumer-0"
+  my_port: 50051
+  otel_endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"
+  otel_filters:
+    - crate_name: "worker"
+      filter_level: "trace"
+  fn_consumer:
+    poll_interval_sec: 10
+    max_concurrent_workers: 100
+    get_work_batch_size: 100
+    job_expiry_seconds: 3600
+    work_queue_endpoint: "http://work-queue-service.chroma:50051"
 log_service:
   num_records_before_backpressure: 100000
   record_count_threshold: 10

@@ -1,8 +1,10 @@
 use async_trait::async_trait;
+use chroma_log::Log;
+use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_system::{
     Component, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, System,
 };
-use chroma_types::{AttachedFunctionUuid, CollectionUuid};
+use chroma_types::{AttachedFunctionUuid, CollectionUuid, DatabaseName};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -36,11 +38,16 @@ pub struct FnConsumerContext {
     pub system: System,
     pub dispatcher: Option<ComponentHandle<Dispatcher>>,
     pub sink: Arc<dyn RecordSink>,
+    pub log: Log,
+    pub sysdb: SysDb,
     pub poll_interval: Duration,
     pub max_concurrent_workers: usize,
     pub get_work_batch_size: u32,
     pub job_expiry_seconds: u64,
     pub my_member_id: String,
+    pub fetch_log_batch_size: u32,
+    pub fetch_log_concurrency: usize,
+    pub fetch_log_max_count: u32,
 }
 
 impl std::fmt::Debug for FnConsumerContext {
@@ -71,22 +78,30 @@ impl std::fmt::Debug for FnConsumerManager {
 }
 
 impl FnConsumerManager {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: FnConsumerConfig,
         my_member_id: String,
         system: System,
         sink: Arc<dyn RecordSink>,
+        log: Log,
+        sysdb: SysDb,
         work_queue_client: WorkQueueClient,
     ) -> Self {
         let context = FnConsumerContext {
             system,
             dispatcher: None,
             sink,
+            log,
+            sysdb,
             poll_interval: Duration::from_secs(config.poll_interval_sec),
             max_concurrent_workers: config.max_concurrent_workers,
             get_work_batch_size: config.get_work_batch_size,
             job_expiry_seconds: config.job_expiry_seconds,
             my_member_id,
+            fetch_log_batch_size: config.fetch_log_batch_size,
+            fetch_log_concurrency: config.fetch_log_concurrency,
+            fetch_log_max_count: config.fetch_log_max_count,
         };
         Self {
             context,
@@ -129,6 +144,43 @@ impl FnConsumerManager {
             tracing::error!("Dispatcher not set on FnConsumerManager");
             return false;
         };
+        let mut collections = match self
+            .context
+            .sysdb
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(input_coll_id),
+                ..Default::default()
+            })
+            .await
+        {
+            Ok(collections) => collections,
+            Err(e) => {
+                tracing::error!(
+                    fn_id = %fn_id,
+                    input_coll_id = %input_coll_id,
+                    "Failed to look up collection in sysdb: {}",
+                    e,
+                );
+                return false;
+            }
+        };
+        let Some(collection) = collections.pop() else {
+            tracing::error!(
+                fn_id = %fn_id,
+                input_coll_id = %input_coll_id,
+                "Collection not found in sysdb",
+            );
+            return false;
+        };
+        let Some(database_name) = DatabaseName::new(collection.database.clone()) else {
+            tracing::error!(
+                fn_id = %fn_id,
+                input_coll_id = %input_coll_id,
+                database = collection.database,
+                "Invalid database name on collection",
+            );
+            return false;
+        };
         self.in_progress
             .insert(key, InProgressFn::new(self.context.job_expiry_seconds));
         let orchestrator = FnConsumerOrchestrator::new(
@@ -136,6 +188,12 @@ impl FnConsumerManager {
             input_coll_id,
             completion_offset,
             self.context.sink.clone(),
+            self.context.log.clone(),
+            collection.tenant,
+            database_name,
+            self.context.fetch_log_batch_size,
+            self.context.fetch_log_concurrency,
+            self.context.fetch_log_max_count,
             dispatcher,
         );
         if let Err(e) = orchestrator.run(self.context.system.clone()).await {

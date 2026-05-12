@@ -5,19 +5,20 @@ use crate::fn_consumer::orchestrator::NoopSink;
 use crate::work_queue::work_queue_client::WorkQueueClient;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
+use chroma_log::Log;
+use chroma_sysdb::SysDb;
 use std::sync::Arc;
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
 pub async fn fn_consumer_service_entrypoint() {
-    // Load configuration from CONFIG_PATH if set, otherwise use default
     let config = match std::env::var(CONFIG_PATH_ENV_VAR) {
         Ok(config_path) => {
-            eprintln!("loading from {config_path}");
+            tracing::info!("loading from {config_path}");
             RootConfig::load_from_path(&config_path)
         }
-        Err(_) => {
-            eprintln!("loading from default path");
+        Err(err) => {
+            tracing::info!("loading from default path because {err}");
             RootConfig::load()
         }
     };
@@ -33,49 +34,64 @@ pub async fn fn_consumer_service_entrypoint() {
 
     let system = chroma_system::System::new();
 
-    // Create dispatcher
     let dispatcher =
         match chroma_system::Dispatcher::try_from_config(&service_config.dispatcher, &registry)
             .await
         {
             Ok(dispatcher) => dispatcher,
             Err(err) => {
-                eprintln!("Failed to create dispatcher: {:?}", err);
+                tracing::error!("Failed to create dispatcher: {:?}", err);
                 return;
             }
         };
     let dispatcher_handle = system.start_component(dispatcher);
 
-    // Connect to the work queue
+    // sysdb is needed to resolve tenant/database for input collections.
+    let sysdb = match SysDb::try_from_config(&(service_config.sysdb, None), &registry).await {
+        Ok(sysdb) => sysdb,
+        Err(err) => {
+            tracing::error!("Failed to create sysdb: {:?}", err);
+            return;
+        }
+    };
+
+    let log = match Log::try_from_config(&(service_config.log, system.clone()), &registry).await {
+        Ok(log) => log,
+        Err(err) => {
+            tracing::error!("Failed to create log client: {:?}", err);
+            return;
+        }
+    };
+
     let work_queue_client =
         match WorkQueueClient::new(service_config.fn_consumer.work_queue_endpoint.clone()).await {
             Ok(client) => client,
             Err(err) => {
-                eprintln!("Failed to connect to work queue: {:?}", err);
+                tracing::error!("Failed to connect to work queue: {:?}", err);
                 return;
             }
         };
 
-    // Build and start the manager
     let sink = Arc::new(NoopSink);
     let mut manager = FnConsumerManager::new(
         service_config.fn_consumer.clone(),
         service_config.my_member_id.clone(),
         system.clone(),
         sink,
+        log,
+        sysdb,
         work_queue_client.clone(),
     );
     manager.set_dispatcher(dispatcher_handle);
     let manager_handle = system.start_component(manager);
 
-    // Build the gRPC server (proxies FinishWork to the work queue)
     let server = FnConsumerServer::new(manager_handle, work_queue_client).into_service();
     let (_health_reporter, health_service) = tonic_health::server::health_reporter();
 
     let addr = format!("0.0.0.0:{}", service_config.my_port)
         .parse()
         .expect("valid address");
-    println!("fn-consumer service starting on {}", addr);
+    tracing::info!("fn-consumer service starting on {}", addr);
 
     tonic::transport::Server::builder()
         .add_service(server)
