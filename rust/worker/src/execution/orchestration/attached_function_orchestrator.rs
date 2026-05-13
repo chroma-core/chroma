@@ -865,7 +865,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
 
         // Execute the attached function
         let operator = match ExecuteAttachedFunctionOperator::from_attached_function(
-            attached_function.function_id,
+            attached_function,
             self.output_context.log.clone(),
         ) {
             Ok(op) => Box::new(op),

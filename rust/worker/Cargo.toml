@@ -80,6 +80,8 @@ s3heap = { workspace = true }
 s3heap-service = { workspace = true }
 wal3 = { workspace = true }
 
+reqwest = { workspace = true, features = ["json"] }
+
 fastrace = "=0.7.8"
 fastrace-opentelemetry = "=0.8.1"
 
@@ -94,7 +96,6 @@ shuttle = { workspace = true }
 rand = { workspace = true }
 rand_xorshift = { workspace = true }
 tempfile = { workspace = true }
-reqwest = { workspace = true, features = ["json"] }
 
 chroma-benchmark = { workspace = true }
 

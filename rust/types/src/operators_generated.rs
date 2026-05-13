@@ -25,3 +25,10 @@ pub const FUNCTION_DUMMY_ASYNC_ID: Uuid = Uuid::from_bytes([
 ]);
 /// Name of the built-in dummy_async function
 pub const FUNCTION_DUMMY_ASYNC_NAME: &str = "dummy_async";
+
+/// UUID for the built-in http_generate function
+pub const FUNCTION_HTTP_GENERATE_ID: Uuid = Uuid::from_bytes([
+    0x9e, 0x3c, 0x75, 0x40, 0x4d, 0xdd, 0x40, 0xa2, 0xbb, 0xff, 0xad, 0x9c, 0xb3, 0xf0, 0x6e, 0xfc,
+]);
+/// Name of the built-in http_generate function
+pub const FUNCTION_HTTP_GENERATE_NAME: &str = "http_generate";
