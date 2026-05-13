@@ -7,18 +7,10 @@ use serde::{Deserialize, Serialize};
 /// breaker, scorecard, OTEL, CORS) flat at the top level so existing
 /// `CHROMA_*` env-var bindings work without nesting. Foundation-specific
 /// fields will land here as handler tickets bring them in.
-#[derive(Deserialize, Serialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
 pub struct FoundationApiConfig {
     #[serde(flatten)]
     pub base: BaseServerConfig,
-}
-
-impl Default for FoundationApiConfig {
-    fn default() -> Self {
-        Self {
-            base: BaseServerConfig::default(),
-        }
-    }
 }
 
 impl FoundationApiConfig {
