@@ -427,7 +427,7 @@ func (s *attachedFunctionDb) AreInvocationsDone(items []dbmodel.InvocationCheckI
 		FROM input_items ii
 		LEFT JOIN attached_functions af
 			ON af.id = ii.fn_id::uuid
-			AND af.input_collection_id = ii.collection_id::uuid
+			AND af.input_collection_id = ii.collection_id
 		ORDER BY ii.ord
 	`, ordinals, fnIDs, collectionIDs, completionOffsets).Rows()
 
