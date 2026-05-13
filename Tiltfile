@@ -150,6 +150,22 @@ else:
 
 if config.tilt_subcommand == "ci":
   custom_build(
+    'fn-consumer',
+    'docker image tag fn-consumer:ci $EXPECTED_REF',
+    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'],
+    disable_push=True
+  )
+else:
+  docker_build(
+    'fn-consumer',
+    '.',
+    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
+    dockerfile='./rust/Dockerfile',
+    target='fn_consumer'
+  )
+
+if config.tilt_subcommand == "ci":
+  custom_build(
     'garbage-collector',
     'docker image tag garbage-collector:ci $EXPECTED_REF',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'],
@@ -196,7 +212,7 @@ if os.environ.get('ADDITIONAL_DISTRIBUTED_CHROMA_VALUES'):
 # We manually call helm template so we can call set-file
 k8s_yaml(
   local(
-    'helm template --set-file rustFrontendService.configuration=' + rfe_config_file + ',rustLogService.configuration=' + worker_config_file + ',heapTenderService.configuration=' + worker_config_file + ',compactionService.configuration=' + worker_config_file + ',queryService.configuration=' + worker_config_file + ',garbageCollector.configuration=' + worker_config_file + ',rustSysdbService.configuration=' + worker_config_file + ',workQueueService.configuration=' + worker_config_file + ' --values ' + distributed_chroma_values + ' k8s/distributed-chroma'
+    'helm template --set-file rustFrontendService.configuration=' + rfe_config_file + ',rustLogService.configuration=' + worker_config_file + ',heapTenderService.configuration=' + worker_config_file + ',compactionService.configuration=' + worker_config_file + ',queryService.configuration=' + worker_config_file + ',garbageCollector.configuration=' + worker_config_file + ',rustSysdbService.configuration=' + worker_config_file + ',workQueueService.configuration=' + worker_config_file + ',fnConsumer.configuration=' + worker_config_file + ' --values ' + distributed_chroma_values + ' k8s/distributed-chroma'
   ),
 )
 
@@ -208,7 +224,7 @@ if os.environ.get('ADDITIONAL_DISTRIBUTED_CHROMA2_VALUES'):
 
 k8s_yaml(
   local(
-    'helm template --set-file rustFrontendService.configuration=' + rfe2_config_file + ',rustLogService.configuration=rust/worker/chroma_mcmr2.yaml,heapTenderService.configuration=rust/worker/chroma_mcmr2.yaml,compactionService.configuration=rust/worker/chroma_mcmr2.yaml,queryService.configuration=rust/worker/chroma_mcmr2.yaml,garbageCollector.configuration=rust/worker/chroma_mcmr2.yaml,rustSysdbService.configuration=rust/worker/chroma_mcmr2.yaml,workQueueService.configuration=rust/worker/chroma_mcmr2.yaml,rustSysdbMigration.configuration=rust/worker/chroma_mcmr2.yaml --values ' + distributed_chroma2_values + ' k8s/distributed-chroma'
+    'helm template --set-file rustFrontendService.configuration=' + rfe2_config_file + ',rustLogService.configuration=rust/worker/chroma_mcmr2.yaml,heapTenderService.configuration=rust/worker/chroma_mcmr2.yaml,compactionService.configuration=rust/worker/chroma_mcmr2.yaml,queryService.configuration=rust/worker/chroma_mcmr2.yaml,garbageCollector.configuration=rust/worker/chroma_mcmr2.yaml,rustSysdbService.configuration=rust/worker/chroma_mcmr2.yaml,workQueueService.configuration=rust/worker/chroma_mcmr2.yaml,fnConsumer.configuration=rust/worker/chroma_mcmr2.yaml,rustSysdbMigration.configuration=rust/worker/chroma_mcmr2.yaml --values ' + distributed_chroma2_values + ' k8s/distributed-chroma'
   ),
 )
 
@@ -338,6 +354,7 @@ k8s_resource('rust-frontend-service:deployment:chroma', resource_deps=['sysdb:de
 k8s_resource('query-service:statefulset:chroma', resource_deps=['sysdb:deployment:chroma'], labels=["chroma"], port_forwards='50053:50051')
 k8s_resource('compaction-service:statefulset:chroma', resource_deps=['sysdb:deployment:chroma'], labels=["chroma"], port_forwards="50057:50051")
 k8s_resource('work-queue-service:statefulset:chroma', resource_deps=['sysdb:deployment:chroma'], labels=["chroma"], port_forwards="50058:50051")
+k8s_resource('fn-consumer:statefulset:chroma', resource_deps=['sysdb:deployment:chroma', 'work-queue-service:statefulset:chroma'], labels=["chroma"], port_forwards="50059:50051")
 k8s_resource('garbage-collector:statefulset:chroma', resource_deps=['k8s_setup', 'minio-deployment', 'rust-log-service:statefulset:chroma'], labels=["chroma"], port_forwards='50055:50055')
 
 # Production Chroma 2
@@ -352,6 +369,7 @@ k8s_resource('rust-frontend-service:deployment:chroma2', resource_deps=['sysdb:d
 k8s_resource('query-service:statefulset:chroma2', resource_deps=['sysdb:deployment:chroma2', 'query-service:statefulset:chroma'], labels=["chroma2"], port_forwards='60053:50051')
 k8s_resource('compaction-service:statefulset:chroma2', resource_deps=['sysdb:deployment:chroma2', 'compaction-service:statefulset:chroma'], labels=["chroma2"])
 k8s_resource('work-queue-service:statefulset:chroma2', resource_deps=['sysdb:deployment:chroma2', 'work-queue-service:statefulset:chroma'], labels=["chroma2"])
+k8s_resource('fn-consumer:statefulset:chroma2', resource_deps=['sysdb:deployment:chroma2', 'work-queue-service:statefulset:chroma2', 'fn-consumer:statefulset:chroma'], labels=["chroma2"])
 k8s_resource('garbage-collector:statefulset:chroma2', resource_deps=['k8s_setup2', 'minio-deployment', 'rust-log-service:statefulset:chroma2', 'garbage-collector:statefulset:chroma'], labels=["chroma2"], port_forwards='60055:50055')
 
 # Observability
@@ -382,6 +400,7 @@ groups = {
     'query-service:statefulset:chroma',
     'compaction-service:statefulset:chroma',
     'work-queue-service:statefulset:chroma',
+    'fn-consumer:statefulset:chroma',
     'garbage-collector:statefulset:chroma',
     'jaeger',
     'grafana',
@@ -402,6 +421,7 @@ groups = {
     'query-service:statefulset:chroma2',
     'compaction-service:statefulset:chroma2',
     'work-queue-service:statefulset:chroma2',
+    'fn-consumer:statefulset:chroma2',
     'garbage-collector:statefulset:chroma2',
     'spanner-deployment',
   ],

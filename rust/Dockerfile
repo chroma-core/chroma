@@ -120,6 +120,10 @@ FROM runner AS work_queue_service
 COPY --from=builder /chroma/work_queue_service .
 ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./work_queue_service" ]
 
+FROM runner AS fn_consumer
+COPY --from=builder /chroma/fn_consumer .
+ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./fn_consumer" ]
+
 FROM runner AS sysdb_service
 COPY --from=builder /chroma/sysdb_service .
 ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./sysdb_service" ]
