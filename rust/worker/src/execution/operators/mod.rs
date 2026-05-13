@@ -30,6 +30,7 @@ pub mod quantized_spann_bruteforce;
 pub mod quantized_spann_center_search;
 pub mod quantized_spann_load_center;
 pub mod quantized_spann_load_cluster;
+pub mod queue_function;
 pub mod rank;
 pub mod ranked_group_by;
 pub mod repair_log_offsets;

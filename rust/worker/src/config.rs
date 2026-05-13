@@ -410,6 +410,13 @@ pub struct CompactionServiceConfig {
     /// isolates fragment pull I/O from the rest of the compaction pipeline.
     #[serde(default)]
     pub fragment_storage: Option<chroma_storage::config::StorageConfig>,
+
+    /// Optional WorkQueue service endpoint for queuing async attached functions.
+    ///
+    /// When set, async attached functions will be queued for external processing
+    /// instead of being executed during compaction.
+    #[serde(default)]
+    pub work_queue_endpoint: Option<String>,
 }
 
 impl CompactionServiceConfig {
