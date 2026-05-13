@@ -1781,6 +1781,7 @@ dependencies = [
  "chroma-tracing",
  "chroma-types",
  "figment",
+ "frontend-core",
  "futures",
  "http-body-util",
  "lazy_static",
@@ -3738,6 +3739,29 @@ dependencies = [
  "tracing",
  "twox-hash",
  "zstd",
+]
+
+[[package]]
+name = "frontend-core"
+version = "1.0.0"
+dependencies = [
+ "async-trait",
+ "axum 0.8.8",
+ "chroma-api-types",
+ "chroma-error",
+ "chroma-tracing",
+ "chroma-types",
+ "figment",
+ "http-body-util",
+ "mdac",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tower 0.5.3",
+ "tower-http 0.6.8",
+ "tracing",
+ "utoipa",
 ]
 
 [[package]]
