@@ -67,6 +67,11 @@ target "work-queue-service" {
   tags = [ "work-queue-service:ci" ]
 }
 
+target "fn-consumer" {
+  dockerfile = "rust/Dockerfile"
+  target = "fn_consumer"
+  tags = [ "fn-consumer:ci" ]
+}
 
 group "default" {
   targets = [
@@ -80,6 +85,7 @@ group "default" {
     "compactor-service",
     "garbage-collector",
     "load-service",
-    "work-queue-service"
+    "work-queue-service",
+    "fn-consumer"
   ]
 }

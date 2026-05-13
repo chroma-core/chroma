@@ -168,13 +168,12 @@ impl FnConsumerManager {
         );
 
         // Run compaction workflow
-        match compaction_context
-            .run_compaction(
-                input_coll_id,
-                chroma_types::DatabaseName::new("default_database").unwrap(), // TODO: Get database name from collection
-                self.context.system.clone(),
-            )
-            .await
+        match Box::pin(compaction_context.run_compaction(
+            input_coll_id,
+            chroma_types::DatabaseName::new("default_database").unwrap(), // TODO: Get database name from collection
+            self.context.system.clone(),
+        ))
+        .await
         {
             Ok(_response) => {
                 tracing::info!(
@@ -226,8 +225,7 @@ impl FnConsumerManager {
                 );
                 continue;
             };
-            self.dispatch_item(fn_id, input_coll_id, item.completion_offset)
-                .await;
+            Box::pin(self.dispatch_item(fn_id, input_coll_id, item.completion_offset)).await;
         }
     }
 }
@@ -267,7 +265,7 @@ impl Handler<ScheduledPollMessage> for FnConsumerManager {
     type Result = ();
 
     async fn handle(&mut self, _: ScheduledPollMessage, ctx: &ComponentContext<Self>) {
-        self.poll_and_dispatch().await;
+        Box::pin(self.poll_and_dispatch()).await;
         ctx.scheduler.schedule(
             ScheduledPollMessage,
             self.context.poll_interval,
