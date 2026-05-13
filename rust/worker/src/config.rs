@@ -1,8 +1,11 @@
+use chroma_blockstore::config::BlockfileProviderConfig;
 use chroma_config::assignment;
 use chroma_config::helpers::deserialize_duration_from_seconds;
-use chroma_index::config::SpannProviderConfig;
+use chroma_index::config::{HnswProviderConfig, SpannProviderConfig};
+use chroma_log::config::LogConfig;
 use chroma_segment::bloom_filter::BloomFilterManagerConfig;
 use chroma_sysdb::SysDbConfig;
+use chroma_system::DispatcherConfig;
 use chroma_tracing::{OtelFilter, OtelFilterLevel};
 use figment::providers::{Env, Format, Yaml};
 use serde::{Deserialize, Serialize};
@@ -60,6 +63,88 @@ impl WorkQueueServiceConfig {
     }
 }
 
+#[derive(Deserialize, Serialize, Debug, Default, Clone)]
+/// # Description
+/// The primary config for the fn consumer service.
+pub struct FnConsumerServiceConfig {
+    /// The service name to be used for OpenTelemetry.
+    #[serde(default = "FnConsumerServiceConfig::default_service_name")]
+    pub service_name: String,
+
+    /// The OpenTelemetry endpoint to send traces to.
+    #[serde(default = "FnConsumerServiceConfig::default_otel_endpoint")]
+    pub otel_endpoint: String,
+
+    /// Additional RUST_LOG style filters to apply for tracing.
+    #[serde(default = "FnConsumerServiceConfig::default_otel_filters")]
+    pub otel_filters: Vec<OtelFilter>,
+
+    /// The port to listen on for gRPC requests.
+    #[serde(default = "FnConsumerServiceConfig::default_my_port")]
+    pub my_port: u16,
+
+    /// Member ID for this service instance.
+    #[serde(default = "FnConsumerServiceConfig::default_my_member_id")]
+    pub my_member_id: String,
+
+    /// The configuration for the dispatcher.
+    #[serde(default)]
+    pub dispatcher: DispatcherConfig,
+
+    /// The configuration for the fn consumer itself.
+    #[serde(default)]
+    pub fn_consumer: crate::fn_consumer::config::FnConsumerConfig,
+
+    /// The configuration for connecting to the log service.
+    #[serde(default)]
+    pub log: LogConfig,
+
+    /// The configuration for connecting to the chroma metadata (sysdb) service.
+    #[serde(default)]
+    pub sysdb: SysDbConfig,
+
+    /// The configuration for connecting to the chroma blockfile provider service.
+    #[serde(default)]
+    pub blockfile_provider: BlockfileProviderConfig,
+
+    /// The configuration for connecting to the HNSW provider.
+    #[serde(default)]
+    pub hnsw_provider: HnswProviderConfig,
+
+    /// The configuration for connecting to the SPANN provider.
+    #[serde(default)]
+    pub spann_provider: SpannProviderConfig,
+
+    /// The configuration for connecting to the chroma data storage (S3, etc.) service.
+    #[serde(default)]
+    pub storage: chroma_storage::config::StorageConfig,
+}
+
+impl FnConsumerServiceConfig {
+    fn default_service_name() -> String {
+        "fn-consumer-service".to_string()
+    }
+
+    fn default_otel_endpoint() -> String {
+        "http://otel-collector:4317".to_string()
+    }
+
+    fn default_otel_filters() -> Vec<OtelFilter> {
+        vec![OtelFilter {
+            crate_name: "worker".to_string(),
+            filter_level: OtelFilterLevel::Trace,
+        }]
+    }
+
+    fn default_my_port() -> u16 {
+        50051
+    }
+
+    fn default_my_member_id() -> String {
+        "fn-consumer-0".to_string()
+    }
+}
+
 #[derive(Deserialize, Serialize, Debug)]
 /// # Description
 /// The RootConfig object wraps the query and compaction config objects so that
@@ -84,6 +169,10 @@ pub struct RootConfig {
     /// The configuration for the work queue service.
     #[serde(default)]
     pub work_queue_service: WorkQueueServiceConfig,
+
+    /// The configuration for the fn consumer service.
+    #[serde(default)]
+    pub fn_consumer_service: FnConsumerServiceConfig,
 }
 
 impl RootConfig {

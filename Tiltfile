@@ -354,7 +354,7 @@ k8s_resource('rust-frontend-service:deployment:chroma', resource_deps=['sysdb:de
 k8s_resource('query-service:statefulset:chroma', resource_deps=['sysdb:deployment:chroma'], labels=["chroma"], port_forwards='50053:50051')
 k8s_resource('compaction-service:statefulset:chroma', resource_deps=['sysdb:deployment:chroma'], labels=["chroma"], port_forwards="50057:50051")
 k8s_resource('work-queue-service:statefulset:chroma', resource_deps=['sysdb:deployment:chroma'], labels=["chroma"], port_forwards="50058:50051")
-k8s_resource('fn-consumer:statefulset:chroma', resource_deps=['sysdb:deployment:chroma', 'work-queue-service:statefulset:chroma'], labels=["chroma"], port_forwards="50059:50051")
+k8s_resource('fn-consumer:deployment:chroma', resource_deps=['sysdb:deployment:chroma', 'work-queue-service:statefulset:chroma'], labels=["chroma"], port_forwards="50059:50051")
 k8s_resource('garbage-collector:statefulset:chroma', resource_deps=['k8s_setup', 'minio-deployment', 'rust-log-service:statefulset:chroma'], labels=["chroma"], port_forwards='50055:50055')
 
 # Production Chroma 2
@@ -369,7 +369,7 @@ k8s_resource('rust-frontend-service:deployment:chroma2', resource_deps=['sysdb:d
 k8s_resource('query-service:statefulset:chroma2', resource_deps=['sysdb:deployment:chroma2', 'query-service:statefulset:chroma'], labels=["chroma2"], port_forwards='60053:50051')
 k8s_resource('compaction-service:statefulset:chroma2', resource_deps=['sysdb:deployment:chroma2', 'compaction-service:statefulset:chroma'], labels=["chroma2"])
 k8s_resource('work-queue-service:statefulset:chroma2', resource_deps=['sysdb:deployment:chroma2', 'work-queue-service:statefulset:chroma'], labels=["chroma2"])
-k8s_resource('fn-consumer:statefulset:chroma2', resource_deps=['sysdb:deployment:chroma2', 'work-queue-service:statefulset:chroma2', 'fn-consumer:statefulset:chroma'], labels=["chroma2"])
+k8s_resource('fn-consumer:deployment:chroma2', resource_deps=['sysdb:deployment:chroma2', 'work-queue-service:statefulset:chroma2', 'fn-consumer:deployment:chroma'], labels=["chroma2"])
 k8s_resource('garbage-collector:statefulset:chroma2', resource_deps=['k8s_setup2', 'minio-deployment', 'rust-log-service:statefulset:chroma2', 'garbage-collector:statefulset:chroma'], labels=["chroma2"], port_forwards='60055:50055')
 
 # Observability
@@ -400,7 +400,7 @@ groups = {
     'query-service:statefulset:chroma',
     'compaction-service:statefulset:chroma',
     'work-queue-service:statefulset:chroma',
-    'fn-consumer:statefulset:chroma',
+    'fn-consumer:deployment:chroma',
     'garbage-collector:statefulset:chroma',
     'jaeger',
     'grafana',
@@ -421,7 +421,7 @@ groups = {
     'query-service:statefulset:chroma2',
     'compaction-service:statefulset:chroma2',
     'work-queue-service:statefulset:chroma2',
-    'fn-consumer:statefulset:chroma2',
+    'fn-consumer:deployment:chroma2',
     'garbage-collector:statefulset:chroma2',
     'spanner-deployment',
   ],
