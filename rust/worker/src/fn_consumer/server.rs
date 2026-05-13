@@ -4,12 +4,12 @@ use crate::work_queue::work_queue_client::WorkQueueClient;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
-use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_index::usearch::USearchIndexProvider;
+use chroma_index::{hnsw_provider::HnswIndexProvider, usearch::USearchIndexProvider};
 use chroma_log::Log;
 use chroma_segment::spann_provider::SpannProvider;
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
+use tonic::transport::Server;
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
@@ -44,7 +44,7 @@ pub async fn fn_consumer_service_entrypoint() {
         {
             Ok(dispatcher) => dispatcher,
             Err(err) => {
-                eprintln!("Failed to create dispatcher: {:?}", err);
+                tracing::error!("Failed to create dispatcher: {:?}", err);
                 return;
             }
         };
@@ -56,7 +56,7 @@ pub async fn fn_consumer_service_entrypoint() {
     {
         Ok(log) => log,
         Err(err) => {
-            eprintln!("Failed to create log service: {:?}", err);
+            tracing::error!("Failed to create log service: {:?}", err);
             return;
         }
     };
@@ -66,7 +66,7 @@ pub async fn fn_consumer_service_entrypoint() {
     {
         Ok(sysdb) => sysdb,
         Err(err) => {
-            eprintln!("Failed to create sysdb: {:?}", err);
+            tracing::error!("Failed to create sysdb: {:?}", err);
             return;
         }
     };
@@ -75,7 +75,7 @@ pub async fn fn_consumer_service_entrypoint() {
     let storage = match Storage::try_from_config(&service_config.storage, &registry).await {
         Ok(storage) => storage,
         Err(err) => {
-            eprintln!("Failed to create storage: {:?}", err);
+            tracing::error!("Failed to create storage: {:?}", err);
             return;
         }
     };
@@ -89,7 +89,7 @@ pub async fn fn_consumer_service_entrypoint() {
     {
         Ok(provider) => provider,
         Err(err) => {
-            eprintln!("Failed to create blockfile provider: {:?}", err);
+            tracing::error!("Failed to create blockfile provider: {:?}", err);
             return;
         }
     };
@@ -103,7 +103,7 @@ pub async fn fn_consumer_service_entrypoint() {
     {
         Ok(provider) => provider,
         Err(err) => {
-            eprintln!("Failed to create hnsw provider: {:?}", err);
+            tracing::error!("Failed to create hnsw provider: {:?}", err);
             return;
         }
     };
@@ -116,7 +116,7 @@ pub async fn fn_consumer_service_entrypoint() {
     {
         Ok(cache) => cache,
         Err(err) => {
-            eprintln!("Failed to create usearch cache: {:?}", err);
+            tracing::error!("Failed to create usearch cache: {:?}", err);
             return;
         }
     };
@@ -136,17 +136,24 @@ pub async fn fn_consumer_service_entrypoint() {
     {
         Ok(provider) => provider,
         Err(err) => {
-            eprintln!("Failed to create spann provider: {:?}", err);
+            tracing::error!("Failed to create spann provider: {:?}", err);
             return;
         }
     };
 
     // Connect to the work queue
     let work_queue_client =
-        match WorkQueueClient::new(service_config.fn_consumer.work_queue_endpoint.clone()).await {
-            Ok(client) => client,
+        match WorkQueueClient::try_from_config(&service_config.fn_consumer.work_queue).await {
+            Ok(client) => {
+                tracing::info!(
+                    "WorkQueue client initialized for {}:{}",
+                    service_config.fn_consumer.work_queue.host,
+                    service_config.fn_consumer.work_queue.port
+                );
+                client
+            }
             Err(err) => {
-                eprintln!("Failed to connect to work queue: {:?}", err);
+                tracing::error!("Failed to initialize WorkQueue client: {:?}", err);
                 return;
             }
         };
@@ -166,9 +173,19 @@ pub async fn fn_consumer_service_entrypoint() {
     manager.set_dispatcher(dispatcher_handle);
     let _manager_handle = system.start_component(manager);
 
-    // Just run the system - FnConsumerManager polls work queue directly
-    println!("fn-consumer service started");
+    // Create health service for readiness probe
+    let (_health_reporter, health_service) = tonic_health::server::health_reporter();
 
-    // Keep the service running
-    system.join().await;
+    let addr = format!("0.0.0.0:{}", service_config.my_port)
+        .parse()
+        .unwrap();
+
+    println!("fn-consumer service starting on {}", addr);
+
+    // Start server (this blocks forever)
+    Server::builder()
+        .add_service(health_service)
+        .serve(addr)
+        .await
+        .expect("Failed to start fn-consumer service");
 }

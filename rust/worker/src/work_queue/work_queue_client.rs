@@ -1,8 +1,11 @@
+use crate::fn_consumer::config::GrpcWorkQueueConfig;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::chroma_proto::{
     work_queue_service_client::WorkQueueServiceClient, FinishWorkRequest, GetWorkRequest,
     GetWorkResponse, PushWorkRequest,
 };
+use std::time::Duration;
+use tonic::transport::Endpoint;
 use tonic::Request;
 
 #[derive(Debug, Clone)]
@@ -13,6 +16,30 @@ pub struct WorkQueueClient {
 
 #[allow(dead_code)]
 impl WorkQueueClient {
+    pub async fn try_from_config(
+        config: &GrpcWorkQueueConfig,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let endpoint = format!("http://{}:{}", config.host, config.port);
+
+        let endpoint = Endpoint::from_shared(endpoint)
+            .map_err(|e| {
+                Box::new(WorkQueueClientError::ConnectionError(e.to_string()))
+                    as Box<dyn ChromaError>
+            })?
+            .connect_timeout(Duration::from_millis(config.connect_timeout_ms))
+            .timeout(Duration::from_millis(config.request_timeout_ms));
+
+        let client = WorkQueueServiceClient::connect(endpoint)
+            .await
+            .map_err(|e| {
+                let err: Box<dyn ChromaError> =
+                    Box::new(WorkQueueClientError::ConnectionError(e.to_string()));
+                err
+            })?;
+
+        Ok(Self { client })
+    }
+
     pub async fn new(endpoint: String) -> Result<Self, Box<dyn ChromaError>> {
         let client = WorkQueueServiceClient::connect(endpoint)
             .await

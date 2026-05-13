@@ -251,13 +251,10 @@ impl CompactionContext {
 
     /// Create an empty output context for attached function orchestrator
     /// This creates a new context with an empty collection_info OnceCell
-    pub fn clone_for_new_collection(
-        &self,
-        collection_info: CollectionCompactInfo,
-    ) -> Result<Self, CompactionContextError> {
+    pub fn clone_for_new_collection(&self) -> Self {
         let orchestrator_context = OrchestratorContext::new(self.dispatcher.clone());
-        Ok(Self {
-            collection_info: OnceCell::from(collection_info.clone()),
+        Self {
+            collection_info: OnceCell::new(), // Start empty for output context
             log: self.log.clone(),
             sysdb: self.sysdb.clone(),
             blockfile_provider: self.blockfile_provider.clone(),
@@ -278,7 +275,7 @@ impl CompactionContext {
             work_queue_client: self.work_queue_client.clone(),
             #[cfg(test)]
             poison_offset: self.poison_offset,
-        })
+        }
     }
 }
 
@@ -609,7 +606,7 @@ impl CompactionContext {
         let collection_info = self.get_collection_info()?.clone();
         let attached_function_orchestrator = AttachedFunctionOrchestrator::new(
             collection_info,
-            self.clone(),
+            self.clone_for_new_collection(),
             self.dispatcher.clone(),
             data_fetch_records,
             is_backfill,
