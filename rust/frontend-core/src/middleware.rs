@@ -4,7 +4,7 @@ use axum::{extract::Request, middleware::Next, response::Response, Json};
 use chroma_error::ErrorCodes;
 
 /// If the request does not have a `Content-Type` header, set it to `application/json`.
-pub(crate) async fn default_json_content_type_middleware(mut req: Request, next: Next) -> Response {
+pub async fn default_json_content_type_middleware(mut req: Request, next: Next) -> Response {
     if req
         .headers()
         .get(axum::http::header::CONTENT_TYPE)
@@ -21,7 +21,7 @@ pub(crate) async fn default_json_content_type_middleware(mut req: Request, next:
 /// Axum occasionally returns generic errors as plain text. Chroma clients expect that JSON errors will always be returned, so this middleware converts plain text errors to JSON.
 ///
 /// Inspired by https://github.com/rust-lang/crates.io/blob/edcf93b071d3564e497c7a984fd411a760db28b5/src/middleware/cargo_compat.rs
-pub(crate) async fn always_json_errors_middleware(req: Request, next: Next) -> Response {
+pub async fn always_json_errors_middleware(req: Request, next: Next) -> Response {
     let res = next.run(req).await;
 
     let status = res.status();

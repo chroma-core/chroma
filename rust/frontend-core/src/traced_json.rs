@@ -9,9 +9,9 @@ use tracing::Instrument;
 /// as well as the JSON parsing.
 /// The error behavior has parity with axum::Json, but the error type is different because those types
 /// are private to axum.
-pub(crate) struct TracedJson<T>(pub T);
+pub struct TracedJson<T>(pub T);
 
-pub(crate) enum TracingJsonRejection {
+pub enum TracingJsonRejection {
     JsonRejection(JsonRejection),
     LengthLimitError,
     UnknownBodyError,

@@ -1,0 +1,27 @@
+[package]
+name = "frontend-core"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+async-trait = { workspace = true }
+axum = { workspace = true }
+figment = { workspace = true }
+http-body-util = { workspace = true }
+mdac = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+tracing = { workspace = true }
+utoipa = { workspace = true }
+
+chroma-api-types = { workspace = true, features = ["utoipa"] }
+chroma-error = { workspace = true, features = ["validator", "http"] }
+chroma-tracing = { workspace = true, features = ["middleware"] }
+chroma-types = { workspace = true, features = ["utoipa"] }
+
+[dev-dependencies]
+serde_json = { workspace = true }
