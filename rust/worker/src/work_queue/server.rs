@@ -22,7 +22,7 @@ pub async fn service_entrypoint() {
     };
 
     let service_config = config.work_queue_service.clone();
-    let work_queue_config = config.work_queue.clone();
+    let work_queue_config = service_config.work_queue.clone();
     let registry = Registry::new();
 
     // Initialize tracing

@@ -40,6 +40,10 @@ pub struct WorkQueueServiceConfig {
     /// The configuration for connecting to the chroma data storage (S3, etc.) service.
     #[serde(alias = "storage", default)]
     pub storage: chroma_storage::config::StorageConfig,
+
+    /// The configuration for the work queue.
+    #[serde(default)]
+    pub work_queue: crate::work_queue::config::WorkQueueConfig,
 }
 
 impl WorkQueueServiceConfig {
@@ -161,10 +165,6 @@ pub struct RootConfig {
     /// The configuration for the compaction service.
     #[serde(default)]
     pub compaction_service: CompactionServiceConfig,
-
-    /// The configuration for the work queue.
-    #[serde(default)]
-    pub work_queue: crate::work_queue::config::WorkQueueConfig,
 
     /// The configuration for the work queue service.
     #[serde(default)]
@@ -505,7 +505,7 @@ pub struct CompactionServiceConfig {
     /// When set, async attached functions will be queued for external processing
     /// instead of being executed during compaction.
     #[serde(default)]
-    pub work_queue_endpoint: Option<String>,
+    pub work_queue: Option<crate::fn_consumer::config::GrpcWorkQueueConfig>,
 }
 
 impl CompactionServiceConfig {

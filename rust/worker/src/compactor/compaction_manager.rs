@@ -702,20 +702,28 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         )
         .await?;
 
-        // Initialize WorkQueueClient if endpoint is configured
-        let work_queue_client = match &config.work_queue_endpoint {
-            Some(endpoint) => match WorkQueueClient::new(endpoint.clone()).await {
-                Ok(client) => {
-                    tracing::info!("WorkQueue client initialized for endpoint: {}", endpoint);
-                    Some(client)
+        // Initialize WorkQueueClient if config is provided
+        let work_queue_client = match &config.work_queue {
+            Some(work_queue_config) => {
+                match WorkQueueClient::try_from_config(work_queue_config).await {
+                    Ok(client) => {
+                        tracing::info!(
+                            "WorkQueue client initialized for {}:{}",
+                            work_queue_config.host,
+                            work_queue_config.port
+                        );
+                        Some(client)
+                    }
+                    Err(err) => {
+                        tracing::warn!("Failed to initialize WorkQueue client: {:?}", err);
+                        None
+                    }
                 }
-                Err(err) => {
-                    tracing::warn!("Failed to initialize WorkQueue client: {:?}", err);
-                    None
-                }
-            },
+            }
             None => {
-                tracing::info!("WorkQueue endpoint not configured, async attached functions will not be supported");
+                tracing::info!(
+                    "WorkQueue not configured, async attached functions will not be supported"
+                );
                 None
             }
         };
