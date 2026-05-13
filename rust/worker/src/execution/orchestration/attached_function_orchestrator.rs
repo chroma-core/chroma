@@ -586,7 +586,7 @@ impl Handler<TaskResult<GetAttachedFunctionOutput, GetAttachedFunctionOperatorEr
                 }
 
                 // Check if this is an async function and handle it early
-                if attached_function.is_async {
+                if attached_function.is_async && !self.output_context.is_fn_consumer {
                     // For async functions, we don't need output collection info
                     if let Some(work_queue_client) = &self.output_context.work_queue_client {
                         let operator =
