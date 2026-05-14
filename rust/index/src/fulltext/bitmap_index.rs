@@ -1,176 +1,297 @@
-use std::collections::HashSet;
-use std::io::Cursor;
 use std::sync::Arc;
 
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
 use dashmap::DashMap;
-use murmur3::murmur3_32;
 use roaring::RoaringBitmap;
 use thiserror::Error;
 use uuid::Uuid;
 
-use super::tokenizer::{QueryError, WordAnalyzer};
+use super::tokenizer::DocumentTokens;
 
-// TODO: Persist these parameters (hash seed, bits, algorithm version) in the
-// blockfile or segment metadata for forward compatibility. Currently hardcoded.
+/// Transition doc-ID keys: `key = hash | (1 << 24)`, range `[2^24, 2^25)`.
+const TRANSITION_DOC_FLAG: u32 = 1 << 24;
+/// Transition bucket-ID keys: `key = hash | (1 << 25)`, range `[2^25, 2^25 + 2^24)`.
+const TRANSITION_BUCKET_FLAG: u32 = 1 << 25;
 
-/// Number of bits in the hash bucket index.
-///
-/// 20 bits = 1,048,576 buckets. With a typical vocabulary of ~5M words,
-/// this gives ~5 words per bucket on average. The probability of a rare
-/// word colliding with a top-10K common word is ~1%, and multi-word AND
-/// queries recover selectivity (0.01^N for N terms). Storage is dominated
-/// by common-word bitmaps regardless of bucket count, so increasing bits
-/// adds mostly empty buckets with negligible cost.
-const HASH_BITS: u32 = 20;
-const NUM_BUCKETS: u32 = 1 << HASH_BITS;
-
-/// Murmur3 seed for token hashing.
-///
-/// A non-default seed to avoid collision patterns with other murmur3 usage
-/// in the codebase (e.g., BM25 sparse embeddings use seed 0). The specific
-/// value is arbitrary but fixed — changing it would invalidate all existing
-/// blockfiles.
-const HASH_SEED: u32 = 0x5f3759df;
+// ---------------------------------------------------------------------------
+// Error
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Error)]
 pub enum FullTextBitmapError {
     #[error("Blockfile error: {0}")]
     Blockfile(#[from] Box<dyn ChromaError>),
-    #[error("Query error: {0}")]
-    Query(#[from] QueryError),
 }
 
 impl ChromaError for FullTextBitmapError {
     fn code(&self) -> ErrorCodes {
         match self {
             FullTextBitmapError::Blockfile(e) => e.code(),
-            FullTextBitmapError::Query(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
 
-/// Hash a token string to a bucket index in [0, NUM_BUCKETS).
-fn hash_token(token: &str) -> u32 {
-    let hash = murmur3_32(&mut Cursor::new(token.as_bytes()), HASH_SEED)
-        .expect("murmur3_32 should not fail on in-memory data");
-    hash % NUM_BUCKETS
-}
+// ---------------------------------------------------------------------------
+// Writer
+// ---------------------------------------------------------------------------
 
-/// Per-bucket accumulator tracking doc IDs to add and remove.
-///
-/// When both `adds` and `deletes` contain the same doc ID for a bucket,
-/// the add takes precedence (the document was updated and still has a
-/// token hashing to this bucket).
+/// Per-bucket accumulator for doc-ID adds and deletes.
 #[derive(Default)]
-struct BucketDelta {
+struct TokenDelta {
     adds: RoaringBitmap,
     deletes: RoaringBitmap,
 }
 
+/// Per-transition accumulator for doc-ID and bucket-ID bitmaps.
+#[derive(Default)]
+struct TransitionDelta {
+    bucket_adds: RoaringBitmap,
+    doc_adds: RoaringBitmap,
+    doc_deletes: RoaringBitmap,
+}
+
+/// Per-trigram accumulator: one bucket-ID bitmap per positional key.
+#[derive(Default)]
+struct TrigramDelta {
+    infix: RoaringBitmap,
+    prefix: RoaringBitmap,
+    suffix: RoaringBitmap,
+}
+
 /// Writer for the word-based full-text bitmap index.
 ///
-/// Tokenizes documents with [`WordAnalyzer`], hashes each token to one of
-/// 2^20 buckets via murmur3, and stores a [`RoaringBitmap`] per bucket in
-/// a blockfile.
+/// Receives pre-computed [`DocumentTokens`] from the tokenizer and writes
+/// bucket, trigram, and transition bitmaps to a single blockfile.
 ///
-/// Supports concurrent mutation via [`DashMap`]. Call [`add_document`] and
-/// [`delete_document`] from multiple threads, then [`write_to_blockfiles`]
-/// and [`commit`] once.
+/// # Blockfile layout
+///
+/// A single blockfile with three logical partitions, distinguished by
+/// prefix and key range. The blockfile writer requires `(prefix, key)`
+/// pairs in globally sorted order, so entries are written as:
+///
+/// 1. `prefix=""`, token bucket keys `[0, 2^24)` — doc-ID bitmaps
+/// 2. `prefix=""`, transition keys `[2^24, 2^26)` — doc-ID and bucket-ID bitmaps
+/// 3. `prefix="{trigram}"`, keys 0/1/2 — bucket-ID bitmaps (positional)
+///
+/// This ordering ensures all `prefix=""` entries (partitions 1–2) are
+/// written first in ascending key order, followed by trigram entries
+/// sorted by `(prefix, key)`.
 #[derive(Clone)]
 pub struct FullTextBitmapWriter {
-    analyzer: WordAnalyzer,
-    delta: Arc<DashMap<u32, BucketDelta>>,
     bitmap_writer: BlockfileWriter,
     old_reader: Option<FullTextBitmapReader>,
+    token_deltas: Arc<DashMap<u32, TokenDelta>>,
+    transition_deltas: Arc<DashMap<u32, TransitionDelta>>,
+    trigram_deltas: Arc<DashMap<String, TrigramDelta>>,
 }
 
 impl FullTextBitmapWriter {
-    pub fn new(
-        bitmap_writer: BlockfileWriter,
-        analyzer: WordAnalyzer,
-        old_reader: Option<FullTextBitmapReader>,
-    ) -> Self {
+    pub fn new(bitmap_writer: BlockfileWriter, old_reader: Option<FullTextBitmapReader>) -> Self {
         Self {
-            analyzer,
-            delta: Arc::new(DashMap::new()),
             bitmap_writer,
             old_reader,
+            token_deltas: Arc::new(DashMap::new()),
+            transition_deltas: Arc::new(DashMap::new()),
+            trigram_deltas: Arc::new(DashMap::new()),
         }
     }
 
-    /// Add a document to the index. Tokenizes the text and marks the
-    /// doc ID for insertion into each token's hash bucket.
-    ///
-    /// Clears any pending delete for the same (bucket, doc_id) so the
-    /// last operation wins.
-    pub fn add_document(&self, offset_id: u32, text: &str) {
-        let mut analyzer = self.analyzer.clone();
-        for token in analyzer.tokenize(text) {
-            let bucket = hash_token(&token);
-            let mut entry = self.delta.entry(bucket).or_default();
+    /// Add a document to the index.
+    pub fn add_document(&self, offset_id: u32, tokens: DocumentTokens) {
+        for bucket in tokens.buckets {
+            let mut entry = self.token_deltas.entry(bucket).or_default();
             entry.deletes.remove(offset_id);
             entry.adds.insert(offset_id);
         }
+
+        for (trigram, key, bucket_id) in tokens.trigrams {
+            let mut entry = self.trigram_deltas.entry(trigram).or_default();
+            match key {
+                0 => entry.prefix.insert(bucket_id),
+                1 => entry.infix.insert(bucket_id),
+                _ => entry.suffix.insert(bucket_id),
+            };
+        }
+
+        for (hash, prev_bucket, curr_bucket) in tokens.transitions {
+            let mut entry = self.transition_deltas.entry(hash).or_default();
+            entry.doc_deletes.remove(offset_id);
+            entry.doc_adds.insert(offset_id);
+            entry.bucket_adds.insert(prev_bucket);
+            entry.bucket_adds.insert(curr_bucket);
+        }
     }
 
-    /// Delete a document from the index. Tokenizes the text and marks the
-    /// doc ID for removal from each token's hash bucket.
+    /// Delete a document from the index.
     ///
-    /// Clears any pending add for the same (bucket, doc_id) so the
-    /// last operation wins.
-    pub fn delete_document(&self, offset_id: u32, text: &str) {
-        let mut analyzer = self.analyzer.clone();
-        for token in analyzer.tokenize(text) {
-            let bucket = hash_token(&token);
-            let mut entry = self.delta.entry(bucket).or_default();
+    /// Removes the doc from bucket and transition doc bitmaps. Trigram and
+    /// transition bucket bitmaps are left stale — they are over-estimates.
+    pub fn delete_document(&self, offset_id: u32, tokens: DocumentTokens) {
+        for bucket in tokens.buckets {
+            let mut entry = self.token_deltas.entry(bucket).or_default();
             entry.adds.remove(offset_id);
             entry.deletes.insert(offset_id);
+        }
+
+        for (hash, _, _) in tokens.transitions {
+            let mut entry = self.transition_deltas.entry(hash).or_default();
+            entry.doc_adds.remove(offset_id);
+            entry.doc_deletes.insert(offset_id);
         }
     }
 
     /// Merge accumulated deltas into the blockfile.
     ///
-    /// Writes buckets in sorted order (required by ordered blockfile writer).
-    /// Adds and deletes are disjoint per (bucket, doc_id) — enforced by
-    /// `add_document`/`delete_document` clearing the opposite set.
-    ///
-    /// When forking from an existing blockfile via `old_reader`, existing
-    /// bitmaps are merged: `result = (existing | adds) - deletes`.
+    /// Writes in `(prefix, key)` sorted order as required by the blockfile:
+    /// 1. Token buckets: `prefix=""`, keys `[0, 2^24)`
+    /// 2. Transitions: `prefix=""`, keys `[2^24, 2^26)`
+    /// 3. Trigrams: `prefix="{trigram}"`, keys `0/1/2`
     pub async fn write_to_blockfiles(&self) -> Result<(), FullTextBitmapError> {
-        let mut bucket_ids: Vec<u32> = self.delta.iter().map(|e| *e.key()).collect();
-        bucket_ids.sort_unstable();
+        self.write_token_buckets().await?;
+        self.write_transitions().await?;
+        self.write_trigrams().await?;
+        Ok(())
+    }
 
-        for bucket_id in bucket_ids {
-            let Some((_, delta)) = self.delta.remove(&bucket_id) else {
+    pub async fn commit(self) -> Result<FullTextBitmapFlusher, FullTextBitmapError> {
+        let flusher = self.bitmap_writer.commit::<u32, RoaringBitmap>().await?;
+        Ok(FullTextBitmapFlusher { flusher })
+    }
+
+    // --- Phases ---
+
+    async fn write_token_buckets(&self) -> Result<(), FullTextBitmapError> {
+        let mut keys: Vec<u32> = self.token_deltas.iter().map(|e| *e.key()).collect();
+        keys.sort_unstable();
+
+        // Preload blocks for all delta keys so point reads hit cache.
+        if let Some(reader) = &self.old_reader {
+            reader
+                .load_keys(keys.iter().map(|k| (String::new(), *k)))
+                .await;
+        }
+
+        for key in keys {
+            let Some((_, delta)) = self.token_deltas.remove(&key) else {
                 continue;
             };
-
             let mut bitmap = match &self.old_reader {
-                Some(reader) => reader.get_bucket(bucket_id).await?,
+                Some(r) => r.get_bucket(key).await?,
                 None => RoaringBitmap::new(),
             };
-            bitmap -= &delta.deletes;
             bitmap |= &delta.adds;
+            bitmap -= &delta.deletes;
 
             if bitmap.is_empty() {
                 self.bitmap_writer
-                    .delete::<u32, RoaringBitmap>("", bucket_id)
+                    .delete::<u32, RoaringBitmap>("", key)
                     .await?;
             } else {
-                self.bitmap_writer.set("", bucket_id, bitmap).await?;
+                self.bitmap_writer.set("", key, bitmap).await?;
             }
         }
         Ok(())
     }
 
-    /// Commit the blockfile, returning a flusher.
-    pub async fn commit(self) -> Result<FullTextBitmapFlusher, FullTextBitmapError> {
-        let flusher = self.bitmap_writer.commit::<u32, RoaringBitmap>().await?;
-        Ok(FullTextBitmapFlusher { flusher })
+    async fn write_trigrams(&self) -> Result<(), FullTextBitmapError> {
+        let mut keys: Vec<String> = self
+            .trigram_deltas
+            .iter()
+            .map(|e| e.key().clone())
+            .collect();
+        keys.sort_unstable();
+
+        // Preload blocks for all trigram keys (up to 3 positional keys each).
+        if let Some(reader) = &self.old_reader {
+            reader
+                .load_keys(
+                    keys.iter()
+                        .flat_map(|t| (0u32..3).map(move |k| (t.clone(), k))),
+                )
+                .await;
+        }
+
+        for trigram in keys {
+            let Some((_, delta)) = self.trigram_deltas.remove(&trigram) else {
+                continue;
+            };
+            for (key, new_buckets) in [(0u32, delta.prefix), (1, delta.infix), (2, delta.suffix)] {
+                if new_buckets.is_empty() {
+                    continue;
+                }
+                let mut bitmap = match &self.old_reader {
+                    Some(r) => r.get_trigram(&trigram, key).await?,
+                    None => RoaringBitmap::new(),
+                };
+                bitmap |= &new_buckets;
+                self.bitmap_writer
+                    .set(trigram.as_str(), key, bitmap)
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn write_transitions(&self) -> Result<(), FullTextBitmapError> {
+        let mut keys: Vec<u32> = self.transition_deltas.iter().map(|e| *e.key()).collect();
+        keys.sort_unstable();
+
+        // Preload blocks for all transition keys (doc + bucket).
+        if let Some(reader) = &self.old_reader {
+            reader
+                .load_keys(keys.iter().flat_map(|h| {
+                    [
+                        (String::new(), h | TRANSITION_DOC_FLAG),
+                        (String::new(), h | TRANSITION_BUCKET_FLAG),
+                    ]
+                }))
+                .await;
+        }
+
+        // Doc-ID bitmaps first: keys in [2^24, 2^25).
+        for &hash in &keys {
+            let Some(entry) = self.transition_deltas.get(&hash) else {
+                continue;
+            };
+            if entry.doc_adds.is_empty() && entry.doc_deletes.is_empty() {
+                continue;
+            }
+            let doc_key = hash | TRANSITION_DOC_FLAG;
+            let mut bitmap = match &self.old_reader {
+                Some(r) => r.get_bucket(doc_key).await?,
+                None => RoaringBitmap::new(),
+            };
+            bitmap |= &entry.doc_adds;
+            bitmap -= &entry.doc_deletes;
+            if !bitmap.is_empty() {
+                self.bitmap_writer.set("", doc_key, bitmap).await?;
+            }
+        }
+
+        // Bucket-ID bitmaps second: keys in [2^25, 2^26).
+        for hash in keys {
+            let Some((_, delta)) = self.transition_deltas.remove(&hash) else {
+                continue;
+            };
+            if delta.bucket_adds.is_empty() {
+                continue;
+            }
+            let bkt_key = hash | TRANSITION_BUCKET_FLAG;
+            let mut bitmap = match &self.old_reader {
+                Some(r) => r.get_bucket(bkt_key).await?,
+                None => RoaringBitmap::new(),
+            };
+            bitmap |= &delta.bucket_adds;
+            self.bitmap_writer.set("", bkt_key, bitmap).await?;
+        }
+        Ok(())
     }
 }
+
+// ---------------------------------------------------------------------------
+// Flusher
+// ---------------------------------------------------------------------------
 
 pub struct FullTextBitmapFlusher {
     flusher: BlockfileFlusher,
@@ -191,362 +312,242 @@ impl FullTextBitmapFlusher {
     }
 }
 
-/// Reader for the word-based full-text bitmap index.
-///
-/// Wraps a blockfile containing `(bucket_id: u32) → RoaringBitmap` entries.
-/// Queries are decomposed into tokens, hashed to bucket IDs, and the
-/// corresponding bitmaps are AND'd together.
+// ---------------------------------------------------------------------------
+// Reader (minimal — fork support only, search added in PR 3)
+// ---------------------------------------------------------------------------
+
 #[derive(Clone)]
 pub struct FullTextBitmapReader {
     bitmap_reader: BlockfileReader<'static, u32, RoaringBitmap>,
-    analyzer: WordAnalyzer,
 }
 
 impl FullTextBitmapReader {
-    pub fn new(
-        bitmap_reader: BlockfileReader<'static, u32, RoaringBitmap>,
-        analyzer: WordAnalyzer,
-    ) -> Self {
-        Self {
-            bitmap_reader,
-            analyzer,
-        }
+    pub fn new(bitmap_reader: BlockfileReader<'static, u32, RoaringBitmap>) -> Self {
+        Self { bitmap_reader }
     }
 
-    /// Search for documents matching the query string.
-    ///
-    /// Tokenizes the query, hashes each full token to a bucket, loads the
-    /// bitmaps, and AND's them together. Returns a `RoaringBitmap` of
-    /// candidate document offset IDs.
-    ///
-    /// Only full tokens (middle `tokens` in `FullTextQuery`) are used for
-    /// matching. Prefix and suffix are ignored for now.
-    // TODO: prefix/suffix require dictionary-based partial matching (PR 3).
-    pub async fn search(&self, query: &str) -> Result<RoaringBitmap, FullTextBitmapError> {
-        let mut analyzer = self.analyzer.clone();
-        let ftq = analyzer.tokenize_query(query)?;
-
-        // Collect all tokens to look up. All are hashed to bucket IDs.
-        // TODO: prefix and suffix are partial matches — they should use
-        // dictionary-based lookup to find all words matching the partial
-        // and OR their bitmaps (PR 3). For now, hash them directly which
-        // only matches the exact token, not words containing it.
-        let token_set: HashSet<&str> = ftq
-            .prefix
-            .iter()
-            .chain(ftq.tokens.iter())
-            .chain(ftq.suffix.iter())
-            .map(|s| s.as_str())
-            .collect();
-
-        let mut result: Option<RoaringBitmap> = None;
-        for token in token_set {
-            let bitmap = self.get_bucket(hash_token(token)).await?;
-            result = Some(match result {
-                Some(r) => r & &bitmap,
-                None => bitmap,
-            });
-        }
-
-        Ok(result.unwrap_or_default())
-    }
-
-    /// The blockfile ID backing this reader.
     pub fn id(&self) -> Uuid {
         self.bitmap_reader.id()
     }
 
-    /// Load a single bucket's bitmap. Returns empty if the bucket doesn't exist.
-    async fn get_bucket(&self, bucket_id: u32) -> Result<RoaringBitmap, FullTextBitmapError> {
+    /// Preload blocks for a set of `(prefix, key)` pairs into the cache.
+    pub async fn load_keys(&self, keys: impl IntoIterator<Item = (String, u32)>) {
+        self.bitmap_reader.load_data_for_keys(keys).await;
+    }
+
+    /// Load a bitmap by key under `prefix=""`.
+    pub async fn get_bucket(&self, key: u32) -> Result<RoaringBitmap, FullTextBitmapError> {
+        Ok(self.bitmap_reader.get("", key).await?.unwrap_or_default())
+    }
+
+    /// Load a trigram bitmap by trigram string and positional key.
+    pub async fn get_trigram(
+        &self,
+        trigram: &str,
+        key: u32,
+    ) -> Result<RoaringBitmap, FullTextBitmapError> {
         Ok(self
             .bitmap_reader
-            .get("", bucket_id)
+            .get(trigram, key)
             .await?
             .unwrap_or_default())
     }
 }
 
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
 #[cfg(test)]
 #[allow(clippy::large_futures)]
 mod tests {
     use super::*;
+    use crate::fulltext::tokenizer::WordAnalyzer;
     use chroma_blockstore::{
         arrow::provider::BlockfileReaderOptions, provider::BlockfileProvider,
-        BlockfileWriterOptions,
+        test_arrow_blockfile_provider, BlockfileWriterOptions,
     };
+    use tempfile::TempDir;
 
-    async fn new_writer() -> (FullTextBitmapWriter, BlockfileProvider, String) {
-        let provider = BlockfileProvider::new_memory();
-        let prefix = String::from("");
-        let writer = provider
-            .write::<u32, RoaringBitmap>(BlockfileWriterOptions::new(prefix.clone()))
-            .await
-            .unwrap();
-        let bm_writer = FullTextBitmapWriter::new(writer, WordAnalyzer::new(), None);
-        (bm_writer, provider, prefix)
+    fn tokenize(text: &str) -> DocumentTokens {
+        WordAnalyzer::default().tokenize_document(text).unwrap()
     }
 
-    async fn commit_and_read(
+    fn provider() -> (TempDir, BlockfileProvider) {
+        test_arrow_blockfile_provider(1024 * 1024)
+    }
+
+    async fn new_writer(provider: &BlockfileProvider) -> FullTextBitmapWriter {
+        let writer = provider
+            .write::<u32, RoaringBitmap>(
+                BlockfileWriterOptions::new(String::new()).ordered_mutations(),
+            )
+            .await
+            .unwrap();
+        FullTextBitmapWriter::new(writer, None)
+    }
+
+    async fn flush_and_read(
         writer: FullTextBitmapWriter,
         provider: &BlockfileProvider,
-        prefix: &str,
     ) -> FullTextBitmapReader {
         writer.write_to_blockfiles().await.unwrap();
         let flusher = writer.commit().await.unwrap();
         let id = flusher.id();
         flusher.flush().await.unwrap();
-
-        let bitmap_reader = provider
-            .read::<u32, RoaringBitmap>(BlockfileReaderOptions::new(id, prefix.to_string()))
-            .await
-            .unwrap();
-        FullTextBitmapReader::new(bitmap_reader, WordAnalyzer::new())
-    }
-
-    async fn read_bucket(
-        provider: &BlockfileProvider,
-        id: Uuid,
-        prefix: &str,
-        bucket_id: u32,
-    ) -> RoaringBitmap {
         let reader = provider
-            .read::<u32, RoaringBitmap>(BlockfileReaderOptions::new(id, prefix.to_string()))
+            .read::<u32, RoaringBitmap>(BlockfileReaderOptions::new(id, String::new()))
             .await
             .unwrap();
-        reader
-            .get("", bucket_id)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_default()
+        FullTextBitmapReader::new(reader)
     }
 
     #[tokio::test]
-    async fn test_add_single_document() {
-        let (writer, provider, prefix) = new_writer().await;
-        writer.add_document(1, "hello world");
-        writer.write_to_blockfiles().await.unwrap();
-        let flusher = writer.commit().await.unwrap();
-        let id = flusher.id();
-        flusher.flush().await.unwrap();
+    async fn test_add_and_delete() {
+        let (_tmp, provider) = provider();
+        let writer = new_writer(&provider).await;
+        let hw_buckets = tokenize("hello world").buckets;
+        let hr_buckets = tokenize("hello rust").buckets;
 
-        let bm = read_bucket(&provider, id, &prefix, hash_token("hello")).await;
-        assert!(bm.contains(1));
-        let bm = read_bucket(&provider, id, &prefix, hash_token("world")).await;
-        assert!(bm.contains(1));
-    }
+        writer.add_document(1, tokenize("hello world"));
+        writer.add_document(2, tokenize("hello rust"));
+        writer.delete_document(1, tokenize("hello world"));
+        let reader = flush_and_read(writer, &provider).await;
 
-    #[tokio::test]
-    async fn test_add_multiple_documents() {
-        let (writer, provider, prefix) = new_writer().await;
-        writer.add_document(1, "hello world");
-        writer.add_document(2, "hello rust");
-        writer.write_to_blockfiles().await.unwrap();
-        let flusher = writer.commit().await.unwrap();
-        let id = flusher.id();
-        flusher.flush().await.unwrap();
-
-        let bm = read_bucket(&provider, id, &prefix, hash_token("hello")).await;
-        assert!(bm.contains(1));
-        assert!(bm.contains(2));
-
-        let bm = read_bucket(&provider, id, &prefix, hash_token("world")).await;
-        assert!(bm.contains(1));
-        assert!(!bm.contains(2));
-    }
-
-    #[tokio::test]
-    async fn test_delete_only() {
-        // Deletion without a prior add in this batch — the doc existed in
-        // a previous generation. Without a reader for the old blockfile,
-        // only the delete is recorded. The effective bitmap is empty.
-        let (writer, provider, prefix) = new_writer().await;
-        writer.add_document(2, "hello rust");
-        writer.delete_document(1, "hello world");
-        writer.write_to_blockfiles().await.unwrap();
-        let flusher = writer.commit().await.unwrap();
-        let id = flusher.id();
-        flusher.flush().await.unwrap();
-
-        let bm = read_bucket(&provider, id, &prefix, hash_token("hello")).await;
+        // "hello" bucket (shared): doc 2 only.
+        let hello_bucket = *hw_buckets.iter().find(|b| hr_buckets.contains(b)).unwrap();
+        let bm = reader.get_bucket(hello_bucket).await.unwrap();
         assert!(!bm.contains(1));
         assert!(bm.contains(2));
+
+        // "world" bucket (unique to doc 1): empty after delete.
+        let world_bucket = *hw_buckets.iter().find(|b| !hr_buckets.contains(b)).unwrap();
+        let bm = reader.get_bucket(world_bucket).await.unwrap();
+        assert!(bm.is_empty());
     }
 
     #[tokio::test]
     async fn test_update_as_delete_then_add() {
-        // Materialized update: delete old doc, add new doc (same offset_id).
-        // Per doc, at most one operation: the caller materializes an update
-        // as delete(old) + add(new). Adds take precedence for shared tokens.
-        let (writer, provider, prefix) = new_writer().await;
-        writer.delete_document(1, "hello world");
-        writer.add_document(1, "hello rust");
-        writer.write_to_blockfiles().await.unwrap();
-        let flusher = writer.commit().await.unwrap();
-        let id = flusher.id();
-        flusher.flush().await.unwrap();
+        let (_tmp, provider) = provider();
+        let writer = new_writer(&provider).await;
+        let old_buckets = tokenize("hello world").buckets;
+        let new_buckets = tokenize("hello rust").buckets;
 
-        // "hello" in both old and new — add takes precedence.
-        let bm = read_bucket(&provider, id, &prefix, hash_token("hello")).await;
-        assert!(bm.contains(1));
+        writer.delete_document(1, tokenize("hello world"));
+        writer.add_document(1, tokenize("hello rust"));
+        let reader = flush_and_read(writer, &provider).await;
 
+        // "hello" in both — add wins.
+        let hello = *old_buckets
+            .iter()
+            .find(|b| new_buckets.contains(b))
+            .unwrap();
+        assert!(reader.get_bucket(hello).await.unwrap().contains(1));
         // "world" only in old — deleted.
-        let bm = read_bucket(&provider, id, &prefix, hash_token("world")).await;
-        assert!(!bm.contains(1));
-
+        let world = *old_buckets
+            .iter()
+            .find(|b| !new_buckets.contains(b))
+            .unwrap();
+        assert!(!reader.get_bucket(world).await.unwrap().contains(1));
         // "rust" only in new — added.
-        let bm = read_bucket(&provider, id, &prefix, hash_token("rust")).await;
-        assert!(bm.contains(1));
+        let rust = *new_buckets
+            .iter()
+            .find(|b| !old_buckets.contains(b))
+            .unwrap();
+        assert!(reader.get_bucket(rust).await.unwrap().contains(1));
     }
 
     #[tokio::test]
-    async fn test_short_tokens_ignored() {
-        let (writer, provider, prefix) = new_writer().await;
-        writer.add_document(1, "a big house");
-        writer.write_to_blockfiles().await.unwrap();
-        let flusher = writer.commit().await.unwrap();
-        let id = flusher.id();
-        flusher.flush().await.unwrap();
+    async fn test_trigram_entries() {
+        let (_tmp, provider) = provider();
+        let writer = new_writer(&provider).await;
+        let bucket = tokenize("hello").buckets[0];
 
-        let bm = read_bucket(&provider, id, &prefix, hash_token("big")).await;
-        assert!(bm.contains(1));
+        writer.add_document(1, tokenize("hello"));
+        let reader = flush_and_read(writer, &provider).await;
 
-        // "a" is 1 char, filtered by WordAnalyzer (min_length=2).
-        let bm = read_bucket(&provider, id, &prefix, hash_token("a")).await;
-        assert!(!bm.contains(1));
+        // "hel"(key=0), "ell"(key=1), "llo"(key=2)
+        assert!(reader.get_trigram("hel", 0).await.unwrap().contains(bucket));
+        assert!(reader.get_trigram("ell", 1).await.unwrap().contains(bucket));
+        assert!(reader.get_trigram("llo", 2).await.unwrap().contains(bucket));
+        // Wrong keys should not contain the bucket.
+        assert!(!reader.get_trigram("hel", 1).await.unwrap().contains(bucket));
+        assert!(!reader.get_trigram("llo", 0).await.unwrap().contains(bucket));
     }
 
     #[tokio::test]
-    async fn test_unicode_normalization() {
-        let (writer, provider, prefix) = new_writer().await;
-        writer.add_document(1, "café résumé");
-        writer.write_to_blockfiles().await.unwrap();
-        let flusher = writer.commit().await.unwrap();
-        let id = flusher.id();
-        flusher.flush().await.unwrap();
+    async fn test_transition_entries() {
+        let (_tmp, provider) = provider();
+        let writer = new_writer(&provider).await;
+        let transitions = tokenize("hello world peace").transitions;
 
-        // "café" normalizes to "cafe".
-        let bm = read_bucket(&provider, id, &prefix, hash_token("cafe")).await;
-        assert!(bm.contains(1));
-    }
+        writer.add_document(1, tokenize("hello world peace"));
+        let reader = flush_and_read(writer, &provider).await;
 
-    // --- Reader / search tests ---
-
-    #[tokio::test]
-    async fn test_search_single_word() {
-        let (writer, provider, prefix) = new_writer().await;
-        writer.add_document(1, "hello world");
-        writer.add_document(2, "hello rust");
-        let reader = commit_and_read(writer, &provider, &prefix).await;
-
-        let result = reader.search("hello").await.unwrap();
-        assert!(result.contains(1));
-        assert!(result.contains(2));
+        assert_eq!(transitions.len(), 2);
+        for (hash, prev_bucket, curr_bucket) in &transitions {
+            let doc_bm = reader.get_bucket(hash | TRANSITION_DOC_FLAG).await.unwrap();
+            assert!(doc_bm.contains(1));
+            let bkt_bm = reader
+                .get_bucket(hash | TRANSITION_BUCKET_FLAG)
+                .await
+                .unwrap();
+            assert!(bkt_bm.contains(*prev_bucket));
+            assert!(bkt_bm.contains(*curr_bucket));
+        }
     }
 
     #[tokio::test]
-    async fn test_search_multi_word() {
-        let (writer, provider, prefix) = new_writer().await;
-        writer.add_document(1, "hello world");
-        writer.add_document(2, "hello rust");
-        writer.add_document(3, "world rust");
-        let reader = commit_and_read(writer, &provider, &prefix).await;
+    async fn test_delete_cleans_transition_docs() {
+        let (_tmp, provider) = provider();
+        let writer = new_writer(&provider).await;
+        let transitions = tokenize("hello world").transitions;
 
-        // "hello world" → tokens ["hello", "world"], AND of their buckets.
-        let result = reader.search("hello world").await.unwrap();
-        assert!(result.contains(1));
-        assert!(!result.contains(2)); // has "hello" but not "world"
-        assert!(!result.contains(3)); // has "world" but not "hello"
-    }
+        writer.add_document(1, tokenize("hello world"));
+        writer.add_document(2, tokenize("hello world"));
+        writer.delete_document(1, tokenize("hello world"));
+        let reader = flush_and_read(writer, &provider).await;
 
-    #[tokio::test]
-    async fn test_search_no_match() {
-        let (writer, provider, prefix) = new_writer().await;
-        writer.add_document(1, "hello world");
-        let reader = commit_and_read(writer, &provider, &prefix).await;
-
-        let result = reader.search("nonexistent").await.unwrap();
-        assert!(result.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_search_unicode() {
-        let (writer, provider, prefix) = new_writer().await;
-        writer.add_document(1, "café résumé");
-        let reader = commit_and_read(writer, &provider, &prefix).await;
-
-        // Query "cafe" matches "café" after normalization.
-        let result = reader.search("cafe").await.unwrap();
-        assert!(result.contains(1));
-    }
-
-    #[tokio::test]
-    async fn test_search_reject_short_query() {
-        let (writer, provider, prefix) = new_writer().await;
-        writer.add_document(1, "hello world");
-        let reader = commit_and_read(writer, &provider, &prefix).await;
-
-        // "a" is too short — no token survives the analyzer.
-        assert!(reader.search("a").await.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_search_after_delete() {
-        let (writer, provider, prefix) = new_writer().await;
-        writer.add_document(1, "hello world");
-        writer.add_document(2, "hello rust");
-        writer.delete_document(1, "hello world");
-        let reader = commit_and_read(writer, &provider, &prefix).await;
-
-        let result = reader.search("hello").await.unwrap();
-        assert!(!result.contains(1));
-        assert!(result.contains(2));
+        for (hash, _, _) in &transitions {
+            let doc_bm = reader.get_bucket(hash | TRANSITION_DOC_FLAG).await.unwrap();
+            assert!(!doc_bm.contains(1));
+            assert!(doc_bm.contains(2));
+        }
     }
 
     #[tokio::test]
     async fn test_fork_with_old_reader() {
-        use chroma_blockstore::arrow::config::BlockManagerConfig;
-        use chroma_cache::new_cache_for_test;
-        use chroma_storage::{local::LocalStorage, Storage};
-        use tempfile::tempdir;
+        let (_tmp, provider) = provider();
+        let hw_buckets = tokenize("hello world").buckets;
+        let hr_buckets = tokenize("hello rust").buckets;
 
-        let tmp_dir = tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let provider = BlockfileProvider::new_arrow(
-            storage,
-            1024 * 1024,
-            new_cache_for_test(),
-            new_cache_for_test(),
-            BlockManagerConfig::default_num_concurrent_block_flushes(),
-            BlockManagerConfig::default_max_concurrent_block_loads(),
-        );
-        let prefix = String::from("");
+        // Gen 1: add docs 1 and 2.
+        let w1 = new_writer(&provider).await;
+        w1.add_document(1, tokenize("hello world"));
+        w1.add_document(2, tokenize("hello rust"));
+        let reader1 = flush_and_read(w1, &provider).await;
 
-        // First generation: write docs 1 and 2.
-        let writer1 = provider
-            .write::<u32, RoaringBitmap>(BlockfileWriterOptions::new(prefix.clone()))
-            .await
-            .unwrap();
-        let w1 = FullTextBitmapWriter::new(writer1, WordAnalyzer::new(), None);
-        w1.add_document(1, "hello world");
-        w1.add_document(2, "hello rust");
-        let reader1 = commit_and_read(w1, &provider, &prefix).await;
+        // Gen 2: fork, add doc 3, delete doc 1.
+        let w2 = {
+            let bf = provider
+                .write::<u32, RoaringBitmap>(
+                    BlockfileWriterOptions::new(String::new())
+                        .fork(reader1.id())
+                        .ordered_mutations(),
+                )
+                .await
+                .unwrap();
+            FullTextBitmapWriter::new(bf, Some(reader1))
+        };
+        w2.add_document(3, tokenize("hello chroma"));
+        w2.delete_document(1, tokenize("hello world"));
+        let reader2 = flush_and_read(w2, &provider).await;
 
-        // Second generation: fork from reader, add doc 3, delete doc 1.
-        let writer2 = provider
-            .write::<u32, RoaringBitmap>(
-                BlockfileWriterOptions::new(prefix.clone()).fork(reader1.id()),
-            )
-            .await
-            .unwrap();
-        let w2 = FullTextBitmapWriter::new(writer2, WordAnalyzer::new(), Some(reader1));
-        w2.add_document(3, "hello chroma");
-        w2.delete_document(1, "hello world");
-        let reader2 = commit_and_read(w2, &provider, &prefix).await;
-
-        let result = reader2.search("hello").await.unwrap();
-        assert!(!result.contains(1)); // deleted
-        assert!(result.contains(2)); // from first gen
-        assert!(result.contains(3)); // added in second gen
+        // "hello" bucket: docs 2 and 3, not 1.
+        let hello = *hw_buckets.iter().find(|b| hr_buckets.contains(b)).unwrap();
+        let bm = reader2.get_bucket(hello).await.unwrap();
+        assert!(!bm.contains(1));
+        assert!(bm.contains(2));
+        assert!(bm.contains(3));
     }
 }
