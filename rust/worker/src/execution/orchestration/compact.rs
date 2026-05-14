@@ -186,6 +186,7 @@ pub struct CompactionContext {
     pub max_compaction_size: usize,
     pub max_partition_size: usize,
     pub is_function_disabled: bool,
+    pub is_fn_consumer: bool,
     pub fragment_fetcher: Option<Arc<FragmentFetcher>>,
     pub bloom_filter_manager: Option<BloomFilterManager>,
     pub shard_size: Option<u64>,
@@ -212,6 +213,7 @@ impl Clone for CompactionContext {
             max_compaction_size: self.max_compaction_size,
             max_partition_size: self.max_partition_size,
             is_function_disabled: self.is_function_disabled,
+            is_fn_consumer: self.is_fn_consumer,
             fragment_fetcher: self.fragment_fetcher.clone(),
             bloom_filter_manager: self.bloom_filter_manager.clone(),
             shard_size: self.shard_size,
@@ -249,7 +251,7 @@ impl CompactionContext {
 
     /// Create an empty output context for attached function orchestrator
     /// This creates a new context with an empty collection_info OnceCell
-    fn clone_for_new_collection(&self) -> Self {
+    pub fn clone_for_new_collection(&self) -> Self {
         let orchestrator_context = OrchestratorContext::new(self.dispatcher.clone());
         Self {
             collection_info: OnceCell::new(), // Start empty for output context
@@ -266,6 +268,7 @@ impl CompactionContext {
             max_compaction_size: self.max_compaction_size,
             max_partition_size: self.max_partition_size,
             is_function_disabled: self.is_function_disabled,
+            is_fn_consumer: self.is_fn_consumer,
             fragment_fetcher: self.fragment_fetcher.clone(),
             bloom_filter_manager: self.bloom_filter_manager.clone(),
             shard_size: self.shard_size,
@@ -372,6 +375,7 @@ impl CompactionContext {
         spann_provider: SpannProvider,
         dispatcher: ComponentHandle<Dispatcher>,
         is_function_disabled: bool,
+        is_fn_consumer: bool,
         fragment_fetcher: Option<Arc<FragmentFetcher>>,
         bloom_filter_manager: Option<BloomFilterManager>,
         shard_size: Option<u64>,
@@ -393,6 +397,7 @@ impl CompactionContext {
             dispatcher,
             orchestrator_context,
             is_function_disabled,
+            is_fn_consumer,
             fragment_fetcher,
             bloom_filter_manager,
             shard_size,
@@ -907,6 +912,7 @@ impl CompactionContext {
         let system_clone_fn = system.clone();
         let system_clone_compact = system.clone();
 
+        // Skip regular compaction workflow if is_fn_consumer
         // 1. Attached function execution + apply output to output collection
         // 2. Apply input logs to input collection
         // Box the futures to avoid stack overflow with large state machines
@@ -925,13 +931,21 @@ impl CompactionContext {
             }
         };
 
-        let compact_future = Box::pin(async move {
-            self_clone_compact
-                .run_regular_compaction_workflow(log_fetch_records, system_clone_compact)
-                .await
-        });
-
-        let (fn_result, compact_result) = tokio::try_join!(fn_future, compact_future)?;
+        // Run compaction in parallel if not fn_consumer
+        let (fn_result, compact_result) = if self.is_fn_consumer {
+            // Only run function workflow for fn_consumer
+            let fn_result = fn_future.await?;
+            (fn_result, None)
+        } else {
+            // Run both workflows in parallel for regular compaction
+            let compact_future = Box::pin(async move {
+                self_clone_compact
+                    .run_regular_compaction_workflow(log_fetch_records, system_clone_compact)
+                    .await
+            });
+            let (fn_result, compact_result) = tokio::try_join!(fn_future, compact_future)?;
+            (fn_result, Some(compact_result))
+        };
 
         // Collect results
         let mut attached_function_context = None;
@@ -943,21 +957,30 @@ impl CompactionContext {
         }
         // Otherwise there was no attached function
 
-        // Process input collection result
-        // Invariant: flush_results is empty => collection_logical_size_bytes == collection_info.collection.size_bytes_post_compaction
-        if compact_result.flush_results.is_empty()
-            && compact_result.collection_logical_size_bytes
-                != compact_result
-                    .collection_info
-                    .collection
-                    .size_bytes_post_compaction
-        {
-            return Err(CompactionError::InvariantViolation(
-                "Collection logical size bytes should be equal to whatever it started with",
-            ));
+        // Process input collection result if we ran regular compaction
+        if let Some(compact_result) = compact_result {
+            // Invariant: flush_results is empty => collection_logical_size_bytes == collection_info.collection.size_bytes_post_compaction
+            if compact_result.flush_results.is_empty()
+                && compact_result.collection_logical_size_bytes
+                    != compact_result
+                        .collection_info
+                        .collection
+                        .size_bytes_post_compaction
+            {
+                return Err(CompactionError::InvariantViolation(
+                    "Collection logical size bytes should be equal to whatever it started with",
+                ));
+            }
+
+            results.push(compact_result);
         }
 
-        results.push(compact_result);
+        // Skip registration if fn_consumer
+        if self.is_fn_consumer {
+            return Ok(CompactionResponse::Success {
+                job_id: collection_id.into(),
+            });
+        }
 
         let _ =
             Box::pin(self.run_register(results, attached_function_context, system.clone())).await?;
@@ -1019,6 +1042,7 @@ pub async fn compact(
         spann_provider.clone(),
         dispatcher.clone(),
         is_function_disabled,
+        false, // is_fn_consumer
         fragment_fetcher,
         bloom_filter_manager,
         shard_size,
@@ -3473,6 +3497,7 @@ mod tests {
             spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
+            false, // is_fn_consumer
             None,
             None,
             None, // shard_size
@@ -3528,6 +3553,7 @@ mod tests {
             spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
+            false, // is_fn_consumer
             None,
             None,
             None, // shard_size

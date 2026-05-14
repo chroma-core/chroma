@@ -146,6 +146,27 @@ impl AttachedFunctionExecutor for CountAttachedFunction {
     }
 }
 
+/// A dummy attached function for testing that logs a message and returns empty output.
+#[derive(Debug)]
+pub struct DummyAttachedFunction;
+
+#[async_trait]
+impl AttachedFunctionExecutor for DummyAttachedFunction {
+    async fn execute(
+        &self,
+        input_records: Chunk<HydratedMaterializedLogRecord<'_, '_>>,
+        _output_reader: Option<&RecordSegmentReaderShard<'_>>,
+    ) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>> {
+        tracing::info!(
+            "DummyAttachedFunction executing with {} input records",
+            input_records.len()
+        );
+
+        // Return empty output records
+        Ok(Chunk::new(vec![].into()))
+    }
+}
+
 /// The ExecuteAttachedFunction operator executes attached function logic based on fetched logs.
 /// Uses an AttachedFunctionExecutor trait to allow different attached function implementations.
 #[derive(Debug)]
@@ -168,14 +189,8 @@ impl ExecuteAttachedFunctionOperator {
             FUNCTION_STATISTICS_ID => {
                 Arc::new(StatisticsFunctionExecutor(Box::new(CounterFunctionFactory)))
             }
-            // For dummy_async - this is an async function, so it should be handled elsewhere
-            FUNCTION_DUMMY_ASYNC_ID => {
-                tracing::error!("Async functions like dummy_async should not be executed in ExecuteAttachedFunctionOperator");
-                return Err(ExecuteAttachedFunctionError::InvalidUuid(format!(
-                    "Async function {} cannot be executed synchronously",
-                    function_id
-                )));
-            }
+            // For dummy_async - use DummyAttachedFunction that returns empty output
+            FUNCTION_DUMMY_ASYNC_ID => Arc::new(DummyAttachedFunction),
             _ => {
                 tracing::error!("Unknown function_id UUID: {}", function_id);
                 return Err(ExecuteAttachedFunctionError::InvalidUuid(format!(

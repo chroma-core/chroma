@@ -358,6 +358,7 @@ impl LogFetchOrchestrator {
             spann_provider,
             dispatcher.clone(),
             false, // LogFetchOrchestrator doesn't need is_function_disabled
+            false, // is_fn_consumer
             fragment_fetcher,
             bloom_filter_manager,
             None, // shard_size

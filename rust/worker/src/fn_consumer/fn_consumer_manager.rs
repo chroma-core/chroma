@@ -1,10 +1,16 @@
 use async_trait::async_trait;
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_log::Log;
+use chroma_segment::spann_provider::SpannProvider;
+use chroma_sysdb::SysDb;
 use chroma_system::{Component, ComponentContext, ComponentHandle, Dispatcher, Handler, System};
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 use tracing::span;
 
+use crate::execution::orchestration::compact::CompactionContext;
 use crate::fn_consumer::config::FnConsumerConfig;
 use crate::work_queue::work_queue_client::WorkQueueClient;
 
@@ -36,6 +42,11 @@ pub struct FnConsumerContext {
     pub get_work_batch_size: u32,
     pub job_expiry_seconds: u64,
     pub my_member_id: String,
+    pub log: Log,
+    pub sysdb: SysDb,
+    pub blockfile_provider: BlockfileProvider,
+    pub hnsw_provider: HnswIndexProvider,
+    pub spann_provider: SpannProvider,
 }
 
 impl std::fmt::Debug for FnConsumerContext {
@@ -66,11 +77,17 @@ impl std::fmt::Debug for FnConsumerManager {
 }
 
 impl FnConsumerManager {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: FnConsumerConfig,
         my_member_id: String,
         system: System,
         work_queue_client: WorkQueueClient,
+        log: Log,
+        sysdb: SysDb,
+        blockfile_provider: BlockfileProvider,
+        hnsw_provider: HnswIndexProvider,
+        spann_provider: SpannProvider,
     ) -> Self {
         let context = FnConsumerContext {
             system,
@@ -80,6 +97,11 @@ impl FnConsumerManager {
             get_work_batch_size: config.get_work_batch_size,
             job_expiry_seconds: config.job_expiry_seconds,
             my_member_id,
+            log,
+            sysdb,
+            blockfile_provider,
+            hnsw_provider,
+            spann_provider,
         };
         Self {
             context,
@@ -118,18 +140,100 @@ impl FnConsumerManager {
             tracing::debug!(?key, "skipping: in progress");
             return false;
         }
-        if self.context.dispatcher.is_none() {
+
+        let Some(dispatcher) = self.context.dispatcher.clone() else {
             tracing::error!("Dispatcher not set on FnConsumerManager");
             return false;
-        }
+        };
+
+        // Fetch collection information to get the database name
+        let mut sysdb = self.context.sysdb.clone();
+        let collection_info = match sysdb
+            .get_collection_with_segments(None, input_coll_id)
+            .await
+        {
+            Ok(info) => info,
+            Err(e) => {
+                tracing::error!(
+                    fn_id = %fn_id,
+                    input_coll_id = %input_coll_id,
+                    "Failed to fetch collection information: {}",
+                    e,
+                );
+                return false;
+            }
+        };
+
+        let database_name =
+            match chroma_types::DatabaseName::new(&collection_info.collection.database) {
+                Some(name) => name,
+                None => {
+                    tracing::error!(
+                        fn_id = %fn_id,
+                        input_coll_id = %input_coll_id,
+                        database = collection_info.collection.database,
+                        "Invalid database name"
+                    );
+                    return false;
+                }
+            };
+
+        // Now that all validations have passed, mark the work as in progress
         self.in_progress
             .insert(key, InProgressFn::new(self.context.job_expiry_seconds));
-        tracing::debug!(
-            fn_id = %fn_id,
-            input_coll_id = %input_coll_id,
-            "fn_consumer dispatch stub: tracked in_progress, no orchestrator yet"
+
+        // Create CompactionContext with is_fn_consumer = true
+        let mut compaction_context = CompactionContext::new(
+            None,  // rebuild_info
+            100,   // fetch_log_batch_size
+            10,    // fetch_log_concurrency
+            10000, // max_compaction_size
+            1000,  // max_partition_size
+            self.context.log.clone(),
+            self.context.sysdb.clone(),
+            self.context.blockfile_provider.clone(),
+            self.context.hnsw_provider.clone(),
+            self.context.spann_provider.clone(),
+            dispatcher,
+            false,                                // is_function_disabled
+            true,                                 // is_fn_consumer
+            None,                                 // fragment_fetcher
+            None,                                 // bloom_filter_manager
+            None,                                 // shard_size
+            Some(self.work_queue_client.clone()), // work_queue_client
         );
-        true
+
+        // Run compaction workflow
+        let result = Box::pin(compaction_context.run_compaction(
+            input_coll_id,
+            database_name,
+            self.context.system.clone(),
+        ))
+        .await;
+
+        // Always remove from in_progress map after completion
+        self.in_progress.remove(&key);
+
+        match result {
+            Ok(_response) => {
+                tracing::info!(
+                    fn_id = %fn_id,
+                    input_coll_id = %input_coll_id,
+                    "Function consumer workflow completed successfully"
+                );
+                true
+            }
+            Err(e) => {
+                tracing::error!(
+                    fn_id = %fn_id,
+                    input_coll_id = %input_coll_id,
+                    "Function consumer workflow failed: {}",
+                    e,
+                );
+                // Return false on error so caller knows it failed
+                false
+            }
+        }
     }
 
     async fn poll_and_dispatch(&mut self) {
@@ -163,8 +267,7 @@ impl FnConsumerManager {
                 );
                 continue;
             };
-            self.dispatch_item(fn_id, input_coll_id, item.completion_offset)
-                .await;
+            Box::pin(self.dispatch_item(fn_id, input_coll_id, item.completion_offset)).await;
         }
     }
 }
@@ -204,7 +307,7 @@ impl Handler<ScheduledPollMessage> for FnConsumerManager {
     type Result = ();
 
     async fn handle(&mut self, _: ScheduledPollMessage, ctx: &ComponentContext<Self>) {
-        self.poll_and_dispatch().await;
+        Box::pin(self.poll_and_dispatch()).await;
         ctx.scheduler.schedule(
             ScheduledPollMessage,
             self.context.poll_interval,

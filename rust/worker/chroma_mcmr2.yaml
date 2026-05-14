@@ -182,6 +182,12 @@ compaction_service:
     max_partition_size: 5000
     disabled_collections: [] # uuids to disable compaction for
     fetch_log_batch_size: 1000
+  work_queue:
+    grpc:
+      host: "work-queue-service.chroma"
+      port: 50051
+      connect_timeout_ms: 10000
+      request_timeout_ms: 10000
   task_runner:
     enabled: true
   blockfile_provider:
@@ -227,11 +233,6 @@ compaction_service:
         weighted_lru:
           name: "usearch_cache"
           capacity: 8192 # 8192 MiB = 8GB
-  work_queue:
-    storage_path: "workqueue_state.parquet"
-    persistence:
-      time_threshold_seconds: 2
-      pending_threshold: 100
 work_queue_service:
   service_name: "work-queue-service"
   my_port: 50051
@@ -256,6 +257,11 @@ work_queue_service:
         count_based_policy:
           max_concurrent_requests: 30
           bandwidth_allocation: [0.7, 0.3]
+  work_queue:
+    storage_path: "workqueue_state.parquet"
+    persistence:
+      time_threshold_seconds: 2
+      pending_threshold: 100
 log_service:
   num_records_before_backpressure: 100000
   record_count_threshold: 10
@@ -520,3 +526,100 @@ rust-sysdb-migration:
             instance: "test-instance"
             database: "local-logdb-database"
   migration_mode: "apply"
+fn_consumer_service:
+  service_name: "fn-consumer"
+  otel_endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"
+  otel_filters:
+    - crate_name: "worker"
+      filter_level: "trace"
+  my_member_id: "fn-consumer-0"
+  poll_interval_sec: 3
+  max_concurrent_workers: 10
+  get_work_batch_size: 10
+  job_expiry_seconds: 120
+  sysdb:
+    grpc:
+      host: "sysdb.chroma"
+      port: 50051
+      connect_timeout_ms: 60000
+      request_timeout_ms: 60000
+  mcmr_sysdb:
+    grpc:
+      host: "rust-sysdb-service.chroma"
+      port: 50051
+      connect_timeout_ms: 60000
+      request_timeout_ms: 60000
+  work_queue:
+    grpc:
+      host: "work-queue-service.chroma"
+      port: 50051
+      connect_timeout_ms: 10000
+      request_timeout_ms: 10000
+  storage:
+    admission_controlled_s3:
+      s3_config:
+        bucket: "chroma-storage"
+        credentials: "Minio"
+        connect_timeout_ms: 5000
+        request_timeout_ms: 30000
+        upload_part_size_bytes: 536870912
+        download_part_size_bytes: 8388608
+      rate_limiting_policy:
+        count_based_policy:
+          max_concurrent_requests: 30
+          bandwidth_allocation: [0.7, 0.3]
+  log:
+    grpc:
+      host: "rust-log-service.chroma"
+      port: 50051
+      connect_timeout_ms: 60000
+      request_timeout_ms: 60000
+      memberlist_provider:
+        custom_resource:
+          kube_namespace: "chroma2"
+          memberlist_name: "rust-log-service-memberlist"
+          queue_size: 100
+  memberlist_provider:
+    custom_resource:
+      kube_namespace: "chroma2"
+      memberlist_name: "query-service-memberlist"
+      queue_size: 100
+  regions_and_topologies:
+    preferred: tilt-config-2
+    regions:
+    - name: tilt-config-2
+      provider: tilt
+      region: config-2
+      config:
+        storage:
+          admission_controlled_s3:
+            s3_config:
+              bucket: "chroma-storage"
+              credentials: "Minio"
+              connect_timeout_ms: 5000
+              request_timeout_ms: 60000 # 1 minute
+              upload_part_size_bytes: 536870912 # 512MiB
+              download_part_size_bytes: 8388608 # 8MiB
+            rate_limiting_policy:
+              count_based_policy:
+                max_concurrent_requests: 30
+                bandwidth_allocation: [0.7, 0.3]
+    topologies:
+    - name: tilt-spanning
+      regions:
+      - tilt-config-1
+      - tilt-config-2
+      config:
+        storage:
+          admission_controlled_s3:
+            s3_config:
+              bucket: "chroma-storage"
+              credentials: "Minio"
+              connect_timeout_ms: 5000
+              request_timeout_ms: 60000 # 1 minute
+              upload_part_size_bytes: 536870912 # 512MiB
+              download_part_size_bytes: 8388608 # 8MiB
+            rate_limiting_policy:
+              count_based_policy:
+                max_concurrent_requests: 1000
+                bandwidth_allocation: [1.0]

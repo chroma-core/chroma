@@ -74,6 +74,19 @@ workQueueService:
     tag: 'latest'
   env:
   replicaCount: 1
+fnConsumer:
+  image:
+    repository: 'fn-consumer'
+    tag: 'latest'
+  env:
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: '2000m'
+      memory: '4Gi'
+    requests:
+      cpu: '1000m'
+      memory: '2Gi'
 sysdbMigration:
   image:
     repository: 'sysdb-migration'

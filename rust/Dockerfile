@@ -65,7 +65,7 @@ RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
   fi && \
   build_dir=$( [ "$RELEASE_MODE" = "1" ] && echo release || echo debug ) && \
   build_dir=$( [ "${ADDRESS_SANITIZER}" = "1" ] && echo "x86_64-unknown-linux-gnu/${build_dir}" || echo "${build_dir}" ) && \
-  for bin in chroma garbage_collector_service chroma-load log_service heap_tender_service query_service compaction_service work_queue_service sysdb_service spanner_migration; do \
+  for bin in chroma garbage_collector_service chroma-load log_service heap_tender_service query_service compaction_service work_queue_service fn_consumer sysdb_service spanner_migration; do \
   mv "target/${build_dir}/${bin}" "./${bin}"; \
   done
 
@@ -119,6 +119,10 @@ ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./compaction_service" ]
 FROM runner AS work_queue_service
 COPY --from=builder /chroma/work_queue_service .
 ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./work_queue_service" ]
+
+FROM runner AS fn_consumer
+COPY --from=builder /chroma/fn_consumer .
+ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./fn_consumer" ]
 
 FROM runner AS sysdb_service
 COPY --from=builder /chroma/sysdb_service .

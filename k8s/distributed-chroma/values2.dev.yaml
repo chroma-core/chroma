@@ -56,6 +56,17 @@ workQueueService:
     requests:
       cpu: 200m
 
+fnConsumer:
+  env:
+    - name: RUST_BACKTRACE
+      value: 'value: "1"'
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: 200m
+    requests:
+      cpu: 200m
+
 rustLogService:
   replicaCount: 1
   resources:
