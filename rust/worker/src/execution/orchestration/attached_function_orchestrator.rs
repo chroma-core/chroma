@@ -21,8 +21,8 @@ use chroma_system::{
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    AttachedFunctionUuid, Chunk, CollectionAndSegments, CollectionUuid, JobId, LogRecord,
-    SegmentShard, SegmentShardError,
+    AttachedFunction, AttachedFunctionUuid, Chunk, CollectionAndSegments, CollectionUuid, JobId,
+    LogRecord, SegmentShard, SegmentShardError,
 };
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
@@ -63,6 +63,7 @@ pub struct FunctionContext {
     pub updated_completion_offset: u64,
     pub input_collection_id: CollectionUuid,
     pub is_async: bool,
+    pub attached_function: AttachedFunction,
 }
 
 #[derive(Debug)]
@@ -578,6 +579,7 @@ impl Handler<TaskResult<GetAttachedFunctionOutput, GetAttachedFunctionOperatorEr
                         updated_completion_offset: attached_function.completion_offset,
                         input_collection_id: attached_function.input_collection_id,
                         is_async: attached_function.is_async,
+                        attached_function: attached_function.clone(),
                     })
                     .is_err()
                 {
@@ -865,7 +867,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
 
         // Execute the attached function
         let operator = match ExecuteAttachedFunctionOperator::from_attached_function(
-            attached_function,
+            &attached_function.attached_function,
             self.output_context.log.clone(),
         ) {
             Ok(op) => Box::new(op),
