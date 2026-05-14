@@ -194,9 +194,8 @@ impl ExecuteAttachedFunctionOperator {
             FUNCTION_HTTP_GENERATE_ID => {
                 let executor = HttpGenerateExecutor::from_attached_function(attached_function)
                     .map_err(|e| {
-                        ExecuteAttachedFunctionError::InvalidUuid(format!(
-                            "Failed to create HttpGenerateExecutor: {}",
-                            e
+                        ExecuteAttachedFunctionError::ExecutorConfig(format!(
+                            "HttpGenerateExecutor: {e}"
                         ))
                     })?;
                 Arc::new(executor)
@@ -257,6 +256,8 @@ pub enum ExecuteAttachedFunctionError {
     RecordReader(#[from] RecordSegmentReaderShardCreationError),
     #[error("Invalid collection UUID: {0}")]
     InvalidUuid(String),
+    #[error("Executor configuration error: {0}")]
+    ExecutorConfig(String),
     #[error("Log offset arithmetic overflow: base_offset={0}, record_index={1}")]
     LogOffsetOverflow(i64, usize),
     #[error("Log offset overflow: base_offset={0}, record_index={1}")]
@@ -271,6 +272,9 @@ impl ChromaError for ExecuteAttachedFunctionError {
             ExecuteAttachedFunctionError::SegmentRead(e) => e.code(),
             ExecuteAttachedFunctionError::RecordReader(e) => e.code(),
             ExecuteAttachedFunctionError::InvalidUuid(_) => {
+                chroma_error::ErrorCodes::InvalidArgument
+            }
+            ExecuteAttachedFunctionError::ExecutorConfig(_) => {
                 chroma_error::ErrorCodes::InvalidArgument
             }
             ExecuteAttachedFunctionError::LogOffsetOverflow(_, _) => {

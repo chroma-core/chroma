@@ -10,6 +10,8 @@ use thiserror::Error;
 
 use crate::execution::operators::execute_task::AttachedFunctionExecutor;
 
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const POLL_INITIAL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
 const POLL_MAX_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 const POLL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3600);
@@ -125,7 +127,10 @@ impl HttpGenerateExecutor {
             output_collection: af.output_collection_name.clone(),
             modal_key,
             modal_secret,
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .connect_timeout(CONNECT_TIMEOUT)
+                .build()
+                .unwrap_or_default(),
         })
     }
 
@@ -142,7 +147,7 @@ impl HttpGenerateExecutor {
             .header("Modal-Key", &self.modal_key)
             .header("Modal-Secret", &self.modal_secret)
             .json(request_body)
-            .timeout(std::time::Duration::from_secs(30))
+            .timeout(REQUEST_TIMEOUT)
             .send()
             .await
             .map_err(|e| {
@@ -154,8 +159,14 @@ impl HttpGenerateExecutor {
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
+            let truncated: String = body.chars().take(256).collect();
+            tracing::error!(
+                "[HttpGenerateExecutor] POST /generate returned {}: {}",
+                status,
+                truncated,
+            );
             return Err(Box::new(HttpGenerateError::Http(format!(
-                "POST /generate returned {status}: {body}"
+                "POST /generate returned {status}"
             ))));
         }
 
@@ -192,7 +203,7 @@ impl HttpGenerateExecutor {
                 .get(&status_url)
                 .header("Modal-Key", &self.modal_key)
                 .header("Modal-Secret", &self.modal_secret)
-                .timeout(std::time::Duration::from_secs(15))
+                .timeout(REQUEST_TIMEOUT)
                 .send()
                 .await;
 
@@ -304,6 +315,7 @@ impl AttachedFunctionExecutor for HttpGenerateExecutor {
                 output_collection: self.output_collection.clone(),
                 base_collection: None,
                 records,
+                // TODO: Remove completion offset from the schema of this request
                 completion_offset: 0,
             },
         };
