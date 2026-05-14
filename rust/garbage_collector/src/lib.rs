@@ -31,6 +31,8 @@ pub mod mcmr;
 #[cfg(test)]
 pub(crate) mod helper;
 pub mod operators;
+#[cfg(test)]
+mod test_gc_with_attached_functions;
 pub mod types;
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";

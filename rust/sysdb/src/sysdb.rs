@@ -2705,8 +2705,41 @@ impl SysDb {
                     )
                     .await
             }
-            SysDb::Test(_) => {
-                todo!()
+            SysDb::Test(test_sysdb) => {
+                // Generate a new ID for the attached function
+                let attached_function_id = chroma_types::AttachedFunctionUuid::new();
+
+                // Create the attached function
+                let attached_function = chroma_types::AttachedFunction {
+                    id: attached_function_id,
+                    name: name.clone(),
+                    function_id: uuid::Uuid::new_v4(), // Generate a UUID for the function
+                    input_collection_id,
+                    output_collection_name: output_collection_name.clone(),
+                    output_collection_id: None, // Will be set later when output collection is created
+                    params: if params.is_null() {
+                        None
+                    } else {
+                        Some(params.to_string())
+                    },
+                    tenant_id: tenant_name,
+                    database_id: database_name,
+                    last_run: None,
+                    completion_offset: 0, // Start at offset 0
+                    min_records_for_invocation: min_records_for_invocation,
+                    is_deleted: false,
+                    is_async: true,
+                    created_at: std::time::SystemTime::now(),
+                    updated_at: std::time::SystemTime::now(),
+                };
+
+                // For testing purposes, we'll just add the function without idempotency check
+                // In a real implementation, we'd check for existing functions
+                let mut attached_functions = std::collections::HashMap::new();
+                attached_functions.insert(input_collection_id, vec![attached_function]);
+                test_sysdb.set_attached_functions(attached_functions);
+
+                Ok((attached_function_id, true))
             }
         }
     }
@@ -2810,7 +2843,10 @@ impl SysDb {
                     .await
             }
             SysDb::Sqlite(_) => unimplemented!(),
-            SysDb::Test(_) => unimplemented!(),
+            SysDb::Test(test) => {
+                test.try_finish_async_attached_function_invocation(request)
+                    .await
+            }
         }
     }
 

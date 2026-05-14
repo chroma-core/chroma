@@ -16,6 +16,11 @@ use crate::operators::delete_versions_at_sysdb::{
     DeleteVersionsAtSysDbError, DeleteVersionsAtSysDbInput, DeleteVersionsAtSysDbOperator,
     DeleteVersionsAtSysDbOutput,
 };
+use crate::operators::fetch_min_attached_function_completion_offset::{
+    FetchMinAttachedFunctionCompletionOffsetError, FetchMinAttachedFunctionCompletionOffsetInput,
+    FetchMinAttachedFunctionCompletionOffsetOperator,
+    FetchMinAttachedFunctionCompletionOffsetOutput,
+};
 use crate::operators::list_files_at_version::{
     ListFilesAtVersionError, ListFilesAtVersionInput, ListFilesAtVersionOutput,
     ListFilesAtVersionsOperator,
@@ -84,6 +89,10 @@ pub struct GarbageCollectorOrchestrator {
     num_files_deleted: u32,
     num_versions_deleted: u32,
 
+    min_attached_fn_completion_offset: Option<u64>,
+    min_attached_fn_completion_offset_fetched: bool,
+    file_listing_complete: bool,
+
     enable_dangerous_option_to_ignore_min_versions_for_wal3: bool,
 }
 
@@ -140,6 +149,10 @@ impl GarbageCollectorOrchestrator {
             num_files_deleted: 0,
             num_versions_deleted: 0,
 
+            min_attached_fn_completion_offset: None,
+            min_attached_fn_completion_offset_fetched: false,
+            file_listing_complete: false,
+
             enable_dangerous_option_to_ignore_min_versions_for_wal3,
             max_concurrent_list_files_operations_per_collection,
         }
@@ -171,6 +184,8 @@ pub enum GarbageCollectorError {
     DeleteUnusedFiles(#[from] DeleteUnusedFilesError),
     #[error("Failed to delete unused logs: {0}")]
     DeleteUnusedLogs(#[from] DeleteUnusedLogsError),
+    #[error("Failed to fetch min attached function completion offset: {0}")]
+    FetchMinAttachedFunctionCompletionOffset(#[from] FetchMinAttachedFunctionCompletionOffsetError),
     #[error("Failed to delete versions at sysdb: {0}")]
     DeleteVersionsAtSysDb(#[from] DeleteVersionsAtSysDbError),
 
@@ -434,6 +449,20 @@ impl GarbageCollectorOrchestrator {
             tracing::debug!("No versions to mark for deletion in SysDb.");
         }
 
+        let fetch_min_offset_task = wrap(
+            Box::new(FetchMinAttachedFunctionCompletionOffsetOperator::default()),
+            FetchMinAttachedFunctionCompletionOffsetInput {
+                sysdb_client: self.sysdb_client.clone(),
+                collection_id: self.collection_id,
+            },
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
+        self.dispatcher()
+            .send(fetch_min_offset_task, Some(Span::current()))
+            .await
+            .map_err(GarbageCollectorError::Channel)?;
+
         // Now, list files for each version
         let root_manager = self.root_manager.clone();
         let dispatcher = self.dispatcher();
@@ -496,16 +525,21 @@ impl GarbageCollectorOrchestrator {
 
         tracing::debug!("Files listed for all versions.");
 
-        self.start_delete_unused_logs_operator(ctx).await?;
         self.start_delete_unused_files_operator(ctx).await?;
+        self.file_listing_complete = true;
+        self.try_start_delete_unused_logs_operator(ctx).await?;
 
         Ok(())
     }
 
-    async fn start_delete_unused_logs_operator(
+    async fn try_start_delete_unused_logs_operator(
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Result<(), GarbageCollectorError> {
+        if !self.file_listing_complete || !self.min_attached_fn_completion_offset_fetched {
+            return Ok(());
+        }
+
         let collections_to_destroy = self.soft_deleted_collections_to_gc.clone();
         let mut collections_to_garbage_collect = HashMap::new();
         let versions_to_delete = self.versions_to_delete_output.as_ref().ok_or(
@@ -556,11 +590,19 @@ impl GarbageCollectorOrchestrator {
                         "Expected log offset to be unsigned".to_string(),
                     )
                 })?;
-            collections_to_garbage_collect.insert(
-                *collection_id,
-                // The minimum offset to keep is one after the minimum compaction offset
-                LogPosition::from_offset(min_compaction_log_offset) + 1u64,
-            );
+            // The minimum offset to keep is one after the minimum compaction offset.
+            let mut min_offset_to_keep = LogPosition::from_offset(min_compaction_log_offset) + 1u64;
+            // Attached functions may be behind compaction; clamp to the lowest
+            // completion_offset across live attached functions on this collection.
+            // TODO(tanujnay112): This needs to be tweaked when we support forking
+            // with functions.
+            if *collection_id == self.collection_id {
+                if let Some(min_completion_offset) = self.min_attached_fn_completion_offset {
+                    let attached_fn_floor = LogPosition::from_offset(min_completion_offset) + 1u64;
+                    min_offset_to_keep = min_offset_to_keep.min(attached_fn_floor);
+                }
+            }
+            collections_to_garbage_collect.insert(*collection_id, min_offset_to_keep);
         }
 
         let task = wrap(
@@ -1114,6 +1156,40 @@ impl Handler<TaskResult<DeleteUnusedLogsOutput, DeleteUnusedLogsError>>
 }
 
 #[async_trait]
+impl
+    Handler<
+        TaskResult<
+            FetchMinAttachedFunctionCompletionOffsetOutput,
+            FetchMinAttachedFunctionCompletionOffsetError,
+        >,
+    > for GarbageCollectorOrchestrator
+{
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<
+            FetchMinAttachedFunctionCompletionOffsetOutput,
+            FetchMinAttachedFunctionCompletionOffsetError,
+        >,
+        ctx: &ComponentContext<GarbageCollectorOrchestrator>,
+    ) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
+            Some(output) => output,
+            None => return,
+        };
+        tracing::debug!(
+            min_completion_offset = ?output.min_completion_offset,
+            "Fetched min attached function completion offset"
+        );
+        self.min_attached_fn_completion_offset = output.min_completion_offset;
+        self.min_attached_fn_completion_offset_fetched = true;
+        let res = self.try_start_delete_unused_logs_operator(ctx).await;
+        self.ok_or_terminate(res, ctx).await;
+    }
+}
+
+#[async_trait]
 impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>>
     for GarbageCollectorOrchestrator
 {
@@ -1269,6 +1345,66 @@ mod tests {
                 );
             }
             other => panic!("expected InvariantViolation, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_gc_clamps_to_attached_function_offset() {
+        use wal3::LogPosition;
+
+        // Test case 1: Attached function offset is behind compaction
+        {
+            let compaction_offset = 150u64;
+            let min_attached_fn_offset = Some(80u64);
+
+            // Calculate min offset to keep (mimics the logic in try_start_delete_unused_logs_operator)
+            let mut min_offset_to_keep = LogPosition::from_offset(compaction_offset) + 1u64;
+            if let Some(min_completion_offset) = min_attached_fn_offset {
+                let attached_fn_floor = LogPosition::from_offset(min_completion_offset) + 1u64;
+                min_offset_to_keep = min_offset_to_keep.min(attached_fn_floor);
+            }
+
+            assert_eq!(
+                min_offset_to_keep.offset(),
+                81,
+                "When attached function is behind compaction, should clamp to attached function offset + 1"
+            );
+        }
+
+        // Test case 2: Attached function offset is ahead of compaction
+        {
+            let compaction_offset = 150u64;
+            let min_attached_fn_offset = Some(200u64);
+
+            let mut min_offset_to_keep = LogPosition::from_offset(compaction_offset) + 1u64;
+            if let Some(min_completion_offset) = min_attached_fn_offset {
+                let attached_fn_floor = LogPosition::from_offset(min_completion_offset) + 1u64;
+                min_offset_to_keep = min_offset_to_keep.min(attached_fn_floor);
+            }
+
+            assert_eq!(
+                min_offset_to_keep.offset(),
+                151,
+                "When attached function is ahead of compaction, should use compaction offset + 1"
+            );
+        }
+
+        // Test case 3: No attached functions
+        {
+            let compaction_offset = 150u64;
+            let min_attached_fn_offset: Option<u64> = None;
+
+            let mut min_offset_to_keep = LogPosition::from_offset(compaction_offset) + 1u64;
+            if let Some(min_completion_offset) = min_attached_fn_offset {
+                let attached_fn_floor = LogPosition::from_offset(min_completion_offset) + 1u64;
+                min_offset_to_keep = min_offset_to_keep.min(attached_fn_floor);
+            }
+
+            assert_eq!(
+                min_offset_to_keep.offset(),
+                151,
+                "When no attached functions, should use compaction offset + 1"
+            );
         }
     }
 

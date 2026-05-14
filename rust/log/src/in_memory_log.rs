@@ -153,18 +153,31 @@ impl InMemoryLog {
         collection_id: CollectionUuid,
         starting_offset: u64,
     ) -> Result<u64, Box<dyn ChromaError>> {
-        let answer = self
-            .collection_to_log
-            .get(&collection_id)
-            .iter()
-            .flat_map(|x| x.iter().map(|rec| rec.log_offset + 1).max())
-            .max()
-            .unwrap_or(starting_offset as i64) as u64;
-        if answer >= starting_offset {
-            Ok(answer)
-        } else {
-            Ok(starting_offset)
+        // Find the first log with offset >= starting_offset
+        if let Some(logs) = self.collection_to_log.get(&collection_id) {
+            for log in logs {
+                if log.log_offset >= starting_offset as i64 {
+                    return Ok(log.log_offset as u64);
+                }
+            }
+            // No logs found at or after starting_offset, return next expected offset
+            if let Some(last_log) = logs.last() {
+                return Ok((last_log.log_offset + 1) as u64);
+            }
         }
+        Ok(starting_offset)
+    }
+
+    pub(super) async fn garbage_collect(
+        &mut self,
+        collection_id: CollectionUuid,
+        min_offset_to_keep: i64,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        if let Some(logs) = self.collection_to_log.get_mut(&collection_id) {
+            // Remove all logs with offset < min_offset_to_keep
+            logs.retain(|log| log.log_offset >= min_offset_to_keep);
+        }
+        Ok(())
     }
 }
 
