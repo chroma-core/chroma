@@ -190,10 +190,10 @@ target "fn-consumer" {
     "ADDRESS_SANITIZER" = "${ADDRESS_SANITIZER}"
   }
   target = "fn_consumer"
-  tags = LOCAL_BUILD == "true" ? ["fn-consumer:${COMMIT_SHORT_SHA}"] : [
-    "${REGISTRY_AWS}/fn-consumer:${COMMIT_SHORT_SHA}",
-    "${REGISTRY_GCP}/fn-consumer:${COMMIT_SHORT_SHA}",
-    "${REGISTRY_DOCKERHUB}/fn-consumer:${COMMIT_SHORT_SHA}",
+  tags = LOCAL_BUILD == "true" ? ["fn-consumer-service:${COMMIT_SHORT_SHA}"] : [
+    "${REGISTRY_AWS}/fn-consumer-service:${COMMIT_SHORT_SHA}",
+    "${REGISTRY_GCP}/fn-consumer-service:${COMMIT_SHORT_SHA}",
+    "${REGISTRY_DOCKERHUB}/fn-consumer-service:${COMMIT_SHORT_SHA}",
   ]
 }
 
