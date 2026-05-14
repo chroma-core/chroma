@@ -574,7 +574,7 @@ fn_consumer_service:
               count_based_policy:
                 max_concurrent_requests: 30
                 bandwidth_allocation: [0.7, 0.3]
-    task_runner:
+  task_runner:
     enabled: true
   blockfile_provider:
     arrow:
@@ -600,7 +600,7 @@ fn_consumer_service:
   hnsw_provider:
     hnsw_temporary_path: "~/tmp"
     hnsw_cache_config:
-      weighted_lru:
+      memory:
         name: "hnsw_cache"
         capacity: 64
     permitted_parallelism: 180
@@ -616,7 +616,7 @@ fn_consumer_service:
       policy: "full_rebuild"
     usearch_provider:
       cache_config:
-        weighted_lru:
+        memory:
           name: "usearch_cache"
           capacity: 8192 # 8192 MiB = 8GB
     topologies:

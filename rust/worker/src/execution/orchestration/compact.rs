@@ -191,6 +191,7 @@ pub struct CompactionContext {
     pub bloom_filter_manager: Option<BloomFilterManager>,
     pub shard_size: Option<u64>,
     pub work_queue_client: Option<WorkQueueClient>,
+    pub log_start_offset: Option<i64>,
     #[cfg(test)]
     pub poison_offset: Option<u32>,
 }
@@ -218,6 +219,7 @@ impl Clone for CompactionContext {
             bloom_filter_manager: self.bloom_filter_manager.clone(),
             shard_size: self.shard_size,
             work_queue_client: self.work_queue_client.clone(),
+            log_start_offset: self.log_start_offset,
             #[cfg(test)]
             poison_offset: self.poison_offset,
         }
@@ -273,6 +275,7 @@ impl CompactionContext {
             bloom_filter_manager: self.bloom_filter_manager.clone(),
             shard_size: self.shard_size,
             work_queue_client: self.work_queue_client.clone(),
+            log_start_offset: self.log_start_offset,
             #[cfg(test)]
             poison_offset: self.poison_offset,
         }
@@ -402,9 +405,56 @@ impl CompactionContext {
             bloom_filter_manager,
             shard_size,
             work_queue_client,
+            log_start_offset: None,
             #[cfg(test)]
             poison_offset: None,
         }
+    }
+
+    /// Create a new CompactionContext with a specific log start offset.
+    /// This is used by the function consumer to start processing from a specific offset.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_log_offset(
+        rebuild_info: Option<RebuildInfo>,
+        fetch_log_batch_size: u32,
+        fetch_log_concurrency: usize,
+        max_compaction_size: usize,
+        max_partition_size: usize,
+        log: Log,
+        sysdb: SysDb,
+        blockfile_provider: BlockfileProvider,
+        hnsw_provider: HnswIndexProvider,
+        spann_provider: SpannProvider,
+        dispatcher: ComponentHandle<Dispatcher>,
+        is_function_disabled: bool,
+        is_fn_consumer: bool,
+        fragment_fetcher: Option<Arc<FragmentFetcher>>,
+        bloom_filter_manager: Option<BloomFilterManager>,
+        shard_size: Option<u64>,
+        work_queue_client: Option<WorkQueueClient>,
+        log_start_offset: i64,
+    ) -> Self {
+        let mut context = Self::new(
+            rebuild_info,
+            fetch_log_batch_size,
+            fetch_log_concurrency,
+            max_compaction_size,
+            max_partition_size,
+            log,
+            sysdb,
+            blockfile_provider,
+            hnsw_provider,
+            spann_provider,
+            dispatcher,
+            is_function_disabled,
+            is_fn_consumer,
+            fragment_fetcher,
+            bloom_filter_manager,
+            shard_size,
+            work_queue_client,
+        );
+        context.log_start_offset = Some(log_start_offset);
+        context
     }
 
     #[cfg(test)]
@@ -496,6 +546,7 @@ impl CompactionContext {
             self.fragment_fetcher.clone(),
             self.bloom_filter_manager.clone(),
             self.work_queue_client.clone(),
+            self.log_start_offset,
         );
 
         let log_fetch_response = match log_fetch_orchestrator.run(system.clone()).await {
@@ -610,6 +661,7 @@ impl CompactionContext {
             self.dispatcher.clone(),
             data_fetch_records,
             is_backfill,
+            self.is_fn_consumer,
         );
 
         let attached_function_response =
@@ -973,13 +1025,6 @@ impl CompactionContext {
             }
 
             results.push(compact_result);
-        }
-
-        // Skip registration if fn_consumer
-        if self.is_fn_consumer {
-            return Ok(CompactionResponse::Success {
-                job_id: collection_id.into(),
-            });
         }
 
         let _ =

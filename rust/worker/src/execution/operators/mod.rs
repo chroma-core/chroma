@@ -3,6 +3,7 @@ pub mod commit_segment_writer;
 pub mod count_records;
 pub mod execute_task;
 pub mod fetch_log;
+pub mod finish_async_work;
 pub mod finish_attached_function;
 pub mod flush_segment_writer;
 pub mod fragment_fetch;

@@ -80,7 +80,7 @@ query_service:
   hnsw_provider:
     hnsw_temporary_path: "~/tmp"
     hnsw_cache_config:
-      weighted_lru:
+      memory:
         name: "hnsw_cache"
         capacity: 8589934592 # 8GB
     permitted_parallelism: 180
@@ -88,7 +88,7 @@ query_service:
     adaptive_search_nprobe: false
     usearch_provider:
       cache_config:
-        weighted_lru:
+        memory:
           name: "usearch_cache"
           capacity: 8192 # 8192 MiB = 8GB
   bloom_filter_manager:
@@ -215,7 +215,7 @@ compaction_service:
   hnsw_provider:
     hnsw_temporary_path: "~/tmp"
     hnsw_cache_config:
-      weighted_lru:
+      memory:
         name: "hnsw_cache"
         capacity: 8192 # 8192 MiB = 8GB
     permitted_parallelism: 180
@@ -231,7 +231,7 @@ compaction_service:
       policy: "full_rebuild"
     usearch_provider:
       cache_config:
-        weighted_lru:
+        memory:
           name: "usearch_cache"
           capacity: 8192 # 8192 MiB = 8GB
 work_queue_service:
@@ -428,3 +428,48 @@ fn_consumer_service:
       kube_namespace: "chroma"
       memberlist_name: "query-service-memberlist"
       queue_size: 100
+  task_runner:
+    enabled: true
+  blockfile_provider:
+    arrow:
+      block_manager_config:
+        max_block_size_bytes: 8388608 # 8MB
+        block_cache_config:
+          lru:
+            name: "block_cache"
+            capacity: 1000
+        num_concurrent_block_flushes: 40
+      sparse_index_manager_config:
+        sparse_index_cache_config:
+          lru:
+            name: "sparse_index_cache"
+            capacity: 1000
+  bloom_filter_manager:
+    cache_config:
+      lru:
+        name: "bloom_filter_cache"
+        capacity: 1000
+    enabled_collection_ids: ["all"]
+    storage_fetch_threshold: 100
+  hnsw_provider:
+    hnsw_temporary_path: "~/tmp"
+    hnsw_cache_config:
+      memory:
+        name: "hnsw_cache"
+        capacity: 8192 # 8192 MiB = 8GB
+    permitted_parallelism: 180
+  spann_provider:
+    pl_block_size: 5242880 # 5MiB
+    pl_garbage_collection:
+      enabled: true
+      policy:
+        random_sample:
+          sample_size: 0.1
+    hnsw_garbage_collection:
+      enabled: true
+      policy: "full_rebuild"
+    usearch_provider:
+      cache_config:
+        memory:
+          name: "usearch_cache"
+          capacity: 8192 # 8192 MiB = 8GB

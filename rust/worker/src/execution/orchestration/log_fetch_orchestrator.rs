@@ -344,8 +344,9 @@ impl LogFetchOrchestrator {
         fragment_fetcher: Option<Arc<FragmentFetcher>>,
         bloom_filter_manager: Option<BloomFilterManager>,
         work_queue_client: Option<WorkQueueClient>,
+        log_start_offset: Option<i64>,
     ) -> Self {
-        let context = CompactionContext::new(
+        let mut context = CompactionContext::new(
             rebuild_info,
             fetch_log_batch_size,
             fetch_log_concurrency,
@@ -364,6 +365,7 @@ impl LogFetchOrchestrator {
             None, // shard_size
             work_queue_client,
         );
+        context.log_start_offset = log_start_offset;
         LogFetchOrchestrator {
             collection_id,
             database_name,
@@ -575,13 +577,23 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                     return;
                 }
             };
+            if self.context.log_start_offset.is_some() {
+                tracing::info!(
+                    "Starting fetch log operation with log_start_offset: {:?}",
+                    self.context.log_start_offset
+                );
+            } else {
+                tracing::info!("Starting fetch log operation without log_start_offset");
+            }
             wrap(
                 Box::new(FetchLogOperator {
                     log_client: self.context.log.clone(),
                     batch_size: self.context.fetch_log_batch_size,
                     // We need to start fetching from the first log that has not been compacted
-                    start_log_offset_id: u64::try_from(collection.log_position + 1)
-                        .unwrap_or_default(),
+                    start_log_offset_id: match self.context.log_start_offset {
+                        Some(offset) => u64::try_from(offset + 1).unwrap_or_default(),
+                        None => u64::try_from(collection.log_position + 1).unwrap_or_default(),
+                    },
                     maximum_fetch_count: Some(self.context.max_compaction_size as u32),
                     collection_uuid: collection.collection_id,
                     tenant: collection.tenant.clone(),

@@ -1,13 +1,16 @@
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
+use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_log::Log;
 use chroma_segment::spann_provider::SpannProvider;
 use chroma_sysdb::SysDb;
 use chroma_system::{Component, ComponentContext, ComponentHandle, Dispatcher, Handler, System};
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
+use futures::future::join_all;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
+use thiserror::Error;
 use tracing::span;
 
 use crate::execution::orchestration::compact::CompactionContext;
@@ -30,6 +33,24 @@ impl InProgressFn {
 
     pub fn is_expired(&self) -> bool {
         SystemTime::now() >= self.expires_at
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum DispatchError {
+    #[error("Dispatcher not initialized")]
+    DispatcherNotInitialized,
+
+    #[error("Compaction workflow failed: {0}")]
+    CompactionFailed(#[from] crate::execution::orchestration::compact::CompactionError),
+}
+
+impl ChromaError for DispatchError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            DispatchError::DispatcherNotInitialized => ErrorCodes::Internal,
+            DispatchError::CompactionFailed(_) => ErrorCodes::Internal,
+        }
     }
 }
 
@@ -124,26 +145,16 @@ impl FnConsumerManager {
             .saturating_sub(self.in_progress.len())
     }
 
-    /// Records dispatch and (will) run the orchestrator inline. v1 stubs
-    /// the dispatch — only the in-flight bookkeeping is wired up. A later
-    /// change replaces this with the real compaction workflow. Returns
-    /// false if a matching (fn_id, input_coll_id) is already in flight or
-    /// the dispatcher hasn't been wired yet.
+    /// Runs the compaction workflow for the given function and collection.
     async fn dispatch_item(
-        &mut self,
+        &self,
         fn_id: AttachedFunctionUuid,
         input_coll_id: CollectionUuid,
-        _completion_offset: i64,
-    ) -> bool {
-        let key = (fn_id, input_coll_id);
-        if self.in_progress.contains_key(&key) {
-            tracing::debug!(?key, "skipping: in progress");
-            return false;
-        }
-
+        completion_offset: i64,
+    ) -> Result<(), DispatchError> {
         let Some(dispatcher) = self.context.dispatcher.clone() else {
             tracing::error!("Dispatcher not set on FnConsumerManager");
-            return false;
+            return Err(DispatchError::DispatcherNotInitialized);
         };
 
         // Fetch collection information to get the database name
@@ -160,7 +171,11 @@ impl FnConsumerManager {
                     "Failed to fetch collection information: {}",
                     e,
                 );
-                return false;
+                return Err(DispatchError::CompactionFailed(
+                    crate::execution::orchestration::compact::CompactionError::InvariantViolation(
+                        "Failed to fetch collection information",
+                    ),
+                ));
             }
         };
 
@@ -174,16 +189,16 @@ impl FnConsumerManager {
                         database = collection_info.collection.database,
                         "Invalid database name"
                     );
-                    return false;
+                    return Err(DispatchError::CompactionFailed(
+                    crate::execution::orchestration::compact::CompactionError::InvariantViolation(
+                        "Invalid database name",
+                    ),
+                ));
                 }
             };
 
-        // Now that all validations have passed, mark the work as in progress
-        self.in_progress
-            .insert(key, InProgressFn::new(self.context.job_expiry_seconds));
-
         // Create CompactionContext with is_fn_consumer = true
-        let mut compaction_context = CompactionContext::new(
+        let mut compaction_context = CompactionContext::new_with_log_offset(
             None,  // rebuild_info
             100,   // fetch_log_batch_size
             10,    // fetch_log_concurrency
@@ -201,6 +216,7 @@ impl FnConsumerManager {
             None,                                 // bloom_filter_manager
             None,                                 // shard_size
             Some(self.work_queue_client.clone()), // work_queue_client
+            completion_offset,                    // log_start_offset
         );
 
         // Run compaction workflow
@@ -211,9 +227,6 @@ impl FnConsumerManager {
         ))
         .await;
 
-        // Always remove from in_progress map after completion
-        self.in_progress.remove(&key);
-
         match result {
             Ok(_response) => {
                 tracing::info!(
@@ -221,7 +234,7 @@ impl FnConsumerManager {
                     input_coll_id = %input_coll_id,
                     "Function consumer workflow completed successfully"
                 );
-                true
+                Ok(())
             }
             Err(e) => {
                 tracing::error!(
@@ -230,8 +243,7 @@ impl FnConsumerManager {
                     "Function consumer workflow failed: {}",
                     e,
                 );
-                // Return false on error so caller knows it failed
-                false
+                Err(e.into())
             }
         }
     }
@@ -255,6 +267,8 @@ impl FnConsumerManager {
                 return;
             }
         };
+        // Collect valid work items first
+        let mut work_items = Vec::new();
         for item in resp.items {
             let Ok(fn_id) = item.fn_id.parse::<AttachedFunctionUuid>() else {
                 tracing::error!(fn_id = item.fn_id, "skipping work item: invalid fn_id");
@@ -267,7 +281,58 @@ impl FnConsumerManager {
                 );
                 continue;
             };
-            Box::pin(self.dispatch_item(fn_id, input_coll_id, item.completion_offset)).await;
+            work_items.push((fn_id, input_coll_id, item.completion_offset));
+        }
+
+        let mut items_to_process = Vec::new();
+        for (fn_id, input_coll_id, completion_offset) in work_items {
+            let key = (fn_id, input_coll_id);
+
+            if self.in_progress.contains_key(&key) {
+                tracing::debug!(?key, "skipping: already in progress");
+                continue;
+            }
+
+            self.in_progress
+                .insert(key, InProgressFn::new(self.context.job_expiry_seconds));
+
+            items_to_process.push((fn_id, input_coll_id, completion_offset));
+        }
+
+        let futures: Vec<_> = items_to_process
+            .into_iter()
+            .map(|(fn_id, input_coll_id, completion_offset)| {
+                let fut = self.dispatch_item(fn_id, input_coll_id, completion_offset);
+                Box::pin(async move {
+                    let result = fut.await;
+                    (fn_id, input_coll_id, result)
+                })
+            })
+            .collect();
+
+        let results = join_all(futures).await;
+
+        for (fn_id, input_coll_id, result) in results {
+            let key = (fn_id, input_coll_id);
+            self.in_progress.remove(&key);
+
+            match result {
+                Ok(()) => {
+                    tracing::debug!(
+                        fn_id = %fn_id,
+                        input_coll_id = %input_coll_id,
+                        "Successfully completed work item"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        fn_id = %fn_id,
+                        input_coll_id = %input_coll_id,
+                        error = %e,
+                        "Failed to process work item"
+                    );
+                }
+            }
         }
     }
 }
