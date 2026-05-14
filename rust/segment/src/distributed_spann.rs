@@ -557,6 +557,19 @@ impl<'me> SpannSegmentReaderShard<'me> {
             })
     }
 
+    pub async fn fetch_posting_list_offset_ids(
+        &self,
+        head_id: u32,
+    ) -> Result<Vec<u32>, SpannSegmentReaderShardError> {
+        self.index_reader
+            .fetch_posting_list_offset_ids(head_id)
+            .await
+            .map_err(|e| {
+                tracing::error!("Error fetching posting list for head {}:{:?}", head_id, e);
+                SpannSegmentReaderShardError::KeyReadError(e)
+            })
+    }
+
     pub async fn rng_query(
         &self,
         normalized_query: &[f32],

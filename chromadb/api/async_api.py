@@ -245,6 +245,19 @@ class AsyncBaseAPI(ABC):
         pass
 
     @abstractmethod
+    async def _sample(
+        self,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        limit: int = 10,
+        seed: Optional[int] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocuments,
+    ) -> GetResult:
+        pass
+
+    @abstractmethod
     async def _delete(
         self,
         collection_id: UUID,
@@ -767,6 +780,22 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         where: Optional[Where] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocuments,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
+        pass
+
+    @abstractmethod
+    @override
+    async def _sample(
+        self,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        limit: int = 10,
+        seed: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
         include: Include = IncludeMetadataDocuments,
         tenant: str = DEFAULT_TENANT,

@@ -21,10 +21,10 @@ use chroma_system::System;
 use chroma_types::{
     operator::{
         Aggregate, CountResult, Filter, GetResult, GroupBy, Key, KnnBatch, KnnBatchResult,
-        KnnProjection, KnnProjectionOutput, Limit, Projection, ProjectionOutput, Scan,
-        SearchPayloadResult, SearchRecord, SearchResult, Select,
+        KnnProjection, KnnProjectionOutput, Limit, Projection, ProjectionOutput, Sample,
+        SampleResult, Scan, SearchPayloadResult, SearchRecord, SearchResult, Select,
     },
-    plan::{Count, Get, Knn, Search, SearchPayload},
+    plan::{Count, Get, Knn, SamplePlan, Search, SearchPayload},
     AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
     AttachFunctionRequest, AttachFunctionResponse, Cmek, Collection, CollectionAndSegments,
     CollectionUuid, CountCollectionsError, CountCollectionsRequest, CountCollectionsResponse,
@@ -43,16 +43,17 @@ use chroma_types::{
     GetTenantResponse, HealthCheckResponse, HeartbeatError, Include, IndexStatusError,
     IndexStatusResponse, KnnIndex, ListCollectionsRequest, ListCollectionsResponse,
     ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord,
-    Quantization, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse, Schema,
-    SchemaError, SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
-    SparseIndexAlgorithm, UpdateCollectionError, UpdateCollectionRecordsError,
-    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
-    UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse,
-    UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse,
-    VectorIndexConfiguration, Where,
+    Quantization, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
+    SampleRequest, Schema, SchemaError, SearchRequest, SearchResponse, Segment, SegmentScope,
+    SegmentType, SegmentUuid, SparseIndexAlgorithm, UpdateCollectionError,
+    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
+    UpdateCollectionRequest, UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest,
+    UpdateTenantResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
+    UpsertCollectionRecordsResponse, VectorIndexConfiguration, Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
+use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -380,6 +381,138 @@ impl ServiceBasedFrontend {
             result: ProjectionOutput {
                 records: merged_records,
             },
+        })
+    }
+
+    fn derive_sample_seed(seed: u64, shard_index: u32) -> u64 {
+        seed ^ ((shard_index as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15))
+    }
+
+    async fn fan_out_sample(&self, mut plan: SamplePlan) -> Result<SampleResult, ExecutorError> {
+        let num_shards = plan
+            .scan
+            .collection_and_segments
+            .record_segment
+            .num_shards()
+            .map_err(|e| ExecutorError::Internal(Box::new(e)))? as u32;
+        let collection_id = plan.scan.collection_and_segments.collection.collection_id;
+        let database_name = DatabaseName::new(
+            plan.scan
+                .collection_and_segments
+                .collection
+                .database
+                .clone(),
+        );
+        if num_shards <= 1 {
+            let provider = self.collections_with_segments_provider.clone();
+            return Box::pin(self.executor.clone().sample(
+                plan.clone(),
+                move |code: tonic::Code| {
+                    let mut provider = provider.clone();
+                    let mut replan = plan.clone();
+                    let database_name = database_name.clone();
+                    async move {
+                        if code == tonic::Code::NotFound {
+                            provider
+                                .collections_with_segments_cache
+                                .remove(&collection_id)
+                                .await;
+                        }
+                        let new_cas = provider
+                            .get_collection_with_segments(database_name, collection_id)
+                            .await
+                            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+                        replan.scan.collection_and_segments = new_cas;
+                        replan.scan.shard_index = 0;
+                        replan.scan.num_shards = 1;
+                        Ok(replan)
+                    }
+                },
+            ))
+            .await;
+        }
+
+        let request_seed = plan
+            .sample
+            .seed
+            .unwrap_or_else(|| StdRng::from_entropy().gen());
+        plan.sample.seed = Some(request_seed);
+
+        let futs: Vec<_> = (0..num_shards)
+            .map(|shard_index| {
+                let mut executor = self.executor.clone();
+                let mut shard_plan = plan.clone();
+                shard_plan.scan.shard_index = shard_index;
+                shard_plan.scan.num_shards = num_shards;
+                shard_plan.sample.seed = Some(Self::derive_sample_seed(request_seed, shard_index));
+                let provider = self.collections_with_segments_provider.clone();
+                let database_name = database_name.clone();
+                async move {
+                    Box::pin(
+                        executor.sample(shard_plan.clone(), move |code: tonic::Code| {
+                            let mut provider = provider.clone();
+                            let mut replan = shard_plan.clone();
+                            let database_name = database_name.clone();
+                            async move {
+                                if code == tonic::Code::NotFound {
+                                    provider
+                                        .collections_with_segments_cache
+                                        .remove(&collection_id)
+                                        .await;
+                                }
+                                let new_cas = provider
+                                    .get_collection_with_segments(database_name, collection_id)
+                                    .await
+                                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+                                replan.scan.collection_and_segments = new_cas;
+                                replan.scan.shard_index = shard_index;
+                                replan.scan.num_shards = num_shards;
+                                replan.sample.seed =
+                                    Some(Self::derive_sample_seed(request_seed, shard_index));
+                                Ok(replan)
+                            }
+                        }),
+                    )
+                    .await
+                }
+            })
+            .collect();
+
+        let results = futures::future::try_join_all(futs).await?;
+        let mut total_pulled_log_bytes = 0u64;
+        let mut total_strata_seen = 0u64;
+        let mut weighted_records = Vec::new();
+        for result in results {
+            total_pulled_log_bytes += result.pulled_log_bytes;
+            total_strata_seen += result.strata_seen;
+            let records = result.result.records;
+            if records.is_empty() {
+                continue;
+            }
+            let weight = (result.strata_seen as f64 / records.len() as f64).max(1.0);
+            weighted_records.extend(records.into_iter().map(|record| (record, weight)));
+        }
+
+        let mut rng = StdRng::seed_from_u64(request_seed ^ 0xD1B5_4A32_D192_ED03);
+        let mut scored_records = weighted_records
+            .into_iter()
+            .map(|(record, weight)| {
+                let u = rng.gen::<f64>().clamp(f64::MIN_POSITIVE, 1.0);
+                ((-u.ln()) / weight, record)
+            })
+            .collect::<Vec<_>>();
+        scored_records.sort_by(|(lhs, _), (rhs, _)| lhs.total_cmp(rhs));
+        let mut records = scored_records
+            .into_iter()
+            .take(plan.sample.limit as usize)
+            .map(|(_, record)| record)
+            .collect::<Vec<_>>();
+        records.shuffle(&mut rng);
+
+        Ok(SampleResult {
+            pulled_log_bytes: total_pulled_log_bytes,
+            strata_seen: total_strata_seen,
+            result: ProjectionOutput { records },
         })
     }
 
@@ -2365,6 +2498,122 @@ impl ServiceBasedFrontend {
         }
 
         Ok((get_result, include).into())
+    }
+
+    pub async fn sample(
+        &mut self,
+        SampleRequest {
+            database_name,
+            collection_id,
+            ids,
+            r#where,
+            limit,
+            seed,
+            include,
+            ..
+        }: SampleRequest,
+    ) -> Result<GetResponse, QueryError> {
+        let database_name_typed = DatabaseName::new(&database_name).ok_or_else(|| {
+            QueryError::Other(Box::new(ValidationError::InvalidArgument(
+                "database name must be at least 3 characters".to_string(),
+            )))
+        })?;
+        let collection_and_segments = self
+            .collections_with_segments_provider
+            .get_collection_with_segments(Some(database_name_typed.clone()), collection_id)
+            .await
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        if self.enable_schema {
+            if let Some(ref schema) = collection_and_segments.collection.schema {
+                if let Some(ref where_clause) = r#where {
+                    schema
+                        .is_metadata_where_indexing_enabled(where_clause)
+                        .map_err(|err| QueryError::Other(Box::new(err) as Box<dyn ChromaError>))?;
+                }
+            }
+        }
+        let latest_collection_logical_size_bytes = collection_and_segments
+            .collection
+            .size_bytes_post_compaction;
+        let metadata_predicate_count = r#where
+            .as_ref()
+            .map(Where::metadata_predicate_count)
+            .unwrap_or_default();
+        let fts_query_length = r#where
+            .as_ref()
+            .map(Where::fts_query_length)
+            .unwrap_or_default();
+        let log_upper_bound_offset = if self.enable_log_scouting {
+            self.log_client
+                .scout_logs(
+                    &collection_and_segments.collection.tenant,
+                    database_name_typed,
+                    collection_id,
+                    0,
+                )
+                .await? as i64
+        } else {
+            0
+        };
+        let sample_result = Box::pin(self.fan_out_sample(SamplePlan {
+            scan: Scan {
+                collection_and_segments,
+                shard_index: 0,
+                num_shards: 1,
+                log_upper_bound_offset,
+            },
+            filter: Filter {
+                query_ids: ids,
+                where_clause: r#where,
+            },
+            sample: Sample { limit, seed },
+            proj: Projection {
+                document: include.0.contains(&Include::Document),
+                embedding: include.0.contains(&Include::Embedding),
+                // If URI is requested, metadata is also requested so we can extract the URI.
+                metadata: (include.0.contains(&Include::Metadata)
+                    || include.0.contains(&Include::Uri)),
+            },
+        }))
+        .await?;
+        let return_bytes = sample_result.size_bytes();
+
+        chroma_metering::with_current(|context| {
+            context.fts_query_length(fts_query_length);
+            context.metadata_predicate_count(metadata_predicate_count);
+            context.query_embedding_count(0);
+            context.pulled_log_size_bytes(sample_result.pulled_log_bytes);
+            context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
+            context.return_bytes(return_bytes);
+            context.finish_request(Instant::now());
+        });
+
+        match chroma_metering::close::<CollectionReadContext>() {
+            Ok(collection_read_context) => {
+                if let Ok(()) = MeterEvent::CollectionRead(collection_read_context)
+                    .submit()
+                    .await
+                {
+                    self.metrics.metering_read_counter.add(1, &[]);
+                }
+            }
+            Err(_) => match chroma_metering::close::<ExternalCollectionReadContext>() {
+                Ok(external_collection_read_context) => {
+                    if let Ok(()) =
+                        MeterEvent::ExternalCollectionRead(external_collection_read_context)
+                            .submit()
+                            .await
+                    {
+                        self.metrics.metering_external_read_counter.add(1, &[]);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Failed to submit metering event to receiver: {:?}", e)
+                }
+            },
+        }
+
+        Ok((sample_result, include).into())
     }
 
     pub async fn query(

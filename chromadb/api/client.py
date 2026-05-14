@@ -515,6 +515,29 @@ class Client(SharedSystemClient, ClientAPI):
             include=include,
         )
 
+    @override
+    def _sample(
+        self,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        limit: int = 10,
+        seed: Optional[int] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocuments,
+    ) -> GetResult:
+        return self._server._sample(
+            collection_id=collection_id,
+            tenant=self.tenant,
+            database=self.database,
+            ids=ids,
+            where=where,
+            limit=limit,
+            seed=seed,
+            where_document=where_document,
+            include=include,
+        )
+
     def _delete(
         self,
         collection_id: UUID,

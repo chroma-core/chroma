@@ -47,6 +47,15 @@ class GetEmbedding(BaseModel):
     include: Include = IncludeMetadataDocuments
 
 
+class SampleEmbedding(BaseModel):
+    ids: Optional[List[str]] = None
+    where: Optional[Dict[Any, Any]] = None
+    where_document: Optional[Dict[Any, Any]] = None
+    limit: int = Field(default=10, ge=0)
+    seed: Optional[int] = Field(default=None, ge=0)
+    include: Include = IncludeMetadataDocuments
+
+
 class DeleteEmbedding(BaseModel):
     ids: Optional[List[str]] = None
     where: Optional[Dict[Any, Any]] = None

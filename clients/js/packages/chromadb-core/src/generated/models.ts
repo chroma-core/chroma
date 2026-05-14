@@ -180,6 +180,22 @@ export namespace Api {
     offset?: number | null;
   }
 
+  export interface SampleRequestPayload extends Api.RawWhereFields {
+    ids?: string[] | null;
+    include?: Api.Include[];
+    /**
+     * @type {number}
+     * @memberof SampleRequestPayload
+     * minimum: 0
+     */
+    limit?: number;
+    /**
+     * @type {number | null}
+     * @memberof SampleRequestPayload
+     */
+    seed?: number | null;
+  }
+
   export interface GetResponse {
     documents?: (string | null)[] | null;
     embeddings?: number[][] | null;

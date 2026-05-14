@@ -38,6 +38,7 @@ futures = { workspace = true }
 mdac = { workspace = true }
 opentelemetry = { workspace = true }
 parking_lot = { workspace = true }
+rand = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
@@ -81,7 +82,6 @@ indicatif = { workspace = true }
 proptest = { workspace = true }
 proptest-state-machine = { workspace = true }
 shuttle = { workspace = true }
-rand = { workspace = true }
 rand_xorshift = { workspace = true }
 tempfile = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }

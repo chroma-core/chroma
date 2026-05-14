@@ -17,8 +17,8 @@ use chroma_system::System;
 use chroma_types::chroma_proto::query_executor_client::QueryExecutorClient;
 use chroma_types::SegmentType;
 use chroma_types::{
-    operator::{CountResult, GetResult, KnnBatchResult, Scan, SearchResult},
-    plan::{Count, Get, Knn, PlanToProtoError, Search},
+    operator::{CountResult, GetResult, KnnBatchResult, SampleResult, Scan, SearchResult},
+    plan::{Count, Get, Knn, PlanToProtoError, SamplePlan, Search},
     ExecutorError,
 };
 
@@ -252,6 +252,65 @@ impl DistributedExecutor {
                 *last_error.lock() = e.code();
                 tracing::info!(
                     "Retrying get for collection {}, error {:?}",
+                    plan.scan.collection_and_segments.collection.collection_id,
+                    e
+                );
+            })
+            .adjust(|e: &tonic::Status, d| {
+                if e.code() == tonic::Code::NotFound {
+                    return Some(Duration::ZERO);
+                }
+                d
+            })
+            .await?
+        };
+        Ok(res.into_inner().try_into()?)
+    }
+
+    pub async fn sample<F, Fut>(
+        &mut self,
+        plan: SamplePlan,
+        replan_closure: F,
+    ) -> Result<SampleResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<SamplePlan, Box<dyn ChromaError>>>,
+    {
+        let clients = self.resolve_clients(&plan.scan)?;
+        let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let last_error = std::sync::Arc::new(parking_lot::Mutex::new(tonic::Code::Ok));
+        let config = self.client_selection_config.clone();
+        let res = {
+            let attempt_count = attempt_count.clone();
+            (|| async {
+                let current_attempt =
+                    attempt_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let is_retry = current_attempt > 0;
+                if is_retry {
+                    let last_error_code = *last_error.lock();
+                    let replan =
+                        replan_closure(last_error_code)
+                            .await
+                            .map_err(|e| -> tonic::Status {
+                                tonic::Status::new(
+                                    e.code().into(),
+                                    format!("Failed to replan sample: {:?}", e),
+                                )
+                            })?;
+                    return choose_query_client_weighted(&clients, &config, is_retry)?
+                        .sample(Request::new(replan.try_into()?))
+                        .await;
+                }
+                choose_query_client_weighted(&clients, &config, is_retry)?
+                    .sample(Request::new(plan.clone().try_into()?))
+                    .await
+            })
+            .retry(self.backoff)
+            .when(is_retryable_error)
+            .notify(|e: &tonic::Status, _dur: Duration| {
+                *last_error.lock() = e.code();
+                tracing::info!(
+                    "Retrying sample for collection {}, error {:?}",
                     plan.scan.collection_and_segments.collection.collection_id,
                     e
                 );

@@ -121,6 +121,26 @@ export interface Collection {
     include?: Include[];
   }): Promise<GetResult<TMeta>>;
   /**
+   * Retrieves a random sample of records from the collection.
+   * @template TMeta - Type of metadata for type safety
+   * @param args - Sampling parameters
+   * @returns Promise resolving to sampled records
+   */
+  sample<TMeta extends Metadata = Metadata>(args?: {
+    /** Specific record IDs to sample from */
+    ids?: string[];
+    /** Metadata-based filtering conditions */
+    where?: Where;
+    /** Maximum number of records to return */
+    limit?: number;
+    /** Seed for deterministic sampling */
+    seed?: number;
+    /** Document content-based filtering conditions */
+    whereDocument?: WhereDocument;
+    /** Fields to include in the response */
+    include?: Include[];
+  }): Promise<GetResult<TMeta>>;
+  /**
    * Retrieves a preview of records from the collection.
    * @param args - Preview options
    * @returns Promise resolving to a sample of records
@@ -870,6 +890,52 @@ export class CollectionImpl implements Collection {
 
   public async peek({ limit = 10 }: { limit?: number }): Promise<GetResult> {
     return this.get({ limit });
+  }
+
+  public async sample<TMeta extends Metadata = Metadata>(
+    args: Partial<{
+      ids: string[];
+      where: Where;
+      limit: number;
+      seed: number;
+      whereDocument: WhereDocument;
+      include: Include[];
+    }> = {},
+  ): Promise<GetResult<TMeta>> {
+    const {
+      ids,
+      where,
+      limit = 10,
+      seed,
+      whereDocument,
+      include = ["documents", "metadatas"],
+    } = args;
+
+    this.validateGet(include, ids, where, whereDocument);
+
+    const { data } = await RecordService.collectionSample({
+      client: this.apiClient,
+      path: await this.path(),
+      body: {
+        ids,
+        where,
+        limit,
+        seed,
+        where_document: whereDocument,
+        include,
+      },
+    });
+
+    const deserializedMetadatas = deserializeMetadatas(data.metadatas) ?? [];
+
+    return new GetResult<TMeta>({
+      documents: data.documents ?? [],
+      embeddings: data.embeddings ?? [],
+      ids: data.ids,
+      include: data.include,
+      metadatas: deserializedMetadatas as (TMeta | null)[],
+      uris: data.uris ?? [],
+    });
   }
 
   public async query<TMeta extends Metadata = Metadata>({

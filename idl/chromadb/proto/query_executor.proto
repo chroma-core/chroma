@@ -36,6 +36,11 @@ message LimitOperator {
     optional uint32 limit = 2;
 }
 
+message SampleOperator {
+    uint32 limit = 1;
+    optional uint64 seed = 2;
+}
+
 message ProjectionOperator {
     bool document = 1;
     bool embedding = 2;
@@ -74,6 +79,19 @@ message ProjectionRecord {
 message GetResult {
     repeated ProjectionRecord records = 1;
     uint64 pulled_log_bytes = 2;
+}
+
+message SamplePlan {
+    ScanOperator scan = 1;
+    FilterOperator filter = 2;
+    SampleOperator sample = 3;
+    ProjectionOperator projection = 4;
+}
+
+message SampleResult {
+    repeated ProjectionRecord records = 1;
+    uint64 pulled_log_bytes = 2;
+    uint64 strata_seen = 3;
 }
 
 message KNNPlan {
@@ -220,6 +238,7 @@ message SearchResult {
 service QueryExecutor {
     rpc Count(CountPlan) returns (CountResult) {}
     rpc Get(GetPlan) returns (GetResult) {}
+    rpc Sample(SamplePlan) returns (SampleResult) {}
     rpc KNN(KNNPlan) returns (KNNBatchResult) {}
     rpc Search(SearchPlan) returns (SearchResult) {}
 }

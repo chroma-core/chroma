@@ -19,8 +19,8 @@ use chroma_types::{
     plan::{ReadLevel, SearchPayload},
     AddCollectionRecordsRequest, AddCollectionRecordsResponse, Collection, CollectionUuid,
     DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, GetRequest, GetResponse,
-    IncludeList, IndexStatusResponse, Metadata, QueryRequest, QueryResponse, Schema, SearchRequest,
-    SearchResponse, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
+    IncludeList, IndexStatusResponse, Metadata, QueryRequest, QueryResponse, SampleRequest, Schema,
+    SearchRequest, SearchResponse, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
     UpdateMetadata, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where,
 };
 use reqwest::Method;
@@ -355,6 +355,33 @@ impl ChromaCollection {
         )?;
         let request = request.into_payload()?;
         self.send(true, "get", "get", Method::POST, Some(request))
+            .await
+    }
+
+    /// Retrieves a random sample of records from the collection by ID or metadata filter.
+    ///
+    /// The `limit` parameter defaults to 10 when `None`. Providing `seed` makes the sample
+    /// deterministic for the same logical collection state.
+    pub async fn sample(
+        &self,
+        ids: Option<Vec<String>>,
+        r#where: Option<Where>,
+        limit: Option<u32>,
+        seed: Option<u64>,
+        include: Option<IncludeList>,
+    ) -> Result<GetResponse, ChromaHttpClientError> {
+        let request = SampleRequest::try_new(
+            self.collection.tenant.clone(),
+            self.collection.database.clone(),
+            self.collection.collection_id,
+            ids,
+            r#where,
+            limit.unwrap_or(10),
+            seed,
+            include.unwrap_or_else(IncludeList::default_get),
+        )?;
+        let request = request.into_payload()?;
+        self.send(true, "sample", "sample", Method::POST, Some(request))
             .await
     }
 

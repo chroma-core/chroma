@@ -2913,6 +2913,54 @@ impl<'me> SpannIndexReader<'me> {
         Ok(posting_lists)
     }
 
+    pub async fn fetch_posting_list_offset_ids(
+        &self,
+        head_id: u32,
+    ) -> Result<Vec<u32>, SpannIndexReaderError> {
+        let res = self
+            .posting_lists
+            .get("", head_id)
+            .await
+            .map_err(|e| {
+                tracing::error!("Error getting posting list for head {}: {}", head_id, e);
+                SpannIndexReaderError::PostingListReadError(e)
+            })?
+            .ok_or(SpannIndexReaderError::PostingListNotFound)?;
+
+        if res.doc_offset_ids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let actual_versions =
+            future::try_join_all(res.doc_offset_ids.iter().map(|offset_id| async {
+                self.versions_map.get("", *offset_id).await.map_err(|e| {
+                    tracing::error!(
+                        "Error getting version for doc offset id {}: {}",
+                        *offset_id,
+                        e
+                    );
+                    SpannIndexReaderError::VersionsMapReadError(e)
+                })
+            }))
+            .await?
+            .into_iter()
+            .collect::<Option<Vec<u32>>>()
+            .ok_or(SpannIndexReaderError::VersionsMapNotFound)?;
+
+        let mut posting_list_offset_ids = Vec::with_capacity(res.doc_offset_ids.len());
+        let mut unique_ids = HashSet::new();
+        for (index, doc_offset_id) in res.doc_offset_ids.iter().enumerate() {
+            if Self::is_version_outdated(actual_versions[index], res.doc_versions[index]) {
+                continue;
+            }
+            if !unique_ids.insert(*doc_offset_id) {
+                continue;
+            }
+            posting_list_offset_ids.push(*doc_offset_id);
+        }
+        Ok(posting_list_offset_ids)
+    }
+
     // Only for testing purposes as of 5 March 2024.
     // Returns all the ids with embeddings.
     // Intentionally dumb and not paginated.

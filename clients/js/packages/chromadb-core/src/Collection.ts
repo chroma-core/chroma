@@ -10,6 +10,7 @@ import {
   QueryRecordsParams,
   MultiQueryResponse,
   PeekParams,
+  SampleParams,
   MultiGetResponse,
   DeleteParams,
   Embeddings,
@@ -418,6 +419,42 @@ export class Collection {
       },
       this.client.api.options,
     )) as unknown as MultiGetResponse;
+  }
+
+  async sample({
+    ids,
+    where,
+    limit = 10,
+    seed,
+    include,
+    whereDocument,
+  }: SampleParams = {}): Promise<GetResponse> {
+    await this.client.init();
+
+    const idsArray = ids ? toArray(ids) : undefined;
+
+    const resp = await this.client.api.collectionSample(
+      this.client.tenant,
+      this.client.database,
+      this.id,
+      {
+        ids: idsArray,
+        where,
+        limit,
+        seed,
+        include: include as GeneratedApi.Include[] | undefined,
+        where_document: whereDocument,
+      },
+      this.client.api.options,
+    );
+
+    return {
+      ...resp,
+      metadatas: resp.metadatas as (Metadata | null)[],
+      documents: resp.documents as (string | null)[],
+      embeddings: resp.embeddings as Embeddings | null,
+      included: resp.include as unknown as IncludeEnum[],
+    };
   }
 
   /**

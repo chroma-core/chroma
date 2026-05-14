@@ -85,6 +85,7 @@ from functools import wraps
 import time
 import logging
 import re
+import random
 from chromadb.execution.expression.plan import Search
 
 T = TypeVar("T", bound=Callable[..., Any])
@@ -735,6 +736,72 @@ class SegmentAPI(ServerAPI):
                     "uris" in include,
                 ),
             )
+        )
+
+    @trace_method("SegmentAPI._sample", OpenTelemetryGranularity.OPERATION)
+    @override
+    @rate_limit
+    def _sample(
+        self,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        limit: int = 10,
+        seed: Optional[int] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocuments,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
+        self._quota_enforcer.enforce(
+            action=Action.GET,
+            tenant=tenant,
+            ids=ids,
+            where=where,
+            where_document=where_document,
+            limit=limit,
+        )
+        if limit == 0:
+            return GetResult(
+                ids=[],
+                embeddings=[] if "embeddings" in include else None,
+                metadatas=[] if "metadatas" in include else None,
+                documents=[] if "documents" in include else None,
+                uris=[] if "uris" in include else None,
+                data=None,
+                included=include,
+            )
+
+        results = self._get(
+            collection_id=collection_id,
+            ids=ids,
+            where=where,
+            limit=None,
+            offset=None,
+            where_document=where_document,
+            include=include,
+            tenant=tenant,
+            database=database,
+        )
+        rng = random.Random(seed)
+        selected = rng.sample(
+            range(len(results["ids"])), min(limit, len(results["ids"]))
+        )
+
+        def select(field: str) -> Optional[List[Any]]:
+            values = results.get(field)  # type: ignore[typeddict-item]
+            if values is None:
+                return None
+            return [values[index] for index in selected]
+
+        return GetResult(
+            ids=[results["ids"][index] for index in selected],
+            embeddings=select("embeddings"),
+            metadatas=select("metadatas"),
+            documents=select("documents"),
+            uris=select("uris"),
+            data=None,
+            included=include,
         )
 
     @trace_method("SegmentAPI._delete", OpenTelemetryGranularity.OPERATION)

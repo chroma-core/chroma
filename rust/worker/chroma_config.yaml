@@ -229,7 +229,7 @@ compaction_service:
           name: "usearch_cache"
           capacity: 8192 # 8192 MiB = 8GB
 log_service:
-  num_records_before_backpressure: 100000
+  num_records_before_backpressure: 10000000
   record_count_threshold: 10
   reinsert_threshold: 0
   suggested_compaction_threshold: 10

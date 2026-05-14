@@ -27,10 +27,10 @@ use chroma_types::{
     GetTenantResponse, IndexStatusResponse, InternalCollectionConfiguration,
     InternalUpdateCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
     ListDatabasesRequest, ListDatabasesResponse, QueryRequest, QueryRequestPayload, QueryResponse,
-    SearchRequest, SearchRequestPayload, SearchResponse, UpdateCollectionPayload,
-    UpdateCollectionRecordsPayload, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
-    UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsPayload,
-    UpsertCollectionRecordsResponse,
+    SampleRequest, SampleRequestPayload, SearchRequest, SearchRequestPayload, SearchResponse,
+    UpdateCollectionPayload, UpdateCollectionRecordsPayload, UpdateCollectionRecordsResponse,
+    UpdateCollectionResponse, UpdateTenantRequest, UpdateTenantResponse,
+    UpsertCollectionRecordsPayload, UpsertCollectionRecordsResponse,
 };
 use mdac::{Rule, Scorecard, ScorecardGuard};
 use opentelemetry::global;
@@ -156,6 +156,7 @@ pub struct Metrics {
     collection_delete: Counter<u64>,
     collection_count: Counter<u64>,
     collection_get: Counter<u64>,
+    collection_sample: Counter<u64>,
     collection_index_status: Counter<u64>,
     collection_query: Counter<u64>,
     collection_search: Counter<u64>,
@@ -196,6 +197,7 @@ impl Metrics {
             collection_delete: meter.u64_counter("collection_delete").build(),
             collection_count: meter.u64_counter("collection_count").build(),
             collection_get: meter.u64_counter("collection_get").build(),
+            collection_sample: meter.u64_counter("collection_sample").build(),
             collection_index_status: meter.u64_counter("collection_index_status").build(),
             collection_query: meter.u64_counter("collection_query").build(),
             collection_search: meter.u64_counter("collection_search").build(),
@@ -359,6 +361,10 @@ impl FrontendServer {
             .route(
                 "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/get",
                 post(collection_get),
+            )
+            .route(
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/sample",
+                post(collection_sample),
             )
             .route(
                 "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/query",
@@ -2885,6 +2891,137 @@ async fn collection_get(
     Ok(Json(res))
 }
 
+/// Sample records
+/// Returns a random sample of records from a collection by ID or metadata filter.
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/sample",
+    summary = "Sample records",
+    description = "Returns a random sample of records from a collection by ID or metadata filter.",
+    tag = "Record",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
+    request_body = SampleRequestPayload,
+    responses(
+        (status = 200, description = "Records sampled from the collection", body = GetResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
+    )
+)]
+async fn collection_sample(
+    headers: HeaderMap,
+    Path((tenant, database, collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<SampleRequestPayload>,
+) -> Result<Json<GetResponse>, ServerError> {
+    server.metrics.collection_sample.add(1, &[]);
+    let requester_identity = server
+        .authenticate_and_authorize_collection(
+            &headers,
+            AuthzAction::Get,
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
+                collection: Some(collection_id.clone()),
+            },
+            DatabaseName::new(&database).ok_or_else(|| {
+                ValidationError::InvalidArgument(
+                    "database name must be at least 3 characters".to_string(),
+                )
+            })?,
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
+        )
+        .await?;
+    let collection_id =
+        CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+    let _guard = server.scorecard_request(&[
+        "op:read",
+        format!("tenant:{}", tenant).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+        format!("requester:{}", requester_identity.tenant).as_str(),
+    ])?;
+    let parsed_where = payload.where_fields.parse()?;
+    let api_token = headers
+        .get("x-chroma-token")
+        .map(|val| val.to_str().unwrap_or_default())
+        .map(|val| val.to_string());
+    let mut quota_payload = QuotaPayload::new(Action::Get, tenant.clone(), api_token);
+    if let Some(ids) = &payload.ids {
+        quota_payload = quota_payload.with_ids(ids);
+    }
+    if let Some(r#where) = &parsed_where {
+        quota_payload = quota_payload.with_where(r#where);
+    }
+    quota_payload = quota_payload.with_limit(payload.limit);
+
+    let quota_overrides = server.quota_enforcer.enforce(&quota_payload).await?;
+    let validated_limit = match quota_overrides {
+        Some(overrides) => overrides.limit,
+        None => payload.limit,
+    };
+
+    let metering_context_container = if requester_identity.tenant == tenant {
+        chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
+            requester_identity.tenant.clone(),
+            database.clone(),
+            collection_id.0.to_string(),
+            ReadAction::Get,
+            server.config.region.clone(),
+        ))
+    } else {
+        chroma_metering::create::<ExternalCollectionReadContext>(
+            ExternalCollectionReadContext::new(
+                requester_identity.tenant.clone(),
+                database.clone(),
+                collection_id.0.to_string(),
+                ReadAction::Get,
+                server.config.region.clone(),
+            ),
+        )
+    };
+
+    metering_context_container.enter();
+
+    chroma_metering::with_current(|context| {
+        context.start_request(Instant::now());
+    });
+
+    tracing::info!(
+        name: "collection_sample",
+        num_ids = payload.ids.as_ref().map_or(0, |ids| ids.len()),
+        include = ?payload.include,
+        has_where = parsed_where.is_some(),
+        limit = validated_limit,
+        has_seed = payload.seed.is_some(),
+    );
+
+    let request = SampleRequest::try_new(
+        tenant,
+        database,
+        collection_id,
+        payload.ids,
+        parsed_where,
+        validated_limit,
+        payload.seed,
+        payload.include,
+    )?;
+    let res = Box::pin(
+        server
+            .frontend
+            .sample(request)
+            .meter(metering_context_container),
+    )
+    .await?;
+    Ok(Json(res))
+}
+
 /// Query collection
 /// Queries a collection using dense vector search with metadata and full-text search filtering.
 #[utoipa::path(
@@ -3475,6 +3612,7 @@ impl Modify for ChromaTokenSecurityAddon {
         collection_delete,
         collection_count,
         collection_get,
+        collection_sample,
         collection_query,
         collection_search,
         attach_function,

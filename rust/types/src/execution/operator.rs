@@ -407,6 +407,34 @@ impl From<Limit> for chroma_proto::LimitOperator {
     }
 }
 
+/// Random sample control for collection sampling.
+///
+/// `limit` is the maximum number of records to return. `seed` makes the
+/// sampling deterministic for a request when present.
+#[derive(Clone, Debug, Default)]
+pub struct Sample {
+    pub limit: u32,
+    pub seed: Option<u64>,
+}
+
+impl From<chroma_proto::SampleOperator> for Sample {
+    fn from(value: chroma_proto::SampleOperator) -> Self {
+        Self {
+            limit: value.limit,
+            seed: value.seed,
+        }
+    }
+}
+
+impl From<Sample> for chroma_proto::SampleOperator {
+    fn from(value: Sample) -> Self {
+        Self {
+            limit: value.limit,
+            seed: value.seed,
+        }
+    }
+}
+
 /// The `RecordDistance` represents a measure of embedding (identified by `offset_id`) with respect to query embedding
 #[derive(Clone, Copy, Debug)]
 pub struct RecordMeasure {
@@ -636,6 +664,58 @@ impl TryFrom<GetResult> for chroma_proto::GetResult {
     fn try_from(value: GetResult) -> Result<Self, Self::Error> {
         Ok(Self {
             pulled_log_bytes: value.pulled_log_bytes,
+            records: value
+                .result
+                .records
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()?,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SampleResult {
+    pub pulled_log_bytes: u64,
+    pub strata_seen: u64,
+    pub result: ProjectionOutput,
+}
+
+impl SampleResult {
+    pub fn size_bytes(&self) -> u64 {
+        self.result
+            .records
+            .iter()
+            .map(ProjectionRecord::size_bytes)
+            .sum()
+    }
+}
+
+impl TryFrom<chroma_proto::SampleResult> for SampleResult {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::SampleResult) -> Result<Self, Self::Error> {
+        Ok(Self {
+            pulled_log_bytes: value.pulled_log_bytes,
+            strata_seen: value.strata_seen,
+            result: ProjectionOutput {
+                records: value
+                    .records
+                    .into_iter()
+                    .map(TryInto::try_into)
+                    .collect::<Result<_, _>>()?,
+            },
+        })
+    }
+}
+
+impl TryFrom<SampleResult> for chroma_proto::SampleResult {
+    type Error = QueryConversionError;
+
+    fn try_from(value: SampleResult) -> Result<Self, Self::Error> {
+        Ok(Self {
+            pulled_log_bytes: value.pulled_log_bytes,
+            strata_seen: value.strata_seen,
             records: value
                 .result
                 .records

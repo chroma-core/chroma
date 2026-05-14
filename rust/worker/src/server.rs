@@ -20,7 +20,9 @@ use chroma_types::{
         self,
         query_executor_server::{QueryExecutor, QueryExecutorServer},
     },
-    operator::{GetResult, Knn, KnnBatch, KnnBatchResult, KnnProjection, QueryVector, Scan},
+    operator::{
+        GetResult, Knn, KnnBatch, KnnBatchResult, KnnProjection, QueryVector, SampleResult, Scan,
+    },
     plan::{ReadLevel, SearchPayload},
     CollectionAndSegments, CollectionUuid, SegmentType,
 };
@@ -40,6 +42,7 @@ use crate::{
             projection::ProjectionOrchestrator,
             quantized_spann_knn::QuantizedSpannKnnOrchestrator,
             rank::{RankOrchestrator, RankOrchestratorOutput},
+            sample::SampleOrchestrator,
             spann_knn::SpannKnnOrchestrator,
             sparse_knn::SparseKnnOrchestrator,
         },
@@ -406,6 +409,70 @@ impl WorkerServer {
                     .map(TryInto::try_into)
                     .collect::<Result<_, _>>()?,
                 pulled_log_bytes,
+            })),
+            Err(err) => Err(Status::new(err.code().into(), err.to_string())),
+        }
+    }
+
+    async fn orchestrate_sample(
+        &self,
+        sample: Request<chroma_proto::SamplePlan>,
+    ) -> Result<Response<chroma_proto::SampleResult>, Status> {
+        let sample_inner = sample.into_inner();
+        let scan = sample_inner
+            .scan
+            .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
+
+        let scan = Scan::try_from(scan)?;
+        let collection_and_segments = scan.collection_and_segments;
+        let collection_id = collection_and_segments.collection.collection_id;
+        let fetch_log = self.fetch_log(
+            &collection_and_segments,
+            self.fetch_log_batch_size,
+            scan.log_upper_bound_offset,
+        )?;
+
+        let filter = sample_inner
+            .filter
+            .ok_or(Status::invalid_argument("Invalid Filter Operator"))?;
+
+        let sample_operator = sample_inner
+            .sample
+            .ok_or(Status::invalid_argument("Invalid Sample Operator"))?;
+
+        let projection = sample_inner
+            .projection
+            .ok_or(Status::invalid_argument("Invalid Projection Operator"))?;
+
+        let sample_orchestrator = SampleOrchestrator::new(
+            self.blockfile_provider.clone(),
+            self.spann_provider.clone(),
+            self.clone_dispatcher()?,
+            // TODO: Make this configurable
+            1000,
+            collection_and_segments,
+            fetch_log,
+            filter.try_into()?,
+            sample_operator.into(),
+            projection.into(),
+            self.bloom_filter_manager_for_collection(collection_id),
+            scan.shard_index,
+            scan.num_shards,
+        );
+
+        match sample_orchestrator.run(self.system.clone()).await {
+            Ok(SampleResult {
+                pulled_log_bytes,
+                strata_seen,
+                result,
+            }) => Ok(Response::new(chroma_proto::SampleResult {
+                records: result
+                    .records
+                    .into_iter()
+                    .map(TryInto::try_into)
+                    .collect::<Result<_, _>>()?,
+                pulled_log_bytes,
+                strata_seen,
             })),
             Err(err) => Err(Status::new(err.code().into(), err.to_string())),
         }
@@ -869,6 +936,13 @@ impl QueryExecutor for WorkerServer {
         get: Request<chroma_proto::GetPlan>,
     ) -> Result<Response<chroma_proto::GetResult>, Status> {
         self.orchestrate_get(get).await
+    }
+
+    async fn sample(
+        &self,
+        sample: Request<chroma_proto::SamplePlan>,
+    ) -> Result<Response<chroma_proto::SampleResult>, Status> {
+        self.orchestrate_sample(sample).await
     }
 
     async fn knn(

@@ -295,6 +295,17 @@ export type GetRequestPayload = RawWhereFields & {
 };
 
 /**
+ * Records can be randomly sampled by ID, metadata, or document filters. Use `include` to specify
+ * which fields to return in the response.
+ */
+export type SampleRequestPayload = RawWhereFields & {
+    ids?: Array<string> | null;
+    include?: IncludeList;
+    limit?: number;
+    seed?: number | null;
+};
+
+/**
  * All arrays have the same length, with each index representing a single record.
  * Only fields specified in the request's `include` parameter are populated.
  */
@@ -1920,6 +1931,52 @@ export type CollectionGetResponses = {
 };
 
 export type CollectionGetResponse = CollectionGetResponses[keyof CollectionGetResponses];
+
+export type CollectionSampleData = {
+    body: SampleRequestPayload;
+    path: {
+        /**
+         * Tenant UUID
+         */
+        tenant: string;
+        /**
+         * Database name
+         */
+        database: string;
+        /**
+         * Collection UUID
+         */
+        collection_id: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/sample';
+};
+
+export type CollectionSampleErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Collection not found
+     */
+    404: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type CollectionSampleError = CollectionSampleErrors[keyof CollectionSampleErrors];
+
+export type CollectionSampleResponses = {
+    /**
+     * Records sampled from the collection
+     */
+    200: GetResponse;
+};
+
+export type CollectionSampleResponse = CollectionSampleResponses[keyof CollectionSampleResponses];
 
 export type IndexingStatusData = {
     body?: never;

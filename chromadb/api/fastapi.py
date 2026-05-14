@@ -571,6 +571,52 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             included=include,
         )
 
+    @trace_method("FastAPI._sample", OpenTelemetryGranularity.OPERATION)
+    @override
+    def _sample(
+        self,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        limit: int = 10,
+        seed: Optional[int] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocuments,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
+        filtered_include = [i for i in include if i != "data"]
+
+        resp_json = self._make_request(
+            "post",
+            f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/sample",
+            json={
+                "ids": ids,
+                "where": where,
+                "limit": limit,
+                "seed": seed,
+                "where_document": where_document,
+                "include": filtered_include,
+            },
+        )
+
+        metadatas = resp_json.get("metadatas", None)
+        if metadatas is not None:
+            metadatas = [
+                deserialize_metadata(metadata) if metadata is not None else None
+                for metadata in metadatas
+            ]
+
+        return GetResult(
+            ids=resp_json["ids"],
+            embeddings=resp_json.get("embeddings", None),
+            metadatas=metadatas,
+            documents=resp_json.get("documents", None),
+            data=None,
+            uris=resp_json.get("uris", None),
+            included=include,
+        )
+
     @trace_method("FastAPI._delete", OpenTelemetryGranularity.OPERATION)
     @override
     def _delete(

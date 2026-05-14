@@ -22,7 +22,7 @@ use chroma_types::{
     GetCollectionRequest, GetDatabaseRequest, GetResponse, GetTenantRequest, GetTenantResponse,
     HeartbeatError, IncludeList, InternalCollectionConfiguration,
     InternalUpdateCollectionConfiguration, KnnIndex, ListCollectionsRequest, ListDatabasesRequest,
-    Metadata, QueryResponse, UpdateCollectionConfiguration, UpdateCollectionRequest,
+    Metadata, QueryResponse, SampleRequest, UpdateCollectionConfiguration, UpdateCollectionRequest,
     UpdateMetadata, WrappedSerdeJsonError,
 };
 use pyo3::{exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, Python};
@@ -676,6 +676,54 @@ impl Bindings {
         let result = py.allow_threads(move || {
             self.runtime
                 .block_on(async { Box::pin(frontend_clone.get(request)).await })
+        })?;
+        Ok(result)
+    }
+
+    #[pyo3(
+        signature = (collection_id, ids = None, r#where = None, limit = 10, seed = None, where_document = None, include = ["metadatas".to_string(), "documents".to_string()].to_vec(), tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+    )]
+    #[allow(clippy::too_many_arguments)]
+    fn sample(
+        &self,
+        collection_id: String,
+        ids: Option<Vec<String>>,
+        r#where: Option<String>,
+        limit: u32,
+        seed: Option<u64>,
+        where_document: Option<String>,
+        include: Vec<String>,
+        tenant: String,
+        database: String,
+        py: Python<'_>,
+    ) -> ChromaPyResult<GetResponse> {
+        let r#where = chroma_types::RawWhereFields::from_json_str(
+            r#where.as_deref(),
+            where_document.as_deref(),
+        )?
+        .parse()?;
+
+        let collection_id = chroma_types::CollectionUuid(
+            uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
+        );
+
+        let include = IncludeList::try_from(include)?;
+
+        let request = SampleRequest::try_new(
+            tenant,
+            database,
+            collection_id,
+            ids,
+            r#where,
+            limit,
+            seed,
+            include,
+        )?;
+
+        let mut frontend_clone = self.frontend.clone();
+        let result = py.allow_threads(move || {
+            self.runtime
+                .block_on(async { Box::pin(frontend_clone.sample(request)).await })
         })?;
         Ok(result)
     }

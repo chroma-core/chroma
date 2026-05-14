@@ -1,8 +1,8 @@
 use super::{
     error::QueryConversionError,
     operator::{
-        Filter, GroupBy, KnnBatch, KnnProjection, Limit, Projection, Rank, Scan, ScanToProtoError,
-        Select,
+        Filter, GroupBy, KnnBatch, KnnProjection, Limit, Projection, Rank, Sample, Scan,
+        ScanToProtoError, Select,
     },
 };
 use crate::{
@@ -104,6 +104,53 @@ impl TryFrom<Get> for chroma_proto::GetPlan {
             scan: Some(value.scan.try_into()?),
             filter: Some(value.filter.try_into()?),
             limit: Some(value.limit.into()),
+            projection: Some(value.proj.into()),
+        })
+    }
+}
+
+/// The `Sample` plan should output a random sample of records matching the specified filter.
+#[derive(Clone, Debug)]
+pub struct SamplePlan {
+    pub scan: Scan,
+    pub filter: Filter,
+    pub sample: Sample,
+    pub proj: Projection,
+}
+
+impl TryFrom<chroma_proto::SamplePlan> for SamplePlan {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::SamplePlan) -> Result<Self, Self::Error> {
+        Ok(Self {
+            scan: value
+                .scan
+                .ok_or(QueryConversionError::field("scan"))?
+                .try_into()?,
+            filter: value
+                .filter
+                .ok_or(QueryConversionError::field("filter"))?
+                .try_into()?,
+            sample: value
+                .sample
+                .ok_or(QueryConversionError::field("sample"))?
+                .into(),
+            proj: value
+                .projection
+                .ok_or(QueryConversionError::field("projection"))?
+                .into(),
+        })
+    }
+}
+
+impl TryFrom<SamplePlan> for chroma_proto::SamplePlan {
+    type Error = QueryConversionError;
+
+    fn try_from(value: SamplePlan) -> Result<Self, Self::Error> {
+        Ok(Self {
+            scan: Some(value.scan.try_into()?),
+            filter: Some(value.filter.try_into()?),
+            sample: Some(value.sample.into()),
             projection: Some(value.proj.into()),
         })
     }

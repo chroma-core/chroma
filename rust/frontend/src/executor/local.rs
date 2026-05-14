@@ -12,11 +12,13 @@ use chroma_system::ComponentHandle;
 use chroma_types::{
     operator::{
         CountResult, Filter, GetResult, KnnBatchResult, KnnProjectionOutput, KnnProjectionRecord,
-        Limit, Projection, ProjectionRecord, RecordMeasure, SearchResult,
+        Limit, Projection, ProjectionOutput, ProjectionRecord, RecordMeasure, SampleResult,
+        SearchResult,
     },
-    plan::{Count, Get, Knn, Search},
+    plan::{Count, Get, Knn, SamplePlan, Search},
     CollectionAndSegments, CollectionUuid, ExecutorError, SegmentType, Space,
 };
+use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
@@ -136,6 +138,90 @@ impl LocalExecutor {
             }
         }
         Ok(result)
+    }
+
+    pub async fn sample<F, Fut>(
+        &mut self,
+        plan: SamplePlan,
+        _: F,
+    ) -> Result<SampleResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<SamplePlan, Box<dyn ChromaError>>>,
+    {
+        let collection_and_segments = plan.scan.collection_and_segments.clone();
+        self.try_backfill_collection(&collection_and_segments)
+            .await?;
+
+        if plan.sample.limit == 0 {
+            return Ok(SampleResult {
+                pulled_log_bytes: 0,
+                strata_seen: 0,
+                result: ProjectionOutput { records: vec![] },
+            });
+        }
+
+        let mut filtered = self
+            .metadata_reader
+            .get(Get {
+                scan: plan.scan.clone(),
+                filter: plan.filter,
+                limit: Limit {
+                    offset: 0,
+                    limit: None,
+                },
+                proj: Projection::default(),
+            })
+            .await
+            .map_err(|err| ExecutorError::Internal(Box::new(err)))?
+            .result
+            .records
+            .into_iter()
+            .map(|record| record.id)
+            .collect::<Vec<_>>();
+
+        let strata_seen = filtered.len() as u64;
+        let mut rng = match plan.sample.seed {
+            Some(seed) => StdRng::seed_from_u64(seed),
+            None => StdRng::from_entropy(),
+        };
+        filtered.shuffle(&mut rng);
+        filtered.truncate(plan.sample.limit as usize);
+
+        let mut hydrated = self
+            .get(
+                Get {
+                    scan: plan.scan,
+                    filter: Filter {
+                        query_ids: Some(filtered.clone()),
+                        where_clause: None,
+                    },
+                    limit: Limit {
+                        offset: 0,
+                        limit: None,
+                    },
+                    proj: plan.proj,
+                },
+                |_| async { unreachable!("local sample hydration should not replan") },
+            )
+            .await?;
+
+        let mut by_id = hydrated
+            .result
+            .records
+            .drain(..)
+            .map(|record| (record.id.clone(), record))
+            .collect::<HashMap<_, _>>();
+        let records = filtered
+            .into_iter()
+            .filter_map(|id| by_id.remove(&id))
+            .collect();
+
+        Ok(SampleResult {
+            pulled_log_bytes: hydrated.pulled_log_bytes,
+            strata_seen,
+            result: ProjectionOutput { records },
+        })
     }
 
     pub async fn knn<F, Fut>(&mut self, plan: Knn, _: F) -> Result<KnnBatchResult, ExecutorError>

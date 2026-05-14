@@ -460,6 +460,41 @@ class RustBindingsAPI(ServerAPI):
         )
 
     @override
+    def _sample(
+        self,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        limit: int = 10,
+        seed: Optional[int] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocuments,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
+        rust_response = self.bindings.sample(
+            str(collection_id),
+            ids,
+            json.dumps(where) if where else None,
+            limit,
+            seed,
+            json.dumps(where_document) if where_document else None,
+            include,
+            tenant,
+            database,
+        )
+
+        return GetResult(
+            ids=rust_response.ids,
+            embeddings=rust_response.embeddings,
+            documents=rust_response.documents,
+            uris=rust_response.uris,
+            included=include,
+            data=None,
+            metadatas=rust_response.metadatas,
+        )
+
+    @override
     def _add(
         self,
         ids: IDs,

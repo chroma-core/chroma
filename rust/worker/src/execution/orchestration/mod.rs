@@ -10,5 +10,6 @@ pub mod projection;
 pub mod quantized_spann_knn;
 pub mod rank;
 pub mod register_orchestrator;
+pub mod sample;
 pub mod spann_knn;
 pub mod sparse_knn;

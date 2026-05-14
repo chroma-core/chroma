@@ -2,8 +2,8 @@ use std::future::Future;
 
 use chroma_error::ChromaError;
 use chroma_types::{
-    operator::{CountResult, GetResult, KnnBatchResult, SearchResult},
-    plan::{Count, Get, Knn, Search},
+    operator::{CountResult, GetResult, KnnBatchResult, SampleResult, SearchResult},
+    plan::{Count, Get, Knn, SamplePlan, Search},
     ExecutorError, SegmentType,
 };
 use distributed::DistributedExecutor;
@@ -53,6 +53,22 @@ impl Executor {
                 distributed_executor.get(plan, replan_closure).await
             }
             Executor::Local(local_executor) => local_executor.get(plan, replan_closure).await,
+        }
+    }
+    pub async fn sample<F, Fut>(
+        &mut self,
+        plan: SamplePlan,
+        replan_closure: F,
+    ) -> Result<SampleResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<SamplePlan, Box<dyn ChromaError>>>,
+    {
+        match self {
+            Executor::Distributed(distributed_executor) => {
+                distributed_executor.sample(plan, replan_closure).await
+            }
+            Executor::Local(local_executor) => local_executor.sample(plan, replan_closure).await,
         }
     }
     pub async fn knn<F, Fut>(

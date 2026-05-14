@@ -74,6 +74,7 @@ pub use chroma_types::PrimitiveOperator;
 pub use chroma_types::QueryError;
 pub use chroma_types::QueryRequest;
 pub use chroma_types::QueryResponse;
+pub use chroma_types::SampleRequest;
 pub use chroma_types::ScalarEncoding;
 pub use chroma_types::Schema;
 pub use chroma_types::SchemaBuilderError;

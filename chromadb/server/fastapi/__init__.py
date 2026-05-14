@@ -65,6 +65,7 @@ from chromadb.server.fastapi.types import (
     DeleteEmbedding,
     GetEmbedding,
     QueryEmbedding,
+    SampleEmbedding,
     CreateCollection,
     UpdateCollection,
     UpdateEmbedding,
@@ -383,6 +384,13 @@ class FastAPI(Server):
             methods=["POST"],
             response_model=None,
             openapi_extra=self.get_openapi_extras_for_body_model(GetEmbedding),
+        )
+        self.router.add_api_route(
+            "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/sample",
+            self.sample,
+            methods=["POST"],
+            response_model=None,
+            openapi_extra=self.get_openapi_extras_for_body_model(SampleEmbedding),
         )
         self.router.add_api_route(
             "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/delete",
@@ -1282,6 +1290,56 @@ class FastAPI(Server):
             ]
 
         return get_result
+
+    @trace_method("FastAPI.sample", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
+    async def sample(
+        self,
+        collection_id: str,
+        tenant: str,
+        database_name: str,
+        request: Request,
+    ) -> GetResult:
+        def process_sample(request: Request, raw_body: bytes) -> GetResult:
+            sample = validate_model(SampleEmbedding, orjson.loads(raw_body))
+            self.sync_auth_request(
+                request.headers,
+                AuthzAction.GET,
+                tenant,
+                database_name,
+                collection_id,
+            )
+            self._set_request_context(request=request)
+            add_attributes_to_current_span({"tenant": tenant})
+            return self._api._sample(
+                collection_id=_uuid(collection_id),
+                ids=sample.ids,
+                where=sample.where,
+                limit=sample.limit,
+                seed=sample.seed,
+                where_document=sample.where_document,
+                include=sample.include,
+                tenant=tenant,
+                database=database_name,
+            )
+
+        sample_result = cast(
+            GetResult,
+            await to_thread.run_sync(
+                process_sample,
+                request,
+                await request.body(),
+                limiter=self._capacity_limiter,
+            ),
+        )
+
+        if sample_result["embeddings"] is not None:
+            sample_result["embeddings"] = [
+                cast(Embedding, embedding).tolist()
+                for embedding in sample_result["embeddings"]
+            ]
+
+        return sample_result
 
     @trace_method("FastAPI.delete", OpenTelemetryGranularity.OPERATION)
     @rate_limit

@@ -6,6 +6,7 @@ use crate::operator::Key;
 use crate::operator::KnnBatchResult;
 use crate::operator::KnnProjectionRecord;
 use crate::operator::ProjectionRecord;
+use crate::operator::SampleResult;
 use crate::operator::SearchResult;
 use crate::operators_generated::{
     FUNCTION_RECORD_COUNTER_ID, FUNCTION_RECORD_COUNTER_NAME, FUNCTION_STATISTICS_ID,
@@ -2061,6 +2062,96 @@ impl From<(GetResult, IncludeList)> for GetResponse {
             }
         }
         res
+    }
+}
+
+////////////////////////// Sample //////////////////////////
+
+fn default_sample_limit() -> u32 {
+    10
+}
+
+/// Records can be randomly sampled by ID, metadata, or document filters. Use `include` to specify
+/// which fields to return in the response.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct SampleRequestPayload {
+    pub ids: Option<Vec<String>>,
+    #[serde(flatten)]
+    pub where_fields: RawWhereFields,
+    #[serde(default = "default_sample_limit")]
+    pub limit: u32,
+    pub seed: Option<u64>,
+    #[serde(default = "IncludeList::default_get")]
+    pub include: IncludeList,
+}
+
+#[non_exhaustive]
+#[derive(Debug, Clone, Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct SampleRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    pub collection_id: CollectionUuid,
+    pub ids: Option<Vec<String>>,
+    pub r#where: Option<Where>,
+    pub limit: u32,
+    pub seed: Option<u64>,
+    pub include: IncludeList,
+}
+
+impl SampleRequest {
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_new(
+        tenant_id: String,
+        database_name: String,
+        collection_id: CollectionUuid,
+        ids: Option<Vec<String>>,
+        r#where: Option<Where>,
+        limit: u32,
+        seed: Option<u64>,
+        include: IncludeList,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            database_name,
+            collection_id,
+            ids,
+            r#where,
+            limit,
+            seed,
+            include,
+        };
+        request.validate().map_err(ChromaValidationError::from)?;
+        Ok(request)
+    }
+
+    pub fn into_payload(self) -> Result<SampleRequestPayload, WhereError> {
+        let where_fields = if let Some(r#where) = self.r#where.as_ref() {
+            RawWhereFields::from_json_str(Some(&serde_json::to_string(r#where)?), None)?
+        } else {
+            RawWhereFields::default()
+        };
+        Ok(SampleRequestPayload {
+            ids: self.ids,
+            where_fields,
+            limit: self.limit,
+            seed: self.seed,
+            include: self.include,
+        })
+    }
+}
+
+impl From<(SampleResult, IncludeList)> for GetResponse {
+    fn from((result, include): (SampleResult, IncludeList)) -> Self {
+        (
+            GetResult {
+                pulled_log_bytes: result.pulled_log_bytes,
+                result: result.result,
+            },
+            include,
+        )
+            .into()
     }
 }
 

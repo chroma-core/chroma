@@ -356,6 +356,85 @@ export const ApiApiFetchParamCreator = function (
       };
     },
     /**
+     * @summary Sample records
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Database name</p>
+     * @param {string} collectionId <p>Collection UUID</p>
+     * @param {Api.SampleRequestPayload} request
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    collectionSample(
+      tenant: string,
+      database: string,
+      collectionId: string,
+      request: Api.SampleRequestPayload,
+      options: RequestInit = {},
+    ): FetchArgs {
+      if (tenant === null || tenant === undefined) {
+        throw new RequiredError(
+          "tenant",
+          "Required parameter tenant was null or undefined when calling collectionSample.",
+        );
+      }
+      if (database === null || database === undefined) {
+        throw new RequiredError(
+          "database",
+          "Required parameter database was null or undefined when calling collectionSample.",
+        );
+      }
+      if (collectionId === null || collectionId === undefined) {
+        throw new RequiredError(
+          "collectionId",
+          "Required parameter collectionId was null or undefined when calling collectionSample.",
+        );
+      }
+      if (request === null || request === undefined) {
+        throw new RequiredError(
+          "request",
+          "Required parameter request was null or undefined when calling collectionSample.",
+        );
+      }
+      let localVarPath =
+        `/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/sample`
+          .replace("{tenant}", encodeURIComponent(String(tenant)))
+          .replace("{database}", encodeURIComponent(String(database)))
+          .replace("{collection_id}", encodeURIComponent(String(collectionId)));
+      const localVarPathQueryStart = localVarPath.indexOf("?");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "POST" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
+      if (localVarPathQueryStart !== -1) {
+        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
+      }
+
+      localVarHeaderParameter.set("Content-Type", "application/json");
+
+      localVarRequestOptions.headers = localVarHeaderParameter;
+
+      if (request !== undefined) {
+        localVarRequestOptions.body = JSON.stringify(request || {});
+      }
+
+      const localVarQueryParameterString = localVarQueryParameter.toString();
+      if (localVarQueryParameterString) {
+        localVarPath += "?" + localVarQueryParameterString;
+      }
+      return {
+        url: localVarPath,
+        options: localVarRequestOptions,
+      };
+    },
+    /**
      * @summary Query a collection in a variety of ways, including vector search, metadata filtering, and full-text search
      * @param {string} tenant <p>Tenant ID</p>
      * @param {string} database <p>Database name containing the collection</p>
@@ -2003,6 +2082,63 @@ export const ApiApiFp = function (configuration?: Configuration) {
       };
     },
     /**
+     * @summary Sample records
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Database name</p>
+     * @param {string} collectionId <p>Collection UUID</p>
+     * @param {Api.SampleRequestPayload} request
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    collectionSample(
+      tenant: string,
+      database: string,
+      collectionId: string,
+      request: Api.SampleRequestPayload,
+      options?: RequestInit,
+    ): (fetch?: FetchAPI, basePath?: string) => Promise<Api.GetResponse> {
+      const localVarFetchArgs = ApiApiFetchParamCreator(
+        configuration,
+      ).collectionSample(tenant, database, collectionId, request, options);
+      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
+
+          if (response.status === 200) {
+            if (mimeType === "application/json") {
+              return response.json() as any;
+            }
+            throw response;
+          }
+          if (response.status === 401) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 404) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          throw response;
+        });
+      };
+    },
+    /**
      * @summary Query a collection in a variety of ways, including vector search, metadata filtering, and full-text search
      * @param {string} tenant <p>Tenant ID</p>
      * @param {string} database <p>Database name containing the collection</p>
@@ -3303,6 +3439,31 @@ export class ApiApi extends BaseAPI {
     options?: RequestInit,
   ) {
     return ApiApiFp(this.configuration).collectionGet(
+      tenant,
+      database,
+      collectionId,
+      request,
+      options,
+    )(this.fetch, this.basePath);
+  }
+
+  /**
+   * @summary Sample records
+   * @param {string} tenant <p>Tenant ID</p>
+   * @param {string} database <p>Database name</p>
+   * @param {string} collectionId <p>Collection UUID</p>
+   * @param {Api.SampleRequestPayload} request
+   * @param {RequestInit} [options] Override http request option.
+   * @throws {RequiredError}
+   */
+  public collectionSample(
+    tenant: string,
+    database: string,
+    collectionId: string,
+    request: Api.SampleRequestPayload,
+    options?: RequestInit,
+  ) {
+    return ApiApiFp(this.configuration).collectionSample(
       tenant,
       database,
       collectionId,
