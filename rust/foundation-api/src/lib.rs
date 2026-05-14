@@ -44,12 +44,68 @@ pub async fn foundation_service_entrypoint_with_config(
     init_otel_tracing: bool,
 ) {
     let system = chroma_system::System::new();
+    let registry = chroma_config::registry::Registry::new();
 
     if init_otel_tracing {
         init_foundation_otel_tracing(config);
     }
 
-    FoundationApiServer::new(config.clone(), auth, system)
+    let sysdb = match <chroma_sysdb::SysDb as chroma_config::Configurable<(
+        chroma_sysdb::SysDbConfig,
+        Option<chroma_sysdb::GrpcSysDbConfig>,
+    )>>::try_from_config(&(config.sysdb.clone(), None), &registry)
+    .await
+    {
+        Ok(sysdb) => sysdb,
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                "foundation-api startup failed: could not construct SysDb client from config",
+            );
+            return;
+        }
+    };
+
+    let rules = match build_scorecard_rules(&config.base.scorecard) {
+        Ok(rules) => rules,
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                "foundation-api startup failed: invalid scorecard rule pattern",
+            );
+            return;
+        }
+    };
+
+    FoundationApiServer::new(config.clone(), auth, sysdb, rules, system)
         .run(None)
         .await;
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum ScorecardRuleError {
+    #[error("Invalid scorecard pattern: {0}")]
+    InvalidPattern(String),
+}
+
+fn build_scorecard_rules(
+    config_rules: &[frontend_core::config::ScorecardRule],
+) -> Result<Vec<mdac::Rule>, ScorecardRuleError> {
+    config_rules
+        .iter()
+        .map(|rule| {
+            let patterns = rule
+                .patterns
+                .iter()
+                .map(|p| {
+                    mdac::Pattern::new(p)
+                        .ok_or_else(|| ScorecardRuleError::InvalidPattern(p.clone()))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(mdac::Rule {
+                patterns,
+                limit: rule.score as usize,
+            })
+        })
+        .collect()
 }
