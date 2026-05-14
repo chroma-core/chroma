@@ -18,6 +18,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -173,14 +174,19 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 			return common.ErrCannotAttachToOutputCollection
 		}
 
-		// Validate params - currently no functions accept params
-		if req.Params != nil && len(req.Params.Fields) > 0 {
-			log.Error("AttachFunction: params must be empty - no functions currently accept parameters")
-			return status.Errorf(codes.InvalidArgument, "params must be empty - no functions currently accept parameters")
-		}
-
 		// Serialize params
-		paramsJSON := "{}"
+		var paramsJSON string
+		if req.Params != nil && len(req.Params.Fields) > 0 {
+			// Convert protobuf Struct to JSON
+			paramsBytes, err := protojson.Marshal(req.Params)
+			if err != nil {
+				log.Error("AttachFunction: failed to serialize params", zap.Error(err))
+				return status.Errorf(codes.InvalidArgument, "failed to serialize params: %v", err)
+			}
+			paramsJSON = string(paramsBytes)
+		} else {
+			paramsJSON = "{}"
+		}
 
 		// Create attached function
 		now := time.Now()

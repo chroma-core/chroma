@@ -12,15 +12,17 @@ use chroma_segment::{
 };
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{
-    Chunk, CollectionUuid, LogRecord, MaterializedLogOperation, Operation, OperationRecord,
-    Segment, SegmentShard, SegmentShardError, UpdateMetadataValue, FUNCTION_DUMMY_ASYNC_ID,
-    FUNCTION_RECORD_COUNTER_ID, FUNCTION_STATISTICS_ID,
+    AttachedFunction, Chunk, CollectionUuid, LogRecord, MaterializedLogOperation, Operation,
+    OperationRecord, Segment, SegmentShard, SegmentShardError, UpdateMetadataValue,
+    FUNCTION_DUMMY_ASYNC_ID, FUNCTION_HTTP_GENERATE_ID, FUNCTION_RECORD_COUNTER_ID,
+    FUNCTION_STATISTICS_ID,
 };
 use std::sync::Arc;
 use thiserror::Error;
-use uuid::Uuid;
 
-use crate::execution::functions::{CounterFunctionFactory, StatisticsFunctionExecutor};
+use crate::execution::functions::{
+    CounterFunctionFactory, HttpGenerateExecutor, StatisticsFunctionExecutor,
+};
 use crate::execution::operators::materialize_logs::MaterializeLogOutput;
 
 // Constants for CountAttachedFunction
@@ -179,18 +181,25 @@ impl ExecuteAttachedFunctionOperator {
     /// Create a new ExecuteAttachedFunctionOperator from an AttachedFunction.
     /// The executor is selected based on the function_id in the attached function.
     pub(crate) fn from_attached_function(
-        function_id: Uuid,
+        attached_function: &AttachedFunction,
         log_client: Log,
     ) -> Result<Self, ExecuteAttachedFunctionError> {
+        let function_id = attached_function.function_id;
         let executor: Arc<dyn AttachedFunctionExecutor> = match function_id {
-            // For the record counter, use CountAttachedFunction
             FUNCTION_RECORD_COUNTER_ID => Arc::new(CountAttachedFunction),
-            // For statistics, use StatisticsFunctionExecutor with CounterFunctionFactory
             FUNCTION_STATISTICS_ID => {
                 Arc::new(StatisticsFunctionExecutor(Box::new(CounterFunctionFactory)))
             }
-            // For dummy_async - use DummyAttachedFunction that returns empty output
             FUNCTION_DUMMY_ASYNC_ID => Arc::new(DummyAttachedFunction),
+            FUNCTION_HTTP_GENERATE_ID => {
+                let executor = HttpGenerateExecutor::from_attached_function(attached_function)
+                    .map_err(|e| {
+                        ExecuteAttachedFunctionError::ExecutorConfig(format!(
+                            "HttpGenerateExecutor: {e}"
+                        ))
+                    })?;
+                Arc::new(executor)
+            }
             _ => {
                 tracing::error!("Unknown function_id UUID: {}", function_id);
                 return Err(ExecuteAttachedFunctionError::InvalidUuid(format!(
@@ -247,6 +256,8 @@ pub enum ExecuteAttachedFunctionError {
     RecordReader(#[from] RecordSegmentReaderShardCreationError),
     #[error("Invalid collection UUID: {0}")]
     InvalidUuid(String),
+    #[error("Executor configuration error: {0}")]
+    ExecutorConfig(String),
     #[error("Log offset arithmetic overflow: base_offset={0}, record_index={1}")]
     LogOffsetOverflow(i64, usize),
     #[error("Log offset overflow: base_offset={0}, record_index={1}")]
@@ -261,6 +272,9 @@ impl ChromaError for ExecuteAttachedFunctionError {
             ExecuteAttachedFunctionError::SegmentRead(e) => e.code(),
             ExecuteAttachedFunctionError::RecordReader(e) => e.code(),
             ExecuteAttachedFunctionError::InvalidUuid(_) => {
+                chroma_error::ErrorCodes::InvalidArgument
+            }
+            ExecuteAttachedFunctionError::ExecutorConfig(_) => {
                 chroma_error::ErrorCodes::InvalidArgument
             }
             ExecuteAttachedFunctionError::LogOffsetOverflow(_, _) => {
