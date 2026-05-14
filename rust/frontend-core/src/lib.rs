@@ -9,6 +9,7 @@
 
 pub mod ac;
 pub mod auth;
+pub mod collection_ops;
 pub mod config;
 pub mod errors;
 pub mod middleware;

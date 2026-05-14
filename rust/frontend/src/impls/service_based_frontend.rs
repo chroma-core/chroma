@@ -43,17 +43,15 @@ use chroma_types::{
     GetTenantResponse, HealthCheckResponse, HeartbeatError, Include, IndexStatusError,
     IndexStatusResponse, KnnIndex, ListCollectionsRequest, ListCollectionsResponse,
     ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord,
-    Quantization, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse, Schema,
-    SchemaError, SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
-    SparseIndexAlgorithm, UpdateCollectionError, UpdateCollectionRecordsError,
+    QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse, Schema, SearchRequest,
+    SearchResponse, SegmentType, UpdateCollectionError, UpdateCollectionRecordsError,
     UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
     UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse,
     UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse,
-    VectorIndexConfiguration, Where,
+    Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
-use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -1153,182 +1151,35 @@ impl ServiceBasedFrontend {
             database_name,
             name,
             metadata,
-            mut configuration,
+            configuration,
             schema,
             get_or_create,
             ..
         }: CreateCollectionRequest,
     ) -> Result<CreateCollectionResponse, CreateCollectionError> {
-        let collection_id = CollectionUuid::new();
-
-        let supported_segment_types: HashSet<SegmentType> =
-            self.get_supported_segment_types().into_iter().collect();
-
-        if let Some(config) = configuration.as_ref() {
-            match &config.vector_index {
-                VectorIndexConfiguration::Spann { .. } => {
-                    if !supported_segment_types.contains(&SegmentType::Spann)
-                        && !supported_segment_types.contains(&SegmentType::QuantizedSpann)
-                    {
-                        return Err(CreateCollectionError::SpannNotImplemented);
-                    }
-                }
-                VectorIndexConfiguration::Hnsw { .. } => {
-                    if !supported_segment_types.contains(&SegmentType::HnswDistributed)
-                        && !supported_segment_types.contains(&SegmentType::HnswLocalMemory)
-                        && !supported_segment_types.contains(&SegmentType::HnswLocalPersisted)
-                    {
-                        return Err(CreateCollectionError::HnswNotSupported);
-                    }
-                }
-            }
-        }
-
-        // Check default server configuration's index type
-        match self.default_knn_index {
-            KnnIndex::Spann => {
-                if !supported_segment_types.contains(&SegmentType::Spann)
-                    && !supported_segment_types.contains(&SegmentType::QuantizedSpann)
-                {
-                    return Err(CreateCollectionError::SpannNotImplemented);
-                }
-            }
-            KnnIndex::Hnsw => {
-                if !supported_segment_types.contains(&SegmentType::HnswDistributed)
-                    && !supported_segment_types.contains(&SegmentType::HnswLocalMemory)
-                    && !supported_segment_types.contains(&SegmentType::HnswLocalPersisted)
-                {
-                    return Err(CreateCollectionError::HnswNotSupported);
-                }
-            }
-        }
-
-        let mut reconciled_schema = if self.enable_schema {
-            // its safe to take here, bc we're moving all config info to schema
-            // when configuration is None, we then populate in sysdb with empty config {}
-            // this allows for easier migration paths in the future
-            let config_for_reconcile = configuration.take();
-            match Schema::reconcile_schema_and_config(
-                schema.as_ref(),
-                config_for_reconcile.as_ref(),
-                self.default_knn_index,
-            ) {
-                Ok(schema) => Some(schema),
-                Err(e) => {
-                    return Err(CreateCollectionError::InvalidSchema(e));
-                }
-            }
-        } else {
-            None
-        };
-
-        // Enable quantization for tenants in the config list (or all tenants if "*" is present)
-        if let Some(ref mut schema) = reconciled_schema {
-            if self.should_enable_quantization_for_tenant(&tenant_id) {
-                schema.quantize(Quantization::FourBitRabitQWithUSearch);
-            }
-        }
-
-        // Enable MaxScore sparse index for tenants in the config list
-        if let Some(ref mut schema) = reconciled_schema {
-            if self.should_enable_maxscore_for_tenant(&tenant_id) {
-                schema.set_sparse_algorithm(SparseIndexAlgorithm::MaxScore);
-            }
-        }
-
-        let segments = match self.executor {
-            Executor::Distributed(_) => {
-                let mut vector_segment_type = SegmentType::HnswDistributed;
-                if self.enable_schema {
-                    if let Some(schema) = reconciled_schema.as_ref() {
-                        if schema.get_internal_spann_config().is_some() {
-                            // Use QuantizedSpann if quantization is enabled, otherwise use Spann
-                            if schema.is_quantization_enabled() {
-                                vector_segment_type = SegmentType::QuantizedSpann;
-                            } else {
-                                vector_segment_type = SegmentType::Spann;
-                            }
-                        }
-                    }
-                }
-                if let Some(config) = configuration.as_ref() {
-                    if matches!(config.vector_index, VectorIndexConfiguration::Spann(_)) {
-                        vector_segment_type = SegmentType::Spann;
-                    }
-                }
-
-                vec![
-                    Segment {
-                        id: SegmentUuid::new(),
-                        r#type: vector_segment_type,
-                        scope: SegmentScope::VECTOR,
-                        collection: collection_id,
-                        metadata: None,
-                        file_path: Default::default(),
-                    },
-                    Segment {
-                        id: SegmentUuid::new(),
-                        r#type: SegmentType::BlockfileMetadata,
-                        scope: SegmentScope::METADATA,
-                        collection: collection_id,
-                        metadata: None,
-                        file_path: Default::default(),
-                    },
-                    Segment {
-                        id: SegmentUuid::new(),
-                        r#type: SegmentType::BlockfileRecord,
-                        scope: SegmentScope::RECORD,
-                        collection: collection_id,
-                        metadata: None,
-                        file_path: Default::default(),
-                    },
-                ]
-            }
-            Executor::Local(_) => {
-                if self.enable_schema {
-                    if let Some(schema) = reconciled_schema.as_ref() {
-                        if schema.is_sparse_index_enabled() {
-                            return Err(CreateCollectionError::InvalidSchema(
-                                SchemaError::InvalidUserInput {
-                                    reason: "Sparse vector indexing is not enabled in local"
-                                        .to_string(),
-                                },
-                            ));
-                        }
-                    }
-                }
-
-                vec![
-                    Segment {
-                        id: SegmentUuid::new(),
-                        r#type: SegmentType::HnswLocalPersisted,
-                        scope: SegmentScope::VECTOR,
-                        collection: collection_id,
-                        metadata: None,
-                        file_path: Default::default(),
-                    },
-                    Segment {
-                        id: SegmentUuid::new(),
-                        r#type: SegmentType::Sqlite,
-                        scope: SegmentScope::METADATA,
-                        collection: collection_id,
-                        metadata: None,
-                        file_path: Default::default(),
-                    },
-                ]
-            }
-        };
+        let plan = frontend_core::collection_ops::plan_create_collection(
+            configuration,
+            schema,
+            executor_kind(&self.executor),
+            &self.get_supported_segment_types(),
+            self.enable_schema,
+            self.default_knn_index,
+            frontend_core::collection_ops::TenantFeatureFlags {
+                enable_quantization: self.should_enable_quantization_for_tenant(&tenant_id),
+                enable_maxscore: self.should_enable_maxscore_for_tenant(&tenant_id),
+            },
+        )?;
 
         let mut collection = self
             .sysdb_client
             .create_collection(
                 tenant_id.clone(),
                 database_name,
-                collection_id,
+                plan.collection_id,
                 name,
-                segments,
-                configuration,
-                reconciled_schema,
+                plan.segments,
+                plan.configuration,
+                plan.schema,
                 metadata,
                 None,
                 get_or_create,
@@ -1337,10 +1188,11 @@ impl ServiceBasedFrontend {
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         self.collections_with_segments_provider
             .collections_with_segments_cache
-            .remove(&collection_id)
+            .remove(&plan.collection_id)
             .await;
-        // this is done in the case that get_or_create was a get, in which case we should reconcile the schema and config
-        // that was retrieved from sysdb, rather than the one that was passed in
+        // this is done in the case that get_or_create was a get, in which
+        // case we should reconcile the schema and config that was retrieved
+        // from sysdb, rather than the one that was passed in.
         if self.enable_schema {
             collection
                 .reconcile_schema_for_read()
@@ -2851,6 +2703,15 @@ impl ServiceBasedFrontend {
     }
 }
 
+/// Map the heavyweight `Executor` enum to the lightweight discriminant the
+/// shared collection-ops planner consumes.
+fn executor_kind(executor: &Executor) -> frontend_core::collection_ops::ExecutorKind {
+    match executor {
+        Executor::Distributed(_) => frontend_core::collection_ops::ExecutorKind::Distributed,
+        Executor::Local(_) => frontend_core::collection_ops::ExecutorKind::Local,
+    }
+}
+
 #[async_trait::async_trait]
 impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
     async fn try_from_config(
@@ -2922,6 +2783,7 @@ mod tests {
     use chroma_config::registry::Registry;
     use chroma_sysdb::GrpcSysDbConfig;
     use chroma_types::Collection;
+    use chroma_types::SegmentScope;
     use uuid::Uuid;
 
     use chroma_types::CreateCollectionPayload;
