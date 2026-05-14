@@ -3630,6 +3630,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "foundation-api"
+version = "1.0.0"
+dependencies = [
+ "axum 0.8.8",
+ "chroma-error",
+ "chroma-system",
+ "chroma-tracing",
+ "chroma-types",
+ "figment",
+ "frontend-core",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower-http 0.6.8",
+ "tracing",
+]
+
+[[package]]
 name = "foyer"
 version = "0.17.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
