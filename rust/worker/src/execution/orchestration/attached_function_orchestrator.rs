@@ -318,8 +318,10 @@ impl AttachedFunctionOrchestrator {
     pub fn set_function_context(
         &self,
         function_context: FunctionContext,
-    ) -> Result<(), FunctionContext> {
-        self.function_context.set(function_context)
+    ) -> Result<(), Box<FunctionContext>> {
+        self.function_context
+            .set(function_context)
+            .map_err(Box::new)
     }
 
     async fn finish_no_attached_function(&mut self, ctx: &ComponentContext<Self>) {

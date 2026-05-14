@@ -130,7 +130,11 @@ impl HttpGenerateExecutor {
             client: reqwest::Client::builder()
                 .connect_timeout(CONNECT_TIMEOUT)
                 .build()
-                .unwrap_or_default(),
+                .map_err(|e| {
+                    Box::new(HttpGenerateError::Http(format!(
+                        "failed to build reqwest client: {e}"
+                    ))) as Box<dyn ChromaError>
+                })?,
         })
     }
 

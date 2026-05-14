@@ -241,26 +241,28 @@ def test_functions_one_attached_function_per_collection(
     )
 
 
-def test_attach_function_with_invalid_params(basic_http_client: System) -> None:
-    """Test that attach_function with non-empty params raises an error"""
-    client = ClientCreator.from_system(basic_http_client)
-    client.reset()
+# TODO(tanujnay112): We take params now but there needs to be validation
+# of the params in a later change.
+# def test_attach_function_with_invalid_params(basic_http_client: System) -> None:
+#     """Test that attach_function with non-empty params raises an error"""
+#     client = ClientCreator.from_system(basic_http_client)
+#     client.reset()
 
-    collection = client.create_collection(name="test_invalid_params")
-    collection.add(ids=["id1"], documents=["test document"])
+#     collection = client.create_collection(name="test_invalid_params")
+#     collection.add(ids=["id1"], documents=["test document"])
 
-    # Attempt to create task with non-empty params should fail
-    # (no functions currently accept parameters)
-    with pytest.raises(
-        ChromaError,
-        match="params must be empty - no functions currently accept parameters",
-    ):
-        collection.attach_function(
-            name="invalid_params_task",
-            function=RECORD_COUNTER_FUNCTION,
-            output_collection="output_collection",
-            params={"some_key": "some_value"},
-        )
+#     # Attempt to create task with non-empty params should fail
+#     # (no functions currently accept parameters)
+#     with pytest.raises(
+#         ChromaError,
+#         match="params must be empty - no functions currently accept parameters",
+#     ):
+#         collection.attach_function(
+#             name="invalid_params_task",
+#             function=RECORD_COUNTER_FUNCTION,
+#             output_collection="output_collection",
+#             params={"some_key": "some_value"},
+#         )
 
 
 def test_attach_function_output_collection_already_exists(
