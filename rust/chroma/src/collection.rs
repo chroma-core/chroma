@@ -11,15 +11,17 @@
 //! - **Metadata access**: [`database()`](ChromaCollection::database), [`metadata()`](ChromaCollection::metadata), [`schema()`](ChromaCollection::schema), [`tenant()`](ChromaCollection::tenant)
 //! - **Read operations**: [`count()`](ChromaCollection::count), [`get()`](ChromaCollection::get), [`get_indexing_status()`](ChromaCollection::get_indexing_status), [`query()`](ChromaCollection::query), [`search()`](ChromaCollection::search)
 //! - **Write operations**: [`add()`](ChromaCollection::add), [`update()`](ChromaCollection::update), [`upsert()`](ChromaCollection::upsert), [`delete()`](ChromaCollection::delete), [`modify()`](ChromaCollection::modify)
+//! - **Attached functions**: [`attach_function()`](ChromaCollection::attach_function), [`get_attached_function()`](ChromaCollection::get_attached_function), [`detach_function()`](ChromaCollection::detach_function)
 
 use std::sync::Arc;
 
 use chroma_api_types::ForkCollectionPayload;
 use chroma_types::{
     plan::{ReadLevel, SearchPayload},
-    AddCollectionRecordsRequest, AddCollectionRecordsResponse, Collection, CollectionUuid,
-    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, GetRequest, GetResponse,
-    IncludeList, IndexStatusResponse, Metadata, QueryRequest, QueryResponse, Schema, SearchRequest,
+    AddCollectionRecordsRequest, AddCollectionRecordsResponse, AttachFunctionResponse, Collection,
+    CollectionUuid, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse,
+    DetachFunctionResponse, GetAttachedFunctionResponse, GetRequest, GetResponse, IncludeList,
+    IndexStatusResponse, Metadata, QueryRequest, QueryResponse, Schema, SearchRequest,
     SearchResponse, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
     UpdateMetadata, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where,
 };
@@ -874,6 +876,122 @@ impl ChromaCollection {
             .send::<(), _>(true, "fork_count", "fork_count", Method::GET, None)
             .await?;
         Ok(response.count)
+    }
+
+    /// Attaches a function to this collection.
+    ///
+    /// Functions execute automatically when records are written to this collection,
+    /// producing results in a separate output collection.
+    ///
+    /// # Arguments
+    ///
+    /// * `function_id` - The function identifier (e.g., `"statistics"`, `"record_counter"`)
+    /// * `name` - A unique name for this attached function instance
+    /// * `output_collection` - Name of the collection where function output will be stored
+    /// * `params` - Optional JSON parameters for the function
+    ///
+    /// # Returns
+    ///
+    /// A tuple of `(response, created)` where `created` is `true` if newly created,
+    /// `false` if an attached function with this name already existed (idempotent).
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use chroma::ChromaCollection;
+    /// # async fn example(collection: ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
+    /// let (response, created) = collection
+    ///     .attach_function("statistics", "my_stats", "my_stats_output", None)
+    ///     .await?;
+    /// println!("Attached function ID: {}", response.attached_function.id);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn attach_function(
+        &self,
+        function_id: impl AsRef<str>,
+        name: impl AsRef<str>,
+        output_collection: impl AsRef<str>,
+        params: Option<serde_json::Value>,
+    ) -> Result<(AttachFunctionResponse, bool), ChromaHttpClientError> {
+        let body = serde_json::json!({
+            "name": name.as_ref(),
+            "function_id": function_id.as_ref(),
+            "output_collection": output_collection.as_ref(),
+            "params": params.unwrap_or(serde_json::json!({})),
+        });
+        let response: AttachFunctionResponse = self
+            .send(
+                false,
+                "attach_function",
+                "functions/attach",
+                Method::POST,
+                Some(body),
+            )
+            .await?;
+        let created = response.created;
+        Ok((response, created))
+    }
+
+    /// Gets an attached function by name for this collection.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Name of the attached function instance
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use chroma::ChromaCollection;
+    /// # async fn example(collection: ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
+    /// let response = collection.get_attached_function("my_stats").await?;
+    /// println!("Function: {}", response.attached_function.function_name);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_attached_function(
+        &self,
+        name: impl AsRef<str>,
+    ) -> Result<GetAttachedFunctionResponse, ChromaHttpClientError> {
+        let path = format!("functions/{}", name.as_ref());
+        self.send::<(), _>(true, "get_attached_function", &path, Method::GET, None)
+            .await
+    }
+
+    /// Detaches a function from this collection, preventing further executions.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Name of the attached function instance to detach
+    /// * `delete_output_collection` - Whether to also delete the output collection
+    ///
+    /// # Returns
+    ///
+    /// `true` if the function was successfully detached.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use chroma::ChromaCollection;
+    /// # async fn example(collection: ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
+    /// let success = collection.detach_function("my_stats", false).await?;
+    /// assert!(success);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn detach_function(
+        &self,
+        name: impl AsRef<str>,
+        delete_output_collection: bool,
+    ) -> Result<bool, ChromaHttpClientError> {
+        let path = format!("attached_functions/{}/detach", name.as_ref());
+        let body = serde_json::json!({
+            "delete_output": delete_output_collection,
+        });
+        let response: DetachFunctionResponse = self
+            .send(false, "detach_function", &path, Method::POST, Some(body))
+            .await?;
+        Ok(response.success)
     }
 
     /// Internal transport method that constructs collection-specific API paths and delegates to the client.
@@ -2097,6 +2215,52 @@ mod tests {
                 collection.metadata().as_ref().unwrap().get("foo"),
                 Some(&"bar".into())
             );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_k8s_integration_attach_get_detach_function() {
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_attach_function").await;
+
+            let attach_name = "my_counter";
+            let output_collection_name = unique_collection_name("test_attach_function_output");
+
+            let (response, created) = collection
+                .attach_function(
+                    chroma_types::FUNCTION_RECORD_COUNTER_NAME,
+                    attach_name,
+                    output_collection_name.as_str(),
+                    None,
+                )
+                .await
+                .unwrap();
+            assert!(created);
+            assert_eq!(response.attached_function.name, attach_name);
+            assert_eq!(
+                response.attached_function.function_name,
+                chroma_types::FUNCTION_RECORD_COUNTER_NAME
+            );
+
+            let retrieved = collection.get_attached_function(attach_name).await.unwrap();
+            assert_eq!(retrieved.attached_function.name, attach_name);
+            assert_eq!(
+                retrieved.attached_function.function_name,
+                chroma_types::FUNCTION_RECORD_COUNTER_NAME
+            );
+            assert_eq!(
+                retrieved.attached_function.id.to_string(),
+                response.attached_function.id
+            );
+            assert_eq!(
+                retrieved.attached_function.output_collection_name,
+                output_collection_name
+            );
+
+            let success = collection.detach_function(attach_name, true).await.unwrap();
+            assert!(success);
         })
         .await;
     }

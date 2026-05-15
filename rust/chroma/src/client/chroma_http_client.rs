@@ -898,10 +898,7 @@ impl ChromaHttpClient {
         input_collection_id: impl AsRef<str>,
         output_collection: impl AsRef<str>,
         params: Option<serde_json::Value>,
-    ) -> Result<
-        (chroma_types::AttachFunctionResponse, bool),
-        ChromaHttpClientError,
-    > {
+    ) -> Result<(chroma_types::AttachFunctionResponse, bool), ChromaHttpClientError> {
         let tenant_id = self.get_tenant_id().await?;
         let database_name = self.get_database_name().await?;
 
@@ -911,7 +908,9 @@ impl ChromaHttpClient {
                 Method::POST,
                 format!(
                     "/api/v2/tenants/{}/databases/{}/collections/{}/functions/attach",
-                    tenant_id, database_name, input_collection_id.as_ref()
+                    tenant_id,
+                    database_name,
+                    input_collection_id.as_ref()
                 ),
                 Some(serde_json::json!({
                     "name": name.as_ref(),
@@ -964,7 +963,10 @@ impl ChromaHttpClient {
             Method::GET,
             format!(
                 "/api/v2/tenants/{}/databases/{}/collections/{}/functions/{}",
-                tenant_id, database_name, input_collection_id.as_ref(), name.as_ref()
+                tenant_id,
+                database_name,
+                input_collection_id.as_ref(),
+                name.as_ref()
             ),
             None::<()>,
             None::<()>,
@@ -1013,7 +1015,10 @@ impl ChromaHttpClient {
                 Method::POST,
                 format!(
                     "/api/v2/tenants/{}/databases/{}/collections/{}/attached_functions/{}/detach",
-                    tenant_id, database_name, input_collection_id.as_ref(), name.as_ref()
+                    tenant_id,
+                    database_name,
+                    input_collection_id.as_ref(),
+                    name.as_ref()
                 ),
                 Some(serde_json::json!({
                     "delete_output": delete_output,
