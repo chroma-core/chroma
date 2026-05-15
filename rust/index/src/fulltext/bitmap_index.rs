@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{ops::BitAnd, sync::Arc};
 
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
@@ -7,7 +7,7 @@ use roaring::RoaringBitmap;
 use thiserror::Error;
 use uuid::Uuid;
 
-use super::tokenizer::DocumentTokens;
+use super::tokenizer::{DocumentTokens, QueryPlan, TokenLookup};
 
 /// Transition doc-ID keys: `key = hash | (1 << 24)`, range `[2^24, 2^25)`.
 const TRANSITION_DOC_FLAG: u32 = 1 << 24;
@@ -313,7 +313,7 @@ impl FullTextBitmapFlusher {
 }
 
 // ---------------------------------------------------------------------------
-// Reader (minimal — fork support only, search added in PR 3)
+// Reader
 // ---------------------------------------------------------------------------
 
 #[derive(Clone)]
@@ -328,6 +328,89 @@ impl FullTextBitmapReader {
 
     pub fn id(&self) -> Uuid {
         self.bitmap_reader.id()
+    }
+
+    /// Execute a query plan and return candidate doc IDs (over-estimate).
+    ///
+    /// Stages 1–2 from the ADR:
+    /// 1. Resolve each lookup to candidate bucket IDs (direct hash or trigram).
+    ///    Filter with transition bitmaps between adjacent tokens.
+    /// 2. Load doc bitmaps for surviving buckets, AND across tokens.
+    ///
+    /// Stage 3 (brute-force verification) is the caller's responsibility.
+    pub async fn search(&self, plan: &QueryPlan) -> Result<RoaringBitmap, FullTextBitmapError> {
+        if plan.lookups.is_empty() {
+            return Ok(RoaringBitmap::new());
+        }
+
+        // Load all transition bitmaps upfront.
+        self.load_keys(plan.transitions.iter().flat_map(|h| {
+            [
+                (String::new(), h | TRANSITION_BUCKET_FLAG),
+                (String::new(), h | TRANSITION_DOC_FLAG),
+            ]
+        }))
+        .await;
+
+        let mut transitions = Vec::with_capacity(plan.transitions.len());
+        for &hash in &plan.transitions {
+            transitions.push((
+                self.get_bucket(hash | TRANSITION_BUCKET_FLAG).await?,
+                self.get_bucket(hash | TRANSITION_DOC_FLAG).await?,
+            ));
+        }
+
+        // Stage 1: resolve lookups and apply transition filtering.
+        let last_lookup = plan.lookups.len() - 1;
+        let mut bucket_sets = Vec::with_capacity(plan.lookups.len());
+        let transition_iter = std::iter::once(None).chain(transitions.iter().map(Some));
+        for ((i, lookup), transition) in plan.lookups.iter().enumerate().zip(transition_iter) {
+            let mut buckets = match lookup {
+                TokenLookup::Direct(id) => RoaringBitmap::from([*id]),
+                TokenLookup::Trigram(trigrams) => {
+                    let is_prefix = i == 0 && !plan.singleton;
+                    let is_suffix = i == last_lookup && !plan.singleton;
+                    self.trigram_resolve(trigrams, is_prefix, is_suffix).await?
+                }
+            };
+            if let Some((bkt_bm, _)) = transition {
+                if let Some(prev) = bucket_sets.last_mut() {
+                    *prev &= bkt_bm;
+                }
+                buckets &= bkt_bm;
+            }
+            if buckets.is_empty() {
+                return Ok(RoaringBitmap::new());
+            }
+            bucket_sets.push(buckets);
+        }
+
+        // Stage 2: load doc bitmaps, AND across tokens + transitions.
+        self.load_keys(
+            bucket_sets
+                .iter()
+                .flat_map(|bs| bs.iter().map(|id| (String::new(), id))),
+        )
+        .await;
+
+        let mut doc_bitmaps = Vec::with_capacity(bucket_sets.len() + transitions.len());
+        for bucket_set in &bucket_sets {
+            let mut bm = RoaringBitmap::new();
+            for bucket_id in bucket_set {
+                bm |= &self.get_bucket(bucket_id).await?;
+            }
+            if bm.is_empty() {
+                return Ok(RoaringBitmap::new());
+            }
+            doc_bitmaps.push(bm);
+        }
+        doc_bitmaps.extend(transitions.into_iter().map(|(_, doc_bm)| doc_bm));
+
+        doc_bitmaps.sort_by_key(|bm| bm.len());
+        Ok(doc_bitmaps
+            .into_iter()
+            .reduce(BitAnd::bitand)
+            .unwrap_or_default())
     }
 
     /// Preload blocks for a set of `(prefix, key)` pairs into the cache.
@@ -350,6 +433,62 @@ impl FullTextBitmapReader {
             .bitmap_reader
             .get(trigram, key)
             .await?
+            .unwrap_or_default())
+    }
+
+    // --- Private helpers ---
+
+    /// Resolve trigrams to candidate bucket IDs via the trigram index.
+    ///
+    /// For each trigram, loads the appropriate positional keys based on
+    /// the token type (prefix/suffix/singleton) and the trigram's position
+    /// within the token. ORs within a trigram, ANDs across trigrams.
+    async fn trigram_resolve(
+        &self,
+        trigrams: &[String],
+        is_prefix: bool,
+        is_suffix: bool,
+    ) -> Result<RoaringBitmap, FullTextBitmapError> {
+        self.load_keys(
+            trigrams
+                .iter()
+                .flat_map(|t| (0u32..3).map(move |k| (t.clone(), k))),
+        )
+        .await;
+
+        let last = trigrams.len().saturating_sub(1);
+        let mut bitmaps = Vec::with_capacity(trigrams.len());
+
+        for (i, trigram) in trigrams.iter().enumerate() {
+            let keys: &[u32] = match (i == 0, i == last) {
+                (true, true) => &[0, 1, 2],
+                (true, false) => {
+                    if is_suffix {
+                        &[0]
+                    } else {
+                        &[0, 1]
+                    }
+                }
+                (false, true) => {
+                    if is_prefix {
+                        &[2]
+                    } else {
+                        &[1, 2]
+                    }
+                }
+                (false, false) => &[1],
+            };
+
+            let mut bm = RoaringBitmap::new();
+            for &key in keys {
+                bm |= &self.get_trigram(trigram, key).await?;
+            }
+            bitmaps.push(bm);
+        }
+
+        Ok(bitmaps
+            .into_iter()
+            .reduce(BitAnd::bitand)
             .unwrap_or_default())
     }
 }
@@ -549,5 +688,87 @@ mod tests {
         assert!(!bm.contains(1));
         assert!(bm.contains(2));
         assert!(bm.contains(3));
+    }
+
+    // --- search ---
+
+    fn query(text: &str) -> QueryPlan {
+        WordAnalyzer::default().plan_query(text).unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_search_exact_word() {
+        let (_tmp, provider) = provider();
+        let writer = new_writer(&provider).await;
+        writer.add_document(1, tokenize("hello world"));
+        writer.add_document(2, tokenize("goodbye world"));
+        let reader = flush_and_read(writer, &provider).await;
+
+        // " hello " — bounded on both sides, Direct lookup.
+        let result = reader.search(&query(" hello ")).await.unwrap();
+        assert!(result.contains(1));
+        assert!(!result.contains(2));
+    }
+
+    #[tokio::test]
+    async fn test_search_partial_match() {
+        let (_tmp, provider) = provider();
+        let writer = new_writer(&provider).await;
+        writer.add_document(1, tokenize("hello world"));
+        writer.add_document(2, tokenize("help world"));
+        let reader = flush_and_read(writer, &provider).await;
+
+        // "hel" — singleton, trigram resolution.
+        let result = reader.search(&query("hel")).await.unwrap();
+        assert!(result.contains(1));
+        assert!(result.contains(2));
+
+        // "hello" — singleton, narrows to just doc 1.
+        let result = reader.search(&query("hello")).await.unwrap();
+        assert!(result.contains(1));
+        // May or may not contain doc 2 depending on trigram collisions.
+        // The index is a sieve — false positives are acceptable.
+    }
+
+    #[tokio::test]
+    async fn test_search_multi_word() {
+        let (_tmp, provider) = provider();
+        let writer = new_writer(&provider).await;
+        writer.add_document(1, tokenize("hello beautiful world"));
+        writer.add_document(2, tokenize("hello cruel world"));
+        let reader = flush_and_read(writer, &provider).await;
+
+        // "hello beautiful world" — prefix + body + suffix.
+        let result = reader
+            .search(&query("hello beautiful world"))
+            .await
+            .unwrap();
+        assert!(result.contains(1));
+        // Doc 2 should not match (different body token + transitions).
+    }
+
+    #[tokio::test]
+    async fn test_search_no_match() {
+        let (_tmp, provider) = provider();
+        let writer = new_writer(&provider).await;
+        writer.add_document(1, tokenize("hello world"));
+        let reader = flush_and_read(writer, &provider).await;
+
+        let result = reader.search(&query("zebra")).await.unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_search_after_delete() {
+        let (_tmp, provider) = provider();
+        let writer = new_writer(&provider).await;
+        writer.add_document(1, tokenize("hello world"));
+        writer.add_document(2, tokenize("hello world"));
+        writer.delete_document(1, tokenize("hello world"));
+        let reader = flush_and_read(writer, &provider).await;
+
+        let result = reader.search(&query("hello")).await.unwrap();
+        assert!(!result.contains(1));
+        assert!(result.contains(2));
     }
 }
