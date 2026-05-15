@@ -299,9 +299,7 @@ impl WordAnalyzer {
         let mut trigrams = Vec::new();
         let mut stream = self.trigram_tokenizer.token_stream(s);
         while let Some(token) = stream.next() {
-            if !trigrams.contains(&token.text) {
-                trigrams.push(token.text.clone());
-            }
+            trigrams.push(token.text.clone());
         }
         trigrams
     }
