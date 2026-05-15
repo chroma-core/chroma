@@ -8,7 +8,7 @@ use chroma_blockstore::{key::KeyWrapper, provider::BlockfileProvider};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::metadata::types::MetadataIndexError;
 use chroma_segment::{
-    blockfile_metadata::{MetadataSegmentError, MetadataSegmentReaderShard},
+    blockfile_metadata::{FtsIndexReader, MetadataSegmentError, MetadataSegmentReaderShard},
     blockfile_record::{
         RecordSegmentReaderOptions, RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
     },
@@ -255,15 +255,80 @@ impl MetadataProvider<'_> {
         query: &str,
     ) -> Result<RoaringBitmap, FilterError> {
         match self {
-            MetadataProvider::CompactData(metadata_segment_reader, _, _) => {
-                if let Some(reader) = metadata_segment_reader.full_text_index_reader.as_ref() {
-                    Ok(reader
-                        .search(query)
-                        .instrument(tracing::trace_span!(parent: Span::current(), "Filter by document contains"))
-                        .await
-                        .map_err(MetadataIndexError::FullTextError)?)
-                } else {
-                    Ok(RoaringBitmap::new())
+            MetadataProvider::CompactData(metadata_segment_reader, record_segment_reader, _) => {
+                match metadata_segment_reader.fts_index_reader.as_ref() {
+                    Some(FtsIndexReader::Trigram(reader)) => {
+                        Ok(reader
+                            .search(query)
+                            .instrument(tracing::trace_span!(parent: Span::current(), "Filter by document contains (trigram)"))
+                            .await
+                            .map_err(MetadataIndexError::FullTextError)?)
+                    }
+                    Some(FtsIndexReader::TokenBitmap(analyzer, reader)) => {
+                        let mut analyzer = analyzer.clone();
+                        let plan = analyzer.plan_query(query).map_err(|e| {
+                            MetadataIndexError::FullTextError(
+                                chroma_index::fulltext::types::FullTextIndexError::TokenizerError(
+                                    e.to_string(),
+                                ),
+                            )
+                        })?;
+                        let candidates = reader
+                            .search(&plan)
+                            .instrument(tracing::trace_span!(parent: Span::current(), "Filter by document contains (token bitmap)"))
+                            .await
+                            .map_err(|e| MetadataIndexError::FullTextError(
+                                chroma_index::fulltext::types::FullTextIndexError::BlockfileError(
+                                    Box::new(e),
+                                ),
+                            ))?;
+
+                        // Stage 3: brute-force verification against actual documents.
+                        // Verify with str::contains(query) — case-sensitive substring
+                        // match, consistent with the Log path and $contains semantics.
+                        //
+                        // Budget: verify up to 50K candidates. Brute-force throughput
+                        // varies with document length (~1M docs/sec for short docs,
+                        // ~300K for long). 50K keeps verification within ~100ms for
+                        // typical workloads. Candidates beyond the budget are included
+                        // unverified (include-all) to preserve recall at the cost of
+                        // precision.
+                        //
+                        // TODO: cursor-based pagination could continue brute-force
+                        // verification across multiple query rounds, improving
+                        // precision for large candidate sets without exceeding the
+                        // per-round latency budget.
+                        const BRUTEFORCE_CANDIDATE_LIMIT: usize = 50_000;
+
+                        let Some(rec_reader) = record_segment_reader else {
+                            return Ok(candidates);
+                        };
+                        let to_verify: Vec<u32> = candidates.iter().take(BRUTEFORCE_CANDIDATE_LIMIT).collect();
+                        let unverified: RoaringBitmap = candidates.iter().skip(BRUTEFORCE_CANDIDATE_LIMIT).collect();
+                        let fetch_futures: Vec<_> = to_verify
+                            .into_iter()
+                            .map(|id| async move {
+                                let data = rec_reader.get_data_for_offset_id(id).await?;
+                                Ok::<(u32, Option<chroma_types::DataRecord>), Box<dyn ChromaError>>(
+                                    (id, data),
+                                )
+                            })
+                            .collect();
+                        let data_results = futures::future::try_join_all(fetch_futures).await?;
+                        let mut result: RoaringBitmap = data_results
+                            .into_iter()
+                            .filter(|(_, data_opt)| {
+                                data_opt.as_ref().is_some_and(|rec| {
+                                    rec.document.is_some_and(|doc| doc.contains(query))
+                                })
+                            })
+                            .map(|(id, _)| id)
+                            .collect();
+
+                        result |= unverified;
+                        Ok(result)
+                    }
+                    None => Ok(RoaringBitmap::new()),
                 }
             }
             MetadataProvider::Log(metadata_log_reader) => Ok(metadata_log_reader
@@ -281,10 +346,18 @@ impl MetadataProvider<'_> {
         let chroma_regex = ChromaRegex::try_from(query.to_string())?;
         match self {
             MetadataProvider::CompactData(metadata_segment_reader, record_segment_reader, _) => {
-                if let (Some(fti_reader), Some(rec_reader)) = (
-                    metadata_segment_reader.full_text_index_reader.as_ref(),
-                    record_segment_reader,
-                ) {
+                // Regex support is only available on the Trigram index.
+                let trigram_reader = match metadata_segment_reader.fts_index_reader.as_ref() {
+                    Some(FtsIndexReader::Trigram(r)) => Some(r),
+                    Some(FtsIndexReader::TokenBitmap(_, _)) => {
+                        tracing::info!("Regex filtering not supported on TokenBitmap FTS index, returning empty");
+                        None
+                    }
+                    None => None,
+                };
+                if let (Some(fti_reader), Some(rec_reader)) =
+                    (trigram_reader, record_segment_reader)
+                {
                     // The pattern can match empty string and thus match any document
                     if let Some(0) = chroma_regex.properties().minimum_len() {
                         return Ok(SignedRoaringBitmap::full());

@@ -23,6 +23,8 @@ pub enum FullTextIndexError {
     InvariantViolation,
     #[error("Blockfile error: {0}")]
     BlockfileError(#[from] Box<dyn ChromaError>),
+    #[error("Tokenizer error: {0}")]
+    TokenizerError(String),
 }
 
 impl ChromaError for FullTextIndexError {
