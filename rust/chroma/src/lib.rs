@@ -107,7 +107,12 @@ pub mod types;
 
 pub use client::ChromaHttpClient;
 pub use client::ChromaHttpClientOptions;
-pub use collection::ChromaCollection;
+pub use client::CreateCollectionOptions;
+pub use client::GetCollectionOptions;
+pub use collection::{
+    AddRecordsOptions, ChromaCollection, ModifyCollectionOptions, QueryRecordsOptions,
+    SearchRecordsOptions, UpdateRecordsOptions, UpsertRecordsOptions,
+};
 
 #[cfg(test)]
 mod tests {

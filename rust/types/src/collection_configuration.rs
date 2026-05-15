@@ -51,6 +51,24 @@ impl EmbeddingFunctionConfiguration {
     }
 }
 
+impl From<EmbeddingFunctionNewConfiguration> for EmbeddingFunctionConfiguration {
+    fn from(config: EmbeddingFunctionNewConfiguration) -> Self {
+        Self::Known(config)
+    }
+}
+
+impl From<(String, serde_json::Value)> for EmbeddingFunctionConfiguration {
+    fn from((name, config): (String, serde_json::Value)) -> Self {
+        EmbeddingFunctionNewConfiguration { name, config }.into()
+    }
+}
+
+impl From<(&str, serde_json::Value)> for EmbeddingFunctionConfiguration {
+    fn from((name, config): (&str, serde_json::Value)) -> Self {
+        (name.to_string(), config).into()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct EmbeddingFunctionNewConfiguration {

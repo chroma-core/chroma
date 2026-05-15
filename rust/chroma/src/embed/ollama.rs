@@ -5,8 +5,11 @@
 //! Ollama enables privacy-preserving embeddings without sending data to external APIs.
 
 use reqwest::RequestBuilder;
+use serde::{Deserialize, Serialize};
 
-use super::EmbeddingFunction;
+use super::{DenseEmbeddingFunction, EmbeddingError, EmbeddingFunction};
+
+const OLLAMA_NAME: &str = "ollama";
 
 /////////////////////////////////////// OllamaEmbeddingError ///////////////////////////////////////
 
@@ -88,6 +91,37 @@ impl OllamaEmbeddingFunction {
         Ok(this)
     }
 
+    /// Constructs a new Ollama embedding function without a heartbeat request.
+    ///
+    /// This is used when restoring a persisted collection configuration. The Ollama
+    /// server is contacted lazily when text is actually embedded.
+    pub fn new_lazy(host: impl Into<String>, model: impl Into<String>) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            host: host.into(),
+            model: model.into(),
+        }
+    }
+
+    /// Construct Ollama from a persisted embedding function configuration.
+    pub fn try_from_config(
+        configuration: &chroma_types::EmbeddingFunctionNewConfiguration,
+    ) -> Result<Self, EmbeddingError> {
+        let config: OllamaConfig = serde_json::from_value(configuration.config.clone())?;
+        let client = if let Some(timeout) = config.timeout {
+            reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(timeout))
+                .build()?
+        } else {
+            reqwest::Client::new()
+        };
+        Ok(Self {
+            client,
+            host: config.url,
+            model: config.model_name,
+        })
+    }
+
     /// Verifies that the Ollama server is responsive and the model is accessible.
     ///
     /// Sends a minimal embedding request to confirm the connection is healthy. This is
@@ -133,6 +167,39 @@ impl EmbeddingFunction for OllamaEmbeddingFunction {
     }
 }
 
+#[async_trait::async_trait]
+impl DenseEmbeddingFunction for OllamaEmbeddingFunction {
+    fn name(&self) -> &str {
+        OLLAMA_NAME
+    }
+
+    fn configuration(&self) -> chroma_types::EmbeddingFunctionConfiguration {
+        (
+            OLLAMA_NAME,
+            serde_json::json!(OllamaConfig {
+                url: self.host.clone(),
+                model_name: self.model.clone(),
+                timeout: None,
+            }),
+        )
+            .into()
+    }
+
+    async fn embed_documents(&self, batches: &[&str]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+        self.embed_strs(batches).await.map_err(|err| match err {
+            OllamaEmbeddingError::Reqwest(err) => EmbeddingError::Request(err),
+        })
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct OllamaConfig {
+    url: String,
+    model_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    timeout: Option<u64>,
+}
+
 /////////////////////////////////////////// EmbedRequest ///////////////////////////////////////////
 
 /// A request to embed multiple input documents.
@@ -166,4 +233,34 @@ pub struct EmbedResponse {
     pub load_duration: Option<f64>,
     /// The number of tokens counted in the prompt.
     pub prompt_eval_count: Option<f64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chroma_types::{EmbeddingFunctionConfiguration, EmbeddingFunctionNewConfiguration};
+
+    #[test]
+    fn test_ollama_config_round_trip() {
+        let config = EmbeddingFunctionNewConfiguration {
+            name: "ollama".to_string(),
+            config: serde_json::json!({
+                "url": "http://localhost:11434",
+                "model_name": "nomic-embed-text",
+                "timeout": 30
+            }),
+        };
+        let embedder = OllamaEmbeddingFunction::try_from_config(&config).unwrap();
+
+        assert_eq!(
+            embedder.configuration(),
+            EmbeddingFunctionConfiguration::Known(EmbeddingFunctionNewConfiguration {
+                name: "ollama".to_string(),
+                config: serde_json::json!({
+                    "url": "http://localhost:11434",
+                    "model_name": "nomic-embed-text"
+                }),
+            })
+        );
+    }
 }

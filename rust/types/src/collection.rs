@@ -3,8 +3,9 @@ use std::time::{Duration, SystemTime};
 
 use super::{Metadata, MetadataValueConversionError};
 use crate::{
-    chroma_proto, test_segment, CollectionConfiguration, InternalCollectionConfiguration, Schema,
-    SchemaError, Segment, SegmentScope, UpdateCollectionConfiguration, UpdateMetadata,
+    chroma_proto, test_segment, CollectionConfiguration, EmbeddingFunctionConfiguration,
+    InternalCollectionConfiguration, Schema, SchemaError, Segment, SegmentScope,
+    UpdateCollectionConfiguration, UpdateMetadata,
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
@@ -247,6 +248,13 @@ impl Collection {
         }
 
         Ok(())
+    }
+
+    pub fn dense_embedding_function(&self) -> Option<&EmbeddingFunctionConfiguration> {
+        self.schema
+            .as_ref()
+            .and_then(|schema| schema.dense_embedding_function())
+            .or(self.config.embedding_function.as_ref())
     }
 
     pub fn test_collection(dim: i32) -> Self {

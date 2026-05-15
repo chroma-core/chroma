@@ -3,6 +3,9 @@ use backon::Retryable;
 use chroma_api_types::ErrorResponse;
 use chroma_error::ChromaValidationError;
 use chroma_types::Collection;
+use chroma_types::CollectionConfiguration;
+use chroma_types::CreateCollectionPayload;
+use chroma_types::HnswConfiguration;
 use chroma_types::Metadata;
 use chroma_types::Schema;
 use chroma_types::WhereError;
@@ -21,6 +24,7 @@ use chroma_api_types::{GetUserIdentityResponse, HeartbeatResponse};
 use crate::client::ChromaHttpClientOptions;
 use crate::client::ChromaHttpClientOptionsError;
 use crate::collection::ChromaCollection;
+use crate::embed::{dense_embedding_function_from_config, DenseEmbeddingFunction, EmbeddingError};
 
 const USER_AGENT: &str = concat!(
     "Chroma Rust Client v",
@@ -60,6 +64,9 @@ pub enum ChromaHttpClientError {
     /// validation error from the where clause parser.
     #[error("Invalid where clause")]
     InvalidWhere,
+    /// Client-side embedding failed before sending the Chroma request.
+    #[error("Embedding error: {0}")]
+    EmbeddingError(#[from] EmbeddingError),
 }
 
 impl From<WhereError> for ChromaHttpClientError {
@@ -121,7 +128,8 @@ impl FailurePredicate<ChromaHttpClientError> for BackendFailurePredicate {
             ChromaHttpClientError::CouldNotResolveDatabaseId(_)
             | ChromaHttpClientError::ValidationError(_)
             | ChromaHttpClientError::NoBackendAvailable
-            | ChromaHttpClientError::InvalidWhere => false,
+            | ChromaHttpClientError::InvalidWhere
+            | ChromaHttpClientError::EmbeddingError(_) => false,
         }
     }
 }
@@ -172,6 +180,7 @@ pub struct ChromaHttpClient {
     base_url: reqwest::Url,
     clients: Vec<Backend>,
     retry_policy: ExponentialBuilder,
+    chroma_cloud_api_key: Option<String>,
     tenant_id: Arc<Mutex<Option<String>>>,
     database_name: Arc<Mutex<Option<String>>>,
     resolve_tenant_or_database_lock: Arc<tokio::sync::Mutex<()>>,
@@ -189,11 +198,32 @@ impl Clone for ChromaHttpClient {
             base_url: self.base_url.clone(),
             clients: self.clients.clone(),
             retry_policy: self.retry_policy,
+            chroma_cloud_api_key: self.chroma_cloud_api_key.clone(),
             tenant_id: Arc::new(Mutex::new(self.tenant_id.lock().clone())),
             database_name: Arc::new(Mutex::new(self.database_name.lock().clone())),
             resolve_tenant_or_database_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
+}
+
+/// Options for collection creation APIs.
+#[derive(Clone, Default)]
+pub struct CreateCollectionOptions {
+    /// Optional schema to use when creating the collection.
+    pub schema: Option<Schema>,
+    /// Optional collection metadata.
+    pub metadata: Option<Metadata>,
+    /// Optional collection configuration.
+    pub configuration: Option<CollectionConfiguration>,
+    /// Optional dense embedding function to attach to the collection handle.
+    pub embedding_function: Option<Arc<dyn DenseEmbeddingFunction>>,
+}
+
+/// Options for collection retrieval APIs.
+#[derive(Clone, Default)]
+pub struct GetCollectionOptions {
+    /// Optional dense embedding function to attach to the returned collection handle.
+    pub embedding_function: Option<Arc<dyn DenseEmbeddingFunction>>,
 }
 
 /// Represents a database within a Chroma tenant.
@@ -233,6 +263,10 @@ impl ChromaHttpClient {
     /// ```
     pub fn new(options: ChromaHttpClientOptions) -> Self {
         let mut headers = options.headers();
+        let chroma_cloud_api_key = headers
+            .get("x-chroma-token")
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.to_string());
         headers.append("user-agent", USER_AGENT.try_into().unwrap());
 
         let client = reqwest::Client::builder()
@@ -260,10 +294,15 @@ impl ChromaHttpClient {
             base_url: options.endpoint.clone(),
             clients,
             retry_policy: options.retry_options.into(),
+            chroma_cloud_api_key,
             tenant_id: Arc::new(Mutex::new(options.tenant_id)),
             database_name: Arc::new(Mutex::new(options.database_name)),
             resolve_tenant_or_database_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
+    }
+
+    pub(crate) fn chroma_cloud_api_key(&self) -> Option<String> {
+        self.chroma_cloud_api_key.clone()
     }
 
     /// Constructs a client from environment variables.
@@ -594,8 +633,24 @@ impl ChromaHttpClient {
         schema: Option<Schema>,
         metadata: Option<Metadata>,
     ) -> Result<ChromaCollection, ChromaHttpClientError> {
-        self.common_create_collection(name, schema, metadata, true)
-            .await
+        self.get_or_create_collection_with_options(
+            name,
+            CreateCollectionOptions {
+                schema,
+                metadata,
+                ..Default::default()
+            },
+        )
+        .await
+    }
+
+    /// Retrieves an existing collection or creates it with an options struct.
+    pub async fn get_or_create_collection_with_options(
+        &self,
+        name: impl AsRef<str>,
+        options: CreateCollectionOptions,
+    ) -> Result<ChromaCollection, ChromaHttpClientError> {
+        self.common_create_collection(name, options, true).await
     }
 
     /// Creates a new collection with the specified parameters.
@@ -630,14 +685,40 @@ impl ChromaHttpClient {
         schema: Option<Schema>,
         metadata: Option<Metadata>,
     ) -> Result<ChromaCollection, ChromaHttpClientError> {
-        self.common_create_collection(name, schema, metadata, false)
-            .await
+        self.create_collection_with_options(
+            name,
+            CreateCollectionOptions {
+                schema,
+                metadata,
+                ..Default::default()
+            },
+        )
+        .await
+    }
+
+    /// Creates a new collection using an options struct.
+    pub async fn create_collection_with_options(
+        &self,
+        name: impl AsRef<str>,
+        options: CreateCollectionOptions,
+    ) -> Result<ChromaCollection, ChromaHttpClientError> {
+        self.common_create_collection(name, options, false).await
     }
 
     /// Retrieves an existing collection by name.
     pub async fn get_collection(
         &self,
         name: impl AsRef<str>,
+    ) -> Result<ChromaCollection, ChromaHttpClientError> {
+        self.get_collection_with_options(name, GetCollectionOptions::default())
+            .await
+    }
+
+    /// Retrieves an existing collection by name using an options struct.
+    pub async fn get_collection_with_options(
+        &self,
+        name: impl AsRef<str>,
+        options: GetCollectionOptions,
     ) -> Result<ChromaCollection, ChromaHttpClientError> {
         let tenant_id = self.get_tenant_id().await?;
         let database_name = self.get_database_name().await?;
@@ -657,10 +738,15 @@ impl ChromaHttpClient {
             )
             .await?;
 
-        Ok(ChromaCollection {
-            client: self.clone(),
-            collection: Arc::new(collection),
-        })
+        if let Some(embedding_function) = options.embedding_function.as_deref() {
+            self.compare_dense_embedding_function(&collection, embedding_function)?;
+        }
+
+        Ok(ChromaCollection::new(
+            self.clone(),
+            collection,
+            options.embedding_function,
+        ))
     }
 
     /// Retrieves an existing collection by its ID.
@@ -706,10 +792,7 @@ impl ChromaHttpClient {
             )
             .await?;
 
-        Ok(ChromaCollection {
-            client: self.clone(),
-            collection: Arc::new(collection),
-        })
+        Ok(ChromaCollection::new(self.clone(), collection, None))
     }
 
     /// Removes a collection and all its records from the database.
@@ -852,22 +935,59 @@ impl ChromaHttpClient {
 
         Ok(collections
             .into_iter()
-            .map(|collection| ChromaCollection {
-                client: self.clone(),
-                collection: Arc::new(collection),
-            })
+            .map(|collection| ChromaCollection::new(self.clone(), collection, None))
             .collect())
     }
 
     async fn common_create_collection(
         &self,
         name: impl AsRef<str>,
-        schema: Option<Schema>,
-        metadata: Option<Metadata>,
+        options: CreateCollectionOptions,
         get_or_create: bool,
     ) -> Result<ChromaCollection, ChromaHttpClientError> {
         let tenant_id = self.get_tenant_id().await?;
         let database_name = self.get_database_name().await?;
+        let CreateCollectionOptions {
+            schema,
+            metadata,
+            mut configuration,
+            embedding_function,
+        } = options;
+
+        if let Some(embedding_function) = embedding_function.as_deref() {
+            if configuration
+                .as_ref()
+                .and_then(|configuration| configuration.embedding_function.as_ref())
+                .is_some()
+            {
+                return Err(EmbeddingError::Configuration(
+                    "embedding function provided when already defined in collection configuration"
+                        .to_string(),
+                )
+                .into());
+            }
+
+            if schema
+                .as_ref()
+                .and_then(|schema| schema.dense_embedding_function())
+                .is_some()
+            {
+                return Err(EmbeddingError::Configuration(
+                    "embedding function provided when already defined in collection schema"
+                        .to_string(),
+                )
+                .into());
+            }
+
+            let collection_configuration =
+                configuration.get_or_insert_with(CollectionConfiguration::default);
+            collection_configuration.embedding_function = Some(embedding_function.configuration());
+            if collection_configuration.hnsw.is_none() && collection_configuration.spann.is_none() {
+                let mut hnsw = HnswConfiguration::default();
+                hnsw.space = Some(embedding_function.default_space());
+                collection_configuration.hnsw = Some(hnsw);
+            }
+        }
 
         let collection: chroma_types::Collection = self
             .send(
@@ -877,20 +997,49 @@ impl ChromaHttpClient {
                     "/api/v2/tenants/{}/databases/{}/collections",
                     tenant_id, database_name
                 ),
-                Some(serde_json::json!({
-                    "name": name.as_ref(),
-                    "schema": schema,
-                    "metadata": metadata,
-                    "get_or_create": get_or_create,
-                })),
+                Some(CreateCollectionPayload {
+                    name: name.as_ref().to_string(),
+                    schema,
+                    configuration,
+                    metadata,
+                    get_or_create,
+                }),
                 None::<()>,
             )
             .await?;
 
-        Ok(ChromaCollection {
-            client: self.clone(),
-            collection: Arc::new(collection),
-        })
+        if let Some(embedding_function) = embedding_function.as_deref() {
+            self.compare_dense_embedding_function(&collection, embedding_function)?;
+        }
+
+        Ok(ChromaCollection::new(
+            self.clone(),
+            collection,
+            embedding_function,
+        ))
+    }
+
+    fn compare_dense_embedding_function(
+        &self,
+        collection: &Collection,
+        provided: &dyn DenseEmbeddingFunction,
+    ) -> Result<(), EmbeddingError> {
+        let Some(persisted) = collection.dense_embedding_function() else {
+            return Ok(());
+        };
+        let persisted_configuration =
+            match dense_embedding_function_from_config(persisted, self.chroma_cloud_api_key()) {
+                Ok(persisted) => persisted.configuration(),
+                Err(EmbeddingError::UnsupportedEmbeddingFunction { .. }) => persisted.clone(),
+                Err(err) => return Err(err),
+            };
+        let provided_configuration = provided.configuration();
+        if provided_configuration != persisted_configuration {
+            return Err(EmbeddingError::Configuration(format!(
+                "embedding function conflict: provided: {provided_configuration:?} vs persisted: {persisted_configuration:?}"
+            )));
+        }
+        Ok(())
     }
 
     pub(crate) async fn send<
@@ -1145,6 +1294,7 @@ impl ChromaHttpClient {
 mod tests {
     use super::*;
     use crate::client::ChromaRetryOptions;
+    use crate::embed::chroma_cloud::{ChromaCloudQwenEmbeddingFunction, ChromaCloudQwenOptions};
     use crate::tests::{unique_collection_name, with_client};
     use chroma_types::{EmbeddingFunctionConfiguration, EmbeddingFunctionNewConfiguration};
     use httpmock::{HttpMockResponse, MockServer};
@@ -1279,6 +1429,66 @@ mod tests {
         let client = ChromaHttpClient::default();
         assert_eq!(client.clients.len(), 1);
         assert!(client.clients[0].breaker.is_none());
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn get_or_create_collection_compares_returned_embedding_function() {
+        let server = MockServer::start_async().await;
+        let mut collection = Collection::default();
+        collection.name = "existing".to_string();
+        collection.tenant = "tenant".to_string();
+        collection.database = "database".to_string();
+        collection.config = CollectionConfiguration {
+            embedding_function: Some(
+                (
+                    "chroma-cloud-qwen",
+                    serde_json::json!({
+                        "model": "different-model"
+                    }),
+                )
+                    .into(),
+            ),
+            ..Default::default()
+        }
+        .try_into()
+        .unwrap();
+
+        let mock = server
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/api/v2/tenants/tenant/databases/database/collections");
+                then.status(200)
+                    .json_body(serde_json::to_value(&collection).unwrap());
+            })
+            .await;
+
+        let client = ChromaHttpClient::new(ChromaHttpClientOptions {
+            endpoint: server.base_url().parse().unwrap(),
+            tenant_id: Some("tenant".to_string()),
+            database_name: Some("database".to_string()),
+            ..Default::default()
+        });
+        let err = client
+            .get_or_create_collection_with_options(
+                "existing",
+                CreateCollectionOptions {
+                    embedding_function: Some(Arc::new(ChromaCloudQwenEmbeddingFunction::new(
+                        ChromaCloudQwenOptions::default(),
+                    ))),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err();
+
+        match err {
+            ChromaHttpClientError::EmbeddingError(EmbeddingError::Configuration(message)) => {
+                assert!(message.contains("embedding function conflict"));
+            }
+            other => panic!("expected embedding function conflict, got {other:?}"),
+        }
+        assert_eq!(mock.calls(), 1);
     }
 
     #[tokio::test]

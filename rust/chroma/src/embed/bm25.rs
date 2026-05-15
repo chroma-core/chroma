@@ -1,9 +1,17 @@
 use chroma_types::SparseVector;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::embed::bm25_tokenizer::Bm25Tokenizer;
 use crate::embed::murmur3_abs_hasher::Murmur3AbsHasher;
-use crate::embed::{EmbeddingFunction, TokenHasher, Tokenizer};
+use crate::embed::{
+    EmbeddingError, EmbeddingFunction, SparseEmbeddingFunction, TokenHasher, Tokenizer,
+};
+
+const CHROMA_BM25_NAME: &str = "chroma_bm25";
+
+/// Default Chroma BM25 sparse embedding function.
+pub type ChromaBm25EmbeddingFunction = BM25SparseEmbeddingFunction<Bm25Tokenizer, Murmur3AbsHasher>;
 
 /// Error type for BM25 sparse embedding.
 ///
@@ -63,6 +71,68 @@ impl BM25SparseEmbeddingFunction<Bm25Tokenizer, Murmur3AbsHasher> {
             k: 1.2,
             b: 0.75,
             avg_len: 256.0,
+        }
+    }
+
+    /// Construct BM25 from a persisted Chroma BM25 configuration.
+    pub fn try_from_config(
+        configuration: &chroma_types::EmbeddingFunctionNewConfiguration,
+    ) -> Result<Self, EmbeddingError> {
+        let config: ChromaBm25Config = serde_json::from_value(configuration.config.clone())?;
+        Ok(Self::from_config(config))
+    }
+
+    fn from_config(config: ChromaBm25Config) -> Self {
+        let token_max_length = config.token_max_length.unwrap_or(40) as usize;
+        let tokenizer = match config.stopwords {
+            Some(stopwords) => Bm25Tokenizer::with_owned_stopwords(stopwords, token_max_length),
+            None => {
+                let mut tokenizer = Bm25Tokenizer::default();
+                tokenizer.token_max_length = token_max_length;
+                tokenizer
+            }
+        };
+
+        Self {
+            include_tokens: config.include_tokens.unwrap_or(true),
+            tokenizer,
+            hasher: Murmur3AbsHasher::default(),
+            k: config.k.unwrap_or(1.2),
+            b: config.b.unwrap_or(0.75),
+            avg_len: config.avg_doc_length.unwrap_or(256.0),
+        }
+    }
+}
+
+impl From<&BM25SparseEmbeddingFunction<Bm25Tokenizer, Murmur3AbsHasher>> for ChromaBm25Config {
+    fn from(value: &BM25SparseEmbeddingFunction<Bm25Tokenizer, Murmur3AbsHasher>) -> Self {
+        let default_stopwords = Bm25Tokenizer::default_stopwords();
+        let has_default_stopwords = value.tokenizer.stopwords.len() == default_stopwords.len()
+            && value
+                .tokenizer
+                .stopwords
+                .iter()
+                .all(|word| default_stopwords.contains(word.as_ref()));
+        let stopwords = if has_default_stopwords {
+            None
+        } else {
+            let mut stopwords = value
+                .tokenizer
+                .stopwords
+                .iter()
+                .map(|word| word.as_ref().to_string())
+                .collect::<Vec<_>>();
+            stopwords.sort();
+            Some(stopwords)
+        };
+
+        ChromaBm25Config {
+            k: Some(value.k),
+            b: Some(value.b),
+            avg_doc_length: Some(value.avg_len),
+            token_max_length: Some(value.tokenizer.token_max_length as u64),
+            stopwords,
+            include_tokens: Some(value.include_tokens),
         }
     }
 }
@@ -139,9 +209,45 @@ where
     }
 }
 
+#[async_trait::async_trait]
+impl SparseEmbeddingFunction for BM25SparseEmbeddingFunction<Bm25Tokenizer, Murmur3AbsHasher> {
+    fn name(&self) -> &str {
+        CHROMA_BM25_NAME
+    }
+
+    fn configuration(&self) -> chroma_types::EmbeddingFunctionConfiguration {
+        (
+            CHROMA_BM25_NAME,
+            serde_json::json!(ChromaBm25Config::from(self)),
+        )
+            .into()
+    }
+
+    async fn embed_documents(&self, batches: &[&str]) -> Result<Vec<SparseVector>, EmbeddingError> {
+        batches
+            .iter()
+            .map(|text| {
+                self.encode(text)
+                    .map_err(|err| EmbeddingError::InvalidInput(err.to_string()))
+            })
+            .collect()
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct ChromaBm25Config {
+    k: Option<f32>,
+    b: Option<f32>,
+    avg_doc_length: Option<f32>,
+    token_max_length: Option<u64>,
+    stopwords: Option<Vec<String>>,
+    include_tokens: Option<bool>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chroma_types::{EmbeddingFunctionConfiguration, EmbeddingFunctionNewConfiguration};
 
     /// Tests comprehensive tokenization covering:
     /// - Possessive forms (Bolt's)
@@ -196,5 +302,36 @@ mod tests {
         for &value in &result.values {
             assert!((value - expected_value).abs() < 1e-5);
         }
+    }
+
+    #[test]
+    fn test_bm25_config_round_trip() {
+        let config = EmbeddingFunctionNewConfiguration {
+            name: "chroma-bm25".to_string(),
+            config: serde_json::json!({
+                "k": 1.5,
+                "b": 0.5,
+                "avg_doc_length": 128.0,
+                "token_max_length": 12,
+                "stopwords": ["and", "the"],
+                "include_tokens": false
+            }),
+        };
+        let bm25 = BM25SparseEmbeddingFunction::try_from_config(&config).unwrap();
+
+        assert_eq!(
+            bm25.configuration(),
+            EmbeddingFunctionConfiguration::Known(EmbeddingFunctionNewConfiguration {
+                name: "chroma_bm25".to_string(),
+                config: serde_json::json!({
+                    "k": 1.5,
+                    "b": 0.5,
+                    "avg_doc_length": 128.0,
+                    "token_max_length": 12,
+                    "stopwords": ["and", "the"],
+                    "include_tokens": false
+                }),
+            })
+        );
     }
 }

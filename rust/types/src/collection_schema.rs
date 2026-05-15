@@ -364,6 +364,38 @@ impl Schema {
             .and_then(|float_list| float_list.vector_index.as_mut())
     }
 
+    pub fn dense_embedding_function(&self) -> Option<&EmbeddingFunctionConfiguration> {
+        self.keys
+            .get(EMBEDDING_KEY)
+            .and_then(|value_types| value_types.float_list.as_ref())
+            .and_then(|float_list| float_list.vector_index.as_ref())
+            .and_then(|vector_index| vector_index.config.embedding_function.as_ref())
+            .or_else(|| {
+                self.defaults
+                    .float_list
+                    .as_ref()
+                    .and_then(|float_list| float_list.vector_index.as_ref())
+                    .and_then(|vector_index| vector_index.config.embedding_function.as_ref())
+            })
+    }
+
+    pub fn sparse_vector_index(&self, key: &str) -> Option<&SparseVectorIndexType> {
+        self.keys
+            .get(key)
+            .and_then(|value_types| value_types.sparse_vector.as_ref())
+            .and_then(|sparse_vector| sparse_vector.sparse_vector_index.as_ref())
+    }
+
+    pub fn sparse_vector_indices(&self) -> impl Iterator<Item = (&str, &SparseVectorIndexType)> {
+        self.keys.iter().filter_map(|(key, value_types)| {
+            value_types
+                .sparse_vector
+                .as_ref()
+                .and_then(|sparse_vector| sparse_vector.sparse_vector_index.as_ref())
+                .map(|sparse_vector_index| (key.as_str(), sparse_vector_index))
+        })
+    }
+
     fn apply_vector_index_update(
         vector_index: &mut VectorIndexType,
         update: &UpdateVectorIndexConfiguration,

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
@@ -8,7 +9,7 @@ use crate::embed::Tokenizer;
 /// Default English stopwords array for BM25 tokenization.
 ///
 /// This list is derived from NLTK's English stopwords. Total: 179 stopwords.
-const DEFAULT_ENGLISH_STOPWORDS_ARRAY: &[&str] = &[
+pub(crate) const DEFAULT_ENGLISH_STOPWORDS_ARRAY: &[&str] = &[
     "a",
     "about",
     "above",
@@ -209,7 +210,7 @@ pub struct Bm25Tokenizer {
     /// Snowball stemmer for reducing words to their root form.
     pub stemmer: Stemmer,
     /// Set of stopwords to filter out during tokenization.
-    pub stopwords: HashSet<&'static str>,
+    pub stopwords: HashSet<Cow<'static, str>>,
     /// Maximum token length; longer tokens are discarded.
     pub token_max_length: usize,
 }
@@ -218,13 +219,49 @@ impl Default for Bm25Tokenizer {
     fn default() -> Self {
         Self {
             stemmer: Stemmer::create(Algorithm::English),
-            stopwords: DEFAULT_ENGLISH_STOPWORDS.clone(),
+            stopwords: DEFAULT_ENGLISH_STOPWORDS
+                .iter()
+                .copied()
+                .map(Cow::Borrowed)
+                .collect(),
             token_max_length: 40,
         }
     }
 }
 
 impl Bm25Tokenizer {
+    /// Returns the default English stopword set.
+    pub fn default_stopwords() -> &'static HashSet<&'static str> {
+        &DEFAULT_ENGLISH_STOPWORDS
+    }
+
+    /// Create a tokenizer with a caller-provided lowercase stopword set.
+    pub fn with_stopwords(
+        stopwords: impl IntoIterator<Item = &'static str>,
+        token_max_length: usize,
+    ) -> Self {
+        Self {
+            stemmer: Stemmer::create(Algorithm::English),
+            stopwords: stopwords.into_iter().map(Cow::Borrowed).collect(),
+            token_max_length,
+        }
+    }
+
+    /// Create a tokenizer from owned stopwords read from persisted configuration.
+    pub(crate) fn with_owned_stopwords(
+        stopwords: impl IntoIterator<Item = String>,
+        token_max_length: usize,
+    ) -> Self {
+        Self {
+            stemmer: Stemmer::create(Algorithm::English),
+            stopwords: stopwords
+                .into_iter()
+                .map(|word| Cow::Owned(word.to_lowercase()))
+                .collect(),
+            token_max_length,
+        }
+    }
+
     /// Remove non-alphanumeric characters, replacing with spaces.
     ///
     /// Matches Python's: re.sub(r"[^\w\s]", " ", text, flags=re.UNICODE)
