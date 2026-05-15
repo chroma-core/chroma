@@ -7,7 +7,9 @@ use std::{
 
 use chroma_cache::Weighted;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_index::{HnswIndex, HnswIndexConfig, IndexConfig};
+use chroma_index::{
+    required_hnsw_capacity, HnswCapacityGrowth, HnswIndex, HnswIndexConfig, IndexConfig,
+};
 use chroma_sqlite::{db::SqliteDb, table::MaxSeqId};
 use chroma_types::{
     operator::RecordMeasure, Chunk, Collection, HnswParametersFromSegmentError, LogRecord,
@@ -774,8 +776,15 @@ impl LocalHnswSegmentWriter {
         // Resize the index if needed
         let index_len = guard.index.len_with_deleted();
         let index_capacity = guard.index.capacity();
-        if index_len + hnsw_batch.len() >= index_capacity {
-            let needed_capacity = (index_len + hnsw_batch.len()).next_power_of_two();
+        if let Some(needed_capacity) = required_hnsw_capacity(
+            index_len,
+            hnsw_batch.len(),
+            index_capacity,
+            true,
+            HnswCapacityGrowth::NextPowerOfTwo,
+        )
+        .map_err(|_| LocalHnswSegmentWriterError::HnswIndexResizeError)?
+        {
             guard
                 .index
                 .resize(needed_capacity)

@@ -7,7 +7,7 @@ use chroma_index::hnsw_provider::{
     HnswIndexProvider, HnswIndexProviderCreateError, HnswIndexProviderForkError,
     HnswIndexProviderOpenError, HnswIndexRef,
 };
-use chroma_index::IndexUuid;
+use chroma_index::{required_hnsw_capacity, HnswCapacityGrowth, IndexUuid};
 use chroma_types::{
     Cmek, Collection, HnswParametersFromSegmentError, MaterializedLogOperation, Schema,
     SchemaError, Segment, SegmentUuid,
@@ -217,17 +217,20 @@ impl DistributedHNSWSegmentWriter {
                         .map_err(ApplyMaterializedLogError::Materialization)?;
                     let embedding = record.merged_embeddings_ref();
 
-                    let mut index = self.index.inner.upgradable_read();
+                    let mut index = self.index.inner.write();
                     let index_len = index.hnsw_index.len_with_deleted();
                     let index_capacity = index.hnsw_index.capacity();
-                    if index_len + 1 > index_capacity {
-                        index.with_upgraded(|index| {
-                            // Bump allocation by 2x
-                            index
-                                .hnsw_index
-                                .resize(index_capacity * 2)
-                                .map(|_| ApplyMaterializedLogError::Allocation)
-                        })?;
+                    if let Some(needed_capacity) = required_hnsw_capacity(
+                        index_len,
+                        1,
+                        index_capacity,
+                        false,
+                        HnswCapacityGrowth::Double,
+                    )
+                    .map_err(|_| ApplyMaterializedLogError::Allocation)?
+                    {
+                        // Bump allocation by 2x
+                        index.hnsw_index.resize(needed_capacity)?;
                     }
 
                     match index
@@ -248,7 +251,7 @@ impl DistributedHNSWSegmentWriter {
                     match self
                         .index
                         .inner
-                        .read()
+                        .write()
                         .hnsw_index
                         .delete(record.get_offset_id() as usize)
                     {

@@ -2816,6 +2816,7 @@ pub struct HnswIndexConfig {
     #[validate(range(min = 2))]
     pub sync_threshold: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 1.0, max = 5.0))]
     pub resize_factor: Option<f64>,
 }
 
@@ -5555,16 +5556,30 @@ mod tests {
         };
         assert!(all_none_config.validate().is_ok());
 
-        // Valid: fields without validation can be any value
+        // Valid: boundary values for the remaining fields should pass.
         let other_fields_config = HnswIndexConfig {
             ef_construction: Some(1),
             max_neighbors: Some(1),
             ef_search: Some(1),
             num_threads: Some(1),
-            resize_factor: Some(0.1),
+            resize_factor: Some(1.0),
             ..Default::default()
         };
         assert!(other_fields_config.validate().is_ok());
+
+        // Invalid: resize_factor too small (min 1.0)
+        let invalid_resize_factor_low = HnswIndexConfig {
+            resize_factor: Some(0.1),
+            ..Default::default()
+        };
+        assert!(invalid_resize_factor_low.validate().is_err());
+
+        // Invalid: resize_factor too large (max 5.0)
+        let invalid_resize_factor_high = HnswIndexConfig {
+            resize_factor: Some(5.1),
+            ..Default::default()
+        };
+        assert!(invalid_resize_factor_high.validate().is_err());
     }
 
     #[test]

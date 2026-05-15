@@ -12,6 +12,7 @@ use chroma_blockstore::{
     BlockfileWriter, BlockfileWriterOptions,
 };
 use chroma_distance::{normalize, DistanceFunction};
+use chroma_error::ChromaError;
 use chroma_tracing::util::Stopwatch;
 use chroma_types::{Cmek, CollectionUuid, InternalSpannConfiguration, SpannPostingList};
 use dashmap::DashMap;
@@ -21,11 +22,12 @@ use uuid::Uuid;
 
 use crate::{
     hnsw_provider::{HnswIndexFlusher, HnswIndexProvider, HnswIndexRef},
+    required_hnsw_capacity,
     spann::types::{
         GarbageCollectionContext, HnswGarbageCollectionPolicy, PlGarbageCollectionPolicy,
         SpannIndexFlusher, SpannIndexFlusherMetrics, SpannIndexWriterError,
     },
-    IndexUuid,
+    HnswCapacityGrowth, IndexUuid,
 };
 
 use super::utils::{cluster, KMeansAlgorithmInput, KMeansError};
@@ -1459,14 +1461,24 @@ impl FastSpannIndexWriter {
                 let mut hnsw_write_guard = self.hnsw_index.inner.write();
                 let hnsw_len = hnsw_write_guard.hnsw_index.len_with_deleted();
                 let hnsw_capacity = hnsw_write_guard.hnsw_index.capacity();
-                if hnsw_len + 1 > hnsw_capacity {
+                if let Some(needed_capacity) = required_hnsw_capacity(
+                    hnsw_len,
+                    1,
+                    hnsw_capacity,
+                    false,
+                    HnswCapacityGrowth::Double,
+                )
+                .map_err(|e| {
+                    tracing::error!("Error calculating hnsw index resize during split: {}", e);
+                    SpannIndexWriterError::HnswIndexResizeError(e.boxed())
+                })? {
                     hnsw_write_guard
                         .hnsw_index
-                        .resize(hnsw_capacity * 2)
+                        .resize(needed_capacity)
                         .map_err(|e| {
                             tracing::error!(
                                 "Error resizing hnsw index during split to {}: {}",
-                                hnsw_capacity * 2,
+                                needed_capacity,
                                 e
                             );
                             SpannIndexWriterError::HnswIndexResizeError(e)
@@ -1547,14 +1559,24 @@ impl FastSpannIndexWriter {
                 let mut write_guard = self.hnsw_index.inner.write();
                 let hnsw_len = write_guard.hnsw_index.len_with_deleted();
                 let hnsw_capacity = write_guard.hnsw_index.capacity();
-                if hnsw_len + 1 > hnsw_capacity {
+                if let Some(needed_capacity) = required_hnsw_capacity(
+                    hnsw_len,
+                    1,
+                    hnsw_capacity,
+                    false,
+                    HnswCapacityGrowth::Double,
+                )
+                .map_err(|e| {
+                    tracing::error!("Error calculating hnsw index resize during append: {}", e);
+                    SpannIndexWriterError::HnswIndexResizeError(e.boxed())
+                })? {
                     write_guard
                         .hnsw_index
-                        .resize(hnsw_capacity * 2)
+                        .resize(needed_capacity)
                         .map_err(|e| {
                             tracing::error!(
                                 "Error resizing hnsw index during append to {}: {}",
-                                hnsw_capacity * 2,
+                                needed_capacity,
                                 e
                             );
                             SpannIndexWriterError::HnswIndexResizeError(e)
@@ -1745,14 +1767,24 @@ impl FastSpannIndexWriter {
                     .ok_or(SpannIndexWriterError::HeadNotFound)?;
                 let hnsw_len = clean_hnsw_write_guard.hnsw_index.len_with_deleted();
                 let hnsw_capacity = clean_hnsw_write_guard.hnsw_index.capacity();
-                if hnsw_len + 1 > hnsw_capacity {
+                if let Some(needed_capacity) = required_hnsw_capacity(
+                    hnsw_len,
+                    1,
+                    hnsw_capacity,
+                    false,
+                    HnswCapacityGrowth::Double,
+                )
+                .map_err(|e| {
+                    tracing::error!("Error calculating hnsw index resize during gc: {}", e);
+                    SpannIndexWriterError::HnswIndexResizeError(e.boxed())
+                })? {
                     clean_hnsw_write_guard
                         .hnsw_index
-                        .resize(hnsw_capacity * 2)
+                        .resize(needed_capacity)
                         .map_err(|e| {
                             tracing::error!(
                                 "Error resizing hnsw index during gc to {}: {}",
-                                hnsw_capacity * 2,
+                                needed_capacity,
                                 e
                             );
                             SpannIndexWriterError::HnswIndexResizeError(e)

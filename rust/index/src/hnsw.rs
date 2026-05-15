@@ -77,6 +77,63 @@ impl HnswIndexConfig {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HnswCapacityGrowth {
+    NextPowerOfTwo,
+    Double,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
+pub enum HnswCapacityError {
+    #[error("HNSW capacity overflow")]
+    Overflow,
+}
+
+impl ChromaError for HnswCapacityError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
+    }
+}
+
+pub fn required_hnsw_capacity(
+    len_with_deleted: usize,
+    additional: usize,
+    capacity: usize,
+    resize_at_capacity: bool,
+    growth: HnswCapacityGrowth,
+) -> Result<Option<usize>, HnswCapacityError> {
+    let required = len_with_deleted
+        .checked_add(additional)
+        .ok_or(HnswCapacityError::Overflow)?;
+    let has_capacity = if resize_at_capacity {
+        required < capacity
+    } else {
+        required <= capacity
+    };
+
+    if has_capacity {
+        return Ok(None);
+    }
+
+    let new_capacity = match growth {
+        HnswCapacityGrowth::NextPowerOfTwo => required
+            .checked_next_power_of_two()
+            .ok_or(HnswCapacityError::Overflow)?,
+        HnswCapacityGrowth::Double => {
+            let doubled = capacity.checked_mul(2).ok_or(HnswCapacityError::Overflow)?;
+            if doubled >= required {
+                doubled
+            } else {
+                required
+                    .checked_next_power_of_two()
+                    .ok_or(HnswCapacityError::Overflow)?
+            }
+        }
+    };
+
+    Ok(Some(new_capacity))
+}
+
 pub struct HnswIndex {
     index: hnswlib::HnswIndex,
     pub id: IndexUuid,
@@ -277,5 +334,73 @@ fn map_distance_function(distance_function: DistanceFunction) -> hnswlib::HnswDi
         DistanceFunction::Cosine => hnswlib::HnswDistanceFunction::Cosine,
         DistanceFunction::Euclidean => hnswlib::HnswDistanceFunction::Euclidean,
         DistanceFunction::InnerProduct => hnswlib::HnswDistanceFunction::InnerProduct,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        required_hnsw_capacity, HnswCapacityError, HnswCapacityGrowth::Double,
+        HnswCapacityGrowth::NextPowerOfTwo,
+    };
+
+    #[test]
+    fn required_capacity_below_limit_does_not_resize() {
+        assert_eq!(
+            Ok(None),
+            required_hnsw_capacity(98, 1, 100, true, NextPowerOfTwo)
+        );
+    }
+
+    #[test]
+    fn required_capacity_at_limit_resizes_when_requested() {
+        assert_eq!(
+            Ok(Some(128)),
+            required_hnsw_capacity(99, 1, 100, true, NextPowerOfTwo)
+        );
+    }
+
+    #[test]
+    fn required_capacity_at_limit_does_not_resize_when_allowed() {
+        assert_eq!(Ok(None), required_hnsw_capacity(99, 1, 100, false, Double));
+    }
+
+    #[test]
+    fn required_capacity_double_growth_uses_doubled_capacity() {
+        assert_eq!(
+            Ok(Some(200)),
+            required_hnsw_capacity(100, 1, 100, false, Double)
+        );
+    }
+
+    #[test]
+    fn required_capacity_double_growth_handles_zero_capacity() {
+        assert_eq!(Ok(Some(1)), required_hnsw_capacity(0, 1, 0, false, Double));
+    }
+
+    #[test]
+    fn required_capacity_rejects_len_overflow() {
+        assert_eq!(
+            Err(HnswCapacityError::Overflow),
+            required_hnsw_capacity(usize::MAX, 1, usize::MAX, false, Double)
+        );
+    }
+
+    #[test]
+    fn required_capacity_rejects_next_power_overflow() {
+        assert_eq!(
+            Err(HnswCapacityError::Overflow),
+            required_hnsw_capacity(usize::MAX, 0, usize::MAX, true, NextPowerOfTwo)
+        );
+    }
+
+    #[test]
+    fn required_capacity_rejects_double_growth_overflow() {
+        let capacity = usize::MAX / 2 + 1;
+
+        assert_eq!(
+            Err(HnswCapacityError::Overflow),
+            required_hnsw_capacity(capacity, 1, capacity, false, Double)
+        );
     }
 }
