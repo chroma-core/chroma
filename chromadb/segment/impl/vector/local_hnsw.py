@@ -109,25 +109,26 @@ class LocalHnswSegment(VectorReader):
         request_version_context: RequestVersionContext,
         ids: Optional[Sequence[str]] = None,
     ) -> Sequence[VectorEmbeddingRecord]:
-        if ids is None:
-            labels = list(self._label_to_id.keys())
-        else:
-            labels = []
-            for id in ids:
-                if id in self._id_to_label:
-                    labels.append(self._id_to_label[id])
+        with ReadRWLock(self._lock):
+            if ids is None:
+                labels = list(self._label_to_id.keys())
+            else:
+                labels = []
+                for id in ids:
+                    if id in self._id_to_label:
+                        labels.append(self._id_to_label[id])
 
-        results = []
-        if self._index is not None:
-            vectors = cast(
-                Sequence[Vector], np.array(self._index.get_items(labels))
-            )  # version 0.8 of hnswlib allows return_type="numpy"
+            results = []
+            if self._index is not None:
+                vectors = cast(
+                    Sequence[Vector], np.array(self._index.get_items(labels))
+                )  # version 0.8 of hnswlib allows return_type="numpy"
 
-            for label, vector in zip(labels, vectors):
-                id = self._label_to_id[label]
-                results.append(VectorEmbeddingRecord(id=id, embedding=vector))
+                for label, vector in zip(labels, vectors):
+                    id = self._label_to_id[label]
+                    results.append(VectorEmbeddingRecord(id=id, embedding=vector))
 
-        return results
+            return results
 
     @trace_method("LocalHnswSegment.query_vectors", OpenTelemetryGranularity.ALL)
     @override

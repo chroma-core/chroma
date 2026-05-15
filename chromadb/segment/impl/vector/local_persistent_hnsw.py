@@ -40,8 +40,10 @@ from chromadb.utils.read_write_lock import ReadRWLock, WriteRWLock
 
 logger = logging.getLogger(__name__)
 
+
 class SafeUnpickler(pickle.Unpickler):
     """Restricts unpickling to allowed classes only, preventing arbitrary code execution (CWE-502)"""
+
     ALLOWED_CLASSES = {
         ("chromadb.segment.impl.vector.local_persistent_hnsw", "PersistentData"),
         ("builtins", "dict"),
@@ -57,6 +59,8 @@ class SafeUnpickler(pickle.Unpickler):
         if (module, name) not in self.ALLOWED_CLASSES:
             raise pickle.UnpicklingError(f"Forbidden: {module}.{name}")
         return super().find_class(module, name)
+
+
 class PersistentData:
     """Stores the data and metadata needed for a PersistentLocalHnswSegment"""
 
@@ -384,42 +388,43 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         """Get the embeddings from the HNSW index and layered brute force
         batch index."""
 
-        ids_hnsw: Set[str] = set()
-        ids_bf: Set[str] = set()
+        with ReadRWLock(self._lock):
+            ids_hnsw: Set[str] = set()
+            ids_bf: Set[str] = set()
 
-        if self._index is not None:
-            ids_hnsw = set(self._id_to_label.keys())
-        if self._brute_force_index is not None:
-            ids_bf = set(self._curr_batch.get_written_ids())
+            if self._index is not None:
+                ids_hnsw = set(self._id_to_label.keys())
+            if self._brute_force_index is not None:
+                ids_bf = set(self._curr_batch.get_written_ids())
 
-        target_ids = ids or list(ids_hnsw.union(ids_bf))
-        self._brute_force_index = cast(BruteForceIndex, self._brute_force_index)
-        hnsw_labels = []
+            target_ids = ids or list(ids_hnsw.union(ids_bf))
+            self._brute_force_index = cast(BruteForceIndex, self._brute_force_index)
+            hnsw_labels = []
 
-        results: List[Optional[VectorEmbeddingRecord]] = []
-        id_to_index: Dict[str, int] = {}
-        for i, id in enumerate(target_ids):
-            if id in ids_bf:
-                results.append(self._brute_force_index.get_vectors([id])[0])
-            elif id in ids_hnsw and id not in self._curr_batch._deleted_ids:
-                hnsw_labels.append(self._id_to_label[id])
-                # Placeholder for hnsw results to be filled in down below so we
-                # can batch the hnsw get() call
-                results.append(None)
-            id_to_index[id] = i
+            results: List[Optional[VectorEmbeddingRecord]] = []
+            id_to_index: Dict[str, int] = {}
+            for i, id in enumerate(target_ids):
+                if id in ids_bf:
+                    results.append(self._brute_force_index.get_vectors([id])[0])
+                elif id in ids_hnsw and id not in self._curr_batch._deleted_ids:
+                    hnsw_labels.append(self._id_to_label[id])
+                    # Placeholder for hnsw results to be filled in down below so we
+                    # can batch the hnsw get() call
+                    results.append(None)
+                id_to_index[id] = i
 
-        if len(hnsw_labels) > 0 and self._index is not None:
-            vectors = cast(
-                Sequence[Vector], np.array(self._index.get_items(hnsw_labels))
-            )  # version 0.8 of hnswlib allows return_type="numpy"
+            if len(hnsw_labels) > 0 and self._index is not None:
+                vectors = cast(
+                    Sequence[Vector], np.array(self._index.get_items(hnsw_labels))
+                )  # version 0.8 of hnswlib allows return_type="numpy"
 
-            for label, vector in zip(hnsw_labels, vectors):
-                id = self._label_to_id[label]
-                results[id_to_index[id]] = VectorEmbeddingRecord(
-                    id=id, embedding=vector
-                )
+                for label, vector in zip(hnsw_labels, vectors):
+                    id = self._label_to_id[label]
+                    results[id_to_index[id]] = VectorEmbeddingRecord(
+                        id=id, embedding=vector
+                    )
 
-        return results  # type: ignore ## Python can't cast List with Optional to List with VectorEmbeddingRecord
+            return results  # type: ignore ## Python can't cast List with Optional to List with VectorEmbeddingRecord
 
     @trace_method(
         "PersistentLocalHnswSegment.query_vectors", OpenTelemetryGranularity.ALL

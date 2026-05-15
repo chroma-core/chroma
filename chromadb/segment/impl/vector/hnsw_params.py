@@ -1,3 +1,4 @@
+import math
 import multiprocessing
 import re
 from typing import Any, Callable, Dict, Union
@@ -6,14 +7,32 @@ from chromadb.types import Metadata
 
 
 Validator = Callable[[Union[str, int, float]], bool]
+MAX_RESIZE_FACTOR = 5.0
+
+
+def _is_positive_int(value: Union[str, int, float]) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
+def _is_resize_factor(value: Union[str, int, float]) -> bool:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+
+    try:
+        resize_factor = float(value)
+    except OverflowError:
+        return False
+
+    return math.isfinite(resize_factor) and 1.0 <= resize_factor <= MAX_RESIZE_FACTOR
+
 
 param_validators: Dict[str, Validator] = {
     "hnsw:space": lambda p: bool(re.match(r"^(l2|cosine|ip)$", str(p))),
-    "hnsw:construction_ef": lambda p: isinstance(p, int),
-    "hnsw:search_ef": lambda p: isinstance(p, int),
-    "hnsw:M": lambda p: isinstance(p, int),
-    "hnsw:num_threads": lambda p: isinstance(p, int),
-    "hnsw:resize_factor": lambda p: isinstance(p, (int, float)),
+    "hnsw:construction_ef": _is_positive_int,
+    "hnsw:search_ef": _is_positive_int,
+    "hnsw:M": _is_positive_int,
+    "hnsw:num_threads": _is_positive_int,
+    "hnsw:resize_factor": _is_resize_factor,
 }
 
 # Extra params used for persistent hnsw

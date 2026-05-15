@@ -1,5 +1,6 @@
 from abc import abstractmethod
 import json
+import math
 from overrides import override
 from typing import (
     Any,
@@ -255,7 +256,9 @@ class HNSWConfigurationInternal(ConfigurationInternal):
         ),
         "resize_factor": ConfigurationDefinition(
             name="resize_factor",
-            validator=lambda value: isinstance(value, float) and value >= 1,
+            validator=lambda value: isinstance(value, float)
+            and math.isfinite(value)
+            and 1.0 <= value <= 5.0,
             is_static=True,
             default_value=1.2,
         ),

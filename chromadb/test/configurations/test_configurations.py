@@ -108,3 +108,5 @@ def test_configuration_validation() -> None:
 def test_hnsw_validation() -> None:
     with pytest.raises(ValueError, match="must be less than or equal"):
         HNSWConfiguration(batch_size=500, sync_threshold=100)
+    with pytest.raises(ValueError, match="Invalid parameter value"):
+        HNSWConfiguration(resize_factor=5.1)
