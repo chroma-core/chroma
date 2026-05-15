@@ -1381,7 +1381,8 @@ impl ChromaCollection {
 
         let mut sparse_keys = schema
             .sparse_vector_indices()
-            .filter_map(|(key, sparse_index)| sparse_index.enabled.then(|| key.to_string()));
+            .filter(|(_, sparse_index)| sparse_index.enabled)
+            .map(|(key, _)| key.to_string());
         let sparse_key = sparse_keys.next().ok_or_else(|| {
             EmbeddingError::InvalidInput(
                 "sparse_key is required because the collection has no sparse vector index"
@@ -1699,11 +1700,13 @@ mod tests {
         schema: Option<chroma_types::Schema>,
         dense_embedding_function: Option<Arc<dyn DenseEmbeddingFunction>>,
     ) -> ChromaCollection {
-        let mut collection = Collection::default();
-        collection.name = "test".to_string();
-        collection.tenant = "tenant".to_string();
-        collection.database = "database".to_string();
-        collection.schema = schema;
+        let collection = Collection {
+            name: "test".to_string(),
+            tenant: "tenant".to_string(),
+            database: "database".to_string(),
+            schema,
+            ..Default::default()
+        };
         let client = ChromaHttpClient::new(crate::client::ChromaHttpClientOptions {
             endpoint: server.base_url().parse().unwrap(),
             tenant_id: Some("tenant".to_string()),

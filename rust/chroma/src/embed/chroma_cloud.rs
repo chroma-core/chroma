@@ -536,17 +536,19 @@ mod tests {
             })
             .await;
 
-        let mut options = ChromaCloudQwenOptions::default();
-        options.api_key = Some("test-key".to_string());
-        options.url = server.base_url();
-        options.task = Some("task".to_string());
-        options.instructions = BTreeMap::from([(
-            "task".to_string(),
-            BTreeMap::from([
-                ("documents".to_string(), "document instruction".to_string()),
-                ("query".to_string(), "query instruction".to_string()),
-            ]),
-        )]);
+        let options = ChromaCloudQwenOptions {
+            api_key: Some("test-key".to_string()),
+            url: server.base_url(),
+            task: Some("task".to_string()),
+            instructions: BTreeMap::from([(
+                "task".to_string(),
+                BTreeMap::from([
+                    ("documents".to_string(), "document instruction".to_string()),
+                    ("query".to_string(), "query instruction".to_string()),
+                ]),
+            )]),
+            ..Default::default()
+        };
         let embedder = ChromaCloudQwenEmbeddingFunction::new(options);
 
         let embeddings = embedder.embed_query(&["hello"]).await.unwrap();
@@ -580,10 +582,12 @@ mod tests {
             })
             .await;
 
-        let mut options = ChromaCloudSpladeOptions::default();
-        options.api_key = Some("test-key".to_string());
-        options.url = format!("{}/embed_sparse", server.base_url());
-        options.include_tokens = true;
+        let options = ChromaCloudSpladeOptions {
+            api_key: Some("test-key".to_string()),
+            url: format!("{}/embed_sparse", server.base_url()),
+            include_tokens: true,
+            ..Default::default()
+        };
         let embedder = ChromaCloudSpladeEmbeddingFunction::new(options);
 
         let embeddings = embedder.embed_documents(&["hello"]).await.unwrap();

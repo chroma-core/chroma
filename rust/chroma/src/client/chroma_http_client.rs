@@ -983,9 +983,10 @@ impl ChromaHttpClient {
                 configuration.get_or_insert_with(CollectionConfiguration::default);
             collection_configuration.embedding_function = Some(embedding_function.configuration());
             if collection_configuration.hnsw.is_none() && collection_configuration.spann.is_none() {
-                let mut hnsw = HnswConfiguration::default();
-                hnsw.space = Some(embedding_function.default_space());
-                collection_configuration.hnsw = Some(hnsw);
+                collection_configuration.hnsw = Some(HnswConfiguration {
+                    space: Some(embedding_function.default_space()),
+                    ..Default::default()
+                });
             }
         }
 
@@ -1435,24 +1436,26 @@ mod tests {
     #[test_log::test]
     async fn get_or_create_collection_compares_returned_embedding_function() {
         let server = MockServer::start_async().await;
-        let mut collection = Collection::default();
-        collection.name = "existing".to_string();
-        collection.tenant = "tenant".to_string();
-        collection.database = "database".to_string();
-        collection.config = CollectionConfiguration {
-            embedding_function: Some(
-                (
-                    "chroma-cloud-qwen",
-                    serde_json::json!({
-                        "model": "different-model"
-                    }),
-                )
-                    .into(),
-            ),
+        let collection = Collection {
+            name: "existing".to_string(),
+            tenant: "tenant".to_string(),
+            database: "database".to_string(),
+            config: CollectionConfiguration {
+                embedding_function: Some(
+                    (
+                        "chroma-cloud-qwen",
+                        serde_json::json!({
+                            "model": "different-model"
+                        }),
+                    )
+                        .into(),
+                ),
+                ..Default::default()
+            }
+            .try_into()
+            .unwrap(),
             ..Default::default()
-        }
-        .try_into()
-        .unwrap();
+        };
 
         let mock = server
             .mock_async(|when, then| {

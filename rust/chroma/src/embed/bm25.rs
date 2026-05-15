@@ -86,11 +86,10 @@ impl BM25SparseEmbeddingFunction<Bm25Tokenizer, Murmur3AbsHasher> {
         let token_max_length = config.token_max_length.unwrap_or(40) as usize;
         let tokenizer = match config.stopwords {
             Some(stopwords) => Bm25Tokenizer::with_owned_stopwords(stopwords, token_max_length),
-            None => {
-                let mut tokenizer = Bm25Tokenizer::default();
-                tokenizer.token_max_length = token_max_length;
-                tokenizer
-            }
+            None => Bm25Tokenizer {
+                token_max_length,
+                ..Default::default()
+            },
         };
 
         Self {
