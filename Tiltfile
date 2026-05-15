@@ -287,6 +287,10 @@ k8s_resource(
     'compaction-service-serviceaccount:ServiceAccount:chroma',
     'compaction-service-serviceaccount-rolebinding:RoleBinding:chroma',
 
+    'fn-consumer-rust-log-service-memberlist-binding:RoleBinding:chroma',
+    'fn-consumer-service-account:ServiceAccount:chroma',
+    'fn-consumer-service-serviceaccount-rolebinding:RoleBinding:chroma',
+
     'rust-frontend-service-serviceaccount:ServiceAccount:chroma',
     'rust-frontend-service-rolebinding:RoleBinding:chroma',
     'rust-frontend-service-query-service-memberlist-binding:RoleBinding:chroma',
