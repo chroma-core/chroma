@@ -3634,17 +3634,22 @@ name = "foundation-api"
 version = "1.0.0"
 dependencies = [
  "axum 0.8.8",
+ "chroma-config",
  "chroma-error",
+ "chroma-sysdb",
  "chroma-system",
  "chroma-tracing",
  "chroma-types",
  "figment",
  "frontend-core",
+ "mdac",
  "serde",
  "serde_json",
+ "thiserror 1.0.69",
  "tokio",
  "tower-http 0.6.8",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

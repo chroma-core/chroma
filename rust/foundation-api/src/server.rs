@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 use axum::{
     extract::{DefaultBodyLimit, State},
@@ -6,8 +9,11 @@ use axum::{
     routing::get,
     Json, Router, ServiceExt,
 };
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_sysdb::SysDb;
 use chroma_system::System;
 use chroma_tracing::add_tracing_middleware;
+use mdac::{Rule, Scorecard, ScorecardGuard};
 #[cfg(unix)]
 use tokio::signal::unix::{signal, SignalKind};
 #[cfg(windows)]
@@ -22,11 +28,23 @@ use crate::{
     server_middleware::{always_json_errors_middleware, default_json_content_type_middleware},
 };
 
+#[derive(Clone, Copy, Debug, thiserror::Error)]
+#[error("Too many requests; backoff and try again")]
+struct RateLimitError;
+
+impl ChromaError for RateLimitError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::ResourceExhausted
+    }
+}
+
 #[derive(Clone)]
 pub struct FoundationApiServer {
     pub(crate) config: FoundationApiConfig,
-    #[allow(dead_code)]
     pub(crate) auth: Arc<dyn AuthenticateAndAuthorize>,
+    pub(crate) sysdb: SysDb,
+    pub(crate) scorecard_enabled: Arc<AtomicBool>,
+    pub(crate) scorecard: Arc<Scorecard<'static>>,
     pub(crate) system: System,
 }
 
@@ -34,12 +52,40 @@ impl FoundationApiServer {
     pub fn new(
         config: FoundationApiConfig,
         auth: Arc<dyn AuthenticateAndAuthorize>,
+        sysdb: SysDb,
+        rules: Vec<Rule>,
         system: System,
     ) -> FoundationApiServer {
+        // NOTE(rescrv): Assume statically no more than 128 threads because we
+        // won't deploy on hardware with that many threads anytime soon for
+        // frontends, if ever. Matches chroma-frontend's choice.
+        let scorecard_enabled = Arc::new(AtomicBool::new(config.base.scorecard_enabled));
+        // SAFETY(rescrv): This is safe because 128 is non-zero.
+        let scorecard = Arc::new(Scorecard::new(&(), rules, 128.try_into().unwrap()));
         FoundationApiServer {
             config,
             auth,
+            sysdb,
+            scorecard_enabled,
+            scorecard,
             system,
+        }
+    }
+
+    /// Track this request against the scorecard rate limiter. Returns a guard
+    /// that must be held for the duration of the request; drop it and the slot
+    /// is released. Returns `RateLimitError` (429) if the limiter rejects.
+    pub(crate) fn scorecard_request(
+        &self,
+        tags: &[&str],
+    ) -> Result<ScorecardGuard, Box<dyn ChromaError>> {
+        if self.scorecard_enabled.load(Ordering::Relaxed) {
+            self.scorecard
+                .track(tags)
+                .map(|ticket| ScorecardGuard::new(Arc::clone(&self.scorecard), Some(ticket)))
+                .ok_or_else(|| Box::new(RateLimitError) as _)
+        } else {
+            Ok(ScorecardGuard::new(Arc::clone(&self.scorecard), None))
         }
     }
 
@@ -48,7 +94,7 @@ impl FoundationApiServer {
     pub async fn run(self, ready_tx: Option<tokio::sync::oneshot::Sender<u16>>) {
         let system = self.system.clone();
 
-        let FoundationApiConfig { base } = self.config.clone();
+        let FoundationApiConfig { base, .. } = self.config.clone();
         let port = base.port;
         let listen_address = base.listen_address.clone();
         let max_payload_size_bytes = base.max_payload_size_bytes;

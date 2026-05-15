@@ -1,9 +1,8 @@
 use crate::server::FoundationApiServer;
-use axum::Router;
+use axum::{routing::post, Router};
 
-/// Empty foundation route module. Handler tickets (#7442, #7507, #7508, #7509)
-/// register `/api/foundation/{ask,recall,brief,init}` and future sync-domain
-/// endpoints here.
+pub(crate) mod init;
+
 pub(crate) fn router() -> Router<FoundationApiServer> {
-    Router::new()
+    Router::new().route("/api/foundation/init", post(init::foundation_init))
 }
