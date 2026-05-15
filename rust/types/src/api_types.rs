@@ -2541,7 +2541,7 @@ impl AttachFunctionRequest {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct AttachedFunctionInfo {
     /// Unique identifier for the attached function.
@@ -2552,7 +2552,7 @@ pub struct AttachedFunctionInfo {
     pub function_name: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct AttachFunctionResponse {
     pub attached_function: AttachedFunctionInfo,
@@ -2561,7 +2561,7 @@ pub struct AttachFunctionResponse {
 }
 
 /// API response struct for attached function with function_name instead of function_id
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct AttachedFunctionApiResponse {
     /// Unique identifier for the attached function
@@ -2618,7 +2618,7 @@ impl AttachedFunctionApiResponse {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetAttachedFunctionResponse {
     pub attached_function: AttachedFunctionApiResponse,
@@ -2702,7 +2702,7 @@ impl DetachFunctionRequest {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DetachFunctionResponse {
     pub success: bool,
