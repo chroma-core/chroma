@@ -14,23 +14,31 @@ services:
       # Uncomment below to build in release mode
       # args:
       #   RELEASE_MODE: "1"
+    hostname: chromadb
+    container_name: chromadb
     volumes:
-      # The default config specifies a persist_directory of /data.
-      # Read more about deployments: https://docs.trychroma.com/deployment
-      - chroma-data:/data
+      # Default configuration for persist_directory in chromadb/config.py
+      # Currently it's located in "/chroma/chroma/"
+      - chroma-data:/chroma/chroma/
     environment:
+      - CHROMA_WORKERS=4 # adjust base on expected workload
       - CHROMA_OPEN_TELEMETRY__ENDPOINT=${CHROMA_OPEN_TELEMETRY__ENDPOINT}
       - CHROMA_OPEN_TELEMETRY__SERVICE_NAME=${CHROMA_OPEN_TELEMETRY__SERVICE_NAME}
       - OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS}
+      - IS_PERSISTENT=TRUE
+      - HOSTNAME="chromadb"
+      - TZ="UTC"
+      - ADDRESS=0.0.0.0
     restart: unless-stopped # possible values are: "no", always", "on-failure", "unless-stopped"
     ports:
       - "8000:8000"
     healthcheck:
       # Adjust below to match your container port
       test: [ "CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat" ]
-      interval: 30s
-      timeout: 10s
+      interval: 10s
+      timeout: 3s
       retries: 3
+      start_period: 32s
     networks:
       - net
 
