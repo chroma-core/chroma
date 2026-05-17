@@ -243,6 +243,11 @@ def normalize_embeddings(
         elif isinstance(target[0], np.ndarray):
             return cast(Embeddings, target)
         elif isinstance(target[0], list):
+            if len(target[0]) == 0:
+                raise ValueError(
+                    "Expected each embedding in the embeddings to be a non-empty list, "
+                    "got an empty list at pos 0"
+                )
             if isinstance(target[0][0], (int, float)) and not isinstance(
                 target[0][0], bool
             ):
