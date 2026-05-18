@@ -94,7 +94,7 @@ describe("query records", () => {
       include: [IncludeEnum.Embeddings],
     });
 
-    expect(results2.embeddings?.[0]?.length).toBe(1);
+    expect(results2.embeddings?.[0]).toHaveLength(1);
     expect(results2.embeddings?.[0][0]).toEqual([
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
     ]);
@@ -358,7 +358,7 @@ describe("id filtering", () => {
       nResults: 10,
     });
 
-    expect(multiResults.ids.length).toBe(multiQueryEmbeddings.length);
+    expect(multiResults.ids).toHaveLength(multiQueryEmbeddings.length);
     multiResults.ids.forEach((idSet) => {
       idSet.forEach((id) => {
         expect(queryIds).toContain(id);

@@ -20,7 +20,7 @@ describe("peek records", () => {
     const results = await collection.peek({ limit: 2 });
     expect(results).toBeDefined();
     expect(typeof results).toBe("object");
-    expect(results.ids.length).toBe(2);
+    expect(results.ids).toHaveLength(2);
     expect(["test1", "test2"]).toEqual(expect.arrayContaining(results.ids));
   });
 
