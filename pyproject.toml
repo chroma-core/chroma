@@ -53,7 +53,9 @@ packages = ["chromadb"]
 chromadb = ["*.yml"]
 
 [tool.maturin]
-strip = true
+# strip = false to avoid conflict with maturin dev's automatic --include-debuginfo
+# (maturin develop includes debug info by default; --strip cannot be used with --include-debuginfo)
+strip = false
 features = ["pyo3/extension-module"]
 manifest-path = "rust/python_bindings/Cargo.toml"
 python-packages = ["chromadb"]
