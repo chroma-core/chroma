@@ -177,7 +177,7 @@ func convertSegmentMetadataToModel(segmentMetadataList []*dbmodel.SegmentMetadat
 		if metadata.Empty() {
 			metadata = nil
 		}
-		log.Debug("segment metadata to model", zap.Any("segmentMetadata", nil))
+		log.Debug("segment metadata to model", zap.Any("segmentMetadata", metadata))
 		return metadata
 	}
 }
