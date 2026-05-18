@@ -1,12 +1,21 @@
 import re
 import sys
+import platform
 
-import chromadb_rust_bindings
 import requests
 from packaging.version import parse
 
 import chromadb
-
+try:
+    import chromadb_rust_bindings
+except ImportError as exc:
+    if platform.system() == "Windows" and "DLL load failed" in str(exc):
+        raise ImportError(
+            "Failed to import chromadb_rust_bindings. On Windows this usually means "
+            "the Microsoft Visual C++ Redistributable is missing. Install it from "
+            "https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist and retry."
+        ) from exc
+    raise
 
 def build_cli_args(**kwargs):
     args = []
