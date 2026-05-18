@@ -232,6 +232,7 @@ jobs:
 
   lint:
     name: Lint
+    needs: change-detection
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
@@ -263,6 +264,7 @@ jobs:
         shell: bash
         run: cargo fmt -- --check
       - name: Clippy
+        if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust') # takes a long time -- only run if rust changed!
         run: cargo clippy --all-targets --all-features --keep-going -- -D warnings -D clippy::large_futures -D clippy::all
 
   # This job exists for our branch protection rule.
