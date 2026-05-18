@@ -1,5 +1,5 @@
 from typing import Dict, List, Mapping, Optional, Sequence, Union, Any
-from typing_extensions import Literal, Final
+from typing_extensions import Literal, Final, TypedDict, NotRequired
 from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
@@ -7,6 +7,24 @@ from numpy.typing import NDArray
 # Type tag constants
 TYPE_KEY: Final[str] = "#type"
 SPARSE_VECTOR_TYPE_VALUE: Final[str] = "sparse_vector"
+
+
+# Strict TypedDict for SparseVector transport format
+class SparseVectorTransportDict(TypedDict):
+    """Strict type for SparseVector transport format with type tag."""
+
+    indices: List[int]
+    values: List[float]
+    tokens: NotRequired[Optional[List[str]]]  # Wire format uses 'tokens'
+
+
+# Helper for the type key - since TypedDict can't use # in field names
+def _validate_sparse_vector_type(d: Dict[str, Any]) -> None:
+    """Validate the #type field for SparseVector."""
+    if d.get(TYPE_KEY) != SPARSE_VECTOR_TYPE_VALUE:
+        raise ValueError(
+            f"Expected {TYPE_KEY}='{SPARSE_VECTOR_TYPE_VALUE}', got {d.get(TYPE_KEY)}"
+        )
 
 
 @dataclass
@@ -99,16 +117,19 @@ class SparseVector:
         return result
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "SparseVector":
+    def from_dict(cls, d: Union[SparseVectorTransportDict, Dict[str, Any]]) -> "SparseVector":
         """Deserialize from transport format (strict - requires #type field).
 
         Note: Reads from 'tokens' key in the wire format for compatibility
         with the protobuf schema, mapping it to the 'labels' attribute.
+
+        Args:
+            d: Dictionary with SparseVector data. Must include #type field.
+               Preferred type is SparseVectorTransportDict for type safety.
         """
-        if d.get(TYPE_KEY) != SPARSE_VECTOR_TYPE_VALUE:
-            raise ValueError(
-                f"Expected {TYPE_KEY}='{SPARSE_VECTOR_TYPE_VALUE}', got {d.get(TYPE_KEY)}"
-            )
+        # Validate type field (since TypedDict can't represent # keys)
+        _validate_sparse_vector_type(d)
+
         return cls(
             indices=d["indices"],
             values=d["values"],
