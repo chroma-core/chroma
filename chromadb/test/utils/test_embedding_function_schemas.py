@@ -366,6 +366,18 @@ class TestEmbeddingFunctionSchemas:
                 # If that fails, try with common minimal args
                 return ef_class(model_name="test-model")
 
+    def test_sentence_transformer_schema_explicit_nulls(self) -> None:
+        """Test that sentence_transformer schema explicitly allows null values for batch_size and multiprocess_devices"""
+        config = {
+            "model_name": "all-MiniLM-L6-v2",
+            "device": "cpu",
+            "normalize_embeddings": False,
+            "batch_size": None,
+            "multiprocess_devices": None,
+            "kwargs": {},
+        }
+        validate_config_schema(config, "sentence_transformer")
+
     @pytest.mark.parametrize("ef_name", get_embedding_function_names())
     def test_validate_config_with_schema(
         self,
