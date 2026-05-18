@@ -39,7 +39,7 @@ class HuggingFaceSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         try:
             from sentence_transformers import SparseEncoder
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The sentence_transformers python package is not installed. Please install it with `pip install sentence_transformers`"
             )
 
@@ -49,7 +49,7 @@ class HuggingFaceSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         self.query_config = query_config
         for key, value in kwargs.items():
             if not isinstance(value, (str, int, float, bool, list, dict, tuple)):
-                raise ValueError(f"Keyword argument {key} is not a primitive type")
+                raise InvalidArgumentError(f"Keyword argument {key} is not a primitive type")
         self.kwargs = kwargs
 
         if model_name not in self.models:
@@ -70,7 +70,7 @@ class HuggingFaceSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         try:
             from sentence_transformers import SparseEncoder
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The sentence_transformers python package is not installed. Please install it with `pip install sentence_transformers`"
             )
         model = cast(SparseEncoder, self._model)
@@ -83,7 +83,7 @@ class HuggingFaceSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
                 list(input),
             )
         else:
-            raise ValueError(f"Invalid task: {self.task}")
+            raise InvalidArgumentError(f"Invalid task: {self.task}")
 
         sparse_vectors: SparseVectors = []
 
@@ -107,7 +107,7 @@ class HuggingFaceSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         try:
             from sentence_transformers import SparseEncoder
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The sentence_transformers python package is not installed. Please install it with `pip install sentence_transformers`"
             )
         model = cast(SparseEncoder, self._model)
@@ -121,7 +121,7 @@ class HuggingFaceSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
                     list(input),
                 )
             else:
-                raise ValueError(f"Invalid task: {self.query_config.get('task')}")
+                raise InvalidArgumentError(f"Invalid task: {self.query_config.get('task')}")
 
             sparse_vectors: SparseVectors = []
 
@@ -181,6 +181,7 @@ class HuggingFaceSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
+from chromadb.errors import InvalidArgumentError
         # model_name is also used as the identifier for model path if stored locally.
         # Users should be able to change the path if needed, so we should not validate that.
         # e.g. moving file path from /v1/my-model.bin to /v2/my-model.bin

@@ -20,7 +20,7 @@ class Text2VecEmbeddingFunction(EmbeddingFunction[Documents]):
         try:
             from text2vec import SentenceModel
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The text2vec python package is not installed. Please install it with `pip install text2vec`"
             )
 
@@ -39,7 +39,7 @@ class Text2VecEmbeddingFunction(EmbeddingFunction[Documents]):
         """
         # Text2Vec only works with text documents
         if not all(isinstance(item, str) for item in input):
-            raise ValueError("Text2Vec only supports text documents, not images")
+            raise InvalidArgumentError("Text2Vec only supports text documents, not images")
 
         embeddings = self._model.encode(list(input), convert_to_numpy=True)
 
@@ -71,6 +71,7 @@ class Text2VecEmbeddingFunction(EmbeddingFunction[Documents]):
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
+from chromadb.errors import InvalidArgumentError
         # model_name is also used as the identifier for model path if stored locally.
         # Users should be able to change the path if needed, so we should not validate that.
         # e.g. moving file path from /v1/my-model.bin to /v2/my-model.bin

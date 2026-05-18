@@ -12,9 +12,10 @@ class ImageLoader(DataLoader[List[Optional[Image]]]):
             self._PILImage = importlib.import_module("PIL.Image")
             self._max_workers = max_workers
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The PIL python package is not installed. Please install it with `pip install pillow`"
             )
+from chromadb.errors import InvalidArgumentError
 
     def _load_image(self, uri: Optional[URI]) -> Optional[Image]:
         return np.array(self._PILImage.open(uri)) if uri is not None else None

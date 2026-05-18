@@ -56,12 +56,12 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         if preferred_providers and not all(
             [isinstance(i, str) for i in preferred_providers]
         ):
-            raise ValueError("Preferred providers must be a list of strings")
+            raise InvalidArgumentError("Preferred providers must be a list of strings")
         # check for duplicate providers
         if preferred_providers and len(preferred_providers) != len(
             set(preferred_providers)
         ):
-            raise ValueError("Preferred providers must be unique")
+            raise InvalidArgumentError("Preferred providers must be unique")
 
         self._preferred_providers = preferred_providers
 
@@ -69,21 +69,21 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             # Equivalent to import onnxruntime
             self.ort = importlib.import_module("onnxruntime")
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The onnxruntime python package is not installed. Please install it with `pip install onnxruntime`"
             )
         try:
             # Equivalent to from tokenizers import Tokenizer
             self.Tokenizer = importlib.import_module("tokenizers").Tokenizer
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The tokenizers python package is not installed. Please install it with `pip install tokenizers`"
             )
         try:
             # Equivalent to from tqdm import tqdm
             self.tqdm = importlib.import_module("tqdm").tqdm
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The tqdm python package is not installed. Please install it with `pip install tqdm`"
             )
 
@@ -119,7 +119,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
 
         if not _verify_sha256(fname, self._MODEL_SHA256):
             os.remove(fname)
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"Downloaded file {fname} does not match expected SHA256 hash. Corrupted download or malicious file."
             )
 
@@ -163,7 +163,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             # Check if any document exceeds the max tokens
             for doc_tokens in encoded:
                 if len(doc_tokens.ids) > self.max_tokens():
-                    raise ValueError(
+                    raise InvalidArgumentError(
                         f"Document length {len(doc_tokens.ids)} is greater than the max tokens {self.max_tokens()}"
                     )
 
@@ -232,7 +232,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         elif not set(self._preferred_providers).issubset(
             set(self.ort.get_available_providers())
         ):
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"Preferred providers must be subset of available providers: {self.ort.get_available_providers()}"
             )
 
@@ -347,6 +347,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
+from chromadb.errors import InvalidArgumentError
         # Preferred providers can be changed, so no validation needed
         pass
 

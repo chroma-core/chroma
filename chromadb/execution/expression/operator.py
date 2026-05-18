@@ -89,21 +89,21 @@ class Where:
         - {"$or": [conditions]} -> condition1 | condition2 | ...
         """
         if not isinstance(data, dict):
-            raise TypeError(f"Expected dict for Where, got {type(data).__name__}")
+            raise InvalidArgumentError(f"Expected dict for Where, got {type(data).__name__}")
 
         if not data:
-            raise ValueError("Where dict cannot be empty")
+            raise InvalidArgumentError("Where dict cannot be empty")
 
         # Handle logical operators
         if "$and" in data:
             if not isinstance(data["$and"], list):
-                raise TypeError(
+                raise InvalidArgumentError(
                     f"$and must be a list, got {type(data['$and']).__name__}"
                 )
             if len(data["$and"]) == 0:
-                raise ValueError("$and requires at least one condition")
+                raise InvalidArgumentError("$and requires at least one condition")
             if len(data) > 1:
-                raise ValueError(
+                raise InvalidArgumentError(
                     "$and cannot be combined with other fields in the same dict"
                 )
 
@@ -117,11 +117,11 @@ class Where:
 
         elif "$or" in data:
             if not isinstance(data["$or"], list):
-                raise TypeError(f"$or must be a list, got {type(data['$or']).__name__}")
+                raise InvalidArgumentError(f"$or must be a list, got {type(data['$or']).__name__}")
             if len(data["$or"]) == 0:
-                raise ValueError("$or requires at least one condition")
+                raise InvalidArgumentError("$or requires at least one condition")
             if len(data) > 1:
-                raise ValueError(
+                raise InvalidArgumentError(
                     "$or cannot be combined with other fields in the same dict"
                 )
 
@@ -136,25 +136,25 @@ class Where:
         else:
             # Single field condition
             if len(data) != 1:
-                raise ValueError(
+                raise InvalidArgumentError(
                     f"Where dict must contain exactly one field, got {len(data)}"
                 )
 
             field, condition = next(iter(data.items()))
 
             if not isinstance(field, str):
-                raise TypeError(
+                raise InvalidArgumentError(
                     f"Field name must be a string, got {type(field).__name__}"
                 )
 
             if isinstance(condition, dict):
                 # Operator-based condition
                 if not condition:
-                    raise ValueError(
+                    raise InvalidArgumentError(
                         f"Operator dict for field '{field}' cannot be empty"
                     )
                 if len(condition) != 1:
-                    raise ValueError(
+                    raise InvalidArgumentError(
                         f"Operator dict for field '{field}' must contain exactly one operator"
                     )
 
@@ -174,42 +174,42 @@ class Where:
                     return Key(field) <= value
                 elif op == "$in":
                     if not isinstance(value, list):
-                        raise TypeError(
+                        raise InvalidArgumentError(
                             f"$in requires a list, got {type(value).__name__}"
                         )
                     return Key(field).is_in(value)
                 elif op == "$nin":
                     if not isinstance(value, list):
-                        raise TypeError(
+                        raise InvalidArgumentError(
                             f"$nin requires a list, got {type(value).__name__}"
                         )
                     return Key(field).not_in(value)
                 elif op == "$contains":
                     if not isinstance(value, (str, int, float, bool)):
-                        raise TypeError(
+                        raise InvalidArgumentError(
                             f"$contains requires a str, int, float, or bool, got {type(value).__name__}"
                         )
                     return Key(field).contains(value)
                 elif op == "$not_contains":
                     if not isinstance(value, (str, int, float, bool)):
-                        raise TypeError(
+                        raise InvalidArgumentError(
                             f"$not_contains requires a str, int, float, or bool, got {type(value).__name__}"
                         )
                     return Key(field).not_contains(value)
                 elif op == "$regex":
                     if not isinstance(value, str):
-                        raise TypeError(
+                        raise InvalidArgumentError(
                             f"$regex requires a string pattern, got {type(value).__name__}"
                         )
                     return Key(field).regex(value)
                 elif op == "$not_regex":
                     if not isinstance(value, str):
-                        raise TypeError(
+                        raise InvalidArgumentError(
                             f"$not_regex requires a string pattern, got {type(value).__name__}"
                         )
                     return Key(field).not_regex(value)
                 else:
-                    raise ValueError(f"Unknown operator: {op}")
+                    raise InvalidArgumentError(f"Unknown operator: {op}")
             else:
                 # Direct value is shorthand for equality
                 return Key(field) == condition
@@ -500,7 +500,7 @@ class Key:
             Key("scores").contains(42)                  # metadata array contains
         """
         if self.name == "#document" and not isinstance(value, str):
-            raise TypeError("$contains on #document requires a string pattern")
+            raise InvalidArgumentError("$contains on #document requires a string pattern")
         return Contains(self.name, value)
 
     def not_contains(self, value: LiteralValue) -> NotContains:
@@ -514,7 +514,7 @@ class Key:
             Key("tags").not_contains("draft")         # metadata array not-contains
         """
         if self.name == "#document" and not isinstance(value, str):
-            raise TypeError("$not_contains on #document requires a string pattern")
+            raise InvalidArgumentError("$not_contains on #document requires a string pattern")
         return NotContains(self.name, value)
 
 
@@ -564,30 +564,30 @@ class Limit:
         - {"limit": 20} -> Limit(offset=0, limit=20)
         """
         if not isinstance(data, dict):
-            raise TypeError(f"Expected dict for Limit, got {type(data).__name__}")
+            raise InvalidArgumentError(f"Expected dict for Limit, got {type(data).__name__}")
 
         offset = data.get("offset", 0)
         if not isinstance(offset, int):
-            raise TypeError(
+            raise InvalidArgumentError(
                 f"Limit offset must be an integer, got {type(offset).__name__}"
             )
         if offset < 0:
-            raise ValueError(f"Limit offset must be non-negative, got {offset}")
+            raise InvalidArgumentError(f"Limit offset must be non-negative, got {offset}")
 
         limit = data.get("limit")
         if limit is not None:
             if not isinstance(limit, int):
-                raise TypeError(
+                raise InvalidArgumentError(
                     f"Limit limit must be an integer, got {type(limit).__name__}"
                 )
             if limit <= 0:
-                raise ValueError(f"Limit limit must be positive, got {limit}")
+                raise InvalidArgumentError(f"Limit limit must be positive, got {limit}")
 
         # Check for unexpected keys
         allowed_keys = {"offset", "limit"}
         unexpected_keys = set(data.keys()) - allowed_keys
         if unexpected_keys:
-            raise ValueError(f"Unexpected keys in Limit dict: {unexpected_keys}")
+            raise InvalidArgumentError(f"Unexpected keys in Limit dict: {unexpected_keys}")
 
         return Limit(offset=offset, limit=limit)
 
@@ -668,13 +668,13 @@ class Rank:
         - {"$min": [ranks]} -> rank1.min(rank2).min(rank3)...
         """
         if not isinstance(data, dict):
-            raise TypeError(f"Expected dict for Rank, got {type(data).__name__}")
+            raise InvalidArgumentError(f"Expected dict for Rank, got {type(data).__name__}")
 
         if not data:
-            raise ValueError("Rank dict cannot be empty")
+            raise InvalidArgumentError("Rank dict cannot be empty")
 
         if len(data) != 1:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"Rank dict must contain exactly one operator, got {len(data)}"
             )
 
@@ -683,16 +683,16 @@ class Rank:
         if op == "$val":
             value = data["$val"]
             if not isinstance(value, (int, float)):
-                raise TypeError(f"$val requires a number, got {type(value).__name__}")
+                raise InvalidArgumentError(f"$val requires a number, got {type(value).__name__}")
             return Val(value)
 
         elif op == "$knn":
             knn_data = data["$knn"]
             if not isinstance(knn_data, dict):
-                raise TypeError(f"$knn requires a dict, got {type(knn_data).__name__}")
+                raise InvalidArgumentError(f"$knn requires a dict, got {type(knn_data).__name__}")
 
             if "query" not in knn_data:
-                raise ValueError("$knn requires 'query' field")
+                raise InvalidArgumentError("$knn requires 'query' field")
 
             query = knn_data["query"]
 
@@ -702,7 +702,7 @@ class Rank:
                     query = SparseVector.from_dict(query)
                 else:
                     # Old format or invalid - try to construct directly
-                    raise ValueError(
+                    raise InvalidArgumentError(
                         f"Expected dict with {TYPE_KEY}='{SPARSE_VECTOR_TYPE_VALUE}', got {query}"
                     )
 
@@ -710,7 +710,7 @@ class Rank:
                 # Dense vector case - normalize then validate
                 normalized = normalize_embeddings(query)
                 if not normalized or len(normalized) > 1:
-                    raise ValueError("$knn requires exactly one query embedding")
+                    raise InvalidArgumentError("$knn requires exactly one query embedding")
 
                 # Validate the normalized version
                 validate_embeddings(normalized)
@@ -718,25 +718,25 @@ class Rank:
                 query = normalized[0]
 
             else:
-                raise TypeError(
+                raise InvalidArgumentError(
                     f"$knn query must be a list, numpy array, or SparseVector dict, got {type(query).__name__}"
                 )
 
             key = knn_data.get("key", "#embedding")
             if not isinstance(key, str):
-                raise TypeError(f"$knn key must be a string, got {type(key).__name__}")
+                raise InvalidArgumentError(f"$knn key must be a string, got {type(key).__name__}")
 
             limit = knn_data.get("limit", 16)
             if not isinstance(limit, int):
-                raise TypeError(
+                raise InvalidArgumentError(
                     f"$knn limit must be an integer, got {type(limit).__name__}"
                 )
             if limit <= 0:
-                raise ValueError(f"$knn limit must be positive, got {limit}")
+                raise InvalidArgumentError(f"$knn limit must be positive, got {limit}")
 
             return_rank = knn_data.get("return_rank", False)
             if not isinstance(return_rank, bool):
-                raise TypeError(
+                raise InvalidArgumentError(
                     f"$knn return_rank must be a boolean, got {type(return_rank).__name__}"
                 )
 
@@ -751,11 +751,11 @@ class Rank:
         elif op == "$sum":
             ranks_data = data["$sum"]
             if not isinstance(ranks_data, (list, tuple)):
-                raise TypeError(
+                raise InvalidArgumentError(
                     f"$sum requires a list, got {type(ranks_data).__name__}"
                 )
             if len(ranks_data) < 2:
-                raise ValueError(
+                raise InvalidArgumentError(
                     f"$sum requires at least 2 ranks, got {len(ranks_data)}"
                 )
 
@@ -768,11 +768,11 @@ class Rank:
         elif op == "$sub":
             sub_data = data["$sub"]
             if not isinstance(sub_data, dict):
-                raise TypeError(
+                raise InvalidArgumentError(
                     f"$sub requires a dict with 'left' and 'right', got {type(sub_data).__name__}"
                 )
             if "left" not in sub_data or "right" not in sub_data:
-                raise ValueError("$sub requires 'left' and 'right' fields")
+                raise InvalidArgumentError("$sub requires 'left' and 'right' fields")
 
             left = Rank.from_dict(sub_data["left"])
             right = Rank.from_dict(sub_data["right"])
@@ -781,11 +781,11 @@ class Rank:
         elif op == "$mul":
             ranks_data = data["$mul"]
             if not isinstance(ranks_data, (list, tuple)):
-                raise TypeError(
+                raise InvalidArgumentError(
                     f"$mul requires a list, got {type(ranks_data).__name__}"
                 )
             if len(ranks_data) < 2:
-                raise ValueError(
+                raise InvalidArgumentError(
                     f"$mul requires at least 2 ranks, got {len(ranks_data)}"
                 )
 
@@ -798,11 +798,11 @@ class Rank:
         elif op == "$div":
             div_data = data["$div"]
             if not isinstance(div_data, dict):
-                raise TypeError(
+                raise InvalidArgumentError(
                     f"$div requires a dict with 'left' and 'right', got {type(div_data).__name__}"
                 )
             if "left" not in div_data or "right" not in div_data:
-                raise ValueError("$div requires 'left' and 'right' fields")
+                raise InvalidArgumentError("$div requires 'left' and 'right' fields")
 
             left = Rank.from_dict(div_data["left"])
             right = Rank.from_dict(div_data["right"])
@@ -811,7 +811,7 @@ class Rank:
         elif op == "$abs":
             child_data = data["$abs"]
             if not isinstance(child_data, dict):
-                raise TypeError(
+                raise InvalidArgumentError(
                     f"$abs requires a rank dict, got {type(child_data).__name__}"
                 )
             return abs(Rank.from_dict(child_data))
@@ -819,7 +819,7 @@ class Rank:
         elif op == "$exp":
             child_data = data["$exp"]
             if not isinstance(child_data, dict):
-                raise TypeError(
+                raise InvalidArgumentError(
                     f"$exp requires a rank dict, got {type(child_data).__name__}"
                 )
             return Rank.from_dict(child_data).exp()
@@ -827,7 +827,7 @@ class Rank:
         elif op == "$log":
             child_data = data["$log"]
             if not isinstance(child_data, dict):
-                raise TypeError(
+                raise InvalidArgumentError(
                     f"$log requires a rank dict, got {type(child_data).__name__}"
                 )
             return Rank.from_dict(child_data).log()
@@ -835,11 +835,11 @@ class Rank:
         elif op == "$max":
             ranks_data = data["$max"]
             if not isinstance(ranks_data, (list, tuple)):
-                raise TypeError(
+                raise InvalidArgumentError(
                     f"$max requires a list, got {type(ranks_data).__name__}"
                 )
             if len(ranks_data) < 2:
-                raise ValueError(
+                raise InvalidArgumentError(
                     f"$max requires at least 2 ranks, got {len(ranks_data)}"
                 )
 
@@ -852,11 +852,11 @@ class Rank:
         elif op == "$min":
             ranks_data = data["$min"]
             if not isinstance(ranks_data, (list, tuple)):
-                raise TypeError(
+                raise InvalidArgumentError(
                     f"$min requires a list, got {type(ranks_data).__name__}"
                 )
             if len(ranks_data) < 2:
-                raise ValueError(
+                raise InvalidArgumentError(
                     f"$min requires at least 2 ranks, got {len(ranks_data)}"
                 )
 
@@ -867,7 +867,7 @@ class Rank:
             return result
 
         else:
-            raise ValueError(f"Unknown rank operator: {op}")
+            raise InvalidArgumentError(f"Unknown rank operator: {op}")
 
     # Arithmetic operators
     def __add__(self, other: Union["Rank", float, int]) -> "Sum":
@@ -1201,18 +1201,18 @@ class Rrf(Rank):
         """
         # Validate RRF parameters
         if not self.ranks:
-            raise ValueError("RRF requires at least one rank")
+            raise InvalidArgumentError("RRF requires at least one rank")
         if self.k <= 0:
-            raise ValueError(f"k must be positive, got {self.k}")
+            raise InvalidArgumentError(f"k must be positive, got {self.k}")
 
         # Validate weights if provided
         if self.weights is not None:
             if len(self.weights) != len(self.ranks):
-                raise ValueError(
+                raise InvalidArgumentError(
                     f"Number of weights ({len(self.weights)}) must match number of ranks ({len(self.ranks)})"
                 )
             if any(w < 0.0 for w in self.weights):
-                raise ValueError("All weights must be non-negative")
+                raise InvalidArgumentError("All weights must be non-negative")
 
         # Populate weights with 1.0 if not provided
         weights = self.weights if self.weights else [1.0] * len(self.ranks)
@@ -1221,7 +1221,7 @@ class Rrf(Rank):
         if self.normalize:
             weight_sum = sum(weights)
             if weight_sum == 0:
-                raise ValueError("Sum of weights must be positive when normalize=True")
+                raise InvalidArgumentError("Sum of weights must be positive when normalize=True")
             weights = [w / weight_sum for w in weights]
 
         # Zip weights with ranks and build terms: weight / (k + rank)
@@ -1283,11 +1283,11 @@ class Select:
         - {"keys": ["title", "author"]} -> Select(keys={"title", "author"})
         """
         if not isinstance(data, dict):
-            raise TypeError(f"Expected dict for Select, got {type(data).__name__}")
+            raise InvalidArgumentError(f"Expected dict for Select, got {type(data).__name__}")
 
         keys = data.get("keys", [])
         if not isinstance(keys, (list, tuple, set)):
-            raise TypeError(
+            raise InvalidArgumentError(
                 f"Select keys must be a list/tuple/set, got {type(keys).__name__}"
             )
 
@@ -1295,7 +1295,7 @@ class Select:
         key_list = []
         for k in keys:
             if not isinstance(k, str):
-                raise TypeError(f"Select key must be a string, got {type(k).__name__}")
+                raise InvalidArgumentError(f"Select key must be a string, got {type(k).__name__}")
 
             # Map special keys to Key instances
             if k == "#id":
@@ -1316,7 +1316,7 @@ class Select:
         allowed_keys = {"keys"}
         unexpected_keys = set(data.keys()) - allowed_keys
         if unexpected_keys:
-            raise ValueError(f"Unexpected keys in Select dict: {unexpected_keys}")
+            raise InvalidArgumentError(f"Unexpected keys in Select dict: {unexpected_keys}")
 
         # Convert to set while preserving the Key instances
         return Select(keys=set(key_list))
@@ -1354,23 +1354,23 @@ def _parse_k_aggregate(
     """
     agg_data = data[op]
     if not isinstance(agg_data, dict):
-        raise TypeError(f"{op} requires a dict, got {type(agg_data).__name__}")
+        raise InvalidArgumentError(f"{op} requires a dict, got {type(agg_data).__name__}")
     if "keys" not in agg_data:
-        raise ValueError(f"{op} requires 'keys' field")
+        raise InvalidArgumentError(f"{op} requires 'keys' field")
     if "k" not in agg_data:
-        raise ValueError(f"{op} requires 'k' field")
+        raise InvalidArgumentError(f"{op} requires 'k' field")
 
     keys = agg_data["keys"]
     if not isinstance(keys, (list, tuple)):
-        raise TypeError(f"{op} keys must be a list, got {type(keys).__name__}")
+        raise InvalidArgumentError(f"{op} keys must be a list, got {type(keys).__name__}")
     if not keys:
-        raise ValueError(f"{op} keys cannot be empty")
+        raise InvalidArgumentError(f"{op} keys cannot be empty")
 
     k = agg_data["k"]
     if not isinstance(k, int):
-        raise TypeError(f"{op} k must be an integer, got {type(k).__name__}")
+        raise InvalidArgumentError(f"{op} k must be an integer, got {type(k).__name__}")
     if k <= 0:
-        raise ValueError(f"{op} k must be positive, got {k}")
+        raise InvalidArgumentError(f"{op} k must be positive, got {k}")
 
     return _strings_to_keys(keys), k
 
@@ -1407,13 +1407,13 @@ class Aggregate:
         - {"$max_k": {"keys": [...], "k": n}} -> MaxK(keys=[...], k=n)
         """
         if not isinstance(data, dict):
-            raise TypeError(f"Expected dict for Aggregate, got {type(data).__name__}")
+            raise InvalidArgumentError(f"Expected dict for Aggregate, got {type(data).__name__}")
 
         if not data:
-            raise ValueError("Aggregate dict cannot be empty")
+            raise InvalidArgumentError("Aggregate dict cannot be empty")
 
         if len(data) != 1:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"Aggregate dict must contain exactly one operator, got {len(data)}"
             )
 
@@ -1426,7 +1426,7 @@ class Aggregate:
             keys, k = _parse_k_aggregate(op, data)
             return MaxK(keys=keys, k=k)
         else:
-            raise ValueError(f"Unknown aggregate operator: {op}")
+            raise InvalidArgumentError(f"Unknown aggregate operator: {op}")
 
 
 @dataclass
@@ -1507,7 +1507,7 @@ class GroupBy:
         - {"keys": ["category"], "aggregate": {"$min_k": {"keys": ["#score"], "k": 3}}}
         """
         if not isinstance(data, dict):
-            raise TypeError(f"Expected dict for GroupBy, got {type(data).__name__}")
+            raise InvalidArgumentError(f"Expected dict for GroupBy, got {type(data).__name__}")
 
         # Empty dict returns default GroupBy (no grouping)
         if not data:
@@ -1515,21 +1515,22 @@ class GroupBy:
 
         # Non-empty dict requires keys and aggregate
         if "keys" not in data:
-            raise ValueError("GroupBy requires 'keys' field")
+            raise InvalidArgumentError("GroupBy requires 'keys' field")
         if "aggregate" not in data:
-            raise ValueError("GroupBy requires 'aggregate' field")
+            raise InvalidArgumentError("GroupBy requires 'aggregate' field")
 
         keys = data["keys"]
         if not isinstance(keys, (list, tuple)):
-            raise TypeError(f"GroupBy keys must be a list, got {type(keys).__name__}")
+            raise InvalidArgumentError(f"GroupBy keys must be a list, got {type(keys).__name__}")
         if not keys:
-            raise ValueError("GroupBy keys cannot be empty")
+            raise InvalidArgumentError("GroupBy keys cannot be empty")
 
         aggregate_data = data["aggregate"]
         if not isinstance(aggregate_data, dict):
-            raise TypeError(
+            raise InvalidArgumentError(
                 f"GroupBy aggregate must be a dict, got {type(aggregate_data).__name__}"
             )
+from chromadb.errors import InvalidArgumentError
         aggregate = Aggregate.from_dict(aggregate_data)
 
         return GroupBy(keys=_strings_to_keys(keys), aggregate=aggregate)

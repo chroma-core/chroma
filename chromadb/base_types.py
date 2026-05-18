@@ -32,45 +32,45 @@ class SparseVector:
     def __post_init__(self) -> None:
         """Validate sparse vector structure."""
         if not isinstance(self.indices, list):
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"Expected SparseVector indices to be a list, got {type(self.indices).__name__}"
             )
 
         if not isinstance(self.values, list):
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"Expected SparseVector values to be a list, got {type(self.values).__name__}"
             )
 
         if len(self.indices) != len(self.values):
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"SparseVector indices and values must have the same length, "
                 f"got {len(self.indices)} indices and {len(self.values)} values"
             )
 
         if self.labels is not None:
             if not isinstance(self.labels, list):
-                raise ValueError(
+                raise InvalidArgumentError(
                     f"Expected SparseVector labels to be a list, got {type(self.labels).__name__}"
                 )
             if len(self.labels) != len(self.indices):
-                raise ValueError(
+                raise InvalidArgumentError(
                     f"SparseVector labels must have the same length as indices and values, "
                     f"got {len(self.labels)} labels, {len(self.indices)} indices"
                 )
 
         for i, idx in enumerate(self.indices):
             if not isinstance(idx, int):
-                raise ValueError(
+                raise InvalidArgumentError(
                     f"SparseVector indices must be integers, got {type(idx).__name__} at position {i}"
                 )
             if idx < 0:
-                raise ValueError(
+                raise InvalidArgumentError(
                     f"SparseVector indices must be non-negative, got {idx} at position {i}"
                 )
 
         for i, val in enumerate(self.values):
             if not isinstance(val, (int, float)):
-                raise ValueError(
+                raise InvalidArgumentError(
                     f"SparseVector values must be numbers, got {type(val).__name__} at position {i}"
                 )
 
@@ -78,7 +78,7 @@ class SparseVector:
         if len(self.indices) > 1:
             for i in range(1, len(self.indices)):
                 if self.indices[i] <= self.indices[i - 1]:
-                    raise ValueError(
+                    raise InvalidArgumentError(
                         f"SparseVector indices must be sorted in strictly ascending order, "
                         f"found indices[{i}]={self.indices[i]} <= indices[{i-1}]={self.indices[i-1]}"
                     )
@@ -106,7 +106,7 @@ class SparseVector:
         with the protobuf schema, mapping it to the 'labels' attribute.
         """
         if d.get(TYPE_KEY) != SPARSE_VECTOR_TYPE_VALUE:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"Expected {TYPE_KEY}='{SPARSE_VECTOR_TYPE_VALUE}', got {d.get(TYPE_KEY)}"
             )
         return cls(
@@ -154,5 +154,6 @@ WhereDocumentOperator = Union[
     Literal["$regex"],
     Literal["$not_regex"],
     LogicalOperator,
+from chromadb.errors import InvalidArgumentError
 ]
 WhereDocument = Dict[WhereDocumentOperator, Union[str, List["WhereDocument"]]]

@@ -30,7 +30,7 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
         try:
             import httpx
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The httpx python package is not installed. Please install it with `pip install httpx`"
             )
 
@@ -47,7 +47,7 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
 
         self.api_key = api_key or os.getenv(self.api_key_env_var)
         if not self.api_key:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"The {self.api_key_env_var} environment variable is not set."
             )
 
@@ -110,7 +110,7 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
         if "model_name" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The model name cannot be changed after the embedding function has been initialized."
             )
 
@@ -152,7 +152,7 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
         try:
             import httpx
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The httpx python package is not installed. Please install it with `pip install httpx`"
             )
 
@@ -216,7 +216,7 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
         url = config.get("url")
         api_key_env_var = config.get("api_key_env_var")
         if url is None:
-            raise ValueError("URL must be provided for HuggingFaceEmbeddingServer")
+            raise InvalidArgumentError("URL must be provided for HuggingFaceEmbeddingServer")
 
         return HuggingFaceEmbeddingServer(url=url, api_key_env_var=api_key_env_var)
 
@@ -227,9 +227,10 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
         if "url" in new_config and new_config["url"] != self.url:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The URL cannot be changed after the embedding function has been initialized."
             )
+from chromadb.errors import InvalidArgumentError
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:

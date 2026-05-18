@@ -33,7 +33,7 @@ class MorphEmbeddingFunction(EmbeddingFunction[Documents]):
         try:
             import openai
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The openai python package is not installed. Please install it with `pip install openai`. "
                 "Note: Morph uses the OpenAI client library for API communication."
             )
@@ -48,7 +48,7 @@ class MorphEmbeddingFunction(EmbeddingFunction[Documents]):
         self.api_key_env_var = api_key_env_var
         self.api_key = api_key or os.getenv(api_key_env_var)
         if not self.api_key:
-            raise ValueError(f"The {api_key_env_var} environment variable is not set.")
+            raise InvalidArgumentError(f"The {api_key_env_var} environment variable is not set.")
 
         self.model_name = model_name
         self.api_base = api_base
@@ -129,9 +129,10 @@ class MorphEmbeddingFunction(EmbeddingFunction[Documents]):
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
         if "model_name" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The model name cannot be changed after the embedding function has been initialized."
             )
+from chromadb.errors import InvalidArgumentError
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:

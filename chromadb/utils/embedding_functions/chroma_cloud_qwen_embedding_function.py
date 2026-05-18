@@ -52,7 +52,7 @@ class ChromaCloudQwenEmbeddingFunction(EmbeddingFunction[Documents]):
         try:
             import httpx
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The httpx python package is not installed. Please install it with `pip install httpx`"
             )
 
@@ -65,7 +65,7 @@ class ChromaCloudQwenEmbeddingFunction(EmbeddingFunction[Documents]):
             self.api_key = SharedSystemClient.get_chroma_cloud_api_key_from_clients()
         # Raise error if still no API key found
         if not self.api_key:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"API key not found in environment variable {api_key_env_var} "
                 f"or in any existing client instances"
             )
@@ -206,17 +206,18 @@ class ChromaCloudQwenEmbeddingFunction(EmbeddingFunction[Documents]):
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
         if "model" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The model cannot be changed after the embedding function has been initialized."
             )
         elif "task" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The task cannot be changed after the embedding function has been initialized."
             )
         elif "instructions" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The instructions cannot be changed after the embedding function has been initialized."
             )
+from chromadb.errors import InvalidArgumentError
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:

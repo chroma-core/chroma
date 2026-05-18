@@ -25,7 +25,7 @@ class BasetenEmbeddingFunction(OpenAIEmbeddingFunction):
         try:
             import openai
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The openai python package is not installed. Please install it with `pip install openai`"
             )
 
@@ -44,12 +44,12 @@ class BasetenEmbeddingFunction(OpenAIEmbeddingFunction):
         # Prioritize api_key argument, then environment variable
         resolved_api_key = api_key or os.getenv(self.api_key_env_var)
         if not resolved_api_key:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"API key not provided and {self.api_key_env_var} environment variable is not set."
             )
         self.api_key = resolved_api_key
         if not api_base:
-            raise ValueError("The api_base argument must be provided.")
+            raise InvalidArgumentError("The api_base argument must be provided.")
         self.api_base = api_base
         self.model_name = "baseten-embedding-model"
         self.dimensions = None
@@ -84,7 +84,7 @@ class BasetenEmbeddingFunction(OpenAIEmbeddingFunction):
         api_key_env_var = config.get("api_key_env_var")
         api_base = config.get("api_base")
         if api_key_env_var is None or api_base is None:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "Missing 'api_key_env_var' or 'api_base' in configuration for BasetenEmbeddingFunction."
             )
 
@@ -92,7 +92,7 @@ class BasetenEmbeddingFunction(OpenAIEmbeddingFunction):
         # by checking the environment variable if the config value is None.
         # However, api_base must be present either in config or have a default.
         if api_base is None:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "Missing 'api_base' in configuration for BasetenEmbeddingFunction."
             )
 
@@ -101,6 +101,7 @@ class BasetenEmbeddingFunction(OpenAIEmbeddingFunction):
             api_base=api_base,
             api_key_env_var=api_key_env_var,
         )
+from chromadb.errors import InvalidArgumentError
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:

@@ -41,21 +41,21 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Embeddable]):
         try:
             import open_clip
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The open_clip python package is not installed. Please install it with `pip install open-clip-torch`. https://github.com/mlfoundations/open_clip"
             )
 
         try:
             self._torch = importlib.import_module("torch")
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The torch python package is not installed. Please install it with `pip install torch`"
             )
 
         try:
             self._PILImage = importlib.import_module("PIL.Image")
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The PIL python package is not installed. Please install it with `pip install pillow`"
             )
 
@@ -165,13 +165,14 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Embeddable]):
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
         if "model_name" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The model name cannot be changed after the embedding function has been initialized."
             )
         if "checkpoint" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The checkpoint cannot be changed after the embedding function has been initialized."
             )
+from chromadb.errors import InvalidArgumentError
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:

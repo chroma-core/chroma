@@ -151,7 +151,7 @@ class Collection(
         try:
             return load_collection_configuration_from_json(self.configuration_json)
         except Exception as e:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"Could not deserialize configuration_json: {e}",
             )
 
@@ -339,4 +339,5 @@ __all__ = [
     "WhereDocumentOperator",
     "WhereDocument",
     "InclusionExclusionOperator",
+from chromadb.errors import InvalidArgumentError
 ]

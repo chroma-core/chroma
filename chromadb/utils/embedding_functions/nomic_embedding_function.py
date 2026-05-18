@@ -40,7 +40,7 @@ class NomicEmbeddingFunction(EmbeddingFunction[Documents]):
         try:
             from nomic import embed
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The nomic python package is not installed. Please install it with `pip install nomic`"
             )
 
@@ -50,12 +50,12 @@ class NomicEmbeddingFunction(EmbeddingFunction[Documents]):
         self.api_key = os.getenv(api_key_env_var)
         self.query_config = query_config
         if not self.api_key:
-            raise ValueError(f"The {api_key_env_var} environment variable is not set.")
+            raise InvalidArgumentError(f"The {api_key_env_var} environment variable is not set.")
         self.embed = embed
 
     def __call__(self, input: Documents) -> Embeddings:
         if not all(isinstance(item, str) for item in input):
-            raise ValueError("Nomic only supports text documents, not images")
+            raise InvalidArgumentError("Nomic only supports text documents, not images")
         output = self.embed.text(
             model=self.model,
             texts=input,
@@ -65,7 +65,7 @@ class NomicEmbeddingFunction(EmbeddingFunction[Documents]):
 
     def embed_query(self, input: Documents) -> Embeddings:
         if not all(isinstance(item, str) for item in input):
-            raise ValueError("Nomic only supports text queries, not images")
+            raise InvalidArgumentError("Nomic only supports text queries, not images")
 
         task_type = (
             self.query_config.get("task_type") if self.query_config else self.task_type
@@ -114,9 +114,10 @@ class NomicEmbeddingFunction(EmbeddingFunction[Documents]):
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
         if "model" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The model cannot be changed after the embedding function has been initialized."
             )
+from chromadb.errors import InvalidArgumentError
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:

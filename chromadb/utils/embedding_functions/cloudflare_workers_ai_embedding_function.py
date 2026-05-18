@@ -41,7 +41,7 @@ class CloudflareWorkersAIEmbeddingFunction(EmbeddingFunction[Documents]):
         try:
             import httpx
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The httpx python package is not installed. Please install it with `pip install httpx`"
             )
 
@@ -63,7 +63,7 @@ class CloudflareWorkersAIEmbeddingFunction(EmbeddingFunction[Documents]):
         self.gateway_id = gateway_id
 
         if not self.api_key:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"The {self.api_key_env_var} environment variable is not set."
             )
 
@@ -88,7 +88,7 @@ class CloudflareWorkersAIEmbeddingFunction(EmbeddingFunction[Documents]):
             Embeddings for the documents.
         """
         if not all(isinstance(item, str) for item in input):
-            raise ValueError(
+            raise InvalidArgumentError(
                 "Cloudflare Workers AI only supports text documents, not images"
             )
 
@@ -141,9 +141,10 @@ class CloudflareWorkersAIEmbeddingFunction(EmbeddingFunction[Documents]):
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
         if "model_name" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The model name cannot be changed after the embedding function has been initialized."
             )
+from chromadb.errors import InvalidArgumentError
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:
