@@ -254,3 +254,13 @@ class CollectionDeleteEvent(ProductTelemetryEvent):
         super().__init__()
         self.collection_uuid = collection_uuid
         self.delete_amount = delete_amount
+
+
+class SqliteForeignKeyViolationEvent(ProductTelemetryEvent):
+    num_violations: int
+    tables_affected: str
+
+    def __init__(self, num_violations: int, tables_affected: str):
+        super().__init__()
+        self.num_violations = num_violations
+        self.tables_affected = tables_affected
