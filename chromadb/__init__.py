@@ -413,6 +413,12 @@ def CloudClient(
             f"Please provide them or set the environment variables: {', '.join([arg.env_var for arg in missing_args])}"
         )
 
+    # Pull the resolved values back into local variables. The env-var fallback
+    # above mutates `arg.value` on each CloudClientArg, but the function-local
+    # `api_key` was never reassigned, so without this the call would proceed
+    # with the original (often None) value and stringify it to "None".
+    api_key = next(arg.value for arg in required_args if arg.name == "api_key")
+
     if settings is None:
         settings = Settings()
 
