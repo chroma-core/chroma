@@ -53,6 +53,8 @@ repos:
             "pypika",
             "numpy",
             "types-protobuf",
+            "types-PyYAML",
+            "types-requests",
             "kubernetes",
           ]
 
