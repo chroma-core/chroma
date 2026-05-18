@@ -48,14 +48,23 @@ from chromadb.api.types import (
 # TODO(hammadb): Unify imports across types vs root __init__.py
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.execution.expression.plan import Search
-import chromadb_rust_bindings
-
 
 from typing import Optional, Sequence, List, Dict, Any, Tuple
 from overrides import override
 from uuid import UUID
 import json
 import platform
+
+try:
+    import chromadb_rust_bindings
+except ImportError as exc:
+    if platform.system() == "Windows" and "DLL load failed" in str(exc):
+        raise ImportError(
+            "Failed to import chromadb_rust_bindings. On Windows this usually means "
+            "the Microsoft Visual C++ Redistributable is missing. Install it from "
+            "https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist and retry."
+        ) from exc
+    raise
 
 if platform.system() != "Windows":
     import resource
