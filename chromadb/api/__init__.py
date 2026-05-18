@@ -578,11 +578,14 @@ class ClientAPI(BaseAPI, ABC):
 
 class AdminAPI(ABC):
     @abstractmethod
-    def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+    def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
         """Create a new database. Raises an error if the database already exists.
 
         Args:
             database: The name of the database to create.
+
+        Returns:
+            The created Database.
 
         """
         pass
@@ -625,11 +628,14 @@ class AdminAPI(ABC):
         pass
 
     @abstractmethod
-    def create_tenant(self, name: str) -> None:
+    def create_tenant(self, name: str) -> Tenant:
         """Create a new tenant. Raises an error if the tenant already exists.
 
         Args:
             tenant: The name of the tenant to create.
+
+        Returns:
+            The created Tenant.
 
         """
         pass

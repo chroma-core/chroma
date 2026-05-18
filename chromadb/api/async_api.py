@@ -530,11 +530,14 @@ class AsyncClientAPI(AsyncBaseAPI, ABC):
 
 class AsyncAdminAPI(ABC):
     @abstractmethod
-    async def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+    async def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
         """Create a new database. Raises an error if the database already exists.
 
         Args:
             database: The name of the database to create.
+
+        Returns:
+            The created Database.
 
         """
         pass
@@ -577,11 +580,14 @@ class AsyncAdminAPI(ABC):
         pass
 
     @abstractmethod
-    async def create_tenant(self, name: str) -> None:
+    async def create_tenant(self, name: str) -> Tenant:
         """Create a new tenant. Raises an error if the tenant already exists.
 
         Args:
             tenant: The name of the tenant to create.
+
+        Returns:
+            The created Tenant.
 
         """
         pass

@@ -68,7 +68,7 @@ class SqlSysDB(SqlDB, SysDB):
     @override
     def create_database(
         self, id: UUID, name: str, tenant: str = DEFAULT_TENANT
-    ) -> None:
+    ) -> Database:
         with self.tx() as cur:
             # Get the tenant id for the tenant name and then insert the database with the id, name and tenant id
             databases = Table("databases")
@@ -93,6 +93,7 @@ class SqlSysDB(SqlDB, SysDB):
                 raise UniqueConstraintError(
                     f"Database {name} already exists for tenant {tenant}"
                 ) from e
+        return Database(id=id, name=name, tenant=tenant)
 
     @override
     def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
@@ -183,7 +184,7 @@ class SqlSysDB(SqlDB, SysDB):
             ]
 
     @override
-    def create_tenant(self, name: str) -> None:
+    def create_tenant(self, name: str) -> Tenant:
         with self.tx() as cur:
             tenants = Table("tenants")
             insert_tenant = (
@@ -197,6 +198,7 @@ class SqlSysDB(SqlDB, SysDB):
                 cur.execute(sql, params)
             except self.unique_constraint_error() as e:
                 raise UniqueConstraintError(f"Tenant {name} already exists") from e
+        return Tenant(name=name)
 
     @override
     def get_tenant(self, name: str) -> Tenant:

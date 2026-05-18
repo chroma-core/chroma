@@ -528,7 +528,7 @@ class AsyncAdminClient(SharedSystemClient, AsyncAdminAPI):
         self._server = self._system.instance(AsyncServerAPI)
 
     @override
-    async def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+    async def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
         return await self._server.create_database(name=name, tenant=tenant)
 
     @override
@@ -551,7 +551,7 @@ class AsyncAdminClient(SharedSystemClient, AsyncAdminAPI):
         )
 
     @override
-    async def create_tenant(self, name: str) -> None:
+    async def create_tenant(self, name: str) -> Tenant:
         return await self._server.create_tenant(name=name)
 
     @override
