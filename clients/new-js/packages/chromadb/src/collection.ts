@@ -129,14 +129,10 @@ export interface Collection {
   sample<TMeta extends Metadata = Metadata>(args?: {
     /** Specific record IDs to sample from */
     ids?: string[];
-    /** Metadata-based filtering conditions */
-    where?: Where;
     /** Maximum number of records to return */
     limit?: number;
     /** Seed for deterministic sampling */
     seed?: number;
-    /** Document content-based filtering conditions */
-    whereDocument?: WhereDocument;
     /** Fields to include in the response */
     include?: Include[];
   }): Promise<GetResult<TMeta>>;
@@ -895,33 +891,27 @@ export class CollectionImpl implements Collection {
   public async sample<TMeta extends Metadata = Metadata>(
     args: Partial<{
       ids: string[];
-      where: Where;
       limit: number;
       seed: number;
-      whereDocument: WhereDocument;
       include: Include[];
     }> = {},
   ): Promise<GetResult<TMeta>> {
     const {
       ids,
-      where,
       limit = 10,
       seed,
-      whereDocument,
       include = ["documents", "metadatas"],
     } = args;
 
-    this.validateGet(include, ids, where, whereDocument);
+    this.validateGet(include, ids);
 
     const { data } = await RecordService.collectionSample({
       client: this.apiClient,
       path: await this.path(),
       body: {
         ids,
-        where,
         limit,
         seed,
-        where_document: whereDocument,
         include,
       },
     });

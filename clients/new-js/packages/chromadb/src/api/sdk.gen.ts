@@ -507,7 +507,7 @@ export class RecordService {
     
     /**
      * Sample records
-     * Returns a random sample of records from a collection by ID or metadata filter.
+     * Returns a random sample of records from a collection, optionally constrained by ID.
      */
     public static collectionSample<ThrowOnError extends boolean = true>(options: Options<CollectionSampleData, ThrowOnError>) {
         return (options.client ?? _heyApiClient).post<CollectionSampleResponse, CollectionSampleError, ThrowOnError>({

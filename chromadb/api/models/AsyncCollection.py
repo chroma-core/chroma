@@ -192,25 +192,21 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
     async def sample(
         self,
         ids: Optional[OneOrMany[ID]] = None,
-        where: Optional[Where] = None,
         limit: int = 10,
         seed: Optional[int] = None,
-        where_document: Optional[WhereDocument] = None,
         include: Include = ["metadatas", "documents"],
     ) -> GetResult:
         """Return a random sample of records from the collection."""
         sample_request = self._validate_and_prepare_get_request(
             ids=ids,
-            where=where,
-            where_document=where_document,
+            where=None,
+            where_document=None,
             include=include,
         )
 
         sample_results = await self._client._sample(
             collection_id=self.id,
             ids=sample_request["ids"],
-            where=sample_request["where"],
-            where_document=sample_request["where_document"],
             include=sample_request["include"],
             limit=limit,
             seed=seed,

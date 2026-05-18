@@ -358,14 +358,13 @@ impl ChromaCollection {
             .await
     }
 
-    /// Retrieves a random sample of records from the collection by ID or metadata filter.
+    /// Retrieves a random sample of records from the collection, optionally constrained by ID.
     ///
     /// The `limit` parameter defaults to 10 when `None`. Providing `seed` makes the sample
     /// deterministic for the same logical collection state.
     pub async fn sample(
         &self,
         ids: Option<Vec<String>>,
-        r#where: Option<Where>,
         limit: Option<u32>,
         seed: Option<u64>,
         include: Option<IncludeList>,
@@ -375,12 +374,11 @@ impl ChromaCollection {
             self.collection.database.clone(),
             self.collection.collection_id,
             ids,
-            r#where,
             limit.unwrap_or(10),
             seed,
             include.unwrap_or_else(IncludeList::default_get),
         )?;
-        let request = request.into_payload()?;
+        let request = request.into_payload();
         self.send(true, "sample", "sample", Method::POST, Some(request))
             .await
     }

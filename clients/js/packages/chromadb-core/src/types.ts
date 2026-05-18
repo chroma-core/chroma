@@ -256,7 +256,10 @@ export type QueryRecordsParams =
 
 export type PeekParams = { limit?: PositiveInteger };
 
-export type SampleParams = Omit<BaseGetParams, "offset"> & {
+export type SampleParams = {
+  ids?: ID | IDs;
+  limit?: PositiveInteger;
+  include?: IncludeEnum[];
   seed?: number;
 };
 

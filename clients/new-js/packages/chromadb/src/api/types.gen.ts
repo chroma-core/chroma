@@ -295,10 +295,10 @@ export type GetRequestPayload = RawWhereFields & {
 };
 
 /**
- * Records can be randomly sampled by ID, metadata, or document filters. Use `include` to specify
- * which fields to return in the response.
+ * Records can be randomly sampled from the collection, optionally constrained by ID. Use
+ * `include` to specify which fields to return in the response.
  */
-export type SampleRequestPayload = RawWhereFields & {
+export type SampleRequestPayload = {
     ids?: Array<string> | null;
     include?: IncludeList;
     limit?: number;

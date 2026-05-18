@@ -2892,12 +2892,12 @@ async fn collection_get(
 }
 
 /// Sample records
-/// Returns a random sample of records from a collection by ID or metadata filter.
+/// Returns a random sample of records from a collection, optionally constrained by ID.
 #[utoipa::path(
     post,
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/sample",
     summary = "Sample records",
-    description = "Returns a random sample of records from a collection by ID or metadata filter.",
+    description = "Returns a random sample of records from a collection, optionally constrained by ID.",
     tag = "Record",
     security(
         ("ApiKeyAuth" = [])
@@ -2947,7 +2947,6 @@ async fn collection_sample(
         format!("collection:{}", collection_id).as_str(),
         format!("requester:{}", requester_identity.tenant).as_str(),
     ])?;
-    let parsed_where = payload.where_fields.parse()?;
     let api_token = headers
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
@@ -2955,9 +2954,6 @@ async fn collection_sample(
     let mut quota_payload = QuotaPayload::new(Action::Get, tenant.clone(), api_token);
     if let Some(ids) = &payload.ids {
         quota_payload = quota_payload.with_ids(ids);
-    }
-    if let Some(r#where) = &parsed_where {
-        quota_payload = quota_payload.with_where(r#where);
     }
     quota_payload = quota_payload.with_limit(payload.limit);
 
@@ -2997,7 +2993,6 @@ async fn collection_sample(
         name: "collection_sample",
         num_ids = payload.ids.as_ref().map_or(0, |ids| ids.len()),
         include = ?payload.include,
-        has_where = parsed_where.is_some(),
         limit = validated_limit,
         has_seed = payload.seed.is_some(),
     );
@@ -3007,7 +3002,6 @@ async fn collection_sample(
         database,
         collection_id,
         payload.ids,
-        parsed_where,
         validated_limit,
         payload.seed,
         payload.include,

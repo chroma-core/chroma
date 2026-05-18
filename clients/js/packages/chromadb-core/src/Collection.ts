@@ -423,11 +423,9 @@ export class Collection {
 
   async sample({
     ids,
-    where,
     limit = 10,
     seed,
     include,
-    whereDocument,
   }: SampleParams = {}): Promise<GetResponse> {
     await this.client.init();
 
@@ -439,11 +437,9 @@ export class Collection {
       this.id,
       {
         ids: idsArray,
-        where,
         limit,
         seed,
         include: include as GeneratedApi.Include[] | undefined,
-        where_document: whereDocument,
       },
       this.client.api.options,
     );

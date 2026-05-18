@@ -577,10 +577,8 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         self,
         collection_id: UUID,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = None,
         limit: int = 10,
         seed: Optional[int] = None,
-        where_document: Optional[WhereDocument] = None,
         include: Include = IncludeMetadataDocuments,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -592,10 +590,8 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/sample",
             json={
                 "ids": ids,
-                "where": where,
                 "limit": limit,
                 "seed": seed,
-                "where_document": where_document,
                 "include": filtered_include,
             },
         )

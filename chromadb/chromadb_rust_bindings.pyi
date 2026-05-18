@@ -190,10 +190,8 @@ class Bindings:
         self,
         collection_id: str,
         ids: Optional[IDs] = None,
-        where: Optional[str] = None,
         limit: int = 10,
         seed: Optional[int] = None,
-        where_document: Optional[str] = None,
         include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,

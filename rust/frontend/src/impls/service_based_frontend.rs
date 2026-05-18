@@ -2506,7 +2506,6 @@ impl ServiceBasedFrontend {
             database_name,
             collection_id,
             ids,
-            r#where,
             limit,
             seed,
             include,
@@ -2523,26 +2522,11 @@ impl ServiceBasedFrontend {
             .get_collection_with_segments(Some(database_name_typed.clone()), collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
-        if self.enable_schema {
-            if let Some(ref schema) = collection_and_segments.collection.schema {
-                if let Some(ref where_clause) = r#where {
-                    schema
-                        .is_metadata_where_indexing_enabled(where_clause)
-                        .map_err(|err| QueryError::Other(Box::new(err) as Box<dyn ChromaError>))?;
-                }
-            }
-        }
         let latest_collection_logical_size_bytes = collection_and_segments
             .collection
             .size_bytes_post_compaction;
-        let metadata_predicate_count = r#where
-            .as_ref()
-            .map(Where::metadata_predicate_count)
-            .unwrap_or_default();
-        let fts_query_length = r#where
-            .as_ref()
-            .map(Where::fts_query_length)
-            .unwrap_or_default();
+        let metadata_predicate_count = 0;
+        let fts_query_length = 0;
         let log_upper_bound_offset = if self.enable_log_scouting {
             self.log_client
                 .scout_logs(
@@ -2564,7 +2548,7 @@ impl ServiceBasedFrontend {
             },
             filter: Filter {
                 query_ids: ids,
-                where_clause: r#where,
+                where_clause: None,
             },
             sample: Sample { limit, seed },
             proj: Projection {

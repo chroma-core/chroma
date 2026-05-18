@@ -1314,10 +1314,8 @@ class FastAPI(Server):
             return self._api._sample(
                 collection_id=_uuid(collection_id),
                 ids=sample.ids,
-                where=sample.where,
                 limit=sample.limit,
                 seed=sample.seed,
-                where_document=sample.where_document,
                 include=sample.include,
                 tenant=tenant,
                 database=database_name,

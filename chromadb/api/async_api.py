@@ -249,10 +249,8 @@ class AsyncBaseAPI(ABC):
         self,
         collection_id: UUID,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = None,
         limit: int = 10,
         seed: Optional[int] = None,
-        where_document: Optional[WhereDocument] = None,
         include: Include = IncludeMetadataDocuments,
     ) -> GetResult:
         pass
@@ -793,10 +791,8 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         self,
         collection_id: UUID,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = None,
         limit: int = 10,
         seed: Optional[int] = None,
-        where_document: Optional[WhereDocument] = None,
         include: Include = IncludeMetadataDocuments,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,

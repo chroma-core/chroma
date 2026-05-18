@@ -745,10 +745,8 @@ class SegmentAPI(ServerAPI):
         self,
         collection_id: UUID,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = None,
         limit: int = 10,
         seed: Optional[int] = None,
-        where_document: Optional[WhereDocument] = None,
         include: Include = IncludeMetadataDocuments,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -757,8 +755,6 @@ class SegmentAPI(ServerAPI):
             action=Action.GET,
             tenant=tenant,
             ids=ids,
-            where=where,
-            where_document=where_document,
             limit=limit,
         )
         if limit == 0:
@@ -775,10 +771,10 @@ class SegmentAPI(ServerAPI):
         results = self._get(
             collection_id=collection_id,
             ids=ids,
-            where=where,
+            where=None,
             limit=None,
             offset=None,
-            where_document=where_document,
+            where_document=None,
             include=include,
             tenant=tenant,
             database=database,
