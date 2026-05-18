@@ -4,6 +4,7 @@ from uuid import UUID
 
 from overrides import override
 import httpx
+from chromadb.errors import InvalidArgumentError
 from chromadb.api import AdminAPI, ClientAPI, ServerAPI
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
@@ -133,14 +134,14 @@ class Client(SharedSystemClient, ClientAPI):
         try:
             return self._server.get_user_identity()
         except httpx.ConnectError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "Could not connect to a Chroma server. Are you sure it is running?"
             )
         # Propagate ChromaErrors
         except ChromaError as e:
             raise e
         except Exception as e:
-            raise ValueError(str(e))
+            raise InvalidArgumentError(str(e))
 
     # region BaseAPI Methods
     # Note - we could do this in less verbose ways, but they break type checking
@@ -640,21 +641,21 @@ class Client(SharedSystemClient, ClientAPI):
         try:
             self._admin_client.get_tenant(name=tenant)
         except httpx.ConnectError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "Could not connect to a Chroma server. Are you sure it is running?"
             )
         # Propagate ChromaErrors
         except ChromaError as e:
             raise e
         except Exception:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"Could not connect to tenant {tenant}. Are you sure it exists?"
             )
 
         try:
             self._admin_client.get_database(name=database, tenant=tenant)
         except httpx.ConnectError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "Could not connect to a Chroma server. Are you sure it is running?"
             )
 
