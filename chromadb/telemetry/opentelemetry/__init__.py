@@ -1,3 +1,4 @@
+import inspect
 import asyncio
 import os
 from functools import wraps
@@ -125,7 +126,7 @@ def trace_method(
     """A decorator that traces a method."""
 
     def decorator(f: T) -> T:
-        if asyncio.iscoroutinefunction(f):
+        if inspect.iscoroutinefunction(f):
 
             @wraps(f)
             async def async_wrapper(*args, **kwargs):  # type: ignore[no-untyped-def]
