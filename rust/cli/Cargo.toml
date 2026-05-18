@@ -47,6 +47,7 @@ supports-color = "3.0.2"
 [dev-dependencies]
 httpmock = "0.8.2"
 serde_json = { workspace = true }
+tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 uuid = { workspace = true }
 
