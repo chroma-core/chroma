@@ -47,7 +47,12 @@ def http_api_factory(
             with patch("chromadb.api.async_client.AsyncClient.get_user_identity"):
 
                 def factory(*args: Any, **kwargs: Any) -> Any:
-                    cls = asyncio.get_event_loop().run_until_complete(
+                    try:
+                        loop = asyncio.get_event_loop()
+                    except RuntimeError:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                    cls = loop.run_until_complete(
                         chromadb.AsyncHttpClient(*args, **kwargs)
                     )
                     return cls
