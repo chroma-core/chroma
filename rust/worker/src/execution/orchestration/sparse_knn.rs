@@ -23,7 +23,7 @@ use crate::execution::{
         },
         sparse_log_knn::{SparseLogKnn, SparseLogKnnError, SparseLogKnnInput, SparseLogKnnOutput},
     },
-    orchestration::knn_filter::KnnFilterOutput,
+    orchestration::filter::FilterOrchestratorOutput,
 };
 
 #[derive(Error, Debug)]
@@ -84,8 +84,8 @@ pub struct SparseKnnOrchestrator {
     // Collection information
     collection_and_segments: CollectionAndSegments,
 
-    // Output from KnnFilterOrchestrator
-    knn_filter_output: KnnFilterOutput,
+    // Output from FilterOrchestrator
+    filter_orchestrator_output: FilterOrchestratorOutput,
 
     // Sparse Knn params shared between log and segments
     query: SparseVector,
@@ -115,7 +115,7 @@ impl SparseKnnOrchestrator {
         dispatcher: ComponentHandle<Dispatcher>,
         queue: usize,
         collection_and_segments: CollectionAndSegments,
-        knn_filter_output: KnnFilterOutput,
+        filter_orchestrator_output: FilterOrchestratorOutput,
         query: SparseVector,
         key: String,
         limit: u32,
@@ -128,7 +128,7 @@ impl SparseKnnOrchestrator {
             blockfile_provider,
             queue,
             collection_and_segments,
-            knn_filter_output,
+            filter_orchestrator_output,
             query,
             key,
             limit,
@@ -153,8 +153,12 @@ impl SparseKnnOrchestrator {
             }),
             SparseLogKnnInput {
                 blockfile_provider: self.blockfile_provider.clone(),
-                logs: self.knn_filter_output.logs.clone(),
-                mask: self.knn_filter_output.filter_output.log_offset_ids.clone(),
+                logs: self.filter_orchestrator_output.logs.clone(),
+                mask: self
+                    .filter_orchestrator_output
+                    .filter_output
+                    .log_offset_ids
+                    .clone(),
                 record_segment: self.collection_and_segments.record_segment.clone(),
                 bloom_filter_manager: self.bloom_filter_manager.clone(),
                 shard_index: self.shard_index,
@@ -172,7 +176,7 @@ impl SparseKnnOrchestrator {
             SparseIndexKnnInput {
                 blockfile_provider: self.blockfile_provider.clone(),
                 mask: self
-                    .knn_filter_output
+                    .filter_orchestrator_output
                     .filter_output
                     .compact_offset_ids
                     .clone(),
@@ -246,8 +250,12 @@ impl Orchestrator for SparseKnnOrchestrator {
                 }),
                 IdfInput {
                     blockfile_provider: self.blockfile_provider.clone(),
-                    logs: self.knn_filter_output.logs.clone(),
-                    mask: self.knn_filter_output.filter_output.log_offset_ids.clone(),
+                    logs: self.filter_orchestrator_output.logs.clone(),
+                    mask: self
+                        .filter_orchestrator_output
+                        .filter_output
+                        .log_offset_ids
+                        .clone(),
                     metadata_segment: self.collection_and_segments.metadata_segment.clone(),
                     record_segment: self.collection_and_segments.record_segment.clone(),
                     bloom_filter_manager: self.bloom_filter_manager.clone(),

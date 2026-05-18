@@ -144,7 +144,7 @@ where
 }
 
 #[derive(Clone, Debug)]
-pub struct KnnFilterOutput {
+pub struct FilterOrchestratorOutput {
     pub logs: FetchLogOutput,
     pub fetch_log_bytes: u64,
     pub filter_output: FilterOutput,
@@ -153,42 +153,48 @@ pub struct KnnFilterOutput {
     pub hnsw_reader: Option<Box<DistributedHNSWSegmentReader>>,
 }
 
-type KnnFilterResult = Result<KnnFilterOutput, KnnError>;
+type FilterOrchestratorResult = Result<FilterOrchestratorOutput, KnnError>;
 
-/// The `KnnFilterOrchestrator` chains a sequence of operators in sequence to evaluate
-/// the first half of a `<collection>.query(...)` query from the user
+/// The `FilterOrchestrator` evaluates the first half of a collection search query:
+/// it fetches the relevant logs, partitions them to the current shard, evaluates the
+/// user-supplied `Where` predicate, and opens the HNSW reader (for HNSW-backed
+/// collections). Its output feeds the downstream KNN / Rank / Projection orchestrators.
 ///
 /// # Pipeline
 /// ```text
-///       ┌────────────┐
-///       │            │
-///       │  on_start  │
-///       │            │
-///       └──────┬─────┘
-///              │
-///              ▼
-///    ┌────────────────────┐
-///    │                    │
-///    │  FetchLogOperator  │
-///    │                    │
-///    └─────────┬──────────┘
-///              │
-///              ▼
-///    ┌───────────────────┐
-///    │                   │
-///    │   FilterOperator  │
-///    │                   │
-///    └─────────┬─────────┘
-///              │
-///              ▼
-///     ┌──────────────────┐
-///     │                  │
-///     │  result_channel  │
-///     │                  │
-///     └──────────────────┘
+///                          ┌────────────┐
+///                          │  on_start  │
+///                          └──────┬─────┘
+///                                 │
+///                 ┌───────────────┼─────────────────────────────┐
+///                 │               │                             │
+///                 ▼               ▼                             ▼
+///         ┌──────────────┐ ┌──────────────┐           ┌────────────────────┐
+///         │  Prefetch    │ │  Prefetch    │   ...     │  FetchLogOperator  │
+///         │    vector    │ │   record     │           │   (skipped for     │
+///         │   segment    │ │   segment    │           │    IndexOnly)      │
+///         └──────────────┘ └──────────────┘           └─────────┬──────────┘
+///         (detached)       (detached)                           │
+///                                                               ▼
+///                                                ┌─────────────────────────────┐
+///                                                │  FilterLogsForShardOperator │
+///                                                └──────────────┬──────────────┘
+///                                                               │
+///                                                               ▼
+///                                                     ┌───────────────────┐
+///                                                     │   FilterOperator  │
+///                                                     └─────────┬─────────┘
+///                                                               │
+///                                                               ▼
+///                                                    open DistributedHNSWSegment
+///                                                               │
+///                                                               ▼
+///                                                     ┌──────────────────┐
+///                                                     │  result_channel  │
+///                                                     └──────────────────┘
 /// ```
 #[derive(Debug)]
-pub struct KnnFilterOrchestrator {
+pub struct FilterOrchestrator {
     // Orchestrator parameters
     context: OrchestratorContext,
     blockfile_provider: BlockfileProvider,
@@ -221,10 +227,10 @@ pub struct KnnFilterOrchestrator {
     num_shards: u32,
 
     // Result channel
-    result_channel: Option<Sender<KnnFilterResult>>,
+    result_channel: Option<Sender<FilterOrchestratorResult>>,
 }
 
-impl KnnFilterOrchestrator {
+impl FilterOrchestrator {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         blockfile_provider: BlockfileProvider,
@@ -281,8 +287,8 @@ impl KnnFilterOrchestrator {
 }
 
 #[async_trait]
-impl Orchestrator for KnnFilterOrchestrator {
-    type Output = KnnFilterOutput;
+impl Orchestrator for FilterOrchestrator {
+    type Output = FilterOrchestratorOutput;
     type Error = KnnError;
 
     fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
@@ -298,7 +304,7 @@ impl Orchestrator for KnnFilterOrchestrator {
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
         let mut tasks = vec![];
-        // prefetch spann segment
+        // Prefetch vector segment
         let prefetch_task = wrap(
             Box::new(PrefetchSegmentOperator::new()),
             PrefetchSegmentInput::new_with_shard(
@@ -310,7 +316,7 @@ impl Orchestrator for KnnFilterOrchestrator {
             self.context.task_cancellation_token.clone(),
         );
         // Prefetch task is detached from the orchestrator
-        let prefetch_span = tracing::info_span!(parent: None, "Prefetch spann segment", segment_id = %self.collection_and_segments.vector_segment.id);
+        let prefetch_span = tracing::info_span!(parent: None, "Prefetch vector segment", segment_id = %self.collection_and_segments.vector_segment.id);
         Span::current().add_link(prefetch_span.context().span().span_context().clone());
         tasks.push((prefetch_task, Some(prefetch_span)));
 
@@ -392,30 +398,30 @@ impl Orchestrator for KnnFilterOrchestrator {
         self.queue
     }
 
-    fn set_result_channel(&mut self, sender: Sender<KnnFilterResult>) {
+    fn set_result_channel(&mut self, sender: Sender<FilterOrchestratorResult>) {
         self.result_channel = Some(sender)
     }
 
-    fn take_result_channel(&mut self) -> Option<Sender<KnnFilterResult>> {
+    fn take_result_channel(&mut self) -> Option<Sender<FilterOrchestratorResult>> {
         self.result_channel.take()
     }
 }
 
 #[async_trait]
-impl Handler<TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>> for KnnFilterOrchestrator {
+impl Handler<TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>> for FilterOrchestrator {
     type Result = ();
 
     async fn handle(
         &mut self,
         _: TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>,
-        _: &ComponentContext<KnnFilterOrchestrator>,
+        _: &ComponentContext<FilterOrchestrator>,
     ) {
         // Nothing to do.
     }
 }
 
 #[async_trait]
-impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for KnnFilterOrchestrator {
+impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for FilterOrchestrator {
     type Result = ();
 
     async fn handle(
@@ -445,9 +451,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for KnnFilterOrchestrato
 }
 
 #[async_trait]
-impl Handler<TaskResult<FilterLogsForShardOutput, FilterLogsForShardError>>
-    for KnnFilterOrchestrator
-{
+impl Handler<TaskResult<FilterLogsForShardOutput, FilterLogsForShardError>> for FilterOrchestrator {
     type Result = ();
 
     async fn handle(
@@ -468,7 +472,7 @@ impl Handler<TaskResult<FilterLogsForShardOutput, FilterLogsForShardError>>
 }
 
 #[async_trait]
-impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
+impl Handler<TaskResult<FilterOutput, FilterError>> for FilterOrchestrator {
     type Result = ();
 
     async fn handle(
@@ -572,7 +576,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
 
         let fetch_log_bytes = logs.iter().map(|(l, _)| l.size_bytes()).sum();
 
-        let output = KnnFilterOutput {
+        let output = FilterOrchestratorOutput {
             logs,
             fetch_log_bytes,
             filter_output: output,

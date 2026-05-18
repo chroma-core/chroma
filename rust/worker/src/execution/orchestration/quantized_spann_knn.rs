@@ -38,14 +38,14 @@ use crate::execution::operators::{
     },
 };
 
-use super::knn_filter::{KnnError, KnnFilterOutput};
+use super::filter::{FilterOrchestratorOutput, KnnError};
 
 #[derive(Debug)]
 pub struct QuantizedSpannKnnOrchestrator {
     collection_and_segments: CollectionAndSegments,
     context: OrchestratorContext,
     knn: Knn,
-    knn_filter_output: KnnFilterOutput,
+    filter_orchestrator_output: FilterOrchestratorOutput,
     queue: usize,
     reader: Option<QuantizedSpannSegmentReaderShard>,
     rotated_query: Option<Arc<[f32]>>,
@@ -73,7 +73,7 @@ impl QuantizedSpannKnnOrchestrator {
         dispatcher: ComponentHandle<Dispatcher>,
         queue: usize,
         collection_and_segments: CollectionAndSegments,
-        knn_filter_output: KnnFilterOutput,
+        filter_orchestrator_output: FilterOrchestratorOutput,
         knn: Knn,
         bloom_filter_manager: Option<BloomFilterManager>,
         shard_index: u32,
@@ -82,7 +82,7 @@ impl QuantizedSpannKnnOrchestrator {
             collection_and_segments,
             context: OrchestratorContext::new(dispatcher),
             knn,
-            knn_filter_output,
+            filter_orchestrator_output,
             queue,
             reader: None,
             rotated_query: None,
@@ -137,11 +137,15 @@ impl Orchestrator for QuantizedSpannKnnOrchestrator {
         let knn_log_task = wrap(
             Box::new(self.knn.clone()),
             KnnLogInput {
-                logs: self.knn_filter_output.logs.clone(),
+                logs: self.filter_orchestrator_output.logs.clone(),
                 blockfile_provider: self.spann_provider.blockfile_provider.clone(),
                 record_segment: self.collection_and_segments.record_segment.clone(),
-                log_offset_ids: self.knn_filter_output.filter_output.log_offset_ids.clone(),
-                distance_function: self.knn_filter_output.distance_function.clone(),
+                log_offset_ids: self
+                    .filter_orchestrator_output
+                    .filter_output
+                    .log_offset_ids
+                    .clone(),
+                distance_function: self.filter_orchestrator_output.distance_function.clone(),
                 bloom_filter_manager: self.bloom_filter_manager.clone(),
                 shard_index: self.shard_index,
             },
@@ -324,7 +328,7 @@ impl Handler<TaskResult<QuantizedSpannLoadClusterOutput, QuantizedSpannLoadClust
             count: self.knn.fetch as usize,
             distance_function,
             filter: self
-                .knn_filter_output
+                .filter_orchestrator_output
                 .filter_output
                 .compact_offset_ids
                 .clone(),

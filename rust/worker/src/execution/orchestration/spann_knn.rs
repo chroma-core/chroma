@@ -30,7 +30,7 @@ use crate::execution::operators::{
     },
 };
 
-use super::knn_filter::{KnnError, KnnFilterOutput};
+use super::filter::{FilterOrchestratorOutput, KnnError};
 
 #[derive(Debug)]
 pub struct SpannKnnOrchestrator {
@@ -41,8 +41,8 @@ pub struct SpannKnnOrchestrator {
     queue: usize,
     collection_and_segments: CollectionAndSegments,
 
-    // Output from KnnFilterOrchestrator
-    knn_filter_output: KnnFilterOutput,
+    // Output from FilterOrchestrator
+    filter_orchestrator_output: FilterOrchestratorOutput,
 
     // Query params.
     k: usize,
@@ -84,14 +84,14 @@ impl SpannKnnOrchestrator {
         dispatcher: ComponentHandle<Dispatcher>,
         queue: usize,
         collection_and_segments: CollectionAndSegments,
-        knn_filter_output: KnnFilterOutput,
+        filter_orchestrator_output: FilterOrchestratorOutput,
         k: usize,
         query: Vec<f32>,
         bloom_filter_manager: Option<BloomFilterManager>,
         shard_index: u32,
     ) -> Self {
         let normalized_query_emb =
-            if knn_filter_output.distance_function == DistanceFunction::Cosine {
+            if filter_orchestrator_output.distance_function == DistanceFunction::Cosine {
                 normalize(&query)
             } else {
                 query.clone()
@@ -104,7 +104,7 @@ impl SpannKnnOrchestrator {
             spann_provider,
             queue,
             collection_and_segments,
-            knn_filter_output,
+            filter_orchestrator_output,
             k,
             normalized_query_emb,
             log_knn: Knn {
@@ -166,11 +166,15 @@ impl Orchestrator for SpannKnnOrchestrator {
         let knn_log_task = wrap(
             Box::new(self.log_knn.clone()),
             KnnLogInput {
-                logs: self.knn_filter_output.logs.clone(),
+                logs: self.filter_orchestrator_output.logs.clone(),
                 blockfile_provider: self.blockfile_provider.clone(),
                 record_segment: self.collection_and_segments.record_segment.clone(),
-                log_offset_ids: self.knn_filter_output.filter_output.log_offset_ids.clone(),
-                distance_function: self.knn_filter_output.distance_function.clone(),
+                log_offset_ids: self
+                    .filter_orchestrator_output
+                    .filter_output
+                    .log_offset_ids
+                    .clone(),
+                distance_function: self.filter_orchestrator_output.distance_function.clone(),
                 bloom_filter_manager: self.bloom_filter_manager.clone(),
                 shard_index: self.shard_index,
             },
@@ -196,7 +200,7 @@ impl Orchestrator for SpannKnnOrchestrator {
             &vector_segment_shard,
             &self.blockfile_provider,
             &self.spann_provider.hnsw_provider,
-            self.knn_filter_output.dimension,
+            self.filter_orchestrator_output.dimension,
             self.spann_provider.adaptive_search_nprobe,
         ))
         .await;
@@ -330,11 +334,11 @@ impl Handler<TaskResult<SpannFetchPlOutput, SpannFetchPlError>> for SpannKnnOrch
                 posting_list: output.posting_list,
                 k: self.k,
                 filter: self
-                    .knn_filter_output
+                    .filter_orchestrator_output
                     .filter_output
                     .compact_offset_ids
                     .clone(),
-                distance_function: self.knn_filter_output.distance_function.clone(),
+                distance_function: self.filter_orchestrator_output.distance_function.clone(),
                 query: self.normalized_query_emb.clone(),
             },
             ctx.receiver(),
