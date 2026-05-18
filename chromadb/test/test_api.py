@@ -3840,7 +3840,7 @@ class TestSelectFromDict:
         with pytest.raises(TypeError, match="Expected dict"):
             Select.from_dict("not a dict")
 
-        with pytest.raises(TypeError, match="must be a list/tuple/set"):
+        with pytest.raises(TypeError, match="must be a list"):
             Select.from_dict({"keys": "not a list"})
 
         with pytest.raises(TypeError, match="must be a string"):
@@ -3851,7 +3851,9 @@ class TestSelectFromDict:
         import pytest
         from chromadb.execution.expression.operator import Select
 
-        with pytest.raises(ValueError, match="Unexpected keys"):
+        with pytest.raises(
+            ValueError, match="must contain exactly the 'keys' field"
+        ):
             Select.from_dict({"keys": [], "invalid": "key"})
 
 
