@@ -2239,6 +2239,15 @@ impl Schema {
         }
     }
 
+    /// Returns true if the inverted index is disabled for the given key and value type.
+    /// Used to determine if the larger document size quota should apply for unindexed fields.
+    pub fn is_metadata_key_unindexed(&self, key: &str, value_type: MetadataValueType) -> bool {
+        match self.is_metadata_type_index_enabled(key, value_type) {
+            Ok(enabled) => !enabled,
+            Err(_) => false,
+        }
+    }
+
     pub fn is_metadata_where_indexing_enabled(
         &self,
         where_clause: &Where,
@@ -3310,6 +3319,58 @@ mod tests {
         // Check that other defaults are still present
         assert!(result.defaults.float.is_some());
         assert!(result.defaults.int.is_some());
+    }
+
+    #[test]
+    fn test_is_metadata_key_unindexed() {
+        // Create a schema with string index disabled by default
+        let mut schema = Schema::new_default(KnnIndex::Spann);
+        schema.defaults.string = Some(StringValueType {
+            string_inverted_index: Some(StringInvertedIndexType {
+                enabled: false,
+                config: StringInvertedIndexConfig {},
+            }),
+            fts_index: None,
+        });
+
+        // Key not in schema.keys should use defaults (disabled = unindexed)
+        assert!(schema.is_metadata_key_unindexed("some_key", MetadataValueType::Str));
+
+        // Create a key-specific override with enabled index
+        schema.keys.insert(
+            "indexed_key".to_string(),
+            ValueTypes {
+                string: Some(StringValueType {
+                    string_inverted_index: Some(StringInvertedIndexType {
+                        enabled: true,
+                        config: StringInvertedIndexConfig {},
+                    }),
+                    fts_index: None,
+                }),
+                ..Default::default()
+            },
+        );
+
+        // Key with explicit enabled=true should NOT be unindexed
+        assert!(!schema.is_metadata_key_unindexed("indexed_key", MetadataValueType::Str));
+
+        // Other value types should also work
+        schema.defaults.int = Some(IntValueType {
+            int_inverted_index: Some(IntInvertedIndexType {
+                enabled: false,
+                config: IntInvertedIndexConfig {},
+            }),
+        });
+        assert!(schema.is_metadata_key_unindexed("some_key", MetadataValueType::Int));
+
+        // Enabled int index should not be unindexed
+        schema.defaults.int = Some(IntValueType {
+            int_inverted_index: Some(IntInvertedIndexType {
+                enabled: true,
+                config: IntInvertedIndexConfig {},
+            }),
+        });
+        assert!(!schema.is_metadata_key_unindexed("some_key", MetadataValueType::Int));
     }
 
     #[test]
