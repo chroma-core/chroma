@@ -175,6 +175,14 @@ impl GarbageCollector {
         &mut self,
         attached_function_gc_absolute_cutoff_time: SystemTime,
     ) -> (u32, u32) {
+        if self.config.max_attached_functions_to_gc_per_run <= 0 {
+            tracing::warn!(
+                limit = self.config.max_attached_functions_to_gc_per_run,
+                "Skipping attached function garbage collection because the configured limit must be greater than 0"
+            );
+            return (0, 0);
+        }
+
         tracing::info!("Checking for attached functions to garbage collect (deleted or not ready)");
         match self
             .sysdb_client
@@ -1002,6 +1010,26 @@ mod tests {
             assignment_policy,
             RootManager::new(storage, Box::new(NopCache)),
         )
+    }
+
+    #[tokio::test]
+    async fn attached_function_gc_skips_nonpositive_limit() {
+        let (_storage_dir, storage) = test_storage();
+        let mut garbage_collector = new_test_garbage_collector(
+            GarbageCollectorConfig {
+                max_attached_functions_to_gc_per_run: 0,
+                ..test_gc_config("gc-a")
+            },
+            SysDb::Test(TestSysDb::new()),
+            storage,
+            Box::new(TestAssignmentPolicy::default()),
+        );
+
+        let result = garbage_collector
+            .garbage_collect_attached_functions(SystemTime::now())
+            .await;
+
+        assert_eq!(result, (0, 0));
     }
 
     #[test]
