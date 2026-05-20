@@ -1644,12 +1644,17 @@ mod proptests {
     use super::*;
     use proptest::prelude::*;
 
+    fn arb_weight() -> impl Strategy<Value = f32> {
+        // Avoid proptest's f32 range sampler, which can debug-assert on some seeds.
+        (10u16..1000).prop_map(|weight| f32::from(weight) / 1000.0)
+    }
+
     fn arb_entries(max_count: usize) -> impl Strategy<Value = Vec<(u32, f32)>> {
         (1..=max_count)
             .prop_flat_map(|n| {
                 (
                     proptest::collection::vec(0u32..u32::MAX / 2, n),
-                    proptest::collection::vec(0.01f32..1.0f32, n),
+                    proptest::collection::vec(arb_weight(), n),
                 )
             })
             .prop_map(|(mut offsets, weights)| {
