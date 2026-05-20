@@ -22,9 +22,9 @@ use serde_pickle::{DeOptions, SerOptions};
 use sqlx::Row;
 use thiserror::Error;
 
-#[allow(dead_code)]
-const METADATA_FILE: &str = "index_metadata.pickle";
-const HNSW_HEADER_FILE: &str = "header.bin";
+pub const METADATA_FILE: &str = "index_metadata.pickle";
+pub const HNSW_HEADER_FILE: &str = "header.bin";
+pub const HNSW_INDEX_FILES: [&str; 4] = chroma_index::hnsw_provider::FILES;
 const HNSW_PERSISTENCE_VERSION: i32 = 1;
 
 #[allow(dead_code)]
@@ -117,7 +117,7 @@ fn read_usize(buf: &[u8], offset: &mut usize) -> Option<usize> {
     Some(usize::from_ne_bytes(array))
 }
 
-fn parse_persisted_hnsw_dim(header: &[u8]) -> Option<usize> {
+pub fn parse_persisted_hnsw_dim(header: &[u8]) -> Option<usize> {
     let mut offset = 0;
     let version = read_i32(header, &mut offset)?;
     if version != HNSW_PERSISTENCE_VERSION {
@@ -489,6 +489,75 @@ impl IdMap {
             ..Default::default()
         }
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PersistedHnswLabelMismatch {
+    LabelMapsToDifferentId {
+        id: String,
+        label: u32,
+        reverse_id: String,
+    },
+    MissingReverseLabel {
+        id: String,
+        label: u32,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PersistedHnswMetadata {
+    pub dimensionality: Option<usize>,
+    pub total_elements_added: u32,
+    pub legacy_max_seq_id: Option<u64>,
+    pub id_to_label_count: usize,
+    pub label_to_id_count: usize,
+    pub first_label_mismatch: Option<PersistedHnswLabelMismatch>,
+}
+
+impl From<IdMap> for PersistedHnswMetadata {
+    fn from(id_map: IdMap) -> Self {
+        let first_label_mismatch =
+            id_map
+                .id_to_label
+                .iter()
+                .find_map(|(id, label)| match id_map.label_to_id.get(label) {
+                    Some(reverse_id) if reverse_id == id => None,
+                    Some(reverse_id) => Some(PersistedHnswLabelMismatch::LabelMapsToDifferentId {
+                        id: id.clone(),
+                        label: *label,
+                        reverse_id: reverse_id.clone(),
+                    }),
+                    None => Some(PersistedHnswLabelMismatch::MissingReverseLabel {
+                        id: id.clone(),
+                        label: *label,
+                    }),
+                });
+
+        Self {
+            dimensionality: id_map.dimensionality,
+            total_elements_added: id_map.total_elements_added,
+            legacy_max_seq_id: id_map.max_seq_id,
+            id_to_label_count: id_map.id_to_label.len(),
+            label_to_id_count: id_map.label_to_id.len(),
+            first_label_mismatch,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum PersistedHnswMetadataError {
+    #[error("Error opening persisted HNSW metadata: {0}")]
+    Open(#[from] std::io::Error),
+    #[error("Error deserializing persisted HNSW metadata: {0}")]
+    Deserialize(#[from] serde_pickle::Error),
+}
+
+pub fn inspect_persisted_hnsw_metadata(
+    metadata_path: &Path,
+) -> Result<PersistedHnswMetadata, PersistedHnswMetadataError> {
+    let file = std::fs::File::open(metadata_path)?;
+    let id_map: IdMap = serde_pickle::from_reader(file, DeOptions::new())?;
+    Ok(id_map.into())
 }
 
 #[allow(dead_code)]
@@ -1094,6 +1163,30 @@ mod tests {
         header[label_offset_offset..label_offset_offset + size_of::<usize>()]
             .copy_from_slice(&69usize.to_ne_bytes());
         assert_eq!(parse_persisted_hnsw_dim(&header), None);
+    }
+
+    #[test]
+    fn persisted_hnsw_metadata_summarizes_legacy_watermark_and_mismatches() {
+        let mut id_map = IdMap::new(3);
+        id_map.max_seq_id = Some(42);
+        id_map.total_elements_added = 1;
+        id_map.id_to_label.insert("a".to_string(), 7);
+        id_map.label_to_id.insert(7, "b".to_string());
+
+        let metadata = PersistedHnswMetadata::from(id_map);
+
+        assert_eq!(metadata.dimensionality, Some(3));
+        assert_eq!(metadata.legacy_max_seq_id, Some(42));
+        assert_eq!(metadata.id_to_label_count, 1);
+        assert_eq!(metadata.label_to_id_count, 1);
+        assert_eq!(
+            metadata.first_label_mismatch,
+            Some(PersistedHnswLabelMismatch::LabelMapsToDifferentId {
+                id: "a".to_string(),
+                label: 7,
+                reverse_id: "b".to_string(),
+            })
+        );
     }
 
     #[tokio::test]

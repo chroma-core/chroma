@@ -9,6 +9,7 @@ use crate::commands::run::RunError;
 use crate::commands::update::UpdateError;
 use crate::commands::vacuum::VacuumError;
 use crate::commands::webpage::WebPageError;
+use crate::hnsw_integrity_check::HnswIntegrityCheckError;
 use crate::ui_utils::Theme;
 use chroma::client::{
     ChromaAuthMethod, ChromaHttpClientError, ChromaHttpClientOptions, ChromaRetryOptions,
@@ -59,6 +60,8 @@ pub enum CliError {
     Copy(#[from] CopyError),
     #[error("{0}")]
     WebPage(#[from] WebPageError),
+    #[error("{0}")]
+    HnswIntegrityCheck(#[from] HnswIntegrityCheckError),
 }
 
 #[derive(Debug, Error)]
