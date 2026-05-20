@@ -140,12 +140,16 @@ impl SqliteSysDb {
             .map_err(|e| e.boxed())?;
 
         for collection in collections {
+            let segments = self
+                .get_segments_with_conn(&mut *tx, collection.collection_id, None, None, None)
+                .await
+                .map_err(|e| e.boxed())?;
             self.delete_collection_with_conn(
                 &mut *tx,
                 tenant.clone(),
                 database_name.clone(),
                 collection.collection_id,
-                vec![],
+                segments.into_iter().map(|segment| segment.id).collect(),
             )
             .await
             .map_err(|e| e.boxed())?;
@@ -1228,11 +1232,59 @@ mod tests {
             .await
             .unwrap();
 
+        let collection_id = CollectionUuid::new();
+        let segments = vec![
+            Segment {
+                id: SegmentUuid::new(),
+                r#type: SegmentType::HnswLocalPersisted,
+                scope: SegmentScope::VECTOR,
+                collection: collection_id,
+                metadata: None,
+                file_path: HashMap::new(),
+            },
+            Segment {
+                id: SegmentUuid::new(),
+                r#type: SegmentType::Sqlite,
+                scope: SegmentScope::METADATA,
+                collection: collection_id,
+                metadata: None,
+                file_path: HashMap::new(),
+            },
+        ];
+        sysdb
+            .create_collection(
+                "default_tenant".to_string(),
+                "test".to_string(),
+                collection_id,
+                "test_collection".to_string(),
+                segments,
+                Some(InternalCollectionConfiguration::default_hnsw()),
+                Some(Schema::new_default(KnnIndex::Hnsw)),
+                None,
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            sysdb
+                .get_segments(None, None, None, collection_id)
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
+
         // Delete database
         sysdb
             .delete_database("test".to_string(), "default_tenant".to_string())
             .await
             .unwrap();
+        assert!(sysdb
+            .get_segments(None, None, None, collection_id)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]

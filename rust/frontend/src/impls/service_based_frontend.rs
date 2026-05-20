@@ -5,6 +5,7 @@ use crate::{
 };
 use backon::{ExponentialBuilder, Retryable};
 use chroma_api_types::HeartbeatResponse;
+use chroma_cache::AysncPartitionedMutex;
 use chroma_config::{registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log, PushLogsError};
@@ -41,20 +42,21 @@ use chroma_types::{
     GetCollectionResponse, GetCollectionsError, GetDatabaseError, GetDatabaseRequest,
     GetDatabaseResponse, GetRequest, GetResponse, GetTenantError, GetTenantRequest,
     GetTenantResponse, HealthCheckResponse, HeartbeatError, Include, IndexStatusError,
-    IndexStatusResponse, KnnIndex, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord,
-    QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse, Schema, SearchRequest,
-    SearchResponse, SegmentType, UpdateCollectionError, UpdateCollectionRecordsError,
-    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
-    UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse,
-    UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse,
-    Where,
+    IndexStatusResponse, InternalCollectionConfiguration, KnnIndex, ListCollectionsRequest,
+    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
+    Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
+    Schema, SearchRequest, SearchResponse, Segment, SegmentType, UpdateCollectionError,
+    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
+    UpdateCollectionRequest, UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest,
+    UpdateTenantResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
+    UpsertCollectionRecordsResponse, VectorIndexConfiguration, Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use validator::Validate;
 
 #[derive(Debug)]
 struct Metrics {
@@ -81,6 +83,8 @@ pub struct ServiceBasedFrontend {
     default_knn_index: KnnIndex,
     enable_schema: bool,
     retries_builder: ExponentialBuilder,
+    dimension_locks: AysncPartitionedMutex<CollectionUuid>,
+    database_operation_locks: AysncPartitionedMutex<(String, DatabaseName)>,
     min_records_for_invocation: u64,
     tenants_with_quantization_enabled: Vec<String>,
     tenants_with_maxscore_enabled: Vec<String>,
@@ -147,6 +151,8 @@ impl ServiceBasedFrontend {
             default_knn_index,
             enable_schema,
             retries_builder,
+            dimension_locks: AysncPartitionedMutex::new(()),
+            database_operation_locks: AysncPartitionedMutex::new(()),
             min_records_for_invocation,
             tenants_with_quantization_enabled,
             tenants_with_maxscore_enabled,
@@ -830,6 +836,61 @@ impl ServiceBasedFrontend {
             .collection)
     }
 
+    async fn invalidate_collection_caches(&mut self, collection_ids: &[CollectionUuid]) {
+        for collection_id in collection_ids {
+            self.collections_with_segments_provider
+                .collections_with_segments_cache
+                .remove(collection_id)
+                .await;
+        }
+    }
+
+    async fn delete_collection_logs(
+        &mut self,
+        collection_ids: &[CollectionUuid],
+    ) -> Result<(), Box<dyn ChromaError>> {
+        for collection_id in collection_ids {
+            self.log_client.delete_logs(*collection_id).await?;
+        }
+        Ok(())
+    }
+
+    async fn cleanup_deleted_collection_resources(
+        &mut self,
+        collection_ids: &[CollectionUuid],
+        segments: &[Segment],
+    ) -> Result<(), Box<dyn ChromaError>> {
+        let mut first_error = self.delete_collection_logs(collection_ids).await.err();
+        if let Err(err) = self.executor.delete_segments(segments).await {
+            if first_error.is_none() {
+                first_error = Some(Box::new(err) as Box<dyn ChromaError>);
+            }
+        }
+        if let Some(err) = first_error {
+            Err(err)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn validate_collection_index_configuration(
+        collection: &Collection,
+    ) -> Result<(), ValidationError> {
+        match &collection.config.vector_index {
+            VectorIndexConfiguration::Hnsw(hnsw) => hnsw
+                .validate()
+                .map_err(|err| ValidationError::InvalidArgument(format!("{err}")))?,
+            VectorIndexConfiguration::Spann(spann) => spann
+                .validate()
+                .map_err(|err| ValidationError::InvalidArgument(format!("{err}")))?,
+        }
+        if let Some(schema) = &collection.schema {
+            InternalCollectionConfiguration::try_from(schema)
+                .map_err(ValidationError::InvalidArgument)?;
+        }
+        Ok(())
+    }
+
     async fn set_collection_dimension(
         &mut self,
         database_name: DatabaseName,
@@ -866,45 +927,53 @@ impl ServiceBasedFrontend {
     where
         F: Fn(&Embedding) -> Option<usize>,
     {
-        let collection = self
-            .get_cached_collection(database_name.clone(), collection_id)
-            .await?;
-        if let Some(embeddings) = option_embeddings {
+        let emb_dim = if let Some(embeddings) = option_embeddings {
             let emb_dims = embeddings
                 .iter()
                 .filter_map(read_length)
                 .collect::<Vec<_>>();
             let min_dim = emb_dims.iter().min().cloned();
             let max_dim = emb_dims.iter().max().cloned();
-            let emb_dim = if let (Some(low), Some(high)) = (min_dim, max_dim) {
+            if let (Some(low), Some(high)) = (min_dim, max_dim) {
                 if low != high {
                     return Err(ValidationError::DimensionInconsistent);
                 }
-                low as u32
+                Some(low as u32)
             } else {
-                // No embedding to check, return
-                return Ok(collection);
-            };
-            match collection.dimension.map(|dim| dim as u32) {
-                Some(expected_dim) => {
-                    if expected_dim != emb_dim {
-                        return Err(ValidationError::DimensionMismatch(expected_dim, emb_dim));
-                    }
+                None
+            }
+        } else {
+            None
+        };
+
+        let Some(emb_dim) = emb_dim else {
+            let collection = self
+                .get_cached_collection(database_name.clone(), collection_id)
+                .await?;
+            Self::validate_collection_index_configuration(&collection)?;
+            return Ok(collection);
+        };
+
+        let dimension_locks = self.dimension_locks.clone();
+        let _guard = dimension_locks.lock(&collection_id).await;
+        let mut collection = self
+            .get_cached_collection(database_name.clone(), collection_id)
+            .await?;
+        Self::validate_collection_index_configuration(&collection)?;
+        match collection.dimension.map(|dim| dim as u32) {
+            Some(expected_dim) => {
+                if expected_dim != emb_dim {
+                    return Err(ValidationError::DimensionMismatch(expected_dim, emb_dim));
                 }
-                None => {
-                    if update_if_not_present {
-                        let database_name =
-                            DatabaseName::new(&collection.database).ok_or_else(|| {
-                                ValidationError::InvalidArgument(
-                                    "database name must be at least 3 characters".to_string(),
-                                )
-                            })?;
-                        self.set_collection_dimension(database_name, collection_id, emb_dim)
-                            .await?;
-                    }
+            }
+            None => {
+                if update_if_not_present {
+                    self.set_collection_dimension(database_name, collection_id, emb_dim)
+                        .await?;
+                    collection.dimension = Some(emb_dim as i32);
                 }
-            };
-        }
+            }
+        };
         Ok(collection)
     }
 
@@ -999,9 +1068,46 @@ impl ServiceBasedFrontend {
             ..
         }: DeleteDatabaseRequest,
     ) -> Result<DeleteDatabaseResponse, DeleteDatabaseError> {
+        let db_name = DatabaseName::new(&database_name).ok_or_else(|| {
+            DeleteDatabaseError::Internal(Box::new(ValidationError::InvalidArgument(
+                "database name must be at least 3 characters".to_string(),
+            )))
+        })?;
+        let database_operation_locks = self.database_operation_locks.clone();
+        let _database_guard = database_operation_locks
+            .lock(&(tenant_id.clone(), db_name.clone()))
+            .await;
+        let collections = self
+            .sysdb_client
+            .get_collections(GetCollectionsOptions {
+                tenant: Some(tenant_id.clone()),
+                database_or_topology: Some(DatabaseOrTopology::Database(db_name)),
+                ..Default::default()
+            })
+            .await
+            .map_err(|err| DeleteDatabaseError::Internal(Box::new(err)))?;
+        let collection_ids = collections
+            .iter()
+            .map(|collection| collection.collection_id)
+            .collect::<Vec<_>>();
+        let mut segments = Vec::<Segment>::new();
+        for collection in &collections {
+            let collection_segments = self
+                .sysdb_client
+                .get_segments(None, None, None, collection.collection_id)
+                .await
+                .map_err(|err| DeleteDatabaseError::Internal(err.boxed()))?;
+            segments.extend(collection_segments);
+        }
+
         self.sysdb_client
             .delete_database(database_name, tenant_id)
+            .await?;
+        self.invalidate_collection_caches(&collection_ids).await;
+        self.cleanup_deleted_collection_resources(&collection_ids, &segments)
             .await
+            .map_err(DeleteDatabaseError::Internal)?;
+        Ok(DeleteDatabaseResponse {})
     }
 
     pub async fn list_collections(
@@ -1157,6 +1263,10 @@ impl ServiceBasedFrontend {
             ..
         }: CreateCollectionRequest,
     ) -> Result<CreateCollectionResponse, CreateCollectionError> {
+        let database_operation_locks = self.database_operation_locks.clone();
+        let _database_guard = database_operation_locks
+            .lock(&(tenant_id.clone(), database_name.clone()))
+            .await;
         let plan = frontend_core::collection_ops::plan_create_collection(
             configuration,
             schema,
@@ -1265,15 +1375,16 @@ impl ServiceBasedFrontend {
                 tenant_id,
                 db_name,
                 collection.collection_id,
-                segments.into_iter().map(|s| s.id).collect(),
+                segments.iter().map(|s| s.id).collect(),
             )
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         // Invalidate the cache.
-        self.collections_with_segments_provider
-            .collections_with_segments_cache
-            .remove(&collection.collection_id)
+        self.invalidate_collection_caches(&[collection.collection_id])
             .await;
+        self.cleanup_deleted_collection_resources(&[collection.collection_id], &segments)
+            .await
+            .map_err(DeleteCollectionError::Internal)?;
 
         Ok(DeleteCollectionResponse {})
     }
@@ -1873,9 +1984,10 @@ impl ServiceBasedFrontend {
             let cmek = self
                 .get_cached_collection(database_name_typed.clone(), collection_id)
                 .await
-                .map_err(|err| DeleteCollectionRecordsError::Internal(err.boxed()))?
-                .schema
-                .and_then(|schema| schema.cmek.clone());
+                .map_err(|err| DeleteCollectionRecordsError::Internal(err.boxed()))?;
+            Self::validate_collection_index_configuration(&cmek)
+                .map_err(|err| DeleteCollectionRecordsError::Internal(err.boxed()))?;
+            let cmek = cmek.schema.and_then(|schema| schema.cmek.clone());
             self.retryable_push_logs(
                 &tenant_id,
                 database_name_typed.clone(),
@@ -2831,6 +2943,125 @@ mod tests {
         assert!(segments.iter().any(
             |s| s.r#type == SegmentType::HnswLocalPersisted && s.scope == SegmentScope::VECTOR
         ));
+    }
+
+    #[tokio::test]
+    async fn concurrent_dimension_initialization_rejects_loser_dimension() {
+        let registry = Registry::new();
+        let system = System::new();
+        let config = FrontendConfig::sqlite_in_memory();
+        let mut frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .unwrap();
+
+        let database_name =
+            DatabaseName::new("default_database").expect("database name should be valid");
+        let collection = frontend
+            .create_collection(
+                CreateCollectionRequest::try_new(
+                    "default_tenant".to_string(),
+                    database_name.clone(),
+                    "concurrent_dimension".to_string(),
+                    None,
+                    None,
+                    None,
+                    false,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+        let mut first_frontend = frontend.clone();
+        let mut second_frontend = frontend.clone();
+        let first_barrier = barrier.clone();
+        let second_barrier = barrier.clone();
+        let collection_id = collection.collection_id;
+
+        let first = tokio::spawn(async move {
+            let embeddings = vec![vec![1.0, 2.0]];
+            first_barrier.wait().await;
+            first_frontend
+                .validate_embedding(
+                    database_name,
+                    collection_id,
+                    Some(&embeddings),
+                    true,
+                    |embedding: &Vec<f32>| Some(embedding.len()),
+                )
+                .await
+        });
+        let second = tokio::spawn(async move {
+            let embeddings = vec![vec![1.0, 2.0, 3.0]];
+            second_barrier.wait().await;
+            second_frontend
+                .validate_embedding(
+                    DatabaseName::new("default_database").expect("database name should be valid"),
+                    collection_id,
+                    Some(&embeddings),
+                    true,
+                    |embedding: &Vec<f32>| Some(embedding.len()),
+                )
+                .await
+        });
+
+        let first = first.await.unwrap();
+        let second = second.await.unwrap();
+        let results = [&first, &second];
+
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| matches!(result, Err(ValidationError::DimensionMismatch(_, _))))
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn collection_create_waits_for_database_operation_lock() {
+        let registry = Registry::new();
+        let system = System::new();
+        let config = FrontendConfig::sqlite_in_memory();
+        let frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .unwrap();
+
+        let database_name =
+            DatabaseName::new("default_database").expect("database name should be valid");
+        let lock_key = ("default_tenant".to_string(), database_name.clone());
+        let database_operation_locks = frontend.database_operation_locks.clone();
+        let guard = database_operation_locks.lock(&lock_key).await;
+
+        let mut create_frontend = frontend.clone();
+        let mut create_task = tokio::spawn(async move {
+            create_frontend
+                .create_collection(
+                    CreateCollectionRequest::try_new(
+                        "default_tenant".to_string(),
+                        database_name,
+                        "blocked_create".to_string(),
+                        None,
+                        None,
+                        None,
+                        false,
+                    )
+                    .unwrap(),
+                )
+                .await
+        });
+
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), &mut create_task)
+                .await
+                .is_err()
+        );
+        drop(guard);
+
+        let collection = create_task.await.unwrap().unwrap();
+        assert_eq!(collection.name, "blocked_create");
     }
 
     #[tokio::test]

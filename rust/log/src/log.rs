@@ -312,6 +312,23 @@ impl Log {
         }
     }
 
+    pub async fn delete_logs(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        match self {
+            Log::Sqlite(log) => log
+                .delete_logs(collection_id)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+            Log::Grpc(_) => Ok(()),
+            Log::InMemory(log) => {
+                log.delete_logs(collection_id).await;
+                Ok(())
+            }
+        }
+    }
+
     pub async fn get_max_batch_size(&mut self) -> Result<u32, Box<dyn ChromaError>> {
         match self {
             Log::Sqlite(log) => log

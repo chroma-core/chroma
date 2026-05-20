@@ -1,6 +1,7 @@
 use std::{
     collections::{BinaryHeap, HashMap},
     io::Write,
+    mem::size_of,
     path::Path,
     sync::Arc,
 };
@@ -23,6 +24,8 @@ use thiserror::Error;
 
 #[allow(dead_code)]
 const METADATA_FILE: &str = "index_metadata.pickle";
+const HNSW_HEADER_FILE: &str = "header.bin";
+const HNSW_PERSISTENCE_VERSION: i32 = 1;
 
 #[allow(dead_code)]
 #[derive(Clone)]
@@ -52,6 +55,8 @@ pub enum LocalHnswSegmentReaderError {
     GetEmbeddingError,
     #[error("Error querying knn")]
     QueryError,
+    #[error("Persisted HNSW dimensionality {actual} does not match collection dimensionality {expected}")]
+    DimensionalityMismatch { expected: usize, actual: usize },
     #[error("Error reading from sqlite: {0}")]
     SqliteError(#[from] sqlx::error::Error),
 }
@@ -69,6 +74,7 @@ impl ChromaError for LocalHnswSegmentReaderError {
             LocalHnswSegmentReaderError::IdNotFound => ErrorCodes::Internal,
             LocalHnswSegmentReaderError::GetEmbeddingError => ErrorCodes::Internal,
             LocalHnswSegmentReaderError::QueryError => ErrorCodes::Internal,
+            LocalHnswSegmentReaderError::DimensionalityMismatch { .. } => ErrorCodes::DataLoss,
             LocalHnswSegmentReaderError::SqliteError(_) => ErrorCodes::Internal,
         }
     }
@@ -91,6 +97,61 @@ async fn get_current_seq_id(
         .transpose()?
         .unwrap_or_default();
     Ok(seq_id)
+}
+
+fn read_i32(buf: &[u8], offset: &mut usize) -> Option<i32> {
+    let end = offset.checked_add(size_of::<i32>())?;
+    let bytes = buf.get(*offset..end)?;
+    let mut array = [0; size_of::<i32>()];
+    array.copy_from_slice(bytes);
+    *offset = end;
+    Some(i32::from_ne_bytes(array))
+}
+
+fn read_usize(buf: &[u8], offset: &mut usize) -> Option<usize> {
+    let end = offset.checked_add(size_of::<usize>())?;
+    let bytes = buf.get(*offset..end)?;
+    let mut array = [0; size_of::<usize>()];
+    array.copy_from_slice(bytes);
+    *offset = end;
+    Some(usize::from_ne_bytes(array))
+}
+
+fn parse_persisted_hnsw_dim(header: &[u8]) -> Option<usize> {
+    let mut offset = 0;
+    let version = read_i32(header, &mut offset)?;
+    if version != HNSW_PERSISTENCE_VERSION {
+        return None;
+    }
+
+    // hnswlib persists native POD fields in order. The vector byte width is
+    // not stored directly, but is exactly the gap between the vector payload
+    // offset and the label offset.
+    let _offset_level0 = read_usize(header, &mut offset)?;
+    let _max_elements = read_usize(header, &mut offset)?;
+    let _cur_element_count = read_usize(header, &mut offset)?;
+    let size_data_per_element = read_usize(header, &mut offset)?;
+    let label_offset = read_usize(header, &mut offset)?;
+    let offset_data = read_usize(header, &mut offset)?;
+
+    let data_size = label_offset.checked_sub(offset_data)?;
+    if data_size == 0 || data_size % size_of::<f32>() != 0 {
+        return None;
+    }
+    if label_offset.checked_add(size_of::<usize>())? > size_data_per_element {
+        return None;
+    }
+    Some(data_size / size_of::<f32>())
+}
+
+async fn persisted_hnsw_dim(index_folder: &Path) -> Result<usize, std::io::Error> {
+    let header = tokio::fs::read(index_folder.join(HNSW_HEADER_FILE)).await?;
+    parse_persisted_hnsw_dim(&header).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "invalid persisted HNSW header",
+        )
+    })
 }
 
 impl LocalHnswSegmentReader {
@@ -131,8 +192,26 @@ impl LocalHnswSegmentReader {
                         .await?
                         .into_std()
                         .await;
-                    let id_map: IdMap = serde_pickle::from_reader(file, DeOptions::new())?;
+                    let mut id_map: IdMap = serde_pickle::from_reader(file, DeOptions::new())?;
                     if !id_map.id_to_label.is_empty() {
+                        if let Some(actual) = id_map.dimensionality {
+                            if actual != dimensionality {
+                                return Err(LocalHnswSegmentReaderError::DimensionalityMismatch {
+                                    expected: dimensionality,
+                                    actual,
+                                });
+                            }
+                        }
+                        let actual = persisted_hnsw_dim(&index_folder)
+                            .await
+                            .map_err(|_| LocalHnswSegmentReaderError::HnswIndexLoadError)?;
+                        if actual != dimensionality {
+                            return Err(LocalHnswSegmentReaderError::DimensionalityMismatch {
+                                expected: dimensionality,
+                                actual,
+                            });
+                        }
+                        id_map.dimensionality = Some(dimensionality);
                         // Load hnsw index.
                         let index_config = IndexConfig::new(
                             dimensionality as i32,
@@ -195,7 +274,7 @@ impl LocalHnswSegmentReader {
                     index: LocalHnswIndex {
                         inner: Arc::new(tokio::sync::RwLock::new(Inner {
                             index,
-                            id_map: Default::default(),
+                            id_map: IdMap::new(dimensionality),
                             index_init: true,
                             allow_reset: false,
                             num_elements_since_last_persist: 0,
@@ -215,6 +294,15 @@ impl LocalHnswSegmentReader {
         offset_id: u32,
     ) -> Result<Vec<f32>, LocalHnswSegmentReaderError> {
         let guard = self.index.inner.read().await;
+        if let Some(actual) = guard.id_map.dimensionality {
+            let expected = guard.index.dimensionality() as usize;
+            if actual != expected {
+                return Err(LocalHnswSegmentReaderError::DimensionalityMismatch {
+                    expected,
+                    actual,
+                });
+            }
+        }
         guard
             .index
             .get(offset_id as usize)
@@ -282,6 +370,18 @@ impl LocalHnswSegmentReader {
         k: u32,
     ) -> Result<Vec<RecordMeasure>, LocalHnswSegmentReaderError> {
         let guard = self.index.inner.read().await;
+        if let Some(actual) = guard.id_map.dimensionality {
+            let expected = guard.index.dimensionality() as usize;
+            if actual != expected {
+                return Err(LocalHnswSegmentReaderError::DimensionalityMismatch {
+                    expected,
+                    actual,
+                });
+            }
+        }
+        if embedding.len() != guard.index.dimensionality() as usize {
+            return Err(LocalHnswSegmentReaderError::QueryError);
+        }
         let len_with_deleted = guard.index.len_with_deleted();
         let actual_len = guard.index.len();
 
@@ -370,7 +470,7 @@ impl LocalHnswSegmentReader {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Default)]
+#[derive(Clone, Deserialize, Serialize, Debug, Default)]
 struct IdMap {
     dimensionality: Option<usize>,
     total_elements_added: u32,
@@ -380,6 +480,15 @@ struct IdMap {
     id_to_label: HashMap<String, u32>,
     label_to_id: HashMap<u32, String>,
     id_to_seq_id: HashMap<String, u32>,
+}
+
+impl IdMap {
+    fn new(dimensionality: usize) -> Self {
+        Self {
+            dimensionality: Some(dimensionality),
+            ..Default::default()
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -443,6 +552,10 @@ pub enum LocalHnswSegmentWriterError {
     HnswIndexPersistError,
     #[error("Error applying log chunk")]
     EmbeddingNotFound,
+    #[error(
+        "Embedding dimensionality {actual} does not match collection dimensionality {expected}"
+    )]
+    DimensionalityMismatch { expected: usize, actual: usize },
     #[error("Error applying log chunk")]
     HnwsIndexAddError,
     #[error("Error applying log chunk")]
@@ -470,6 +583,9 @@ impl ChromaError for LocalHnswSegmentWriterError {
             LocalHnswSegmentWriterError::HnswIndexInitError => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::HnswIndexPersistError => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::EmbeddingNotFound => ErrorCodes::InvalidArgument,
+            LocalHnswSegmentWriterError::DimensionalityMismatch { .. } => {
+                ErrorCodes::InvalidArgument
+            }
             LocalHnswSegmentWriterError::HnwsIndexAddError => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::HnswIndexResizeError => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::HnswIndexDeleteError => ErrorCodes::Internal,
@@ -478,6 +594,19 @@ impl ChromaError for LocalHnswSegmentWriterError {
             LocalHnswSegmentWriterError::MaxSeqIdUpdateError(_) => ErrorCodes::Internal,
         }
     }
+}
+
+fn validate_embedding_dim(
+    embedding: &[f32],
+    expected: usize,
+) -> Result<(), LocalHnswSegmentWriterError> {
+    if embedding.len() != expected {
+        return Err(LocalHnswSegmentWriterError::DimensionalityMismatch {
+            expected,
+            actual: embedding.len(),
+        });
+    }
+    Ok(())
 }
 
 impl LocalHnswSegmentWriter {
@@ -517,8 +646,26 @@ impl LocalHnswSegmentWriter {
                         .await?
                         .into_std()
                         .await;
-                    let id_map: IdMap = serde_pickle::from_reader(file, DeOptions::new())?;
+                    let mut id_map: IdMap = serde_pickle::from_reader(file, DeOptions::new())?;
                     if !id_map.id_to_label.is_empty() {
+                        if let Some(actual) = id_map.dimensionality {
+                            if actual != dimensionality {
+                                return Err(LocalHnswSegmentWriterError::DimensionalityMismatch {
+                                    expected: dimensionality,
+                                    actual,
+                                });
+                            }
+                        }
+                        let actual = persisted_hnsw_dim(&index_folder)
+                            .await
+                            .map_err(|_| LocalHnswSegmentWriterError::HnswIndexLoadError)?;
+                        if actual != dimensionality {
+                            return Err(LocalHnswSegmentWriterError::DimensionalityMismatch {
+                                expected: dimensionality,
+                                actual,
+                            });
+                        }
+                        id_map.dimensionality = Some(dimensionality);
                         // Migrate legacy max_seq_id if present
                         if let Some(max_seq_id) = id_map.max_seq_id {
                             let id = segment.id.to_string().into();
@@ -594,7 +741,7 @@ impl LocalHnswSegmentWriter {
                     index: LocalHnswIndex {
                         inner: Arc::new(tokio::sync::RwLock::new(Inner {
                             index,
-                            id_map: IdMap::default(),
+                            id_map: IdMap::new(dimensionality),
                             index_init: true,
                             allow_reset: false,
                             num_elements_since_last_persist: 0,
@@ -628,7 +775,7 @@ impl LocalHnswSegmentWriter {
                     index: LocalHnswIndex {
                         inner: Arc::new(tokio::sync::RwLock::new(Inner {
                             index,
-                            id_map: Default::default(),
+                            id_map: IdMap::new(dimensionality),
                             index_init: true,
                             allow_reset: false,
                             num_elements_since_last_persist: 0,
@@ -654,6 +801,13 @@ impl LocalHnswSegmentWriter {
         if log_chunk.is_empty() {
             return Ok(next_label);
         }
+        let expected_dim = guard
+            .id_map
+            .dimensionality
+            .unwrap_or_else(|| guard.index.dimensionality() as usize);
+        let mut pending_id_map = guard.id_map.clone();
+        pending_id_map.dimensionality = Some(expected_dim);
+        let mut pending_num_elements_since_last_persist = guard.num_elements_since_last_persist;
         let mut max_seq_id = u64::MIN;
         // In order to insert into hnsw index in parallel, we need to collect all the embeddings
         let mut hnsw_batch: HashMap<u32, Vec<(u32, &OperationRecord)>> =
@@ -663,7 +817,7 @@ impl LocalHnswSegmentWriter {
                 continue;
             }
 
-            guard.num_elements_since_last_persist += 1;
+            pending_num_elements_since_last_persist += 1;
             max_seq_id = max_seq_id.max(log.log_offset as u64);
             match log.record.operation {
                 Operation::BackfillFn => {
@@ -672,15 +826,14 @@ impl LocalHnswSegmentWriter {
                 }
                 Operation::Add => {
                     // only update if the id is not already present
-                    if !guard.id_map.id_to_label.contains_key(&log.record.id) {
-                        match &log.record.embedding {
-                            Some(_embedding) => {
-                                guard
-                                    .id_map
+                    if !pending_id_map.id_to_label.contains_key(&log.record.id) {
+                        match log.record.embedding.as_ref() {
+                            Some(embedding) => {
+                                validate_embedding_dim(embedding, expected_dim)?;
+                                pending_id_map
                                     .id_to_label
                                     .insert(log.record.id.clone(), next_label);
-                                guard
-                                    .id_map
+                                pending_id_map
                                     .label_to_id
                                     .insert(next_label, log.record.id.clone());
                                 let records_for_label = match hnsw_batch.get_mut(&next_label) {
@@ -701,8 +854,9 @@ impl LocalHnswSegmentWriter {
                     }
                 }
                 Operation::Update => {
-                    if let Some(label) = guard.id_map.id_to_label.get(&log.record.id).cloned() {
-                        if let Some(_embedding) = &log.record.embedding {
+                    if let Some(label) = pending_id_map.id_to_label.get(&log.record.id).cloned() {
+                        if let Some(embedding) = log.record.embedding.as_ref() {
+                            validate_embedding_dim(embedding, expected_dim)?;
                             let records_for_label = match hnsw_batch.get_mut(&label) {
                                 Some(records) => records,
                                 None => {
@@ -716,9 +870,9 @@ impl LocalHnswSegmentWriter {
                     }
                 }
                 Operation::Delete => {
-                    if let Some(label) = guard.id_map.id_to_label.get(&log.record.id).cloned() {
-                        guard.id_map.id_to_label.remove(&log.record.id);
-                        guard.id_map.label_to_id.remove(&label);
+                    if let Some(label) = pending_id_map.id_to_label.get(&log.record.id).cloned() {
+                        pending_id_map.id_to_label.remove(&log.record.id);
+                        pending_id_map.label_to_id.remove(&label);
                         let records_for_label = match hnsw_batch.get_mut(&label) {
                             Some(records) => records,
                             None => {
@@ -732,21 +886,20 @@ impl LocalHnswSegmentWriter {
                 }
                 Operation::Upsert => {
                     let mut update_label = false;
-                    let label = match guard.id_map.id_to_label.get(&log.record.id) {
+                    let label = match pending_id_map.id_to_label.get(&log.record.id) {
                         Some(label) => *label,
                         None => {
                             update_label = true;
                             next_label
                         }
                     };
-                    match &log.record.embedding {
-                        Some(_embedding) => {
-                            guard
-                                .id_map
+                    match log.record.embedding.as_ref() {
+                        Some(embedding) => {
+                            validate_embedding_dim(embedding, expected_dim)?;
+                            pending_id_map
                                 .id_to_label
                                 .insert(log.record.id.clone(), label);
-                            guard
-                                .id_map
+                            pending_id_map
                                 .label_to_id
                                 .insert(label, log.record.id.clone());
                             let records_for_label = match hnsw_batch.get_mut(&label) {
@@ -815,7 +968,9 @@ impl LocalHnswSegmentWriter {
             .find_any(|result| result.is_err())
             .unwrap_or(Ok(()))?;
 
-        guard.id_map.total_elements_added = next_label - 1;
+        pending_id_map.total_elements_added = next_label - 1;
+        guard.id_map = pending_id_map;
+        guard.num_elements_since_last_persist = pending_num_elements_since_last_persist;
         if guard.num_elements_since_last_persist >= guard.sync_threshold as u64 {
             guard = persist(guard).await?;
             let id = guard.index.id.to_string().into();
@@ -858,4 +1013,147 @@ async fn persist(
         buffered_file.flush()?;
     }
     Ok(guard)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chroma_config::{registry::Registry, Configurable};
+    use chroma_distance::DistanceFunction;
+    use chroma_index::IndexUuid;
+    use chroma_sqlite::config::SqliteDBConfig;
+
+    fn add_record(id: &str, embedding: Vec<f32>) -> OperationRecord {
+        OperationRecord {
+            id: id.to_string(),
+            embedding: Some(embedding),
+            encoding: None,
+            metadata: None,
+            document: None,
+            operation: Operation::Add,
+        }
+    }
+
+    fn push_i32(buf: &mut Vec<u8>, value: i32) {
+        buf.extend_from_slice(&value.to_ne_bytes());
+    }
+
+    fn push_usize(buf: &mut Vec<u8>, value: usize) {
+        buf.extend_from_slice(&value.to_ne_bytes());
+    }
+
+    fn header_for_dim(dim: usize) -> Vec<u8> {
+        let offset_data = 68;
+        let label_offset = offset_data + dim * size_of::<f32>();
+        let size_data_per_element = label_offset + size_of::<usize>();
+        let mut header = Vec::new();
+        push_i32(&mut header, HNSW_PERSISTENCE_VERSION);
+        push_usize(&mut header, 0);
+        push_usize(&mut header, 100);
+        push_usize(&mut header, 1);
+        push_usize(&mut header, size_data_per_element);
+        push_usize(&mut header, label_offset);
+        push_usize(&mut header, offset_data);
+        header
+    }
+
+    #[test]
+    fn persisted_hnsw_header_reports_dimensionality() {
+        assert_eq!(parse_persisted_hnsw_dim(&header_for_dim(8)), Some(8));
+        assert_eq!(parse_persisted_hnsw_dim(&header_for_dim(768)), Some(768));
+    }
+
+    #[test]
+    fn persisted_hnsw_header_matches_hnswlib_layout() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let index_config = IndexConfig::new(8, DistanceFunction::Euclidean);
+        let hnsw_config =
+            HnswIndexConfig::new_persistent(16, 100, 100, dir.path()).expect("hnsw config");
+        let index = HnswIndex::init(
+            &index_config,
+            Some(&hnsw_config),
+            IndexUuid(uuid::Uuid::new_v4()),
+        )
+        .expect("hnsw init");
+        index.add(0, &[0.0; 8]).expect("hnsw add");
+        index.save().expect("hnsw save");
+        index.close_fd();
+
+        let header = std::fs::read(dir.path().join(HNSW_HEADER_FILE)).expect("header");
+        assert_eq!(parse_persisted_hnsw_dim(&header), Some(8));
+    }
+
+    #[test]
+    fn persisted_hnsw_header_rejects_invalid_layout() {
+        let mut header = header_for_dim(8);
+        header[0..size_of::<i32>()].copy_from_slice(&2i32.to_ne_bytes());
+        assert_eq!(parse_persisted_hnsw_dim(&header), None);
+
+        let mut header = header_for_dim(8);
+        let label_offset_offset = size_of::<i32>() + 4 * size_of::<usize>();
+        header[label_offset_offset..label_offset_offset + size_of::<usize>()]
+            .copy_from_slice(&69usize.to_ne_bytes());
+        assert_eq!(parse_persisted_hnsw_dim(&header), None);
+    }
+
+    #[tokio::test]
+    async fn apply_log_chunk_rejects_bad_dim_without_id_map_side_effects() {
+        let sqlite = SqliteDb::try_from_config(&SqliteDBConfig::default(), &Registry::new())
+            .await
+            .expect("sqlite");
+        let index_config = IndexConfig::new(2, DistanceFunction::Euclidean);
+        let hnsw_config = HnswIndexConfig::new_ephemeral(16, 100, 100);
+        let index = HnswIndex::init(
+            &index_config,
+            Some(&hnsw_config),
+            IndexUuid(uuid::Uuid::new_v4()),
+        )
+        .expect("hnsw init");
+        let mut writer = LocalHnswSegmentWriter {
+            index: LocalHnswIndex {
+                inner: Arc::new(tokio::sync::RwLock::new(Inner {
+                    index,
+                    id_map: IdMap::new(2),
+                    index_init: true,
+                    allow_reset: false,
+                    num_elements_since_last_persist: 0,
+                    last_seen_seq_id: 0,
+                    sync_threshold: 1000,
+                    persist_path: None,
+                    sqlite,
+                })),
+            },
+        };
+        let chunk = Chunk::new(
+            vec![
+                LogRecord {
+                    log_offset: 1,
+                    record: add_record("valid", vec![1.0, 2.0]),
+                },
+                LogRecord {
+                    log_offset: 2,
+                    record: add_record("invalid", vec![1.0, 2.0, 3.0]),
+                },
+            ]
+            .into(),
+        );
+
+        let err = writer
+            .apply_log_chunk(chunk)
+            .await
+            .expect_err("bad dimension should fail");
+        assert!(matches!(
+            err,
+            LocalHnswSegmentWriterError::DimensionalityMismatch {
+                expected: 2,
+                actual: 3,
+            }
+        ));
+        let guard = writer.index.inner.read().await;
+        assert!(guard.id_map.id_to_label.is_empty());
+        assert!(guard.id_map.label_to_id.is_empty());
+        assert_eq!(guard.id_map.total_elements_added, 0);
+        assert_eq!(guard.num_elements_since_last_persist, 0);
+        assert_eq!(guard.last_seen_seq_id, 0);
+    }
 }

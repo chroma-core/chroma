@@ -390,9 +390,11 @@ impl SqliteLog {
 
         if let Some(handle) = self.compactor_handle.get() {
             let backfill_message = BackfillMessage { collection_id };
-            handle.request(backfill_message, None).await??;
+            let backfill_result = handle.request(backfill_message, None).await;
             let purge_log_msg = PurgeLogsMessage { collection_id };
-            handle.clone().request(purge_log_msg, None).await??;
+            let purge_result = handle.clone().request(purge_log_msg, None).await;
+            backfill_result??;
+            purge_result??;
         }
 
         Ok(())
@@ -478,6 +480,22 @@ impl SqliteLog {
         sqlx::query("DELETE FROM embeddings_queue WHERE topic = ? AND seq_id < ?")
             .bind(topic)
             .bind(seq_id as i64)
+            .execute(self.db.get_conn())
+            .await
+            .map_err(WrappedSqlxError)?;
+
+        Ok(())
+    }
+
+    pub async fn delete_logs(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<(), WrappedSqlxError> {
+        let topic =
+            get_embeddings_queue_topic_name(&self.tenant_id, &self.topic_namespace, collection_id);
+
+        sqlx::query("DELETE FROM embeddings_queue WHERE topic = ?")
+            .bind(topic)
             .execute(self.db.get_conn())
             .await
             .map_err(WrappedSqlxError)?;
@@ -674,6 +692,17 @@ mod tests {
         SqliteLog::new(db, "default".to_string(), "default".to_string())
     }
 
+    fn add_record(id: &str) -> OperationRecord {
+        OperationRecord {
+            id: id.to_string(),
+            embedding: Some(vec![1.0, 2.0, 3.0]),
+            encoding: Some(ScalarEncoding::FLOAT32),
+            metadata: None,
+            document: None,
+            operation: Operation::Add,
+        }
+    }
+
     #[tokio::test]
     async fn test_log_offset() {
         let mut log = setup_sqlite_log().await;
@@ -725,6 +754,41 @@ mod tests {
             .unwrap();
         let collections_with_data = log.get_collections_with_new_data(0).await.unwrap();
         assert_eq!(collections_with_data.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_delete_logs_removes_collection_topic() {
+        let mut log = setup_sqlite_log().await;
+        log.update_legacy_embeddings_queue_config(LegacyEmbeddingsQueueConfig {
+            automatically_purge: false,
+            kind: legacy_embeddings_queue_config_default_kind(),
+        })
+        .await
+        .unwrap();
+
+        let deleted_collection_id = CollectionUuid::new();
+        let retained_collection_id = CollectionUuid::new();
+        log.push_logs(deleted_collection_id, vec![add_record("deleted")])
+            .await
+            .unwrap();
+        log.push_logs(retained_collection_id, vec![add_record("retained")])
+            .await
+            .unwrap();
+
+        log.delete_logs(deleted_collection_id).await.unwrap();
+
+        assert!(log
+            .read(deleted_collection_id, 0, -1, None)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            log.read(retained_collection_id, 0, -1, None)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     proptest! {

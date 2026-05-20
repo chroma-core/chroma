@@ -1137,6 +1137,7 @@ impl Schema {
         segment: &Segment,
     ) -> Result<Option<InternalHnswConfiguration>, HnswParametersFromSegmentError> {
         if let Some(config) = self.get_internal_hnsw_config() {
+            config.validate()?;
             let config_from_metadata =
                 InternalHnswConfiguration::from_legacy_segment_metadata(&segment.metadata)?;
 
@@ -2802,10 +2803,13 @@ pub struct VectorIndexConfig {
 #[serde(deny_unknown_fields)]
 pub struct HnswIndexConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 1, max = 4096))]
     pub ef_construction: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 1, max = 128))]
     pub max_neighbors: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 1, max = 4096))]
     pub ef_search: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub num_threads: Option<usize>,
@@ -2813,9 +2817,10 @@ pub struct HnswIndexConfig {
     #[validate(range(min = 2))]
     pub batch_size: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[validate(range(min = 2))]
+    #[validate(range(min = 2, max = 4096))]
     pub sync_threshold: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 1.0, max = 10.0))]
     pub resize_factor: Option<f64>,
 }
 
@@ -5541,6 +5546,13 @@ mod tests {
         };
         assert!(invalid_sync_threshold.validate().is_err());
 
+        // Invalid: sync_threshold too large (max 4096)
+        let excessive_sync_threshold = HnswIndexConfig {
+            sync_threshold: Some(4097),
+            ..Default::default()
+        };
+        assert!(excessive_sync_threshold.validate().is_err());
+
         // Valid: boundary values (exactly 2) should pass
         let boundary_config = HnswIndexConfig {
             batch_size: Some(2),
@@ -5549,22 +5561,37 @@ mod tests {
         };
         assert!(boundary_config.validate().is_ok());
 
+        let upper_boundary_config = HnswIndexConfig {
+            sync_threshold: Some(4096),
+            ..Default::default()
+        };
+        assert!(upper_boundary_config.validate().is_ok());
+
         // Valid: None values should pass validation
         let all_none_config = HnswIndexConfig {
             ..Default::default()
         };
         assert!(all_none_config.validate().is_ok());
 
-        // Valid: fields without validation can be any value
+        // Valid: bounded HNSW fields accept values inside their resource limits
         let other_fields_config = HnswIndexConfig {
             ef_construction: Some(1),
             max_neighbors: Some(1),
             ef_search: Some(1),
             num_threads: Some(1),
-            resize_factor: Some(0.1),
+            resize_factor: Some(1.0),
             ..Default::default()
         };
         assert!(other_fields_config.validate().is_ok());
+
+        let excessive_config = HnswIndexConfig {
+            ef_construction: Some(4097),
+            max_neighbors: Some(129),
+            ef_search: Some(4097),
+            resize_factor: Some(10.1),
+            ..Default::default()
+        };
+        assert!(excessive_config.validate().is_err());
     }
 
     #[test]

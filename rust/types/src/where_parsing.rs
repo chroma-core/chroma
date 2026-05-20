@@ -9,6 +9,8 @@ use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
 
+const MAX_WHERE_RECURSION_DEPTH: usize = 64;
+
 #[derive(Default, Deserialize, Debug, Clone, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct RawWhereFields {
@@ -96,6 +98,16 @@ impl RawWhereFields {
 }
 
 pub fn parse_where_document(json_payload: &Value) -> Result<Where, WhereValidationError> {
+    parse_where_document_with_depth(json_payload, 0)
+}
+
+fn parse_where_document_with_depth(
+    json_payload: &Value,
+    depth: usize,
+) -> Result<Where, WhereValidationError> {
+    if depth > MAX_WHERE_RECURSION_DEPTH {
+        return Err(WhereValidationError::WhereDocumentClause);
+    }
     let where_doc_payload = json_payload
         .as_object()
         .ok_or(WhereValidationError::WhereDocumentClause)?;
@@ -113,7 +125,7 @@ pub fn parse_where_document(json_payload: &Value) -> Result<Where, WhereValidati
         let mut predicate_list = vec![];
         // Recursively parse the children.
         for child in children {
-            predicate_list.push(parse_where_document(child)?);
+            predicate_list.push(parse_where_document_with_depth(child, depth + 1)?);
         }
         return Ok(Where::Composite(CompositeExpression {
             operator: logical_operator,
@@ -129,7 +141,7 @@ pub fn parse_where_document(json_payload: &Value) -> Result<Where, WhereValidati
         let mut predicate_list = vec![];
         // Recursively parse the children.
         for child in children {
-            predicate_list.push(parse_where_document(child)?);
+            predicate_list.push(parse_where_document_with_depth(child, depth + 1)?);
         }
         return Ok(Where::Composite(CompositeExpression {
             operator: logical_operator,
@@ -170,6 +182,16 @@ fn parse_contains_operator(operator: &str) -> Option<ContainsOperator> {
 }
 
 pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> {
+    parse_where_with_depth(json_payload, 0)
+}
+
+fn parse_where_with_depth(
+    json_payload: &Value,
+    depth: usize,
+) -> Result<Where, WhereValidationError> {
+    if depth > MAX_WHERE_RECURSION_DEPTH {
+        return Err(WhereValidationError::WhereClause);
+    }
     let where_payload = json_payload
         .as_object()
         .ok_or(WhereValidationError::WhereClause)?;
@@ -185,7 +207,7 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
         let mut predicate_list = vec![];
         // Recursively parse the children.
         for child in children {
-            predicate_list.push(parse_where(child)?);
+            predicate_list.push(parse_where_with_depth(child, depth + 1)?);
         }
         return Ok(Where::Composite(CompositeExpression {
             operator: logical_operator,
@@ -199,7 +221,7 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
         let mut predicate_list = vec![];
         // Recursively parse the children.
         for child in children {
-            predicate_list.push(parse_where(child)?);
+            predicate_list.push(parse_where_with_depth(child, depth + 1)?);
         }
         return Ok(Where::Composite(CompositeExpression {
             operator: logical_operator,
@@ -941,5 +963,31 @@ mod tests {
                 serde_json::to_string_pretty(payload).unwrap(),
             );
         }
+    }
+
+    #[test]
+    fn test_parse_where_rejects_excessive_depth() {
+        let mut payload = json!({"key": "value"});
+        for _ in 0..=MAX_WHERE_RECURSION_DEPTH {
+            payload = json!({"$or": [payload]});
+        }
+
+        assert!(matches!(
+            parse_where(&payload),
+            Err(WhereValidationError::WhereClause)
+        ));
+    }
+
+    #[test]
+    fn test_parse_where_document_rejects_excessive_depth() {
+        let mut payload = json!({"$contains": "value"});
+        for _ in 0..=MAX_WHERE_RECURSION_DEPTH {
+            payload = json!({"$and": [payload]});
+        }
+
+        assert!(matches!(
+            parse_where_document(&payload),
+            Err(WhereValidationError::WhereDocumentClause)
+        ));
     }
 }

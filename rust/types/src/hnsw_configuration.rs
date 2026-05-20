@@ -5,6 +5,17 @@ use std::num::NonZero;
 use thiserror::Error;
 use validator::Validate;
 
+pub const MIN_HNSW_EF_CONSTRUCTION: usize = 1;
+pub const MAX_HNSW_EF_CONSTRUCTION: usize = 4096;
+pub const MIN_HNSW_EF_SEARCH: usize = 1;
+pub const MAX_HNSW_EF_SEARCH: usize = 4096;
+pub const MIN_HNSW_MAX_NEIGHBORS: usize = 1;
+pub const MAX_HNSW_MAX_NEIGHBORS: usize = 128;
+pub const MIN_HNSW_RESIZE_FACTOR: f64 = 1.0;
+pub const MAX_HNSW_RESIZE_FACTOR: f64 = 10.0;
+pub const MIN_HNSW_SYNC_THRESHOLD: usize = 2;
+pub const MAX_HNSW_SYNC_THRESHOLD: usize = 4096;
+
 #[derive(Debug, Error)]
 pub enum HnswParametersFromSegmentError {
     #[error("Invalid metadata: {0}")]
@@ -79,18 +90,22 @@ pub fn default_space() -> Space {
 pub struct InternalHnswConfiguration {
     #[serde(default = "default_space")]
     pub space: Space,
+    #[validate(range(min = 1, max = 4096))]
     #[serde(default = "default_construction_ef")]
     pub ef_construction: usize,
+    #[validate(range(min = 1, max = 4096))]
     #[serde(default = "default_search_ef")]
     pub ef_search: usize,
+    #[validate(range(min = 1, max = 128))]
     #[serde(default = "default_m")]
     pub max_neighbors: usize,
     #[serde(default = "default_num_threads")]
     #[serde(skip_serializing)]
     pub num_threads: usize,
+    #[validate(range(min = 1.0, max = 10.0))]
     #[serde(default = "default_resize_factor")]
     pub resize_factor: f64,
-    #[validate(range(min = 2))]
+    #[validate(range(min = 2, max = 4096))]
     #[serde(default = "default_sync_threshold")]
     pub sync_threshold: usize,
     #[validate(range(min = 2))]
@@ -147,13 +162,17 @@ impl From<(Option<&Space>, Option<&HnswIndexConfig>)> for InternalHnswConfigurat
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct HnswConfiguration {
     pub space: Option<Space>,
+    #[validate(range(min = 1, max = 4096))]
     pub ef_construction: Option<usize>,
+    #[validate(range(min = 1, max = 4096))]
     pub ef_search: Option<usize>,
+    #[validate(range(min = 1, max = 128))]
     pub max_neighbors: Option<usize>,
     #[serde(skip_serializing)]
     pub num_threads: Option<usize>,
+    #[validate(range(min = 1.0, max = 10.0))]
     pub resize_factor: Option<f64>,
-    #[validate(range(min = 2))]
+    #[validate(range(min = 2, max = 4096))]
     pub sync_threshold: Option<usize>,
     #[validate(range(min = 2))]
     #[serde(skip_serializing)]
@@ -253,11 +272,14 @@ impl InternalHnswConfiguration {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct UpdateHnswConfiguration {
+    #[validate(range(min = 1, max = 4096))]
     pub ef_search: Option<usize>,
+    #[validate(range(min = 1, max = 128))]
     pub max_neighbors: Option<usize>,
     pub num_threads: Option<usize>,
+    #[validate(range(min = 1.0, max = 10.0))]
     pub resize_factor: Option<f64>,
-    #[validate(range(min = 2))]
+    #[validate(range(min = 2, max = 4096))]
     pub sync_threshold: Option<usize>,
     #[validate(range(min = 2))]
     pub batch_size: Option<usize>,

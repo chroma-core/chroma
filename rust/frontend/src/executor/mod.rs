@@ -4,7 +4,7 @@ use chroma_error::ChromaError;
 use chroma_types::{
     operator::{CountResult, GetResult, KnnBatchResult, SearchResult},
     plan::{Count, Get, Knn, Search},
-    ExecutorError, SegmentType,
+    ExecutorError, Segment, SegmentType,
 };
 use distributed::DistributedExecutor;
 use local::LocalExecutor;
@@ -98,6 +98,16 @@ impl Executor {
             Executor::Distributed(_) => Ok(()),
             Executor::Local(local_executor) => local_executor
                 .reset()
+                .await
+                .map_err(ExecutorError::Internal),
+        }
+    }
+
+    pub async fn delete_segments(&mut self, segments: &[Segment]) -> Result<(), ExecutorError> {
+        match self {
+            Executor::Distributed(_) => Ok(()),
+            Executor::Local(local_executor) => local_executor
+                .delete_segments(segments)
                 .await
                 .map_err(ExecutorError::Internal),
         }

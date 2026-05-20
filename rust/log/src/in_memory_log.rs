@@ -148,6 +148,11 @@ impl InMemoryLog {
         Ok(())
     }
 
+    pub(super) async fn delete_logs(&mut self, collection_id: CollectionUuid) {
+        self.collection_to_log.remove(&collection_id);
+        self.offsets.remove(&collection_id);
+    }
+
     pub(super) async fn scout_logs(
         &mut self,
         collection_id: CollectionUuid,
