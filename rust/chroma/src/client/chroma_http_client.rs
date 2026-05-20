@@ -32,12 +32,12 @@ const USER_AGENT: &str = concat!(
 #[derive(Error, Debug)]
 pub enum ChromaHttpClientError {
     /// Network-level HTTP request failed.
-    #[error("Request error: {0:?}")]
+    #[error("Request error: {0}")]
     RequestError(#[from] reqwest::Error),
     /// Chroma API returned an error status with a structured error message.
     ///
     /// Contains the error message from the server and the HTTP status code that triggered the error.
-    #[error("API error: {0:?} ({1})")]
+    #[error("API error: {0} ({1})")]
     ApiError(String, reqwest::StatusCode),
     /// Client lacks access to a unique database or cannot determine which database to use.
     #[error("Could not resolve database ID: {0}")]
@@ -268,8 +268,9 @@ impl ChromaHttpClient {
 
     /// Constructs a client from environment variables.
     ///
-    /// Reads configuration from `CHROMA_ENDPOINT`, `CHROMA_TENANT`, and `CHROMA_DATABASE`.
-    /// Falls back to default local endpoint if `CHROMA_ENDPOINT` is not set.
+    /// Reads configuration from `CHROMA_ENDPOINT`, `CHROMA_HOST`, `CHROMA_TENANT`,
+    /// and `CHROMA_DATABASE`. Falls back to default local endpoint if neither
+    /// `CHROMA_ENDPOINT` nor `CHROMA_HOST` is set.
     ///
     /// # Errors
     ///
@@ -291,8 +292,9 @@ impl ChromaHttpClient {
 
     /// Constructs a client configured for Chroma Cloud from environment variables.
     ///
-    /// Reads `CHROMA_API_KEY` (required), `CHROMA_ENDPOINT` (defaults to Chroma Cloud),
-    /// `CHROMA_TENANT`, and `CHROMA_DATABASE` from the environment.
+    /// Reads `CHROMA_API_KEY` (required), `CHROMA_ENDPOINT` or `CHROMA_HOST`
+    /// (defaults to Chroma Cloud), `CHROMA_TENANT`, and `CHROMA_DATABASE` from
+    /// the environment.
     ///
     /// # Errors
     ///
