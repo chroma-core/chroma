@@ -18,7 +18,7 @@ pub use frontend_core::{ac, auth, errors, middleware as server_middleware, trace
 use config::FoundationApiConfig;
 use server::FoundationApiServer;
 
-pub const CONFIG_PATH_ENV_VAR: &str = "FOUNDATION_API_CONFIG_PATH";
+pub const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
 pub async fn foundation_service_entrypoint(
     auth: Arc<dyn auth::AuthenticateAndAuthorize>,
