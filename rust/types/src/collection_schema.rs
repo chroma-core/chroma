@@ -243,9 +243,6 @@ pub struct Schema {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<Object>))]
     pub cmek: Option<Cmek>,
-    /// ID of the attached function that created this output collection (if applicable)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_attached_function_id: Option<String>,
 }
 
 impl Schema {
@@ -588,7 +585,6 @@ impl Default for Schema {
             defaults,
             keys,
             cmek: None,
-            source_attached_function_id: None,
         }
     }
 }
@@ -973,7 +969,6 @@ impl Schema {
             defaults,
             keys,
             cmek: None,
-            source_attached_function_id: None,
         }
     }
 
@@ -1189,10 +1184,6 @@ impl Schema {
                     defaults: merged_defaults,
                     keys: merged_keys,
                     cmek: user.cmek.clone().or(default_schema.cmek.clone()),
-                    source_attached_function_id: user
-                        .source_attached_function_id
-                        .clone()
-                        .or(default_schema.source_attached_function_id.clone()),
                 })
             }
             None => Ok(default_schema),
@@ -1220,10 +1211,6 @@ impl Schema {
             defaults: self.defaults.clone(),
             keys,
             cmek: other.cmek.clone().or(self.cmek.clone()),
-            source_attached_function_id: other
-                .source_attached_function_id
-                .clone()
-                .or(self.source_attached_function_id.clone()),
         })
     }
 
@@ -3267,7 +3254,6 @@ mod tests {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
             cmek: None,
-            source_attached_function_id: None,
         };
 
         let result = Schema::reconcile_with_defaults(Some(&user_schema), KnnIndex::Spann).unwrap();
@@ -3282,7 +3268,6 @@ mod tests {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
             cmek: None,
-            source_attached_function_id: None,
         };
 
         user_schema.defaults.string = Some(StringValueType {
@@ -3319,7 +3304,6 @@ mod tests {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
             cmek: None,
-            source_attached_function_id: None,
         };
 
         user_schema.defaults.float_list = Some(FloatListValueType {
@@ -3370,7 +3354,6 @@ mod tests {
                 defaults: merged_defaults,
                 keys: merged_keys,
                 cmek: None,
-                source_attached_function_id: None,
             }
         };
 
@@ -3408,7 +3391,6 @@ mod tests {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
             cmek: None,
-            source_attached_function_id: None,
         };
 
         // Add a custom key override
@@ -3457,7 +3439,6 @@ mod tests {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
             cmek: None,
-            source_attached_function_id: None,
         };
 
         // Override the #embedding key with custom settings
@@ -4174,7 +4155,6 @@ mod tests {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
             cmek: None,
-            source_attached_function_id: None,
         };
 
         // Set up complex user defaults
@@ -4252,7 +4232,6 @@ mod tests {
                 defaults: merged_defaults,
                 keys: merged_keys,
                 cmek: None,
-                source_attached_function_id: None,
             }
         };
 
@@ -6204,7 +6183,6 @@ mod tests {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
             cmek: None,
-            source_attached_function_id: None,
         };
         assert!(empty_schema.is_fts_enabled());
     }
@@ -7078,7 +7056,6 @@ mod tests {
                             defaults,
                             keys: extra_keys,
                             cmek: None,
-                            source_attached_function_id: None,
                         }
                     },
                 )

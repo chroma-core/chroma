@@ -42,8 +42,9 @@ type IAttachedFunctionDb interface {
 	// - id: Filter by attached function ID
 	// - name: Filter by attached function name
 	// - inputCollectionID: Filter by input collection ID
+	// - outputCollectionID: Filter by output collection ID
 	// - onlyReady: If true, only returns attached functions where is_ready = true
-	GetAttachedFunctions(id *uuid.UUID, name *string, inputCollectionID *string, onlyReady bool) ([]*AttachedFunction, error)
+	GetAttachedFunctions(id *uuid.UUID, name *string, inputCollectionID *string, outputCollectionID *string, onlyReady bool) ([]*AttachedFunction, error)
 	Update(attachedFunction *AttachedFunction) error
 	UpdateCompletionOffsetAndHeapEntry(id uuid.UUID, collectionID string, newOffset int64) error
 	UpdateHeapEntryPending(id uuid.UUID, heapEntryPending bool) error

@@ -503,10 +503,6 @@ export type Schema = {
     keys: {
         [key: string]: ValueTypes;
     };
-    /**
-     * ID of the attached function that created this output collection (if applicable)
-     */
-    source_attached_function_id?: string | null;
 };
 
 export type SearchPayload = {

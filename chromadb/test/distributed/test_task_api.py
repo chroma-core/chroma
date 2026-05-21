@@ -268,7 +268,7 @@ def test_functions_one_attached_function_per_collection(
 def test_attach_function_output_collection_already_exists(
     basic_http_client: System,
 ) -> None:
-    """Test that attach_function fails when output collection name already exists"""
+    """Test that attach_function can reuse any existing collection as output collection"""
     client = ClientCreator.from_system(basic_http_client)
     client.reset()
 
@@ -279,17 +279,64 @@ def test_attach_function_output_collection_already_exists(
     # Create another collection with the name we want to use for output
     client.create_collection(name="existing_output_collection")
 
-    # Attempt to create task with output collection name that already exists
-    with pytest.raises(
-        ChromaError,
-        match=r"Output collection \[existing_output_collection\] already exists",
-    ):
-        input_collection.attach_function(
-            name="my_task",
-            function=RECORD_COUNTER_FUNCTION,
-            output_collection="existing_output_collection",
-            params=None,
-        )
+    # Attempt to create task with output collection name that already exists - should succeed
+    attached_fn, created = input_collection.attach_function(
+        name="my_task",
+        function=RECORD_COUNTER_FUNCTION,
+        output_collection="existing_output_collection",
+        params=None,
+    )
+    assert attached_fn is not None
+    assert created is True  # We can now reuse any existing collection
+
+
+def test_multiple_functions_can_share_output_collection(
+    basic_http_client: System,
+) -> None:
+    """Test that multiple functions can share an output collection, including different function types"""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    # Create three input collections
+    input_collection1 = client.create_collection(name="input_collection_1")
+    input_collection1.add(ids=["id1", "id2"], documents=["doc1", "doc2"])
+
+    input_collection2 = client.create_collection(name="input_collection_2")
+    input_collection2.add(ids=["id3", "id4"], documents=["doc3", "doc4"])
+
+    input_collection3 = client.create_collection(name="input_collection_3")
+    input_collection3.add(ids=["id5", "id6"], documents=["doc5", "doc6"])
+
+    # Attach first record_counter function
+    attached_fn1, created1 = input_collection1.attach_function(
+        name="counter_1",
+        function=RECORD_COUNTER_FUNCTION,
+        output_collection="shared_counter_output",
+        params=None,
+    )
+    assert attached_fn1 is not None
+    assert created1 is True
+
+    # Attach second record_counter function to the same output collection - should succeed
+    attached_fn2, created2 = input_collection2.attach_function(
+        name="counter_2",
+        function=RECORD_COUNTER_FUNCTION,
+        output_collection="shared_counter_output",
+        params=None,
+    )
+    assert attached_fn2 is not None
+    assert created2 is True
+
+    # Now try to attach a different function type to the same output collection - should succeed
+    # The validation has been removed, so different function types can share output collections
+    attached_fn3, created3 = input_collection3.attach_function(
+        name="statistics_1",
+        function=STATISTICS_FUNCTION,
+        output_collection="shared_counter_output",
+        params=None,
+    )
+    assert attached_fn3 is not None
+    assert created3 is True
 
 
 def test_function_remove_nonexistent(basic_http_client: System) -> None:
@@ -362,7 +409,7 @@ def test_delete_output_collection_detaches_function(basic_http_client: System) -
     # Delete the output collection directly
     client.delete_collection("output_collection")
 
-    # The attached function should now be gone - trying to get it should raise NotFoundError
+    # The attached function should be deleted due to cascade delete (database query finds all functions using this output collection)
     with pytest.raises(NotFoundError):
         input_collection.get_attached_function("my_function")
 
@@ -428,22 +475,26 @@ def test_partial_attach_function_repair(
     )
 
     # Create a task that counts records in the collection
-    # This should fail
-    with pytest.raises(
-        ChromaError, match=r"Output collection \[my_documents_counts\] already exists"
-    ):
-        attached_fn, _ = collection2.attach_function(
-            name="count_my_docs",
-            function=RECORD_COUNTER_FUNCTION,
-            output_collection="my_documents_counts",
-            params=None,
-        )
+    # This should succeed since both are record_counter functions
+    attached_fn2, created2 = collection2.attach_function(
+        name="count_my_docs2",
+        function=RECORD_COUNTER_FUNCTION,
+        output_collection="my_documents_counts",
+        params=None,
+    )
+    assert attached_fn2 is not None
+    assert created2 is True  # Both functions can share the same output collection
 
-    # Detach the function
+    # Detach the function with delete_output_collection=True
+    # This will delete the output collection and cascade delete ALL attached functions
     assert (
         collection.detach_function(attached_fn.name, delete_output_collection=True)
         is True
     )
+
+    # The second function should be deleted due to cascade delete
+    with pytest.raises(NotFoundError):
+        collection2.get_attached_function(attached_fn2.name)
 
     # Create a task that counts records in the collection
     attached_fn, created = collection2.attach_function(
@@ -454,37 +505,6 @@ def test_partial_attach_function_repair(
     )
     assert attached_fn is not None
     assert created is True
-
-
-def test_output_collection_created_with_schema(basic_http_client: System) -> None:
-    """Test that output collections are created with the source_attached_function_id in the schema"""
-    client = ClientCreator.from_system(basic_http_client)
-    client.reset()
-
-    # Create input collection and attach a function
-    input_collection = client.create_collection(name="input_collection")
-    input_collection.add(ids=["id1"], documents=["test"])
-
-    attached_fn, created = input_collection.attach_function(
-        name="my_function",
-        function=RECORD_COUNTER_FUNCTION,
-        output_collection="output_collection",
-        params=None,
-    )
-    assert attached_fn is not None
-    assert created is True
-
-    # Get the output collection - it should exist
-    output_collection = client.get_collection(name="output_collection")
-    assert output_collection is not None
-
-    # The source_attached_function_id is stored in the schema (not metadata)
-    # We can't directly access the schema from the client, but we verify the collection exists
-    # and the attached function orchestrator will use this field internally
-    assert "source_attached_function_id" in output_collection._model.pretty_schema()
-
-    # Clean up
-    input_collection.detach_function(attached_fn.name, delete_output_collection=True)
 
 
 def test_count_function_attach_and_detach_attach_attach(

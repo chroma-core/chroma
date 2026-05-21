@@ -261,22 +261,9 @@ type Cmek struct {
 }
 
 type Schema struct {
-	Defaults                 ValueTypes            `json:"defaults"`
-	Keys                     map[string]ValueTypes `json:"keys"`
-	Cmek                     *Cmek                 `json:"cmek,omitempty"`
-	SourceAttachedFunctionID *string               `json:"source_attached_function_id,omitempty"`
-}
-
-// GetSourceAttachedFunctionIDFromSchema parses a schema string and returns the source attached function ID if present
-func GetSourceAttachedFunctionIDFromSchema(schemaStr *string) *string {
-	if schemaStr == nil || *schemaStr == "" || *schemaStr == "{}" {
-		return nil
-	}
-	var schema Schema
-	if err := json.Unmarshal([]byte(*schemaStr), &schema); err != nil {
-		return nil
-	}
-	return schema.SourceAttachedFunctionID
+	Defaults ValueTypes            `json:"defaults"`
+	Keys     map[string]ValueTypes `json:"keys"`
+	Cmek     *Cmek                 `json:"cmek,omitempty"`
 }
 
 // UpdateSchemaFromConfig merges an InternalCollectionConfiguration into a Schema

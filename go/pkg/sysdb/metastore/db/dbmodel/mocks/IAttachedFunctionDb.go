@@ -112,9 +112,9 @@ func (_m *IAttachedFunctionDb) Finish(id uuid.UUID) error {
 	return r0
 }
 
-// GetAttachedFunctions provides a mock function with given fields: id, name, inputCollectionID, onlyReady
-func (_m *IAttachedFunctionDb) GetAttachedFunctions(id *uuid.UUID, name *string, inputCollectionID *string, onlyReady bool) ([]*dbmodel.AttachedFunction, error) {
-	ret := _m.Called(id, name, inputCollectionID, onlyReady)
+// GetAttachedFunctions provides a mock function with given fields: id, name, inputCollectionID, outputCollectionID, onlyReady
+func (_m *IAttachedFunctionDb) GetAttachedFunctions(id *uuid.UUID, name *string, inputCollectionID *string, outputCollectionID *string, onlyReady bool) ([]*dbmodel.AttachedFunction, error) {
+	ret := _m.Called(id, name, inputCollectionID, outputCollectionID, onlyReady)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetAttachedFunctions")
@@ -122,19 +122,19 @@ func (_m *IAttachedFunctionDb) GetAttachedFunctions(id *uuid.UUID, name *string,
 
 	var r0 []*dbmodel.AttachedFunction
 	var r1 error
-	if rf, ok := ret.Get(0).(func(*uuid.UUID, *string, *string, bool) ([]*dbmodel.AttachedFunction, error)); ok {
-		return rf(id, name, inputCollectionID, onlyReady)
+	if rf, ok := ret.Get(0).(func(*uuid.UUID, *string, *string, *string, bool) ([]*dbmodel.AttachedFunction, error)); ok {
+		return rf(id, name, inputCollectionID, outputCollectionID, onlyReady)
 	}
-	if rf, ok := ret.Get(0).(func(*uuid.UUID, *string, *string, bool) []*dbmodel.AttachedFunction); ok {
-		r0 = rf(id, name, inputCollectionID, onlyReady)
+	if rf, ok := ret.Get(0).(func(*uuid.UUID, *string, *string, *string, bool) []*dbmodel.AttachedFunction); ok {
+		r0 = rf(id, name, inputCollectionID, outputCollectionID, onlyReady)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*dbmodel.AttachedFunction)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(*uuid.UUID, *string, *string, bool) error); ok {
-		r1 = rf(id, name, inputCollectionID, onlyReady)
+	if rf, ok := ret.Get(1).(func(*uuid.UUID, *string, *string, *string, bool) error); ok {
+		r1 = rf(id, name, inputCollectionID, outputCollectionID, onlyReady)
 	} else {
 		r1 = ret.Error(1)
 	}
