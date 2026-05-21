@@ -12,15 +12,17 @@ Word-based full-text substring search using hashed token buckets with roaring bi
 
 ## Blockfile Layout
 
-A single blockfile typed as `(prefix: &str, key: u32) → RoaringBitmap` with three logical partitions:
+A single blockfile typed as `(prefix: &str, key: u32) → RoaringBitmap` with four logical partitions:
 
-1. **Token buckets** — `prefix=""`, `key ∈ [0, 2^24)`. Each token is hashed to a bucket ID. The bitmap stores doc IDs containing tokens in that bucket.
+1. **Token buckets** — `prefix=""`, `key = (bucket_id << 8) | chunk_index`. Each token is hashed to a 24-bit bucket ID. Doc-ID bitmaps are chunked into 16M (2^24) doc-ID ranges, bounding each entry's serialized size to ~4 MB. The chunk index occupies the lower 8 bits of the key.
 
-2. **Transitions** — `prefix=""`, `key ∈ [2^24, 2^26)`. For each adjacent token pair, the boundary characters are hashed. Two entries per transition: `key = hash | (1 << 24)` for doc-ID bitmap, `key = hash | (1 << 25)` for bucket-ID bitmap.
+2. **Transition doc bitmaps** — `prefix="!"`, `key = (hash << 8) | chunk_index`. Chunked like token buckets. For each adjacent token pair, the boundary characters are hashed and the doc-ID bitmap records which documents contain that transition.
 
-3. **Trigrams** — `prefix="{trigram}"`, `key ∈ {0, 1, 2}`. Maps character trigrams to bucket IDs with disjoint positional keys: 0 = prefix (first trigram of token), 1 = infix, 2 = suffix (last trigram). Single-trigram tokens (3 chars) are stored under both key=0 and key=2.
+3. **Transition bucket bitmaps** — `prefix="#"`, `key = hash`. Not chunked (stores bucket IDs, not doc IDs). Records which token buckets participate in each transition.
 
-Entries are written in `(prefix, key)` sorted order: all token buckets, then transitions, then trigrams.
+4. **Trigrams** — `prefix="{trigram}"`, `key ∈ {0, 1, 2}`. Maps character trigrams to bucket IDs with disjoint positional keys: 0 = prefix (first trigram of token), 1 = infix, 2 = suffix (last trigram). Single-trigram tokens (3 chars) are stored under both key=0 and key=2.
+
+Entries are written in `(prefix, key)` sorted order: `""` < `"!"` < `"#"` < trigram prefixes (alphanumeric).
 
 ## Query Pipeline
 

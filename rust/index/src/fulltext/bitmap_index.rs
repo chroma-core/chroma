@@ -9,10 +9,17 @@ use uuid::Uuid;
 
 use super::tokenizer::{DocumentTokens, QueryPlan, TokenLookup};
 
-/// Transition doc-ID keys: `key = hash | (1 << 24)`, range `[2^24, 2^25)`.
-const TRANSITION_DOC_FLAG: u32 = 1 << 24;
-/// Transition bucket-ID keys: `key = hash | (1 << 25)`, range `[2^25, 2^25 + 2^24)`.
-const TRANSITION_BUCKET_FLAG: u32 = 1 << 25;
+/// Number of bits per doc-ID chunk. Each chunk covers 2^24 (16M) doc IDs.
+const CHUNK_BITS: u32 = 24;
+
+/// Blockfile prefix for token bucket doc-ID bitmaps.
+const TOKEN_DOC_PREFIX: &str = "";
+/// Blockfile prefix for transition doc-ID bitmaps.
+/// Sorts after `""` and before any trigram prefix (trigrams are alphanumeric,
+/// starting at `'0'` = 0x30).
+const TRANSITION_DOC_PREFIX: &str = "!";
+/// Blockfile prefix for transition bucket-ID bitmaps.
+const TRANSITION_BUCKET_PREFIX: &str = "#";
 
 // ---------------------------------------------------------------------------
 // Error
@@ -66,17 +73,19 @@ struct TrigramDelta {
 ///
 /// # Blockfile layout
 ///
-/// A single blockfile with three logical partitions, distinguished by
-/// prefix and key range. The blockfile writer requires `(prefix, key)`
-/// pairs in globally sorted order, so entries are written as:
+/// A single blockfile with four logical partitions, distinguished by
+/// prefix. The blockfile writer requires `(prefix, key)` pairs in globally
+/// sorted order, so entries are written as:
 ///
-/// 1. `prefix=""`, token bucket keys `[0, 2^24)` — doc-ID bitmaps
-/// 2. `prefix=""`, transition keys `[2^24, 2^26)` — doc-ID and bucket-ID bitmaps
-/// 3. `prefix="{trigram}"`, keys 0/1/2 — bucket-ID bitmaps (positional)
-///
-/// This ordering ensures all `prefix=""` entries (partitions 1–2) are
-/// written first in ascending key order, followed by trigram entries
-/// sorted by `(prefix, key)`.
+/// 1. `prefix=""` — token bucket doc-ID bitmaps.
+///    `key = (bucket_id << 8) | chunk_index`. Each chunk covers 2^24
+///    (16M) doc IDs, bounding per-entry bitmap size to ~4 MB.
+/// 2. `prefix="!"` — transition doc-ID bitmaps (chunked like buckets).
+///    `key = (hash << 8) | chunk_index`.
+/// 3. `prefix="#"` — transition bucket-ID bitmaps (not chunked).
+///    `key = hash`.
+/// 4. `prefix="{trigram}"` — positional bucket-ID bitmaps.
+///    `key ∈ {0, 1, 2}`.
 #[derive(Clone)]
 pub struct FullTextBitmapWriter {
     bitmap_writer: BlockfileWriter,
@@ -143,13 +152,16 @@ impl FullTextBitmapWriter {
 
     /// Merge accumulated deltas into the blockfile.
     ///
-    /// Writes in `(prefix, key)` sorted order as required by the blockfile:
-    /// 1. Token buckets: `prefix=""`, keys `[0, 2^24)`
-    /// 2. Transitions: `prefix=""`, keys `[2^24, 2^26)`
-    /// 3. Trigrams: `prefix="{trigram}"`, keys `0/1/2`
+    /// Writes in `(prefix, key)` sorted order as required by the blockfile,
+    /// one method per partition:
+    /// 1. Token buckets: `prefix=""`
+    /// 2. Transition doc bitmaps: `prefix="!"`
+    /// 3. Transition bucket bitmaps: `prefix="#"`
+    /// 4. Trigrams: `prefix="{trigram}"`, keys `0/1/2`
     pub async fn write_to_blockfiles(&self) -> Result<(), FullTextBitmapError> {
         self.write_token_buckets().await?;
-        self.write_transitions().await?;
+        self.write_transition_docs().await?;
+        self.write_transition_buckets().await?;
         self.write_trigrams().await?;
         Ok(())
     }
@@ -159,41 +171,107 @@ impl FullTextBitmapWriter {
         Ok(FullTextBitmapFlusher { flusher })
     }
 
-    // --- Phases ---
+    // --- Write phases (one per partition, in sorted prefix order) ---
 
+    /// Partition 1: token bucket doc-ID bitmaps under `prefix=""`.
     async fn write_token_buckets(&self) -> Result<(), FullTextBitmapError> {
-        let mut keys: Vec<u32> = self.token_deltas.iter().map(|e| *e.key()).collect();
-        keys.sort_unstable();
+        let mut bucket_ids: Vec<u32> = self.token_deltas.iter().map(|e| *e.key()).collect();
+        bucket_ids.sort_unstable();
 
-        // Preload blocks for all delta keys so point reads hit cache.
         if let Some(reader) = &self.old_reader {
             reader
-                .load_keys(keys.iter().map(|k| (String::new(), *k)))
+                .load_keys(bucket_ids.iter().flat_map(|&b| {
+                    (0u32..=255).map(move |c| (TOKEN_DOC_PREFIX.to_string(), (b << 8) | c))
+                }))
                 .await;
         }
 
-        for key in keys {
-            let Some((_, delta)) = self.token_deltas.remove(&key) else {
+        for bucket_id in bucket_ids {
+            let Some((_, delta)) = self.token_deltas.remove(&bucket_id) else {
                 continue;
             };
             let mut bitmap = match &self.old_reader {
-                Some(r) => r.get_bucket(key).await?,
+                Some(r) => r.get_doc_bitmap(TOKEN_DOC_PREFIX, bucket_id).await?,
                 None => RoaringBitmap::new(),
             };
             bitmap |= &delta.adds;
             bitmap -= &delta.deletes;
-
-            if bitmap.is_empty() {
-                self.bitmap_writer
-                    .delete::<u32, RoaringBitmap>("", key)
-                    .await?;
-            } else {
-                self.bitmap_writer.set("", key, bitmap).await?;
-            }
+            self.write_doc_bitmap(TOKEN_DOC_PREFIX, bucket_id, &bitmap)
+                .await?;
         }
         Ok(())
     }
 
+    /// Partition 2: transition doc-ID bitmaps under `prefix="!"`.
+    async fn write_transition_docs(&self) -> Result<(), FullTextBitmapError> {
+        let mut hashes: Vec<u32> = self.transition_deltas.iter().map(|e| *e.key()).collect();
+        hashes.sort_unstable();
+
+        if let Some(reader) = &self.old_reader {
+            reader
+                .load_keys(hashes.iter().flat_map(|&h| {
+                    (0u32..=255).map(move |c| (TRANSITION_DOC_PREFIX.to_string(), (h << 8) | c))
+                }))
+                .await;
+        }
+
+        for &hash in &hashes {
+            let Some(entry) = self.transition_deltas.get(&hash) else {
+                continue;
+            };
+            if entry.doc_adds.is_empty() && entry.doc_deletes.is_empty() {
+                continue;
+            }
+            let mut bitmap = match &self.old_reader {
+                Some(r) => r.get_doc_bitmap(TRANSITION_DOC_PREFIX, hash).await?,
+                None => RoaringBitmap::new(),
+            };
+            bitmap |= &entry.doc_adds;
+            bitmap -= &entry.doc_deletes;
+            self.write_doc_bitmap(TRANSITION_DOC_PREFIX, hash, &bitmap)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Partition 3: transition bucket-ID bitmaps under `prefix="#"`.
+    async fn write_transition_buckets(&self) -> Result<(), FullTextBitmapError> {
+        let mut hashes: Vec<u32> = self.transition_deltas.iter().map(|e| *e.key()).collect();
+        hashes.sort_unstable();
+
+        if let Some(reader) = &self.old_reader {
+            reader
+                .load_keys(
+                    hashes
+                        .iter()
+                        .map(|&h| (TRANSITION_BUCKET_PREFIX.to_string(), h)),
+                )
+                .await;
+        }
+
+        for hash in hashes {
+            let Some((_, delta)) = self.transition_deltas.remove(&hash) else {
+                continue;
+            };
+            if delta.bucket_adds.is_empty() {
+                continue;
+            }
+            let mut bitmap = match &self.old_reader {
+                Some(r) => r
+                    .bitmap_reader
+                    .get(TRANSITION_BUCKET_PREFIX, hash)
+                    .await?
+                    .unwrap_or_default(),
+                None => RoaringBitmap::new(),
+            };
+            bitmap |= &delta.bucket_adds;
+            self.write_id_bitmap(TRANSITION_BUCKET_PREFIX, hash, bitmap)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Partition 4: trigram positional bucket-ID bitmaps under `prefix="{trigram}"`.
     async fn write_trigrams(&self) -> Result<(), FullTextBitmapError> {
         let mut keys: Vec<String> = self
             .trigram_deltas
@@ -202,7 +280,6 @@ impl FullTextBitmapWriter {
             .collect();
         keys.sort_unstable();
 
-        // Preload blocks for all trigram keys (up to 3 positional keys each).
         if let Some(reader) = &self.old_reader {
             reader
                 .load_keys(
@@ -221,70 +298,51 @@ impl FullTextBitmapWriter {
                     continue;
                 }
                 let mut bitmap = match &self.old_reader {
-                    Some(r) => r.get_trigram(&trigram, key).await?,
+                    Some(r) => r.get_id_bitmap(&trigram, key).await?,
                     None => RoaringBitmap::new(),
                 };
                 bitmap |= &new_buckets;
-                self.bitmap_writer
-                    .set(trigram.as_str(), key, bitmap)
-                    .await?;
+                self.write_id_bitmap(trigram.as_str(), key, bitmap).await?;
             }
         }
         Ok(())
     }
 
-    async fn write_transitions(&self) -> Result<(), FullTextBitmapError> {
-        let mut keys: Vec<u32> = self.transition_deltas.iter().map(|e| *e.key()).collect();
-        keys.sort_unstable();
+    // --- Write helpers ---
 
-        // Preload blocks for all transition keys (doc + bucket).
-        if let Some(reader) = &self.old_reader {
-            reader
-                .load_keys(keys.iter().flat_map(|h| {
-                    [
-                        (String::new(), h | TRANSITION_DOC_FLAG),
-                        (String::new(), h | TRANSITION_BUCKET_FLAG),
-                    ]
-                }))
-                .await;
+    /// Write a doc-ID bitmap, splitting it into 16M-range chunks.
+    ///
+    /// Doc-ID bitmaps can grow with the document universe and are chunked to
+    /// bound per-entry serialized size to ~4 MB. Used for token bucket and
+    /// transition doc bitmaps. Key encoding: `(id << 8) | chunk_index`.
+    async fn write_doc_bitmap(
+        &self,
+        prefix: &str,
+        id: u32,
+        bitmap: &RoaringBitmap,
+    ) -> Result<(), FullTextBitmapError> {
+        let docs: Vec<u32> = bitmap.iter().collect();
+        for chunk_docs in docs.chunk_by(|a, b| a >> CHUNK_BITS == b >> CHUNK_BITS) {
+            let chunk = chunk_docs[0] >> CHUNK_BITS;
+            let chunk_bm: RoaringBitmap = chunk_docs.iter().copied().collect();
+            self.bitmap_writer
+                .set(prefix, (id << 8) | chunk, chunk_bm)
+                .await?;
         }
+        Ok(())
+    }
 
-        // Doc-ID bitmaps first: keys in [2^24, 2^25).
-        for &hash in &keys {
-            let Some(entry) = self.transition_deltas.get(&hash) else {
-                continue;
-            };
-            if entry.doc_adds.is_empty() && entry.doc_deletes.is_empty() {
-                continue;
-            }
-            let doc_key = hash | TRANSITION_DOC_FLAG;
-            let mut bitmap = match &self.old_reader {
-                Some(r) => r.get_bucket(doc_key).await?,
-                None => RoaringBitmap::new(),
-            };
-            bitmap |= &entry.doc_adds;
-            bitmap -= &entry.doc_deletes;
-            if !bitmap.is_empty() {
-                self.bitmap_writer.set("", doc_key, bitmap).await?;
-            }
-        }
-
-        // Bucket-ID bitmaps second: keys in [2^25, 2^26).
-        for hash in keys {
-            let Some((_, delta)) = self.transition_deltas.remove(&hash) else {
-                continue;
-            };
-            if delta.bucket_adds.is_empty() {
-                continue;
-            }
-            let bkt_key = hash | TRANSITION_BUCKET_FLAG;
-            let mut bitmap = match &self.old_reader {
-                Some(r) => r.get_bucket(bkt_key).await?,
-                None => RoaringBitmap::new(),
-            };
-            bitmap |= &delta.bucket_adds;
-            self.bitmap_writer.set("", bkt_key, bitmap).await?;
-        }
+    /// Write a bounded-universe ID bitmap as a single entry.
+    ///
+    /// Bucket-ID and trigram bitmaps are bounded to 2^24 values and never
+    /// need chunking. Key is used as-is.
+    async fn write_id_bitmap(
+        &self,
+        prefix: &str,
+        key: u32,
+        bitmap: RoaringBitmap,
+    ) -> Result<(), FullTextBitmapError> {
+        self.bitmap_writer.set(prefix, key, bitmap).await?;
         Ok(())
     }
 }
@@ -344,19 +402,25 @@ impl FullTextBitmapReader {
         }
 
         // Load all transition bitmaps upfront.
-        self.load_keys(plan.transitions.iter().flat_map(|h| {
-            [
-                (String::new(), h | TRANSITION_BUCKET_FLAG),
-                (String::new(), h | TRANSITION_DOC_FLAG),
-            ]
-        }))
+        self.load_keys(
+            plan.transitions
+                .iter()
+                .flat_map(|&h| {
+                    (0u32..=255).map(move |c| (TRANSITION_DOC_PREFIX.to_string(), (h << 8) | c))
+                })
+                .chain(
+                    plan.transitions
+                        .iter()
+                        .map(|&h| (TRANSITION_BUCKET_PREFIX.to_string(), h)),
+                ),
+        )
         .await;
 
         let mut transitions = Vec::with_capacity(plan.transitions.len());
         for &hash in &plan.transitions {
             transitions.push((
-                self.get_bucket(hash | TRANSITION_BUCKET_FLAG).await?,
-                self.get_bucket(hash | TRANSITION_DOC_FLAG).await?,
+                self.get_id_bitmap(TRANSITION_BUCKET_PREFIX, hash).await?,
+                self.get_doc_bitmap(TRANSITION_DOC_PREFIX, hash).await?,
             ));
         }
 
@@ -386,18 +450,18 @@ impl FullTextBitmapReader {
         }
 
         // Stage 2: load doc bitmaps, AND across tokens + transitions.
-        self.load_keys(
-            bucket_sets
-                .iter()
-                .flat_map(|bs| bs.iter().map(|id| (String::new(), id))),
-        )
+        self.load_keys(bucket_sets.iter().flat_map(|bs| {
+            bs.iter().flat_map(|id| {
+                (0u32..=255).map(move |c| (TOKEN_DOC_PREFIX.to_string(), (id << 8) | c))
+            })
+        }))
         .await;
 
         let mut doc_bitmaps = Vec::with_capacity(bucket_sets.len() + transitions.len());
         for bucket_set in &bucket_sets {
             let mut bm = RoaringBitmap::new();
             for bucket_id in bucket_set {
-                bm |= &self.get_bucket(bucket_id).await?;
+                bm |= &self.get_doc_bitmap(TOKEN_DOC_PREFIX, bucket_id).await?;
             }
             if bm.is_empty() {
                 return Ok(RoaringBitmap::new());
@@ -418,20 +482,42 @@ impl FullTextBitmapReader {
         self.bitmap_reader.load_data_for_keys(keys).await;
     }
 
-    /// Load a bitmap by key under `prefix=""`.
-    pub async fn get_bucket(&self, key: u32) -> Result<RoaringBitmap, FullTextBitmapError> {
-        Ok(self.bitmap_reader.get("", key).await?.unwrap_or_default())
+    // --- Read helpers ---
+
+    /// Load a doc-ID bitmap, merging all 16M-range chunks via range read.
+    ///
+    /// Used for token buckets (`prefix=""`) and transition doc bitmaps
+    /// (`prefix="!"`). Key encoding: `(id << 8) | chunk_index`.
+    pub async fn get_doc_bitmap(
+        &self,
+        prefix: &str,
+        id: u32,
+    ) -> Result<RoaringBitmap, FullTextBitmapError> {
+        let lo = id << 8;
+        let hi = lo | 0xFF;
+        let entries = self
+            .bitmap_reader
+            .get_range(prefix..=prefix, lo..=hi)
+            .await?;
+        let mut result = RoaringBitmap::new();
+        for (_, _, chunk_bm) in entries {
+            result |= chunk_bm;
+        }
+        Ok(result)
     }
 
-    /// Load a trigram bitmap by trigram string and positional key.
-    pub async fn get_trigram(
+    /// Load a bounded-universe ID bitmap as a single point read.
+    ///
+    /// Used for transition bucket bitmaps (`prefix="#"`) and trigram
+    /// positional bitmaps (`prefix="{trigram}"`). Key is used as-is.
+    pub async fn get_id_bitmap(
         &self,
-        trigram: &str,
+        prefix: &str,
         key: u32,
     ) -> Result<RoaringBitmap, FullTextBitmapError> {
         Ok(self
             .bitmap_reader
-            .get(trigram, key)
+            .get(prefix, key)
             .await?
             .unwrap_or_default())
     }
@@ -481,7 +567,7 @@ impl FullTextBitmapReader {
 
             let mut bm = RoaringBitmap::new();
             for &key in keys {
-                bm |= &self.get_trigram(trigram, key).await?;
+                bm |= &self.get_id_bitmap(trigram, key).await?;
             }
             bitmaps.push(bm);
         }
@@ -555,13 +641,19 @@ mod tests {
 
         // "hello" bucket (shared): doc 2 only.
         let hello_bucket = *hw_buckets.iter().find(|b| hr_buckets.contains(b)).unwrap();
-        let bm = reader.get_bucket(hello_bucket).await.unwrap();
+        let bm = reader
+            .get_doc_bitmap(TOKEN_DOC_PREFIX, hello_bucket)
+            .await
+            .unwrap();
         assert!(!bm.contains(1));
         assert!(bm.contains(2));
 
         // "world" bucket (unique to doc 1): empty after delete.
         let world_bucket = *hw_buckets.iter().find(|b| !hr_buckets.contains(b)).unwrap();
-        let bm = reader.get_bucket(world_bucket).await.unwrap();
+        let bm = reader
+            .get_doc_bitmap(TOKEN_DOC_PREFIX, world_bucket)
+            .await
+            .unwrap();
         assert!(bm.is_empty());
     }
 
@@ -581,19 +673,31 @@ mod tests {
             .iter()
             .find(|b| new_buckets.contains(b))
             .unwrap();
-        assert!(reader.get_bucket(hello).await.unwrap().contains(1));
+        assert!(reader
+            .get_doc_bitmap(TOKEN_DOC_PREFIX, hello)
+            .await
+            .unwrap()
+            .contains(1));
         // "world" only in old — deleted.
         let world = *old_buckets
             .iter()
             .find(|b| !new_buckets.contains(b))
             .unwrap();
-        assert!(!reader.get_bucket(world).await.unwrap().contains(1));
+        assert!(!reader
+            .get_doc_bitmap(TOKEN_DOC_PREFIX, world)
+            .await
+            .unwrap()
+            .contains(1));
         // "rust" only in new — added.
         let rust = *new_buckets
             .iter()
             .find(|b| !old_buckets.contains(b))
             .unwrap();
-        assert!(reader.get_bucket(rust).await.unwrap().contains(1));
+        assert!(reader
+            .get_doc_bitmap(TOKEN_DOC_PREFIX, rust)
+            .await
+            .unwrap()
+            .contains(1));
     }
 
     #[tokio::test]
@@ -606,12 +710,32 @@ mod tests {
         let reader = flush_and_read(writer, &provider).await;
 
         // "hel"(key=0), "ell"(key=1), "llo"(key=2)
-        assert!(reader.get_trigram("hel", 0).await.unwrap().contains(bucket));
-        assert!(reader.get_trigram("ell", 1).await.unwrap().contains(bucket));
-        assert!(reader.get_trigram("llo", 2).await.unwrap().contains(bucket));
+        assert!(reader
+            .get_id_bitmap("hel", 0)
+            .await
+            .unwrap()
+            .contains(bucket));
+        assert!(reader
+            .get_id_bitmap("ell", 1)
+            .await
+            .unwrap()
+            .contains(bucket));
+        assert!(reader
+            .get_id_bitmap("llo", 2)
+            .await
+            .unwrap()
+            .contains(bucket));
         // Wrong keys should not contain the bucket.
-        assert!(!reader.get_trigram("hel", 1).await.unwrap().contains(bucket));
-        assert!(!reader.get_trigram("llo", 0).await.unwrap().contains(bucket));
+        assert!(!reader
+            .get_id_bitmap("hel", 1)
+            .await
+            .unwrap()
+            .contains(bucket));
+        assert!(!reader
+            .get_id_bitmap("llo", 0)
+            .await
+            .unwrap()
+            .contains(bucket));
     }
 
     #[tokio::test]
@@ -625,10 +749,13 @@ mod tests {
 
         assert_eq!(transitions.len(), 2);
         for (hash, prev_bucket, curr_bucket) in &transitions {
-            let doc_bm = reader.get_bucket(hash | TRANSITION_DOC_FLAG).await.unwrap();
+            let doc_bm = reader
+                .get_doc_bitmap(TRANSITION_DOC_PREFIX, *hash)
+                .await
+                .unwrap();
             assert!(doc_bm.contains(1));
             let bkt_bm = reader
-                .get_bucket(hash | TRANSITION_BUCKET_FLAG)
+                .get_id_bitmap(TRANSITION_BUCKET_PREFIX, *hash)
                 .await
                 .unwrap();
             assert!(bkt_bm.contains(*prev_bucket));
@@ -648,7 +775,10 @@ mod tests {
         let reader = flush_and_read(writer, &provider).await;
 
         for (hash, _, _) in &transitions {
-            let doc_bm = reader.get_bucket(hash | TRANSITION_DOC_FLAG).await.unwrap();
+            let doc_bm = reader
+                .get_doc_bitmap(TRANSITION_DOC_PREFIX, *hash)
+                .await
+                .unwrap();
             assert!(!doc_bm.contains(1));
             assert!(doc_bm.contains(2));
         }
@@ -684,7 +814,10 @@ mod tests {
 
         // "hello" bucket: docs 2 and 3, not 1.
         let hello = *hw_buckets.iter().find(|b| hr_buckets.contains(b)).unwrap();
-        let bm = reader2.get_bucket(hello).await.unwrap();
+        let bm = reader2
+            .get_doc_bitmap(TOKEN_DOC_PREFIX, hello)
+            .await
+            .unwrap();
         assert!(!bm.contains(1));
         assert!(bm.contains(2));
         assert!(bm.contains(3));
@@ -770,5 +903,51 @@ mod tests {
         let result = reader.search(&query("hello")).await.unwrap();
         assert!(!result.contains(1));
         assert!(result.contains(2));
+    }
+
+    /// Verify that documents with digits, punctuation, and special characters
+    /// work correctly with the chunked partition layout.
+    ///
+    /// Transition prefixes `"!"` and `"#"` are non-alphanumeric and cannot
+    /// appear as trigrams (SimpleTokenizer strips non-alphanumeric chars).
+    /// Digit-starting trigrams (e.g. `"123"`) sort after `"!"` and `"#"`
+    /// (`'0'` = 0x30 > `'#'` = 0x23), preserving partition ordering.
+    /// If ordering were broken, the ordered blockfile writer would panic.
+    #[tokio::test]
+    async fn test_mixed_alphanumeric_and_special_chars() {
+        let (_tmp, provider) = provider();
+        let writer = new_writer(&provider).await;
+
+        // "!" and "#" in the text are stripped by SimpleTokenizer, producing
+        // tokens "test" and "value" (not "!" or "#" tokens).
+        writer.add_document(1, tokenize("test!value hello#world"));
+        // Digits produce trigrams like "123" that sort after transition
+        // prefixes in the blockfile.
+        writer.add_document(2, tokenize("abc 123 item42"));
+        writer.add_document(3, tokenize("café naïve 789xyz"));
+        let reader = flush_and_read(writer, &provider).await;
+
+        // Punctuation splits tokens and creates transitions.
+        let result = reader.search(&query("test value")).await.unwrap();
+        assert!(result.contains(1));
+
+        let result = reader.search(&query("hello world")).await.unwrap();
+        assert!(result.contains(1));
+
+        // Digit tokens are indexed correctly.
+        let result = reader.search(&query("123")).await.unwrap();
+        assert!(result.contains(2));
+        assert!(!result.contains(1));
+
+        // Mixed alpha-digit tokens work.
+        let result = reader.search(&query("item42")).await.unwrap();
+        assert!(result.contains(2));
+
+        // Non-ASCII tokens are indexed.
+        let result = reader.search(&query("café")).await.unwrap();
+        assert!(result.contains(3));
+
+        let result = reader.search(&query("789xyz")).await.unwrap();
+        assert!(result.contains(3));
     }
 }
