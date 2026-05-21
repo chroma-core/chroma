@@ -147,6 +147,9 @@ pub struct GetOrchestrator {
     limit: Limit,
     projection: Projection,
 
+    // Maximum candidates for FTS brute-force verification.
+    bruteforce_candidate_limit: usize,
+
     // Bloom filter manager
     bloom_filter_manager: Option<BloomFilterManager>,
 
@@ -169,6 +172,7 @@ impl GetOrchestrator {
         filter: Filter,
         limit: Limit,
         projection: Projection,
+        bruteforce_candidate_limit: usize,
         bloom_filter_manager: Option<BloomFilterManager>,
         shard_index: u32,
         num_shards: u32,
@@ -184,6 +188,7 @@ impl GetOrchestrator {
             filter,
             limit,
             projection,
+            bruteforce_candidate_limit,
             bloom_filter_manager,
             shard_index,
             num_shards,
@@ -333,6 +338,7 @@ impl Handler<TaskResult<FilterLogsForShardOutput, FilterLogsForShardError>> for 
                 metadata_segment: self.collection_and_segments.metadata_segment.clone(),
                 record_segment: self.collection_and_segments.record_segment.clone(),
                 bloom_filter_manager: self.bloom_filter_manager.clone(),
+                bruteforce_candidate_limit: self.bruteforce_candidate_limit,
                 shard_index: self.shard_index,
             },
             ctx.receiver(),

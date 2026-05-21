@@ -54,6 +54,7 @@ pub struct FilterInput {
     pub metadata_segment: Segment,
     pub record_segment: Segment,
     pub bloom_filter_manager: Option<BloomFilterManager>,
+    pub bruteforce_candidate_limit: usize,
     pub shard_index: u32,
 }
 
@@ -245,6 +246,7 @@ pub(crate) enum MetadataProvider<'me> {
         &'me MetadataSegmentReaderShard<'me>,
         &'me Option<RecordSegmentReaderShard<'me>>,
         &'me RecordSegmentReaderOptions,
+        usize, // bruteforce_candidate_limit
     ),
     Log(&'me MetadataLogReader<'me>),
 }
@@ -255,7 +257,12 @@ impl MetadataProvider<'_> {
         query: &str,
     ) -> Result<RoaringBitmap, FilterError> {
         match self {
-            MetadataProvider::CompactData(metadata_segment_reader, record_segment_reader, _) => {
+            MetadataProvider::CompactData(
+                metadata_segment_reader,
+                record_segment_reader,
+                _,
+                bruteforce_limit,
+            ) => {
                 match metadata_segment_reader.fts_index_reader.as_ref() {
                     Some(FtsIndexReader::Trigram(reader)) => {
                         Ok(reader
@@ -287,24 +294,23 @@ impl MetadataProvider<'_> {
                         // Verify with str::contains(query) — case-sensitive substring
                         // match, consistent with the Log path and $contains semantics.
                         //
-                        // Budget: verify up to 50K candidates. Brute-force throughput
-                        // varies with document length (~1M docs/sec for short docs,
-                        // ~300K for long). 50K keeps verification within ~100ms for
-                        // typical workloads. Candidates beyond the budget are included
-                        // unverified (include-all) to preserve recall at the cost of
-                        // precision.
+                        // Budget: verify up to `bruteforce_candidate_limit` candidates.
+                        // Brute-force throughput varies with document length (~1M
+                        // docs/sec for short docs, ~300K for long). Candidates beyond
+                        // the budget are included unverified (include-all) to preserve
+                        // recall at the cost of precision.
                         //
                         // TODO: cursor-based pagination could continue brute-force
                         // verification across multiple query rounds, improving
                         // precision for large candidate sets without exceeding the
                         // per-round latency budget.
-                        const BRUTEFORCE_CANDIDATE_LIMIT: usize = 50_000;
+                        let limit = *bruteforce_limit;
 
                         let Some(rec_reader) = record_segment_reader else {
                             return Ok(candidates);
                         };
-                        let to_verify: Vec<u32> = candidates.iter().take(BRUTEFORCE_CANDIDATE_LIMIT).collect();
-                        let unverified: RoaringBitmap = candidates.iter().skip(BRUTEFORCE_CANDIDATE_LIMIT).collect();
+                        let to_verify: Vec<u32> = candidates.iter().take(limit).collect();
+                        let unverified: RoaringBitmap = candidates.iter().skip(limit).collect();
                         let fetch_futures: Vec<_> = to_verify
                             .into_iter()
                             .map(|id| async move {
@@ -345,12 +351,13 @@ impl MetadataProvider<'_> {
     ) -> Result<SignedRoaringBitmap, FilterError> {
         let chroma_regex = ChromaRegex::try_from(query.to_string())?;
         match self {
-            MetadataProvider::CompactData(metadata_segment_reader, record_segment_reader, _) => {
+            MetadataProvider::CompactData(metadata_segment_reader, record_segment_reader, _, _) => {
                 // Regex support is only available on the Trigram index.
                 let trigram_reader = match metadata_segment_reader.fts_index_reader.as_ref() {
                     Some(FtsIndexReader::Trigram(r)) => Some(r),
                     Some(FtsIndexReader::TokenBitmap(_, _)) => {
-                        tracing::info!("Regex filtering not supported on TokenBitmap FTS index, returning empty");
+                        // TODO: Add regex support for the TokenBitmap index.
+                        tracing::info!("Regex filtering not yet supported on TokenBitmap FTS index, returning empty");
                         None
                     }
                     None => None,
@@ -450,7 +457,12 @@ impl MetadataProvider<'_> {
         op: &PrimitiveOperator,
     ) -> Result<RoaringBitmap, FilterError> {
         match self {
-            MetadataProvider::CompactData(metadata_segment_reader, record_segment_reader, plan) => {
+            MetadataProvider::CompactData(
+                metadata_segment_reader,
+                record_segment_reader,
+                plan,
+                _,
+            ) => {
                 let (metadata_index_reader, kw) = match val {
                     MetadataValue::Bool(b) => (
                         metadata_segment_reader.bool_metadata_index_reader.as_ref(),
@@ -769,8 +781,12 @@ impl Operator<FilterInput, FilterOutput> for Filter {
         }
 
         let log_metadata_provider = MetadataProvider::Log(&metadata_log_reader);
-        let compact_metadata_provider =
-            MetadataProvider::CompactData(&metadata_segment_reader, &record_segment_reader, &plan);
+        let compact_metadata_provider = MetadataProvider::CompactData(
+            &metadata_segment_reader,
+            &record_segment_reader,
+            &plan,
+            input.bruteforce_candidate_limit,
+        );
 
         // Get offset ids corresponding to user ids
         let (user_allowed_log_offset_ids, user_allowed_compact_offset_ids) =
@@ -904,6 +920,7 @@ mod tests {
                 metadata_segment,
                 record_segment,
                 bloom_filter_manager: None,
+                bruteforce_candidate_limit: 50_000,
                 shard_index: 0,
             },
         )
@@ -1694,6 +1711,7 @@ mod tests {
             &metadata_segment_reader,
             &some_reader,
             &RecordSegmentReaderOptions::default(),
+            50_000,
         );
         let res = compact_metadata_provider
             .filter_by_document_regex("(?i)def")
@@ -1754,6 +1772,7 @@ mod tests {
             &metadata_segement_reader,
             &record_segment_reader,
             &RecordSegmentReaderOptions::default(),
+            50_000,
         );
 
         let match_all = r".*";
@@ -1916,6 +1935,7 @@ mod tests {
             metadata_segment: test_segment.metadata_segment.clone(),
             record_segment: test_segment.record_segment.clone(),
             bloom_filter_manager: None,
+            bruteforce_candidate_limit: 50_000,
             shard_index: 0,
         };
 

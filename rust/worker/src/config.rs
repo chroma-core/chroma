@@ -347,6 +347,12 @@ pub struct QueryServiceConfig {
     #[serde(default)]
     pub bloom_filter_manager: BloomFilterManagerConfig,
 
+    /// Maximum number of candidates to brute-force verify for FTS bitmap
+    /// `$contains` queries. Candidates beyond this limit are included
+    /// unverified to preserve recall.
+    #[serde(default = "QueryServiceConfig::default_bruteforce_candidate_limit")]
+    pub bruteforce_candidate_limit: usize,
+
     /// The grace period for shutting down the gRPC server.
     #[serde(
         rename = "grpc_shutdown_grace_period_seconds",
@@ -386,6 +392,10 @@ impl QueryServiceConfig {
 
     fn default_bounded_wal_limit() -> u32 {
         250
+    }
+
+    fn default_bruteforce_candidate_limit() -> usize {
+        50_000
     }
 
     fn default_grpc_shutdown_grace_period() -> Duration {
