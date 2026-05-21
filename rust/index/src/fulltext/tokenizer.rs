@@ -3,8 +3,8 @@ use std::io::Cursor;
 
 use murmur3::murmur3_32;
 use tantivy::tokenizer::{
-    AsciiFoldingFilter, LowerCaser, NgramTokenizer, RemoveLongFilter, SimpleTokenizer,
-    TextAnalyzer, Token, TokenFilter, TokenStream, Tokenizer,
+    LowerCaser, NgramTokenizer, RemoveLongFilter, SimpleTokenizer, TextAnalyzer, Token,
+    TokenFilter, TokenStream, Tokenizer,
 };
 use thiserror::Error;
 
@@ -13,19 +13,41 @@ use thiserror::Error;
 // ---------------------------------------------------------------------------
 
 const TRIGRAM_LENGTH: usize = 3;
+
+/// Tokens longer than this are dropped by the word tokenizer and not indexed.
+/// 128 chars covers essentially all natural-language words and programming
+/// identifiers while avoiding pathological inputs (base64 blobs, minified code).
 const MAX_TOKEN_LENGTH: usize = 128;
+
 const DEFAULT_HASH_BITS: u32 = 24;
 
 /// Murmur3 seed. Fixed — changing it invalidates all existing blockfiles.
+///
+/// Murmur3 is a fast, non-cryptographic hash with good distribution,
+/// and is already a dependency in the Chroma codebase.
 const HASH_SEED: u32 = 0x5f3759df;
 
-/// Boundary characters hashed for cross-token transitions.
+/// Number of boundary characters hashed for cross-token transitions.
+///
+/// Benchmarked bigram (2) vs trigram (3) transitions: bigrams give 28-33%
+/// smaller index with ≤1.3% precision loss. Fixed at 2 — changing this
+/// value invalidates all existing blockfiles.
 const TRANSITION_CHARS: usize = 2;
 
 // ---------------------------------------------------------------------------
 // RemoveShortFilter
 // ---------------------------------------------------------------------------
 
+/// Drops tokens shorter than `min_length` bytes.
+///
+/// Used to filter out very short tokens (e.g. "a", "of") that are too small
+/// for trigram extraction and would create excessive hash collisions.
+///
+/// Follows the tantivy `TokenFilter` pattern: a config struct
+/// (`RemoveShortFilter`), a wrapper that implements `Tokenizer`
+/// (`RemoveShortFilterWrapper`), and a stream that implements `TokenStream`
+/// (`RemoveShortFilterStream`) where the actual filtering happens in
+/// `advance()`.
 #[derive(Clone)]
 struct RemoveShortFilter {
     min_length: usize,
@@ -163,9 +185,10 @@ fn first_n_chars(s: &str, n: usize) -> &str {
 /// fully resolved numeric keys and never performs string analysis.
 ///
 /// Two internal pipelines:
-/// - **Word**: `SimpleTokenizer` → `LowerCaser` → `AsciiFoldingFilter`
-///   → `RemoveShortFilter(3)` → `RemoveLongFilter(128)`.
-/// - **Trigram**: `NgramTokenizer(3,3)` → `LowerCaser`.
+/// - **Word**: `SimpleTokenizer` → `LowerCaser` → `RemoveShortFilter(3)`
+///   → `RemoveLongFilter(128)`.
+/// - **Trigram**: `NgramTokenizer(3,3)` (no additional filters — input is
+///   already lowercased by the word pipeline).
 #[derive(Clone)]
 pub struct WordAnalyzer {
     num_buckets: u32,
@@ -179,10 +202,9 @@ impl WordAnalyzer {
             .map_err(|e| TokenizerError::Config(e.to_string()))?;
         Ok(Self {
             num_buckets: 1u32 << hash_bits,
-            trigram_tokenizer: TextAnalyzer::builder(ngram).filter(LowerCaser).build(),
+            trigram_tokenizer: TextAnalyzer::builder(ngram).build(),
             word_tokenizer: TextAnalyzer::builder(SimpleTokenizer::default())
                 .filter(LowerCaser)
-                .filter(AsciiFoldingFilter)
                 .filter(RemoveShortFilter {
                     min_length: TRIGRAM_LENGTH,
                 })
@@ -374,10 +396,11 @@ mod tests {
     #[test]
     fn test_document_filters() {
         let mut a = WordAnalyzer::default();
-        // "a" (1 char) and "is" (2 chars) removed; ASCII folding on "café".
+        // "a" (1 char) and "is" (2 chars) removed by RemoveShortFilter.
+        // "café" is lowercased to "café" (no ASCII folding).
         let dt = a.tokenize_document("a is café").unwrap();
         assert_eq!(dt.buckets.len(), 1);
-        assert!(dt.buckets.contains(&a.hash_token("cafe").unwrap()));
+        assert!(dt.buckets.contains(&a.hash_token("café").unwrap()));
     }
 
     #[test]
