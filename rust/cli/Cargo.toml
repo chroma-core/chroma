@@ -53,3 +53,7 @@ uuid = { workspace = true }
 [[bin]]
 name = "chroma"
 path = "src/main.rs"
+
+[[bin]]
+name = "chroma-hnsw-integrity-check"
+path = "src/bin/chroma-hnsw-integrity-check.rs"

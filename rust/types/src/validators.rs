@@ -8,7 +8,7 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::{net::IpAddr, sync::LazyLock};
-use validator::ValidationError;
+use validator::{Validate, ValidationError};
 
 static ALNUM_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{1, 510}[a-zA-Z0-9]$")
@@ -286,6 +286,28 @@ pub fn validate_schema(schema: &Schema) -> Result<(), ValidationError> {
     {
         return Err(ValidationError::new("schema").with_message("Full text search / regular expression index cannot be enabled by default. It can only be enabled on #document field.".into()));
     }
+
+    for value_types in std::iter::once(&schema.defaults).chain(schema.keys.values()) {
+        if let Some(vector_index) = value_types
+            .float_list
+            .as_ref()
+            .and_then(|vt| vt.vector_index.as_ref())
+        {
+            if let Some(hnsw) = &vector_index.config.hnsw {
+                hnsw.validate().map_err(|err| {
+                    ValidationError::new("schema")
+                        .with_message(format!("Invalid HNSW configuration: {err}").into())
+                })?;
+            }
+            if let Some(spann) = &vector_index.config.spann {
+                spann.validate().map_err(|err| {
+                    ValidationError::new("schema")
+                        .with_message(format!("Invalid SPANN configuration: {err}").into())
+                })?;
+            }
+        }
+    }
+
     for (key, config) in &schema.keys {
         // Validate that keys cannot start with # (except system keys)
         if key.starts_with('#') && key != DOCUMENT_KEY && key != EMBEDDING_KEY {
@@ -415,6 +437,21 @@ mod tests {
         assert!(validate_name("ab").is_err());
         assert!(validate_name("a").is_err());
         assert!(validate_name("").is_err());
+    }
+
+    #[test]
+    fn invalid_hnsw_schema_config_is_rejected() {
+        let mut schema = crate::Schema::new_default(crate::KnnIndex::Hnsw);
+        let hnsw = schema
+            .keys
+            .get_mut(EMBEDDING_KEY)
+            .and_then(|value_types| value_types.float_list.as_mut())
+            .and_then(|float_list| float_list.vector_index.as_mut())
+            .and_then(|vector_index| vector_index.config.hnsw.as_mut())
+            .expect("default HNSW schema should have HNSW config");
+        hnsw.max_neighbors = Some(129);
+
+        assert!(validate_schema(&schema).is_err());
     }
 
     #[test]
