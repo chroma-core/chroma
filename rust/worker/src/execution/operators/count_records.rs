@@ -148,6 +148,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
                 .bloom_filter_manager
                 .as_ref()
                 .is_some_and(|mgr| input.log_records.len() >= mgr.storage_fetch_threshold()),
+            ..Default::default()
         };
         // In theory, we can sort all the ids here
         // and send them to the reader so that the reader

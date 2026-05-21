@@ -222,6 +222,7 @@ impl Operator<LimitInput, LimitOutput> for Limit {
                 .bloom_filter_manager
                 .as_ref()
                 .is_some_and(|mgr| input.logs.len() >= mgr.storage_fetch_threshold()),
+            ..Default::default()
         };
         let mut materialized_log_offset_ids = match &input.log_offset_ids {
             SignedRoaringBitmap::Include(rbm) => rbm.clone(),

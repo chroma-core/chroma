@@ -88,6 +88,7 @@ fn bench_filter(criterion: &mut Criterion) {
             metadata_segment: test_segment.metadata_segment,
             record_segment: test_segment.record_segment,
             bloom_filter_manager: None,
+            bruteforce_candidate_limit: 50_000,
             shard_index: 0,
         };
 

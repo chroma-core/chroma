@@ -132,6 +132,7 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
                 .bloom_filter_manager
                 .as_ref()
                 .is_some_and(|mgr| input.logs.len() >= mgr.storage_fetch_threshold()),
+            ..Default::default()
         };
         let materialized_logs =
             materialize_logs(&record_segment_reader, input.logs.clone(), None, &plan)

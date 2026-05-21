@@ -1012,9 +1012,22 @@ impl RecordSegmentFlusherShard {
 
 /// Controls how the record segment reader handles bloom-filter-based
 /// pre-filtering during lookups.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct RecordSegmentReaderOptions {
     pub use_bloom_filter: bool,
+    /// Maximum number of candidates to brute-force verify for FTS bitmap
+    /// `$contains` queries. Candidates beyond this limit are included
+    /// unverified to preserve recall.
+    pub bruteforce_candidate_limit: usize,
+}
+
+impl Default for RecordSegmentReaderOptions {
+    fn default() -> Self {
+        Self {
+            use_bloom_filter: false,
+            bruteforce_candidate_limit: 50_000,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -1576,6 +1589,7 @@ pub async fn partition_logs_to_shard(
         use_bloom_filter: bloom_filter_manager
             .as_ref()
             .is_some_and(|mgr| logs.len() >= mgr.storage_fetch_threshold()),
+        ..Default::default()
     };
 
     let mut visibility = vec![false; logs.total_len()];
@@ -2101,6 +2115,7 @@ mod tests {
         assert_eq!(reader.num_shards(), 2);
         let opts = RecordSegmentReaderOptions {
             use_bloom_filter: true,
+            ..Default::default()
         };
 
         // IDs 1-5 should be in shard 0
@@ -2135,6 +2150,7 @@ mod tests {
 
         let opts = RecordSegmentReaderOptions {
             use_bloom_filter: true,
+            ..Default::default()
         };
         let result = reader
             .resolve_shard("id_nonexistent", &opts)
@@ -2456,6 +2472,7 @@ mod tests {
         assert_eq!(reader.num_shards(), 1);
         let opts = RecordSegmentReaderOptions {
             use_bloom_filter: true,
+            ..Default::default()
         };
 
         for i in 1..=5 {

@@ -445,6 +445,7 @@ impl LogFetchOrchestrator {
                 .bloom_filter_manager
                 .as_ref()
                 .is_some_and(|mgr| total_log_count >= mgr.storage_fetch_threshold()),
+            ..Default::default()
         };
         self.num_uncompleted_materialization_tasks = partitions.len();
         for partition in partitions.iter() {
