@@ -280,7 +280,7 @@ export type FtsAlgorithm = 'trigram' | 'token_bitmap';
 
 export type FtsIndexConfig = {
     /**
-     * FTS index algorithm (cloud-only, tenant-gated).
+     * FTS index algorithm.
      * Omitted from JSON when set to the default (Trigram) so that old
      * servers/clients that do not know about this field can still
      * deserialize the schema.

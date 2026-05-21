@@ -3126,7 +3126,7 @@ fn is_default_fts_algorithm(v: &FtsAlgorithm) -> bool {
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 pub struct FtsIndexConfig {
-    /// FTS index algorithm (cloud-only, tenant-gated).
+    /// FTS index algorithm.
     /// Omitted from JSON when set to the default (Trigram) so that old
     /// servers/clients that do not know about this field can still
     /// deserialize the schema.
