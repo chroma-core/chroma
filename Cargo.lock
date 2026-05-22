@@ -3635,6 +3635,7 @@ name = "foundation-api"
 version = "1.0.0"
 dependencies = [
  "axum 0.8.8",
+ "chroma-api-types",
  "chroma-config",
  "chroma-error",
  "chroma-sysdb",

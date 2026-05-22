@@ -9,7 +9,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::{
-    auth::{AuthzAction, AuthzResource},
+    auth::{AuthError, AuthenticateAndAuthorize, AuthzAction, AuthzResource},
     errors::ServerError,
     server::FoundationApiServer,
 };
@@ -32,19 +32,7 @@ pub async fn foundation_init(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
 ) -> Result<Json<FoundationInitResponse>, ServerError> {
-    let identity = server
-        .auth
-        .authenticate_and_authorize(
-            &headers,
-            AuthzAction::CreateDatabase,
-            AuthzResource {
-                tenant: None,
-                database: None,
-                collection: None,
-            },
-        )
-        .await?;
-    let tenant = identity.tenant.clone();
+    let tenant = whoami_and_authorize(&*server.auth, &headers, AuthzAction::CreateDatabase).await?;
 
     let _guard =
         server.scorecard_request(&["op:foundation_init", &format!("tenant:{}", tenant)])?;
@@ -148,4 +136,125 @@ async fn ensure_collection(
         )
         .await?;
     Ok(collection)
+}
+
+/// Resolve the caller's tenant from the auth token, then check that the
+/// caller is allowed to perform `action` against that tenant.
+///
+/// The two-step shape exists because the Cloud `authenticate_and_authorize`
+/// impl enforces `resource.tenant == user_identity.tenant` (returns 403 on
+/// mismatch, including `resource.tenant == None`). The Noop impl ignores
+/// resource entirely, which is why a single-call handler that passed
+/// `tenant: None` looked fine in tests but 403'd under Cloud auth.
+async fn whoami_and_authorize(
+    auth: &dyn AuthenticateAndAuthorize,
+    headers: &HeaderMap,
+    action: AuthzAction,
+) -> Result<String, AuthError> {
+    let identity = auth.get_user_identity(headers).await?;
+    let tenant = identity.tenant.clone();
+    auth.authenticate_and_authorize(
+        headers,
+        action,
+        AuthzResource {
+            tenant: Some(tenant.clone()),
+            database: None,
+            collection: None,
+        },
+    )
+    .await?;
+    Ok(tenant)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chroma_api_types::GetUserIdentityResponse;
+    use std::collections::HashSet;
+    use std::future::{ready, Future};
+    use std::pin::Pin;
+    use std::sync::Mutex;
+
+    /// Fake `AuthenticateAndAuthorize` that returns a fixed tenant from
+    /// `get_user_identity` and records the `AuthzResource` passed to
+    /// `authenticate_and_authorize` so tests can assert on it.
+    struct FakeAuth {
+        tenant: String,
+        captured_resource: Mutex<Option<AuthzResource>>,
+    }
+
+    impl FakeAuth {
+        fn new(tenant: &str) -> Self {
+            Self {
+                tenant: tenant.to_string(),
+                captured_resource: Mutex::new(None),
+            }
+        }
+
+        fn identity(&self) -> GetUserIdentityResponse {
+            GetUserIdentityResponse {
+                user_id: String::new(),
+                tenant: self.tenant.clone(),
+                databases: HashSet::new(),
+            }
+        }
+    }
+
+    impl AuthenticateAndAuthorize for FakeAuth {
+        fn authenticate_and_authorize(
+            &self,
+            _headers: &axum::http::HeaderMap,
+            _action: AuthzAction,
+            resource: AuthzResource,
+        ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>>
+        {
+            *self.captured_resource.lock().unwrap() = Some(resource);
+            let identity = self.identity();
+            Box::pin(ready(Ok(identity)))
+        }
+
+        fn authenticate_and_authorize_collection(
+            &self,
+            _headers: &axum::http::HeaderMap,
+            _action: AuthzAction,
+            _resource: AuthzResource,
+            _collection: chroma_types::Collection,
+        ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>>
+        {
+            let identity = self.identity();
+            Box::pin(ready(Ok(identity)))
+        }
+
+        fn get_user_identity(
+            &self,
+            _headers: &axum::http::HeaderMap,
+        ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>>
+        {
+            let identity = self.identity();
+            Box::pin(ready(Ok(identity)))
+        }
+    }
+
+    #[tokio::test]
+    async fn whoami_and_authorize_passes_resolved_tenant_to_authz() {
+        let fake = FakeAuth::new("team_abc");
+        let headers = HeaderMap::new();
+
+        let tenant = whoami_and_authorize(&fake, &headers, AuthzAction::CreateDatabase)
+            .await
+            .expect("auth should succeed");
+
+        assert_eq!(tenant, "team_abc");
+        let captured = fake
+            .captured_resource
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("authenticate_and_authorize should have been called");
+        // Regression: before this fix the handler passed `tenant: None`,
+        // which the Cloud authz impl always rejects with 403.
+        assert_eq!(captured.tenant, Some("team_abc".to_string()));
+        assert_eq!(captured.database, None);
+        assert_eq!(captured.collection, None);
+    }
 }
