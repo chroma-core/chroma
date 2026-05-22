@@ -3173,7 +3173,11 @@ def test_config_classes_reject_invalid_fields() -> None:
 
     error_msg = str(exc_info.value)
     assert "invalid_field" in error_msg.lower()
-    assert "extra" in error_msg.lower() or "permitted" in error_msg.lower()
+    assert (
+        "extra" in error_msg.lower()
+        or "permitted" in error_msg.lower()
+        or "not a valid field" in error_msg.lower()
+    )
 
     # Test StringInvertedIndexConfig rejects invalid fields
     with pytest.raises((ValueError, ValidationError)) as exc_info:

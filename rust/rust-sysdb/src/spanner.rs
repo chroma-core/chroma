@@ -4173,7 +4173,7 @@ pub mod tests {
                 string: Some(StringValueType {
                     fts_index: Some(FtsIndexType {
                         enabled: true,
-                        config: FtsIndexConfig {},
+                        config: FtsIndexConfig::default(),
                     }),
                     string_inverted_index: Some(StringInvertedIndexType {
                         enabled: false,
@@ -5189,7 +5189,7 @@ pub mod tests {
                 string: Some(StringValueType {
                     fts_index: Some(FtsIndexType {
                         enabled: true,
-                        config: FtsIndexConfig {},
+                        config: FtsIndexConfig::default(),
                     }),
                     string_inverted_index: Some(StringInvertedIndexType {
                         enabled: false,
@@ -5278,7 +5278,7 @@ pub mod tests {
                 string: Some(StringValueType {
                     fts_index: Some(FtsIndexType {
                         enabled: true,
-                        config: FtsIndexConfig {},
+                        config: FtsIndexConfig::default(),
                     }),
                     string_inverted_index: Some(StringInvertedIndexType {
                         enabled: true,
@@ -5358,7 +5358,7 @@ pub mod tests {
                 string: Some(StringValueType {
                     fts_index: Some(FtsIndexType {
                         enabled: true,
-                        config: FtsIndexConfig {},
+                        config: FtsIndexConfig::default(),
                     }),
                     string_inverted_index: Some(StringInvertedIndexType {
                         enabled: false,
@@ -5377,7 +5377,7 @@ pub mod tests {
                 string: Some(StringValueType {
                     fts_index: Some(FtsIndexType {
                         enabled: true,
-                        config: FtsIndexConfig {},
+                        config: FtsIndexConfig::default(),
                     }),
                     string_inverted_index: Some(StringInvertedIndexType {
                         enabled: true,
@@ -5494,7 +5494,7 @@ pub mod tests {
                 string: Some(StringValueType {
                     fts_index: Some(FtsIndexType {
                         enabled: true,
-                        config: FtsIndexConfig {},
+                        config: FtsIndexConfig::default(),
                     }),
                     string_inverted_index: Some(StringInvertedIndexType {
                         enabled: true,
@@ -5590,7 +5590,7 @@ pub mod tests {
                 string: Some(StringValueType {
                     fts_index: Some(FtsIndexType {
                         enabled: true,
-                        config: FtsIndexConfig {},
+                        config: FtsIndexConfig::default(),
                     }),
                     string_inverted_index: Some(StringInvertedIndexType {
                         enabled: false,
@@ -5608,7 +5608,7 @@ pub mod tests {
                 string: Some(StringValueType {
                     fts_index: Some(FtsIndexType {
                         enabled: true,
-                        config: FtsIndexConfig {},
+                        config: FtsIndexConfig::default(),
                     }),
                     string_inverted_index: Some(StringInvertedIndexType {
                         enabled: true,
@@ -5722,7 +5722,7 @@ pub mod tests {
                 string: Some(StringValueType {
                     fts_index: Some(FtsIndexType {
                         enabled: true,
-                        config: FtsIndexConfig {},
+                        config: FtsIndexConfig::default(),
                     }),
                     string_inverted_index: Some(StringInvertedIndexType {
                         enabled: false,
@@ -5749,7 +5749,7 @@ pub mod tests {
                 string: Some(StringValueType {
                     fts_index: Some(FtsIndexType {
                         enabled: true,
-                        config: FtsIndexConfig {},
+                        config: FtsIndexConfig::default(),
                     }),
                     string_inverted_index: Some(StringInvertedIndexType {
                         enabled: true,
@@ -5876,7 +5876,7 @@ pub mod tests {
                     string: Some(StringValueType {
                         fts_index: Some(FtsIndexType {
                             enabled: i % 2 == 0, // Alternate FTS enabled
-                            config: FtsIndexConfig {},
+                            config: FtsIndexConfig::default(),
                         }),
                         string_inverted_index: Some(StringInvertedIndexType {
                             enabled: true,
@@ -6057,7 +6057,7 @@ pub mod tests {
                 string: Some(StringValueType {
                     fts_index: Some(FtsIndexType {
                         enabled: true,
-                        config: FtsIndexConfig {},
+                        config: FtsIndexConfig::default(),
                     }),
                     string_inverted_index: Some(StringInvertedIndexType {
                         enabled: false,
@@ -6798,7 +6798,7 @@ pub mod tests {
                 string: Some(StringValueType {
                     fts_index: Some(FtsIndexType {
                         enabled: true,
-                        config: FtsIndexConfig {},
+                        config: FtsIndexConfig::default(),
                     }),
                     string_inverted_index: Some(StringInvertedIndexType {
                         enabled: false,
@@ -6939,7 +6939,7 @@ pub mod tests {
                 string: Some(StringValueType {
                     fts_index: Some(FtsIndexType {
                         enabled: true,
-                        config: FtsIndexConfig {},
+                        config: FtsIndexConfig::default(),
                     }),
                     string_inverted_index: Some(StringInvertedIndexType {
                         enabled: true,
@@ -7247,7 +7247,7 @@ pub mod tests {
                 string: Some(StringValueType {
                     fts_index: Some(FtsIndexType {
                         enabled: true,
-                        config: FtsIndexConfig {},
+                        config: FtsIndexConfig::default(),
                     }),
                     string_inverted_index: Some(StringInvertedIndexType {
                         enabled: false,
@@ -7398,7 +7398,7 @@ pub mod tests {
                 string: Some(StringValueType {
                     fts_index: Some(FtsIndexType {
                         enabled: true,
-                        config: FtsIndexConfig {},
+                        config: FtsIndexConfig::default(),
                     }),
                     string_inverted_index: Some(StringInvertedIndexType {
                         enabled: true,

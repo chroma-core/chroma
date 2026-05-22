@@ -270,8 +270,22 @@ export type ForkCountResponse = {
     count: number;
 };
 
+/**
+ * Full-text search index algorithm.
+ *
+ * Controls which index format and query pipeline are used for
+ * document substring search within a collection.
+ */
+export type FtsAlgorithm = 'trigram' | 'token_bitmap';
+
 export type FtsIndexConfig = {
-    [key: string]: never;
+    /**
+     * FTS index algorithm.
+     * Omitted from JSON when set to the default (Trigram) so that old
+     * servers/clients that do not know about this field can still
+     * deserialize the schema.
+     */
+    algorithm?: FtsAlgorithm;
 };
 
 export type FtsIndexType = {

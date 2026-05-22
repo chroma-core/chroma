@@ -468,6 +468,37 @@ impl Schema {
             })
             .is_none_or(|idx| idx.enabled)
     }
+
+    /// Check if the FTS index is configured to use TokenBitmap.
+    pub fn is_token_bitmap_fts_enabled(&self) -> bool {
+        let check = |s: &StringValueType| -> bool {
+            s.fts_index.as_ref().is_some_and(|idx| {
+                idx.enabled && matches!(idx.config.algorithm, FtsAlgorithm::TokenBitmap)
+            })
+        };
+        self.keys
+            .get(DOCUMENT_KEY)
+            .and_then(|vt| vt.string.as_ref())
+            .is_some_and(check)
+            || self.defaults.string.as_ref().is_some_and(check)
+    }
+
+    /// Set the FTS index algorithm on all FTS index configs
+    /// (defaults and every key-specific config).
+    pub fn set_fts_algorithm(&mut self, algorithm: FtsAlgorithm) {
+        if let Some(s) = &mut self.defaults.string {
+            if let Some(idx) = &mut s.fts_index {
+                idx.config.algorithm = algorithm.clone();
+            }
+        }
+        for vt in self.keys.values_mut() {
+            if let Some(s) = &mut vt.string {
+                if let Some(idx) = &mut s.fts_index {
+                    idx.config.algorithm = algorithm.clone();
+                }
+            }
+        }
+    }
 }
 
 impl Default for Schema {
@@ -493,7 +524,7 @@ impl Default for Schema {
             string: Some(StringValueType {
                 fts_index: Some(FtsIndexType {
                     enabled: false,
-                    config: FtsIndexConfig {},
+                    config: FtsIndexConfig::default(),
                 }),
                 string_inverted_index: Some(StringInvertedIndexType {
                     enabled: true,
@@ -553,7 +584,7 @@ impl Default for Schema {
                 string: Some(StringValueType {
                     fts_index: Some(FtsIndexType {
                         enabled: true,
-                        config: FtsIndexConfig {},
+                        config: FtsIndexConfig::default(),
                     }),
                     string_inverted_index: Some(StringInvertedIndexType {
                         enabled: false,
@@ -862,7 +893,7 @@ impl Schema {
                 }),
                 fts_index: Some(FtsIndexType {
                     enabled: false,
-                    config: FtsIndexConfig {},
+                    config: FtsIndexConfig::default(),
                 }),
             }),
             float: Some(FloatValueType {
@@ -958,7 +989,7 @@ impl Schema {
             string: Some(StringValueType {
                 fts_index: Some(FtsIndexType {
                     enabled: true,
-                    config: FtsIndexConfig {},
+                    config: FtsIndexConfig::default(),
                 }),
                 string_inverted_index: Some(StringInvertedIndexType {
                     enabled: false,
@@ -1559,9 +1590,15 @@ impl Schema {
         user: Option<&FtsIndexType>,
     ) -> Result<Option<FtsIndexType>, SchemaError> {
         match (default, user) {
-            (Some(_default), Some(user)) => Ok(Some(FtsIndexType {
+            (Some(default), Some(user)) => Ok(Some(FtsIndexType {
                 enabled: user.enabled,
-                config: user.config.clone(),
+                config: FtsIndexConfig {
+                    algorithm: if !is_default_fts_algorithm(&user.config.algorithm) {
+                        user.config.algorithm.clone()
+                    } else {
+                        default.config.algorithm.clone()
+                    },
+                },
             })),
             (Some(default), None) => Ok(Some(default.clone())),
             (None, Some(user)) => Ok(Some(user.clone())),
@@ -3068,11 +3105,41 @@ pub struct SparseVectorIndexConfig {
     pub algorithm: SparseIndexAlgorithm,
 }
 
+/// Full-text search index algorithm.
+///
+/// Controls which index format and query pipeline are used for
+/// document substring search within a collection.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum FtsAlgorithm {
+    #[default]
+    Trigram,
+    TokenBitmap,
+}
+
+fn is_default_fts_algorithm(v: &FtsAlgorithm) -> bool {
+    v == &FtsAlgorithm::default()
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 pub struct FtsIndexConfig {
-    // FTS index typically has no additional parameters
+    /// FTS index algorithm.
+    /// Omitted from JSON when set to the default (Trigram) so that old
+    /// servers/clients that do not know about this field can still
+    /// deserialize the schema.
+    #[serde(default, skip_serializing_if = "is_default_fts_algorithm")]
+    pub algorithm: FtsAlgorithm,
+}
+
+impl Default for FtsIndexConfig {
+    fn default() -> Self {
+        Self {
+            algorithm: FtsAlgorithm::Trigram,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -3416,7 +3483,7 @@ mod tests {
             string: Some(StringValueType {
                 fts_index: Some(FtsIndexType {
                     enabled: true,
-                    config: FtsIndexConfig {},
+                    config: FtsIndexConfig::default(),
                 }),
                 string_inverted_index: Some(StringInvertedIndexType {
                     enabled: false,
@@ -3950,7 +4017,7 @@ mod tests {
             }),
             fts_index: Some(FtsIndexType {
                 enabled: false,
-                config: FtsIndexConfig {},
+                config: FtsIndexConfig::default(),
             }),
         };
 
@@ -4168,6 +4235,62 @@ mod tests {
     }
 
     #[test]
+    fn test_fts_algorithm_serde_roundtrip() {
+        // Old schema JSON without algorithm field -> defaults to Trigram
+        let json_no_algorithm = r#"{}"#;
+        let config: FtsIndexConfig = serde_json::from_str(json_no_algorithm).unwrap();
+        assert_eq!(config.algorithm, FtsAlgorithm::Trigram);
+
+        // Serialize with Trigram -> algorithm field absent from JSON
+        let serialized = serde_json::to_string(&config).unwrap();
+        assert!(
+            !serialized.contains("algorithm"),
+            "Trigram (default) must not appear in JSON: {serialized}"
+        );
+
+        // Deserialize with "algorithm": "token_bitmap" -> TokenBitmap
+        let json_token_bitmap = r#"{"algorithm": "token_bitmap"}"#;
+        let config: FtsIndexConfig = serde_json::from_str(json_token_bitmap).unwrap();
+        assert_eq!(config.algorithm, FtsAlgorithm::TokenBitmap);
+
+        // Serialize with TokenBitmap -> algorithm field present in JSON
+        let serialized = serde_json::to_string(&config).unwrap();
+        assert!(
+            serialized.contains(r#""algorithm":"token_bitmap""#),
+            "TokenBitmap must appear in JSON: {serialized}"
+        );
+    }
+
+    #[test]
+    fn test_is_token_bitmap_fts_enabled() {
+        // Default schema -> Trigram -> false
+        let schema = Schema::default();
+        assert!(!schema.is_token_bitmap_fts_enabled());
+
+        // Schema with FTS enabled but Trigram algorithm -> false
+        let mut schema = Schema::new_default(KnnIndex::Hnsw);
+        assert!(!schema.is_token_bitmap_fts_enabled());
+
+        // Set algorithm to TokenBitmap -> true
+        schema.set_fts_algorithm(FtsAlgorithm::TokenBitmap);
+        assert!(schema.is_token_bitmap_fts_enabled());
+
+        // Disabled FTS with TokenBitmap -> false
+        schema
+            .keys
+            .get_mut(DOCUMENT_KEY)
+            .unwrap()
+            .string
+            .as_mut()
+            .unwrap()
+            .fts_index
+            .as_mut()
+            .unwrap()
+            .enabled = false;
+        assert!(!schema.is_token_bitmap_fts_enabled());
+    }
+
+    #[test]
     fn test_complex_nested_merging_scenario() {
         // Test a complex scenario with multiple levels of merging
         let mut user_schema = Schema {
@@ -4185,7 +4308,7 @@ mod tests {
             }),
             fts_index: Some(FtsIndexType {
                 enabled: true,
-                config: FtsIndexConfig {},
+                config: FtsIndexConfig::default(),
             }),
         });
 
@@ -4215,7 +4338,7 @@ mod tests {
             string: Some(StringValueType {
                 fts_index: Some(FtsIndexType {
                     enabled: true,
-                    config: FtsIndexConfig {},
+                    config: FtsIndexConfig::default(),
                 }),
                 string_inverted_index: None,
             }),
@@ -4935,7 +5058,7 @@ mod tests {
         schema.defaults.string = Some(StringValueType {
             fts_index: Some(FtsIndexType {
                 enabled: true,
-                config: FtsIndexConfig {},
+                config: FtsIndexConfig::default(),
             }),
             string_inverted_index: None,
         });
@@ -5971,7 +6094,7 @@ mod tests {
 
         // Error: FTS index on non-#document key
         let result = Schema::new_default(KnnIndex::Hnsw)
-            .create_index(Some("my_text"), IndexConfig::Fts(FtsIndexConfig {}));
+            .create_index(Some("my_text"), IndexConfig::Fts(FtsIndexConfig::default()));
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -5980,7 +6103,10 @@ mod tests {
 
         // Success: FTS index on #document key
         let schema = Schema::new_default(KnnIndex::Hnsw)
-            .create_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .create_index(
+                Some(DOCUMENT_KEY),
+                IndexConfig::Fts(FtsIndexConfig::default()),
+            )
             .expect("FTS on #document should succeed");
         assert!(schema.is_fts_enabled());
 
@@ -6097,7 +6223,10 @@ mod tests {
 
         // FTS index deletion is now supported (disables FTS)
         let schema = Schema::new_default(KnnIndex::Hnsw)
-            .delete_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .delete_index(
+                Some(DOCUMENT_KEY),
+                IndexConfig::Fts(FtsIndexConfig::default()),
+            )
             .expect("FTS deletion should succeed");
         assert!(!schema.is_fts_enabled());
 
@@ -6133,7 +6262,7 @@ mod tests {
     fn test_fts_create_global_without_key_rejected() {
         // FTS create_index without key (global) should fail with FtsIndexOnlyOnDocument
         let result = Schema::new_default(KnnIndex::Hnsw)
-            .create_index(None, IndexConfig::Fts(FtsIndexConfig {}));
+            .create_index(None, IndexConfig::Fts(FtsIndexConfig::default()));
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -6145,7 +6274,7 @@ mod tests {
     fn test_fts_delete_global_without_key_rejected() {
         // FTS delete_index without key (global) should fail with FtsIndexDeletionOnlyOnDocument
         let result = Schema::new_default(KnnIndex::Hnsw)
-            .delete_index(None, IndexConfig::Fts(FtsIndexConfig {}));
+            .delete_index(None, IndexConfig::Fts(FtsIndexConfig::default()));
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -6157,7 +6286,7 @@ mod tests {
     fn test_fts_delete_on_custom_key_rejected() {
         // FTS delete_index on a custom key (not #document) should fail
         let result = Schema::new_default(KnnIndex::Hnsw)
-            .delete_index(Some("my_text"), IndexConfig::Fts(FtsIndexConfig {}));
+            .delete_index(Some("my_text"), IndexConfig::Fts(FtsIndexConfig::default()));
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -6213,7 +6342,10 @@ mod tests {
     fn test_is_fts_enabled_after_disable() {
         // After disabling FTS on #document, is_fts_enabled should return false
         let schema = Schema::new_default(KnnIndex::Hnsw)
-            .delete_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .delete_index(
+                Some(DOCUMENT_KEY),
+                IndexConfig::Fts(FtsIndexConfig::default()),
+            )
             .expect("FTS deletion should succeed");
         assert!(!schema.is_fts_enabled());
     }
@@ -6222,9 +6354,15 @@ mod tests {
     fn test_is_fts_enabled_after_reenable() {
         // After disabling then re-enabling FTS on #document, is_fts_enabled should return true
         let schema = Schema::new_default(KnnIndex::Hnsw)
-            .delete_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .delete_index(
+                Some(DOCUMENT_KEY),
+                IndexConfig::Fts(FtsIndexConfig::default()),
+            )
             .expect("FTS deletion should succeed")
-            .create_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .create_index(
+                Some(DOCUMENT_KEY),
+                IndexConfig::Fts(FtsIndexConfig::default()),
+            )
             .expect("FTS creation should succeed");
         assert!(schema.is_fts_enabled());
     }
@@ -6235,7 +6373,10 @@ mod tests {
 
         // Create schema with FTS disabled
         let schema = Schema::new_default(KnnIndex::Hnsw)
-            .delete_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .delete_index(
+                Some(DOCUMENT_KEY),
+                IndexConfig::Fts(FtsIndexConfig::default()),
+            )
             .expect("FTS deletion should succeed");
 
         // Where::Document query should be rejected
@@ -6856,7 +6997,7 @@ mod tests {
         fn fts_index_type_strategy() -> impl Strategy<Value = FtsIndexType> {
             any::<bool>().prop_map(|enabled| FtsIndexType {
                 enabled,
-                config: FtsIndexConfig {},
+                config: FtsIndexConfig::default(),
             })
         }
 

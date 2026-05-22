@@ -3882,7 +3882,10 @@ mod test {
 
         // Build a schema with FTS disabled
         let fts_disabled_schema = Schema::new_default(KnnIndex::Hnsw)
-            .delete_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .delete_index(
+                Some(DOCUMENT_KEY),
+                IndexConfig::Fts(FtsIndexConfig::default()),
+            )
             .expect("FTS deletion should succeed");
         assert!(!fts_disabled_schema.is_fts_enabled());
 
