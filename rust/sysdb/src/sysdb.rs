@@ -2726,7 +2726,7 @@ impl SysDb {
                     database_id: database_name,
                     last_run: None,
                     completion_offset: 0, // Start at offset 0
-                    min_records_for_invocation: min_records_for_invocation,
+                    min_records_for_invocation,
                     is_deleted: false,
                     is_async: true,
                     created_at: std::time::SystemTime::now(),
