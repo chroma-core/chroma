@@ -1416,9 +1416,9 @@ mod tests {
         // Verify statistics were generated
         let attached_functions = sysdb
             .get_attached_functions(
-                None,
                 Some(attached_function_name.clone()),
                 Some(collection_id),
+                vec![],
                 true,
             )
             .await

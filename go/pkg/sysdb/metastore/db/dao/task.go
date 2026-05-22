@@ -2,6 +2,7 @@ package dao
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
@@ -131,17 +132,26 @@ func (s *attachedFunctionDb) UpdateHeapEntryPending(id uuid.UUID, heapEntryPendi
 
 // GetAttachedFunctions is a consolidated getter that supports various query patterns
 // Parameters can be nil to indicate they should not be filtered on
-// - id: Filter by attached function ID
+// - id: DEPRECATED - Use ids instead. Filter by attached function ID
 // - name: Filter by attached function name
 // - inputCollectionID: Filter by input collection ID
 // - outputCollectionID: Filter by output collection ID
+// - ids: Filter by multiple attached function IDs (cannot be used together with id)
 // - onlyReady: If true, only returns attached functions where is_ready = true
-func (s *attachedFunctionDb) GetAttachedFunctions(id *uuid.UUID, name *string, inputCollectionID *string, outputCollectionID *string, onlyReady bool) ([]*dbmodel.AttachedFunction, error) {
+func (s *attachedFunctionDb) GetAttachedFunctions(id *uuid.UUID, name *string, inputCollectionID *string, outputCollectionID *string, ids []uuid.UUID, onlyReady bool) ([]*dbmodel.AttachedFunction, error) {
 	var attachedFunctions []*dbmodel.AttachedFunction
+
+	// Validate that both id and ids are not provided together
+	if id != nil && len(ids) > 0 {
+		return nil, fmt.Errorf("cannot provide both 'id' and 'ids' parameters")
+	}
 
 	query := s.db.Where("is_deleted = ?", false)
 
-	if id != nil {
+	// Handle ID filtering
+	if len(ids) > 0 {
+		query = query.Where("id IN ?", ids)
+	} else if id != nil {
 		query = query.Where("id = ?", *id)
 	}
 

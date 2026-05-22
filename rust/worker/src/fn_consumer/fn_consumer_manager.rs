@@ -340,12 +340,6 @@ impl FnConsumerManager {
 #[derive(Clone, Debug)]
 pub struct ScheduledPollMessage;
 
-#[derive(Clone, Debug)]
-pub struct RemoveInProgressMessage {
-    pub fn_id: AttachedFunctionUuid,
-    pub input_coll_id: CollectionUuid,
-}
-
 #[async_trait]
 impl Component for FnConsumerManager {
     fn get_name() -> &'static str {
@@ -379,14 +373,5 @@ impl Handler<ScheduledPollMessage> for FnConsumerManager {
             ctx,
             || Some(span!(parent: None, tracing::Level::INFO, "Scheduled fn-consumer poll")),
         );
-    }
-}
-
-#[async_trait]
-impl Handler<RemoveInProgressMessage> for FnConsumerManager {
-    type Result = ();
-
-    async fn handle(&mut self, msg: RemoveInProgressMessage, _ctx: &ComponentContext<Self>) {
-        self.in_progress.remove(&(msg.fn_id, msg.input_coll_id));
     }
 }
