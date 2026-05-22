@@ -10,7 +10,7 @@ describe("MorphEmbeddingFunction", () => {
 
   const defaultParametersTest = "should initialize with default parameters";
   if (!process.env.MORPH_API_KEY) {
-    it.skip(defaultParametersTest, () => { });
+    it.skip(defaultParametersTest, () => {});
   } else {
     it(defaultParametersTest, () => {
       const embedder = new MorphEmbeddingFunction();
@@ -26,14 +26,14 @@ describe("MorphEmbeddingFunction", () => {
 
   const customParametersTest = "should initialize with custom parameters";
   if (!process.env.MORPH_API_KEY) {
-    it.skip(customParametersTest, () => { });
+    it.skip(customParametersTest, () => {});
   } else {
     it(customParametersTest, () => {
       const embedder = new MorphEmbeddingFunction({
-        model_name: "custom-model",
-        api_base: "https://custom-api.com/v1",
-        encoding_format: "base64",
-        api_key_env_var: "MORPH_API_KEY",
+        modelName: "custom-model",
+        apiBase: "https://custom-api.com/v1",
+        encodingFormat: "base64",
+        apiKeyEnvVar: "MORPH_API_KEY",
       });
 
       const config = embedder.getConfig();
@@ -64,12 +64,10 @@ describe("MorphEmbeddingFunction", () => {
 
     try {
       const embedder = new MorphEmbeddingFunction({
-        api_key_env_var: "CUSTOM_MORPH_API_KEY",
+        apiKeyEnvVar: "CUSTOM_MORPH_API_KEY",
       });
 
-      expect(embedder.getConfig().api_key_env_var).toBe(
-        "CUSTOM_MORPH_API_KEY",
-      );
+      expect(embedder.getConfig().api_key_env_var).toBe("CUSTOM_MORPH_API_KEY");
     } finally {
       delete process.env.CUSTOM_MORPH_API_KEY;
     }
@@ -77,7 +75,7 @@ describe("MorphEmbeddingFunction", () => {
 
   const buildFromConfigTest = "should build from config";
   if (!process.env.MORPH_API_KEY) {
-    it.skip(buildFromConfigTest, () => { });
+    it.skip(buildFromConfigTest, () => {});
   } else {
     it(buildFromConfigTest, () => {
       const config = {
@@ -95,7 +93,7 @@ describe("MorphEmbeddingFunction", () => {
 
   const generateEmbeddingsTest = "should generate embeddings";
   if (!process.env.MORPH_API_KEY) {
-    it.skip(generateEmbeddingsTest, () => { });
+    it.skip(generateEmbeddingsTest, () => {});
   } else {
     it(generateEmbeddingsTest, async () => {
       const embedder = new MorphEmbeddingFunction();
