@@ -60,6 +60,15 @@ pub enum ChromaHttpClientError {
     /// validation error from the where clause parser.
     #[error("Invalid where clause")]
     InvalidWhere,
+    /// No embedding function is configured for a collection that needs to embed documents.
+    #[error("You must provide an embedding function to compute embeddings from documents")]
+    MissingEmbeddingFunction,
+    /// Documents were required because embeddings were omitted.
+    #[error("Documents are required when embeddings are not provided")]
+    MissingDocumentsForEmbedding,
+    /// The configured embedding function failed.
+    #[error("Embedding function error: {0}")]
+    EmbeddingFunctionError(String),
 }
 
 impl From<WhereError> for ChromaHttpClientError {
@@ -121,7 +130,10 @@ impl FailurePredicate<ChromaHttpClientError> for BackendFailurePredicate {
             ChromaHttpClientError::CouldNotResolveDatabaseId(_)
             | ChromaHttpClientError::ValidationError(_)
             | ChromaHttpClientError::NoBackendAvailable
-            | ChromaHttpClientError::InvalidWhere => false,
+            | ChromaHttpClientError::InvalidWhere
+            | ChromaHttpClientError::MissingEmbeddingFunction
+            | ChromaHttpClientError::MissingDocumentsForEmbedding
+            | ChromaHttpClientError::EmbeddingFunctionError(_) => false,
         }
     }
 }
@@ -175,6 +187,7 @@ pub struct ChromaHttpClient {
     tenant_id: Arc<Mutex<Option<String>>>,
     database_name: Arc<Mutex<Option<String>>>,
     resolve_tenant_or_database_lock: Arc<tokio::sync::Mutex<()>>,
+    chroma_cloud_api_key: Option<String>,
 }
 
 impl Default for ChromaHttpClient {
@@ -192,6 +205,7 @@ impl Clone for ChromaHttpClient {
             tenant_id: Arc::new(Mutex::new(self.tenant_id.lock().clone())),
             database_name: Arc::new(Mutex::new(self.database_name.lock().clone())),
             resolve_tenant_or_database_lock: Arc::new(tokio::sync::Mutex::new(())),
+            chroma_cloud_api_key: self.chroma_cloud_api_key.clone(),
         }
     }
 }
@@ -232,6 +246,10 @@ impl ChromaHttpClient {
     /// # }
     /// ```
     pub fn new(options: ChromaHttpClientOptions) -> Self {
+        let chroma_cloud_api_key = options
+            .auth_method
+            .chroma_cloud_api_key()
+            .map(ToOwned::to_owned);
         let mut headers = options.headers();
         headers.append("user-agent", USER_AGENT.try_into().unwrap());
 
@@ -263,7 +281,12 @@ impl ChromaHttpClient {
             tenant_id: Arc::new(Mutex::new(options.tenant_id)),
             database_name: Arc::new(Mutex::new(options.database_name)),
             resolve_tenant_or_database_lock: Arc::new(tokio::sync::Mutex::new(())),
+            chroma_cloud_api_key,
         }
+    }
+
+    pub(crate) fn chroma_cloud_api_key(&self) -> Option<&str> {
+        self.chroma_cloud_api_key.as_deref()
     }
 
     /// Constructs a client from environment variables.
@@ -657,10 +680,7 @@ impl ChromaHttpClient {
             )
             .await?;
 
-        Ok(ChromaCollection {
-            client: self.clone(),
-            collection: Arc::new(collection),
-        })
+        Ok(ChromaCollection::new(self.clone(), collection))
     }
 
     /// Retrieves an existing collection by its ID.
@@ -706,10 +726,7 @@ impl ChromaHttpClient {
             )
             .await?;
 
-        Ok(ChromaCollection {
-            client: self.clone(),
-            collection: Arc::new(collection),
-        })
+        Ok(ChromaCollection::new(self.clone(), collection))
     }
 
     /// Removes a collection and all its records from the database.
@@ -852,10 +869,7 @@ impl ChromaHttpClient {
 
         Ok(collections
             .into_iter()
-            .map(|collection| ChromaCollection {
-                client: self.clone(),
-                collection: Arc::new(collection),
-            })
+            .map(|collection| ChromaCollection::new(self.clone(), collection))
             .collect())
     }
 
@@ -1060,10 +1074,7 @@ impl ChromaHttpClient {
             )
             .await?;
 
-        Ok(ChromaCollection {
-            client: self.clone(),
-            collection: Arc::new(collection),
-        })
+        Ok(ChromaCollection::new(self.clone(), collection))
     }
 
     pub(crate) async fn send<

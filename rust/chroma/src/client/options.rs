@@ -91,6 +91,17 @@ impl ChromaAuthMethod {
             value,
         })
     }
+
+    pub(crate) fn chroma_cloud_api_key(&self) -> Option<&str> {
+        match self {
+            ChromaAuthMethod::HeaderAuth { header, value }
+                if header.as_str().eq_ignore_ascii_case("x-chroma-token") =>
+            {
+                value.to_str().ok()
+            }
+            ChromaAuthMethod::HeaderAuth { .. } | ChromaAuthMethod::None => None,
+        }
+    }
 }
 
 /// Errors that occur during client configuration construction.
