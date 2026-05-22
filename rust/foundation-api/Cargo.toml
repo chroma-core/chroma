@@ -26,3 +26,6 @@ chroma-tracing = { workspace = true, features = ["middleware"] }
 chroma-types = { workspace = true }
 frontend-core = { workspace = true }
 mdac = { workspace = true }
+
+[dev-dependencies]
+chroma-api-types = { workspace = true }
