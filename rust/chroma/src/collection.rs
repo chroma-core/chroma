@@ -1197,12 +1197,23 @@ impl ChromaCollection {
         }
 
         let mut embeddings = self.embed_documents(&input).await?.into_iter();
-        Ok(Some(
-            documents
-                .iter()
-                .map(|document| document.as_ref().map(|_| embeddings.next().unwrap()))
-                .collect(),
-        ))
+        documents
+            .iter()
+            .map(|document| {
+                document
+                    .as_ref()
+                    .map(|_| {
+                        embeddings.next().ok_or_else(|| {
+                            ChromaHttpClientError::EmbeddingFunctionError(
+                                "Embedding function returned fewer embeddings than documents"
+                                    .to_string(),
+                            )
+                        })
+                    })
+                    .transpose()
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(Some)
     }
 
     async fn embed_documents(
