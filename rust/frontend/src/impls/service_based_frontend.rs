@@ -2645,9 +2645,9 @@ impl ServiceBasedFrontend {
         let attached_functions = self
             .sysdb_client
             .get_attached_functions(
-                None,
                 Some(function_name.clone()),
                 Some(collection_uuid),
+                vec![],
                 true,
             )
             .await?;

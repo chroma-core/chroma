@@ -720,7 +720,7 @@ func (tc *Catalog) softDeleteCollection(ctx context.Context, deleteCollection *m
 
 		// List attached functions for this collection (as input) and soft delete them
 		deleteCollectionIDStr := deleteCollection.ID.String()
-		attachedFunctions, err := tc.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(nil, nil, &deleteCollectionIDStr, nil, true)
+		attachedFunctions, err := tc.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(nil, nil, &deleteCollectionIDStr, nil, nil, true)
 		if err != nil {
 			return err
 		}
@@ -735,7 +735,7 @@ func (tc *Catalog) softDeleteCollection(ctx context.Context, deleteCollection *m
 		// This is done transactionally - either all functions are deleted or none are
 		// Query for all attached functions that have this collection as their output
 		outputCollectionIDStr := deleteCollection.ID.String()
-		attachedFunctionsWithOutput, err := tc.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(nil, nil, nil, &outputCollectionIDStr, false)
+		attachedFunctionsWithOutput, err := tc.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(nil, nil, nil, &outputCollectionIDStr, nil, false)
 		if err != nil {
 			log.Error("Failed to query attached functions by output collection", zap.Error(err))
 			return fmt.Errorf("failed to query attached functions for output collection: %w", err)

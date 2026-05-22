@@ -150,7 +150,7 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByName() {
 	// Retrieve by name
 	inputColID := "input_col_id"
 	attachedFunctionName := "test-get-attachedFunction"
-	retrievedList, err := suite.Db.GetAttachedFunctions(nil, &attachedFunctionName, &inputColID, nil, true)
+	retrievedList, err := suite.Db.GetAttachedFunctions(nil, &attachedFunctionName, &inputColID, nil, nil, true)
 	suite.Require().NoError(err)
 	suite.Require().Len(retrievedList, 1)
 	retrieved := retrievedList[0]
@@ -186,7 +186,7 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByName_NotRe
 	// Retrieve by name with onlyReady=true should not return it
 	inputColID := "input_col_id"
 	attachedFunctionName := "test-get-attachedFunction"
-	retrievedList, err := suite.Db.GetAttachedFunctions(nil, &attachedFunctionName, &inputColID, nil, true)
+	retrievedList, err := suite.Db.GetAttachedFunctions(nil, &attachedFunctionName, &inputColID, nil, nil, true)
 	suite.Require().NoError(err)
 	suite.Require().Len(retrievedList, 0)
 
@@ -198,7 +198,7 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByName_NotFo
 	// Try to get non-existent attached function
 	inputColID := "input_col_id"
 	nonexistentName := "nonexistent-attachedFunction"
-	retrievedList, err := suite.Db.GetAttachedFunctions(nil, &nonexistentName, &inputColID, nil, true)
+	retrievedList, err := suite.Db.GetAttachedFunctions(nil, &nonexistentName, &inputColID, nil, nil, true)
 	suite.Require().NoError(err)
 	suite.Require().Len(retrievedList, 0)
 }
@@ -231,7 +231,7 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByName_Ignor
 	// GetByName should not return it
 	inputColID := "input1"
 	deletedName := "test-deleted-attachedFunction"
-	retrievedList, err := suite.Db.GetAttachedFunctions(nil, &deletedName, &inputColID, nil, true)
+	retrievedList, err := suite.Db.GetAttachedFunctions(nil, &deletedName, &inputColID, nil, nil, true)
 	suite.Require().NoError(err)
 	suite.Require().Len(retrievedList, 0)
 
@@ -334,7 +334,7 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_DeleteAll() {
 
 	// Verify all attached functions are deleted
 	for _, attachedFunction := range attachedFunctions {
-		retrievedList, err := suite.Db.GetAttachedFunctions(nil, &attachedFunction.Name, &attachedFunction.InputCollectionID, nil, true)
+		retrievedList, err := suite.Db.GetAttachedFunctions(nil, &attachedFunction.Name, &attachedFunction.InputCollectionID, nil, nil, true)
 		suite.Require().NoError(err)
 		suite.Require().Len(retrievedList, 0)
 	}
@@ -365,7 +365,7 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByID() {
 	err := suite.Db.Insert(attachedFunction)
 	suite.Require().NoError(err)
 
-	retrievedList, err := suite.Db.GetAttachedFunctions(&attachedFunctionID, nil, nil, nil, true)
+	retrievedList, err := suite.Db.GetAttachedFunctions(&attachedFunctionID, nil, nil, nil, nil, true)
 	suite.Require().NoError(err)
 	suite.Require().Len(retrievedList, 1)
 	retrieved := retrievedList[0]
@@ -396,7 +396,7 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByID_NoReady
 	err := suite.Db.Insert(attachedFunction)
 	suite.Require().NoError(err)
 
-	retrievedList, err := suite.Db.GetAttachedFunctions(&attachedFunctionID, nil, nil, nil, true)
+	retrievedList, err := suite.Db.GetAttachedFunctions(&attachedFunctionID, nil, nil, nil, nil, true)
 	suite.Require().NoError(err)
 	suite.Require().Len(retrievedList, 0)
 
@@ -405,7 +405,7 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByID_NoReady
 
 func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByID_NotFound() {
 	nonexistentID := uuid.New()
-	retrievedList, err := suite.Db.GetAttachedFunctions(&nonexistentID, nil, nil, nil, true)
+	retrievedList, err := suite.Db.GetAttachedFunctions(&nonexistentID, nil, nil, nil, nil, true)
 	suite.Require().NoError(err)
 	suite.Require().Len(retrievedList, 0)
 }
@@ -433,11 +433,56 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByID_Ignores
 	err = suite.Db.SoftDelete("input1", "test-get-by-id-deleted")
 	suite.Require().NoError(err)
 
-	retrievedList, err := suite.Db.GetAttachedFunctions(&attachedFunctionID, nil, nil, nil, true)
+	retrievedList, err := suite.Db.GetAttachedFunctions(&attachedFunctionID, nil, nil, nil, nil, true)
 	suite.Require().NoError(err)
 	suite.Require().Len(retrievedList, 0)
 
 	suite.db.Unscoped().Delete(&dbmodel.AttachedFunction{}, "id = ?", attachedFunction.ID)
+}
+
+func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetAttachedFunctions_ErrorWhenBothIdAndIdsProvided() {
+	// Create two test attached functions
+	attachedFunction1 := &dbmodel.AttachedFunction{
+		ID:                      uuid.New(),
+		Name:                    "test-both-params-1",
+		FunctionID:              dbmodel.FunctionRecordCounter,
+		InputCollectionID:       "input1",
+		OutputCollectionName:    "output1",
+		FunctionParams:          "{}",
+		TenantID:                "tenant1",
+		DatabaseID:              "db1",
+		MinRecordsForInvocation: 100,
+		IsReady:                 true,
+	}
+	attachedFunction2 := &dbmodel.AttachedFunction{
+		ID:                      uuid.New(),
+		Name:                    "test-both-params-2",
+		FunctionID:              dbmodel.FunctionRecordCounter,
+		InputCollectionID:       "input1",
+		OutputCollectionName:    "output2",
+		FunctionParams:          "{}",
+		TenantID:                "tenant1",
+		DatabaseID:              "db1",
+		MinRecordsForInvocation: 100,
+		IsReady:                 true,
+	}
+
+	err := suite.Db.Insert(attachedFunction1)
+	suite.Require().NoError(err)
+	err = suite.Db.Insert(attachedFunction2)
+	suite.Require().NoError(err)
+
+	// Test that providing both id and ids returns an error
+	singleID := attachedFunction1.ID
+	multipleIDs := []uuid.UUID{attachedFunction1.ID, attachedFunction2.ID}
+
+	_, err = suite.Db.GetAttachedFunctions(&singleID, nil, nil, nil, multipleIDs, true)
+	suite.Require().Error(err)
+	suite.Require().Contains(err.Error(), "cannot provide both 'id' and 'ids' parameters")
+
+	// Clean up
+	suite.db.Unscoped().Delete(&dbmodel.AttachedFunction{}, "id = ?", attachedFunction1.ID)
+	suite.db.Unscoped().Delete(&dbmodel.AttachedFunction{}, "id = ?", attachedFunction2.ID)
 }
 
 // TestFunctionConstantsMatchSeededDatabase verifies that function constants in

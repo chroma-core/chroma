@@ -1620,9 +1620,11 @@ impl GrpcSysDb {
         let res = self
             .client
             .get_attached_functions(chroma_proto::GetAttachedFunctionsRequest {
+                #[allow(deprecated)]
                 id: None,
                 name: None,
                 input_collection_id: Some(collection_id.0.to_string()),
+                ids: vec![],
                 only_ready: Some(true),
             })
             .await
@@ -2379,18 +2381,41 @@ impl GrpcSysDb {
 
     /// Get attached functions using flexible query parameters
     /// All parameters are optional - None means don't filter on that field
+    /// Maximum 100 IDs can be queried at once
     pub async fn get_attached_functions(
         &mut self,
-        id: Option<chroma_types::AttachedFunctionUuid>,
         name: Option<String>,
         input_collection_id: Option<chroma_types::CollectionUuid>,
+        ids: Vec<chroma_types::AttachedFunctionUuid>,
         only_ready: bool,
     ) -> Result<Vec<chroma_types::AttachedFunction>, GetAttachedFunctionError> {
+        // Enforce a reasonable limit on the number of IDs to prevent overly large queries
+        const MAX_IDS: usize = 100;
+        if ids.len() > MAX_IDS {
+            return Err(GetAttachedFunctionError::InvalidArgument(format!(
+                "Too many IDs provided: {} (maximum: {})",
+                ids.len(),
+                MAX_IDS
+            )));
+        }
+
+        // Convert ids to strings for the proto request
+        let ids_as_strings: Vec<String> = ids.into_iter().map(|id| id.0.to_string()).collect();
+
+        // If we have exactly one ID, also set the deprecated id field for backward compatibility
+        let single_id = if ids_as_strings.len() == 1 {
+            Some(ids_as_strings[0].clone())
+        } else {
+            None
+        };
+
         let req = chroma_proto::GetAttachedFunctionsRequest {
-            id: id.map(|id| id.0.to_string()),
+            #[allow(deprecated)]
+            id: single_id,
             name,
             input_collection_id: input_collection_id.map(|id| id.to_string()),
             only_ready: Some(only_ready),
+            ids: ids_as_strings,
         };
 
         let response = match self.client.get_attached_functions(req).await {
@@ -2688,16 +2713,27 @@ impl SysDb {
 
     /// Get attached functions using flexible query parameters
     /// All parameters are optional - None means don't filter on that field
+    /// Maximum 100 IDs can be queried at once
     pub async fn get_attached_functions(
         &mut self,
-        id: Option<chroma_types::AttachedFunctionUuid>,
         name: Option<String>,
         input_collection_id: Option<chroma_types::CollectionUuid>,
+        ids: Vec<chroma_types::AttachedFunctionUuid>,
         only_ready: bool,
     ) -> Result<Vec<chroma_types::AttachedFunction>, GetAttachedFunctionError> {
+        // Enforce the same limit here as in GrpcSysDb
+        const MAX_IDS: usize = 100;
+        if ids.len() > MAX_IDS {
+            return Err(GetAttachedFunctionError::InvalidArgument(format!(
+                "Too many IDs provided: {} (maximum: {})",
+                ids.len(),
+                MAX_IDS
+            )));
+        }
+
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.get_attached_functions(id, name, input_collection_id, only_ready)
+                grpc.get_attached_functions(name, input_collection_id, ids, only_ready)
                     .await
             }
             SysDb::Sqlite(_) => {
@@ -2879,6 +2915,8 @@ pub enum GetAttachedFunctionError {
     FailedToGetAttachedFunction(tonic::Status),
     #[error("Server returned invalid data")]
     ServerReturnedInvalidData,
+    #[error("Invalid argument: {0}")]
+    InvalidArgument(String),
 }
 
 impl ChromaError for GetAttachedFunctionError {
@@ -2888,6 +2926,7 @@ impl ChromaError for GetAttachedFunctionError {
             GetAttachedFunctionError::NotReady => ErrorCodes::FailedPrecondition,
             GetAttachedFunctionError::FailedToGetAttachedFunction(e) => e.code().into(),
             GetAttachedFunctionError::ServerReturnedInvalidData => ErrorCodes::Internal,
+            GetAttachedFunctionError::InvalidArgument(_) => ErrorCodes::InvalidArgument,
         }
     }
 }

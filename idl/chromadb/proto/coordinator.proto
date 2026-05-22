@@ -580,14 +580,17 @@ message AttachFunctionResponse {
 
 message GetAttachedFunctionsRequest {
   // All parameters are optional - nil means don't filter on that field
-  // - id: Filter by attached function ID (UUID string)
+  // - id: DEPRECATED - Use ids field instead. Filter by attached function ID (UUID string)
   // - name: Filter by attached function name
   // - input_collection_id: Filter by input collection ID
   // - only_ready: If true, only returns attached functions where is_ready = true (default: true)
-  optional string id = 1;
+  // - ids: Filter by multiple attached function IDs. Pass a single-element array to filter by one ID.
+  //        Maximum 100 IDs can be queried at once.
+  optional string id = 1 [deprecated = true];
   optional string name = 2;
   optional string input_collection_id = 3;
   optional bool only_ready = 4;
+  repeated string ids = 5;
 }
 
 message GetAttachedFunctionsResponse {

@@ -86,7 +86,7 @@ func (suite *ListAttachedFunctionsTestSuite) TestListAttachedFunctions_Success()
 	}
 
 	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &collectionID, (*string)(nil), true).Return(attachedFunctions, nil).Once()
+	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &collectionID, (*string)(nil), []uuid.UUID(nil), true).Return(attachedFunctions, nil).Once()
 
 	functionOne := &dbmodel.Function{ID: functionID1, Name: "function-one", IsAsync: false}
 	functionTwo := &dbmodel.Function{ID: functionID2, Name: "function-two", IsAsync: true}
@@ -132,7 +132,7 @@ func (suite *ListAttachedFunctionsTestSuite) TestListAttachedFunctions_EmptyResu
 	collectionID := "test-collection"
 
 	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &collectionID, (*string)(nil), true).Return([]*dbmodel.AttachedFunction{}, nil).Once()
+	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &collectionID, (*string)(nil), []uuid.UUID(nil), true).Return([]*dbmodel.AttachedFunction{}, nil).Once()
 
 	req := &coordinatorpb.GetAttachedFunctionsRequest{InputCollectionId: &collectionID}
 	resp, err := suite.coordinator.GetAttachedFunctions(ctx, req)
@@ -165,7 +165,7 @@ func (suite *ListAttachedFunctionsTestSuite) TestListAttachedFunctions_FunctionD
 	}
 
 	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &collectionID, (*string)(nil), true).Return([]*dbmodel.AttachedFunction{attachedFunction}, nil).Once()
+	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &collectionID, (*string)(nil), []uuid.UUID(nil), true).Return([]*dbmodel.AttachedFunction{attachedFunction}, nil).Once()
 
 	suite.mockMetaDomain.On("FunctionDb", ctx).Return(suite.mockFunctionDb).Once()
 	suite.mockFunctionDb.On("GetByIDs", []uuid.UUID{functionID}).Return(nil, errors.New("db error")).Once()
@@ -200,7 +200,7 @@ func (suite *ListAttachedFunctionsTestSuite) TestListAttachedFunctions_InvalidPa
 	}
 
 	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &collectionID, (*string)(nil), true).Return([]*dbmodel.AttachedFunction{attachedFunction}, nil).Once()
+	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &collectionID, (*string)(nil), []uuid.UUID(nil), true).Return([]*dbmodel.AttachedFunction{attachedFunction}, nil).Once()
 
 	functionModel := &dbmodel.Function{ID: functionID, Name: "function", IsAsync: false}
 

@@ -69,7 +69,7 @@ func TestAsyncFunctionRepairFlowSimple(t *testing.T) {
 
 	// Mock all the DB calls
 	mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(mockAttachedFunctionDb)
-	mockAttachedFunctionDb.On("GetAttachedFunctions", &attachedFunctionID, (*string)(nil), (*string)(nil), (*string)(nil), true).
+	mockAttachedFunctionDb.On("GetAttachedFunctions", &attachedFunctionID, (*string)(nil), (*string)(nil), (*string)(nil), []uuid.UUID(nil), true).
 		Return([]*dbmodel.AttachedFunction{attachedFunction}, nil)
 
 	mockMetaDomain.On("FunctionDb", mock.Anything).Return(mockFunctionDb)
@@ -187,7 +187,7 @@ func TestAsyncFunctionNoRepairSimple(t *testing.T) {
 
 	// Mock all the DB calls
 	mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(mockAttachedFunctionDb)
-	mockAttachedFunctionDb.On("GetAttachedFunctions", &attachedFunctionID, (*string)(nil), (*string)(nil), (*string)(nil), true).
+	mockAttachedFunctionDb.On("GetAttachedFunctions", &attachedFunctionID, (*string)(nil), (*string)(nil), (*string)(nil), []uuid.UUID(nil), true).
 		Return([]*dbmodel.AttachedFunction{attachedFunction}, nil)
 
 	mockMetaDomain.On("FunctionDb", mock.Anything).Return(mockFunctionDb)
@@ -274,7 +274,7 @@ func TestAsyncFunctionTryFinishIdempotent(t *testing.T) {
 
 	// Mock all the DB calls
 	mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(mockAttachedFunctionDb)
-	mockAttachedFunctionDb.On("GetAttachedFunctions", &attachedFunctionID, (*string)(nil), (*string)(nil), (*string)(nil), true).
+	mockAttachedFunctionDb.On("GetAttachedFunctions", &attachedFunctionID, (*string)(nil), (*string)(nil), (*string)(nil), []uuid.UUID(nil), true).
 		Return([]*dbmodel.AttachedFunction{attachedFunction}, nil)
 
 	mockMetaDomain.On("FunctionDb", mock.Anything).Return(mockFunctionDb)
@@ -411,7 +411,7 @@ func TestAsyncFunctionOffsetOnlyMovesForward(t *testing.T) {
 
 	// Mock all the DB calls
 	mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(mockAttachedFunctionDb)
-	mockAttachedFunctionDb.On("GetAttachedFunctions", &attachedFunctionID, (*string)(nil), (*string)(nil), (*string)(nil), true).
+	mockAttachedFunctionDb.On("GetAttachedFunctions", &attachedFunctionID, (*string)(nil), (*string)(nil), (*string)(nil), []uuid.UUID(nil), true).
 		Return([]*dbmodel.AttachedFunction{attachedFunction}, nil)
 
 	mockMetaDomain.On("FunctionDb", mock.Anything).Return(mockFunctionDb)
