@@ -2559,9 +2559,8 @@ impl ServiceBasedFrontend {
         .await?;
 
         // Step 3: Create output collection and set is_ready = true
-        // Generate a default HNSW schema for the output collection with the attached function ID
-        let mut output_schema = Schema::new_default(KnnIndex::Hnsw);
-        output_schema.source_attached_function_id = Some(attached_function_id.0.to_string());
+        // Generate a default HNSW schema for the output collection
+        let output_schema = Schema::new_default(KnnIndex::Hnsw);
         let output_schema_str = serde_json::to_string(&output_schema).map_err(|e| {
             chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
                 tonic::Status::internal(format!(
@@ -2577,14 +2576,7 @@ impl ServiceBasedFrontend {
             .sysdb_client
             .finish_create_attached_function(attached_function_id, output_schema_str)
             .await
-            .map_err(|e| match e {
-                chroma_types::FinishCreateAttachedFunctionError::OutputCollectionExists => {
-                    chroma_types::AttachFunctionError::OutputCollectionExists(
-                        output_collection.clone(),
-                    )
-                }
-                other => chroma_types::AttachFunctionError::from(other),
-            })?;
+            .map_err(chroma_types::AttachFunctionError::from)?;
 
         Ok(AttachFunctionResponse {
             attached_function: chroma_types::AttachedFunctionInfo {

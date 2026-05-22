@@ -101,7 +101,7 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 	err := s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		// Check if there's any active (ready, non-deleted) attached function for this collection
 		// We only allow one active attached function per collection
-		existingAttachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(nil, nil, &req.InputCollectionId, false)
+		existingAttachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(nil, nil, &req.InputCollectionId, nil, false)
 		if err != nil {
 			log.Error("AttachFunction: failed to check for existing attached function", zap.Error(err))
 			return err
@@ -166,12 +166,30 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 			return common.ErrCollectionNotFound
 		}
 
-		// Check if input collection is an output collection (prevent chaining)
-		inputCollection := collections[0]
-		if model.GetSourceAttachedFunctionIDFromSchema(inputCollection.Collection.SchemaStr) != nil {
-			log.Error("AttachFunction: cannot attach function to an output collection",
-				zap.String("input_collection_id", req.InputCollectionId))
+		// Check if input collection is being used as an output collection by any attached function
+		inputCollectionIDStr := req.InputCollectionId
+		attachedFunctionsUsingAsOutput, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(nil, nil, nil, &inputCollectionIDStr, false)
+		if err != nil {
+			log.Error("AttachFunction: failed to check if input collection is used as output", zap.Error(err))
+			return err
+		}
+		if len(attachedFunctionsUsingAsOutput) > 0 {
+			log.Error("AttachFunction: cannot attach function to a collection that is already an output collection",
+				zap.String("collection_id", req.InputCollectionId))
 			return common.ErrCannotAttachToOutputCollection
+		}
+
+		// Check if output collection already exists
+		existingOutputCollections, err := s.catalog.metaDomain.CollectionDb(txCtx).GetCollections(nil, &req.OutputCollectionName, req.TenantId, req.Database, nil, nil, false)
+		if err != nil {
+			log.Error("AttachFunction: failed to check for existing output collection", zap.Error(err))
+			return err
+		}
+
+		if len(existingOutputCollections) > 0 {
+			// Output collection exists - we now allow reusing any existing collection
+			log.Info("AttachFunction: output collection already exists, will reuse it",
+				zap.String("output_collection_name", req.OutputCollectionName))
 		}
 
 		// Serialize params
@@ -302,7 +320,7 @@ func (s *Coordinator) GetAttachedFunctions(ctx context.Context, req *coordinator
 		onlyReady = *req.OnlyReady
 	}
 
-	attachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).GetAttachedFunctions(idPtr, req.Name, req.InputCollectionId, onlyReady)
+	attachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).GetAttachedFunctions(idPtr, req.Name, req.InputCollectionId, nil, onlyReady)
 	if err != nil {
 		log.Error("GetAttachedFunctions: failed to get attached functions", zap.Error(err))
 		return nil, err
@@ -371,7 +389,7 @@ func (s *Coordinator) GetAttachedFunctions(ctx context.Context, req *coordinator
 // DetachFunction soft deletes an attached function by name
 func (s *Coordinator) DetachFunction(ctx context.Context, req *coordinatorpb.DetachFunctionRequest) (*coordinatorpb.DetachFunctionResponse, error) {
 	// First get the attached function to check if we need to delete the output collection
-	attachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).GetAttachedFunctions(nil, &req.Name, &req.InputCollectionId, true)
+	attachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).GetAttachedFunctions(nil, &req.Name, &req.InputCollectionId, nil, true)
 	if err != nil {
 		log.Error("DetachFunction: failed to get attached function", zap.Error(err))
 		return nil, err
@@ -473,7 +491,7 @@ func (s *Coordinator) FinishCreateAttachedFunction(ctx context.Context, req *coo
 	// Execute all operations in a transaction for atomicity
 	err = s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		// 1. Get the attached function to retrieve metadata
-		attachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(&attachedFunctionID, nil, nil, false)
+		attachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(&attachedFunctionID, nil, nil, nil, false)
 		if err != nil {
 			log.Error("FinishCreateAttachedFunction: failed to get attached function", zap.Error(err))
 			return err
@@ -502,54 +520,74 @@ func (s *Coordinator) FinishCreateAttachedFunction(ctx context.Context, req *coo
 			return common.ErrDatabaseNotFound
 		}
 
-		// 4. Generate new collection UUID
-		collectionID := types.NewUniqueID()
-
-		// 5. Create the output collection with segments
-		dimension := int32(1) // Default dimension for attached function output collections
-
-		// Use the schema string passed from Rust (contains default schema + source_attached_function_id)
-		schemaStr := req.OutputCollectionSchemaStr
-
-		collection := &model.CreateCollection{
-			ID:                   collectionID,
-			Name:                 attachedFunction.OutputCollectionName,
-			ConfigurationJsonStr: "{}", // Empty JSON object for default config
-			SchemaStr:            &schemaStr,
-			TenantID:             attachedFunction.TenantID,
-			DatabaseName:         database.Name,
-			Dimension:            &dimension,
-		}
-
-		// Create segments for the collection (distributed setup with HNSW)
-		segments := []*model.Segment{
-			{
-				ID:           types.NewUniqueID(),
-				Type:         "urn:chroma:segment/vector/hnsw-distributed",
-				Scope:        "VECTOR",
-				CollectionID: collectionID,
-			},
-			{
-				ID:           types.NewUniqueID(),
-				Type:         "urn:chroma:segment/metadata/blockfile",
-				Scope:        "METADATA",
-				CollectionID: collectionID,
-			},
-			{
-				ID:           types.NewUniqueID(),
-				Type:         "urn:chroma:segment/record/blockfile",
-				Scope:        "RECORD",
-				CollectionID: collectionID,
-			},
-		}
-
-		_, _, err = s.catalog.CreateCollectionAndSegments(txCtx, collection, segments, 0)
+		// 4. Check if output collection already exists
+		existingCollections, err := s.catalog.metaDomain.CollectionDb(txCtx).GetCollections(nil, &attachedFunction.OutputCollectionName, attachedFunction.TenantID, database.Name, nil, nil, false)
 		if err != nil {
-			log.Error("FinishCreateAttachedFunction: failed to create output collection", zap.Error(err))
-			if err == common.ErrCollectionUniqueConstraintViolation {
-				return grpcutils.BuildAlreadyExistsGrpcError(fmt.Sprintf("output collection '%s' already exists", collection.Name))
-			}
+			log.Error("FinishCreateAttachedFunction: failed to check for existing output collection", zap.Error(err))
 			return err
+		}
+
+		var collectionID types.UniqueID
+		if len(existingCollections) > 0 {
+			// Output collection exists - reuse it
+			existingCollection := existingCollections[0]
+			log.Info("FinishCreateAttachedFunction: reusing existing output collection",
+				zap.String("output_collection_name", attachedFunction.OutputCollectionName))
+
+			collectionID, err = types.Parse(existingCollection.Collection.ID)
+			if err != nil {
+				log.Error("FinishCreateAttachedFunction: failed to parse existing collection ID", zap.Error(err))
+				return grpcutils.BuildInternalGrpcError("invalid collection ID")
+			}
+			created = false // Collection already existed
+		} else {
+			// 5. Create new output collection with segments
+			collectionID = types.NewUniqueID()
+			dimension := int32(1) // Default dimension for attached function output collections
+
+			// Use the schema string passed from Rust (contains default schema)
+			schemaStr := req.OutputCollectionSchemaStr
+
+			collection := &model.CreateCollection{
+				ID:                   collectionID,
+				Name:                 attachedFunction.OutputCollectionName,
+				ConfigurationJsonStr: "{}", // Empty JSON object for default config
+				SchemaStr:            &schemaStr,
+				TenantID:             attachedFunction.TenantID,
+				DatabaseName:         database.Name,
+				Dimension:            &dimension,
+			}
+
+			// Create segments for the collection (distributed setup with HNSW)
+			segments := []*model.Segment{
+				{
+					ID:           types.NewUniqueID(),
+					Type:         "urn:chroma:segment/vector/hnsw-distributed",
+					Scope:        "VECTOR",
+					CollectionID: collectionID,
+				},
+				{
+					ID:           types.NewUniqueID(),
+					Type:         "urn:chroma:segment/metadata/blockfile",
+					Scope:        "METADATA",
+					CollectionID: collectionID,
+				},
+				{
+					ID:           types.NewUniqueID(),
+					Type:         "urn:chroma:segment/record/blockfile",
+					Scope:        "RECORD",
+					CollectionID: collectionID,
+				},
+			}
+
+			_, _, err = s.catalog.CreateCollectionAndSegments(txCtx, collection, segments, 0)
+			if err != nil {
+				log.Error("FinishCreateAttachedFunction: failed to create output collection", zap.Error(err))
+				if err == common.ErrCollectionUniqueConstraintViolation {
+					return grpcutils.BuildAlreadyExistsGrpcError(fmt.Sprintf("output collection '%s' already exists", collection.Name))
+				}
+				return err
+			}
 		}
 
 		// 6. Update attached function with output_collection_id and set is_ready to true
@@ -568,7 +606,7 @@ func (s *Coordinator) FinishCreateAttachedFunction(ctx context.Context, req *coo
 		}
 
 		// 7. Validate that there is only one ready attached function for this collection
-		existingAttachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(nil, nil, &attachedFunction.InputCollectionID, true)
+		existingAttachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(nil, nil, &attachedFunction.InputCollectionID, nil, true)
 		if err != nil {
 			log.Error("FinishCreateAttachedFunction: failed to get attached functions", zap.Error(err))
 			return err
@@ -717,7 +755,7 @@ func (s *Coordinator) TryFinishAsyncAttachedFunctionInvocation(ctx context.Conte
 	var witnessedLogOffset int64
 
 	err = s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		attachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(&attachedFunctionID, nil, nil, true)
+		attachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(&attachedFunctionID, nil, nil, nil, true)
 		if err != nil {
 			log.Error("Failed to get attached function", zap.Error(err))
 			return err

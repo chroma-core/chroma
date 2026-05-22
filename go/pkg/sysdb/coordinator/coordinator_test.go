@@ -1994,67 +1994,6 @@ func (suite *APIsTestSuite) TestDeleteCollectionWithAttachedFunction() {
 	suite.Equal(int64(1), count)
 }
 
-func (suite *APIsTestSuite) TestCannotAttachToOutputCollection() {
-	ctx := context.Background()
-
-	// Create a test collection (input)
-	inputCollectionID := types.NewUniqueID()
-	inputCollectionName := "test_input_collection"
-	createInputCollection := &model.CreateCollection{
-		ID:           inputCollectionID,
-		Name:         inputCollectionName,
-		TenantID:     suite.tenantName,
-		DatabaseName: suite.databaseName,
-	}
-	_, _, err := suite.coordinator.CreateCollection(ctx, createInputCollection)
-	suite.NoError(err)
-
-	// Create a collection that simulates an output collection (has source_attached_function_id in schema)
-	outputCollectionID := types.NewUniqueID()
-	outputCollectionName := "simulated_output_collection"
-	outputSchemaStr := `{"defaults":{},"keys":{},"source_attached_function_id":"some-function-id"}`
-	createOutputCollection := &model.CreateCollection{
-		ID:           outputCollectionID,
-		Name:         outputCollectionName,
-		TenantID:     suite.tenantName,
-		DatabaseName: suite.databaseName,
-		SchemaStr:    &outputSchemaStr,
-	}
-	_, _, err = suite.coordinator.CreateCollection(ctx, createOutputCollection)
-	suite.NoError(err)
-
-	// Create a dummy function
-	functionID := uuid.New()
-	functionName := "test_function_for_output_test"
-	err = suite.db.Create(&dbmodel.Function{
-		ID:            functionID,
-		Name:          functionName,
-		IsIncremental: false,
-		ReturnType:    "{}",
-	}).Error
-	suite.NoError(err)
-
-	// Try to attach function to the output collection - should fail
-	attachReq := &coordinatorpb.AttachFunctionRequest{
-		Name:                    "test_attached_fn",
-		InputCollectionId:       outputCollectionID.String(),
-		OutputCollectionName:    "another_output_collection",
-		FunctionName:            functionName,
-		TenantId:                suite.tenantName,
-		Database:                suite.databaseName,
-		MinRecordsForInvocation: 100,
-		Params:                  &structpb.Struct{Fields: map[string]*structpb.Value{}},
-	}
-	_, err = suite.coordinator.AttachFunction(ctx, attachReq)
-	suite.Error(err)
-	suite.True(errors.Is(err, common.ErrCannotAttachToOutputCollection))
-
-	// Attaching to input collection should succeed
-	attachReq.InputCollectionId = inputCollectionID.String()
-	_, err = suite.coordinator.AttachFunction(ctx, attachReq)
-	suite.NoError(err)
-}
-
 func (suite *APIsTestSuite) TestDeleteOutputCollectionDeletesAttachedFunction() {
 	ctx := context.Background()
 
@@ -2104,14 +2043,12 @@ func (suite *APIsTestSuite) TestDeleteOutputCollectionDeletesAttachedFunction() 
 	}).Error
 	suite.NoError(err)
 
-	// Create an output collection with schema pointing to the attached function
-	outputSchemaStr := fmt.Sprintf(`{"defaults":{},"keys":{},"source_attached_function_id":"%s"}`, attachedFunctionID.String())
+	// Create an output collection
 	createOutputCollection := &model.CreateCollection{
 		ID:           outputCollectionID,
 		Name:         "test_output_for_delete",
 		TenantID:     suite.tenantName,
 		DatabaseName: suite.databaseName,
-		SchemaStr:    &outputSchemaStr,
 	}
 	_, _, err = suite.coordinator.CreateCollection(ctx, createOutputCollection)
 	suite.NoError(err)

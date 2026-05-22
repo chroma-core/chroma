@@ -134,8 +134,9 @@ func (s *attachedFunctionDb) UpdateHeapEntryPending(id uuid.UUID, heapEntryPendi
 // - id: Filter by attached function ID
 // - name: Filter by attached function name
 // - inputCollectionID: Filter by input collection ID
+// - outputCollectionID: Filter by output collection ID
 // - onlyReady: If true, only returns attached functions where is_ready = true
-func (s *attachedFunctionDb) GetAttachedFunctions(id *uuid.UUID, name *string, inputCollectionID *string, onlyReady bool) ([]*dbmodel.AttachedFunction, error) {
+func (s *attachedFunctionDb) GetAttachedFunctions(id *uuid.UUID, name *string, inputCollectionID *string, outputCollectionID *string, onlyReady bool) ([]*dbmodel.AttachedFunction, error) {
 	var attachedFunctions []*dbmodel.AttachedFunction
 
 	query := s.db.Where("is_deleted = ?", false)
@@ -150,6 +151,10 @@ func (s *attachedFunctionDb) GetAttachedFunctions(id *uuid.UUID, name *string, i
 
 	if inputCollectionID != nil {
 		query = query.Where("input_collection_id = ?", *inputCollectionID)
+	}
+
+	if outputCollectionID != nil {
+		query = query.Where("output_collection_id = ?", *outputCollectionID)
 	}
 
 	if onlyReady {

@@ -1864,10 +1864,9 @@ impl GrpcSysDb {
         let collection_id_to_path = res.into_inner().collection_id_to_version_file_path;
         let mut result = HashMap::new();
         for (key, value) in collection_id_to_path {
-            let collection_id = CollectionUuid(
-                Uuid::try_parse(&key)
-                    .map_err(|err| BatchGetCollectionVersionFilePathsError::Uuid(err, key))?,
-            );
+            let collection_id = CollectionUuid(Uuid::try_parse(&key).map_err(|err| {
+                BatchGetCollectionVersionFilePathsError::Uuid(err, key.to_string())
+            })?);
             result.insert(collection_id, value);
         }
         Ok(result)
@@ -1900,10 +1899,9 @@ impl GrpcSysDb {
         );
         let mut result = HashMap::new();
         for (key, value) in collection_id_to_status {
-            let collection_id = CollectionUuid(
-                Uuid::try_parse(&key)
-                    .map_err(|err| BatchGetCollectionSoftDeleteStatusError::Uuid(err, key))?,
-            );
+            let collection_id = CollectionUuid(Uuid::try_parse(&key).map_err(|err| {
+                BatchGetCollectionSoftDeleteStatusError::Uuid(err, key.to_string())
+            })?);
             tracing::debug!("Collection {} is soft deleted: {}", collection_id, value);
             result.insert(collection_id, value);
         }
@@ -2212,7 +2210,6 @@ impl GrpcSysDb {
             .await
             .map_err(|e| match e.code() {
                 Code::NotFound => FinishCreateAttachedFunctionError::AttachedFunctionNotFound,
-                Code::AlreadyExists => FinishCreateAttachedFunctionError::OutputCollectionExists,
                 _ => FinishCreateAttachedFunctionError::FailedToFinishCreateAttachedFunction(e),
             })?;
         Ok(response.into_inner().created)
