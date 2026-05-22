@@ -25,6 +25,8 @@
 //! CHROMA_EMBED_URL=...
 //! ```
 
+use std::error::Error;
+
 use chroma::{
     embed::{
         chroma_cloud::{ChromaCloudQwenEmbeddingFunction, ChromaCloudSpladeEmbeddingFunction},
@@ -36,8 +38,10 @@ use chroma::{
     },
     ChromaCollection, ChromaHttpClient,
 };
+use serde_json::{to_string_pretty, Error as JsonError};
 
 const COLLECTION_NAME: &str = "rust_chroma_cloud_embeddings_example";
+const DENSE_KEY: &str = "#embedding";
 const SPARSE_KEY: &str = "sparse_embedding";
 const QUERY: &str = "How do I create embeddings with the Rust client?";
 
@@ -71,7 +75,7 @@ const RECORDS: [ExampleRecord; 4] = [
 ];
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn Error>> {
     let client = ChromaHttpClient::cloud()?;
 
     let qwen = ChromaCloudQwenEmbeddingFunction::builder()
@@ -190,12 +194,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn print_saved_embedding_functions(collection: &ChromaCollection) -> Result<(), serde_json::Error> {
+fn print_saved_embedding_functions(collection: &ChromaCollection) -> Result<(), JsonError> {
     let schema = collection.schema().as_ref();
     let dense_config = schema
-        .and_then(|schema| schema.defaults.float_list.as_ref())
+        .and_then(|schema| schema.keys.get(DENSE_KEY))
+        .and_then(|value_types| value_types.float_list.as_ref())
         .and_then(|float_list| float_list.vector_index.as_ref())
-        .and_then(|vector_index| vector_index.config.embedding_function.as_ref());
+        .and_then(|vector_index| vector_index.config.embedding_function.as_ref())
+        .or_else(|| {
+            schema
+                .and_then(|schema| schema.defaults.float_list.as_ref())
+                .and_then(|float_list| float_list.vector_index.as_ref())
+                .and_then(|vector_index| vector_index.config.embedding_function.as_ref())
+        });
     let sparse_config = schema
         .and_then(|schema| schema.keys.get(SPARSE_KEY))
         .and_then(|value_types| value_types.sparse_vector.as_ref())
@@ -211,11 +222,11 @@ fn print_saved_embedding_functions(collection: &ChromaCollection) -> Result<(), 
 fn print_embedding_function_config(
     label: &str,
     config: Option<&EmbeddingFunctionConfiguration>,
-) -> Result<(), serde_json::Error> {
+) -> Result<(), JsonError> {
     match config {
         Some(config) => {
             println!("{label}:");
-            println!("{}", serde_json::to_string_pretty(config)?);
+            println!("{}", to_string_pretty(config)?);
         }
         None => println!("{label}: <missing>"),
     }

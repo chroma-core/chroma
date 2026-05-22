@@ -1324,7 +1324,7 @@ mod tests {
     }
 
     #[test]
-    fn test_new_auto_attaches_chroma_cloud_qwen_embedding_function() {
+    fn new_auto_attaches_chroma_cloud_qwen_embedding_function() {
         let client = ChromaHttpClient::new(ChromaHttpClientOptions {
             auth_method: ChromaAuthMethod::cloud_api_key("test-api-key").unwrap(),
             ..Default::default()
@@ -1344,7 +1344,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_resolve_embeddings_uses_embedding_function() {
+    async fn resolve_embeddings_uses_embedding_function() {
         let mut collection = test_collection();
         collection.set_embedding_function(Some(TestEmbeddingFunction));
 
@@ -1360,7 +1360,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_resolve_embeddings_requires_documents() {
+    async fn resolve_embeddings_requires_documents() {
         let mut collection = test_collection();
         collection.set_embedding_function(Some(TestEmbeddingFunction));
 
@@ -1376,7 +1376,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_resolve_update_embeddings_embeds_only_present_documents() {
+    async fn resolve_update_embeddings_embeds_only_present_documents() {
         let mut collection = test_collection();
         collection.set_embedding_function(Some(TestEmbeddingFunction));
 

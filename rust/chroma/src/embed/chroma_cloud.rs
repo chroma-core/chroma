@@ -3,7 +3,7 @@
 //! This module mirrors the Python `chromadb` Chroma Cloud embedding functions:
 //! `chroma-cloud-qwen` for dense embeddings and `chroma-cloud-splade` for sparse embeddings.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, env};
 
 use chroma_types::{
     EmbeddingFunctionConfiguration, EmbeddingFunctionNewConfiguration, SparseVector,
@@ -11,6 +11,7 @@ use chroma_types::{
 };
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, InvalidHeaderValue};
 use serde::{Deserialize, Serialize};
+use serde_json::{from_value, json, Value};
 use thiserror::Error;
 
 use crate::embed::EmbeddingFunction;
@@ -50,10 +51,11 @@ pub enum ChromaCloudEmbeddingError {
 }
 
 /// Dense Chroma Cloud Qwen embedding model.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ChromaCloudQwenEmbeddingModel {
     /// `Qwen/Qwen3-Embedding-0.6B`.
     #[serde(rename = "Qwen/Qwen3-Embedding-0.6B")]
+    #[default]
     Qwen3Embedding0p6b,
 }
 
@@ -66,17 +68,12 @@ impl ChromaCloudQwenEmbeddingModel {
     }
 }
 
-impl Default for ChromaCloudQwenEmbeddingModel {
-    fn default() -> Self {
-        Self::Qwen3Embedding0p6b
-    }
-}
-
 /// Sparse Chroma Cloud Splade embedding model.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ChromaCloudSpladeEmbeddingModel {
     /// `prithivida/Splade_PP_en_v1`.
     #[serde(rename = "prithivida/Splade_PP_en_v1")]
+    #[default]
     SpladePpEnV1,
 }
 
@@ -86,12 +83,6 @@ impl ChromaCloudSpladeEmbeddingModel {
         match self {
             Self::SpladePpEnV1 => "prithivida/Splade_PP_en_v1",
         }
-    }
-}
-
-impl Default for ChromaCloudSpladeEmbeddingModel {
-    fn default() -> Self {
-        Self::SpladePpEnV1
     }
 }
 
@@ -205,13 +196,7 @@ impl ChromaCloudQwenEmbeddingFunctionBuilder {
         documents: impl Into<String>,
         query: impl Into<String>,
     ) -> Self {
-        self.instructions.insert(
-            task.into(),
-            ChromaCloudQwenTaskInstructions {
-                documents: documents.into(),
-                query: query.into(),
-            },
-        );
+        insert_qwen_instruction(&mut self.instructions, task, documents, query);
         self
     }
 
@@ -220,13 +205,7 @@ impl ChromaCloudQwenEmbeddingFunctionBuilder {
     /// The API key is resolved in this order: explicit `api_key`, `api_key_env_var`,
     /// then the client API key used by collection auto-configuration.
     pub fn build(self) -> Result<ChromaCloudQwenEmbeddingFunction, ChromaCloudEmbeddingError> {
-        let api_key = self
-            .api_key
-            .or_else(|| std::env::var(&self.api_key_env_var).ok())
-            .or(self.client_api_key)
-            .ok_or_else(|| ChromaCloudEmbeddingError::MissingApiKey {
-                env_var: self.api_key_env_var.clone(),
-            })?;
+        let api_key = resolve_api_key(self.api_key, &self.api_key_env_var, self.client_api_key)?;
         let client = new_chroma_cloud_client(api_key, self.model.as_str())?;
         Ok(ChromaCloudQwenEmbeddingFunction {
             client,
@@ -300,27 +279,21 @@ impl ChromaCloudQwenEmbeddingConfigurationBuilder {
         documents: impl Into<String>,
         query: impl Into<String>,
     ) -> Self {
-        self.instructions.insert(
-            task.into(),
-            ChromaCloudQwenTaskInstructions {
-                documents: documents.into(),
-                query: query.into(),
-            },
-        );
+        insert_qwen_instruction(&mut self.instructions, task, documents, query);
         self
     }
 
     /// Builds the known embedding function configuration.
     pub fn build(self) -> EmbeddingFunctionConfiguration {
-        EmbeddingFunctionConfiguration::Known(EmbeddingFunctionNewConfiguration {
-            name: QWEN_NAME.to_string(),
-            config: serde_json::json!({
-                "api_key_env_var": self.api_key_env_var,
-                "model": self.model.as_str(),
-                "task": self.task,
-                "instructions": self.instructions,
-            }),
-        })
+        known_embedding_function_configuration(
+            QWEN_NAME,
+            qwen_config_value(
+                &self.api_key_env_var,
+                self.model,
+                self.task.as_deref(),
+                &self.instructions,
+            ),
+        )
     }
 }
 
@@ -359,7 +332,7 @@ impl ChromaCloudQwenEmbeddingFunction {
                 config.name
             )));
         }
-        let config: QwenConfig = serde_json::from_value(config.config.clone())
+        let config: QwenConfig = from_value(config.config.clone())
             .map_err(|err| ChromaCloudEmbeddingError::InvalidConfig(err.to_string()))?;
         let api_key_env_var = config
             .api_key_env_var
@@ -382,13 +355,13 @@ impl ChromaCloudQwenEmbeddingFunction {
     }
 
     /// Returns this embedding function's serializable configuration.
-    pub fn get_config(&self) -> serde_json::Value {
-        serde_json::json!({
-            "api_key_env_var": self.api_key_env_var,
-            "model": self.model.as_str(),
-            "task": self.task,
-            "instructions": self.instructions,
-        })
+    pub fn get_config(&self) -> Value {
+        qwen_config_value(
+            &self.api_key_env_var,
+            self.model,
+            self.task.as_deref(),
+            &self.instructions,
+        )
     }
 
     async fn embed_with_instruction(
@@ -521,12 +494,7 @@ impl ChromaCloudSpladeEmbeddingFunctionBuilder {
     ///
     /// The API key is resolved in this order: explicit `api_key`, then `api_key_env_var`.
     pub fn build(self) -> Result<ChromaCloudSpladeEmbeddingFunction, ChromaCloudEmbeddingError> {
-        let api_key = self
-            .api_key
-            .or_else(|| std::env::var(&self.api_key_env_var).ok())
-            .ok_or_else(|| ChromaCloudEmbeddingError::MissingApiKey {
-                env_var: self.api_key_env_var.clone(),
-            })?;
+        let api_key = resolve_api_key(self.api_key, &self.api_key_env_var, None)?;
         let client = new_chroma_cloud_client(api_key, self.model.as_str())?;
         Ok(ChromaCloudSpladeEmbeddingFunction {
             client,
@@ -580,14 +548,10 @@ impl ChromaCloudSpladeEmbeddingConfigurationBuilder {
 
     /// Builds the known embedding function configuration.
     pub fn build(self) -> EmbeddingFunctionConfiguration {
-        EmbeddingFunctionConfiguration::Known(EmbeddingFunctionNewConfiguration {
-            name: SPLADE_NAME.to_string(),
-            config: serde_json::json!({
-                "api_key_env_var": self.api_key_env_var,
-                "model": self.model.as_str(),
-                "include_tokens": self.include_tokens,
-            }),
-        })
+        known_embedding_function_configuration(
+            SPLADE_NAME,
+            splade_config_value(&self.api_key_env_var, self.model, self.include_tokens),
+        )
     }
 }
 
@@ -608,12 +572,8 @@ impl ChromaCloudSpladeEmbeddingFunction {
     }
 
     /// Returns this embedding function's serializable configuration.
-    pub fn get_config(&self) -> serde_json::Value {
-        serde_json::json!({
-            "api_key_env_var": self.api_key_env_var,
-            "model": self.model.as_str(),
-            "include_tokens": self.include_tokens,
-        })
+    pub fn get_config(&self) -> Value {
+        splade_config_value(&self.api_key_env_var, self.model, self.include_tokens)
     }
 }
 
@@ -735,6 +695,70 @@ impl SparseEmbedding {
     }
 }
 
+fn resolve_api_key(
+    api_key: Option<String>,
+    api_key_env_var: &str,
+    client_api_key: Option<String>,
+) -> Result<String, ChromaCloudEmbeddingError> {
+    api_key
+        .or_else(|| env::var(api_key_env_var).ok())
+        .or(client_api_key)
+        .ok_or_else(|| ChromaCloudEmbeddingError::MissingApiKey {
+            env_var: api_key_env_var.to_string(),
+        })
+}
+
+fn insert_qwen_instruction(
+    instructions: &mut HashMap<String, ChromaCloudQwenTaskInstructions>,
+    task: impl Into<String>,
+    documents: impl Into<String>,
+    query: impl Into<String>,
+) {
+    instructions.insert(
+        task.into(),
+        ChromaCloudQwenTaskInstructions {
+            documents: documents.into(),
+            query: query.into(),
+        },
+    );
+}
+
+fn known_embedding_function_configuration(
+    name: &str,
+    config: Value,
+) -> EmbeddingFunctionConfiguration {
+    EmbeddingFunctionConfiguration::Known(EmbeddingFunctionNewConfiguration {
+        name: name.to_string(),
+        config,
+    })
+}
+
+fn qwen_config_value(
+    api_key_env_var: &str,
+    model: ChromaCloudQwenEmbeddingModel,
+    task: Option<&str>,
+    instructions: &HashMap<String, ChromaCloudQwenTaskInstructions>,
+) -> Value {
+    json!({
+        "api_key_env_var": api_key_env_var,
+        "model": model.as_str(),
+        "task": task,
+        "instructions": instructions,
+    })
+}
+
+fn splade_config_value(
+    api_key_env_var: &str,
+    model: ChromaCloudSpladeEmbeddingModel,
+    include_tokens: bool,
+) -> Value {
+    json!({
+        "api_key_env_var": api_key_env_var,
+        "model": model.as_str(),
+        "include_tokens": include_tokens,
+    })
+}
+
 fn new_chroma_cloud_client(
     api_key: String,
     model: &str,
@@ -753,7 +777,7 @@ fn new_chroma_cloud_client(
 }
 
 fn chroma_embed_url_from_env() -> String {
-    std::env::var("CHROMA_EMBED_URL").unwrap_or_else(|_| DEFAULT_CHROMA_EMBED_URL.to_string())
+    env::var("CHROMA_EMBED_URL").unwrap_or_else(|_| DEFAULT_CHROMA_EMBED_URL.to_string())
 }
 
 fn trim_trailing_slash(url: String) -> String {
@@ -776,6 +800,7 @@ fn default_qwen_instructions() -> HashMap<String, ChromaCloudQwenTaskInstruction
 mod tests {
     use super::*;
     use httpmock::MockServer;
+    use serde_json::json;
 
     #[tokio::test]
     async fn qwen_embeds_documents_and_queries_with_expected_instructions() {
@@ -786,24 +811,23 @@ mod tests {
                     .path("/")
                     .header("x-chroma-token", "test-api-key")
                     .header("x-chroma-embedding-model", "Qwen/Qwen3-Embedding-0.6B")
-                    .json_body(serde_json::json!({
+                    .json_body(json!({
                         "instructions": "",
                         "texts": ["doc"],
                     }));
                 then.status(200)
-                    .json_body(serde_json::json!({"embeddings": [[1.0, 2.0]]}));
+                    .json_body(json!({"embeddings": [[1.0, 2.0]]}));
             })
             .await;
         let queries = server
             .mock_async(|when, then| {
                 when.method("POST")
                     .path("/")
-                    .json_body(serde_json::json!({
+                    .json_body(json!({
                         "instructions": "Given a question about coding, retrieval code or passage that can solve user's question",
                         "texts": ["query"],
                     }));
-                then.status(200)
-                    .json_body(serde_json::json!({"embeddings": [[3.0, 4.0]]}));
+                then.status(200).json_body(json!({"embeddings": [[3.0, 4.0]]}));
             })
             .await;
 
@@ -839,13 +863,13 @@ mod tests {
                     .path("/embed_sparse")
                     .header("x-chroma-token", "test-api-key")
                     .header("x-chroma-embedding-model", "prithivida/Splade_PP_en_v1")
-                    .json_body(serde_json::json!({
+                    .json_body(json!({
                         "texts": ["doc"],
                         "task": "",
                         "target": "",
                         "fetch_tokens": "true",
                     }));
-                then.status(200).json_body(serde_json::json!({
+                then.status(200).json_body(json!({
                     "embeddings": [{
                         "indices": [3, 1],
                         "values": [0.3, 0.1],
