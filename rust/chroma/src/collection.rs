@@ -819,8 +819,9 @@ impl ChromaCollection {
     ///
     /// Updates only the specified fields for records matching the provided IDs. Fields set to
     /// `None` or `Some(None)` remain unchanged. All non-`None` vectors must match the length of
-    /// `ids`. If `embeddings` is `None` and `documents` contains values, the collection's
-    /// embedding function computes updated embeddings for those documents.
+    /// `ids`. If `embeddings` is `None`, `documents` contains values, and an embedding function is
+    /// configured, the collection's embedding function computes updated embeddings for those
+    /// documents.
     ///
     /// # Errors
     ///
@@ -1183,7 +1184,7 @@ impl ChromaCollection {
         embeddings: Option<Vec<Option<Vec<f32>>>>,
         documents: &Option<Vec<Option<String>>>,
     ) -> Result<Option<Vec<Option<Vec<f32>>>>, ChromaHttpClientError> {
-        if embeddings.is_some() || documents.is_none() {
+        if embeddings.is_some() || documents.is_none() || self.embedding_function.is_none() {
             return Ok(embeddings);
         }
 
@@ -1403,6 +1404,18 @@ mod tests {
             embeddings,
             Some(vec![Some(vec![5.0]), None, Some(vec![1.0])])
         );
+    }
+
+    #[tokio::test]
+    async fn resolve_update_embeddings_allows_documents_without_embedding_function() {
+        let collection = test_collection();
+
+        let embeddings = collection
+            .resolve_update_embeddings(None, &Some(vec![Some("updated document".to_string())]))
+            .await
+            .unwrap();
+
+        assert_eq!(embeddings, None);
     }
 
     #[tokio::test]
