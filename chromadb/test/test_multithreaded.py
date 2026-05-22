@@ -7,7 +7,6 @@ import numpy as np
 
 from chromadb.api import ClientAPI
 import chromadb.test.property.invariants as invariants
-from chromadb.api.segment import SegmentAPI
 from chromadb.test.property.strategies import RecordSet
 from chromadb.test.property.strategies import test_hnsw_config
 from chromadb.types import Metadata
@@ -170,7 +169,7 @@ def _test_interleaved_add_query(
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
         futures: List[Future[Any]] = []
         total_sent = -1
-        while total_sent < len(ids) - 1:
+    while total_sent < len(ids) - 1:
             operation = random.randint(0, 2)
             if operation == 0:
                 # Randomly grab up to 10% of the dataset and send it to the executor
@@ -182,11 +181,11 @@ def _test_interleaved_add_query(
                 futures.append(future)
                 total_sent += to_send
             elif operation == 1:
-                future = executor.submit(
-                    perform_operation,
-                    operation,
-                )
-                futures.append(future)
+        future = executor.submit(
+            perform_operation,
+            operation,
+        )
+        futures.append(future)
 
     wait(futures)
 
@@ -194,10 +193,6 @@ def _test_interleaved_add_query(
         exception = future.exception()
         if exception is not None:
             raise exception
-    if (
-        isinstance(client, SegmentAPI) and client.get_settings().is_persistent is True
-    ):  # we can't check invariants for FastAPI
-        invariants.fd_not_exceeding_threadpool_size(num_workers)
     # Check that invariants hold
     invariants.count(coll, records_set)
     invariants.ids_match(coll, records_set)

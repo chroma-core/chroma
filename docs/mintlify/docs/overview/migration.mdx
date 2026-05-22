@@ -162,10 +162,14 @@ The first time this is run, it makes a HTTP request. We made this a method to ma
 
 ### Auth overhaul - April 20, 2024
 
+Auth changes in this section apply to the HTTP server path.
+The Rust-backed embedded API uses a fixed server identity and does not run the
+`ServerAuthenticationProvider` / `ServerAuthorizationProvider` middleware.
+
 **If you are not using Chroma's built-in auth system, you do not need to take any action.**
 
 This release overhauls and simplifies our authentication and authorization systems.
-If you are you using Chroma's built-in auth system, you will need to update your configuration and
+If you are using Chroma's built-in auth system, you will need to update your configuration and
 any code you wrote to implement your own authentication or authorization providers.
 This change is mostly to pay down some of Chroma's technical debt and make future changes easier,
 but it also changes and simplifies user configuration.
@@ -199,7 +203,7 @@ The two auth systems Chroma ships with are `Basic` and `Token`. We have a small 
 
 #### Basic
 
-If you're using `Token` auth, your server configuration might look like:
+If you're using `Basic` auth, your server configuration might look like:
 
 ```yaml
 CHROMA_SERVER_AUTH_CREDENTIALS="admin:admin"
@@ -352,7 +356,6 @@ client = chromadb.EphemeralClient()
 import chromadb
 from chromadb.config import Settings
 client = chromadb.Client(Settings(
-    chroma_db_impl="duckdb+parquet",
     persist_directory="/path/to/persist/directory" # Optional, defaults to .chromadb/ in the current directory
 ))
 

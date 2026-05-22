@@ -1,7 +1,6 @@
 import pytest
 from chromadb.api.client import AdminClient, Client
 from chromadb.config import System
-from chromadb.db.impl.sqlite import SqliteDB
 from chromadb.errors import NotFoundError
 from chromadb.test.conftest import ClientFactories
 
@@ -53,8 +52,6 @@ def test_does_not_affect_other_databases(client_factories: ClientFactories) -> N
 
 
 def test_collection_was_removed(sqlite_persistent: System) -> None:
-    sqlite = sqlite_persistent.instance(SqliteDB)
-
     admin_client = AdminClient.from_system(sqlite_persistent)
     admin_client.create_database("test_delete_database")
 
@@ -65,11 +62,6 @@ def test_collection_was_removed(sqlite_persistent: System) -> None:
 
     with pytest.raises(NotFoundError):
         client.get_collection("foo")
-
-    # Check table
-    with sqlite.tx() as cur:
-        row = cur.execute("SELECT COUNT(*) from collections").fetchone()
-        assert row[0] == 0
 
 
 def test_errors_when_database_does_not_exist(client_factories: ClientFactories) -> None:

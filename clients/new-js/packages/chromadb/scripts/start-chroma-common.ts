@@ -46,7 +46,7 @@ export const startContainer = async (
     );
     container = new GenericContainer(imageHash)
       .withEnvironment({
-        CHROMA_API_IMPL: "chromadb.api.segment.SegmentAPI",
+        CHROMA_API_IMPL: "chromadb.api.rust.RustBindingsAPI",
       })
       .withLogConsumer((stream: Readable) => {
         stream.on("data", (line: Buffer) => {

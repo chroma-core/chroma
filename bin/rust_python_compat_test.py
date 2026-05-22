@@ -12,7 +12,6 @@ import urllib
 
 from chromadb import RustClient
 from chromadb.config import Settings
-from chromadb.segment.impl.manager.local import LocalSegmentManager
 from chromadb.test.property.test_cross_version_persist import api_import_for_version
 from chromadb.test.utils.cross_version import install_version, switch_to_version
 from packaging import version
@@ -42,11 +41,7 @@ def persist_with_old_version(ver: str, path: str):
     
     print(f"Initializing client {ver}")
     settings = Settings(
-        chroma_api_impl="chromadb.api.segment.SegmentAPI",
-        chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
-        chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
-        chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
-        chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+        chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
         allow_reset=True,
         is_persistent=True,
         persist_directory=path,
@@ -70,7 +65,6 @@ def persist_with_old_version(ver: str, path: str):
         metadatas = [{"int": i, "float": i / 2.0, "str": f"<{i}>"} for i in id_vals]
         coll.add(ids=ids, documents=documents, embeddings=embeddings, metadatas=metadatas)
     assert coll.count() == persist_size // 2
-    system.instance(LocalSegmentManager).stop()
     for start in tqdm.tqdm(range(persist_size // 2, persist_size, batch_size)):
         id_vals = range(start, start + batch_size)
         documents = [f"DOC-{i}" for i in id_vals]

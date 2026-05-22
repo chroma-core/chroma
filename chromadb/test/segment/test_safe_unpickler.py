@@ -3,9 +3,8 @@ import os
 import pickle
 import pytest
 
-from chromadb.segment.impl.vector.local_persistent_hnsw import (
-    PersistentData,
-    SafeUnpickler,
+pytestmark = pytest.mark.skip(
+    reason="Python segment persistence types were removed with the Rust backend migration"
 )
 
 

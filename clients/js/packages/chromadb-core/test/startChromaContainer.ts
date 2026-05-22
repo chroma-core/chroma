@@ -74,7 +74,7 @@ export async function startChromaContainer({
       },
     ]);
     container = container.withEnvironment({
-      CHROMA_API_IMPL: "chromadb.api.segment.SegmentAPI",
+      CHROMA_API_IMPL: "chromadb.api.rust.RustBindingsAPI",
     });
     container.withLogConsumer((stream) => {
       stream.on("data", (line: Buffer) => {

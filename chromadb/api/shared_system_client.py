@@ -56,7 +56,6 @@ class SharedSystemClient:
         if api_impl is None:
             raise ValueError("Chroma API implementation must be set in settings")
         elif api_impl in [
-            "chromadb.api.segment.SegmentAPI",
             "chromadb.api.rust.RustBindingsAPI",
         ]:
             if settings.is_persistent:
@@ -142,7 +141,7 @@ class SharedSystemClient:
         Try to extract api key from existing client instances by checking httpx session headers.
 
         Requirements to pull api key:
-        - must be a BaseHTTPClient instance (ignore RustBindingsAPI and SegmentAPI)
+        - must be a BaseHTTPClient instance (ignore RustBindingsAPI)
         - must have "api.trychroma.com" or "gcp.trychroma.com" in the _api_url (ignore local/self-hosted instances)
         - must have "x-chroma-token" or "X-Chroma-Token" in the headers
 
@@ -157,7 +156,7 @@ class SharedSystemClient:
                 server_api = system.instance(ServerAPI)
 
                 if not isinstance(server_api, BaseHTTPClient):
-                    # RustBindingsAPI and SegmentAPI don't have HTTP headers
+                    # RustBindingsAPI doesn't have HTTP headers
                     continue
 
                 # Only pull api key if the url contains the chroma cloud url

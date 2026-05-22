@@ -9,13 +9,13 @@ from uuid import uuid4
 
 def test_valid_key() -> None:
     with patch(
-        "chromadb.api.fastapi.FastAPI.get_user_identity"
+        "chromadb.api.client.Client.get_user_identity"
     ) as mock_get_user_identity, patch(
         "chromadb.api.client.AdminClient.get_tenant"
     ) as mock_get_tenant, patch(
         "chromadb.api.client.AdminClient.get_database"
     ) as mock_get_database, patch(
-        "chromadb.api.fastapi.FastAPI.heartbeat"
+        "chromadb.api.client.Client.heartbeat"
     ) as mock_heartbeat:
         mock_get_user_identity.return_value = UserIdentity(
             user_id="test_user", tenant="default_tenant", databases=["testdb"]
@@ -44,7 +44,7 @@ def test_valid_key() -> None:
 
 def test_invalid_key() -> None:
     with patch(
-        "chromadb.api.fastapi.FastAPI.get_user_identity"
+        "chromadb.api.client.Client.get_user_identity"
     ) as mock_get_user_identity:
         mock_get_user_identity.side_effect = ChromaAuthError("Authentication failed")
 
@@ -55,7 +55,7 @@ def test_invalid_key() -> None:
 # Scoped API key to 1 database tests
 def test_scoped_api_key_to_single_db_with_api_key_only() -> None:
     with patch(
-        "chromadb.api.fastapi.FastAPI.get_user_identity"
+        "chromadb.api.client.Client.get_user_identity"
     ) as mock_get_user_identity, patch(
         "chromadb.api.client.AdminClient.get_tenant"
     ) as mock_get_tenant, patch(
@@ -79,7 +79,7 @@ def test_scoped_api_key_to_single_db_with_api_key_only() -> None:
 
 def test_scoped_api_key_to_single_db_with_correct_tenant() -> None:
     with patch(
-        "chromadb.api.fastapi.FastAPI.get_user_identity"
+        "chromadb.api.client.Client.get_user_identity"
     ) as mock_get_user_identity, patch(
         "chromadb.api.client.AdminClient.get_tenant"
     ) as mock_get_tenant, patch(
@@ -101,7 +101,7 @@ def test_scoped_api_key_to_single_db_with_correct_tenant() -> None:
 
 def test_scoped_api_key_to_single_db_with_correct_db() -> None:
     with patch(
-        "chromadb.api.fastapi.FastAPI.get_user_identity"
+        "chromadb.api.client.Client.get_user_identity"
     ) as mock_get_user_identity, patch(
         "chromadb.api.client.AdminClient.get_tenant"
     ) as mock_get_tenant, patch(
@@ -123,7 +123,7 @@ def test_scoped_api_key_to_single_db_with_correct_db() -> None:
 
 def test_scoped_api_key_to_single_db_with_correct_tenant_and_db() -> None:
     with patch(
-        "chromadb.api.fastapi.FastAPI.get_user_identity"
+        "chromadb.api.client.Client.get_user_identity"
     ) as mock_get_user_identity, patch(
         "chromadb.api.client.AdminClient.get_tenant"
     ) as mock_get_tenant, patch(
@@ -147,7 +147,7 @@ def test_scoped_api_key_to_single_db_with_correct_tenant_and_db() -> None:
 
 def test_scoped_api_key_to_single_db_with_wrong_tenant() -> None:
     with patch(
-        "chromadb.api.fastapi.FastAPI.get_user_identity"
+        "chromadb.api.client.Client.get_user_identity"
     ) as mock_get_user_identity:
         mock_get_user_identity.return_value = UserIdentity(
             user_id="test_user", tenant="123-456-789", databases=["right-db"]
@@ -162,7 +162,7 @@ def test_scoped_api_key_to_single_db_with_wrong_tenant() -> None:
 
 def test_scoped_api_key_to_single_db_with_wrong_database() -> None:
     with patch(
-        "chromadb.api.fastapi.FastAPI.get_user_identity"
+        "chromadb.api.client.Client.get_user_identity"
     ) as mock_get_user_identity:
         mock_get_user_identity.return_value = UserIdentity(
             user_id="test_user", tenant="123-456-789", databases=["right-db"]
@@ -177,7 +177,7 @@ def test_scoped_api_key_to_single_db_with_wrong_database() -> None:
 
 def test_scoped_api_key_to_single_db_with_wrong_api_key() -> None:
     with patch(
-        "chromadb.api.fastapi.FastAPI.get_user_identity"
+        "chromadb.api.client.Client.get_user_identity"
     ) as mock_get_user_identity:
         mock_get_user_identity.side_effect = ChromaAuthError("Permission denied.")
 
@@ -188,7 +188,7 @@ def test_scoped_api_key_to_single_db_with_wrong_api_key() -> None:
 # Scoped API key to multiple databases tests
 def test_scoped_api_key_to_multiple_dbs_with_wrong_tenant() -> None:
     with patch(
-        "chromadb.api.fastapi.FastAPI.get_user_identity"
+        "chromadb.api.client.Client.get_user_identity"
     ) as mock_get_user_identity:
         mock_get_user_identity.return_value = UserIdentity(
             user_id="test_user",
@@ -207,7 +207,7 @@ def test_scoped_api_key_to_multiple_dbs_with_wrong_tenant() -> None:
 
 def test_scoped_api_key_to_multiple_dbs_with_correct_tenant_and_db() -> None:
     with patch(
-        "chromadb.api.fastapi.FastAPI.get_user_identity"
+        "chromadb.api.client.Client.get_user_identity"
     ) as mock_get_user_identity, patch(
         "chromadb.api.client.AdminClient.get_tenant"
     ) as mock_get_tenant, patch(
@@ -233,7 +233,7 @@ def test_scoped_api_key_to_multiple_dbs_with_correct_tenant_and_db() -> None:
 
 def test_scoped_api_key_to_multiple_dbs_with_nonexistent_database() -> None:
     with patch(
-        "chromadb.api.fastapi.FastAPI.get_user_identity"
+        "chromadb.api.client.Client.get_user_identity"
     ) as mock_get_user_identity, patch(
         "chromadb.api.client.AdminClient.get_tenant"
     ) as mock_get_tenant, patch(
@@ -258,7 +258,7 @@ def test_scoped_api_key_to_multiple_dbs_with_nonexistent_database() -> None:
 
 def test_scoped_api_key_to_multiple_dbs_with_api_key_only() -> None:
     with patch(
-        "chromadb.api.fastapi.FastAPI.get_user_identity"
+        "chromadb.api.client.Client.get_user_identity"
     ) as mock_get_user_identity:
         mock_get_user_identity.return_value = UserIdentity(
             user_id="test_user",
@@ -276,7 +276,7 @@ def test_scoped_api_key_to_multiple_dbs_with_api_key_only() -> None:
 # Unscoped API key tests
 def test_api_key_with_unscoped_tenant() -> None:
     with patch(
-        "chromadb.api.fastapi.FastAPI.get_user_identity"
+        "chromadb.api.client.Client.get_user_identity"
     ) as mock_get_user_identity:
         mock_get_user_identity.return_value = UserIdentity(
             user_id="test_user", tenant="*", databases=["right-db"]
@@ -291,7 +291,7 @@ def test_api_key_with_unscoped_tenant() -> None:
 
 def test_api_key_with_unscoped_db() -> None:
     with patch(
-        "chromadb.api.fastapi.FastAPI.get_user_identity"
+        "chromadb.api.client.Client.get_user_identity"
     ) as mock_get_user_identity:
         mock_get_user_identity.return_value = UserIdentity(
             user_id="test_user", tenant="123-456-789", databases=["*"]
@@ -306,7 +306,7 @@ def test_api_key_with_unscoped_db() -> None:
 
 def test_api_key_with_no_db_access() -> None:
     with patch(
-        "chromadb.api.fastapi.FastAPI.get_user_identity"
+        "chromadb.api.client.Client.get_user_identity"
     ) as mock_get_user_identity:
         mock_get_user_identity.return_value = UserIdentity(
             user_id="test_user", tenant="123-456-789", databases=[]
@@ -321,7 +321,7 @@ def test_api_key_with_no_db_access() -> None:
 
 def test_api_key_with_no_tenant_access() -> None:
     with patch(
-        "chromadb.api.fastapi.FastAPI.get_user_identity"
+        "chromadb.api.client.Client.get_user_identity"
     ) as mock_get_user_identity:
         mock_get_user_identity.return_value = UserIdentity(
             user_id="test_user", tenant=None, databases=["right-db"]

@@ -9,15 +9,7 @@ import pytest
 import json
 from urllib import request
 from chromadb import config
-from chromadb.api.configuration import (
-    ConfigurationParameter,
-    EmbeddingsQueueConfigurationInternal,
-)
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
-from chromadb.db.impl.sqlite import SqliteDB
-from chromadb.ingest.impl.utils import trigger_vector_segments_max_seq_id_migration
-from chromadb.segment import SegmentManager
-from chromadb.segment.impl.manager.local import LocalSegmentManager
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from packaging import version as packaging_version
@@ -130,13 +122,6 @@ def configurations(versions: List[str]) -> List[Tuple[str, Settings]]:
         (
             version,
             Settings(
-                chroma_api_impl="chromadb.api.rust.RustBindingsAPI"
-                if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ
-                else "chromadb.api.segment.SegmentAPI",
-                chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
-                chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
-                chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
-                chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
                 allow_reset=True,
                 is_persistent=True,
                 persist_directory=tempfile.mkdtemp(),
@@ -185,11 +170,6 @@ def persist_generated_data_with_old_version(
 ) -> None:
     try:
         old_module = switch_to_version(version, VERSIONED_MODULES)
-        # In 0.7.0 we switch to Rust client. The old versions are using the the python SegmentAPI client
-        if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ and packaging_version.Version(
-            version
-        ) < packaging_version.Version("0.7.0"):
-            settings.chroma_api_impl = "chromadb.api.segment.SegmentAPI"
         system = old_module.config.System(settings)
         api = system.instance(api_import_for_version(old_module, version))
         system.start()
@@ -222,10 +202,6 @@ def persist_generated_data_with_old_version(
         actual_ids = sorted(actual_ids, key=lambda id: embedding_id_to_index[id])
         assert actual_ids == check_embeddings["ids"]
 
-        # Leave writes on the queue to be processed by the next version's
-        # segment manager so we can test cross version serialization
-        # compatibility.
-        system.instance(LocalSegmentManager).stop()
         coll.upsert(**embeddings_strategy)
 
         # Shutdown system
@@ -310,37 +286,8 @@ def test_cycle_versions(
         embedding_function=not_implemented_ef(),  # type: ignore
     )
 
-    embeddings_queue = system.instance(SqliteDB)
-
-    # Automatic pruning should be disabled since embeddings_queue is non-empty
-    if packaging_version.Version(version) < packaging_version.Version(
-        "0.5.7"
-    ):  # (automatic pruning is enabled by default in 0.5.7 and later)
-        assert (
-            embeddings_queue.config.get_parameter("automatically_purge").value is False
-        )
-
-    # Update to True so log_size_below_max() invariant will pass
-    embeddings_queue.set_config(
-        EmbeddingsQueueConfigurationInternal(
-            [ConfigurationParameter("automatically_purge", True)]
-        )
-    )
-
     # Should be able to clean log immediately after updating
-
-    # 07/29/24: the max_seq_id for vector segments was moved from the pickled metadata file to SQLite.
-    # Cleaning the log is dependent on vector segments migrating their max_seq_id from the pickled metadata file to SQLite.
-    # Vector segments migrate this field automatically on init, but at this point the segment has not been loaded yet.
-    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
-        # Trigger log purge in Rust impl
-        invariants.count(coll, embeddings_strategy)
-    else:
-        trigger_vector_segments_max_seq_id_migration(
-            embeddings_queue, system.instance(SegmentManager)
-        )
-        embeddings_queue.purge_log(coll.id)
-    invariants.log_size_below_max(system, [coll], True)
+    invariants.count(coll, embeddings_strategy)
 
     # Should be able to add embeddings
     coll.add(**embeddings_strategy)  # type: ignore

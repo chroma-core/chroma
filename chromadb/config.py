@@ -65,18 +65,9 @@ _abstract_type_keys: Dict[str, str] = {
     "chromadb.api.ServerAPI": "chroma_api_impl",
     "chromadb.api.async_api.AsyncServerAPI": "chroma_api_impl",
     "chromadb.auth.ClientAuthProvider": "chroma_client_auth_provider",
-    "chromadb.auth.ServerAuthenticationProvider": "chroma_server_authn_provider",
-    "chromadb.auth.ServerAuthorizationProvider": "chroma_server_authz_provider",
-    "chromadb.db.system.SysDB": "chroma_sysdb_impl",
-    "chromadb.execution.executor.abstract.Executor": "chroma_executor_impl",
-    "chromadb.ingest.Consumer": "chroma_consumer_impl",
-    "chromadb.ingest.Producer": "chroma_producer_impl",
     "chromadb.quota.QuotaEnforcer": "chroma_quota_enforcer_impl",
     "chromadb.rate_limit.RateLimitEnforcer": "chroma_rate_limit_enforcer_impl",
     "chromadb.rate_limit.AsyncRateLimitEnforcer": "chroma_async_rate_limit_enforcer_impl",
-    "chromadb.segment.SegmentManager": "chroma_segment_manager_impl",
-    "chromadb.segment.distributed.SegmentDirectory": "chroma_segment_directory_impl",
-    "chromadb.segment.distributed.MemberlistProvider": "chroma_memberlist_provider_impl",
     "chromadb.telemetry.product.ProductTelemetryClient": "chroma_product_telemetry_impl",
 }
 
@@ -89,26 +80,6 @@ class APIVersion(str, Enum):
     V2 = "/api/v2"
 
 
-# NOTE(hammadb) 1/13/2024 - This has to be in config.py instead of being localized to the module
-# that uses it because of a circular import issue. This is a temporary solution until we can
-# refactor the code to remove the circular import.
-class RoutingMode(Enum):
-    """
-    Routing mode for the segment directory
-
-    node - Assign based on the node name, used in production with multi-node settings with the assumption that
-    there is one query service pod per node. This is useful for when there is a disk based cache on the
-    node that we want to route to.
-
-    id - Assign based on the member id, used in development and testing environments where the node name is not
-    guaranteed to be unique. (I.e a local development kubernetes env). Or when there are multiple query service
-    pods per node.
-    """
-
-    NODE = "node"
-    ID = "id"
-
-
 class Settings(BaseSettings):  # type: ignore
     # ==============
     # Generic config
@@ -116,7 +87,7 @@ class Settings(BaseSettings):  # type: ignore
 
     environment: str = ""
 
-    # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI" or "chromadb.api.rust.RustBindingsAPI"
+    # Can be "chromadb.api.rust.RustBindingsAPI" or "chromadb.api.fastapi.FastAPI"
     chroma_api_impl: str = "chromadb.api.rust.RustBindingsAPI"
 
     chroma_server_nofile: Optional[int] = None
@@ -159,21 +130,14 @@ class Settings(BaseSettings):  # type: ignore
     is_persistent: bool = False
     persist_directory: str = "./chroma"
 
-    chroma_memory_limit_bytes: int = 0
-    chroma_segment_cache_policy: Optional[str] = None
-
     allow_reset: bool = False
-
-    # ===========================
-    # {Client, Server} auth{n, z}
-    # ===========================
-
-    # The header to use for the token. Defaults to "Authorization".
-    chroma_auth_token_transport_header: Optional[str] = None
 
     # ================
     # Client auth{n,z}
     # ================
+
+    # The header to use for the token. Defaults to "Authorization".
+    chroma_auth_token_transport_header: Optional[str] = None
 
     # The provider for client auth. See chromadb/auth/__init__.py
     chroma_client_auth_provider: Optional[str] = None
@@ -181,40 +145,9 @@ class Settings(BaseSettings):  # type: ignore
     # the credentials to use.
     chroma_client_auth_credentials: Optional[str] = None
 
-    # ================
-    # Server auth{n,z}
-    # ================
-
-    chroma_server_auth_ignore_paths: Dict[str, List[str]] = {
-        f"{APIVersion.V2}": ["GET"],
-        f"{APIVersion.V2}/heartbeat": ["GET"],
-        f"{APIVersion.V2}/version": ["GET"],
-        f"{APIVersion.V1}": ["GET"],
-        f"{APIVersion.V1}/heartbeat": ["GET"],
-        f"{APIVersion.V1}/version": ["GET"],
-    }
     # Overwrite singleton tenant and database access from the auth provider
-    # if applicable. See chromadb/auth/utils/__init__.py's
-    # authenticate_and_authorize_or_raise method.
+    # if applicable. See chromadb.auth.utils.maybe_set_tenant_and_database.
     chroma_overwrite_singleton_tenant_database_access_from_auth: bool = False
-
-    # ============
-    # Server authn
-    # ============
-
-    chroma_server_authn_provider: Optional[str] = None
-    # Only one of the below may be specified.
-    chroma_server_authn_credentials: Optional[str] = None
-    chroma_server_authn_credentials_file: Optional[str] = None
-
-    # ============
-    # Server authz
-    # ============
-
-    chroma_server_authz_provider: Optional[str] = None
-    # Only one of the below may be specified.
-    chroma_server_authz_config: Optional[str] = None
-    chroma_server_authz_config_file: Optional[str] = None
 
     # =========
     # Telemetry
@@ -240,29 +173,12 @@ class Settings(BaseSettings):  # type: ignore
     # been applied once this is intended to be a first-time setup configuration
     migrations_hash_algorithm: Literal["md5", "sha256"] = "md5"
 
-    # ==================
-    # Distributed Chroma
-    # ==================
-
-    chroma_segment_directory_impl: str = "chromadb.segment.impl.distributed.segment_directory.RendezvousHashSegmentDirectory"
-    chroma_segment_directory_routing_mode: RoutingMode = RoutingMode.ID
-
-    chroma_memberlist_provider_impl: str = "chromadb.segment.impl.distributed.segment_directory.CustomResourceMemberlistProvider"
-    worker_memberlist_name: str = "query-service-memberlist"
-
     chroma_coordinator_host: str = "localhost"
     # TODO this is the sysdb port. Should probably rename it.
     chroma_server_grpc_port: Optional[int] = None
-    chroma_sysdb_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
-
-    chroma_producer_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
-    chroma_consumer_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
-
-    chroma_segment_manager_impl: str = (
-        "chromadb.segment.impl.manager.local.LocalSegmentManager"
-    )
-    chroma_executor_impl: str = "chromadb.execution.executor.local.LocalExecutor"
-    chroma_query_replication_factor: int = 2
+    chroma_sysdb_impl: Optional[str] = None
+    chroma_producer_impl: Optional[str] = None
+    chroma_consumer_impl: Optional[str] = None
 
     chroma_logservice_host: str = "localhost"
     chroma_logservice_port: int = 50052
@@ -380,18 +296,6 @@ class System(Component):
         for key in _legacy_config_keys:
             if settings[key] is not None:
                 raise ValueError(LEGACY_ERROR)
-
-        if (
-            settings["chroma_segment_cache_policy"] is not None
-            and settings["chroma_segment_cache_policy"] != "LRU"
-        ):
-            logger.error(
-                "Failed to set chroma_segment_cache_policy: Only LRU is available."
-            )
-            if settings["chroma_memory_limit_bytes"] == 0:
-                logger.error(
-                    "Failed to set chroma_segment_cache_policy: chroma_memory_limit_bytes is require."
-                )
 
         # Apply the nofile limit if set
         if settings["chroma_server_nofile"] is not None:

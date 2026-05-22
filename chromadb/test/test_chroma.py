@@ -4,58 +4,56 @@ from unittest.mock import patch, Mock
 import pytest
 import chromadb
 import chromadb.config
-from chromadb.db.system import SysDB
-from chromadb.ingest import Consumer, Producer
+from chromadb.api import ServerAPI
 
 
 class GetDBTest(unittest.TestCase):
-    @patch("chromadb.db.impl.sqlite.SqliteDB", autospec=True)
+    @patch("chromadb.api.rust.RustBindingsAPI", autospec=True)
     def test_default_db(self, mock: Mock) -> None:
         system = chromadb.config.System(
             chromadb.config.Settings(persist_directory="./foo")
         )
-        system.instance(SysDB)
+        system.instance(ServerAPI)
         assert mock.called
 
-    @patch("chromadb.db.impl.sqlite.SqliteDB", autospec=True)
+    @patch("chromadb.api.rust.RustBindingsAPI", autospec=True)
     def test_sqlite_sysdb(self, mock: Mock) -> None:
         system = chromadb.config.System(
             chromadb.config.Settings(
-                chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+                chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
                 persist_directory="./foo",
             )
         )
-        system.instance(SysDB)
+        system.instance(ServerAPI)
         assert mock.called
 
-    @patch("chromadb.db.impl.sqlite.SqliteDB", autospec=True)
+    @patch("chromadb.api.rust.RustBindingsAPI", autospec=True)
     def test_sqlite_queue(self, mock: Mock) -> None:
         system = chromadb.config.System(
             chromadb.config.Settings(
-                chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
-                chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
-                chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+                chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
                 persist_directory="./foo",
             )
         )
-        system.instance(Producer)
-        system.instance(Consumer)
+        system.instance(ServerAPI)
         assert mock.called
 
 
 class GetAPITest(unittest.TestCase):
-    @patch("chromadb.api.segment.SegmentAPI", autospec=True)
+    @patch("chromadb.api.rust.RustBindingsAPI", autospec=True)
     @patch.dict(
-        os.environ, {"CHROMA_API_IMPL": "chromadb.api.segment.SegmentAPI"}, clear=True
+        os.environ,
+        {"CHROMA_API_IMPL": "chromadb.api.rust.RustBindingsAPI"},
+        clear=True,
     )
     def test_local(self, mock_api: Mock) -> None:
         client = chromadb.Client(chromadb.config.Settings(persist_directory="./foo"))
         assert mock_api.called
         client.clear_system_cache()
 
-    @patch("chromadb.db.impl.sqlite.SqliteDB", autospec=True)
+    @patch("chromadb.api.rust.RustBindingsAPI", autospec=True)
     @patch.dict(
-        os.environ, {"CHROMA_API_IMPL": "chromadb.api.segment.SegmentAPI"}, clear=True
+        os.environ, {"CHROMA_API_IMPL": "chromadb.api.rust.RustBindingsAPI"}, clear=True
     )
     def test_local_db(self, mock_db: Mock) -> None:
         client = chromadb.Client(chromadb.config.Settings(persist_directory="./foo"))

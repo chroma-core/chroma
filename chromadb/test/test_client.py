@@ -4,7 +4,6 @@ from unittest.mock import MagicMock, patch
 import chromadb
 from chromadb.config import Settings, System
 from chromadb.api import ClientAPI
-import chromadb.server.fastapi
 from chromadb.api.fastapi import FastAPI
 import pytest
 import tempfile

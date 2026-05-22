@@ -12,7 +12,6 @@ import numpy as np
 import pytest
 
 import chromadb
-import chromadb.server.fastapi
 from chromadb.api.fastapi import FastAPI
 from chromadb.api.types import (
     Document,
@@ -39,14 +38,10 @@ def persist_dir():
 def local_persist_api(persist_dir):
     client = chromadb.Client(
         Settings(
-            chroma_api_impl="chromadb.api.segment.SegmentAPI",
-            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
-            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
-            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
-            chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-            allow_reset=True,
-            is_persistent=True,
-            persist_directory=persist_dir,
+        chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
+        allow_reset=True,
+        is_persistent=True,
+        persist_directory=persist_dir,
         ),
     )
     yield client
@@ -60,14 +55,10 @@ def local_persist_api(persist_dir):
 def local_persist_api_cache_bust(persist_dir):
     client = chromadb.Client(
         Settings(
-            chroma_api_impl="chromadb.api.segment.SegmentAPI",
-            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
-            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
-            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
-            chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-            allow_reset=True,
-            is_persistent=True,
-            persist_directory=persist_dir,
+        chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
+        allow_reset=True,
+        is_persistent=True,
+        persist_directory=persist_dir,
         ),
     )
     yield client
@@ -2275,22 +2266,8 @@ def test_where_contains_validation():
         {"$and": [{"tags": {"$contains": "action"}}, {"year": {"$gt": 2020}}]}
     )
 
-
-def _is_python_local_segment(client):
-    """Return True when the client is backed by the Python local segment API
-    (which does not yet support array metadata)."""
-    settings = client.get_settings()
-    return (
-        settings.chroma_api_impl == "chromadb.api.segment.SegmentAPI"
-        and settings.chroma_segment_manager_impl
-        == "chromadb.segment.impl.manager.local.LocalSegmentManager"
-    )
-
-
 def test_array_metadata_e2e(client):
     """End-to-end test: write array metadata, read it back, and query with $contains."""
-    if _is_python_local_segment(client):
-        pytest.skip("Python local segment does not support array metadata yet")
     client.reset()
     collection = client.create_collection("test_array_metadata_e2e")
     collection.add(
