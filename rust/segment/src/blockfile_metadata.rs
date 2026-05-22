@@ -8,6 +8,10 @@ use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError, Rea
 use chroma_blockstore::BlockfileReader;
 use chroma_blockstore::BlockfileWriterOptions;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_index::fulltext::bitmap_index::{
+    FullTextBitmapFlusher, FullTextBitmapReader, FullTextBitmapWriter,
+};
+use chroma_index::fulltext::tokenizer::WordAnalyzer;
 use chroma_index::fulltext::types::{
     DocumentMutation, FullTextIndexError, FullTextIndexFlusher, FullTextIndexReader,
     FullTextIndexWriter,
@@ -31,6 +35,7 @@ use chroma_types::SparsePostingBlock;
 use chroma_types::BOOL_METADATA;
 use chroma_types::F32_METADATA;
 use chroma_types::FULL_TEXT_PLS;
+use chroma_types::FULL_TEXT_TOKEN;
 use chroma_types::SPARSE_MAX;
 use chroma_types::SPARSE_OFFSET_VALUE;
 use chroma_types::SPARSE_POSTING;
@@ -197,9 +202,47 @@ impl<'me> SparseIndexReader<'me> {
     }
 }
 
+/// The full-text index writer for a segment shard.
+///
+/// For existing collections the variant is determined by which blockfile
+/// keys are present in the segment's file_path (`FULL_TEXT_PLS` → Trigram,
+/// `FULL_TEXT_TOKEN` → TokenBitmap), not the schema, because schema
+/// changes are metadata-only and do not rewrite on-disk data. For fresh
+/// collections (no existing file paths) the schema's `fts_algorithm`
+/// field decides.
+#[derive(Clone)]
+#[allow(clippy::large_enum_variant)]
+pub enum FtsIndexWriter {
+    Trigram(FullTextIndexWriter),
+    TokenBitmap(WordAnalyzer, FullTextBitmapWriter),
+}
+
+/// The full-text index flusher for a segment shard.
+#[allow(clippy::large_enum_variant)]
+pub enum FtsIndexFlusher {
+    Trigram(FullTextIndexFlusher),
+    TokenBitmap(FullTextBitmapFlusher),
+}
+
+/// The full-text index reader for a segment shard.
+pub enum FtsIndexReader<'me> {
+    Trigram(FullTextIndexReader<'me>),
+    TokenBitmap(WordAnalyzer, FullTextBitmapReader),
+}
+
+impl<'me> FtsIndexReader<'me> {
+    #[cfg(test)]
+    pub fn as_trigram(&self) -> Option<&FullTextIndexReader<'me>> {
+        match self {
+            FtsIndexReader::Trigram(r) => Some(r),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct MetadataSegmentWriterShard<'me> {
-    pub(crate) full_text_index_writer: Option<FullTextIndexWriter>,
+    pub(crate) fts_index_writer: Option<FtsIndexWriter>,
     pub(crate) string_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) bool_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) f32_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
@@ -475,40 +518,91 @@ impl<'me> MetadataSegmentWriterShard<'me> {
         } else {
             segment.construct_prefix_path(tenant, database_id)
         };
-        let pls_writer = match segment.file_path.get(FULL_TEXT_PLS) {
-            Some(pls_path) => {
-                let (prefix, pls_uuid) = Segment::extract_prefix_and_id(pls_path)
-                    .map_err(|_| MetadataSegmentError::UuidParseError(pls_path.to_string()))?;
+        // ── FTS index writer: 3-way branch ──────────────────────────
+        //
+        // 1. FULL_TEXT_TOKEN in file_path → fork TokenBitmap index
+        // 2. FULL_TEXT_PLS in file_path   → fork existing Trigram index
+        // 3. Neither (fresh collection)   → check schema to decide
+        let token_file_path = segment.file_path.get(FULL_TEXT_TOKEN);
+        let pls_file_path = segment.file_path.get(FULL_TEXT_PLS);
 
-                {
-                    let mut options = BlockfileWriterOptions::new(prefix.to_string())
-                        .fork(pls_uuid)
-                        .ordered_mutations();
-                    if let Some(cmek) = &cmek {
-                        options = options.with_cmek(cmek.clone());
-                    }
-                    blockfile_provider
-                        .write::<u32, Vec<u32>>(options)
-                        .await
-                        .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
-                }
-            }
-            None => {
-                let mut options =
-                    BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations();
+        let fts_index_writer = if let Some(token_path) = token_file_path {
+            // ── Fork path: TokenBitmap index ───────────────────────
+            let (prefix, token_uuid) = Segment::extract_prefix_and_id(token_path)
+                .map_err(|_| MetadataSegmentError::UuidParseError(token_path.to_string()))?;
+            let token_reader = blockfile_provider
+                .read::<u32, RoaringBitmap>(BlockfileReaderOptions::new(
+                    token_uuid,
+                    prefix.to_string(),
+                ))
+                .await
+                .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
+            let token_writer = {
+                let mut options = BlockfileWriterOptions::new(prefix.to_string())
+                    .fork(token_uuid)
+                    .ordered_mutations();
                 if let Some(cmek) = &cmek {
                     options = options.with_cmek(cmek.clone());
                 }
-                match blockfile_provider.write::<u32, Vec<u32>>(options).await {
-                    Ok(writer) => writer,
-                    Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
+                blockfile_provider
+                    .write::<u32, RoaringBitmap>(options)
+                    .await
+                    .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
+            };
+            let old_reader = FullTextBitmapReader::new(token_reader);
+            tracing::info!("FTS index: using TokenBitmap (fork from existing)");
+            FtsIndexWriter::TokenBitmap(
+                WordAnalyzer::default(),
+                FullTextBitmapWriter::new(token_writer, Some(old_reader)),
+            )
+        } else if let Some(pls_path) = pls_file_path {
+            // ── Fork path: Trigram index ───────────────────────────
+            let (prefix, pls_uuid) = Segment::extract_prefix_and_id(pls_path)
+                .map_err(|_| MetadataSegmentError::UuidParseError(pls_path.to_string()))?;
+            let pls_writer = {
+                let mut options = BlockfileWriterOptions::new(prefix.to_string())
+                    .fork(pls_uuid)
+                    .ordered_mutations();
+                if let Some(cmek) = &cmek {
+                    options = options.with_cmek(cmek.clone());
                 }
+                blockfile_provider
+                    .write::<u32, Vec<u32>>(options)
+                    .await
+                    .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
+            };
+            let tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
+            tracing::info!("FTS index: using Trigram (fork from existing)");
+            FtsIndexWriter::Trigram(FullTextIndexWriter::new(pls_writer, tokenizer))
+        } else if schema.is_some_and(|s| s.is_token_bitmap_fts_enabled()) {
+            // ── Fresh path: TokenBitmap index ──────────────────────
+            let mut options = BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations();
+            if let Some(cmek) = &cmek {
+                options = options.with_cmek(cmek.clone());
             }
+            let token_writer = blockfile_provider
+                .write::<u32, RoaringBitmap>(options)
+                .await
+                .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
+            tracing::info!("FTS index: using TokenBitmap (fresh, schema-gated)");
+            FtsIndexWriter::TokenBitmap(
+                WordAnalyzer::default(),
+                FullTextBitmapWriter::new(token_writer, None),
+            )
+        } else {
+            // ── Fresh path: Trigram index (default) ────────────────
+            let mut options = BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations();
+            if let Some(cmek) = &cmek {
+                options = options.with_cmek(cmek.clone());
+            }
+            let pls_writer = blockfile_provider
+                .write::<u32, Vec<u32>>(options)
+                .await
+                .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
+            let tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
+            tracing::info!("FTS index: using Trigram (fresh, default)");
+            FtsIndexWriter::Trigram(FullTextIndexWriter::new(pls_writer, tokenizer))
         };
-
-        let full_text_writer_tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
-        let full_text_index_writer =
-            FullTextIndexWriter::new(pls_writer, full_text_writer_tokenizer);
 
         let (string_metadata_writer, string_metadata_index_reader) =
             match segment.file_path.get(STRING_METADATA) {
@@ -842,7 +936,7 @@ impl<'me> MetadataSegmentWriterShard<'me> {
         };
 
         Ok(MetadataSegmentWriterShard {
-            full_text_index_writer: Some(full_text_index_writer),
+            fts_index_writer: Some(fts_index_writer),
             string_metadata_index_writer: Some(string_metadata_index_writer),
             bool_metadata_index_writer: Some(bool_metadata_index_writer),
             f32_metadata_index_writer: Some(f32_metadata_index_writer),
@@ -1144,53 +1238,101 @@ impl<'me> MetadataSegmentWriterShard<'me> {
             return Ok(());
         }
 
-        let mut full_text_writer_batch = vec![];
-        for record in materialized {
-            let record = record
-                .hydrate(record_segment_reader.as_ref())
-                .await
-                .map_err(ApplyMaterializedLogError::Materialization)?;
-            let offset_id = record.get_offset_id();
-            let old_document = record.document_ref_from_segment();
-            let new_document = record.document_ref_from_log();
+        let Some(fts_writer) = self.fts_index_writer.as_ref() else {
+            return Err(ApplyMaterializedLogError::FullTextIndex(
+                FullTextIndexError::InvariantViolation,
+            ));
+        };
 
-            if matches!(
-                record.get_operation(),
-                MaterializedLogOperation::UpdateExisting
-            ) && new_document.is_none()
-            {
-                continue;
+        match fts_writer {
+            FtsIndexWriter::Trigram(writer) => {
+                let mut batch = vec![];
+                for record in materialized {
+                    let record = record
+                        .hydrate(record_segment_reader.as_ref())
+                        .await
+                        .map_err(ApplyMaterializedLogError::Materialization)?;
+                    let offset_id = record.get_offset_id();
+                    let old_document = record.document_ref_from_segment();
+                    let new_document = record.document_ref_from_log();
+
+                    if matches!(
+                        record.get_operation(),
+                        MaterializedLogOperation::UpdateExisting
+                    ) && new_document.is_none()
+                    {
+                        continue;
+                    }
+
+                    match (old_document, new_document) {
+                        (None, None) => {}
+                        (Some(old), Some(new)) => {
+                            batch.push(DocumentMutation::Update {
+                                offset_id,
+                                old_document: old,
+                                new_document: new,
+                            });
+                        }
+                        (None, Some(new)) => {
+                            batch.push(DocumentMutation::Create {
+                                offset_id,
+                                new_document: new,
+                            });
+                        }
+                        (Some(old), None) => {
+                            batch.push(DocumentMutation::Delete {
+                                offset_id,
+                                old_document: old,
+                            });
+                        }
+                    }
+                }
+                writer
+                    .handle_batch(batch)
+                    .map_err(ApplyMaterializedLogError::FullTextIndex)?;
             }
+            FtsIndexWriter::TokenBitmap(analyzer, writer) => {
+                let mut analyzer = analyzer.clone();
+                let tokenize = |analyzer: &mut WordAnalyzer, text: &str| {
+                    analyzer.tokenize_document(text).map_err(|e| {
+                        ApplyMaterializedLogError::FullTextIndex(
+                            FullTextIndexError::TokenizerError(e.to_string()),
+                        )
+                    })
+                };
+                for record in materialized {
+                    let record = record
+                        .hydrate(record_segment_reader.as_ref())
+                        .await
+                        .map_err(ApplyMaterializedLogError::Materialization)?;
+                    let offset_id = record.get_offset_id();
+                    let old_document = record.document_ref_from_segment();
+                    let new_document = record.document_ref_from_log();
 
-            match (old_document, new_document) {
-                (None, None) => continue,
-                (Some(old_document), Some(new_document)) => {
-                    full_text_writer_batch.push(DocumentMutation::Update {
-                        offset_id,
-                        old_document,
-                        new_document,
-                    })
-                }
-                (None, Some(new_document)) => {
-                    full_text_writer_batch.push(DocumentMutation::Create {
-                        offset_id,
-                        new_document,
-                    })
-                }
-                (Some(old_document), None) => {
-                    full_text_writer_batch.push(DocumentMutation::Delete {
-                        offset_id,
-                        old_document,
-                    })
+                    if matches!(
+                        record.get_operation(),
+                        MaterializedLogOperation::UpdateExisting
+                    ) && new_document.is_none()
+                    {
+                        continue;
+                    }
+
+                    match (old_document, new_document) {
+                        (None, None) => {}
+                        (Some(old), Some(new)) => {
+                            writer.delete_document(offset_id, tokenize(&mut analyzer, old)?);
+                            writer.add_document(offset_id, tokenize(&mut analyzer, new)?);
+                        }
+                        (None, Some(new)) => {
+                            writer.add_document(offset_id, tokenize(&mut analyzer, new)?);
+                        }
+                        (Some(old), None) => {
+                            writer.delete_document(offset_id, tokenize(&mut analyzer, old)?);
+                        }
+                    }
                 }
             }
         }
-
-        self.full_text_index_writer
-            .as_ref()
-            .unwrap()
-            .handle_batch(full_text_writer_batch)
-            .map_err(ApplyMaterializedLogError::FullTextIndex)?;
 
         Ok(())
     }
@@ -1423,19 +1565,26 @@ impl<'me> MetadataSegmentWriterShard<'me> {
     }
 
     pub async fn finish(&mut self) -> Result<(), Box<dyn ChromaError>> {
-        let mut full_text_index_writer = match self.full_text_index_writer.take() {
+        let mut fts_index_writer = match self.fts_index_writer.take() {
             Some(writer) => writer,
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
-        let res = full_text_index_writer
-            .write_to_blockfiles()
-            .instrument(tracing::info_span!("fts writer write_to_blockfiles"))
-            .await;
-        self.full_text_index_writer = Some(full_text_index_writer);
-        match res {
-            Ok(_) => {}
-            Err(_) => return Err(Box::new(MetadataSegmentError::BlockfileWriteError)),
-        }
+        let res = match &mut fts_index_writer {
+            FtsIndexWriter::Trigram(w) => w
+                .write_to_blockfiles()
+                .instrument(tracing::info_span!("fts writer write_to_blockfiles"))
+                .await
+                .map_err(|_| {
+                    Box::new(MetadataSegmentError::BlockfileWriteError) as Box<dyn ChromaError>
+                }),
+            FtsIndexWriter::TokenBitmap(_, w) => w
+                .write_to_blockfiles()
+                .instrument(tracing::info_span!("fts writer write_to_blockfiles"))
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+        };
+        self.fts_index_writer = Some(fts_index_writer);
+        res?;
 
         let mut string_metadata_index_writer = match self.string_metadata_index_writer.take() {
             Some(writer) => writer,
@@ -1505,10 +1654,18 @@ impl<'me> MetadataSegmentWriterShard<'me> {
     }
 
     pub async fn commit(self) -> Result<MetadataSegmentFlusherShard, Box<dyn ChromaError>> {
-        let full_text_flusher = match self.full_text_index_writer {
-            Some(flusher) => match flusher.commit().await {
-                Ok(flusher) => flusher,
-                Err(e) => return Err(Box::new(e)),
+        let fts_flusher = match self.fts_index_writer {
+            Some(writer) => match writer {
+                FtsIndexWriter::Trigram(w) => FtsIndexFlusher::Trigram(
+                    w.commit()
+                        .await
+                        .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?,
+                ),
+                FtsIndexWriter::TokenBitmap(_, w) => FtsIndexFlusher::TokenBitmap(
+                    w.commit()
+                        .await
+                        .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?,
+                ),
             },
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
@@ -1552,7 +1709,7 @@ impl<'me> MetadataSegmentWriterShard<'me> {
 
         Ok(MetadataSegmentFlusherShard {
             id: self.id,
-            full_text_index_flusher: full_text_flusher,
+            fts_index_flusher: fts_flusher,
             string_metadata_index_flusher: string_metadata_flusher,
             bool_metadata_index_flusher: bool_metadata_flusher,
             f32_metadata_index_flusher: f32_metadata_flusher,
@@ -1589,7 +1746,7 @@ impl MetadataSegmentFlusher {
 
 pub struct MetadataSegmentFlusherShard {
     pub id: SegmentUuid,
-    pub(crate) full_text_index_flusher: FullTextIndexFlusher,
+    pub(crate) fts_index_flusher: FtsIndexFlusher,
     pub(crate) string_metadata_index_flusher: MetadataIndexFlusher,
     pub(crate) bool_metadata_index_flusher: MetadataIndexFlusher,
     pub(crate) f32_metadata_index_flusher: MetadataIndexFlusher,
@@ -1607,26 +1764,39 @@ impl Debug for MetadataSegmentFlusherShard {
 
 impl MetadataSegmentFlusherShard {
     pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
-        let prefix_path = self.full_text_index_flusher.prefix_path().to_string();
-        let full_text_pls_id = self.full_text_index_flusher.pls_id();
+        let mut flushed = HashMap::new();
+
+        let prefix_path = match &self.fts_index_flusher {
+            FtsIndexFlusher::Trigram(f) => f.prefix_path().to_string(),
+            FtsIndexFlusher::TokenBitmap(f) => f.prefix_path().to_string(),
+        };
         let string_metadata_id = self.string_metadata_index_flusher.id();
         let bool_metadata_id = self.bool_metadata_index_flusher.id();
         let f32_metadata_id = self.f32_metadata_index_flusher.id();
         let u32_metadata_id = self.u32_metadata_index_flusher.id();
 
-        let mut flushed = HashMap::new();
-
-        match self.full_text_index_flusher.flush().await {
-            Ok(_) => {}
-            Err(e) => return Err(Box::new(e)),
+        match self.fts_index_flusher {
+            FtsIndexFlusher::Trigram(f) => {
+                let pls_id = f.pls_id();
+                f.flush()
+                    .await
+                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+                flushed.insert(
+                    FULL_TEXT_PLS.to_string(),
+                    vec![ChromaSegmentFlusher::flush_key(&prefix_path, &pls_id)],
+                );
+            }
+            FtsIndexFlusher::TokenBitmap(f) => {
+                let token_id = f.id();
+                f.flush()
+                    .await
+                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+                flushed.insert(
+                    FULL_TEXT_TOKEN.to_string(),
+                    vec![ChromaSegmentFlusher::flush_key(&prefix_path, &token_id)],
+                );
+            }
         }
-        flushed.insert(
-            FULL_TEXT_PLS.to_string(),
-            vec![ChromaSegmentFlusher::flush_key(
-                &prefix_path,
-                &full_text_pls_id,
-            )],
-        );
 
         match self.bool_metadata_index_flusher.flush().await {
             Ok(_) => {}
@@ -1687,7 +1857,7 @@ impl MetadataSegmentFlusherShard {
 }
 
 pub struct MetadataSegmentReaderShard<'me> {
-    pub full_text_index_reader: Option<FullTextIndexReader<'me>>,
+    pub fts_index_reader: Option<FtsIndexReader<'me>>,
     pub string_metadata_index_reader: Option<MetadataIndexReader<'me>>,
     pub bool_metadata_index_reader: Option<MetadataIndexReader<'me>>,
     pub f32_metadata_index_reader: Option<MetadataIndexReader<'me>>,
@@ -1726,6 +1896,12 @@ impl MetadataSegmentReaderShard<'_> {
 
         // Create async tasks for all reader operations
         let pls_future = Self::load_index_reader(segment, FULL_TEXT_PLS, blockfile_provider);
+        let token_bitmap_future = Self::load_index_reader::<u32, RoaringBitmap>(
+            segment,
+            FULL_TEXT_TOKEN,
+            blockfile_provider,
+        )
+        .instrument(Span::current());
 
         let string_metadata_future =
             Self::load_index_reader(segment, STRING_METADATA, blockfile_provider)
@@ -1759,6 +1935,7 @@ impl MetadataSegmentReaderShard<'_> {
 
         let (
             pls_reader,
+            token_bitmap_reader,
             string_metadata_reader,
             bool_metadata_reader,
             f32_metadata_reader,
@@ -1768,6 +1945,7 @@ impl MetadataSegmentReaderShard<'_> {
             sparse_posting_reader,
         ) = tokio::join!(
             pls_future,
+            token_bitmap_future,
             string_metadata_future,
             bool_metadata_future,
             f32_metadata_future,
@@ -1777,12 +1955,21 @@ impl MetadataSegmentReaderShard<'_> {
             sparse_posting_future,
         );
 
-        // Handle results and create index readers
+        // Exactly one of FULL_TEXT_TOKEN (TokenBitmap) or FULL_TEXT_PLS
+        // (Trigram) is present per segment; check TokenBitmap first.
+        let token_bitmap_reader = token_bitmap_reader?;
         let pls_reader = pls_reader?;
-        let full_text_index_reader = pls_reader.map(|reader| {
-            let tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
-            FullTextIndexReader::new(reader, tokenizer)
-        });
+        let fts_index_reader = if let Some(reader) = token_bitmap_reader {
+            Some(FtsIndexReader::TokenBitmap(
+                WordAnalyzer::default(),
+                FullTextBitmapReader::new(reader),
+            ))
+        } else {
+            pls_reader.map(|reader| {
+                let tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
+                FtsIndexReader::Trigram(FullTextIndexReader::new(reader, tokenizer))
+            })
+        };
 
         let string_metadata_reader = string_metadata_reader?;
         let string_metadata_index_reader =
@@ -1817,7 +2004,7 @@ impl MetadataSegmentReaderShard<'_> {
         };
 
         Ok(MetadataSegmentReaderShard {
-            full_text_index_reader,
+            fts_index_reader,
             string_metadata_index_reader,
             bool_metadata_index_reader,
             f32_metadata_index_reader,
@@ -3077,18 +3264,22 @@ mod test {
         .await
         .expect("Metadata segment reader construction failed");
         let res = metadata_segment_reader
-            .full_text_index_reader
+            .fts_index_reader
             .as_ref()
             .expect("The float reader should be initialized")
+            .as_trigram()
+            .expect("expected Trigram FTS reader")
             .search("hello")
             .await
             .unwrap();
         assert_eq!(res.len(), 0);
         // FTS for bye should return the lone document.
         let res = metadata_segment_reader
-            .full_text_index_reader
+            .fts_index_reader
             .as_ref()
             .expect("The float reader should be initialized")
+            .as_trigram()
+            .expect("expected Trigram FTS reader")
             .search("bye")
             .await
             .unwrap();
@@ -3302,9 +3493,11 @@ mod test {
         .await
         .expect("Metadata segment reader construction failed");
         let res = metadata_segment_reader
-            .full_text_index_reader
+            .fts_index_reader
             .as_ref()
             .expect("The float reader should be initialized")
+            .as_trigram()
+            .expect("expected Trigram FTS reader")
             .search("hello")
             .await
             .unwrap();
@@ -3312,9 +3505,11 @@ mod test {
         assert_eq!(res.min(), Some(1));
         // FTS for world should return the other document.
         let res = metadata_segment_reader
-            .full_text_index_reader
+            .fts_index_reader
             .as_ref()
             .expect("The float reader should be initialized")
+            .as_trigram()
+            .expect("expected Trigram FTS reader")
             .search("world")
             .await
             .unwrap();
@@ -3383,9 +3578,11 @@ mod test {
         .await
         .expect("Metadata segment reader should be constructable");
         let fts_reader = metadata_segment_reader
-            .full_text_index_reader
+            .fts_index_reader
             .as_ref()
-            .expect("Full text index reader should be present");
+            .expect("Full text index reader should be present")
+            .as_trigram()
+            .expect("expected Trigram FTS reader");
         let literal_expression = LiteralExpr::from(test_case.hir);
         let regex_results = fts_reader
             .match_literal_expression(&literal_expression)
@@ -4012,16 +4209,26 @@ mod test {
         .expect("Metadata segment reader construction failed");
 
         let fts_reader = metadata_segment_reader
-            .full_text_index_reader
+            .fts_index_reader
             .as_ref()
             .expect("FTS reader blockfile should still exist");
-        let res = fts_reader.search("cats").await.unwrap();
+        let res = fts_reader
+            .as_trigram()
+            .expect("expected Trigram FTS reader")
+            .search("cats")
+            .await
+            .unwrap();
         assert_eq!(
             res.len(),
             0,
             "FTS search should return 0 results when FTS is disabled"
         );
-        let res = fts_reader.search("dogs").await.unwrap();
+        let res = fts_reader
+            .as_trigram()
+            .expect("expected Trigram FTS reader")
+            .search("dogs")
+            .await
+            .unwrap();
         assert_eq!(
             res.len(),
             0,
@@ -4219,16 +4426,26 @@ mod test {
         .expect("Metadata segment reader construction failed");
 
         let fts_reader = metadata_segment_reader
-            .full_text_index_reader
+            .fts_index_reader
             .as_ref()
             .expect("FTS reader should exist");
-        let res = fts_reader.search("cats").await.unwrap();
+        let res = fts_reader
+            .as_trigram()
+            .expect("expected Trigram FTS reader")
+            .search("cats")
+            .await
+            .unwrap();
         assert_eq!(
             res.len(),
             1,
             "FTS search for 'cats' should return 1 result when FTS is enabled"
         );
-        let res = fts_reader.search("dogs").await.unwrap();
+        let res = fts_reader
+            .as_trigram()
+            .expect("expected Trigram FTS reader")
+            .search("dogs")
+            .await
+            .unwrap();
         assert_eq!(
             res.len(),
             1,

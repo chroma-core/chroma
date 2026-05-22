@@ -1965,18 +1965,22 @@ mod tests {
             .unwrap();
         assert_eq!(res.len(), 0);
         let res = metadata_segment_reader
-            .full_text_index_reader
+            .fts_index_reader
             .as_ref()
             .expect("The float reader should be initialized")
+            .as_trigram()
+            .expect("expected Trigram FTS reader")
             .search("number")
             .await
             .unwrap();
         assert_eq!(res.len(), 1);
         assert_eq!(res.min(), Some(1));
         let res = metadata_segment_reader
-            .full_text_index_reader
+            .fts_index_reader
             .as_ref()
             .expect("The float reader should be initialized")
+            .as_trigram()
+            .expect("expected Trigram FTS reader")
             .search("doc")
             .await
             .unwrap();
@@ -2297,18 +2301,22 @@ mod tests {
         assert_eq!(res.len(), 1);
         assert_eq!(res.min(), Some(1));
         let res = metadata_segment_reader
-            .full_text_index_reader
+            .fts_index_reader
             .as_ref()
             .expect("The float reader should be initialized")
+            .as_trigram()
+            .expect("expected Trigram FTS reader")
             .search("doc1")
             .await
             .unwrap();
         assert_eq!(res.len(), 1);
         assert_eq!(res.min(), Some(1));
         let res = metadata_segment_reader
-            .full_text_index_reader
+            .fts_index_reader
             .as_ref()
             .expect("The float reader should be initialized")
+            .as_trigram()
+            .expect("expected Trigram FTS reader")
             .search("number")
             .await
             .unwrap();
@@ -2648,18 +2656,22 @@ mod tests {
             .unwrap();
         assert_eq!(res.len(), 0);
         let res = metadata_segment_reader
-            .full_text_index_reader
+            .fts_index_reader
             .as_ref()
             .expect("The float reader should be initialized")
+            .as_trigram()
+            .expect("expected Trigram FTS reader")
             .search("number")
             .await
             .unwrap();
         assert_eq!(res.len(), 1);
         assert_eq!(res.min(), Some(1));
         let res = metadata_segment_reader
-            .full_text_index_reader
+            .fts_index_reader
             .as_ref()
             .expect("The float reader should be initialized")
+            .as_trigram()
+            .expect("expected Trigram FTS reader")
             .search("doc1")
             .await
             .unwrap();
