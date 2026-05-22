@@ -205,15 +205,18 @@ class ChromaCloudQwenEmbeddingFunction(EmbeddingFunction[Documents]):
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
-        if "model" in new_config:
+        if "model" in new_config and new_config["model"] != old_config.get("model"):
             raise ValueError(
                 "The model cannot be changed after the embedding function has been initialized."
             )
-        elif "task" in new_config:
+        if "task" in new_config and new_config["task"] != old_config.get("task"):
             raise ValueError(
                 "The task cannot be changed after the embedding function has been initialized."
             )
-        elif "instructions" in new_config:
+        if (
+            "instructions" in new_config
+            and new_config["instructions"] != old_config.get("instructions")
+        ):
             raise ValueError(
                 "The instructions cannot be changed after the embedding function has been initialized."
             )

@@ -164,11 +164,17 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Embeddable]):
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
-        if "model_name" in new_config:
+        if (
+            "model_name" in new_config
+            and new_config["model_name"] != old_config.get("model_name")
+        ):
             raise ValueError(
                 "The model name cannot be changed after the embedding function has been initialized."
             )
-        if "checkpoint" in new_config:
+        if (
+            "checkpoint" in new_config
+            and new_config["checkpoint"] != old_config.get("checkpoint")
+        ):
             raise ValueError(
                 "The checkpoint cannot be changed after the embedding function has been initialized."
             )
