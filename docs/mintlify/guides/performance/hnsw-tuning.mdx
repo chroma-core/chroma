@@ -1,0 +1,218 @@
+---
+title: HNSW Index Tuning
+description: How to tune HNSW parameters in Chroma for better search speed, accuracy, and memory usage.
+---
+
+Chroma uses the HNSW (Hierarchical Navigable Small World) algorithm to index and search vectors. HNSW builds a multi-layer graph where each vector is a node connected to its nearest neighbors. Queries traverse this graph from the top layer down, narrowing the search at each level.
+
+The default parameters work well for most use cases. Tune them when you need to optimize for a specific tradeoff between **search speed**, **recall accuracy**, and **memory usage**.
+
+## Parameters
+
+You can set HNSW parameters when creating a collection:
+
+```python
+client.create_collection(
+    name="my_collection",
+    metadata={
+        "hnsw:space": "cosine",
+        "hnsw:construction_ef": 200,
+        "hnsw:search_ef": 100,
+        "hnsw:M": 32,
+        "hnsw:num_threads": 4,
+        "hnsw:batch_size": 1000,
+    }
+)
+```
+
+### hnsw:space
+
+The distance function used to compare vectors.
+
+| Value | Description | Best for |
+|---|---|---|
+| cosine (default) | Cosine similarity | Text embeddings, semantic search |
+| l2 | Euclidean distance | Image embeddings, spatial data |
+| ip | Inner product | When embeddings are already normalized |
+
+Most text embedding models (OpenAI, sentence-transformers, Cohere) produce normalized vectors, so cosine and ip give equivalent results. Use cosine unless you have a specific reason not to.
+
+### hnsw:M
+
+The number of bi-directional links per node in the graph. Higher values create a denser graph.
+
+| Value | Search accuracy | Memory usage | Build time |
+|---|---|---|---|
+| 8 | Lower | Lower | Faster |
+| **16 (default)** | **Good balance** | **Moderate** | **Moderate** |
+| 32 | Higher | Higher | Slower |
+| 64 | Highest | ~4x of M=16 | Much slower |
+
+**When to increase:** You have a large collection (1M+ vectors) and need high recall. Each doubling of M roughly doubles memory per vector.
+
+**When to decrease:** You have limited memory or a small collection where the default already gives good accuracy.
+
+### hnsw:construction_ef
+
+Controls how many neighbors are explored when **building** the index. Higher values produce a better graph but take longer to build.
+
+| Value | Index quality | Build time |
+|---|---|---|
+| 50 | Lower | Fast |
+| **100 (default)** | **Good balance** | **Moderate** |
+| 200 | Higher | Slower |
+| 400 | Highest | 2-4x slower |
+
+**Rule of thumb:** Set construction_ef >= M. Values below M produce poor-quality graphs. For production workloads, construction_ef = 200 is a safe choice.
+
+This parameter only affects index build time, not search time. If your data is loaded once and queried many times, use a higher value.
+
+### hnsw:search_ef
+
+Controls how many neighbors are explored when **querying** the index. This is the most impactful parameter for search performance.
+
+| Value | Recall accuracy | Search latency |
+|---|---|---|
+| 10 | ~85% | Fastest |
+| **50 (default)** | **~95%** | **Fast** |
+| 100 | ~98% | Moderate |
+| 200 | ~99%+ | Slower |
+
+**When to increase:** Your application requires high recall (e.g., compliance document search, medical data). The cost is linear -- doubling search_ef roughly doubles query time.
+
+**When to decrease:** You need fast approximate results and can tolerate missing some relevant documents.
+
+search_ef must be >= n_results (the number of results you request). If you query with n_results=20, set search_ef to at least 20.
+
+### hnsw:num_threads
+
+Number of threads used for index construction. Defaults to the number of available CPU cores.
+
+Set this to the number of physical cores on your machine. Values higher than the core count provide no benefit and may reduce performance due to context switching.
+
+### hnsw:batch_size
+
+Number of vectors to index in each batch during bulk inserts. Default is 100.
+
+Increase this when loading large datasets to reduce overhead. Values between 1000 and 10000 work well for bulk loads.
+
+### hnsw:resize_factor
+
+Growth factor when the index needs to allocate more memory. Default is 1.2 (20% growth).
+
+Only relevant if you are adding vectors incrementally and want to control memory allocation behavior.
+
+## Recommended Configurations
+
+### Small collection (< 10,000 documents)
+
+Default parameters work well. No tuning needed.
+
+```python
+client.create_collection(name="small_docs")
+```
+
+### Medium collection (10,000 - 500,000 documents)
+
+Increase search_ef for better accuracy. Increase construction_ef if build time is not a concern.
+
+```python
+client.create_collection(
+    name="medium_docs",
+    metadata={
+        "hnsw:construction_ef": 200,
+        "hnsw:search_ef": 100,
+    }
+)
+```
+
+### Large collection (500,000+ documents)
+
+Increase M for a denser graph. Use higher construction_ef and search_ef. Consider batch_size for faster bulk loading.
+
+```python
+client.create_collection(
+    name="large_docs",
+    metadata={
+        "hnsw:M": 32,
+        "hnsw:construction_ef": 400,
+        "hnsw:search_ef": 200,
+        "hnsw:batch_size": 5000,
+    }
+)
+```
+
+### High-accuracy requirements (compliance, medical, legal)
+
+Maximize recall at the cost of latency.
+
+```python
+client.create_collection(
+    name="compliance_docs",
+    metadata={
+        "hnsw:M": 48,
+        "hnsw:construction_ef": 400,
+        "hnsw:search_ef": 300,
+    }
+)
+```
+
+### Low-latency requirements (real-time search, autocomplete)
+
+Minimize search time at the cost of recall.
+
+```python
+client.create_collection(
+    name="fast_search",
+    metadata={
+        "hnsw:M": 12,
+        "hnsw:search_ef": 20,
+    }
+)
+```
+
+> **Note:** With search_ef=20, keep n_results at or below 20 in your queries. Requesting more results than search_ef will degrade accuracy.
+
+## How to Measure
+
+Use timing to measure the impact of parameter changes on your data:
+
+```python
+import time
+
+collection = client.create_collection(
+    name="benchmark",
+    metadata={"hnsw:search_ef": 50}
+)
+
+# Add your documents
+collection.add(documents=docs, ids=ids)
+
+# Warmup query (first query is slower due to cold cache)
+collection.query(query_texts=["warmup"], n_results=10)
+
+# Benchmark over multiple runs for reliable timing
+n_runs = 10
+times = []
+for _ in range(n_runs):
+    start = time.perf_counter()
+    results = collection.query(query_texts=["your query"], n_results=10)
+    times.append(time.perf_counter() - start)
+
+avg = sum(times) / len(times)
+print(f"Avg query time ({n_runs} runs): {avg:.3f}s")
+print(f"Min: {min(times):.3f}s | Max: {max(times):.3f}s")
+```
+
+Compare results across different search_ef values to find the right balance for your use case. Accuracy can be measured by comparing results against a brute-force search on a smaller dataset.
+
+## Key Tradeoffs
+
+| Want | Increase | Cost |
+|---|---|---|
+| Better accuracy | search_ef, M | Slower queries, more memory |
+| Faster queries | Decrease search_ef | Lower accuracy |
+| Better index quality | construction_ef | Slower index build |
+| Less memory | Decrease M | Lower accuracy |
+
+For most applications, tuning search_ef alone is sufficient. Start with the default (50), increase to 100-200 if recall is insufficient, and only adjust M and construction_ef for large-scale deployments.
