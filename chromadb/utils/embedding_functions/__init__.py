@@ -80,6 +80,9 @@ from chromadb.utils.embedding_functions.huggingface_sparse_embedding_function im
 from chromadb.utils.embedding_functions.fastembed_sparse_embedding_function import (
     FastembedSparseEmbeddingFunction,
 )
+from chromadb.utils.embedding_functions.fastembed_text_embedding_function import (
+    FastembedTextEmbeddingFunction,
+)
 from chromadb.utils.embedding_functions.bm25_embedding_function import (
     Bm25EmbeddingFunction,
 )
@@ -128,6 +131,7 @@ _all_classes: Set[str] = {
     "DefaultEmbeddingFunction",
     "HuggingFaceSparseEmbeddingFunction",
     "FastembedSparseEmbeddingFunction",
+    "FastembedTextEmbeddingFunction",
     "Bm25EmbeddingFunction",
     "ChromaCloudQwenEmbeddingFunction",
     "ChromaCloudSpladeEmbeddingFunction",
@@ -171,6 +175,7 @@ known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignor
     "together_ai": TogetherAIEmbeddingFunction,
     "chroma-cloud-qwen": ChromaCloudQwenEmbeddingFunction,
     "perplexity": PerplexityEmbeddingFunction,
+    "fastembed_text": FastembedTextEmbeddingFunction,
 }
 
 sparse_known_embedding_functions: Dict[str, Type[SparseEmbeddingFunction]] = {  # type: ignore
@@ -296,6 +301,7 @@ __all__ = [
     "TogetherAIEmbeddingFunction",
     "HuggingFaceSparseEmbeddingFunction",
     "FastembedSparseEmbeddingFunction",
+    "FastembedTextEmbeddingFunction",
     "Bm25EmbeddingFunction",
     "ChromaCloudQwenEmbeddingFunction",
     "ChromaCloudSpladeEmbeddingFunction",

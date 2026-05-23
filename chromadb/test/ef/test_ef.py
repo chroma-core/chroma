@@ -54,6 +54,7 @@ def test_get_builtins_holds() -> None:
         "DefaultEmbeddingFunction",
         "HuggingFaceSparseEmbeddingFunction",
         "FastembedSparseEmbeddingFunction",
+        "FastembedTextEmbeddingFunction",
         "Bm25EmbeddingFunction",
         "ChromaCloudQwenEmbeddingFunction",
         "ChromaCloudSpladeEmbeddingFunction",
