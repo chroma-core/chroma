@@ -56,6 +56,12 @@ use wal3::LogPosition;
 
 use crate::mcmr::RegionsAndTopologies;
 
+#[derive(Debug, Clone)]
+enum AttachedFunctionOffset {
+    NotFetched,
+    Fetched(Option<u64>),
+}
+
 #[derive(Debug)]
 pub struct GarbageCollectorOrchestrator {
     collection_id: CollectionUuid,
@@ -89,8 +95,7 @@ pub struct GarbageCollectorOrchestrator {
     num_files_deleted: u32,
     num_versions_deleted: u32,
 
-    min_attached_fn_completion_offset: Option<u64>,
-    min_attached_fn_completion_offset_fetched: bool,
+    attached_fn_completion_offset: AttachedFunctionOffset,
     file_listing_complete: bool,
 
     enable_dangerous_option_to_ignore_min_versions_for_wal3: bool,
@@ -149,8 +154,7 @@ impl GarbageCollectorOrchestrator {
             num_files_deleted: 0,
             num_versions_deleted: 0,
 
-            min_attached_fn_completion_offset: None,
-            min_attached_fn_completion_offset_fetched: false,
+            attached_fn_completion_offset: AttachedFunctionOffset::NotFetched,
             file_listing_complete: false,
 
             enable_dangerous_option_to_ignore_min_versions_for_wal3,
@@ -536,7 +540,12 @@ impl GarbageCollectorOrchestrator {
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Result<(), GarbageCollectorError> {
-        if !self.file_listing_complete || !self.min_attached_fn_completion_offset_fetched {
+        if !self.file_listing_complete
+            || matches!(
+                self.attached_fn_completion_offset,
+                AttachedFunctionOffset::NotFetched
+            )
+        {
             return Ok(());
         }
 
@@ -594,11 +603,17 @@ impl GarbageCollectorOrchestrator {
             let mut min_offset_to_keep = LogPosition::from_offset(min_compaction_log_offset) + 1u64;
             // Attached functions may be behind compaction; clamp to the lowest
             // completion_offset across live attached functions on this collection.
-            // TODO(tanujnay112): This needs to be tweaked when we support forking
-            // with functions.
+            // TODO(tanujnay112): This needs to be changed when we support forking
+            // with functions. We would need to drop the assumption there is only
+            // one collection with an attached function in this fork tree and
+            // receive min_min_attached_fn_completion_offset for each collection
+            // in this forktree. That needs to be derived inline with where the
+            // fork tree is constructed.
             if *collection_id == self.collection_id {
-                if let Some(min_completion_offset) = self.min_attached_fn_completion_offset {
-                    let attached_fn_floor = LogPosition::from_offset(min_completion_offset) + 1u64;
+                if let AttachedFunctionOffset::Fetched(Some(min_completion_offset)) =
+                    &self.attached_fn_completion_offset
+                {
+                    let attached_fn_floor = LogPosition::from_offset(*min_completion_offset) + 1u64;
                     min_offset_to_keep = min_offset_to_keep.min(attached_fn_floor);
                 }
             }
@@ -1182,8 +1197,8 @@ impl
             min_completion_offset = ?output.min_completion_offset,
             "Fetched min attached function completion offset"
         );
-        self.min_attached_fn_completion_offset = output.min_completion_offset;
-        self.min_attached_fn_completion_offset_fetched = true;
+        self.attached_fn_completion_offset =
+            AttachedFunctionOffset::Fetched(output.min_completion_offset);
         let res = self.try_start_delete_unused_logs_operator(ctx).await;
         self.ok_or_terminate(res, ctx).await;
     }

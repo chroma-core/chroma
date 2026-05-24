@@ -61,7 +61,7 @@ impl
         FetchMinAttachedFunctionCompletionOffsetOutput,
         FetchMinAttachedFunctionCompletionOffsetError,
     > {
-        // TODO: replace with a server-side MIN(completion_offset) aggregate so
+        // TODO(tanujny112): replace with a server-side MIN(completion_offset) aggregate so
         // we don't pay to serialize every AttachedFunction row.
         let attached_functions = input
             .sysdb_client

@@ -726,7 +726,6 @@ impl TestSysDb {
         Ok(functions)
     }
 
-    #[allow(dead_code)]
     pub(crate) async fn attach_function(
         &mut self,
         attached_function: chroma_types::AttachedFunction,
