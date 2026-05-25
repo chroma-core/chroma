@@ -75,9 +75,9 @@ pub struct AttachedFunction {
     pub output_collection_id: Option<CollectionUuid>,
     /// Optional JSON parameters for the function
     pub params: Option<String>,
-    /// Tenant name this attached function belongs to (despite field name, this is a name not a UUID)
+    /// Tenant ID this attached function belongs to
     pub tenant_id: String,
-    /// Database name this attached function belongs to (despite field name, this is a name not a UUID)
+    /// Database ID this attached function belongs to
     pub database_id: String,
     /// Timestamp of the last successful function run
     #[serde(skip, default)]
