@@ -441,6 +441,13 @@ class FastAPI(Server):
         )
 
         self.router.add_api_route(
+            "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/attached_functions/{function_name}/add_input",
+            self.add_attached_function_input,
+            methods=["POST"],
+            response_model=None,
+        )
+
+        self.router.add_api_route(
             "/api/v2/tenants/{tenant}/databases/{database_name}/collections/by-id/{collection_id}",
             self.get_collection_by_id,
             methods=["GET"],
@@ -566,7 +573,9 @@ class FastAPI(Server):
             await to_thread.run_sync(
                 lambda: cast(
                     ServerAuthenticationProvider, self.authn_provider
-                ).authenticate_or_raise(dict(request.headers))  # type: ignore
+                ).authenticate_or_raise(
+                    dict(request.headers)
+                )  # type: ignore
             ),
         )
 
@@ -1091,6 +1100,72 @@ class FastAPI(Server):
                 "params": attached_fn.params,
             }
         }
+
+    @trace_method(
+        "FastAPI.add_attached_function_input", OpenTelemetryGranularity.OPERATION
+    )
+    @rate_limit
+    async def add_attached_function_input(
+        self,
+        request: Request,
+        tenant: str,
+        database_name: str,
+        collection_id: str,
+        function_name: str,
+    ) -> Dict[str, Any]:
+        try:
+
+            def process_add_attached_function_input(
+                request: Request, raw_body: bytes
+            ) -> Dict[str, Any]:
+                body = orjson.loads(raw_body)
+                new_input_collection_id = body.get("input_collection_id")
+
+                self.sync_auth_request(
+                    request.headers,
+                    AuthzAction.UPDATE_COLLECTION,
+                    tenant,
+                    database_name,
+                    collection_id,
+                )
+                self.sync_auth_request(
+                    request.headers,
+                    AuthzAction.UPDATE_COLLECTION,
+                    tenant,
+                    database_name,
+                    new_input_collection_id,
+                )
+                self._set_request_context(request=request)
+
+                attached_fn, created = self._api.add_attached_function_input(
+                    name=function_name,
+                    existing_input_collection_id=_uuid(collection_id),
+                    new_input_collection_id=_uuid(new_input_collection_id),
+                    tenant=tenant,
+                    database=database_name,
+                )
+
+                return {
+                    "attached_function": {
+                        "id": str(attached_fn.id),
+                        "name": attached_fn.name,
+                        "function_name": attached_fn.function_name,
+                        "input_collection_id": str(attached_fn.input_collection_id),
+                        "output_collection": attached_fn.output_collection,
+                        "params": attached_fn.params,
+                    },
+                    "created": created,
+                }
+
+            raw_body = await request.body()
+            return await to_thread.run_sync(
+                process_add_attached_function_input,
+                request,
+                raw_body,
+                limiter=self._capacity_limiter,
+            )
+        except Exception:
+            raise
 
     @trace_method("FastAPI.add", OpenTelemetryGranularity.OPERATION)
     @rate_limit

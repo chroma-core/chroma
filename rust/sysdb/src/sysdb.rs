@@ -2291,6 +2291,52 @@ impl GrpcSysDb {
         Ok((attached_function_id, response.created))
     }
 
+    pub async fn add_attached_function_input(
+        &mut self,
+        attached_function_id: chroma_types::AttachedFunctionUuid,
+        input_collection_id: chroma_types::CollectionUuid,
+    ) -> Result<(chroma_types::AttachedFunctionUuid, bool), AttachFunctionError> {
+        let req = chroma_proto::AddAttachedFunctionInputRequest {
+            attached_function_id: attached_function_id.to_string(),
+            input_collection_id: input_collection_id.to_string(),
+        };
+
+        let response = self
+            .client
+            .add_attached_function_input(req)
+            .await
+            .map_err(|e| match e.code() {
+                Code::AlreadyExists => AttachFunctionError::AlreadyExists(e.message().to_string()),
+                Code::FailedPrecondition => {
+                    AttachFunctionError::CollectionAlreadyHasFunction(e.message().to_string())
+                }
+                Code::InvalidArgument => {
+                    AttachFunctionError::InvalidArgument(e.message().to_string())
+                }
+                Code::NotFound => AttachFunctionError::FunctionNotFound(e.message().to_string()),
+                _ => AttachFunctionError::InternalError(e),
+            })?
+            .into_inner();
+
+        let attached_function = response.attached_function.ok_or_else(|| {
+            tracing::error!("Server did not return attached function in response");
+            AttachFunctionError::ServerReturnedInvalidData
+        })?;
+
+        let parsed_attached_function_id = chroma_types::AttachedFunctionUuid(
+            uuid::Uuid::parse_str(&attached_function.id).map_err(|e| {
+                tracing::error!(
+                    attached_function_id = %attached_function.id,
+                    error = %e,
+                    "Server returned invalid attached_function_id UUID - attached function input was added but response is corrupt"
+                );
+                AttachFunctionError::ServerReturnedInvalidData
+            })?,
+        );
+
+        Ok((parsed_attached_function_id, response.created))
+    }
+
     /// Helper function to convert a proto AttachedFunction to a chroma_types::AttachedFunction
     #[allow(clippy::result_large_err)]
     fn attached_function_from_proto(
@@ -2740,6 +2786,27 @@ impl SysDb {
                 test_sysdb.set_attached_functions(attached_functions);
 
                 Ok((attached_function_id, true))
+            }
+        }
+    }
+
+    pub async fn add_attached_function_input(
+        &mut self,
+        attached_function_id: chroma_types::AttachedFunctionUuid,
+        input_collection_id: chroma_types::CollectionUuid,
+    ) -> Result<(chroma_types::AttachedFunctionUuid, bool), AttachFunctionError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.add_attached_function_input(attached_function_id, input_collection_id)
+                    .await
+            }
+            SysDb::Sqlite(_) => Err(AttachFunctionError::InternalError(
+                tonic::Status::unimplemented(
+                    "add_attached_function_input is not supported in SqliteSysDb",
+                ),
+            )),
+            SysDb::Test(_) => {
+                todo!()
             }
         }
     }

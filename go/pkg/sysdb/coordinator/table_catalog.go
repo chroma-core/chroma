@@ -731,37 +731,25 @@ func (tc *Catalog) softDeleteCollection(ctx context.Context, deleteCollection *m
 			}
 		}
 
-		// If this collection is an output collection, cascade delete all attached functions
-		// This is done transactionally - either all functions are deleted or none are
-		// Query for all attached functions that have this collection as their output
+		// If this collection is an output collection, soft delete the attached functions that write into it.
 		outputCollectionIDStr := deleteCollection.ID.String()
-		attachedFunctionsWithOutput, err := tc.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(nil, nil, nil, &outputCollectionIDStr, nil, false)
+		attachedFunctionsForOutput, err := tc.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(nil, nil, nil, &outputCollectionIDStr, nil, true)
 		if err != nil {
-			log.Error("Failed to query attached functions by output collection", zap.Error(err))
-			return fmt.Errorf("failed to query attached functions for output collection: %w", err)
+			log.Error("Failed to get attached functions for output collection", zap.Error(err), zap.String("output_collection_id", outputCollectionIDStr))
+			return err
 		}
-
-		if len(attachedFunctionsWithOutput) > 0 {
-			log.Info("Deleting output collection with attached functions - cascade deleting functions",
-				zap.String("collection_id", deleteCollection.ID.String()),
-				zap.String("collection_name", *collections[0].Collection.Name),
-				zap.Int("num_attached_functions", len(attachedFunctionsWithOutput)))
-
-			// Delete each function that writes to this output collection (all in same transaction)
-			for _, af := range attachedFunctionsWithOutput {
-				inputCollectionID, err := uuid.Parse(af.InputCollectionID)
-				if err != nil {
-					log.Error("Failed to parse input collection ID", zap.Error(err), zap.String("input_collection_id", af.InputCollectionID))
-					return fmt.Errorf("invalid input collection ID for function %s: %s", af.ID.String(), af.InputCollectionID)
+		if len(attachedFunctionsForOutput) > 0 {
+			log.Info("Soft deleting attached functions for output collection",
+				zap.String("output_collection_id", outputCollectionIDStr),
+				zap.Int("num_attached_functions", len(attachedFunctionsForOutput)))
+			for _, af := range attachedFunctionsForOutput {
+				inputCollectionID, parseErr := uuid.Parse(af.InputCollectionID)
+				if parseErr != nil {
+					log.Error("Failed to parse input collection ID", zap.Error(parseErr), zap.String("input_collection_id", af.InputCollectionID))
+					return parseErr
 				}
-
-				log.Info("Cascade deleting attached function",
-					zap.String("attached_function_id", af.ID.String()),
-					zap.String("output_collection_id", deleteCollection.ID.String()))
-
 				if err := tc.metaDomain.AttachedFunctionDb(txCtx).SoftDeleteByID(af.ID, inputCollectionID); err != nil {
-					log.Error("Failed to soft delete attached function", zap.Error(err), zap.String("attached_function_id", af.ID.String()))
-					return fmt.Errorf("failed to delete attached function %s: %w", af.ID.String(), err)
+					return err
 				}
 			}
 		}

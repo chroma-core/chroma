@@ -2634,6 +2634,30 @@ pub struct GetAttachedFunctionResponse {
     pub attached_function: AttachedFunctionApiResponse,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct AddAttachedFunctionInputResponse {
+    pub attached_function: AttachedFunctionApiResponse,
+    pub created: bool,
+}
+
+#[non_exhaustive]
+#[derive(Clone, Debug, Deserialize, Serialize, Validate)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct AddAttachedFunctionInputRequest {
+    pub input_collection_id: CollectionUuid,
+}
+
+impl AddAttachedFunctionInputRequest {
+    pub fn try_new(input_collection_id: CollectionUuid) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            input_collection_id,
+        };
+        request.validate().map_err(ChromaValidationError::from)?;
+        Ok(request)
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum AttachFunctionError {
     #[error("{0}")]

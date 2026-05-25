@@ -15,23 +15,23 @@ use chroma_system::System;
 use chroma_tracing::add_tracing_middleware;
 use chroma_types::{
     decode_embeddings, maybe_decode_update_embeddings, plan::ReadLevel, validate_name,
-    AddCollectionRecordsPayload, AddCollectionRecordsResponse, AttachFunctionRequest,
-    AttachFunctionResponse, Collection, CollectionConfiguration, CollectionMetadataUpdate,
-    CollectionUuid, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
-    CreateCollectionPayload, CreateCollectionRequest, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, DatabaseName,
-    DeleteCollectionRecordsPayload, DeleteCollectionRecordsResponse, DeleteCollectionResponse,
-    DeleteDatabaseRequest, DeleteDatabaseResponse, DetachFunctionRequest, DetachFunctionResponse,
-    ForkCollectionResponse, GetAttachedFunctionResponse, GetCollectionByCrnRequest,
-    GetCollectionByIdRequest, GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse,
-    GetRequest, GetRequestPayload, GetResponse, GetTenantRequest, GetTenantResponse,
-    HealthCheckResponse, IndexStatusResponse, InternalCollectionConfiguration,
-    InternalUpdateCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesRequest, ListDatabasesResponse, QueryRequest, QueryRequestPayload, QueryResponse,
-    SearchRequest, SearchRequestPayload, SearchResponse, UpdateCollectionPayload,
-    UpdateCollectionRecordsPayload, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
-    UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsPayload,
-    UpsertCollectionRecordsResponse,
+    AddAttachedFunctionInputRequest, AddAttachedFunctionInputResponse, AddCollectionRecordsPayload,
+    AddCollectionRecordsResponse, AttachFunctionRequest, AttachFunctionResponse, Collection,
+    CollectionConfiguration, CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest,
+    CountCollectionsResponse, CountRequest, CountResponse, CreateCollectionPayload,
+    CreateCollectionRequest, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest,
+    CreateTenantResponse, DatabaseName, DeleteCollectionRecordsPayload,
+    DeleteCollectionRecordsResponse, DeleteCollectionResponse, DeleteDatabaseRequest,
+    DeleteDatabaseResponse, DetachFunctionRequest, DetachFunctionResponse, ForkCollectionResponse,
+    GetAttachedFunctionResponse, GetCollectionByCrnRequest, GetCollectionByIdRequest,
+    GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetRequestPayload,
+    GetResponse, GetTenantRequest, GetTenantResponse, HealthCheckResponse, IndexStatusResponse,
+    InternalCollectionConfiguration, InternalUpdateCollectionConfiguration, ListCollectionsRequest,
+    ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse, QueryRequest,
+    QueryRequestPayload, QueryResponse, SearchRequest, SearchRequestPayload, SearchResponse,
+    UpdateCollectionPayload, UpdateCollectionRecordsPayload, UpdateCollectionRecordsResponse,
+    UpdateCollectionResponse, UpdateTenantRequest, UpdateTenantResponse,
+    UpsertCollectionRecordsPayload, UpsertCollectionRecordsResponse,
 };
 use frontend_core::routes::{SystemMetrics, SystemState};
 use mdac::{Rule, Scorecard, ScorecardGuard};
@@ -158,6 +158,7 @@ pub struct Metrics {
     collection_query: Counter<u64>,
     collection_search: Counter<u64>,
     attach_function: Counter<u64>,
+    add_attached_function_input: Counter<u64>,
     get_attached_function: Counter<u64>,
     detach_function: Counter<u64>,
 }
@@ -194,6 +195,7 @@ impl Metrics {
             collection_query: meter.u64_counter("collection_query").build(),
             collection_search: meter.u64_counter("collection_search").build(),
             attach_function: meter.u64_counter("attach_function").build(),
+            add_attached_function_input: meter.u64_counter("add_attached_function_input").build(),
             get_attached_function: meter.u64_counter("get_attached_function").build(),
             detach_function: meter.u64_counter("detach_function").build(),
         }
@@ -364,6 +366,10 @@ impl FrontendServer {
             .route(
                 "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/functions/{function_name}",
                 get(get_attached_function),
+            )
+            .route(
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/attached_functions/{name}/add_input",
+                post(add_attached_function_input),
             )
             .route(
                 "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/attached_functions/{name}/detach",
@@ -3229,6 +3235,78 @@ async fn get_attached_function(
     }))
 }
 
+/// Add an input collection to an async attached function.
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/attached_functions/{name}/add_input",
+    summary = "Add attached function input",
+    description = "Adds a new input collection to an existing async attached function.",
+    tag = "Function",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
+    request_body = AddAttachedFunctionInputRequest,
+    responses(
+        (status = 200, description = "Attached function input added successfully", body = AddAttachedFunctionInputResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("name" = String, Path, description = "Function name")
+    )
+)]
+async fn add_attached_function_input(
+    headers: HeaderMap,
+    Path((tenant, database, collection_id, name)): Path<(String, String, String, String)>,
+    State(mut server): State<FrontendServer>,
+    TracedJson(request): TracedJson<AddAttachedFunctionInputRequest>,
+) -> Result<Json<AddAttachedFunctionInputResponse>, ServerError> {
+    server.metrics.add_attached_function_input.add(1, &[]);
+
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::CreateAttachedFunction,
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
+                collection: Some(collection_id.clone()),
+            },
+        )
+        .await?;
+
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::CreateAttachedFunction,
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
+                collection: Some(request.input_collection_id.to_string()),
+            },
+        )
+        .await?;
+
+    let _guard = server.scorecard_request(&[
+        "op:add_attached_function_input",
+        format!("tenant:{}", tenant).as_str(),
+        format!("database:{}", database).as_str(),
+    ])?;
+
+    let database_name = DatabaseName::new(database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
+    reject_topology_database_operation(&database_name, "attached functions")?;
+    let res = server
+        .frontend
+        .add_attached_function_input(tenant, database_name, collection_id, name, request)
+        .await?;
+    Ok(Json(res))
+}
+
 /// Detach function
 /// Detaches a function from a collection.
 #[utoipa::path(
@@ -3350,6 +3428,7 @@ impl Modify for ChromaTokenSecurityAddon {
         collection_query,
         collection_search,
         attach_function,
+        add_attached_function_input,
         get_attached_function,
         detach_function,
         indexing_status,
@@ -3587,6 +3666,32 @@ mod tests {
                 multi_region_database(),
                 collection_id
             )),
+            "multi-region databases do not support attached functions",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn add_attached_function_input_rejects_multi_region_database() {
+        let port = test_server(FrontendServerConfig::single_node_default()).await;
+
+        let client = Client::new();
+        let collection_id = uuid::Uuid::new_v4().to_string();
+        assert_invalid_argument(
+            client
+                .post(format!(
+                    "http://localhost:{}/api/v2/tenants/test_tenant/databases/{}/collections/{}/attached_functions/my_function/add_input",
+                    port,
+                    multi_region_database(),
+                    collection_id
+                ))
+                .header("content-type", "application/json")
+                .body(
+                    serde_json::to_string(&serde_json::json!({
+                        "input_collection_id": uuid::Uuid::new_v4().to_string()
+                    }))
+                    .unwrap(),
+                ),
             "multi-region databases do not support attached functions",
         )
         .await;
