@@ -193,6 +193,7 @@ async fn whoami_and_authorize(
 mod tests {
     use super::*;
     use chroma_api_types::GetUserIdentityResponse;
+    use chroma_types::SegmentType;
     use std::collections::HashSet;
     use std::future::{ready, Future};
     use std::pin::Pin;
@@ -256,6 +257,68 @@ mod tests {
             let identity = self.identity();
             Box::pin(ready(Ok(identity)))
         }
+    }
+
+    #[test]
+    fn foundation_schema_has_sparse_vector_index() {
+        let schema = foundation_collection_schema();
+        assert!(
+            schema.is_sparse_index_enabled(),
+            "schema must have a sparse vector index for SPLADE embeddings"
+        );
+    }
+
+    #[test]
+    fn foundation_schema_sparse_key_is_sparse_embedding() {
+        let schema = foundation_collection_schema();
+        let sparse_vt = schema
+            .keys
+            .get("sparse_embedding")
+            .expect("schema must have a 'sparse_embedding' key override");
+        let idx = sparse_vt
+            .sparse_vector
+            .as_ref()
+            .and_then(|sv| sv.sparse_vector_index.as_ref())
+            .expect("'sparse_embedding' key must have a sparse_vector_index");
+        assert!(idx.enabled, "sparse_vector_index must be enabled");
+        assert_eq!(idx.config.bm25, Some(false));
+    }
+
+    #[test]
+    fn foundation_plan_produces_schema_and_segments() {
+        let schema = foundation_collection_schema();
+        let plan = plan_create_collection(
+            None,
+            Some(schema),
+            ExecutorKind::Distributed,
+            &supported_segment_types(ExecutorKind::Distributed),
+            true,
+            KnnIndex::Spann,
+            TenantFeatureFlags::default(),
+        )
+        .expect("planning with foundation schema must succeed");
+
+        assert!(
+            plan.schema.is_some(),
+            "plan must carry a reconciled schema when enable_schema=true"
+        );
+        assert!(
+            !plan.segments.is_empty(),
+            "plan must produce at least one segment"
+        );
+        let reconciled = plan.schema.as_ref().unwrap();
+        assert!(
+            reconciled.is_sparse_index_enabled(),
+            "reconciled schema must preserve the sparse vector index"
+        );
+        assert!(
+            plan.segments
+                .iter()
+                .any(|s| s.r#type == SegmentType::Spann
+                    || s.r#type == SegmentType::QuantizedSpann),
+            "plan must include a SPANN vector segment, got: {:?}",
+            plan.segments.iter().map(|s| &s.r#type).collect::<Vec<_>>()
+        );
     }
 
     #[tokio::test]
