@@ -314,8 +314,7 @@ mod tests {
         assert!(
             plan.segments
                 .iter()
-                .any(|s| s.r#type == SegmentType::Spann
-                    || s.r#type == SegmentType::QuantizedSpann),
+                .any(|s| s.r#type == SegmentType::Spann || s.r#type == SegmentType::QuantizedSpann),
             "plan must include a SPANN vector segment, got: {:?}",
             plan.segments.iter().map(|s| &s.r#type).collect::<Vec<_>>()
         );
