@@ -153,6 +153,7 @@ async fn ensure_collection(
             plan.configuration,
             plan.schema,
             None,
+            // NOTE(hammadb): Foundation uses Qwen0.6B by default which is 1024 dims
             Some(1024),
             GET_OR_CREATE,
         )
