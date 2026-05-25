@@ -130,8 +130,6 @@ impl HttpGenerateExecutor {
             source_kind,
             output_collection: af.output_collection_name.clone(),
             tenant_id: af.tenant_id.clone(),
-            // Note(hammadb): See rust/types/src/task.rs which notes that database_id is a name not a UUID
-            // this is odd, but keeping it as is for transmission here.
             database_id: af.database_id.clone(),
             modal_key,
             modal_secret,
