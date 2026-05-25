@@ -1,7 +1,10 @@
 use axum::{extract::State, http::HeaderMap, Json};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_sysdb::SysDb;
-use chroma_types::{Collection, CreateDatabaseError, DatabaseName, KnnIndex};
+use chroma_types::{
+    Collection, CreateDatabaseError, DatabaseName, IndexConfig, KnnIndex, Schema,
+    SparseIndexAlgorithm, SparseVectorIndexConfig,
+};
 use frontend_core::collection_ops::{
     plan_create_collection, supported_segment_types, ExecutorKind, TenantFeatureFlags,
 };
@@ -101,24 +104,43 @@ async fn ensure_database(
 /// trip, so we don't need the try-then-fallback dance we use for databases.
 const GET_OR_CREATE: bool = true;
 
+/// Build the [`Schema`] used for Foundation collections. Adds a
+/// SPLADE-compatible sparse vector index so the server-side mutation
+/// writer has a field to land sparse embeddings in.
+fn foundation_collection_schema() -> Schema {
+    Schema::new_default(KnnIndex::Hnsw)
+        .create_index(
+            Some("sparse_embedding"),
+            IndexConfig::SparseVector(SparseVectorIndexConfig {
+                embedding_function: None,
+                source_key: None,
+                bm25: Some(false),
+                // TODO: Change this to MaxScore
+                algorithm: SparseIndexAlgorithm::Wand,
+            }),
+        )
+        .expect("static schema construction should never fail")
+}
+
 /// Plan a fresh distributed-mode collection with the shared
-/// `frontend_core::collection_ops` planner and hand it to sysdb. Foundation-api
-/// has no user-supplied schema/config and (today) no per-tenant feature
-/// flags, so most planner inputs are defaults. Sharing the planner keeps
-/// us in lock-step with chroma-frontend on segment-type dispatch.
+/// `frontend_core::collection_ops` planner and hand it to sysdb. The
+/// planner reconciles the Foundation schema (sparse vector index for
+/// SPLADE) with the default config, picks the right segment types for
+/// distributed mode, and emits everything sysdb needs.
 async fn ensure_collection(
     sysdb: &mut SysDb,
     tenant: String,
     database_name: DatabaseName,
     collection_name: &str,
 ) -> Result<Collection, ServerError> {
+    let schema = foundation_collection_schema();
     let plan = plan_create_collection(
         None,
-        None,
+        Some(schema),
         ExecutorKind::Distributed,
         &supported_segment_types(ExecutorKind::Distributed),
-        false,
-        KnnIndex::Hnsw,
+        true,
+        KnnIndex::Spann,
         TenantFeatureFlags::default(),
     )?;
     let collection = sysdb
@@ -131,7 +153,7 @@ async fn ensure_collection(
             plan.configuration,
             plan.schema,
             None,
-            None,
+            Some(1024),
             GET_OR_CREATE,
         )
         .await?;
