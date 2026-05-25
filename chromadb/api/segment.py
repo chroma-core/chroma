@@ -459,9 +459,7 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> int:
-        raise NotImplementedError(
-            "Fork count is not implemented for SegmentAPI"
-        )
+        raise NotImplementedError("Fork count is not implemented for SegmentAPI")
 
     @override
     def _get_indexing_status(
@@ -995,6 +993,21 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> "AttachedFunction":
+        """Attached functions are not supported in the Segment API (local embedded mode)."""
+        raise NotImplementedError(
+            "Attached functions are only supported when connecting to a Chroma server via HttpClient. "
+            "The Segment API (embedded mode) does not support attached function operations."
+        )
+
+    @override
+    def add_attached_function_input(
+        self,
+        name: str,
+        existing_input_collection_id: UUID,
+        new_input_collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> Tuple["AttachedFunction", bool]:
         """Attached functions are not supported in the Segment API (local embedded mode)."""
         raise NotImplementedError(
             "Attached functions are only supported when connecting to a Chroma server via HttpClient. "

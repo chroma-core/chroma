@@ -894,6 +894,39 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             database=database,
         )
 
+    @trace_method("FastAPI.add_attached_function_input", OpenTelemetryGranularity.ALL)
+    @override
+    def add_attached_function_input(
+        self,
+        name: str,
+        existing_input_collection_id: UUID,
+        new_input_collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> Tuple["AttachedFunction", bool]:
+        """Add a new input collection to an existing async attached function."""
+        resp_json = self._make_request(
+            "post",
+            f"/tenants/{tenant}/databases/{database}/collections/{existing_input_collection_id}/attached_functions/{name}/add_input",
+            json={
+                "input_collection_id": str(new_input_collection_id),
+            },
+        )
+
+        attached_function = AttachedFunction(
+            client=self,
+            id=UUID(resp_json["attached_function"]["id"]),
+            name=resp_json["attached_function"]["name"],
+            function_name=resp_json["attached_function"]["function_name"],
+            input_collection_id=new_input_collection_id,
+            output_collection=resp_json["attached_function"]["output_collection"],
+            params=resp_json["attached_function"].get("params"),
+            tenant=tenant,
+            database=database,
+        )
+        created = resp_json.get("created", True)
+        return (attached_function, created)
+
     @trace_method("FastAPI.detach_function", OpenTelemetryGranularity.ALL)
     @override
     def detach_function(

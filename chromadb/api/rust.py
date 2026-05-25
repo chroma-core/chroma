@@ -293,7 +293,9 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
-        collection = self.bindings.get_collection_by_id(str(collection_id), tenant, database)
+        collection = self.bindings.get_collection_by_id(
+            str(collection_id), tenant, database
+        )
         return CollectionModel(
             id=collection.id,
             name=collection.name,
@@ -367,9 +369,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> int:
-        raise NotImplementedError(
-            "Fork count is not implemented for Local Chroma"
-        )
+        raise NotImplementedError("Fork count is not implemented for Local Chroma")
 
     @override
     def _get_indexing_status(
@@ -678,6 +678,21 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> "AttachedFunction":
+        """Attached functions are not supported in the Rust bindings (local embedded mode)."""
+        raise NotImplementedError(
+            "Attached functions are only supported when connecting to a Chroma server via HttpClient. "
+            "The Rust bindings (embedded mode) do not support attached function operations."
+        )
+
+    @override
+    def add_attached_function_input(
+        self,
+        name: str,
+        existing_input_collection_id: UUID,
+        new_input_collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> Tuple["AttachedFunction", bool]:
         """Attached functions are not supported in the Rust bindings (local embedded mode)."""
         raise NotImplementedError(
             "Attached functions are only supported when connecting to a Chroma server via HttpClient. "

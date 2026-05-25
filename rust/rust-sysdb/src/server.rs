@@ -13,7 +13,8 @@ use chroma_storage::Storage;
 use chroma_types::chroma_proto::collection_version_info::VersionChangeReason;
 use chroma_types::chroma_proto::{
     sys_db_server::{SysDb, SysDbServer},
-    AttachFunctionRequest, AttachFunctionResponse, BatchGetCollectionSoftDeleteStatusRequest,
+    AddAttachedFunctionInputRequest, AddAttachedFunctionInputResponse, AttachFunctionRequest,
+    AttachFunctionResponse, BatchGetCollectionSoftDeleteStatusRequest,
     BatchGetCollectionSoftDeleteStatusResponse, BatchGetCollectionVersionFilePathsRequest,
     BatchGetCollectionVersionFilePathsResponse, CheckCollectionsRequest, CheckCollectionsResponse,
     CheckInvocationStatusRequest, CheckInvocationStatusResponse,
@@ -903,6 +904,15 @@ impl SysDb for SysdbService {
         _request: Request<AttachFunctionRequest>,
     ) -> Result<Response<AttachFunctionResponse>, Status> {
         Err(Status::unimplemented("attach_function is not supported"))
+    }
+
+    async fn add_attached_function_input(
+        &self,
+        _request: Request<AddAttachedFunctionInputRequest>,
+    ) -> Result<Response<AddAttachedFunctionInputResponse>, Status> {
+        Err(Status::unimplemented(
+            "add_attached_function_input is not supported",
+        ))
     }
 
     async fn get_attached_functions(
