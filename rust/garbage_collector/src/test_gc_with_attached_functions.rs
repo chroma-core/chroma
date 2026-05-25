@@ -1,38 +1,78 @@
 #[cfg(test)]
 mod tests {
     use crate::garbage_collector_orchestrator_v2::GarbageCollectorOrchestrator;
+    use crate::helper::{setup_tilt_log, setup_tilt_storage, ChromaGrpcClients};
     use chroma_blockstore::RootManager;
     use chroma_cache::nop::NopCache;
-    use chroma_log::{in_memory_log::InMemoryLog, Log};
-    use chroma_storage::test_storage;
+    use chroma_config::registry::Registry;
+    use chroma_log::Log;
+    use chroma_storage::GetOptions;
     use chroma_sysdb::{GetCollectionsOptions, TestSysDb};
     use chroma_system::{Dispatcher, Orchestrator, System};
     use chroma_types::{
-        AttachedFunction, AttachedFunctionUuid, CollectionUuid, Operation, OperationRecord,
-        Segment, SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid,
+        AttachedFunction, AttachedFunctionUuid, CollectionUuid, DatabaseName, Operation,
+        OperationRecord, Segment, SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid,
     };
     use chrono::DateTime;
     use std::{collections::HashMap, sync::Arc, time::SystemTime};
     use uuid::Uuid;
+    use wal3::{Cursor, CursorName, CursorStore, CursorStoreOptions, LogPosition};
 
-    /// Tests that the garbage collector preserves logs for attached functions.
+    async fn push_test_logs(
+        logs: &mut Log,
+        collection_id: CollectionUuid,
+        database_name: &DatabaseName,
+        record_count: usize,
+    ) {
+        for i in 0..record_count {
+            logs.push_logs(
+                "test_tenant",
+                database_name.clone(),
+                collection_id,
+                vec![OperationRecord {
+                    id: format!("attached-fn-record-{i}"),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                }],
+                None,
+            )
+            .await
+            .expect("push_logs should succeed");
+        }
+    }
+
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_gc_preserves_logs_for_attached_function() {
-        let (_storage_dir, storage) = test_storage();
-        let mut test_sysdb = TestSysDb::new();
-        test_sysdb.set_storage(Some(storage.clone()));
+    async fn test_k8s_integration_gc_preserves_logs_for_attached_function() {
+        let mut clients = match ChromaGrpcClients::new().await {
+            Ok(clients) => clients,
+            Err(err) => {
+                panic!("Skipping test: Tilt gRPC services not reachable: {err:?}. Is Tilt running?")
+            }
+        };
+
+        let registry = Registry::new();
+        let storage = setup_tilt_storage(&registry)
+            .await
+            .expect("Tilt S3 storage should be reachable");
 
         let collection_id = CollectionUuid::new();
-        let mut sysdb = chroma_sysdb::SysDb::Test(test_sysdb);
+        let tenant = "test_tenant".to_string();
+        let database = DatabaseName::new("test_database").expect("database name should be valid");
 
         let system = System::new();
         let dispatcher = Dispatcher::new(Default::default());
         let dispatcher_handle = system.start_component(dispatcher);
         let root_manager = RootManager::new(storage.clone(), Box::new(NopCache));
+        let grpc_log = setup_tilt_log(&system, &registry)
+            .await
+            .expect("Tilt log service should be reachable");
 
-        let tenant = "test_tenant".to_string();
-        let database = chroma_types::DatabaseName::new("test_database")
-            .expect("database name should be valid");
+        let mut test_sysdb = TestSysDb::new();
+        test_sysdb.set_storage(Some(storage.clone()));
+        let mut sysdb = chroma_sysdb::SysDb::Test(test_sysdb);
 
         let segment_id = SegmentUuid::new();
         let segment = Segment {
@@ -44,7 +84,6 @@ mod tests {
             file_path: HashMap::new(),
         };
 
-        // Create collection first
         sysdb
             .create_collection(
                 tenant.clone(),
@@ -59,11 +98,9 @@ mod tests {
                 false,
             )
             .await
-            .unwrap();
+            .expect("create_collection should succeed");
 
-        // Create an attached function with completion offset behind compaction
         let attached_fn_id = AttachedFunctionUuid::new();
-
         if let chroma_sysdb::SysDb::Test(ref mut test_sysdb) = sysdb {
             let attached_fn = AttachedFunction {
                 id: attached_fn_id,
@@ -74,9 +111,9 @@ mod tests {
                 output_collection_id: Some(CollectionUuid::new()),
                 params: None,
                 tenant_id: tenant.clone(),
-                database_id: "test_database".to_string(),
+                database_id: database.as_ref().to_string(),
                 last_run: None,
-                completion_offset: 50, // Behind compaction offset
+                completion_offset: 50,
                 min_records_for_invocation: 10,
                 is_deleted: false,
                 is_async: true,
@@ -84,19 +121,48 @@ mod tests {
                 updated_at: SystemTime::now(),
             };
 
-            // Add the attached function to the test sysdb
             let mut attached_functions = HashMap::new();
             attached_functions.insert(collection_id, vec![attached_fn]);
             test_sysdb.set_attached_functions(attached_functions);
         }
 
-        // Create a compaction at offset 99 (last log)
+        let mut seed_logs = grpc_log.clone();
+        push_test_logs(&mut seed_logs, collection_id, &database, 100).await;
+
+        let state_before_compaction = clients
+            .inspect_log_state(collection_id, &database)
+            .await
+            .expect("inspect_log_state should succeed");
+        let compaction_offset = state_before_compaction
+            .limit
+            .checked_sub(1)
+            .expect("log should contain at least one record");
+        let cursor_store = CursorStore::new(
+            CursorStoreOptions::default(),
+            Arc::new(storage.clone()),
+            collection_id.storage_prefix_for_log(),
+            "test-writer".to_string(),
+        );
+        cursor_store
+            .init(
+                &CursorName::new("so_you_may_gc").expect("cursor name should be valid"),
+                Cursor {
+                    position: LogPosition::from_offset(compaction_offset),
+                    epoch_us: compaction_offset,
+                    writer: "test-writer".to_string(),
+                },
+            )
+            .await
+            .expect("cursor should initialize");
+
+        let new_compaction_offset: i64 = 80;
+
         sysdb
             .flush_compaction(
                 tenant.clone(),
                 database.clone(),
                 collection_id,
-                99,
+                new_compaction_offset,
                 0,
                 Arc::new([SegmentFlushInfo {
                     segment_id,
@@ -110,66 +176,44 @@ mod tests {
                 None,
             )
             .await
-            .unwrap();
+            .expect("flush_compaction should succeed");
 
-        // Get collection info
         let mut collections = sysdb
             .get_collections(GetCollectionsOptions {
                 collection_id: Some(collection_id),
                 ..Default::default()
             })
             .await
-            .unwrap();
-        let collection = collections.pop().unwrap();
+            .expect("get_collections should succeed");
+        let collection = collections.pop().expect("collection should exist");
 
         let now = DateTime::from_timestamp(
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
+                .expect("system time should be after epoch")
                 .as_secs() as i64,
             0,
         )
-        .unwrap();
+        .expect("timestamp should be valid");
 
-        // Create InMemoryLog for testing
-        let mut in_memory_log = InMemoryLog::default();
+        let fragment_prefix = format!("{}/log/", collection_id.storage_prefix_for_log());
+        let fragment_count_before_first_gc = storage
+            .list_prefix(&fragment_prefix, GetOptions::default())
+            .await
+            .expect("list_prefix before first GC should succeed")
+            .len();
+        assert!(
+            fragment_count_before_first_gc > 0,
+            "expected WAL fragments before first GC"
+        );
 
-        // Add 100 log entries to the log (0-indexed)
-        for i in 0..100 {
-            let record = chroma_types::OperationRecord {
-                id: format!("record_{}", i),
-                embedding: None,
-                encoding: None,
-                metadata: None,
-                document: None,
-                operation: chroma_types::Operation::Add,
-            };
-
-            let log_record = chroma_types::LogRecord {
-                log_offset: i as i64,
-                record,
-            };
-
-            let internal_record = chroma_log::in_memory_log::InternalLogRecord {
-                collection_id,
-                log_offset: i as i64,
-                log_ts: 1000 + i as i64, // Arbitrary timestamp
-                record: log_record,
-            };
-
-            in_memory_log.add_log(collection_id, internal_record);
-        }
-
-        tracing::info!("Added 100 records to InMemoryLog");
-
-        // Wrap in Log enum for the orchestrator
-        let logs_for_orchestrator = Log::InMemory(in_memory_log);
-
-        // Create the orchestrator
         let orchestrator = GarbageCollectorOrchestrator::new(
             collection_id,
             database.clone(),
-            collection.version_file_path.clone().unwrap(),
+            collection
+                .version_file_path
+                .clone()
+                .expect("version file path should exist"),
             None,
             now,
             now,
@@ -177,7 +221,7 @@ mod tests {
             dispatcher_handle.clone(),
             system.clone(),
             storage.clone(),
-            logs_for_orchestrator,
+            grpc_log.clone(),
             None,
             root_manager.clone(),
             crate::types::CleanupMode::DeleteV2,
@@ -187,67 +231,80 @@ mod tests {
             10,
         );
 
-        // Run the orchestrator
-        let result = orchestrator.run(system.clone()).await;
+        orchestrator
+            .run(system.clone())
+            .await
+            .expect("first GC run should succeed");
 
-        // The orchestrator should complete successfully
+        let state_after_first_gc = clients
+            .inspect_log_state(collection_id, &database)
+            .await
+            .expect("inspect_log_state should succeed");
+        assert_eq!(
+            state_after_first_gc.start, 51,
+            "first GC should keep logs starting at offset 51 while the attached function is behind"
+        );
+        let mut read_logs = grpc_log.clone();
+        let read_from_50 = read_logs
+            .read("test_tenant", database.clone(), collection_id, 50, 2, None)
+            .await;
         assert!(
-            result.is_ok(),
-            "Orchestrator should complete successfully: {:?}",
-            result
+            read_from_50.is_err(),
+            "offset 50 should no longer be readable after the first GC pass"
         );
 
-        tracing::info!("First GC run completed: Attached function at offset 50, compaction at 99");
-        tracing::info!("Expected: GC would preserve logs 51-99 for the attached function");
-
-        // Note: InMemoryLog doesn't actually implement garbage collection,
-        // but in a real implementation with a proper log service:
-        tracing::info!("In a real log service:");
-        tracing::info!("  - Logs 0-50 would be deleted (up to attached function offset)");
-        tracing::info!(
-            "  - Logs 51-99 would be preserved (between attached function and compaction)"
+        let read_from_51 = read_logs
+            .read("test_tenant", database.clone(), collection_id, 51, 1, None)
+            .await
+            .expect("read from offset 51 should succeed");
+        assert_eq!(
+            read_from_51.first().map(|r| r.log_offset),
+            Some(51),
+            "offset 51 should remain readable after the first GC pass"
         );
-        tracing::info!("  - scout_logs would return 51 as first available offset");
 
-        // Now simulate the attached function making progress to offset 99
-        tracing::info!("Moving attached function from offset 50 to 99...");
+        let fragment_count_after_first_gc = storage
+            .list_prefix(&fragment_prefix, GetOptions::default())
+            .await
+            .expect("list_prefix after first GC should succeed")
+            .len();
+        assert!(
+            fragment_count_after_first_gc < fragment_count_before_first_gc,
+            "first GC should delete some WAL fragments: before={} after={}",
+            fragment_count_before_first_gc,
+            fragment_count_after_first_gc
+        );
+
+        // Attached function is ahead of compaction now.
+        let new_completion_offset = new_compaction_offset + 4;
 
         let finish_request =
             chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationRequest {
                 attached_function_id: attached_fn_id.0.to_string(),
                 collection_id: collection_id.to_string(),
-                new_completion_offset: 99,
+                new_completion_offset: new_completion_offset as u64,
             };
 
-        let finish_result = sysdb
+        sysdb
             .clone()
             .try_finish_async_attached_function_invocation(finish_request)
-            .await;
+            .await
+            .expect("advancing attached function should succeed");
 
-        assert!(
-            finish_result.is_ok(),
-            "Should be able to move attached function forward: {:?}",
-            finish_result
-        );
-
-        tracing::info!("Attached function moved to offset 99");
-
-        // Run GC again now that attached function has caught up to compaction
-        tracing::info!("Running GC again after attached function reached offset 99...");
-
-        // Recreate orchestrator with fresh state
         let orchestrator2 = GarbageCollectorOrchestrator::new(
             collection_id,
             database.clone(),
-            collection.version_file_path.unwrap(),
+            collection
+                .version_file_path
+                .expect("version file path should exist"),
             None,
             now,
             now,
             sysdb,
             dispatcher_handle,
             system.clone(),
-            storage,
-            Log::InMemory(InMemoryLog::default()),
+            storage.clone(),
+            grpc_log,
             None,
             root_manager,
             crate::types::CleanupMode::DeleteV2,
@@ -257,33 +314,34 @@ mod tests {
             10,
         );
 
-        let result2 = orchestrator2.run(system.clone()).await;
+        orchestrator2
+            .run(system.clone())
+            .await
+            .expect("second GC run should succeed");
+
+        let state_after_second_gc = clients
+            .inspect_log_state(collection_id, &database)
+            .await
+            .expect("inspect_log_state should succeed");
+        assert_eq!(
+            state_after_second_gc.start,
+            (new_compaction_offset + 1) as u64,
+            "once the attached function catches up, GC should advance to the compaction boundary"
+        );
+
+        let fragment_count_after_second_gc = storage
+            .list_prefix(&fragment_prefix, GetOptions::default())
+            .await
+            .expect("list_prefix after second GC should succeed")
+            .len();
         assert!(
-            result2.is_ok(),
-            "Second GC run should succeed: {:?}",
-            result2
-        );
-
-        tracing::info!(
-            "Second GC run completed: Both attached function and compaction at offset 99"
-        );
-        tracing::info!("Expected: Logs up to offset 99 can now be deleted");
-
-        // After the second GC run, logs up to offset 99 should be deleted
-        // since both the attached function and compaction are at offset 99
-
-        tracing::info!("After second GC:");
-        tracing::info!("  - All logs 0-99 should now be deleted");
-        tracing::info!("  - Only new logs after offset 99 would remain");
-
-        // Note: InMemoryLog doesn't actually implement garbage collection,
-        // but this test verifies that the GC orchestrator correctly calculates
-        // the minimum offset to keep based on attached function completion offsets
-
-        tracing::info!(
-            "Test complete: GC orchestrator properly respects attached function offsets"
+            fragment_count_after_second_gc < fragment_count_after_first_gc,
+            "second GC should delete additional WAL fragments: first={} second={}",
+            fragment_count_after_first_gc,
+            fragment_count_after_second_gc
         );
 
         system.stop().await;
+        system.join().await;
     }
 }

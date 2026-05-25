@@ -1363,66 +1363,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_gc_clamps_to_attached_function_offset() {
-        use wal3::LogPosition;
-
-        // Test case 1: Attached function offset is behind compaction
-        {
-            let compaction_offset = 150u64;
-            let min_attached_fn_offset = Some(80u64);
-
-            // Calculate min offset to keep (mimics the logic in try_start_delete_unused_logs_operator)
-            let mut min_offset_to_keep = LogPosition::from_offset(compaction_offset) + 1u64;
-            if let Some(min_completion_offset) = min_attached_fn_offset {
-                let attached_fn_floor = LogPosition::from_offset(min_completion_offset) + 1u64;
-                min_offset_to_keep = min_offset_to_keep.min(attached_fn_floor);
-            }
-
-            assert_eq!(
-                min_offset_to_keep.offset(),
-                81,
-                "When attached function is behind compaction, should clamp to attached function offset + 1"
-            );
-        }
-
-        // Test case 2: Attached function offset is ahead of compaction
-        {
-            let compaction_offset = 150u64;
-            let min_attached_fn_offset = Some(200u64);
-
-            let mut min_offset_to_keep = LogPosition::from_offset(compaction_offset) + 1u64;
-            if let Some(min_completion_offset) = min_attached_fn_offset {
-                let attached_fn_floor = LogPosition::from_offset(min_completion_offset) + 1u64;
-                min_offset_to_keep = min_offset_to_keep.min(attached_fn_floor);
-            }
-
-            assert_eq!(
-                min_offset_to_keep.offset(),
-                151,
-                "When attached function is ahead of compaction, should use compaction offset + 1"
-            );
-        }
-
-        // Test case 3: No attached functions
-        {
-            let compaction_offset = 150u64;
-            let min_attached_fn_offset: Option<u64> = None;
-
-            let mut min_offset_to_keep = LogPosition::from_offset(compaction_offset) + 1u64;
-            if let Some(min_completion_offset) = min_attached_fn_offset {
-                let attached_fn_floor = LogPosition::from_offset(min_completion_offset) + 1u64;
-                min_offset_to_keep = min_offset_to_keep.min(attached_fn_floor);
-            }
-
-            assert_eq!(
-                min_offset_to_keep.offset(),
-                151,
-                "When no attached functions, should use compaction offset + 1"
-            );
-        }
-    }
-
     #[tokio::test(flavor = "multi_thread")]
     async fn errors_on_empty_file_paths() {
         let (_storage_dir, storage) = test_storage();

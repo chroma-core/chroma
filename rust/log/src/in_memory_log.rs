@@ -167,18 +167,6 @@ impl InMemoryLog {
         }
         Ok(starting_offset)
     }
-
-    pub(super) async fn garbage_collect(
-        &mut self,
-        collection_id: CollectionUuid,
-        min_offset_to_keep: i64,
-    ) -> Result<(), Box<dyn ChromaError>> {
-        if let Some(logs) = self.collection_to_log.get_mut(&collection_id) {
-            // Remove all logs with offset < min_offset_to_keep
-            logs.retain(|log| log.log_offset >= min_offset_to_keep);
-        }
-        Ok(())
-    }
 }
 
 impl Default for InMemoryLog {

@@ -1,12 +1,12 @@
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
-    AttachFunctionError, BatchGetCollectionSoftDeleteStatusError,
-    BatchGetCollectionVersionFilePathsError, Collection, CollectionAndSegments, CollectionUuid,
-    CountForksError, Database, DeleteCollectionError, FlushCompactionResponse,
-    GetCollectionByCrnError, GetCollectionSizeError, GetCollectionWithSegmentsError,
-    GetCollectionsError, GetSegmentsError, ListAttachedFunctionsError, ListDatabasesError,
-    ListDatabasesResponse, Segment, SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid,
-    Tenant, UpdateTenantError, UpdateTenantResponse,
+    BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
+    CollectionAndSegments, CollectionUuid, CountForksError, Database, DeleteCollectionError,
+    FlushCompactionResponse, GetCollectionByCrnError, GetCollectionSizeError,
+    GetCollectionWithSegmentsError, GetCollectionsError, GetSegmentsError,
+    ListAttachedFunctionsError, ListDatabasesError, ListDatabasesResponse, Segment,
+    SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid, Tenant, UpdateTenantError,
+    UpdateTenantResponse,
 };
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
@@ -724,15 +724,6 @@ impl TestSysDb {
             .map(attached_function_to_proto)
             .collect();
         Ok(functions)
-    }
-
-    pub(crate) async fn attach_function(
-        &mut self,
-        attached_function: chroma_types::AttachedFunction,
-    ) -> Result<(), AttachFunctionError> {
-        let mut inner = self.inner.lock();
-        inner.tasks.insert(attached_function.id, attached_function);
-        Ok(())
     }
 
     pub(crate) async fn try_finish_async_attached_function_invocation(
