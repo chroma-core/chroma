@@ -13,19 +13,16 @@ use chroma_types::{AttachedFunctionUuid, CollectionUuid};
 use std::str::FromStr;
 use tonic::{Request, Response, Status};
 
-#[allow(dead_code)]
 pub struct WorkQueueServer {
     manager: ComponentHandle<WorkQueueManager>,
     sysdb: SysDb,
 }
 
-#[allow(dead_code)]
 impl WorkQueueServer {
     pub fn new(manager: ComponentHandle<WorkQueueManager>, sysdb: SysDb) -> Self {
         Self { manager, sysdb }
     }
 
-    #[allow(dead_code)]
     pub fn into_service(self) -> WorkQueueServiceServer<Self> {
         WorkQueueServiceServer::new(self)
     }

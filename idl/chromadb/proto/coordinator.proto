@@ -710,12 +710,23 @@ message InvocationCheckItem {
   int64 completion_offset = 3;
 }
 
-message AreInvocationsDoneRequest {
+enum InvocationStatus {
+  INVOCATION_STATUS_NOT_DONE = 0;
+  INVOCATION_STATUS_DONE = 1;
+  INVOCATION_STATUS_NEEDS_REPAIR = 2;
+}
+
+message CheckInvocationStatusRequest {
   repeated InvocationCheckItem items = 1;
 }
 
-message AreInvocationsDoneResponse {
-  repeated bool done = 1;
+message InvocationStatusResult {
+  InvocationStatus status = 1;
+  int64 current_completion_offset = 2;
+}
+
+message CheckInvocationStatusResponse {
+  repeated InvocationStatusResult results = 1;
 }
 
 message IncrementCompactionFailureCountRequest {
@@ -770,7 +781,7 @@ service SysDB {
   rpc GetFunctions(GetFunctionsRequest) returns (GetFunctionsResponse) {}
   rpc GetAttachedFunctionsToGc(GetAttachedFunctionsToGcRequest) returns (GetAttachedFunctionsToGcResponse) {}
   rpc FinishAttachedFunctionDeletion(FinishAttachedFunctionDeletionRequest) returns (FinishAttachedFunctionDeletionResponse) {}
-  rpc AreInvocationsDone(AreInvocationsDoneRequest) returns (AreInvocationsDoneResponse) {}
+  rpc CheckInvocationStatus(CheckInvocationStatusRequest) returns (CheckInvocationStatusResponse) {}
   rpc FlushCollectionCompactionAndAttachedFunction(FlushCollectionCompactionAndAttachedFunctionRequest) returns (FlushCollectionCompactionAndAttachedFunctionResponse) {}
   rpc TryFinishAsyncAttachedFunctionInvocation(TryFinishAsyncAttachedFunctionInvocationRequest) returns (TryFinishAsyncAttachedFunctionInvocationResponse) {}
   rpc FinalizeAsyncAttachedFunctionRepair(FinalizeAsyncAttachedFunctionRepairRequest) returns (FinalizeAsyncAttachedFunctionRepairResponse) {}

@@ -886,13 +886,14 @@ func (s *Coordinator) FinalizeAsyncAttachedFunctionRepair(ctx context.Context, r
 	return &coordinatorpb.FinalizeAsyncAttachedFunctionRepairResponse{}, nil
 }
 
-// AreInvocationsDone checks if multiple attached function invocations have completed
-// by comparing current completion_offset against provided old completion offsets.
-func (s *Coordinator) AreInvocationsDone(ctx context.Context, req *coordinatorpb.AreInvocationsDoneRequest) (*coordinatorpb.AreInvocationsDoneResponse, error) {
-	log := log.With(zap.String("method", "AreInvocationsDone"))
+// CheckInvocationStatus checks the status of multiple attached function invocations
+// by comparing current completion_offset against provided old completion offsets and checking heap_entry_pending flag.
+// Returns one of three states for each invocation: NOT_DONE (default), DONE, or NEEDS_REPAIR.
+func (s *Coordinator) CheckInvocationStatus(ctx context.Context, req *coordinatorpb.CheckInvocationStatusRequest) (*coordinatorpb.CheckInvocationStatusResponse, error) {
+	log := log.With(zap.String("method", "CheckInvocationStatus"))
 
 	if len(req.Items) == 0 {
-		return &coordinatorpb.AreInvocationsDoneResponse{Done: []bool{}}, nil
+		return &coordinatorpb.CheckInvocationStatusResponse{Results: []*coordinatorpb.InvocationStatusResult{}}, nil
 	}
 
 	// Convert proto request items to dbmodel items
@@ -900,14 +901,14 @@ func (s *Coordinator) AreInvocationsDone(ctx context.Context, req *coordinatorpb
 	for i, item := range req.Items {
 		functionID, err := uuid.Parse(item.FunctionId)
 		if err != nil {
-			log.Error("AreInvocationsDone: invalid function_id", zap.Error(err), zap.String("function_id", item.FunctionId))
+			log.Error("CheckInvocationStatus: invalid function_id", zap.Error(err), zap.String("function_id", item.FunctionId))
 			return nil, status.Errorf(codes.InvalidArgument, "invalid function_id at index %d: %v", i, err)
 		}
 
 		// Validate input collection ID as UUID
 		_, err = uuid.Parse(item.InputCollectionId)
 		if err != nil {
-			log.Error("AreInvocationsDone: invalid input_collection_id", zap.Error(err), zap.String("input_collection_id", item.InputCollectionId))
+			log.Error("CheckInvocationStatus: invalid input_collection_id", zap.Error(err), zap.String("input_collection_id", item.InputCollectionId))
 			return nil, status.Errorf(codes.InvalidArgument, "invalid input_collection_id at index %d: %v", i, err)
 		}
 
@@ -919,15 +920,33 @@ func (s *Coordinator) AreInvocationsDone(ctx context.Context, req *coordinatorpb
 	}
 
 	// Call the database method
-	done, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).AreInvocationsDone(items)
+	results, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).CheckInvocationStatus(items)
 	if err != nil {
-		log.Error("AreInvocationsDone: failed to check invocation status", zap.Error(err))
+		log.Error("CheckInvocationStatus: failed to check invocation status", zap.Error(err))
 		return nil, err
 	}
 
-	log.Debug("AreInvocationsDone: completed successfully",
-		zap.Int("items_count", len(items)),
-		zap.Int("results_count", len(done)))
+	// Convert dbmodel statuses to proto statuses
+	protoResults := make([]*coordinatorpb.InvocationStatusResult, len(results))
+	for i, result := range results {
+		var protoStatus coordinatorpb.InvocationStatus
+		switch result.Status {
+		case dbmodel.InvocationStatusNotDone:
+			protoStatus = coordinatorpb.InvocationStatus_INVOCATION_STATUS_NOT_DONE
+		case dbmodel.InvocationStatusDone:
+			protoStatus = coordinatorpb.InvocationStatus_INVOCATION_STATUS_DONE
+		case dbmodel.InvocationStatusNeedsRepair:
+			protoStatus = coordinatorpb.InvocationStatus_INVOCATION_STATUS_NEEDS_REPAIR
+		}
+		protoResults[i] = &coordinatorpb.InvocationStatusResult{
+			Status:                  protoStatus,
+			CurrentCompletionOffset: result.CurrentCompletionOffset,
+		}
+	}
 
-	return &coordinatorpb.AreInvocationsDoneResponse{Done: done}, nil
+	log.Debug("CheckInvocationStatus: completed successfully",
+		zap.Int("items_count", len(items)),
+		zap.Int("results_count", len(results)))
+
+	return &coordinatorpb.CheckInvocationStatusResponse{Results: protoResults}, nil
 }

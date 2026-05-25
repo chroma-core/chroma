@@ -13,10 +13,10 @@ use chroma_storage::Storage;
 use chroma_types::chroma_proto::collection_version_info::VersionChangeReason;
 use chroma_types::chroma_proto::{
     sys_db_server::{SysDb, SysDbServer},
-    AreInvocationsDoneRequest, AreInvocationsDoneResponse, AttachFunctionRequest,
-    AttachFunctionResponse, BatchGetCollectionSoftDeleteStatusRequest,
+    AttachFunctionRequest, AttachFunctionResponse, BatchGetCollectionSoftDeleteStatusRequest,
     BatchGetCollectionSoftDeleteStatusResponse, BatchGetCollectionVersionFilePathsRequest,
     BatchGetCollectionVersionFilePathsResponse, CheckCollectionsRequest, CheckCollectionsResponse,
+    CheckInvocationStatusRequest, CheckInvocationStatusResponse,
     CleanupExpiredPartialAttachedFunctionsRequest, CleanupExpiredPartialAttachedFunctionsResponse,
     CountCollectionsRequest, CountCollectionsResponse, CountForksRequest, CountForksResponse,
     CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseRequest,
@@ -990,12 +990,12 @@ impl SysDb for SysdbService {
         ))
     }
 
-    async fn are_invocations_done(
+    async fn check_invocation_status(
         &self,
-        _request: Request<AreInvocationsDoneRequest>,
-    ) -> Result<Response<AreInvocationsDoneResponse>, Status> {
+        _request: Request<CheckInvocationStatusRequest>,
+    ) -> Result<Response<CheckInvocationStatusResponse>, Status> {
         Err(Status::unimplemented(
-            "are_invocations_done is not supported",
+            "check_invocation_status is not supported",
         ))
     }
 }

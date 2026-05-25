@@ -403,12 +403,15 @@ func (s *attachedFunctionDb) HardDeleteAttachedFunction(id uuid.UUID) error {
 	return nil
 }
 
-// AreInvocationsDone checks if multiple attached function invocations have completed
+// CheckInvocationStatus checks the status of multiple attached function invocations
 // by comparing current completion_offset against provided completion_offset and checking
-// heap_entry_pending flag. Returns a slice of booleans indicating completion status for each input item.
-func (s *attachedFunctionDb) AreInvocationsDone(items []dbmodel.InvocationCheckItem) ([]bool, error) {
+// heap_entry_pending flag. Returns a slice of InvocationStatusResult indicating status for each input item:
+// - InvocationStatusNotDone: default case
+// - InvocationStatusDone: if not heap_entry_pending and af.completion_offset > ii.completion_offset
+// - InvocationStatusNeedsRepair: if heap_entry_pending and af.completion_offset > ii.completion_offset
+func (s *attachedFunctionDb) CheckInvocationStatus(items []dbmodel.InvocationCheckItem) ([]dbmodel.InvocationStatusResult, error) {
 	if len(items) == 0 {
-		return []bool{}, nil
+		return []dbmodel.InvocationStatusResult{}, nil
 	}
 
 	// Prepare arrays for UNNEST
@@ -435,10 +438,13 @@ func (s *attachedFunctionDb) AreInvocationsDone(items []dbmodel.InvocationCheckI
 		)
 		SELECT ii.ord,
 		       CASE
-		           WHEN af.id IS NULL THEN true  -- Hard deleted (not in DB)
-		           WHEN af.is_deleted THEN true   -- Soft deleted
-		           ELSE af.completion_offset > ii.completion_offset AND NOT af.heap_entry_pending
-		       END AS is_done
+		           WHEN af.id IS NULL THEN 1  -- Hard deleted (not in DB) -> Done
+		           WHEN af.is_deleted THEN 1   -- Soft deleted -> Done
+		           WHEN af.completion_offset > ii.completion_offset AND af.heap_entry_pending THEN 2  -- NeedsRepair
+		           WHEN af.completion_offset > ii.completion_offset AND NOT af.heap_entry_pending THEN 1  -- Done
+		           ELSE 0  -- NotDone (default case)
+		       END AS status,
+		       COALESCE(af.completion_offset, ii.completion_offset) AS current_completion_offset
 		FROM input_items ii
 		LEFT JOIN attached_functions af
 			ON af.id = ii.fn_id::uuid
@@ -447,26 +453,30 @@ func (s *attachedFunctionDb) AreInvocationsDone(items []dbmodel.InvocationCheckI
 	`, ordinals, fnIDs, collectionIDs, completionOffsets).Rows()
 
 	if err != nil {
-		log.Error("AreInvocationsDone: query failed", zap.Error(err))
+		log.Error("CheckInvocationStatus: query failed", zap.Error(err))
 		return nil, err
 	}
 	defer rows.Close()
 
-	results := make([]bool, len(items))
+	results := make([]dbmodel.InvocationStatusResult, len(items))
 	for rows.Next() {
 		var ord int64
-		var isDone bool
-		if err := rows.Scan(&ord, &isDone); err != nil {
-			log.Error("AreInvocationsDone: scan failed", zap.Error(err))
+		var status int
+		var currentCompletionOffset int64
+		if err := rows.Scan(&ord, &status, &currentCompletionOffset); err != nil {
+			log.Error("CheckInvocationStatus: scan failed", zap.Error(err))
 			return nil, err
 		}
 		if ord >= 0 && ord < int64(len(results)) {
-			results[ord] = isDone
+			results[ord] = dbmodel.InvocationStatusResult{
+				Status:                  dbmodel.InvocationStatus(status),
+				CurrentCompletionOffset: currentCompletionOffset,
+			}
 		}
 	}
 
 	if err := rows.Err(); err != nil {
-		log.Error("AreInvocationsDone: rows iteration error", zap.Error(err))
+		log.Error("CheckInvocationStatus: rows iteration error", zap.Error(err))
 		return nil, err
 	}
 

@@ -16,24 +16,24 @@ type IAttachedFunctionDb struct {
 	mock.Mock
 }
 
-// AreInvocationsDone provides a mock function with given fields: items
-func (_m *IAttachedFunctionDb) AreInvocationsDone(items []dbmodel.InvocationCheckItem) ([]bool, error) {
+// CheckInvocationStatus provides a mock function with given fields: items
+func (_m *IAttachedFunctionDb) CheckInvocationStatus(items []dbmodel.InvocationCheckItem) ([]dbmodel.InvocationStatusResult, error) {
 	ret := _m.Called(items)
 
 	if len(ret) == 0 {
-		panic("no return value specified for AreInvocationsDone")
+		panic("no return value specified for CheckInvocationStatus")
 	}
 
-	var r0 []bool
+	var r0 []dbmodel.InvocationStatusResult
 	var r1 error
-	if rf, ok := ret.Get(0).(func([]dbmodel.InvocationCheckItem) ([]bool, error)); ok {
+	if rf, ok := ret.Get(0).(func([]dbmodel.InvocationCheckItem) ([]dbmodel.InvocationStatusResult, error)); ok {
 		return rf(items)
 	}
-	if rf, ok := ret.Get(0).(func([]dbmodel.InvocationCheckItem) []bool); ok {
+	if rf, ok := ret.Get(0).(func([]dbmodel.InvocationCheckItem) []dbmodel.InvocationStatusResult); ok {
 		r0 = rf(items)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]bool)
+			r0 = ret.Get(0).([]dbmodel.InvocationStatusResult)
 		}
 	}
 
