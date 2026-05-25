@@ -174,9 +174,43 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 			return err
 		}
 		if len(attachedFunctionsUsingAsOutput) > 0 {
-			log.Error("AttachFunction: cannot attach function to a collection that is already an output collection",
-				zap.String("collection_id", req.InputCollectionId))
-			return common.ErrCannotAttachToOutputCollection
+			functionIDs := make([]uuid.UUID, 0, len(attachedFunctionsUsingAsOutput))
+			seenFunctionIDs := make(map[uuid.UUID]struct{}, len(attachedFunctionsUsingAsOutput))
+			for _, attachedFunction := range attachedFunctionsUsingAsOutput {
+				if _, ok := seenFunctionIDs[attachedFunction.FunctionID]; ok {
+					continue
+				}
+				seenFunctionIDs[attachedFunction.FunctionID] = struct{}{}
+				functionIDs = append(functionIDs, attachedFunction.FunctionID)
+			}
+
+			functions, err := s.catalog.metaDomain.FunctionDb(txCtx).GetByIDs(functionIDs)
+			if err != nil {
+				log.Error("AttachFunction: failed to load functions for output collection validation", zap.Error(err))
+				return err
+			}
+
+			functionsByID := make(map[uuid.UUID]*dbmodel.Function, len(functions))
+			for _, existingFunction := range functions {
+				functionsByID[existingFunction.ID] = existingFunction
+			}
+
+			for _, attachedFunction := range attachedFunctionsUsingAsOutput {
+				existingFunction, ok := functionsByID[attachedFunction.FunctionID]
+				if !ok {
+					log.Error("AttachFunction: attached function references unknown function during output collection validation",
+						zap.String("collection_id", req.InputCollectionId),
+						zap.Stringer("function_id", attachedFunction.FunctionID))
+					return common.ErrFunctionNotFound
+				}
+				if !existingFunction.IsAsync {
+					log.Error("AttachFunction: cannot attach function to a collection that is already an output collection with sync upstream functions",
+						zap.String("collection_id", req.InputCollectionId),
+						zap.Stringer("function_id", attachedFunction.FunctionID),
+						zap.String("function_name", existingFunction.Name))
+					return common.ErrCannotAttachToOutputCollection
+				}
+			}
 		}
 
 		// Check if output collection already exists

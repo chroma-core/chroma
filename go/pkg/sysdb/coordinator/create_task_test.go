@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/memberlist_manager"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbmodel"
@@ -327,6 +328,183 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Alrea
 	suite.mockMetaDomain.AssertExpectations(suite.T())
 	suite.mockAttachedFunctionDb.AssertExpectations(suite.T())
 	suite.mockDatabaseDb.AssertExpectations(suite.T())
+}
+
+func (suite *AttachFunctionTestSuite) TestAttachFunction_AllowsOutputCollectionInputWhenAllUpstreamFunctionsAreAsync() {
+	ctx := context.Background()
+
+	attachedFunctionName := "async-chain-attached-function"
+	inputCollectionID := "output-of-async-upstream"
+	outputCollectionName := "next-output-collection"
+	functionName := "record_counter"
+	tenantID := "test-tenant"
+	databaseName := "test-database"
+	databaseID := "database-uuid"
+	functionID := dbmodel.FunctionRecordCounter
+	upstreamFunctionID := uuid.New()
+	minRecordsForInvocation := uint64(100)
+
+	request := &coordinatorpb.AttachFunctionRequest{
+		Name:                    attachedFunctionName,
+		InputCollectionId:       inputCollectionID,
+		OutputCollectionName:    outputCollectionName,
+		FunctionName:            functionName,
+		TenantId:                tenantID,
+		Database:                databaseName,
+		MinRecordsForInvocation: minRecordsForInvocation,
+	}
+
+	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
+	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &inputCollectionID, (*string)(nil), []uuid.UUID(nil), false).
+		Return([]*dbmodel.AttachedFunction{}, nil).Once()
+
+	suite.mockMetaDomain.On("DatabaseDb", mock.Anything).Return(suite.mockDatabaseDb).Once()
+	suite.mockDatabaseDb.On("GetDatabases", tenantID, databaseName).
+		Return([]*dbmodel.Database{{ID: databaseID, Name: databaseName}}, nil).Once()
+
+	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Once()
+	suite.mockFunctionDb.On("GetByName", functionName).
+		Return(&dbmodel.Function{ID: functionID, Name: functionName, IsAsync: false}, nil).Once()
+
+	suite.mockMetaDomain.On("CollectionDb", mock.Anything).Return(suite.mockCollectionDb).Once()
+	suite.mockCollectionDb.On("GetCollections",
+		[]string{inputCollectionID}, (*string)(nil), tenantID, databaseName, (*int32)(nil), (*int32)(nil), false).
+		Return([]*dbmodel.CollectionAndMetadata{{Collection: &dbmodel.Collection{ID: inputCollectionID}}}, nil).Once()
+
+	existingUpstream := &dbmodel.AttachedFunction{
+		ID:                uuid.New(),
+		Name:              "upstream-async-function",
+		InputCollectionID: "root-input-collection",
+		OutputCollectionID: func() *string {
+			id := inputCollectionID
+			return &id
+		}(),
+		FunctionID: upstreamFunctionID,
+	}
+
+	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
+	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), (*string)(nil), &inputCollectionID, []uuid.UUID(nil), false).
+		Return([]*dbmodel.AttachedFunction{existingUpstream}, nil).Once()
+
+	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Once()
+	suite.mockFunctionDb.On("GetByIDs", []uuid.UUID{upstreamFunctionID}).
+		Return([]*dbmodel.Function{{ID: upstreamFunctionID, Name: "async-upstream", IsAsync: true}}, nil).Once()
+
+	suite.mockMetaDomain.On("CollectionDb", mock.Anything).Return(suite.mockCollectionDb).Once()
+	suite.mockCollectionDb.On("GetCollections",
+		[]string(nil), &outputCollectionName, tenantID, databaseName, (*int32)(nil), (*int32)(nil), false).
+		Return([]*dbmodel.CollectionAndMetadata{}, nil).Once()
+
+	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
+	suite.mockAttachedFunctionDb.On("Insert", mock.MatchedBy(func(attachedFunction *dbmodel.AttachedFunction) bool {
+		return attachedFunction.Name == attachedFunctionName &&
+			attachedFunction.InputCollectionID == inputCollectionID &&
+			attachedFunction.OutputCollectionName == outputCollectionName &&
+			attachedFunction.FunctionID == functionID &&
+			attachedFunction.TenantID == tenantID &&
+			attachedFunction.DatabaseID == databaseID &&
+			attachedFunction.MinRecordsForInvocation == int64(minRecordsForInvocation)
+	})).Return(nil).Once()
+
+	suite.mockTxImpl.On("Transaction", ctx, mock.AnythingOfType("func(context.Context) error")).
+		Run(func(args mock.Arguments) {
+			txFunc := args.Get(1).(func(context.Context) error)
+			err := txFunc(context.Background())
+			suite.NoError(err)
+		}).Return(nil).Once()
+
+	response, err := suite.coordinator.AttachFunction(ctx, request)
+
+	suite.NoError(err)
+	suite.NotNil(response)
+	suite.NotEmpty(response.AttachedFunction.Id)
+
+	suite.mockMetaDomain.AssertExpectations(suite.T())
+	suite.mockAttachedFunctionDb.AssertExpectations(suite.T())
+	suite.mockFunctionDb.AssertExpectations(suite.T())
+	suite.mockDatabaseDb.AssertExpectations(suite.T())
+	suite.mockCollectionDb.AssertExpectations(suite.T())
+	suite.mockTxImpl.AssertExpectations(suite.T())
+}
+
+func (suite *AttachFunctionTestSuite) TestAttachFunction_RejectsOutputCollectionInputWhenAnyUpstreamFunctionIsSync() {
+	ctx := context.Background()
+
+	attachedFunctionName := "blocked-chain-attached-function"
+	inputCollectionID := "output-of-mixed-upstream"
+	outputCollectionName := "next-output-collection"
+	functionName := "record_counter"
+	tenantID := "test-tenant"
+	databaseName := "test-database"
+	databaseID := "database-uuid"
+	functionID := dbmodel.FunctionRecordCounter
+	upstreamFunctionID := uuid.New()
+	minRecordsForInvocation := uint64(100)
+
+	request := &coordinatorpb.AttachFunctionRequest{
+		Name:                    attachedFunctionName,
+		InputCollectionId:       inputCollectionID,
+		OutputCollectionName:    outputCollectionName,
+		FunctionName:            functionName,
+		TenantId:                tenantID,
+		Database:                databaseName,
+		MinRecordsForInvocation: minRecordsForInvocation,
+	}
+
+	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
+	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &inputCollectionID, (*string)(nil), []uuid.UUID(nil), false).
+		Return([]*dbmodel.AttachedFunction{}, nil).Once()
+
+	suite.mockMetaDomain.On("DatabaseDb", mock.Anything).Return(suite.mockDatabaseDb).Once()
+	suite.mockDatabaseDb.On("GetDatabases", tenantID, databaseName).
+		Return([]*dbmodel.Database{{ID: databaseID, Name: databaseName}}, nil).Once()
+
+	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Once()
+	suite.mockFunctionDb.On("GetByName", functionName).
+		Return(&dbmodel.Function{ID: functionID, Name: functionName, IsAsync: false}, nil).Once()
+
+	suite.mockMetaDomain.On("CollectionDb", mock.Anything).Return(suite.mockCollectionDb).Once()
+	suite.mockCollectionDb.On("GetCollections",
+		[]string{inputCollectionID}, (*string)(nil), tenantID, databaseName, (*int32)(nil), (*int32)(nil), false).
+		Return([]*dbmodel.CollectionAndMetadata{{Collection: &dbmodel.Collection{ID: inputCollectionID}}}, nil).Once()
+
+	existingUpstream := &dbmodel.AttachedFunction{
+		ID:                uuid.New(),
+		Name:              "upstream-sync-function",
+		InputCollectionID: "root-input-collection",
+		OutputCollectionID: func() *string {
+			id := inputCollectionID
+			return &id
+		}(),
+		FunctionID: upstreamFunctionID,
+	}
+
+	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
+	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), (*string)(nil), &inputCollectionID, []uuid.UUID(nil), false).
+		Return([]*dbmodel.AttachedFunction{existingUpstream}, nil).Once()
+
+	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Once()
+	suite.mockFunctionDb.On("GetByIDs", []uuid.UUID{upstreamFunctionID}).
+		Return([]*dbmodel.Function{{ID: upstreamFunctionID, Name: "sync-upstream", IsAsync: false}}, nil).Once()
+
+	suite.mockTxImpl.On("Transaction", ctx, mock.AnythingOfType("func(context.Context) error")).
+		Run(func(args mock.Arguments) {
+			txFunc := args.Get(1).(func(context.Context) error)
+			err := txFunc(context.Background())
+			suite.ErrorIs(err, common.ErrCannotAttachToOutputCollection)
+		}).Return(common.ErrCannotAttachToOutputCollection).Once()
+
+	response, err := suite.coordinator.AttachFunction(ctx, request)
+
+	suite.ErrorIs(err, common.ErrCannotAttachToOutputCollection)
+	suite.Nil(response)
+
+	suite.mockMetaDomain.AssertExpectations(suite.T())
+	suite.mockAttachedFunctionDb.AssertExpectations(suite.T())
+	suite.mockFunctionDb.AssertExpectations(suite.T())
+	suite.mockDatabaseDb.AssertExpectations(suite.T())
+	suite.mockCollectionDb.AssertExpectations(suite.T())
+	suite.mockTxImpl.AssertExpectations(suite.T())
 }
 
 // TestAttachFunction_RecoveryFlow tests the realistic recovery scenario:

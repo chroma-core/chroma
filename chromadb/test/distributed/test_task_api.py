@@ -8,6 +8,7 @@ for automatically processing collections.
 import pytest
 from chromadb.api.client import Client as ClientCreator
 from chromadb.api.functions import (
+    DUMMY_ASYNC_FUNCTION,
     RECORD_COUNTER_FUNCTION,
     STATISTICS_FUNCTION,
     Function,
@@ -360,8 +361,10 @@ def test_function_remove_nonexistent(basic_http_client: System) -> None:
         collection.detach_function(attached_fn.name, delete_output_collection=True)
 
 
-def test_attach_to_output_collection_fails(basic_http_client: System) -> None:
-    """Test that attaching a function to an output collection fails"""
+def test_attach_to_output_collection_fails_for_sync_upstream(
+    basic_http_client: System,
+) -> None:
+    """Test that attaching a function to an output collection still fails when an upstream function is sync"""
     client = ClientCreator.from_system(basic_http_client)
     client.reset()
 
@@ -384,6 +387,77 @@ def test_attach_to_output_collection_fails(basic_http_client: System) -> None:
             name="test_function_2",
             function=RECORD_COUNTER_FUNCTION,
             output_collection="output_collection_2",
+            params=None,
+        )
+
+
+def test_attach_to_output_collection_succeeds_for_async_upstream(
+    basic_http_client: System,
+) -> None:
+    """Test that attaching a function to an output collection succeeds when all upstream functions are async"""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    input_collection = client.create_collection(name="async_input_collection")
+    input_collection.add(ids=["id1"], documents=["test"])
+
+    _, _ = input_collection.attach_function(
+        name="async_test_function",
+        function=DUMMY_ASYNC_FUNCTION,
+        output_collection="async_output_collection",
+        params=None,
+    )
+    output_collection = client.get_collection(name="async_output_collection")
+
+    attached_fn, created = output_collection.attach_function(
+        name="downstream_test_function",
+        function=RECORD_COUNTER_FUNCTION,
+        output_collection="downstream_output_collection",
+        params=None,
+    )
+
+    assert attached_fn is not None
+    assert created is True
+
+
+def test_attach_to_output_collection_fails_for_mixed_sync_and_async_upstream(
+    basic_http_client: System,
+) -> None:
+    """Test that attaching to an output collection fails when upstream functions are a mix of sync and async"""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    async_input_collection = client.create_collection(
+        name="mixed_async_input_collection"
+    )
+    async_input_collection.add(ids=["id1"], documents=["test"])
+
+    sync_input_collection = client.create_collection(name="mixed_sync_input_collection")
+    sync_input_collection.add(ids=["id2"], documents=["test"])
+
+    _, _ = async_input_collection.attach_function(
+        name="mixed_async_upstream",
+        function=DUMMY_ASYNC_FUNCTION,
+        output_collection="mixed_output_collection",
+        params=None,
+    )
+
+    _, _ = sync_input_collection.attach_function(
+        name="mixed_sync_upstream",
+        function=RECORD_COUNTER_FUNCTION,
+        output_collection="mixed_output_collection",
+        params=None,
+    )
+
+    output_collection = client.get_collection(name="mixed_output_collection")
+
+    with pytest.raises(
+        ChromaError, match="cannot attach function to an output collection"
+    ):
+        _ = output_collection.attach_function(
+            name="mixed_downstream_test_function",
+            function=RECORD_COUNTER_FUNCTION,
+            output_collection="mixed_downstream_output_collection",
             params=None,
         )
 
