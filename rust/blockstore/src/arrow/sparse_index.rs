@@ -451,7 +451,7 @@ impl SparseIndexReader {
     {
         let forward = &self.data.forward;
 
-        // Convert key range bounds to KeyWrapper once, outside the loop.
+        // Convert key range bounds to KeyWrapper once.
         let key_start: Bound<crate::key::KeyWrapper> = match key_range.start_bound() {
             Bound::Included(k) => Bound::Included(k.clone().into()),
             Bound::Excluded(k) => Bound::Excluded(k.clone().into()),
@@ -463,7 +463,43 @@ impl SparseIndexReader {
             Bound::Unbounded => Bound::Unbounded,
         };
 
-        // We do not materialize the last key of each block, so we must check the next block's start key to determine if the current block's end key is within the query range.
+        // Fast path: when prefix is a single value and key start is
+        // bounded, use BTreeMap range lookups for O(log B + R) instead
+        // of the O(B) linear scan below.
+        if let (Bound::Included(ps), Bound::Included(pe)) =
+            (prefix_range.start_bound(), prefix_range.end_bound())
+        {
+            if ps == pe {
+                if let Bound::Included(ref ks) = key_start {
+                    let start = SparseIndexDelimiter::Key(CompositeKey {
+                        prefix: ps.to_string(),
+                        key: ks.clone(),
+                    });
+                    if let Some((first_delim, _)) = forward.range(..=&start).next_back() {
+                        return forward
+                            .range(first_delim.clone()..)
+                            .take_while(|(delim, _)| match delim {
+                                SparseIndexDelimiter::Start => true,
+                                SparseIndexDelimiter::Key(k) => {
+                                    if k.prefix.as_str() != *ps {
+                                        return false;
+                                    }
+                                    match &key_end {
+                                        Bound::Included(ke) => k.key <= *ke,
+                                        Bound::Excluded(ke) => k.key < *ke,
+                                        Bound::Unbounded => true,
+                                    }
+                                }
+                            })
+                            .map(|(_, v)| v.id)
+                            .collect();
+                    }
+                    return vec![];
+                }
+            }
+        }
+
+        // Slow path: linear scan with prefix + key overlap filtering.
         let start_keys_offset_by_1_iter = forward
             .iter()
             .skip(1)
@@ -956,29 +992,41 @@ mod tests {
         let blocks = reader.get_block_ids_range::<_, u32, _>(""..="", ..);
         assert_eq!(blocks, vec![block_id_0, block_id_1, block_id_2]);
 
-        // Key 150 — block_1 retained (key in [100, 200)), block_0 and
-        // block_2 also retained (first/last block not eliminated).
+        // Key 150 — only block_1 (key in [100, 200)).
         let blocks = reader.get_block_ids_range(""..="", 150u32..=150u32);
-        assert_eq!(blocks, vec![block_id_0, block_id_1, block_id_2]);
+        assert_eq!(blocks, vec![block_id_1]);
 
-        // Key 50 — only block_1 eliminated (key range [100, 200) does
-        // not overlap [50, 50]). block_0 (Start) and block_2 (last)
-        // are not eliminated.
+        // Key 50 — only block_0 ([Start, 100) contains key 50).
         let blocks = reader.get_block_ids_range(""..="", 50u32..=50u32);
-        assert_eq!(blocks, vec![block_id_0, block_id_2]);
+        assert_eq!(blocks, vec![block_id_0]);
 
-        // Key 250 — only block_1 eliminated. block_0 (Start) and
-        // block_2 (last) are not eliminated.
+        // Key 250 — only block_2 ([200, ∞) contains key 250).
         let blocks = reader.get_block_ids_range(""..="", 250u32..=250u32);
-        assert_eq!(blocks, vec![block_id_0, block_id_2]);
+        assert_eq!(blocks, vec![block_id_2]);
 
-        // Key 99..=100 — spans block_0/block_1 boundary. block_1
-        // retained ([100, 200) overlaps [99, 100]).
+        // Key 99..=100 — spans block_0 and block_1.
         let blocks = reader.get_block_ids_range(""..="", 99u32..=100u32);
-        assert_eq!(blocks, vec![block_id_0, block_id_1, block_id_2]);
+        assert_eq!(blocks, vec![block_id_0, block_id_1]);
 
         // Key 0..=999 — all blocks.
         let blocks = reader.get_block_ids_range(""..="", 0u32..=999u32);
+        assert_eq!(blocks, vec![block_id_0, block_id_1, block_id_2]);
+
+        // Key exactly at block boundary — 100 is block_1's start.
+        let blocks = reader.get_block_ids_range(""..="", 100u32..=100u32);
+        assert_eq!(blocks, vec![block_id_1]);
+
+        // Key exactly at block boundary — 200 is block_2's start.
+        let blocks = reader.get_block_ids_range(""..="", 200u32..=200u32);
+        assert_eq!(blocks, vec![block_id_2]);
+
+        // Key 0 — minimum key, in first block (Start delimiter).
+        let blocks = reader.get_block_ids_range(""..="", 0u32..=0u32);
+        assert_eq!(blocks, vec![block_id_0]);
+
+        // Excluded key start — falls to slow path (first/last not eliminated).
+        let blocks =
+            reader.get_block_ids_range(""..="", (Bound::Excluded(100u32), Bound::Included(150u32)));
         assert_eq!(blocks, vec![block_id_0, block_id_1, block_id_2]);
     }
 
