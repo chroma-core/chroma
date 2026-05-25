@@ -25,6 +25,8 @@ struct GenerateRecord {
 
 #[derive(Debug, Serialize)]
 struct GenerateRecordSet {
+    tenant_id: String,
+    database_id: String,
     source_collection: String,
     source_kind: String,
     output_collection: String,
@@ -55,6 +57,8 @@ pub struct HttpGenerateExecutor {
     source_collection: String,
     source_kind: String,
     output_collection: String,
+    tenant_id: String,
+    database_id: String,
     modal_key: String,
     modal_secret: String,
     client: reqwest::Client,
@@ -125,6 +129,8 @@ impl HttpGenerateExecutor {
             source_collection,
             source_kind,
             output_collection: af.output_collection_name.clone(),
+            tenant_id: af.tenant_id.clone(),
+            database_id: af.database_id.clone(),
             modal_key,
             modal_secret,
             client: reqwest::Client::builder()
@@ -314,6 +320,8 @@ impl AttachedFunctionExecutor for HttpGenerateExecutor {
         let num_records = records.len();
         let request_body = GenerateRequest {
             record_set: GenerateRecordSet {
+                tenant_id: self.tenant_id.clone(),
+                database_id: self.database_id.clone(),
                 source_collection: self.source_collection.clone(),
                 source_kind: self.source_kind.clone(),
                 output_collection: self.output_collection.clone(),
