@@ -462,6 +462,117 @@ def test_attach_to_output_collection_fails_for_mixed_sync_and_async_upstream(
         )
 
 
+def test_attach_to_existing_output_collection_rejects_cycle(
+    basic_http_client: System,
+) -> None:
+    """Test that attaching to an existing output collection rejects a cycle like A -> B -> C -> A"""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    collection_a = client.create_collection(name="cycle_collection_a")
+    collection_a.add(ids=["id1"], documents=["doc1"])
+
+    _, _ = collection_a.attach_function(
+        name="a_to_b",
+        function=DUMMY_ASYNC_FUNCTION,
+        output_collection="cycle_collection_b",
+        params=None,
+    )
+
+    collection_b = client.get_collection(name="cycle_collection_b")
+
+    _, _ = collection_b.attach_function(
+        name="b_to_c",
+        function=DUMMY_ASYNC_FUNCTION,
+        output_collection="cycle_collection_c",
+        params=None,
+    )
+
+    collection_c = client.get_collection(name="cycle_collection_c")
+
+    with pytest.raises(
+        ChromaError, match="cannot attach function to an output collection"
+    ):
+        collection_c.attach_function(
+            name="c_to_a",
+            function=RECORD_COUNTER_FUNCTION,
+            output_collection="cycle_collection_a",
+            params=None,
+        )
+
+
+def test_attach_function_rejects_depth_above_maximum(
+    basic_http_client: System,
+) -> None:
+    """Test that attach_function rejects chains deeper than the configured maximum depth"""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    current_collection = client.create_collection(name="depth_collection_0")
+    current_collection.add(ids=["id0"], documents=["doc0"])
+
+    for i in range(1, 6):
+        _, _ = current_collection.attach_function(
+            name=f"depth_edge_{i}",
+            function=DUMMY_ASYNC_FUNCTION,
+            output_collection=f"depth_collection_{i}",
+            params=None,
+        )
+        current_collection = client.get_collection(name=f"depth_collection_{i}")
+
+    with pytest.raises(
+        ChromaError, match="attached function depth exceeds maximum of 5"
+    ):
+        current_collection.attach_function(
+            name="depth_edge_6",
+            function=RECORD_COUNTER_FUNCTION,
+            output_collection="depth_collection_6",
+            params=None,
+        )
+
+
+def test_attach_function_rejects_when_connecting_two_chains_exceeds_maximum_depth(
+    basic_http_client: System,
+) -> None:
+    """Test that attach_function rejects connecting two valid chains if the combined path would exceed the maximum depth"""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    left_current = client.create_collection(name="left_depth_collection_0")
+    left_current.add(ids=["left_id0"], documents=["left_doc0"])
+
+    for i in range(1, 3):
+        _, _ = left_current.attach_function(
+            name=f"left_depth_edge_{i}",
+            function=DUMMY_ASYNC_FUNCTION,
+            output_collection=f"left_depth_collection_{i}",
+            params=None,
+        )
+        left_current = client.get_collection(name=f"left_depth_collection_{i}")
+
+    right_current = client.create_collection(name="right_depth_collection_0")
+    right_current.add(ids=["right_id0"], documents=["right_doc0"])
+
+    for i in range(1, 4):
+        _, _ = right_current.attach_function(
+            name=f"right_depth_edge_{i}",
+            function=DUMMY_ASYNC_FUNCTION,
+            output_collection=f"right_depth_collection_{i}",
+            params=None,
+        )
+        right_current = client.get_collection(name=f"right_depth_collection_{i}")
+
+    with pytest.raises(
+        ChromaError, match="attached function depth exceeds maximum of 5"
+    ):
+        left_current.attach_function(
+            name="bridge_two_chains",
+            function=RECORD_COUNTER_FUNCTION,
+            output_collection="right_depth_collection_0",
+            params=None,
+        )
+
+
 def test_delete_output_collection_detaches_function(basic_http_client: System) -> None:
     """Test that deleting an output collection also detaches the attached function"""
     client = ClientCreator.from_system(basic_http_client)
