@@ -36,7 +36,9 @@ def _verify_sha256(fname: str, expected_sha256: str) -> bool:
 # and verify the ONNX model.
 class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
     MODEL_NAME = "all-MiniLM-L6-v2"
-    DOWNLOAD_PATH = Path.home() / ".cache" / "chroma" / "onnx_models" / MODEL_NAME
+    _DEFAULT_DOWNLOAD_PATH = (
+        Path.home() / ".cache" / "chroma" / "onnx_models" / MODEL_NAME
+    )
     EXTRACTED_FOLDER_NAME = "onnx"
     ARCHIVE_FILENAME = "onnx.tar.gz"
     MODEL_DOWNLOAD_URL = (
@@ -44,12 +46,18 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
     )
     _MODEL_SHA256 = "913d7300ceae3b2dbc2c50d1de4baacab4be7b9380491c27fab7418616a16ec3"
 
-    def __init__(self, preferred_providers: Optional[List[str]] = None) -> None:
+    def __init__(
+        self,
+        preferred_providers: Optional[List[str]] = None,
+        download_path: Optional[Path] = None,
+    ) -> None:
         """
         Initialize the ONNXMiniLM_L6_V2 embedding function.
 
         Args:
             preferred_providers (List[str], optional): The preferred ONNX runtime providers.
+                Defaults to None.
+            download_path (Path, optional): The path to download the model to.
                 Defaults to None.
         """
         # convert the list to set for unique values
@@ -64,6 +72,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             raise ValueError("Preferred providers must be unique")
 
         self._preferred_providers = preferred_providers
+        self.download_path = download_path or self._DEFAULT_DOWNLOAD_PATH
 
         try:
             # Equivalent to import onnxruntime
@@ -205,7 +214,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         """
         tokenizer = self.Tokenizer.from_file(
             os.path.join(
-                self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "tokenizer.json"
+                self.download_path, self.EXTRACTED_FOLDER_NAME, "tokenizer.json"
             )
         )
         # max_seq_length = 256, for some reason sentence-transformers uses 256 even though the HF config has a max length of 128
@@ -249,7 +258,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             self._preferred_providers.remove("CoreMLExecutionProvider")
 
         return self.ort.InferenceSession(
-            os.path.join(self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "model.onnx"),
+            os.path.join(self.download_path, self.EXTRACTED_FOLDER_NAME, "model.onnx"),
             # Since 1.9 onnyx runtime requires providers to be specified when there are multiple available
             providers=self._preferred_providers,
             sess_options=so,
@@ -290,7 +299,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             "tokenizer.json",
             "vocab.txt",
         ]
-        extracted_folder = os.path.join(self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME)
+        extracted_folder = os.path.join(self.download_path, self.EXTRACTED_FOLDER_NAME)
         onnx_files_exist = True
         for f in onnx_files:
             if not os.path.exists(os.path.join(extracted_folder, f)):
@@ -298,28 +307,28 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
                 break
         # Model is not downloaded yet
         if not onnx_files_exist:
-            os.makedirs(self.DOWNLOAD_PATH, exist_ok=True)
+            os.makedirs(self.download_path, exist_ok=True)
             if not os.path.exists(
-                os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME)
+                os.path.join(self.download_path, self.ARCHIVE_FILENAME)
             ) or not _verify_sha256(
-                os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
+                os.path.join(self.download_path, self.ARCHIVE_FILENAME),
                 self._MODEL_SHA256,
             ):
                 self._download(
                     url=self.MODEL_DOWNLOAD_URL,
-                    fname=os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
+                    fname=os.path.join(self.download_path, self.ARCHIVE_FILENAME),
                 )
             with tarfile.open(
-                name=os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
+                name=os.path.join(self.download_path, self.ARCHIVE_FILENAME),
                 mode="r:gz",
             ) as tar:
                 if sys.version_info >= (3, 12):
-                    tar.extractall(path=self.DOWNLOAD_PATH, filter="data")
+                    tar.extractall(path=self.download_path, filter="data")
                 else:
                     # filter argument was added in Python 3.12
                     # https://docs.python.org/3/library/tarfile.html#tarfile.TarFile.extractall
                     # In versions prior to 3.12, this provides the same behavior as filter="data"
-                    tar.extractall(path=self.DOWNLOAD_PATH)
+                    tar.extractall(path=self.download_path)
 
     @staticmethod
     def name() -> str:
