@@ -49,7 +49,7 @@ The function also handles edge cases like record resurrection (delete followed b
 - **Version archival**: every write to the source collection produces an immutable snapshot in the history collection, enabling full audit trails and point-in-time reconstruction.
 - **Lightweight storage**: the history collection is a pure record segment with all indexes disabled. Since versions only grow (append-only), the record segment is cheap to maintain -- no rebalancing, no index rebuilds, no tombstone compaction overhead.
 - **Monotonic and gapless versioning**: the function enforces a strictly increasing, gap-free version sequence per record ID, even across delete/re-creation cycles.
-- **Simple pagination via thin API facade**: a client can retrieve the full revision history for any record by reading its `__max` tracker and then fetching `v1..vN` by predictable composite IDs. This requires only a thin facade over Chroma's existing get-by-IDs API -- no new endpoints needed.
+- **Simple pagination via thin API facade**: a client can retrieve the full revision history for any record by reading its `v0` tracker and then fetching `v1..vN` by predictable composite IDs. This requires only a thin facade over Chroma's existing get-by-IDs API -- no new endpoints needed.
 - **Delete awareness**: deletions produce explicit tombstone records in the history, preserving the complete lifecycle.
 
 ## How Version Histories Work
@@ -80,7 +80,7 @@ flowchart TB
  end
 ```
 
-The `__max` tracker for `page-1` would show `max_version: 5`. A client paginating `v1..v5` gets the complete lifecycle including the deletion and resurrection, in order, without any special logic.
+The `v0` tracker for `page-1` would show `max_version: 5`. A client paginating `v1..v5` gets the complete lifecycle including the deletion and resurrection, in order, without any special logic.
 
 ## Architecture
 
@@ -92,23 +92,23 @@ flowchart LR
 
  subgraph fn [revision_history function]
  direction TB
- READ["Read __max tracker\nfrom output_reader"]
+ READ["Read v0 tracker\nfrom output_reader"]
  CALC["effective_version =\nmax + 1"]
- EMIT["Emit revision +\nupdate __max"]
+ EMIT["Emit revision +\nupdate v0"]
  READ --> CALC --> EMIT
  end
 
  subgraph output [History Collection - record segment only]
  direction TB
+ V0["page-1::v0\n(tracker: max_version=3)"]
  V1["page-1::v1\n(archived snapshot)"]
  V2["page-1::v2\n(archived snapshot)"]
  V3["page-1::v3\n(archived snapshot)"]
- MAX["page-1::__max\nmax_version: 3"]
  end
 
  subgraph facade [Thin API Facade]
  direction TB
- GET_MAX["GET page-1::__max\n-> max_version=3"]
+ GET_MAX["GET page-1::v0\n-> max_version=3"]
  GET_RANGE["GET page-1::v1,\npage-1::v2, page-1::v3"]
  GET_MAX --> GET_RANGE
  end
@@ -138,9 +138,9 @@ The function only reads `id`, `metadata`, and `document` from the source. Embedd
 
 The function watches the source collection for writes. On each invocation:
 
-1. For **adds/upserts**: read the version identifier from record metadata (key name configurable via `params`), resolve the effective version via the `__max` tracker (see Resurrection Handling below), then write to the output collection with a composite ID `"{original_id}::v{effective_version}"`.
+1. For **adds/upserts**: read the version identifier from record metadata (key name configurable via `params`), resolve the effective version via the `v0` tracker (see Resurrection Handling below), then write to the output collection with a composite ID `"{original_id}::v{effective_version}"`.
 2. For **deletes**: increment the version (just like an add/upsert) and write a record at `"{original_id}::v{effective_version}"` with `is_delete: true` in metadata. Tombstones are simply the next version in the sequence.
-3. For **each record processed**: update the `"{original_id}::__max"` tracking record with the new max version.
+3. For **each record processed**: update the `"{original_id}::v0"` tracking record with the new max version.
 
 The output collection uses a schema with **all indexes disabled** (no vector/KNN, no metadata inverted indexes) -- purely a record segment for lightweight archival storage. Since versions only grow and records are never updated or removed, the record segment stays compact with zero maintenance overhead.
 
@@ -148,15 +148,17 @@ Versions are monotonically increasing and gapless within the history collection.
 
 ### Resurrection Handling
 
-When a record is deleted and re-created, the source application may reset the version counter (e.g. back to 1). The function handles this via a per-ID tracking record:
+When a record is deleted and re-created, the source application may reset the version counter (e.g. back to 1). The function handles this via the v0 tracking record:
 
-- **Tracking record ID**: `"{original_id}::__max"` with metadata `{ max_version: Int }`
-- On processing a write, the function reads `__max` from output_reader
-- If incoming source_version <= max_version (collision), effective_version = max_version + 1
-- Otherwise, effective_version = max_version + 1 (always increment from tracked max, regardless of source version)
+- **Tracking record ID**: `"{original_id}::v0"` (v0 is reserved for tracking; revisions start at v1)
+- On processing a write, the function reads v0 from output_reader to get `max_version`
+- effective_version is always `max_version + 1` (regardless of source_version)
+- On detecting a new generation (source_version <= `current_life_start_source_ver + (max_version - current_life_start_pos)`), the function updates `current_life_start_pos` and `current_life_start_source_ver` on v0
 - The original source version is preserved in metadata as `source_version`
 
-**Pagination** (client-side): read `"{id}::__max"` to get `max_version`, then fetch `"{id}::v1"` through `"{id}::v{max_version}"`. Tombstones are just regular versions with `is_delete: true` -- no separate lookup needed.
+**Source version translation (current generation):** `history_pos = current_life_start_pos + (source_version - current_life_start_source_ver)`. For previous generations, walk backwards from the tombstone at `current_life_start_pos - 1` -- all data is immutable and always present.
+
+**Pagination** (client-side): read `"{id}::v0"` to get `max_version`, then fetch `"{id}::v1"` through `"{id}::v{max_version}"`. Tombstones are just regular versions with `is_delete: true` -- no separate lookup needed.
 
 ## Data Model (output collection records)
 
@@ -175,14 +177,20 @@ Metadata:
 
 Tombstones use the exact same ID scheme and just occupy the next version slot. This keeps the timeline fully linear -- paginating `v1..vN` gives you the complete history including deletions, with `is_delete` distinguishing snapshots from tombstones.
 
-**Tracking record** (per original_id):
+**Tracking record** (per original_id, stored at version slot 0):
 ```
-ID:       "{original_id}::__max"
+ID:       "{original_id}::v0"
 Document: None
 Metadata:
-  - max_version: Int
+  - max_version: Int (highest history position assigned)
+  - current_life_start_pos: Int (history position where the current generation began)
+  - current_life_start_source_ver: Int (source_version of the first record in the current generation)
   - original_id: String
 ```
+
+Using v0 (rather than a separate suffix) avoids ID format collisions with user-chosen record IDs. Versions start at 1, so v0 is always reserved for tracking.
+
+The `current_life_*` fields enable O(1) source_version-to-history-position translation for the current generation: `history_pos = current_life_start_pos + (source_version - current_life_start_source_ver)`. For previous generations, the mapping can be reconstructed by walking backwards from tombstone records (all revision data is immutable and always available).
 
 ## Files to Change
 
@@ -222,22 +230,23 @@ impl AttachedFunctionExecutor for RevisionHistoryExecutor {
         let mut output = Vec::new();
         let now = unix_millis_now();
 
-        // Load existing max versions from output_reader for all IDs we'll process
-        let mut max_versions: HashMap<String, i64> = HashMap::new();
+        // Load existing v0 trackers from output_reader for all IDs we'll process
+        // TrackerState: (max_version, current_life_start_pos, current_life_start_source_ver)
+        let mut trackers: HashMap<String, TrackerState> = HashMap::new();
         for record in &input_records {
             let id = record.get_user_id();
-            if !max_versions.contains_key(id) {
-                let max = read_max_version(output_reader, id); // reads "{id}::__max"
-                max_versions.insert(id.to_string(), max.unwrap_or(0));
+            if !trackers.contains_key(id) {
+                let state = read_tracker(output_reader, id); // reads "{id}::v0"
+                trackers.insert(id.to_string(), state.unwrap_or(TrackerState::new()));
             }
         }
 
         for record in input_records {
             let original_id = record.get_user_id();
-            let current_max = max_versions.get(original_id).copied().unwrap_or(0);
+            let tracker = trackers.get_mut(original_id).unwrap();
 
-            let effective_version = current_max + 1;
-            max_versions.insert(original_id.to_string(), effective_version);
+            let effective_version = tracker.max_version + 1;
+            tracker.max_version = effective_version;
             let id = format!("{original_id}::v{effective_version}");
 
             if record.is_delete() {
@@ -248,6 +257,13 @@ impl AttachedFunctionExecutor for RevisionHistoryExecutor {
                 });
             } else {
                 let source_version = record.merged_metadata().get(version_key).as_int();
+
+                // Detect new generation: source_version reset indicates resurrection
+                if tracker.is_new_generation(source_version) {
+                    tracker.current_life_start_pos = effective_version;
+                    tracker.current_life_start_source_ver = source_version;
+                }
+
                 output.push(LogRecord {
                     operation: Upsert, id,
                     metadata: {
@@ -260,12 +276,17 @@ impl AttachedFunctionExecutor for RevisionHistoryExecutor {
             }
         }
 
-        // Emit __max tracker updates for all modified IDs
-        for (original_id, max_ver) in &max_versions {
+        // Emit v0 tracker updates for all modified IDs
+        for (original_id, tracker) in &trackers {
             output.push(LogRecord {
                 operation: Upsert,
-                id: format!("{original_id}::__max"),
-                metadata: { max_version: max_ver, original_id },
+                id: format!("{original_id}::v0"),
+                metadata: {
+                    max_version: tracker.max_version,
+                    current_life_start_pos: tracker.current_life_start_pos,
+                    current_life_start_source_ver: tracker.current_life_start_source_ver,
+                    original_id,
+                },
                 document: None, embedding: None,
             });
         }
@@ -274,6 +295,14 @@ impl AttachedFunctionExecutor for RevisionHistoryExecutor {
     }
 }
 ```
+
+## Edge Cases
+
+**Missing version_key in metadata**: If a source record does not contain the configured `version_key` in its metadata, the function still archives it with `source_version: null`. The effective_version is assigned normally (max + 1). This allows the function to handle mixed collections where not all records participate in versioning.
+
+**Duplicate source_version (upstream bug)**: If the function sees a write where `source_version` matches the previously archived value for that ID, it treats this as an upstream bug -- logs a warning but still archives the mutation as the next history version. Every mutation produces a history entry; deduplication is not performed.
+
+**ID format safety**: The tracking record uses `{original_id}::v0` (version slot 0, which is never used for actual revisions). This avoids any naming collision with user-chosen record IDs regardless of their format. Even if a source record ID contains `::v` patterns, the composite IDs in the history collection remain unambiguous because they exist in a separate namespace.
 
 ## Output Collection Schema
 
@@ -291,7 +320,7 @@ Reference workload: 1M records with high revision frequency (content management,
 |--------|-------|
 | Source records | 1M pages |
 | Avg revisions/page | 150 |
-| Total revision records | 150M + 1M __max trackers = 151M |
+| Total revision records | 150M + 1M v0 trackers = 151M |
 | Per revision: document | ~2KB avg |
 | Per revision: metadata | ~300B (original metadata + revision fields) |
 | Per revision: ID overhead | ~50B |
@@ -302,16 +331,16 @@ At 500 revisions/page (heavily edited content):
 
 ### Memory during compaction
 
-The function's memory profile is predictable: **records in ~ records out** (plus one __max tracker per unique ID in the batch).
+The function's memory profile is predictable: **records in ~ records out** (plus one v0 tracker per unique ID in the batch).
 
 | Metric | Value |
 |--------|-------|
 | Compaction batch size | 1000 records (typical `max_compaction_size`) |
 | Avg input record (hydrated) | ~5KB (document + metadata + record overhead) |
 | Input batch in memory | 1000 x 5KB = **5MB** |
-| Output records (1 per input + __max updates) | ~2000 x 2.5KB = **5MB** |
-| __max point lookups from output_reader | 1000 B-tree lookups; each may load an 8MB blockfile block into memory. In the worst case (all unique IDs, cold cache), this could pull in up to 1000 distinct blocks. In practice, IDs in a batch are often clustered (same collection, recent writes), so block reuse is high. Estimate **1-10 block loads per batch** (~8-80MB) with warm cache. |
-| **Peak working memory** | **~20-90MB per compaction cycle** (dominated by blockfile block cache for __max lookups) |
+| Output records (1 per input + v0 updates) | ~2000 x 2.5KB = **5MB** |
+| v0 point lookups from output_reader | 1000 B-tree lookups; each may load an 8MB blockfile block into memory. In the worst case (all unique IDs, cold cache), this could pull in up to 1000 distinct blocks. In practice, IDs in a batch are often clustered (same collection, recent writes), so block reuse is high. Estimate **1-10 block loads per batch** (~8-80MB) with warm cache. |
+| **Peak working memory** | **~20-90MB per compaction cycle** (dominated by blockfile block cache for v0 lookups) |
 
 The function adds moderate memory pressure from blockfile reads, but no more than any other incremental function (e.g. statistics). The dominant cost in any compaction cycle remains the vector index (HNSW/SPANN) maintenance on the *source* collection.
 
@@ -353,7 +382,7 @@ class RevisionHistory:
 
     def get_max_version(self, record_id: str) -> int:
         """Get the total number of history entries for a record."""
-        result = self.coll.get(ids=[f"{record_id}::__max"], include=["metadatas"])
+        result = self.coll.get(ids=[f"{record_id}::v0"], include=["metadatas"])
         return result["metadatas"][0]["max_version"]
 
     def get_at_position(self, record_id: str, position: int):
@@ -371,37 +400,34 @@ class RevisionHistory:
         return self.coll.get(ids=ids, include=["metadatas", "documents"])
 
     def find_by_source_version(self, record_id: str, source_version: int):
-        """Find the history entry matching a specific source_version.
-        Requires a scan since no metadata indexes exist on the history collection
-        and we cannot know a priori whether the history and source version
-        sequences have diverged (resurrection may have occurred at any point).
-        For large histories, consider caching the source_version->position mapping."""
-        max_ver = self.get_max_version(record_id)
-        # Scan in reverse (most recent first) since source_version resets on resurrection
-        for pos in range(max_ver, 0, -1):
-            entry = self.get_at_position(record_id, pos)
-            if entry["metadatas"][0].get("source_version") == source_version:
-                return entry
-        return None
+        """O(1) lookup: translate a source_version to its history position
+        in the current generation using v0 tracker metadata."""
+        tracker = self.coll.get(ids=[f"{record_id}::v0"], include=["metadatas"])
+        meta = tracker["metadatas"][0]
+        life_start_pos = meta["current_life_start_pos"]
+        life_start_src = meta["current_life_start_source_ver"]
+
+        history_pos = life_start_pos + (source_version - life_start_src)
+        return self.get_at_position(record_id, history_pos)
 ```
 
 Because history versions are gapless and IDs are deterministic, the facade needs no search/filter capabilities -- simple get-by-IDs is sufficient for pagination. Tombstones (deletes) are just another version in the sequence with `is_delete: true`, so they appear naturally without any special handling.
 
-Note: `find_by_source_version` always requires a scan (O(n) over history length) because we cannot know whether the two version sequences have diverged without checking. The history collection has no metadata indexes, so there is no way to query by `source_version` directly. Applications that frequently need source_version lookup should cache the mapping client-side.
+Note: `find_by_source_version` is O(1) -- a single arithmetic computation from v0 tracker metadata. It only resolves within the current generation. For previous generations, the client can scan the relevant range of history positions directly (all data is immutable and addressable by position).
 
 ## Reverting to a Previous Version
 
 Reverting a record to an older version is a client-side operation that writes back to the source collection. Since the history collection stores no embeddings (record-only), the source collection's embedding function must re-embed the reverted content.
 
 ```python
-def revert_to_version(self, source_collection, record_id: str, target_version: int):
-    # 1. Fetch the historical snapshot
-    revision = self.get_revision(record_id, target_version)
+def revert_to_version(self, source_collection, record_id: str, target_position: int):
+    # 1. Fetch the historical snapshot by history position
+    revision = self.get_at_position(record_id, target_position)
     metadata = revision["metadatas"][0]
     document = revision["documents"][0]
 
     if metadata.get("is_delete"):
-        raise ValueError(f"Version {target_version} is a deletion, cannot revert to it")
+        raise ValueError(f"Position {target_position} is a deletion, cannot revert to it")
 
     # 2. Strip revision-history metadata (not part of the original record)
     internal_keys = {"original_id", "version", "source_version", "archived_at", "is_delete"}
@@ -428,7 +454,7 @@ Key points:
 
 The history collection is append-only in practice:
 - Revision records are written once and never updated (immutable snapshots)
-- `__max` trackers are the only records that receive updates (one per source record ID)
+- `v0` trackers are the only records that receive updates (one per source record ID)
 - No deletes ever occur in the history collection
 - No vector index means no HNSW/SPANN graph maintenance (the dominant cost in typical collections)
 - No metadata indexes means no inverted index rebuilds
@@ -436,3 +462,84 @@ The history collection is append-only in practice:
 The record segment's blockfile B-tree will still incur some rebalancing/block-splits as new IDs interleave lexicographically (e.g. `page-1::v3` lands between `page-1::v2` and `page-2::v1`). This is inherent to the blockfile design. However, without vector or metadata index maintenance, the write amplification is limited to just the B-tree layer -- orders of magnitude cheaper than a full indexed collection. Storage cost scales linearly with the number of versions archived.
 
 **Reads are equally cheap.** Since all access is by known IDs (deterministic composite keys), every read is a direct B-tree point lookup -- O(log n) per key. There is no query planning, no filter evaluation, no ANN search, no inverted index intersection. Fetching a page of 10 revisions is just 10 point lookups against the record segment. The B-tree's lexicographic ordering also means versions for the same original_id are clustered together in adjacent blocks (`page-1::v1`, `page-1::v2`, `page-1::v3`...), giving good cache locality for sequential version reads.
+
+## Test Plan
+
+### Unit Tests (in `revision_history.rs`)
+
+Tests operate on the executor directly using in-memory materialized records and an optional output_reader, following the pattern in `statistics.rs`.
+
+**1. Basic add archival**
+- Input: 3 records with distinct IDs, each with `version: 1` in metadata
+- Expected: 3 revision records at `{id}::v1` + 3 v0 trackers with `max_version: 1`
+- Verify: `source_version`, `archived_at`, `is_delete: false`, original metadata preserved
+
+**2. Sequential versions for same ID**
+- Input: same record ID appears 3 times in one batch (simulating rapid edits between compactions) with `version: 1, 2, 3`
+- Expected: `{id}::v1`, `{id}::v2`, `{id}::v3` + v0 tracker at `max_version: 3`
+- Verify: each entry has correct `source_version` and incrementing `version`
+
+**3. Delete produces tombstone as next version**
+- Setup: output_reader has existing v0 tracker with `max_version: 2`
+- Input: one delete operation for that ID
+- Expected: `{id}::v3` with `is_delete: true` + v0 tracker updated to `max_version: 3`
+- Verify: no document, no embedding, `is_delete: true`
+
+**4. Resurrection / version collision**
+- Setup: output_reader has v0 tracker with `max_version: 5` (record was previously at v5)
+- Input: add with `version: 1` (app reset its counter)
+- Expected: `{id}::v6` (not v1) with `source_version: 1`, `version: 6`
+- Verify: v0 tracker updated to `max_version: 6`
+
+**5. Missing version_key in metadata**
+- Input: record with no `version` key in metadata
+- Expected: revision still archived at next effective_version, `source_version: null`
+- Verify: no error, no skip
+
+**6. Duplicate source_version (upstream bug)**
+- Setup: output_reader has v0 with `max_version: 3`
+- Input: record with `version: 3` (same as last archived source_version)
+- Expected: still archived as `{id}::v4`, warning logged
+- Verify: `source_version: 3`, `version: 4`
+
+**7. Empty batch**
+- Input: no records
+- Expected: empty output (no v0 trackers emitted either)
+
+**8. Mixed operations in one batch**
+- Input: add for ID-A, upsert for ID-B, delete for ID-C (ID-C has existing v0 at max=2)
+- Expected: correct per-ID versioning, independent v0 trackers for each
+
+**9. Multiple records with same ID interleaved with other IDs**
+- Input: [A v1, B v1, A v2, B v2, A delete]
+- Expected: A gets v1, v2, v3(tombstone); B gets v1, v2. Correct v0 trackers for both.
+
+### Integration Test (k8s / Tilt -- following `test_k8s_integration_statistics_function` pattern)
+
+**10. End-to-end compaction integration**
+- Create source collection, attach `revision_history` function
+- Push multiple log records (adds, updates, deletes)
+- Trigger compaction
+- Read output collection segments directly
+- Verify: revision records exist with correct IDs, metadata, v0 trackers correct
+- Verify: `completion_offset` advances correctly
+
+**11. Multi-compaction-cycle consistency**
+- Cycle 1: push 5 records, compact
+- Cycle 2: push 5 more records (same IDs, higher versions), compact
+- Verify: v0 trackers reflect cumulative state, history positions continue from where cycle 1 left off
+
+**12. Backfill on attach**
+- Create source collection with existing data (10 records)
+- Attach `revision_history` function (triggers backfill)
+- Verify: all existing records archived as v1 entries, v0 trackers at max_version=1
+
+### Facade Tests (Python, optional)
+
+**13. Pagination correctness**
+- Populate history collection with 25 revisions for one record
+- Verify: `list_revisions(page=1, page_size=10)` returns v1..v10, page 3 returns v21..v25
+
+**14. find_by_source_version after resurrection**
+- Populate: v1(src=1), v2(src=2), v3(tombstone), v4(src=1 after resurrection)
+- Verify: `find_by_source_version(1)` returns v4 (most recent match, reverse scan)
