@@ -273,13 +273,28 @@ impl MetadataProvider<'_> {
                     }
                     Some(FtsIndexReader::TokenBitmap(analyzer, reader)) => {
                         let mut analyzer = analyzer.clone();
-                        let plan = analyzer.plan_query(query).map_err(|e| {
-                            MetadataIndexError::FullTextError(
-                                chroma_index::fulltext::types::FullTextIndexError::TokenizerError(
-                                    e.to_string(),
-                                ),
-                            )
-                        })?;
+                        // NOTE: When plan_query fails with NoSelectiveToken (query
+                        // too short for the tokenizer, e.g. "ab"), we return an empty
+                        // bitmap to match the legacy trigram index behavior, which
+                        // also silently returns empty for sub-trigram queries. Both
+                        // are technically false-negatives.
+                        let plan = match analyzer.plan_query(query) {
+                            Ok(plan) => plan,
+                            Err(chroma_index::fulltext::tokenizer::TokenizerError::NoSelectiveToken { .. }) => {
+                                tracing::trace!(
+                                    query = query,
+                                    "TokenBitmap: query too short for index, returning empty",
+                                );
+                                return Ok(RoaringBitmap::new());
+                            }
+                            Err(e) => {
+                                return Err(MetadataIndexError::FullTextError(
+                                    chroma_index::fulltext::types::FullTextIndexError::TokenizerError(
+                                        e.to_string(),
+                                    ),
+                                ).into());
+                            }
+                        };
                         let candidates = reader
                             .search(&plan)
                             .instrument(tracing::trace_span!(parent: Span::current(), "Filter by document contains (token bitmap)"))
