@@ -44,7 +44,7 @@ pub trait AttachedFunctionExecutor: Send + Sync + std::fmt::Debug {
     /// The output records to be written to the output collection
     async fn execute(
         &self,
-        input_records: Chunk<HydratedMaterializedLogRecord<'_, '_>>,
+        input_records: Vec<Chunk<HydratedMaterializedLogRecord<'_, '_>>>,
         output_reader: Option<&RecordSegmentReaderShard<'_>>,
     ) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>>;
 }
@@ -96,15 +96,16 @@ impl CountAttachedFunction {
 impl AttachedFunctionExecutor for CountAttachedFunction {
     async fn execute(
         &self,
-        input_records: Chunk<HydratedMaterializedLogRecord<'_, '_>>,
+        input_records: Vec<Chunk<HydratedMaterializedLogRecord<'_, '_>>>,
         output_reader: Option<&RecordSegmentReaderShard<'_>>,
     ) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>> {
-        let records_count = input_records.len() as i64;
+        let records_count = input_records.iter().map(Chunk::len).sum::<usize>() as i64;
 
         // NOTE(tanujnay112): Can get all these in one pass but this function is just for
         // testing.
         let delete_count = input_records
             .iter()
+            .flat_map(|batch| batch.iter())
             .filter(|(record, _)| {
                 record.get_operation() == MaterializedLogOperation::DeleteExisting
             })
@@ -112,6 +113,7 @@ impl AttachedFunctionExecutor for CountAttachedFunction {
 
         let insert_count = input_records
             .iter()
+            .flat_map(|batch| batch.iter())
             .filter(|(record, _)| record.get_operation() == MaterializedLogOperation::AddNew)
             .count() as i64;
 
@@ -157,12 +159,12 @@ pub struct DummyAttachedFunction;
 impl AttachedFunctionExecutor for DummyAttachedFunction {
     async fn execute(
         &self,
-        input_records: Chunk<HydratedMaterializedLogRecord<'_, '_>>,
+        input_records: Vec<Chunk<HydratedMaterializedLogRecord<'_, '_>>>,
         _output_reader: Option<&RecordSegmentReaderShard<'_>>,
     ) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>> {
         tracing::info!(
             "DummyAttachedFunction executing with {} input records",
-            input_records.len()
+            input_records.iter().map(Chunk::len).sum::<usize>()
         );
 
         // Return empty output records
@@ -228,17 +230,21 @@ impl ExecuteAttachedFunctionOperator {
 
 /// Input for the ExecuteAttachedFunction operator
 #[derive(Debug)]
-pub struct ExecuteAttachedFunctionInput {
-    /// The materialized log outputs to process
+pub struct ExecuteAttachedFunctionBatchInput {
+    /// The materialized logs for one input collection.
     pub materialized_logs: Vec<MaterializeLogOutput>,
+    /// The input collection's record segment to hydrate against.
+    pub input_record_segment: Option<RecordSegmentReader<'static>>,
+}
+
+#[derive(Debug)]
+pub struct ExecuteAttachedFunctionInput {
+    /// The materialized log outputs to process, grouped by input collection.
+    pub input_batches: Vec<ExecuteAttachedFunctionBatchInput>,
     /// The tenant ID
     pub tenant_id: String,
-    /// The input collection's record segment to read existing data
-    pub input_record_segment: Option<RecordSegmentReader<'static>>,
     /// The output collection ID where results are written
     pub output_collection_id: CollectionUuid,
-    /// The current completion offset
-    pub completion_offset: u64,
     /// The output collection's record segment to read existing data
     pub output_record_segment: Segment,
     /// Blockfile provider for reading segments
@@ -313,8 +319,8 @@ impl Operator<ExecuteAttachedFunctionInput, ExecuteAttachedFunctionOutput>
         input: &ExecuteAttachedFunctionInput,
     ) -> Result<ExecuteAttachedFunctionOutput, ExecuteAttachedFunctionError> {
         tracing::info!(
-            "[ExecuteAttachedFunction]: Processing {} materialized log outputs for output collection {}",
-            input.materialized_logs.len(),
+            "[ExecuteAttachedFunction]: Processing {} input batches for output collection {}",
+            input.input_batches.len(),
             input.output_collection_id
         );
 
@@ -350,45 +356,44 @@ impl Operator<ExecuteAttachedFunctionInput, ExecuteAttachedFunctionOutput>
         let mut all_hydrated_records = Vec::new();
         let mut total_records_processed = 0u64;
 
-        // For backfill, all existing compacted data from the input collection should be
-        // in our input materialized logs. So we don't need to read any existing data from
-        // the input collection segments.
-        let input_record_segment = if input.is_for_backfill {
-            None
-        } else {
-            input.input_record_segment.as_ref()
-        };
+        for batch in &input.input_batches {
+            let mut hydrated_records = Vec::new();
 
-        for materialized_log in input.materialized_logs.iter() {
-            // Iterate over each shard in the partitioned result
-            for (shard_idx, shard_result) in materialized_log.result.shards.iter().enumerate() {
-                // Get the shard reader for this specific shard index
-                let shard_reader = input_record_segment
-                    .and_then(|reader| reader.get_shards().get(shard_idx))
-                    .and_then(|shard_opt| shard_opt.as_ref());
+            // For backfill, all existing compacted data from the input collection should be
+            // in our input materialized logs. So we don't need to read any existing data from
+            // the input collection segments.
+            let input_record_segment = if input.is_for_backfill {
+                None
+            } else {
+                batch.input_record_segment.as_ref()
+            };
 
-                // Now iterate over records in this shard
-                for borrowed_record in shard_result.iter() {
-                    // Hydrate the record using the correct shard
-                    let hydrated_record = borrowed_record
-                        .hydrate(shard_reader)
-                        .await
-                        .map_err(|e| ExecuteAttachedFunctionError::SegmentRead(Box::new(e)))?;
+            for materialized_log in &batch.materialized_logs {
+                for (shard_idx, shard_result) in materialized_log.result.shards.iter().enumerate() {
+                    let shard_reader = input_record_segment
+                        .and_then(|reader| reader.get_shards().get(shard_idx))
+                        .and_then(|shard_opt| shard_opt.as_ref());
 
-                    all_hydrated_records.push(hydrated_record);
+                    for borrowed_record in shard_result.iter() {
+                        let hydrated_record = borrowed_record
+                            .hydrate(shard_reader)
+                            .await
+                            .map_err(|e| ExecuteAttachedFunctionError::SegmentRead(Box::new(e)))?;
+
+                        hydrated_records.push(hydrated_record);
+                    }
                 }
+
+                total_records_processed += materialized_log.result.len() as u64;
             }
 
-            total_records_processed += materialized_log.result.len() as u64;
+            all_hydrated_records.push(Chunk::new(std::sync::Arc::from(hydrated_records)));
         }
 
         // Execute the attached function using the provided executor
         let output_records = self
             .attached_function_executor
-            .execute(
-                Chunk::new(std::sync::Arc::from(all_hydrated_records)),
-                output_record_segment_reader.as_ref(),
-            )
+            .execute(all_hydrated_records, output_record_segment_reader.as_ref())
             .await
             .map_err(ExecuteAttachedFunctionError::SegmentRead)?;
 
