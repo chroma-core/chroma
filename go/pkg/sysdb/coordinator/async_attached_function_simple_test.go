@@ -103,10 +103,11 @@ func TestAsyncFunctionRepairFlowSimple(t *testing.T) {
 	}
 
 	// Step 2: Finalize repair
-	mockAttachedFunctionDb.On("UpdateHeapEntryPending", attachedFunctionID, false).Return(nil)
+	mockAttachedFunctionDb.On("UpdateHeapEntryPending", attachedFunctionID, collectionID, false).Return(nil)
 
 	finishReq := &coordinatorpb.FinalizeAsyncAttachedFunctionRepairRequest{
 		AttachedFunctionId: attachedFunctionID.String(),
+		CollectionId:       collectionID,
 	}
 
 	finishResp, err := coordinator.FinalizeAsyncAttachedFunctionRepair(ctx, finishReq)
@@ -321,6 +322,7 @@ func TestAsyncFunctionFinalizeRepairIdempotent(t *testing.T) {
 
 	ctx := context.Background()
 	attachedFunctionID := uuid.New()
+	collectionID := uuid.New().String()
 
 	// Setup mocks
 	mockTxImpl := &dbmodel_mocks.ITransaction{}
@@ -338,10 +340,11 @@ func TestAsyncFunctionFinalizeRepairIdempotent(t *testing.T) {
 	mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(mockAttachedFunctionDb)
 
 	// The operation is idempotent (same final state) but performs the update each time
-	mockAttachedFunctionDb.On("UpdateHeapEntryPending", attachedFunctionID, false).Return(nil).Times(3)
+	mockAttachedFunctionDb.On("UpdateHeapEntryPending", attachedFunctionID, collectionID, false).Return(nil).Times(3)
 
 	req := &coordinatorpb.FinalizeAsyncAttachedFunctionRepairRequest{
 		AttachedFunctionId: attachedFunctionID.String(),
+		CollectionId:       collectionID,
 	}
 
 	// Call the endpoint 3 times - should succeed each time

@@ -408,12 +408,7 @@ impl TestSysDb {
 
             // Get current version history
             let mut version_history = version_file.version_history.unwrap_or_default();
-            let last_version_info = version_history
-                .versions
-                .last()
-                .cloned()
-                .unwrap_or_default()
-                .clone();
+            let last_version_info = version_history.versions.last().cloned().unwrap_or_default();
             let mut collection_info = last_version_info
                 .collection_info_mutable
                 .unwrap_or_default();
@@ -432,16 +427,18 @@ impl TestSysDb {
                 ..Default::default()
             };
 
-            let mut segment_info = CollectionSegmentInfo::default();
-            let mut flush_compaction_infos = Vec::new();
+            let mut flush_compaction_infos: Vec<_> = segment_flush_info
+                .iter()
+                .map(|segment_flush_info| {
+                    let flush_compaction_info: FlushSegmentCompactionInfo = segment_flush_info
+                        .try_into()
+                        .expect("Failed to convert SegmentFlushInfo");
+                    flush_compaction_info
+                })
+                .collect();
 
-            for segment_flush_info in segment_flush_info.iter() {
-                let flush_compaction_info: FlushSegmentCompactionInfo = segment_flush_info
-                    .try_into()
-                    .expect("Failed to convert SegmentFlushInfo");
-                flush_compaction_infos.push(flush_compaction_info);
-            }
-
+            // Some tests advance only the collection log position. Reuse the
+            // current in-memory segments so the historical version remains valid.
             if flush_compaction_infos.is_empty() {
                 flush_compaction_infos = inner
                     .segments
@@ -465,8 +462,9 @@ impl TestSysDb {
                     .collect();
             }
 
-            segment_info.segment_compaction_info = flush_compaction_infos;
-            version_info.segment_info = Some(segment_info);
+            version_info.segment_info = Some(CollectionSegmentInfo {
+                segment_compaction_info: flush_compaction_infos,
+            });
 
             version_history.versions.push(version_info);
             version_file.version_history = Some(version_history);

@@ -3,7 +3,8 @@ use chroma_error::ChromaError;
 use chroma_sysdb::sysdb::SysDb;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{
-    AttachedFunction, AttachedFunctionConversionError, CollectionUuid, ListAttachedFunctionsError,
+    AttachedFunction, AttachedFunctionConversionError, AttachedFunctionUuid, CollectionUuid,
+    ListAttachedFunctionsError,
 };
 use thiserror::Error;
 
@@ -28,6 +29,7 @@ impl GetAttachedFunctionOperator {
 #[derive(Debug)]
 pub struct GetAttachedFunctionInput {
     pub collection_id: CollectionUuid,
+    pub attached_function_id: Option<AttachedFunctionUuid>,
 }
 
 #[derive(Debug)]
@@ -126,16 +128,22 @@ impl Operator<GetAttachedFunctionInput, GetAttachedFunctionOutput> for GetAttach
             });
         }
 
-        // Take the first attached function from the list
-        let attached_function_proto = attached_functions
+        let attached_functions = attached_functions
             .into_iter()
-            .next()
-            .ok_or(GetAttachedFunctionOperatorError::NoAttachedFunctionFound)?;
-
-        // Convert proto to AttachedFunction type using TryFrom from task.rs
-        let attached_function: AttachedFunction = attached_function_proto
-            .try_into()
+            .map(AttachedFunction::try_from)
+            .collect::<Result<Vec<_>, _>>()
             .map_err(GetAttachedFunctionOperatorError::ConversionError)?;
+
+        let attached_function = match input.attached_function_id {
+            Some(attached_function_id) => attached_functions
+                .into_iter()
+                .find(|attached_function| attached_function.id == attached_function_id)
+                .ok_or(GetAttachedFunctionOperatorError::NoAttachedFunctionFound)?,
+            None => attached_functions
+                .into_iter()
+                .next()
+                .ok_or(GetAttachedFunctionOperatorError::NoAttachedFunctionFound)?,
+        };
 
         tracing::info!(
             "[{}]: Found attached function '{}' for collection {}",

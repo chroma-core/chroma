@@ -5,3 +5,6 @@ INSERT INTO "public"."functions" ("id", "name", "is_incremental", "return_type",
   '{}',
   false
 );
+
+ALTER TABLE "public"."attached_functions" DROP CONSTRAINT "attached_functions_pkey";
+ALTER TABLE "public"."attached_functions" ADD CONSTRAINT "attached_functions_pkey" PRIMARY KEY ("id", "input_collection_id");

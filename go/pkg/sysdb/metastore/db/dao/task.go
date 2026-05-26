@@ -107,10 +107,11 @@ func (s *attachedFunctionDb) UpdateCompletionOffsetAndHeapEntry(id uuid.UUID, co
 	return nil
 }
 
-// UpdateHeapEntryPending updates only the heap_entry_pending flag
-func (s *attachedFunctionDb) UpdateHeapEntryPending(id uuid.UUID, heapEntryPending bool) error {
+// UpdateHeapEntryPending updates only the heap_entry_pending flag for a specific input collection.
+func (s *attachedFunctionDb) UpdateHeapEntryPending(id uuid.UUID, collectionID string, heapEntryPending bool) error {
 	result := s.db.Model(&dbmodel.AttachedFunction{}).
 		Where("id = ?", id).
+		Where("input_collection_id = ?", collectionID).
 		Where("is_deleted = ?", false).
 		Updates(map[string]interface{}{
 			"heap_entry_pending": heapEntryPending,
@@ -123,7 +124,9 @@ func (s *attachedFunctionDb) UpdateHeapEntryPending(id uuid.UUID, heapEntryPendi
 	}
 
 	if result.RowsAffected == 0 {
-		log.Error("update heap_entry_pending: no rows affected", zap.String("id", id.String()))
+		log.Error("update heap_entry_pending: no rows affected",
+			zap.String("id", id.String()),
+			zap.String("collection_id", collectionID))
 		return common.ErrAttachedFunctionNotFound
 	}
 

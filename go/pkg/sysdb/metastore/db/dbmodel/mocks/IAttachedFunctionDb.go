@@ -310,17 +310,17 @@ func (_m *IAttachedFunctionDb) UpdateCompletionOffsetAndHeapEntry(id uuid.UUID, 
 	return r0
 }
 
-// UpdateHeapEntryPending provides a mock function with given fields: id, heapEntryPending
-func (_m *IAttachedFunctionDb) UpdateHeapEntryPending(id uuid.UUID, heapEntryPending bool) error {
-	ret := _m.Called(id, heapEntryPending)
+// UpdateHeapEntryPending provides a mock function with given fields: id, collectionID, heapEntryPending
+func (_m *IAttachedFunctionDb) UpdateHeapEntryPending(id uuid.UUID, collectionID string, heapEntryPending bool) error {
+	ret := _m.Called(id, collectionID, heapEntryPending)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateHeapEntryPending")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(uuid.UUID, bool) error); ok {
-		r0 = rf(id, heapEntryPending)
+	if rf, ok := ret.Get(0).(func(uuid.UUID, string, bool) error); ok {
+		r0 = rf(id, collectionID, heapEntryPending)
 	} else {
 		r0 = ret.Error(0)
 	}
