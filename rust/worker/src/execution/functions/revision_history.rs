@@ -1,3 +1,56 @@
+//! # Revision History Function
+//!
+//! Archives every version of a record into a lightweight output collection (expected to have no vector/metadata
+//! indexes). Each mutation in the source collection produces an immutable revision in the
+//! history collection, enabling pagination over a record's full change timeline.
+//!
+//! ## Data Flow
+//!
+//! ```text
+//!   Source Collection                   History Collection (record-only)
+//!  ┌─────────────────┐                ┌──────────────────────────────────┐
+//!  │ id: "page-1"    │  ──compaction──▶│ "page-1::v1"  {version:1, ...}  │
+//!  │ metadata:       │                │ "page-1::v2"  {version:2, ...}  │
+//!  │   version: 3    │                │ "page-1::v3"  {version:3, ...}  │
+//!  │   title: "..."  │                │ "page-1::v0"  {max_version:3,   │
+//!  └─────────────────┘                │                generation_...}   │
+//!                                     └──────────────────────────────────┘
+//! ```
+//!
+//! ## Key Concepts
+//!
+//! - **Composite IDs**: History records are keyed as `"{original_id}::v{version}"`.
+//! - **v0 Tracker**: A special record at `"{original_id}::v0"` stores `max_version` and
+//!   generation boundaries, enabling efficient version assignment without scanning.
+//! - **Effective Version**: A monotonic, gapless counter (1, 2, 3, ...) assigned by this
+//!   function, independent of the source application's version counter.
+//! - **Resurrection**: When a deleted record is re-created with the same ID, the source
+//!   version counter resets. The tracker detects this and starts a new generation while
+//!   continuing the effective version sequence.
+//! - **Tombstones**: Deletes produce a revision with `is_delete: true` — just another
+//!   version in the timeline, keeping pagination simple.
+//!
+//! ## Chunking Assumption
+//!
+//! This function assumes it receives **all records for a compaction cycle in a single
+//! `execute()` call**. The in-memory tracker state (built from the v0 record at the start)
+//! is shared across all records in the batch — if the same original_id appears multiple
+//! times within one batch, versions are assigned sequentially from the in-memory tracker.
+//!
+//! If a document is chunked across multiple records (each chunk having its own ID), each
+//! chunk is tracked independently with its own v0 tracker and version timeline. The
+//! source application is responsible for ensuring the `version_key` metadata is consistent
+//! across all chunks belonging to the same logical document revision.
+//!
+//! Even if chunks for the same version land in different compaction cycles, the system
+//! converges: each chunk's tracker is independent and persisted after every cycle.
+//! For the UI, chunk-0 can serve as the canonical version timeline for listing/pagination,
+//! since all chunks advance atomically from the source application's perspective. The
+//! facade expands to all chunks only when displaying a specific revision's full content.
+//!
+//!
+//! NOTE(hammadb): I hate this design. It is all too clever.
+
 use crate::execution::operators::execute_task::AttachedFunctionExecutor;
 use async_trait::async_trait;
 use chroma_error::ChromaError;
@@ -13,30 +66,192 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_VERSION_KEY: &str = "version";
 
-#[derive(Debug)]
-struct TrackerState {
-    max_version: i64,
-    current_life_start_pos: i64,
-    current_life_start_source_ver: i64,
+/// Composite ID for a revision record: `"{original_id}::v{version}"`.
+fn revision_id(original_id: &str, version: i64) -> String {
+    format!("{original_id}::v{version}")
 }
 
-impl TrackerState {
+/// Composite ID for the v0 tracker record: `"{original_id}::v0"`.
+fn tracker_id(original_id: &str) -> String {
+    format!("{original_id}::v0")
+}
+
+/// Per-record version tracker stored at `{original_id}::v0` in the output collection.
+/// Maintains the monotonic version counter and generation boundaries across resurrection cycles.
+#[derive(Debug)]
+struct RevisionTracker {
+    /// Highest history position assigned so far (revisions are v1..=max_version)
+    max_version: i64,
+    /// History position where the current generation began
+    generation_start_pos: i64,
+    /// Source version of the first record in the current generation
+    generation_start_source_ver: i64,
+}
+
+impl RevisionTracker {
     fn new() -> Self {
         Self {
             max_version: 0,
-            current_life_start_pos: 0,
-            current_life_start_source_ver: 0,
+            generation_start_pos: 0,
+            generation_start_source_ver: 0,
         }
     }
 
+    /// Detects whether `source_version` represents a new generation (resurrection).
+    ///
+    /// A new generation starts when the source application resets its version counter
+    /// (e.g. after a delete + re-create of the same record ID). We detect this by
+    /// computing the expected max source_version for the current generation:
+    ///   expected = start_source_ver + (max_version - start_pos)
+    /// If the incoming source_version is <= this expected max, the source counter has
+    /// been reset and we're starting a new generation.
     fn is_new_generation(&self, source_version: i64) -> bool {
         if self.max_version == 0 {
             return true;
         }
         let expected_max_source_ver =
-            self.current_life_start_source_ver + (self.max_version - self.current_life_start_pos);
+            self.generation_start_source_ver + (self.max_version - self.generation_start_pos);
         source_version <= expected_max_source_ver
-            && !(self.current_life_start_pos == 0 && self.current_life_start_source_ver == 0)
+            && !(self.generation_start_pos == 0 && self.generation_start_source_ver == 0)
+    }
+
+    /// Load tracker state from the output collection's `{original_id}::v0` record.
+    /// Returns a fresh tracker if the record doesn't exist yet.
+    async fn from_reader(
+        output_reader: Option<&RecordSegmentReaderShard<'_>>,
+        original_id: &str,
+    ) -> Self {
+        let Some(reader) = output_reader else {
+            return Self::new();
+        };
+
+        let tid = tracker_id(original_id);
+        let offset_id = match reader
+            .get_offset_id_for_user_id(&tid, &RecordSegmentReaderOptions::default())
+            .await
+        {
+            Ok(Some(id)) => id,
+            _ => return Self::new(),
+        };
+
+        let data_record = match reader.get_data_for_offset_id(offset_id).await {
+            Ok(Some(record)) => record,
+            _ => return Self::new(),
+        };
+
+        let metadata = match &data_record.metadata {
+            Some(m) => m,
+            None => return Self::new(),
+        };
+
+        let max_version = match metadata.get("max_version") {
+            Some(MetadataValue::Int(v)) => *v,
+            _ => 0,
+        };
+        let generation_start_pos = match metadata.get("generation_start_pos") {
+            Some(MetadataValue::Int(v)) => *v,
+            _ => 0,
+        };
+        let generation_start_source_ver = match metadata.get("generation_start_source_ver") {
+            Some(MetadataValue::Int(v)) => *v,
+            _ => 0,
+        };
+
+        Self {
+            max_version,
+            generation_start_pos,
+            generation_start_source_ver,
+        }
+    }
+
+    fn to_log_record(&self, original_id: &str) -> LogRecord {
+        let metadata = HashMap::from([
+            (
+                "max_version".to_string(),
+                UpdateMetadataValue::Int(self.max_version),
+            ),
+            (
+                "generation_start_pos".to_string(),
+                UpdateMetadataValue::Int(self.generation_start_pos),
+            ),
+            (
+                "generation_start_source_ver".to_string(),
+                UpdateMetadataValue::Int(self.generation_start_source_ver),
+            ),
+            (
+                "original_id".to_string(),
+                UpdateMetadataValue::Str(original_id.to_string()),
+            ),
+        ]);
+
+        LogRecord {
+            // log_offset is unused for function output records; the compaction
+            // pipeline assigns offsets when writing to the output collection.
+            log_offset: 0,
+            record: OperationRecord {
+                id: tracker_id(original_id),
+                embedding: None,
+                encoding: None,
+                metadata: Some(metadata),
+                document: None,
+                operation: Operation::Upsert,
+            },
+        }
+    }
+}
+
+/// Metadata written to each revision record in the output collection.
+/// Provides a typed interface instead of ad-hoc HashMap construction.
+#[derive(Debug)]
+struct RevisionMetadata {
+    original_id: String,
+    version: i64,
+    source_version: Option<i64>,
+    archived_at: i64,
+    is_delete: bool,
+}
+
+impl RevisionMetadata {
+    fn into_update_metadata(
+        self,
+        original_metadata: Option<&HashMap<String, MetadataValue>>,
+    ) -> HashMap<String, UpdateMetadataValue> {
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "original_id".to_string(),
+            UpdateMetadataValue::Str(self.original_id),
+        );
+        metadata.insert(
+            "version".to_string(),
+            UpdateMetadataValue::Int(self.version),
+        );
+        metadata.insert(
+            "archived_at".to_string(),
+            UpdateMetadataValue::Int(self.archived_at),
+        );
+        metadata.insert(
+            "is_delete".to_string(),
+            UpdateMetadataValue::Bool(self.is_delete),
+        );
+
+        if let Some(sv) = self.source_version {
+            metadata.insert("source_version".to_string(), UpdateMetadataValue::Int(sv));
+        }
+
+        if let Some(orig) = original_metadata {
+            for (key, value) in orig {
+                let update_value = match value {
+                    MetadataValue::Bool(b) => UpdateMetadataValue::Bool(*b),
+                    MetadataValue::Int(i) => UpdateMetadataValue::Int(*i),
+                    MetadataValue::Float(f) => UpdateMetadataValue::Float(*f),
+                    MetadataValue::Str(s) => UpdateMetadataValue::Str(s.clone()),
+                    _ => continue,
+                };
+                metadata.entry(key.clone()).or_insert(update_value);
+            }
+        }
+
+        metadata
     }
 }
 
@@ -61,85 +276,6 @@ impl RevisionHistoryExecutor {
 
         Ok(Self { version_key })
     }
-
-    async fn read_tracker(
-        output_reader: Option<&RecordSegmentReaderShard<'_>>,
-        original_id: &str,
-    ) -> TrackerState {
-        let Some(reader) = output_reader else {
-            return TrackerState::new();
-        };
-
-        let tracker_id = format!("{original_id}::v0");
-        let offset_id = match reader
-            .get_offset_id_for_user_id(&tracker_id, &RecordSegmentReaderOptions::default())
-            .await
-        {
-            Ok(Some(id)) => id,
-            _ => return TrackerState::new(),
-        };
-
-        let data_record = match reader.get_data_for_offset_id(offset_id).await {
-            Ok(Some(record)) => record,
-            _ => return TrackerState::new(),
-        };
-
-        let metadata = match &data_record.metadata {
-            Some(m) => m,
-            None => return TrackerState::new(),
-        };
-
-        let max_version = match metadata.get("max_version") {
-            Some(MetadataValue::Int(v)) => *v,
-            _ => 0,
-        };
-        let current_life_start_pos = match metadata.get("current_life_start_pos") {
-            Some(MetadataValue::Int(v)) => *v,
-            _ => 0,
-        };
-        let current_life_start_source_ver = match metadata.get("current_life_start_source_ver") {
-            Some(MetadataValue::Int(v)) => *v,
-            _ => 0,
-        };
-
-        TrackerState {
-            max_version,
-            current_life_start_pos,
-            current_life_start_source_ver,
-        }
-    }
-
-    fn build_tracker_record(original_id: &str, tracker: &TrackerState) -> LogRecord {
-        let mut metadata = HashMap::new();
-        metadata.insert(
-            "max_version".to_string(),
-            UpdateMetadataValue::Int(tracker.max_version),
-        );
-        metadata.insert(
-            "current_life_start_pos".to_string(),
-            UpdateMetadataValue::Int(tracker.current_life_start_pos),
-        );
-        metadata.insert(
-            "current_life_start_source_ver".to_string(),
-            UpdateMetadataValue::Int(tracker.current_life_start_source_ver),
-        );
-        metadata.insert(
-            "original_id".to_string(),
-            UpdateMetadataValue::Str(original_id.to_string()),
-        );
-
-        LogRecord {
-            log_offset: 0,
-            record: OperationRecord {
-                id: format!("{original_id}::v0"),
-                embedding: None,
-                encoding: None,
-                metadata: Some(metadata),
-                document: None,
-                operation: Operation::Upsert,
-            },
-        }
-    }
 }
 
 #[async_trait]
@@ -158,14 +294,14 @@ impl AttachedFunctionExecutor for RevisionHistoryExecutor {
             .unwrap_or_default()
             .as_millis() as i64;
 
-        let mut trackers: HashMap<String, TrackerState> = HashMap::new();
+        let mut trackers: HashMap<String, RevisionTracker> = HashMap::new();
         let mut output = Vec::new();
 
         for (record, _index) in input_records.iter() {
             let original_id = record.get_user_id().to_string();
 
             if !trackers.contains_key(&original_id) {
-                let state = Self::read_tracker(output_reader, &original_id).await;
+                let state = RevisionTracker::from_reader(output_reader, &original_id).await;
                 trackers.insert(original_id.clone(), state);
             }
 
@@ -173,20 +309,16 @@ impl AttachedFunctionExecutor for RevisionHistoryExecutor {
             let effective_version = tracker.max_version + 1;
             tracker.max_version = effective_version;
 
-            let composite_id = format!("{original_id}::v{effective_version}");
+            let composite_id = revision_id(&original_id, effective_version);
 
             if record.get_operation() == MaterializedLogOperation::DeleteExisting {
-                let mut metadata = HashMap::new();
-                metadata.insert(
-                    "original_id".to_string(),
-                    UpdateMetadataValue::Str(original_id.clone()),
-                );
-                metadata.insert(
-                    "version".to_string(),
-                    UpdateMetadataValue::Int(effective_version),
-                );
-                metadata.insert("archived_at".to_string(), UpdateMetadataValue::Int(now));
-                metadata.insert("is_delete".to_string(), UpdateMetadataValue::Bool(true));
+                let rev_meta = RevisionMetadata {
+                    original_id: original_id.clone(),
+                    version: effective_version,
+                    source_version: None,
+                    archived_at: now,
+                    is_delete: true,
+                };
 
                 output.push(LogRecord {
                     log_offset: 0,
@@ -194,7 +326,7 @@ impl AttachedFunctionExecutor for RevisionHistoryExecutor {
                         id: composite_id,
                         embedding: None,
                         encoding: None,
-                        metadata: Some(metadata),
+                        metadata: Some(rev_meta.into_update_metadata(None)),
                         document: None,
                         operation: Operation::Upsert,
                     },
@@ -203,42 +335,30 @@ impl AttachedFunctionExecutor for RevisionHistoryExecutor {
                 let merged_metadata = record.merged_metadata();
                 let source_version = match merged_metadata.get(&self.version_key) {
                     Some(MetadataValue::Int(v)) => Some(*v),
-                    _ => None,
+                    _ => {
+                        tracing::warn!(
+                            record_id = %original_id,
+                            version_key = %self.version_key,
+                            "version_key not found in record metadata; archiving without source_version"
+                        );
+                        None
+                    }
                 };
 
                 if let Some(sv) = source_version {
                     if tracker.is_new_generation(sv) {
-                        tracker.current_life_start_pos = effective_version;
-                        tracker.current_life_start_source_ver = sv;
+                        tracker.generation_start_pos = effective_version;
+                        tracker.generation_start_source_ver = sv;
                     }
                 }
 
-                let mut out_metadata = HashMap::new();
-                out_metadata.insert(
-                    "original_id".to_string(),
-                    UpdateMetadataValue::Str(original_id.clone()),
-                );
-                out_metadata.insert(
-                    "version".to_string(),
-                    UpdateMetadataValue::Int(effective_version),
-                );
-                out_metadata.insert("archived_at".to_string(), UpdateMetadataValue::Int(now));
-                out_metadata.insert("is_delete".to_string(), UpdateMetadataValue::Bool(false));
-
-                if let Some(sv) = source_version {
-                    out_metadata.insert("source_version".to_string(), UpdateMetadataValue::Int(sv));
-                }
-
-                for (key, value) in &merged_metadata {
-                    let update_value = match value {
-                        MetadataValue::Bool(b) => UpdateMetadataValue::Bool(*b),
-                        MetadataValue::Int(i) => UpdateMetadataValue::Int(*i),
-                        MetadataValue::Float(f) => UpdateMetadataValue::Float(*f),
-                        MetadataValue::Str(s) => UpdateMetadataValue::Str(s.clone()),
-                        _ => continue,
-                    };
-                    out_metadata.entry(key.clone()).or_insert(update_value);
-                }
+                let rev_meta = RevisionMetadata {
+                    original_id: original_id.clone(),
+                    version: effective_version,
+                    source_version,
+                    archived_at: now,
+                    is_delete: false,
+                };
 
                 let document = record.merged_document_ref().map(|s| s.to_string());
 
@@ -248,7 +368,7 @@ impl AttachedFunctionExecutor for RevisionHistoryExecutor {
                         id: composite_id,
                         embedding: None,
                         encoding: None,
-                        metadata: Some(out_metadata),
+                        metadata: Some(rev_meta.into_update_metadata(Some(&merged_metadata))),
                         document,
                         operation: Operation::Upsert,
                     },
@@ -257,7 +377,7 @@ impl AttachedFunctionExecutor for RevisionHistoryExecutor {
         }
 
         for (original_id, tracker) in &trackers {
-            output.push(Self::build_tracker_record(original_id, tracker));
+            output.push(tracker.to_log_record(original_id));
         }
 
         Ok(Chunk::new(Arc::from(output)))
@@ -357,8 +477,8 @@ mod tests {
 
     /// Build a tracker record with a dummy embedding, suitable for seeding a TestDistributedSegment
     /// (which requires embeddings for materialization).
-    fn build_seed_tracker(original_id: &str, tracker: &TrackerState) -> LogRecord {
-        let mut record = RevisionHistoryExecutor::build_tracker_record(original_id, tracker);
+    fn build_seed_tracker(original_id: &str, tracker: &RevisionTracker) -> LogRecord {
+        let mut record = tracker.to_log_record(original_id);
         record.record.embedding = Some(vec![0.0]);
         record
     }
@@ -372,12 +492,12 @@ mod tests {
 
     #[test]
     fn test_tracker_new_generation_detection() {
-        let mut tracker = TrackerState::new();
+        let mut tracker = RevisionTracker::new();
         assert!(tracker.is_new_generation(1));
 
         tracker.max_version = 1;
-        tracker.current_life_start_pos = 1;
-        tracker.current_life_start_source_ver = 1;
+        tracker.generation_start_pos = 1;
+        tracker.generation_start_source_ver = 1;
 
         assert!(!tracker.is_new_generation(2));
 
@@ -402,12 +522,12 @@ mod tests {
 
     #[test]
     fn test_build_tracker_record() {
-        let tracker = TrackerState {
+        let tracker = RevisionTracker {
             max_version: 5,
-            current_life_start_pos: 4,
-            current_life_start_source_ver: 1,
+            generation_start_pos: 4,
+            generation_start_source_ver: 1,
         };
-        let record = RevisionHistoryExecutor::build_tracker_record("page-1", &tracker);
+        let record = tracker.to_log_record("page-1");
         assert_eq!(record.record.id, "page-1::v0");
         assert_eq!(record.record.operation, Operation::Upsert);
         assert!(record.record.document.is_none());
@@ -419,11 +539,11 @@ mod tests {
             Some(&UpdateMetadataValue::Int(5))
         );
         assert_eq!(
-            metadata.get("current_life_start_pos"),
+            metadata.get("generation_start_pos"),
             Some(&UpdateMetadataValue::Int(4))
         );
         assert_eq!(
-            metadata.get("current_life_start_source_ver"),
+            metadata.get("generation_start_source_ver"),
             Some(&UpdateMetadataValue::Int(1))
         );
         assert_eq!(
@@ -572,10 +692,10 @@ mod tests {
         let mut output_segment = TestDistributedSegment::new().await;
         let tracker_record = build_seed_tracker(
             "page-1",
-            &TrackerState {
+            &RevisionTracker {
                 max_version: 2,
-                current_life_start_pos: 1,
-                current_life_start_source_ver: 1,
+                generation_start_pos: 1,
+                generation_start_source_ver: 1,
             },
         );
         Box::pin(output_segment.compact_log(Chunk::new(vec![tracker_record].into()), 1)).await;
@@ -636,10 +756,10 @@ mod tests {
         let mut output_segment = TestDistributedSegment::new().await;
         let tracker_record = build_seed_tracker(
             "page-1",
-            &TrackerState {
+            &RevisionTracker {
                 max_version: 5,
-                current_life_start_pos: 1,
-                current_life_start_source_ver: 1,
+                generation_start_pos: 1,
+                generation_start_source_ver: 1,
             },
         );
         Box::pin(output_segment.compact_log(Chunk::new(vec![tracker_record].into()), 1)).await;
@@ -689,11 +809,11 @@ mod tests {
             Some(&UpdateMetadataValue::Int(6))
         );
         assert_eq!(
-            tracker_meta.get("current_life_start_pos"),
+            tracker_meta.get("generation_start_pos"),
             Some(&UpdateMetadataValue::Int(6))
         );
         assert_eq!(
-            tracker_meta.get("current_life_start_source_ver"),
+            tracker_meta.get("generation_start_source_ver"),
             Some(&UpdateMetadataValue::Int(1))
         );
     }
@@ -785,10 +905,10 @@ mod tests {
         let mut output_segment = TestDistributedSegment::new().await;
         let tracker_c = build_seed_tracker(
             "id-c",
-            &TrackerState {
+            &RevisionTracker {
                 max_version: 2,
-                current_life_start_pos: 1,
-                current_life_start_source_ver: 1,
+                generation_start_pos: 1,
+                generation_start_source_ver: 1,
             },
         );
         Box::pin(output_segment.compact_log(Chunk::new(vec![tracker_c].into()), 1)).await;
