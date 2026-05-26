@@ -1,7 +1,10 @@
 use axum::{extract::State, http::HeaderMap, Json};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_sysdb::SysDb;
-use chroma_types::{Collection, CreateDatabaseError, DatabaseName, KnnIndex};
+use chroma_types::{
+    Collection, CreateDatabaseError, DatabaseName, IndexConfig, KnnIndex, Schema,
+    SparseIndexAlgorithm, SparseVectorIndexConfig,
+};
 use frontend_core::collection_ops::{
     plan_create_collection, supported_segment_types, ExecutorKind, TenantFeatureFlags,
 };
@@ -101,24 +104,43 @@ async fn ensure_database(
 /// trip, so we don't need the try-then-fallback dance we use for databases.
 const GET_OR_CREATE: bool = true;
 
+/// Build the [`Schema`] used for Foundation collections. Adds a
+/// SPLADE-compatible sparse vector index so the server-side mutation
+/// writer has a field to land sparse embeddings in.
+fn foundation_collection_schema() -> Schema {
+    Schema::new_default(KnnIndex::Hnsw)
+        .create_index(
+            Some("sparse_embedding"),
+            IndexConfig::SparseVector(SparseVectorIndexConfig {
+                embedding_function: None,
+                source_key: None,
+                bm25: Some(false),
+                // TODO: Change this to MaxScore
+                algorithm: SparseIndexAlgorithm::Wand,
+            }),
+        )
+        .expect("static schema construction should never fail")
+}
+
 /// Plan a fresh distributed-mode collection with the shared
-/// `frontend_core::collection_ops` planner and hand it to sysdb. Foundation-api
-/// has no user-supplied schema/config and (today) no per-tenant feature
-/// flags, so most planner inputs are defaults. Sharing the planner keeps
-/// us in lock-step with chroma-frontend on segment-type dispatch.
+/// `frontend_core::collection_ops` planner and hand it to sysdb. The
+/// planner reconciles the Foundation schema (sparse vector index for
+/// SPLADE) with the default config, picks the right segment types for
+/// distributed mode, and emits everything sysdb needs.
 async fn ensure_collection(
     sysdb: &mut SysDb,
     tenant: String,
     database_name: DatabaseName,
     collection_name: &str,
 ) -> Result<Collection, ServerError> {
+    let schema = foundation_collection_schema();
     let plan = plan_create_collection(
         None,
-        None,
+        Some(schema),
         ExecutorKind::Distributed,
         &supported_segment_types(ExecutorKind::Distributed),
-        false,
-        KnnIndex::Hnsw,
+        true,
+        KnnIndex::Spann,
         TenantFeatureFlags::default(),
     )?;
     let collection = sysdb
@@ -131,7 +153,8 @@ async fn ensure_collection(
             plan.configuration,
             plan.schema,
             None,
-            None,
+            // NOTE(hammadb): Foundation uses Qwen0.6B by default which is 1024 dims
+            Some(1024),
             GET_OR_CREATE,
         )
         .await?;
@@ -170,6 +193,7 @@ async fn whoami_and_authorize(
 mod tests {
     use super::*;
     use chroma_api_types::GetUserIdentityResponse;
+    use chroma_types::SegmentType;
     use std::collections::HashSet;
     use std::future::{ready, Future};
     use std::pin::Pin;
@@ -233,6 +257,67 @@ mod tests {
             let identity = self.identity();
             Box::pin(ready(Ok(identity)))
         }
+    }
+
+    #[test]
+    fn foundation_schema_has_sparse_vector_index() {
+        let schema = foundation_collection_schema();
+        assert!(
+            schema.is_sparse_index_enabled(),
+            "schema must have a sparse vector index for SPLADE embeddings"
+        );
+    }
+
+    #[test]
+    fn foundation_schema_sparse_key_is_sparse_embedding() {
+        let schema = foundation_collection_schema();
+        let sparse_vt = schema
+            .keys
+            .get("sparse_embedding")
+            .expect("schema must have a 'sparse_embedding' key override");
+        let idx = sparse_vt
+            .sparse_vector
+            .as_ref()
+            .and_then(|sv| sv.sparse_vector_index.as_ref())
+            .expect("'sparse_embedding' key must have a sparse_vector_index");
+        assert!(idx.enabled, "sparse_vector_index must be enabled");
+        assert_eq!(idx.config.bm25, Some(false));
+    }
+
+    #[test]
+    fn foundation_plan_produces_schema_and_segments() {
+        let schema = foundation_collection_schema();
+        let plan = plan_create_collection(
+            None,
+            Some(schema),
+            ExecutorKind::Distributed,
+            &supported_segment_types(ExecutorKind::Distributed),
+            true,
+            KnnIndex::Spann,
+            TenantFeatureFlags::default(),
+        )
+        .expect("planning with foundation schema must succeed");
+
+        assert!(
+            plan.schema.is_some(),
+            "plan must carry a reconciled schema when enable_schema=true"
+        );
+        assert!(
+            !plan.segments.is_empty(),
+            "plan must produce at least one segment"
+        );
+        let reconciled = plan.schema.as_ref().unwrap();
+        assert!(
+            reconciled.is_sparse_index_enabled(),
+            "reconciled schema must preserve the sparse vector index"
+        );
+        assert!(
+            plan.segments
+                .iter()
+                .any(|s| s.r#type == SegmentType::Spann || s.r#type == SegmentType::QuantizedSpann),
+            "plan must include a SPANN vector segment, got: {:?}",
+            plan.segments.iter().map(|s| &s.r#type).collect::<Vec<_>>()
+        );
     }
 
     #[tokio::test]
