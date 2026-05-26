@@ -9,14 +9,14 @@ use uuid::Uuid;
 
 use super::tokenizer::{DocumentTokens, QueryPlan, TokenLookup};
 
-/// Key layout (32 bits): `[flags:2][id:24][chunk:6]`.
+/// Key layout (32 bits): `[partition:2][id:24][chunk:6]`.
 ///
 /// Doc-ID bitmaps (token buckets and transition docs) are chunked into
 /// 2^CHUNK_BITS (16M) doc-ID ranges, bounding per-entry bitmap size.
-/// Flags in the top 2 bits distinguish the partition:
-///   00 = token bucket doc-ID bitmap
-///   01 = transition doc-ID bitmap
-///   10 = transition bucket-ID bitmap (not chunked, chunk bits unused)
+/// The top 2 bits select the partition, placing each in a distinct key range:
+///   keys [0, 2^30)           — token bucket doc-ID bitmaps
+///   keys [2^30, 2^31)        — transition doc-ID bitmaps
+///   keys [2^31, 2^31 + 2^24) — transition bucket-ID bitmaps (not chunked)
 const CHUNK_BITS: u32 = 24;
 const CHUNK_SHIFT: u32 = 6;
 const MAX_CHUNK: u32 = (1 << CHUNK_SHIFT) - 1;
@@ -76,14 +76,15 @@ struct TrigramDelta {
 /// # Blockfile layout
 ///
 /// A single blockfile with four logical partitions under `prefix=""`,
-/// plus trigram entries under `prefix="{trigram}"`. The top 2 bits of
-/// the key distinguish the partition:
+/// plus trigram entries under `prefix="{trigram}"`. Keys are 32 bits
+/// laid out as `[partition:2][id:24][chunk:6]` (see constants above).
+/// The top 2 bits place each partition in a distinct key range:
 ///
-/// 1. `prefix=""`, flags `00` — token bucket doc-ID bitmaps (chunked).
+/// 1. `prefix=""`, keys `[0, 2^30)` — token bucket doc-ID bitmaps (chunked).
 ///    `key = (bucket_id << CHUNK_SHIFT) | chunk_index`.
-/// 2. `prefix=""`, flags `01` — transition doc-ID bitmaps (chunked).
+/// 2. `prefix=""`, keys `[2^30, 2^31)` — transition doc-ID bitmaps (chunked).
 ///    `key = TRANSITION_DOC_FLAG | (hash << CHUNK_SHIFT) | chunk_index`.
-/// 3. `prefix=""`, flags `10` — transition bucket-ID bitmaps (not chunked).
+/// 3. `prefix=""`, keys `[2^31, 2^31 + 2^24)` — transition bucket-ID bitmaps (not chunked).
 ///    `key = TRANSITION_BUCKET_FLAG | hash`.
 /// 4. `prefix="{trigram}"`, keys 0/1/2 — positional bucket-ID bitmaps.
 #[derive(Clone)]
@@ -153,9 +154,9 @@ impl FullTextBitmapWriter {
     /// Merge accumulated deltas into the blockfile.
     ///
     /// Writes in `(prefix, key)` sorted order as required by the blockfile:
-    /// 1. Token buckets (flags `00`)
-    /// 2. Transition doc bitmaps (flags `01`)
-    /// 3. Transition bucket bitmaps (flags `10`)
+    /// 1. Token buckets — keys `[0, 2^30)`
+    /// 2. Transition doc bitmaps — keys `[2^30, 2^31)`
+    /// 3. Transition bucket bitmaps — keys `[2^31, 2^31 + 2^24)`
     /// 4. Trigrams (`prefix="{trigram}"`)
     pub async fn write_to_blockfiles(&self) -> Result<(), FullTextBitmapError> {
         self.write_token_buckets().await?;
@@ -172,7 +173,7 @@ impl FullTextBitmapWriter {
 
     // --- Write phases (one per partition, in sorted key order) ---
 
-    /// Partition 1: token bucket doc-ID bitmaps (flags `00`, chunked).
+    /// Partition 1: token bucket doc-ID bitmaps, keys `[0, 2^30)` (chunked).
     async fn write_token_buckets(&self) -> Result<(), FullTextBitmapError> {
         let mut bucket_ids: Vec<u32> = self.token_deltas.iter().map(|e| *e.key()).collect();
         bucket_ids.sort_unstable();
@@ -244,7 +245,7 @@ impl FullTextBitmapWriter {
         Ok(())
     }
 
-    /// Partition 2: transition doc-ID bitmaps (flags `01`, chunked).
+    /// Partition 2: transition doc-ID bitmaps, keys `[2^30, 2^31)` (chunked).
     async fn write_transition_docs(&self) -> Result<(), FullTextBitmapError> {
         let mut hashes: Vec<u32> = self.transition_deltas.iter().map(|e| *e.key()).collect();
         hashes.sort_unstable();
@@ -277,7 +278,7 @@ impl FullTextBitmapWriter {
         Ok(())
     }
 
-    /// Partition 3: transition bucket-ID bitmaps (flags `10`, not chunked).
+    /// Partition 3: transition bucket-ID bitmaps, keys `[2^31, 2^31 + 2^24)` (not chunked).
     async fn write_transition_buckets(&self) -> Result<(), FullTextBitmapError> {
         let mut hashes: Vec<u32> = self.transition_deltas.iter().map(|e| *e.key()).collect();
         hashes.sort_unstable();
