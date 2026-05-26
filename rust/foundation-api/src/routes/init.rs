@@ -2,13 +2,14 @@ use axum::{extract::State, http::HeaderMap, Json};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_sysdb::SysDb;
 use chroma_types::{
-    Collection, CreateDatabaseError, DatabaseName, IndexConfig, KnnIndex, Schema,
-    SparseIndexAlgorithm, SparseVectorIndexConfig,
+    Collection, CreateDatabaseError, DatabaseName, IndexConfig, KnnIndex, Metadata, MetadataValue,
+    Schema, SparseIndexAlgorithm, SparseVectorIndexConfig, CHROMA_GROUP_CHUNK_SIBLINGS_KEY,
 };
 use frontend_core::collection_ops::{
     plan_create_collection, supported_segment_types, ExecutorKind, TenantFeatureFlags,
 };
 use serde::Serialize;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::{
@@ -24,6 +25,9 @@ pub struct FoundationInitResponse {
     pub database_id: String,
     pub wiki_collection_id: String,
     pub wiki_revisions_collection_id: String,
+    /// Source collection name -> id for each ensured source collection
+    /// (slack, notion, …). Each carries the chunk-sibling grouping flag.
+    pub source_collection_ids: std::collections::HashMap<String, String>,
 }
 
 /// `POST /api/foundation/init` — idempotent bootstrap for a team's Foundation
@@ -46,20 +50,42 @@ pub async fn foundation_init(
 
     let mut sysdb = server.sysdb.clone();
     let database_id = ensure_database(&mut sysdb, db_name.clone(), tenant.clone()).await?;
+
+    // Wiki collections are the attached function's *output*; they don't
+    // need chunk-sibling grouping (no end-of-job marker is read from them).
     let wiki = ensure_collection(
         &mut sysdb,
         tenant.clone(),
         db_name.clone(),
         &foundation_cfg.wiki_collection,
+        None,
     )
     .await?;
     let wiki_revisions = ensure_collection(
         &mut sysdb,
         tenant.clone(),
-        db_name,
+        db_name.clone(),
         &foundation_cfg.wiki_revisions_collection,
+        None,
     )
     .await?;
+
+    // Source collections are the attached function's *input*. They carry
+    // the chunk-sibling grouping flag so a job's chunk records stay in one
+    // partition and the trailing end-of-job marker on `{base}-0` is
+    // observed after every sibling chunk (ADR 0001 §6).
+    let mut source_collection_ids = HashMap::new();
+    for source_name in &foundation_cfg.source_collections {
+        let source = ensure_collection(
+            &mut sysdb,
+            tenant.clone(),
+            db_name.clone(),
+            source_name,
+            Some(group_chunk_siblings_metadata()),
+        )
+        .await?;
+        source_collection_ids.insert(source_name.clone(), source.collection_id.to_string());
+    }
 
     Ok(Json(FoundationInitResponse {
         tenant,
@@ -67,7 +93,20 @@ pub async fn foundation_init(
         database_id: database_id.to_string(),
         wiki_collection_id: wiki.collection_id.to_string(),
         wiki_revisions_collection_id: wiki_revisions.collection_id.to_string(),
+        source_collection_ids,
     }))
+}
+
+/// Collection metadata that opts a source collection into chunk-sibling
+/// grouping during compaction/partitioning (see
+/// [`chroma_types::CHROMA_GROUP_CHUNK_SIBLINGS_KEY`]).
+fn group_chunk_siblings_metadata() -> Metadata {
+    let mut metadata = HashMap::new();
+    metadata.insert(
+        CHROMA_GROUP_CHUNK_SIBLINGS_KEY.to_string(),
+        MetadataValue::Bool(true),
+    );
+    metadata
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -132,6 +171,7 @@ async fn ensure_collection(
     tenant: String,
     database_name: DatabaseName,
     collection_name: &str,
+    metadata: Option<Metadata>,
 ) -> Result<Collection, ServerError> {
     let schema = foundation_collection_schema();
     let plan = plan_create_collection(
@@ -152,7 +192,7 @@ async fn ensure_collection(
             plan.segments,
             plan.configuration,
             plan.schema,
-            None,
+            metadata,
             // NOTE(hammadb): Foundation uses Qwen0.6B by default which is 1024 dims
             Some(1024),
             GET_OR_CREATE,

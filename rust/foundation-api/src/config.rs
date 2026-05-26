@@ -32,6 +32,12 @@ pub struct FoundationConfig {
     pub wiki_collection: String,
     #[serde(default = "FoundationConfig::default_wiki_revisions_collection")]
     pub wiki_revisions_collection: String,
+    /// Source collections (one per ingest source) that `/init` ensures.
+    /// These receive the chunk-sibling grouping flag so the attached
+    /// function observes the per-job end-of-job marker after all of a
+    /// job's chunk records (ADR 0001 §6 in chroma-core/foundation).
+    #[serde(default = "FoundationConfig::default_source_collections")]
+    pub source_collections: Vec<String>,
 }
 
 impl FoundationConfig {
@@ -44,6 +50,9 @@ impl FoundationConfig {
     fn default_wiki_revisions_collection() -> String {
         "wiki_revisions".to_string()
     }
+    fn default_source_collections() -> Vec<String> {
+        vec!["slack".to_string(), "notion".to_string()]
+    }
 }
 
 impl Default for FoundationConfig {
@@ -52,6 +61,7 @@ impl Default for FoundationConfig {
             database_name: Self::default_database_name(),
             wiki_collection: Self::default_wiki_collection(),
             wiki_revisions_collection: Self::default_wiki_revisions_collection(),
+            source_collections: Self::default_source_collections(),
         }
     }
 }
