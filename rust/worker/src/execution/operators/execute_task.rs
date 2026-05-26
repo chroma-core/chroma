@@ -202,14 +202,12 @@ impl ExecuteAttachedFunctionOperator {
                 Arc::new(executor)
             }
             FUNCTION_REVISION_HISTORY_ID => {
-                let executor =
-                    RevisionHistoryExecutor::from_attached_function(attached_function).map_err(
-                        |e| {
-                            ExecuteAttachedFunctionError::ExecutorConfig(format!(
-                                "RevisionHistoryExecutor: {e}"
-                            ))
-                        },
-                    )?;
+                let executor = RevisionHistoryExecutor::from_attached_function(attached_function)
+                    .map_err(|e| {
+                    ExecuteAttachedFunctionError::ExecutorConfig(format!(
+                        "RevisionHistoryExecutor: {e}"
+                    ))
+                })?;
                 Arc::new(executor)
             }
             _ => {

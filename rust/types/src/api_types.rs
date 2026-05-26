@@ -2598,9 +2598,7 @@ impl AttachedFunctionApiResponse {
             id if id == FUNCTION_STATISTICS_ID => FUNCTION_STATISTICS_NAME.to_string(),
             id if id == FUNCTION_DUMMY_ASYNC_ID => FUNCTION_DUMMY_ASYNC_NAME.to_string(),
             id if id == FUNCTION_HTTP_GENERATE_ID => FUNCTION_HTTP_GENERATE_NAME.to_string(),
-            id if id == FUNCTION_REVISION_HISTORY_ID => {
-                FUNCTION_REVISION_HISTORY_NAME.to_string()
-            }
+            id if id == FUNCTION_REVISION_HISTORY_ID => FUNCTION_REVISION_HISTORY_NAME.to_string(),
             _ => {
                 return Err(GetAttachedFunctionError::UnknownFunctionId(af.function_id));
             }
