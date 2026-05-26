@@ -12,15 +12,19 @@ Word-based full-text substring search using hashed token buckets with roaring bi
 
 ## Blockfile Layout
 
-A single blockfile typed as `(prefix: &str, key: u32) → RoaringBitmap` with three logical partitions:
+A single blockfile typed as `(prefix: &str, key: u32) → RoaringBitmap`. The 32-bit key is laid out as `[partition:2][id:24][chunk:6]`. The top 2 bits select the partition, the middle 24 bits hold the hash/bucket ID, and the bottom 6 bits hold the chunk index.
 
-1. **Token buckets** — `prefix=""`, `key ∈ [0, 2^24)`. Each token is hashed to a bucket ID. The bitmap stores doc IDs containing tokens in that bucket.
+Doc-ID bitmaps are chunked into 2^24 (16M) doc-ID ranges, supporting up to 1B doc IDs. Each chunk's bitmap stays under ~4 MB.
 
-2. **Transitions** — `prefix=""`, `key ∈ [2^24, 2^26)`. For each adjacent token pair, the boundary characters are hashed. Two entries per transition: `key = hash | (1 << 24)` for doc-ID bitmap, `key = hash | (1 << 25)` for bucket-ID bitmap.
+1. **Token buckets** — `prefix=""`, keys `[0, 2^30)`. `key = (bucket_id << 6) | chunk_index`. Each token is hashed to a 24-bit bucket ID. Doc-ID bitmaps are chunked.
 
-3. **Trigrams** — `prefix="{trigram}"`, `key ∈ {0, 1, 2}`. Maps character trigrams to bucket IDs with disjoint positional keys: 0 = prefix (first trigram of token), 1 = infix, 2 = suffix (last trigram). Single-trigram tokens (3 chars) are stored under both key=0 and key=2.
+2. **Transition doc bitmaps** — `prefix=""`, keys `[2^30, 2^31)`. `key = (1 << 30) | (hash << 6) | chunk_index`. Chunked like token buckets.
 
-Entries are written in `(prefix, key)` sorted order: all token buckets, then transitions, then trigrams.
+3. **Transition bucket bitmaps** — `prefix=""`, keys `[2^31, 2^31 + 2^24)`. `key = (1 << 31) | hash`. Not chunked (stores bucket IDs, not doc IDs).
+
+4. **Trigrams** — `prefix="{trigram}"`, `key ∈ {0, 1, 2}`. Maps character trigrams to bucket IDs with disjoint positional keys: 0 = prefix (first trigram of token), 1 = infix, 2 = suffix (last trigram). Single-trigram tokens (3 chars) are stored under both key=0 and key=2.
+
+Entries are written in `(prefix, key)` sorted order: token buckets, then transition docs, then transition buckets, then trigrams.
 
 ## Query Pipeline
 
