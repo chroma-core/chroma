@@ -30,6 +30,10 @@ var (
 	// FunctionHttpGenerate is the UUID for the built-in http_generate function
 	// Must match: rust/types/src/operators_generated.rs::FUNCTION_HTTP_GENERATE_ID
 	FunctionHttpGenerate = uuid.MustParse("9e3c7540-4ddd-40a2-bbff-ad9cb3f06efc")
+
+	// FunctionRevisionHistory is the UUID for the built-in revision_history function
+	// Must match: migration 20260525150000.sql and rust/types/src/operators_generated.rs::FUNCTION_REVISION_HISTORY_ID
+	FunctionRevisionHistory = uuid.MustParse("2df4342c-5b5a-49aa-8345-c46503e85509")
 )
 
 // Function names - must stay in sync with database and Rust constants.
@@ -45,15 +49,19 @@ const (
 
 	// FunctionNameHttpGenerate must match rust/types/src/operators_generated.rs::FUNCTION_HTTP_GENERATE_NAME
 	FunctionNameHttpGenerate = "http_generate"
+
+	// FunctionNameRevisionHistory must match rust/types/src/operators_generated.rs::FUNCTION_REVISION_HISTORY_NAME
+	FunctionNameRevisionHistory = "revision_history"
 )
 
 // functionIDToName maps function UUIDs to their names.
 // This avoids DB lookups for known built-in functions.
 var functionIDToName = map[uuid.UUID]string{
-	FunctionRecordCounter: FunctionNameRecordCounter,
-	FunctionStatistics:    FunctionNameStatistics,
-	FunctionDummyAsync:    FunctionNameDummyAsync,
-	FunctionHttpGenerate: FunctionNameHttpGenerate,
+	FunctionRecordCounter:   FunctionNameRecordCounter,
+	FunctionStatistics:      FunctionNameStatistics,
+	FunctionDummyAsync:      FunctionNameDummyAsync,
+	FunctionHttpGenerate:    FunctionNameHttpGenerate,
+	FunctionRevisionHistory: FunctionNameRevisionHistory,
 }
 
 // GetFunctionNameByID returns the function name for a given function ID.
