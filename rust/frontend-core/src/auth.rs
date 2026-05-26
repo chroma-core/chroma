@@ -10,7 +10,7 @@ use chroma_api_types::GetUserIdentityResponse;
 use chroma_types::Collection;
 use serde::Serialize;
 
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthzAction {
     Reset,
@@ -41,6 +41,8 @@ pub enum AuthzAction {
     Search,
     CreateAttachedFunction,
     RemoveAttachedFunction,
+    InitFoundation,
+    ViewFoundation,
 }
 
 impl Display for AuthzAction {
@@ -74,6 +76,8 @@ impl Display for AuthzAction {
             AuthzAction::Search => write!(f, "collection:search"),
             AuthzAction::CreateAttachedFunction => write!(f, "collection:create_attached_function"),
             AuthzAction::RemoveAttachedFunction => write!(f, "collection:remove_attached_function"),
+            AuthzAction::InitFoundation => write!(f, "foundation:init"),
+            AuthzAction::ViewFoundation => write!(f, "foundation:view"),
         }
     }
 }
