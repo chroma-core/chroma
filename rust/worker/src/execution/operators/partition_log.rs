@@ -5,12 +5,52 @@ use chroma_types::{Chunk, LogRecord};
 use std::collections::HashMap;
 use thiserror::Error;
 
+/// Grouping key used to assign a record to a partition.
+///
+/// A record whose id ends in `-{digits}` (e.g. `mydoc-0`, `mydoc-12`)
+/// is grouped under its base (`mydoc`), so that all chunks of one
+/// document land in the same partition. The partition operator
+/// guarantees in-order processing *within* a partition but not across
+/// partitions, so co-locating a document's chunks is what lets a
+/// downstream consumer (e.g. a foundation attached function) observe a
+/// trailing end-of-job marker on `{base}-0` only after every sibling
+/// chunk — see ADR 0001 §6 in chroma-core/foundation.
+///
+/// This only ever *enlarges* groups: a given concrete id always maps to
+/// a single key, so the existing "all ops for one id in one partition"
+/// invariant is preserved. Records whose id does not match `{base}-{digits}`
+/// are returned unchanged.
+///
+/// Trade-off (flagged for review): ids that legitimately end in
+/// `-{digits}` but are NOT chunk siblings (e.g. `report-2024`,
+/// `report-2023`) will be co-located in one partition. This is
+/// correctness-neutral — they remain distinct records — but can reduce
+/// compaction parallelism for collections that use such an id scheme.
+/// If that proves too coarse, this should be gated behind a
+/// per-collection flag rather than applied globally.
+fn chunk_grouping_key(id: &str) -> &str {
+    match id.rsplit_once('-') {
+        Some((base, suffix))
+            if !base.is_empty()
+                && !suffix.is_empty()
+                && suffix.bytes().all(|b| b.is_ascii_digit()) =>
+        {
+            base
+        }
+        _ => id,
+    }
+}
+
 #[derive(Debug)]
 /// The partition Operator takes a DataChunk and presents a copy-free
 /// view of N partitions by breaking the data into partitions by max_partition_size. It will group operations
 /// on the same key into the same partition. Due to this, the max_partition_size is a
 /// soft-limit, since if there are more operations to a key than max_partition_size we cannot
 /// partition the data.
+///
+/// Keys are computed by [`chunk_grouping_key`], which folds chunk
+/// siblings (`{base}-{idx}`) onto a shared base so a document's chunks
+/// stay in one partition.
 pub struct PartitionOperator {}
 
 /// The input to the partition operator.
@@ -69,7 +109,7 @@ impl PartitionOperator {
         for data in records.iter() {
             let log_record = data.0;
             let index = data.1;
-            let key = log_record.record.id.clone();
+            let key = chunk_grouping_key(&log_record.record.id).to_string();
             map.entry(key).or_insert_with(Vec::new).push(index);
         }
         let mut result = Vec::new();
@@ -219,5 +259,58 @@ mod tests {
         result.records.sort_by_key(|x| x.len());
         assert_eq!(result.records[0].len(), 1);
         assert_eq!(result.records[1].len(), 2);
+    }
+
+    #[test]
+    fn test_chunk_grouping_key() {
+        // Chunk siblings fold onto their base.
+        assert_eq!(chunk_grouping_key("mydoc-0"), "mydoc");
+        assert_eq!(chunk_grouping_key("mydoc-12"), "mydoc");
+        assert_eq!(chunk_grouping_key("sha256hex-9999"), "sha256hex");
+        // Only the final `-{digits}` segment is stripped.
+        assert_eq!(chunk_grouping_key("a-b-0"), "a-b");
+        // Non-chunk ids pass through unchanged.
+        assert_eq!(chunk_grouping_key("mydoc"), "mydoc");
+        assert_eq!(chunk_grouping_key("mydoc-abc"), "mydoc-abc");
+        assert_eq!(chunk_grouping_key("mydoc-"), "mydoc-");
+        assert_eq!(chunk_grouping_key("-0"), "-0"); // empty base: leave alone
+        assert_eq!(chunk_grouping_key(""), "");
+        // Documented trade-off: a legitimately-numbered id is folded too.
+        assert_eq!(chunk_grouping_key("report-2024"), "report");
+    }
+
+    #[tokio::test]
+    async fn test_chunk_siblings_share_a_partition() {
+        // Three chunks of one document plus one unrelated record. Even
+        // at partition_size == 1, the chunk siblings must stay together
+        // (they share grouping key "doc"), so we get exactly 2
+        // partitions: {doc-0, doc-1, doc-2} and {other}.
+        let mk = |offset: i64, id: &str| LogRecord {
+            log_offset: offset,
+            record: OperationRecord {
+                id: id.to_string(),
+                embedding: None,
+                encoding: None,
+                metadata: None,
+                document: None,
+                operation: Operation::Add,
+            },
+        };
+        let data: Arc<[LogRecord]> = vec![
+            mk(1, "doc-0"),
+            mk(2, "doc-1"),
+            mk(3, "doc-2"),
+            mk(4, "other"),
+        ]
+        .into();
+
+        let operator = PartitionOperator::new();
+        let input = PartitionInput::new(Chunk::new(data), 1);
+        let mut result = operator.run(&input).await.unwrap();
+
+        assert_eq!(result.records.len(), 2);
+        result.records.sort_by_key(|x| x.len());
+        assert_eq!(result.records[0].len(), 1); // {other}
+        assert_eq!(result.records[1].len(), 3); // {doc-0, doc-1, doc-2}
     }
 }
