@@ -811,9 +811,22 @@ pub async fn materialize_logs(
     // inserted for the first time.
     async {
         for (log_record, log_index) in logs.iter() {
+            tracing::info!(
+                log_index,
+                record_id = %log_record.record.id,
+                operation = ?log_record.record.operation,
+                exists_in_materialized_existing = existing_id_to_materialized.contains_key(log_record.record.id.as_str()),
+                exists_in_materialized_new = new_id_to_materialized.contains_key(log_record.record.id.as_str()),
+                "materialize_logs: processing log record"
+            );
             match log_record.record.operation {
                 Operation::BackfillFn => {
                     has_backfill = true;
+                    tracing::info!(
+                        log_index,
+                        record_id = %log_record.record.id,
+                        "materialize_logs: encountered backfill record"
+                    );
                     continue;
                 }
                 Operation::Add => {
@@ -827,6 +840,11 @@ pub async fn materialize_logs(
                             .final_operation;
                         match operation {
                             MaterializedLogOperation::DeleteExisting => {
+                                tracing::info!(
+                                    log_index,
+                                    record_id = %log_record.record.id,
+                                    "materialize_logs: replacing previously deleted existing record"
+                                );
                                 let curr_val = existing_id_to_materialized
                                     .remove(log_record.record.id.as_str())
                                     .unwrap();
@@ -855,6 +873,12 @@ pub async fn materialize_logs(
                             | MaterializedLogOperation::OverwriteExisting
                             | MaterializedLogOperation::UpdateExisting => {
                                 // Invalid add so skip.
+                                tracing::info!(
+                                    log_index,
+                                    record_id = %log_record.record.id,
+                                    prior_operation = ?operation,
+                                    "materialize_logs: skipping add because record already exists"
+                                );
                                 continue;
                             }
                         }
@@ -862,6 +886,11 @@ pub async fn materialize_logs(
                     // Adding an entry that does not exist on the segment yet.
                     // Only add if it hasn't been added before in the log.
                     else if !new_id_to_materialized.contains_key(log_record.record.id.as_str()) {
+                        tracing::info!(
+                            log_index,
+                            record_id = %log_record.record.id,
+                            "materialize_logs: inserting new record from add"
+                        );
                         let next_offset_id =
                             next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                         let materialized_record = match MaterializedLogRecord::from_log_record(
@@ -876,6 +905,12 @@ pub async fn materialize_logs(
                         };
                         new_id_to_materialized
                             .insert(log_record.record.id.as_str(), materialized_record);
+                    } else {
+                        tracing::info!(
+                            log_index,
+                            record_id = %log_record.record.id,
+                            "materialize_logs: skipping add because record was already added in this batch"
+                        );
                     }
                 }
                 Operation::Delete => {
@@ -885,8 +920,18 @@ pub async fn materialize_logs(
                     // in segment then we'll have to pass it as a delete
                     // to the compactor so that it can be deleted.
                     if new_id_to_materialized.contains_key(log_record.record.id.as_str()) {
+                        tracing::info!(
+                            log_index,
+                            record_id = %log_record.record.id,
+                            "materialize_logs: removing newly added record due to delete in same batch"
+                        );
                         new_id_to_materialized.remove(log_record.record.id.as_str());
                     } else if existing_id_to_materialized.contains_key(log_record.record.id.as_str()) {
+                        tracing::info!(
+                            log_index,
+                            record_id = %log_record.record.id,
+                            "materialize_logs: marking existing record as deleted"
+                        );
                         // Mark state as deleted. Other fields become noop after such a delete.
                         let record_from_map = existing_id_to_materialized
                             .get_mut(log_record.record.id.as_str())
@@ -907,6 +952,11 @@ pub async fn materialize_logs(
                             match res.final_operation {
                                         // Ignore the update if deleted.
                                         MaterializedLogOperation::DeleteExisting => {
+                                            tracing::info!(
+                                                log_index,
+                                                record_id = %log_record.record.id,
+                                                "materialize_logs: skipping update because record is deleted"
+                                            );
                                             continue;
                                         },
                                         MaterializedLogOperation::AddNew => panic!("Invariant violation. AddNew state not expected for an entry that exists on the segment"),
@@ -918,6 +968,11 @@ pub async fn materialize_logs(
                             Some(res) => res,
                             None => {
                                 // Does not exist in either maps. Ignore this update.
+                                tracing::info!(
+                                    log_index,
+                                    record_id = %log_record.record.id,
+                                    "materialize_logs: skipping update because record does not exist"
+                                );
                                 continue;
                             }
                         },

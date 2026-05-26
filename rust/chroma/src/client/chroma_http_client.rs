@@ -17,7 +17,11 @@ use std::time::Duration;
 use thiserror::Error;
 
 use chroma_api_types::{GetUserIdentityResponse, HeartbeatResponse};
+use chroma_types::{
+    AddAttachedFunctionInputRequest, AddAttachedFunctionInputResponse, GetAttachedFunctionResponse,
+};
 
+use crate::attached_function::ChromaAttachedFunction;
 use crate::client::ChromaHttpClientOptions;
 use crate::client::ChromaHttpClientOptionsError;
 use crate::collection::ChromaCollection;
@@ -729,6 +733,67 @@ impl ChromaHttpClient {
         Ok(ChromaCollection::new(self.clone(), collection))
     }
 
+    /// Retrieves an attached function by name for a specific collection.
+    pub async fn get_attached_function(
+        &self,
+        input_collection_id: chroma_types::CollectionUuid,
+        name: impl AsRef<str>,
+    ) -> Result<ChromaAttachedFunction, ChromaHttpClientError> {
+        let tenant_id = self.get_tenant_id().await?;
+        let database_name = self.get_database_name().await?;
+
+        let response = self
+            .send_read_only::<(), (), GetAttachedFunctionResponse>(
+                "get_attached_function",
+                Method::GET,
+                format!(
+                    "/api/v2/tenants/{}/databases/{}/collections/{}/functions/{}",
+                    tenant_id,
+                    database_name,
+                    input_collection_id,
+                    name.as_ref()
+                ),
+                None,
+                None,
+            )
+            .await?;
+
+        Ok(ChromaAttachedFunction {
+            client: self.clone(),
+            attached_function: Arc::new(response.attached_function),
+        })
+    }
+
+    /// Adds a new input collection to an existing attached function.
+    pub async fn add_attached_function_input(
+        &self,
+        existing_input_collection_id: chroma_types::CollectionUuid,
+        name: impl AsRef<str>,
+        new_input_collection_id: chroma_types::CollectionUuid,
+    ) -> Result<ChromaAttachedFunction, ChromaHttpClientError> {
+        let tenant_id = self.get_tenant_id().await?;
+        let database_name = self.get_database_name().await?;
+        let request = AddAttachedFunctionInputRequest::try_new(new_input_collection_id)?;
+
+        let response = self
+            .send::<AddAttachedFunctionInputRequest, (), AddAttachedFunctionInputResponse>(
+                "add_attached_function_input",
+                Method::POST,
+                format!(
+                    "/api/v2/tenants/{}/databases/{}/collections/{}/attached_functions/{}/add_input",
+                    tenant_id, database_name, existing_input_collection_id, name.as_ref()
+                ),
+                Some(request),
+                None,
+            )
+            .await?;
+
+        Ok(ChromaAttachedFunction {
+            client: self.clone(),
+            attached_function: Arc::new(response.attached_function),
+        })
+    }
+
     /// Removes a collection and all its records from the database.
     ///
     /// Permanently deletes the collection and all contained embeddings, metadata, and documents.
@@ -940,54 +1005,6 @@ impl ChromaHttpClient {
 
         let created = response.created;
         Ok((response, created))
-    }
-
-    /// Gets an attached function by name for a specific collection.
-    ///
-    /// # Arguments
-    ///
-    /// * `input_collection_id` - UUID of the collection the function is attached to
-    /// * `name` - Name of the attached function instance
-    ///
-    /// # Returns
-    ///
-    /// The attached function details including its ID, function name, and output collection.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// # use chroma::ChromaHttpClient;
-    /// # async fn example(client: ChromaHttpClient) -> Result<(), Box<dyn std::error::Error>> {
-    /// let response = client.get_attached_function(
-    ///     "00000000-0000-0000-0000-000000000001",
-    ///     "my_stats",
-    /// ).await?;
-    /// println!("Function: {}", response.attached_function.function_name);
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn get_attached_function(
-        &self,
-        input_collection_id: impl AsRef<str>,
-        name: impl AsRef<str>,
-    ) -> Result<chroma_types::GetAttachedFunctionResponse, ChromaHttpClientError> {
-        let tenant_id = self.get_tenant_id().await?;
-        let database_name = self.get_database_name().await?;
-
-        self.send_read_only(
-            "get_attached_function",
-            Method::GET,
-            format!(
-                "/api/v2/tenants/{}/databases/{}/collections/{}/functions/{}",
-                tenant_id,
-                database_name,
-                input_collection_id.as_ref(),
-                name.as_ref()
-            ),
-            None::<()>,
-            None::<()>,
-        )
-        .await
     }
 
     /// Detaches a function from a collection, preventing further executions.

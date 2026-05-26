@@ -2634,7 +2634,7 @@ pub struct GetAttachedFunctionResponse {
     pub attached_function: AttachedFunctionApiResponse,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct AddAttachedFunctionInputResponse {
     pub attached_function: AttachedFunctionApiResponse,

@@ -1,9 +1,10 @@
-from typing import TYPE_CHECKING, Optional, Dict, Any, Tuple
+from typing import TYPE_CHECKING, Optional, Dict, Any, Union
 from uuid import UUID
 import json
 
 if TYPE_CHECKING:
     from chromadb.api import ServerAPI  # noqa: F401
+    from chromadb.api.models.Collection import Collection  # noqa: F401
 
 
 class AttachedFunction:
@@ -74,15 +75,32 @@ class AttachedFunction:
         """The function parameters."""
         return self._params
 
-    def add_input(self, input_collection_id: UUID) -> Tuple["AttachedFunction", bool]:
-        """Add a new input collection to this async attached function."""
-        return self._client.add_attached_function_input(
+    def add_input(
+        self, input_collection: Union["Collection", UUID, str]
+    ) -> "AttachedFunction":
+        """Add a new input collection to this async attached function.
+
+        Args:
+            input_collection: A `Collection`, collection UUID, or UUID string.
+
+        Returns:
+            AttachedFunction: A handle for the attached function scoped to the newly added input.
+        """
+        if hasattr(input_collection, "id"):
+            input_collection_id = input_collection.id
+        elif isinstance(input_collection, UUID):
+            input_collection_id = input_collection
+        else:
+            input_collection_id = UUID(str(input_collection))
+
+        attached_function, _created = self._client.add_attached_function_input(
             name=self._name,
             existing_input_collection_id=self._input_collection_id,
             new_input_collection_id=input_collection_id,
             tenant=self._tenant,
             database=self._database,
         )
+        return attached_function
 
     @staticmethod
     def _normalize_params(params: Optional[Any]) -> Dict[str, Any]:
