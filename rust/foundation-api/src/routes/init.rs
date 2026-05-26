@@ -1,9 +1,10 @@
 use axum::{extract::State, http::HeaderMap, Json};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_sysdb::SysDb;
+use chroma_sysdb::{AttachFunctionError, SysDb};
 use chroma_types::{
-    Collection, CreateDatabaseError, DatabaseName, IndexConfig, KnnIndex, Metadata, MetadataValue,
-    Schema, SparseIndexAlgorithm, SparseVectorIndexConfig, CHROMA_GROUP_CHUNK_SIBLINGS_KEY,
+    Collection, CollectionUuid, CreateDatabaseError, DatabaseName, IndexConfig, KnnIndex, Metadata,
+    MetadataValue, Schema, SparseIndexAlgorithm, SparseVectorIndexConfig,
+    CHROMA_GROUP_CHUNK_SIBLINGS_KEY,
 };
 use frontend_core::collection_ops::{
     plan_create_collection, supported_segment_types, ExecutorKind, TenantFeatureFlags,
@@ -14,6 +15,7 @@ use uuid::Uuid;
 
 use crate::{
     auth::{AuthError, AuthenticateAndAuthorize, AuthzAction, AuthzResource},
+    config::FoundationConfig,
     errors::ServerError,
     server::FoundationApiServer,
 };
@@ -73,7 +75,9 @@ pub async fn foundation_init(
     // Source collections are the attached function's *input*. They carry
     // the chunk-sibling grouping flag so a job's chunk records stay in one
     // partition and the trailing end-of-job marker on `{base}-0` is
-    // observed after every sibling chunk (ADR 0001 §6).
+    // observed after every sibling chunk (ADR 0001 §6). Each gets the
+    // server-side function attached, with the wiki collection as output —
+    // mirroring the foundation CLI POC (chroma-core/foundation #97).
     let mut source_collection_ids = HashMap::new();
     for source_name in &foundation_cfg.source_collections {
         let source = ensure_collection(
@@ -82,6 +86,15 @@ pub async fn foundation_init(
             db_name.clone(),
             source_name,
             Some(group_chunk_siblings_metadata()),
+        )
+        .await?;
+        ensure_attached_function(
+            &mut sysdb,
+            tenant.clone(),
+            foundation_cfg.database_name.clone(),
+            source.collection_id,
+            source_name,
+            foundation_cfg,
         )
         .await?;
         source_collection_ids.insert(source_name.clone(), source.collection_id.to_string());
@@ -107,6 +120,50 @@ fn group_chunk_siblings_metadata() -> Metadata {
         MetadataValue::Bool(true),
     );
     metadata
+}
+
+/// Idempotently attach the foundation function to a source collection,
+/// mirroring the CLI POC (chroma-core/foundation #97): the function reads
+/// the source collection and writes synthesized content to the wiki
+/// collection. The attachment name is `{source}_to_wiki`; `params` carry
+/// the modal `endpoint_url` plus `source_collection` / `source_kind`.
+///
+/// `/init` is safe to call repeatedly, so an already-attached function
+/// (`AlreadyExists` or `CollectionAlreadyHasFunction`) is treated as
+/// success rather than an error.
+async fn ensure_attached_function(
+    sysdb: &mut SysDb,
+    tenant: String,
+    database_name: String,
+    input_collection_id: CollectionUuid,
+    source_name: &str,
+    cfg: &FoundationConfig,
+) -> Result<(), ServerError> {
+    let attachment_name = format!("{source_name}_to_wiki");
+    let params = serde_json::json!({
+        "endpoint_url": cfg.function_endpoint_url,
+        "source_collection": source_name,
+        "source_kind": source_name,
+    });
+    match sysdb
+        .create_attached_function(
+            attachment_name,
+            cfg.function_name.clone(),
+            input_collection_id,
+            cfg.wiki_collection.clone(),
+            params,
+            tenant,
+            database_name,
+            cfg.min_records_for_invocation,
+        )
+        .await
+    {
+        Ok(_) => Ok(()),
+        // Idempotent: the function is already attached to this collection.
+        Err(AttachFunctionError::AlreadyExists(_))
+        | Err(AttachFunctionError::CollectionAlreadyHasFunction(_)) => Ok(()),
+        Err(e) => Err(e.into()),
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

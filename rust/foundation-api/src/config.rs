@@ -38,6 +38,18 @@ pub struct FoundationConfig {
     /// job's chunk records (ADR 0001 §6 in chroma-core/foundation).
     #[serde(default = "FoundationConfig::default_source_collections")]
     pub source_collections: Vec<String>,
+    /// Server-registered function attached to each source collection
+    /// (its output is the wiki collection). Default mirrors the POC.
+    #[serde(default = "FoundationConfig::default_function_name")]
+    pub function_name: String,
+    /// Modal endpoint the attached function POSTs to. Threaded into the
+    /// attach `params` as `endpoint_url`. Default mirrors the POC.
+    #[serde(default = "FoundationConfig::default_function_endpoint_url")]
+    pub function_endpoint_url: String,
+    /// How many new source-collection records accumulate before the
+    /// attached function is invoked. Matches the chroma frontend default.
+    #[serde(default = "FoundationConfig::default_min_records_for_invocation")]
+    pub min_records_for_invocation: u64,
 }
 
 impl FoundationConfig {
@@ -53,6 +65,15 @@ impl FoundationConfig {
     fn default_source_collections() -> Vec<String> {
         vec!["slack".to_string(), "notion".to_string()]
     }
+    fn default_function_name() -> String {
+        "http_generate".to_string()
+    }
+    fn default_function_endpoint_url() -> String {
+        "https://chroma-core--foundation-research-generate-api.modal.run".to_string()
+    }
+    fn default_min_records_for_invocation() -> u64 {
+        100
+    }
 }
 
 impl Default for FoundationConfig {
@@ -62,6 +83,9 @@ impl Default for FoundationConfig {
             wiki_collection: Self::default_wiki_collection(),
             wiki_revisions_collection: Self::default_wiki_revisions_collection(),
             source_collections: Self::default_source_collections(),
+            function_name: Self::default_function_name(),
+            function_endpoint_url: Self::default_function_endpoint_url(),
+            min_records_for_invocation: Self::default_min_records_for_invocation(),
         }
     }
 }
