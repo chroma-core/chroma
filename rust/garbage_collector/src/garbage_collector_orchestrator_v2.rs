@@ -16,6 +16,11 @@ use crate::operators::delete_versions_at_sysdb::{
     DeleteVersionsAtSysDbError, DeleteVersionsAtSysDbInput, DeleteVersionsAtSysDbOperator,
     DeleteVersionsAtSysDbOutput,
 };
+use crate::operators::fetch_min_attached_function_completion_offset::{
+    FetchMinAttachedFunctionCompletionOffsetError, FetchMinAttachedFunctionCompletionOffsetInput,
+    FetchMinAttachedFunctionCompletionOffsetOperator,
+    FetchMinAttachedFunctionCompletionOffsetOutput,
+};
 use crate::operators::list_files_at_version::{
     ListFilesAtVersionError, ListFilesAtVersionInput, ListFilesAtVersionOutput,
     ListFilesAtVersionsOperator,
@@ -51,6 +56,12 @@ use wal3::LogPosition;
 
 use crate::mcmr::RegionsAndTopologies;
 
+#[derive(Debug, Clone)]
+enum AttachedFunctionOffset {
+    NotFetched,
+    Fetched(Option<u64>),
+}
+
 #[derive(Debug)]
 pub struct GarbageCollectorOrchestrator {
     collection_id: CollectionUuid,
@@ -83,6 +94,9 @@ pub struct GarbageCollectorOrchestrator {
 
     num_files_deleted: u32,
     num_versions_deleted: u32,
+
+    attached_fn_completion_offset: AttachedFunctionOffset,
+    file_listing_complete: bool,
 
     enable_dangerous_option_to_ignore_min_versions_for_wal3: bool,
 }
@@ -140,6 +154,9 @@ impl GarbageCollectorOrchestrator {
             num_files_deleted: 0,
             num_versions_deleted: 0,
 
+            attached_fn_completion_offset: AttachedFunctionOffset::NotFetched,
+            file_listing_complete: false,
+
             enable_dangerous_option_to_ignore_min_versions_for_wal3,
             max_concurrent_list_files_operations_per_collection,
         }
@@ -171,6 +188,8 @@ pub enum GarbageCollectorError {
     DeleteUnusedFiles(#[from] DeleteUnusedFilesError),
     #[error("Failed to delete unused logs: {0}")]
     DeleteUnusedLogs(#[from] DeleteUnusedLogsError),
+    #[error("Failed to fetch min attached function completion offset: {0}")]
+    FetchMinAttachedFunctionCompletionOffset(#[from] FetchMinAttachedFunctionCompletionOffsetError),
     #[error("Failed to delete versions at sysdb: {0}")]
     DeleteVersionsAtSysDb(#[from] DeleteVersionsAtSysDbError),
 
@@ -434,6 +453,20 @@ impl GarbageCollectorOrchestrator {
             tracing::debug!("No versions to mark for deletion in SysDb.");
         }
 
+        let fetch_min_offset_task = wrap(
+            Box::new(FetchMinAttachedFunctionCompletionOffsetOperator::default()),
+            FetchMinAttachedFunctionCompletionOffsetInput {
+                sysdb_client: self.sysdb_client.clone(),
+                collection_id: self.collection_id,
+            },
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
+        self.dispatcher()
+            .send(fetch_min_offset_task, Some(Span::current()))
+            .await
+            .map_err(GarbageCollectorError::Channel)?;
+
         // Now, list files for each version
         let root_manager = self.root_manager.clone();
         let dispatcher = self.dispatcher();
@@ -496,16 +529,21 @@ impl GarbageCollectorOrchestrator {
 
         tracing::debug!("Files listed for all versions.");
 
-        self.start_delete_unused_logs_operator(ctx).await?;
         self.start_delete_unused_files_operator(ctx).await?;
+        self.file_listing_complete = true;
+        self.try_start_delete_unused_logs_operator(ctx).await?;
 
         Ok(())
     }
 
-    async fn start_delete_unused_logs_operator(
+    async fn try_start_delete_unused_logs_operator(
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Result<(), GarbageCollectorError> {
+        if !self.ready_to_start_delete_unused_logs() {
+            return Ok(());
+        }
+
         let collections_to_destroy = self.soft_deleted_collections_to_gc.clone();
         let mut collections_to_garbage_collect = HashMap::new();
         let versions_to_delete = self.versions_to_delete_output.as_ref().ok_or(
@@ -556,11 +594,25 @@ impl GarbageCollectorOrchestrator {
                         "Expected log offset to be unsigned".to_string(),
                     )
                 })?;
-            collections_to_garbage_collect.insert(
-                *collection_id,
-                // The minimum offset to keep is one after the minimum compaction offset
-                LogPosition::from_offset(min_compaction_log_offset) + 1u64,
-            );
+            // The minimum offset to keep is one after the minimum compaction offset.
+            let mut min_offset_to_keep = LogPosition::from_offset(min_compaction_log_offset) + 1u64;
+            // Attached functions may be behind compaction; clamp to the lowest
+            // completion_offset across live attached functions on this collection.
+            // TODO(tanujnay112): This needs to be changed when we support forking
+            // with functions. We would need to drop the assumption there is only
+            // one collection with an attached function in this fork tree and
+            // receive min_min_attached_fn_completion_offset for each collection
+            // in this forktree. That needs to be derived inline with where the
+            // fork tree is constructed.
+            if *collection_id == self.collection_id {
+                if let AttachedFunctionOffset::Fetched(Some(min_completion_offset)) =
+                    &self.attached_fn_completion_offset
+                {
+                    let attached_fn_floor = LogPosition::from_offset(*min_completion_offset) + 1u64;
+                    min_offset_to_keep = min_offset_to_keep.min(attached_fn_floor);
+                }
+            }
+            collections_to_garbage_collect.insert(*collection_id, min_offset_to_keep);
         }
 
         let task = wrap(
@@ -586,6 +638,14 @@ impl GarbageCollectorOrchestrator {
             .await
             .map_err(GarbageCollectorError::Channel)?;
         Ok(())
+    }
+
+    fn ready_to_start_delete_unused_logs(&self) -> bool {
+        self.file_listing_complete
+            && !matches!(
+                self.attached_fn_completion_offset,
+                AttachedFunctionOffset::NotFetched
+            )
     }
 
     async fn handle_list_files_at_version_output(
@@ -1114,6 +1174,40 @@ impl Handler<TaskResult<DeleteUnusedLogsOutput, DeleteUnusedLogsError>>
 }
 
 #[async_trait]
+impl
+    Handler<
+        TaskResult<
+            FetchMinAttachedFunctionCompletionOffsetOutput,
+            FetchMinAttachedFunctionCompletionOffsetError,
+        >,
+    > for GarbageCollectorOrchestrator
+{
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<
+            FetchMinAttachedFunctionCompletionOffsetOutput,
+            FetchMinAttachedFunctionCompletionOffsetError,
+        >,
+        ctx: &ComponentContext<GarbageCollectorOrchestrator>,
+    ) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
+            Some(output) => output,
+            None => return,
+        };
+        tracing::debug!(
+            min_completion_offset = ?output.min_completion_offset,
+            "Fetched min attached function completion offset"
+        );
+        self.attached_fn_completion_offset =
+            AttachedFunctionOffset::Fetched(output.min_completion_offset);
+        let res = self.try_start_delete_unused_logs_operator(ctx).await;
+        self.ok_or_terminate(res, ctx).await;
+    }
+}
+
+#[async_trait]
 impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>>
     for GarbageCollectorOrchestrator
 {
@@ -1138,6 +1232,7 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
 #[cfg(test)]
 mod tests {
     use super::build_versions_to_mark;
+    use super::AttachedFunctionOffset;
     use super::GarbageCollectorError;
     use super::GarbageCollectorOrchestrator;
     use crate::operators::compute_versions_to_delete_from_graph::CollectionVersionAction;
@@ -1545,6 +1640,50 @@ mod tests {
         let mut paths = file_paths.iter().collect::<Vec<_>>();
         paths.sort();
         paths
+    }
+
+    #[tokio::test]
+    async fn delete_unused_logs_gate_is_closed_when_neither_prerequisite_is_ready() {
+        let (_storage_dir, storage) = test_storage();
+        let mut orchestrator = test_orchestrator(storage, CollectionUuid::new());
+
+        orchestrator.file_listing_complete = false;
+        orchestrator.attached_fn_completion_offset = AttachedFunctionOffset::NotFetched;
+
+        assert!(!orchestrator.ready_to_start_delete_unused_logs());
+    }
+
+    #[tokio::test]
+    async fn delete_unused_logs_gate_is_closed_when_only_file_listing_is_complete() {
+        let (_storage_dir, storage) = test_storage();
+        let mut orchestrator = test_orchestrator(storage, CollectionUuid::new());
+
+        orchestrator.file_listing_complete = true;
+        orchestrator.attached_fn_completion_offset = AttachedFunctionOffset::NotFetched;
+
+        assert!(!orchestrator.ready_to_start_delete_unused_logs());
+    }
+
+    #[tokio::test]
+    async fn delete_unused_logs_gate_is_closed_when_only_attached_function_offset_is_fetched() {
+        let (_storage_dir, storage) = test_storage();
+        let mut orchestrator = test_orchestrator(storage, CollectionUuid::new());
+
+        orchestrator.file_listing_complete = false;
+        orchestrator.attached_fn_completion_offset = AttachedFunctionOffset::Fetched(Some(42));
+
+        assert!(!orchestrator.ready_to_start_delete_unused_logs());
+    }
+
+    #[tokio::test]
+    async fn delete_unused_logs_gate_opens_when_both_prerequisites_are_ready() {
+        let (_storage_dir, storage) = test_storage();
+        let mut orchestrator = test_orchestrator(storage, CollectionUuid::new());
+
+        orchestrator.file_listing_complete = true;
+        orchestrator.attached_fn_completion_offset = AttachedFunctionOffset::Fetched(None);
+
+        assert!(orchestrator.ready_to_start_delete_unused_logs());
     }
 
     #[tokio::test]

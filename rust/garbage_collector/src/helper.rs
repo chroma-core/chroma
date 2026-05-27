@@ -1,11 +1,20 @@
+use chroma_config::assignment::assignment_policy::AssignmentPolicy;
+use chroma_config::{registry::Registry, Configurable};
+use chroma_log::{config::GrpcLogConfig, Log};
+use chroma_memberlist::client_manager::{ClientAssigner, ClientManager, ClientOptions};
+use chroma_memberlist::memberlist_provider::Member;
+use chroma_storage::{s3_config_for_localhost_with_bucket_name, Storage};
+use chroma_system::System;
 use chroma_types::chroma_proto::log_service_client::LogServiceClient;
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::chroma_proto::{
-    CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest,
-    ListCollectionVersionsRequest, ListCollectionVersionsResponse, OperationRecord,
-    PushLogsRequest, Segment, SegmentScope, Vector,
+    CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, InspectLogStateRequest,
+    InspectLogStateResponse, ListCollectionVersionsRequest, ListCollectionVersionsResponse,
+    OperationRecord, PushLogsRequest, Segment, SegmentScope, Vector,
 };
 use chroma_types::InternalCollectionConfiguration;
+use chroma_types::{CollectionUuid, DatabaseName};
+use std::time::Duration;
 use tonic::transport::Channel;
 use uuid::Uuid;
 
@@ -28,6 +37,20 @@ impl ChromaGrpcClients {
             sysdb: SysDbClient::new(sysdb_channel),
             log_service: LogServiceClient::new(logservice_channel),
         })
+    }
+
+    pub async fn inspect_log_state(
+        &mut self,
+        collection_id: CollectionUuid,
+        database_name: &DatabaseName,
+    ) -> Result<InspectLogStateResponse, tonic::Status> {
+        self.log_service
+            .inspect_log_state(InspectLogStateRequest {
+                collection_id: collection_id.to_string(),
+                database_name: database_name.clone().into_string(),
+            })
+            .await
+            .map(|response| response.into_inner())
     }
 
     pub async fn create_database_and_collection(
@@ -183,4 +206,68 @@ impl ChromaGrpcClients {
         let response = self.sysdb.list_collection_versions(request).await?;
         Ok(response.into_inner())
     }
+}
+
+pub async fn setup_tilt_storage(registry: &Registry) -> Option<Storage> {
+    let config = s3_config_for_localhost_with_bucket_name("chroma-storage").await;
+    match Storage::try_from_config(&config, registry).await {
+        Ok(storage) => Some(storage),
+        Err(err) => {
+            eprintln!(
+                "Failed to connect to localhost S3 for integration test: {err:?}. Is Tilt running?"
+            );
+            None
+        }
+    }
+}
+
+pub async fn setup_tilt_log(system: &System, registry: &Registry) -> Option<Log> {
+    let config = GrpcLogConfig {
+        port: 50054,
+        connect_timeout_ms: 10_000,
+        request_timeout_ms: 30_000,
+        ..GrpcLogConfig::default()
+    };
+
+    let assignment_policy =
+        match Box::<dyn AssignmentPolicy>::try_from_config(&config.assignment, registry).await {
+            Ok(policy) => policy,
+            Err(err) => {
+                eprintln!("Failed to construct log assignment policy: {err:?}");
+                return None;
+            }
+        };
+    let client_assigner = ClientAssigner::new(assignment_policy, 1, vec![]);
+    let client_manager = ClientManager::new(
+        client_assigner.clone(),
+        1,
+        config.connect_timeout_ms,
+        config.request_timeout_ms,
+        config.port,
+        ClientOptions::new(Some(config.max_decoding_message_size)),
+    );
+    let mut client_manager_handle = system.start_component(client_manager);
+    client_manager_handle
+        .send(
+            vec![Member {
+                member_id: "rust-log-service-0".to_string(),
+                member_ip: "127.0.0.1".to_string(),
+                member_node_name: "localhost".to_string(),
+            }],
+            None,
+        )
+        .await
+        .ok()?;
+
+    let log = Log::Grpc(chroma_log::grpc_log::GrpcLog::new(config, client_assigner));
+    for _ in 0..50 {
+        if log.is_ready() {
+            return Some(log);
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    eprintln!(
+        "Log service client assigner did not become ready in time. Is localhost:50054 available?"
+    );
+    None
 }

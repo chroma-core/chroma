@@ -518,6 +518,20 @@ impl TestSysDb {
         inner.storage = storage;
     }
 
+    // For testing purposes, set attached functions for a collection.
+    pub fn set_attached_functions(
+        &mut self,
+        attached_functions: HashMap<CollectionUuid, Vec<chroma_types::AttachedFunction>>,
+    ) {
+        let mut inner = self.inner.lock();
+        inner.tasks.clear();
+        for (_collection_id, functions) in attached_functions {
+            for function in functions {
+                inner.tasks.insert(function.id, function);
+            }
+        }
+    }
+
     pub fn get_version_file_name(&self, collection_id: CollectionUuid) -> String {
         let inner = self.inner.lock();
         let collection = inner.collections.get(&collection_id).unwrap();
@@ -710,6 +724,68 @@ impl TestSysDb {
             .map(attached_function_to_proto)
             .collect();
         Ok(functions)
+    }
+
+    pub(crate) async fn try_finish_async_attached_function_invocation(
+        &mut self,
+        request: chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationRequest,
+    ) -> Result<
+        tonic::Response<
+            chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationResponse,
+        >,
+        tonic::Status,
+    > {
+        use chroma_types::chroma_proto::{
+            FinishAsyncNeedsRepair, FinishAsyncSuccess,
+            TryFinishAsyncAttachedFunctionInvocationResponse,
+        };
+        use chroma_types::AttachedFunctionUuid;
+        use uuid::Uuid;
+
+        let mut inner = self.inner.lock();
+
+        // Parse the attached function ID
+        let attached_function_id = Uuid::parse_str(&request.attached_function_id).map_err(|e| {
+            tonic::Status::invalid_argument(format!("Invalid attached function ID: {}", e))
+        })?;
+        let attached_function_uuid = AttachedFunctionUuid(attached_function_id);
+
+        // Find the attached function
+        let attached_function = inner
+            .tasks
+            .get_mut(&attached_function_uuid)
+            .ok_or_else(|| tonic::Status::not_found("Attached function not found"))?;
+
+        // For test purposes, we'll simulate success if the new offset is greater than the current
+        // and needs repair if it's less than or equal
+        let response = if request.new_completion_offset > attached_function.completion_offset {
+            // Update the completion offset
+            attached_function.completion_offset = request.new_completion_offset;
+
+            TryFinishAsyncAttachedFunctionInvocationResponse {
+                result: Some(
+                    chroma_types::chroma_proto::try_finish_async_attached_function_invocation_response::Result::Success(
+                        FinishAsyncSuccess {
+                            updated_completion_offset: request.new_completion_offset,
+                        },
+                    ),
+                ),
+            }
+        } else {
+            // Simulate needs repair - return a mock current collection log offset
+            TryFinishAsyncAttachedFunctionInvocationResponse {
+                result: Some(
+                    chroma_types::chroma_proto::try_finish_async_attached_function_invocation_response::Result::NeedsRepair(
+                        FinishAsyncNeedsRepair {
+                            // For testing, we'll just return the current completion offset + 100
+                            current_collection_log_offset: attached_function.completion_offset + 100,
+                        },
+                    ),
+                ),
+            }
+        };
+
+        Ok(tonic::Response::new(response))
     }
 
     pub(crate) async fn batch_get_collection_version_file_paths(
