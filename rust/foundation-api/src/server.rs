@@ -3,17 +3,17 @@ use std::sync::{
     Arc,
 };
 
-use axum::{
-    extract::{DefaultBodyLimit, State},
-    response::IntoResponse,
-    routing::get,
-    Json, Router, ServiceExt,
-};
+use async_trait::async_trait;
+use axum::{extract::DefaultBodyLimit, Router, ServiceExt};
+use chroma_api_types::HeartbeatResponse;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_sysdb::SysDb;
 use chroma_system::System;
 use chroma_tracing::add_tracing_middleware;
+use chroma_types::HealthCheckResponse;
+use frontend_core::routes::{system_router, SystemMetrics, SystemState};
 use mdac::{Rule, Scorecard, ScorecardGuard};
+use opentelemetry::global;
 #[cfg(unix)]
 use tokio::signal::unix::{signal, SignalKind};
 #[cfg(windows)]
@@ -24,9 +24,15 @@ use crate::{
     ac::AdmissionControlledService,
     auth::AuthenticateAndAuthorize,
     config::FoundationApiConfig,
+    errors::ServerError,
     routes,
     server_middleware::{always_json_errors_middleware, default_json_content_type_middleware},
 };
+
+/// Placeholder batch limit reported by `/api/v2/pre-flight-checks`.
+/// foundation-api has no log backend to source a real value from, and these
+/// routes don't ingest records, so this is a stub.
+const STUB_MAX_BATCH_SIZE: u32 = 100;
 
 #[derive(Clone, Copy, Debug, thiserror::Error)]
 #[error("Too many requests; backoff and try again")]
@@ -46,6 +52,7 @@ pub struct FoundationApiServer {
     pub(crate) scorecard_enabled: Arc<AtomicBool>,
     pub(crate) scorecard: Arc<Scorecard<'static>>,
     pub(crate) system: System,
+    pub(crate) metrics: Arc<SystemMetrics>,
 }
 
 impl FoundationApiServer {
@@ -62,6 +69,7 @@ impl FoundationApiServer {
         let scorecard_enabled = Arc::new(AtomicBool::new(config.base.scorecard_enabled));
         // SAFETY(rescrv): This is safe because 128 is non-zero.
         let scorecard = Arc::new(Scorecard::new(&(), rules, 128.try_into().unwrap()));
+        let metrics = Arc::new(SystemMetrics::new(&global::meter("foundation-api")));
         FoundationApiServer {
             config,
             auth,
@@ -69,6 +77,7 @@ impl FoundationApiServer {
             scorecard_enabled,
             scorecard,
             system,
+            metrics,
         }
     }
 
@@ -102,7 +111,7 @@ impl FoundationApiServer {
         let cors_allow_origins = base.cors_allow_origins.clone();
 
         let app = Router::new()
-            .route("/api/v2/healthcheck", get(healthcheck))
+            .merge(system_router::<FoundationApiServer>())
             .merge(routes::router())
             .with_state(self)
             .layer(DefaultBodyLimit::max(max_payload_size_bytes))
@@ -162,11 +171,44 @@ impl FoundationApiServer {
     }
 }
 
-async fn healthcheck(State(_server): State<FoundationApiServer>) -> impl IntoResponse {
-    (
-        axum::http::StatusCode::OK,
-        Json(serde_json::json!({ "is_executor_ready": true })),
-    )
+/// Stubbed `SystemState` so foundation-api can mount the shared `system_router`
+/// from `frontend-core`. foundation-api has no executor or log client, so
+/// readiness and batch size are placeholders rather than real backend probes.
+#[async_trait]
+impl SystemState for FoundationApiServer {
+    async fn healthcheck(&self) -> HealthCheckResponse {
+        // No executor or log client to probe; report ready so liveness and
+        // readiness behave like the previous hardcoded healthcheck (always 200).
+        HealthCheckResponse {
+            is_executor_ready: true,
+            is_log_client_ready: true,
+        }
+    }
+
+    async fn heartbeat(&self) -> Result<HeartbeatResponse, ServerError> {
+        Ok(HeartbeatResponse {
+            nanosecond_heartbeat: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos(),
+        })
+    }
+
+    fn max_batch_size(&self) -> u32 {
+        STUB_MAX_BATCH_SIZE
+    }
+
+    fn version(&self) -> String {
+        "1.0.0".to_string()
+    }
+
+    fn auth(&self) -> &dyn AuthenticateAndAuthorize {
+        self.auth.as_ref()
+    }
+
+    fn system_metrics(&self) -> &SystemMetrics {
+        self.metrics.as_ref()
+    }
 }
 
 async fn graceful_shutdown(system: System) {

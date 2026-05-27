@@ -3634,6 +3634,7 @@ dependencies = [
 name = "foundation-api"
 version = "1.0.0"
 dependencies = [
+ "async-trait",
  "axum 0.8.8",
  "chroma-api-types",
  "chroma-config",
@@ -3645,6 +3646,7 @@ dependencies = [
  "figment",
  "frontend-core",
  "mdac",
+ "opentelemetry",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
