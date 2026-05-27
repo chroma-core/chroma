@@ -27,8 +27,10 @@
 //! - **Resurrection**: When a deleted record is re-created with the same ID, the source
 //!   version counter resets. The tracker detects this and starts a new generation while
 //!   continuing the effective version sequence.
-//! - **Tombstones**: Deletes produce a revision with `is_delete: true` — just another
-//!   version in the timeline, keeping pagination simple.
+//! - **Tombstones**: Deletes produce a revision with `is_delete: true`. The tombstone
+//!   position is computed as `source_version + 1` (read from the deleted record's metadata)
+//!   to ensure all chunks of the same document get the same tombstone effective_version,
+//!   regardless of how many compaction cycles each chunk missed.
 //!
 //! ## Chunking Assumption
 //!
@@ -78,13 +80,20 @@ fn tracker_id(original_id: &str) -> String {
 
 /// Per-record version tracker stored at `{original_id}::v0` in the output collection.
 /// Maintains the monotonic version counter and generation boundaries across resurrection cycles.
+///
+/// v0 is a metadata-only record — no document, no embedding, no revision content.
+/// Real revisions start at v1. Effective versions are 1-indexed; source versions are
+/// app-defined (no assumption on start value or indexing).
 #[derive(Debug)]
 struct RevisionTracker {
-    /// Highest history position assigned so far (revisions are v1..=max_version)
+    /// Highest effective_version assigned so far. 0 means no revisions yet.
+    /// Real revisions occupy positions v1..=max_version.
     max_version: i64,
-    /// History position where the current generation began
+    /// Effective_version of the first record in the current generation (always >= 1).
     generation_start_pos: i64,
-    /// Source version of the first record in the current generation
+    /// The source_version (app-provided) that corresponds to generation_start_pos.
+    /// Together with generation_start_pos, defines the linear mapping:
+    ///   effective = generation_start_pos + (source_version - generation_start_source_ver)
     generation_start_source_ver: i64,
 }
 
@@ -103,16 +112,53 @@ impl RevisionTracker {
     /// (e.g. after a delete + re-create of the same record ID). We detect this by
     /// computing the expected max source_version for the current generation:
     ///   expected = start_source_ver + (max_version - start_pos)
-    /// If the incoming source_version is <= this expected max, the source counter has
-    /// been reset and we're starting a new generation.
+    /// If the incoming source_version is strictly below this expected max, the source
+    /// counter has been reset and we're starting a new generation. Equal means we're
+    /// seeing the same version again (idempotent re-compaction).
     fn is_new_generation(&self, source_version: i64) -> bool {
         if self.max_version == 0 {
             return true;
         }
         let expected_max_source_ver =
             self.generation_start_source_ver + (self.max_version - self.generation_start_pos);
-        source_version <= expected_max_source_ver
+        // Guard: if generation fields are uninitialized (both zero with max_version > 0),
+        // all previous records went through the fallback path (no version_key). We can't
+        // do resurrection detection without a valid generation baseline, so skip it.
+        source_version < expected_max_source_ver
             && !(self.generation_start_pos == 0 && self.generation_start_source_ver == 0)
+    }
+
+    /// Compute the next effective_version for a record with a known source_version.
+    ///
+    /// Maps source_version deterministically to a history position:
+    ///   effective = generation_start_pos + (source_version - generation_start_source_ver)
+    ///
+    /// If the record starts a new generation, the generation boundary is updated first.
+    /// Returns `None` if this version has already been archived (idempotency).
+    fn next_version_for_source(&mut self, source_version: i64) -> Option<i64> {
+        if self.is_new_generation(source_version) {
+            let new_start = self.max_version + 1;
+            self.generation_start_pos = new_start;
+            self.generation_start_source_ver = source_version;
+        }
+
+        let effective =
+            self.generation_start_pos + (source_version - self.generation_start_source_ver);
+
+        // Already archived in a previous compaction cycle — skip to avoid duplicates.
+        if effective <= self.max_version {
+            return None;
+        }
+
+        self.max_version = effective;
+        Some(effective)
+    }
+
+    /// Compute the next effective_version for a record without a source_version
+    /// (deletes, or records missing the version key). Falls back to max_version + 1.
+    fn next_version_fallback(&mut self) -> i64 {
+        self.max_version += 1;
+        self.max_version
     }
 
     /// Load tracker state from the output collection's `{original_id}::v0` record.
@@ -306,16 +352,32 @@ impl AttachedFunctionExecutor for RevisionHistoryExecutor {
             }
 
             let tracker = trackers.get_mut(&original_id).unwrap();
-            let effective_version = tracker.max_version + 1;
-            tracker.max_version = effective_version;
-
-            let composite_id = revision_id(&original_id, effective_version);
 
             if record.get_operation() == MaterializedLogOperation::DeleteExisting {
+                // Read the source_version from the record being deleted so all chunks
+                // of the same document get the same tombstone position (virtual_sv = sv + 1).
+                let merged_metadata = record.merged_metadata();
+                let source_version = match merged_metadata.get(&self.version_key) {
+                    Some(MetadataValue::Int(v)) => Some(*v),
+                    _ => None,
+                };
+
+                let effective_version = if let Some(sv) = source_version {
+                    let virtual_sv = sv + 1;
+                    match tracker.next_version_for_source(virtual_sv) {
+                        Some(v) => v,
+                        None => continue,
+                    }
+                } else {
+                    tracker.next_version_fallback()
+                };
+
+                let composite_id = revision_id(&original_id, effective_version);
+
                 let rev_meta = RevisionMetadata {
                     original_id: original_id.clone(),
                     version: effective_version,
-                    source_version: None,
+                    source_version,
                     archived_at: now,
                     is_delete: true,
                 };
@@ -345,12 +407,16 @@ impl AttachedFunctionExecutor for RevisionHistoryExecutor {
                     }
                 };
 
-                if let Some(sv) = source_version {
-                    if tracker.is_new_generation(sv) {
-                        tracker.generation_start_pos = effective_version;
-                        tracker.generation_start_source_ver = sv;
+                let effective_version = if let Some(sv) = source_version {
+                    match tracker.next_version_for_source(sv) {
+                        Some(v) => v,
+                        None => continue, // already archived
                     }
-                }
+                } else {
+                    tracker.next_version_fallback()
+                };
+
+                let composite_id = revision_id(&original_id, effective_version);
 
                 let rev_meta = RevisionMetadata {
                     original_id: original_id.clone(),
@@ -1032,5 +1098,281 @@ mod tests {
             meta.get("source_version"),
             Some(&UpdateMetadataValue::Int(42))
         );
+    }
+
+    #[test]
+    fn test_next_version_for_source_deterministic() {
+        let mut tracker = RevisionTracker {
+            max_version: 3,
+            generation_start_pos: 1,
+            generation_start_source_ver: 1,
+        };
+
+        // source_version=4 → effective = 1 + (4 - 1) = 4
+        assert_eq!(tracker.next_version_for_source(4), Some(4));
+        assert_eq!(tracker.max_version, 4);
+
+        // source_version=7 → effective = 1 + (7 - 1) = 7 (skipped 5, 6 — that's fine)
+        assert_eq!(tracker.next_version_for_source(7), Some(7));
+        assert_eq!(tracker.max_version, 7);
+    }
+
+    #[test]
+    fn test_next_version_for_source_idempotent() {
+        let mut tracker = RevisionTracker {
+            max_version: 5,
+            generation_start_pos: 1,
+            generation_start_source_ver: 1,
+        };
+
+        // source_version=5 → effective = 1 + (5 - 1) = 5, but max_version is already 5
+        assert_eq!(tracker.next_version_for_source(5), None);
+        assert_eq!(tracker.max_version, 5);
+    }
+
+    #[test]
+    fn test_lower_source_version_triggers_new_generation() {
+        let mut tracker = RevisionTracker {
+            max_version: 5,
+            generation_start_pos: 1,
+            generation_start_source_ver: 1,
+        };
+
+        // source_version=3 with max=5: this looks like a counter reset (resurrection).
+        // In practice, this only happens after a delete event already bumped max_version.
+        // The function correctly starts a new generation.
+        assert_eq!(tracker.next_version_for_source(3), Some(6));
+        assert_eq!(tracker.max_version, 6);
+        assert_eq!(tracker.generation_start_pos, 6);
+        assert_eq!(tracker.generation_start_source_ver, 3);
+    }
+
+    #[test]
+    fn test_next_version_chunks_align() {
+        // Two independent chunks for the same logical document, same generation boundaries
+        let mut chunk_0 = RevisionTracker {
+            max_version: 3,
+            generation_start_pos: 1,
+            generation_start_source_ver: 1,
+        };
+        let mut chunk_1 = RevisionTracker {
+            max_version: 3,
+            generation_start_pos: 1,
+            generation_start_source_ver: 1,
+        };
+
+        // Both see source_version=4 → both compute effective=4
+        assert_eq!(chunk_0.next_version_for_source(4), Some(4));
+        assert_eq!(chunk_1.next_version_for_source(4), Some(4));
+
+        // Both see source_version=5 → both compute effective=5
+        assert_eq!(chunk_0.next_version_for_source(5), Some(5));
+        assert_eq!(chunk_1.next_version_for_source(5), Some(5));
+    }
+
+    #[test]
+    fn test_next_version_chunks_different_compaction_cycles() {
+        // chunk-0 was compacted with source_version=4 already, chunk-1 was not
+        let mut chunk_0 = RevisionTracker {
+            max_version: 4,
+            generation_start_pos: 1,
+            generation_start_source_ver: 1,
+        };
+        let mut chunk_1 = RevisionTracker {
+            max_version: 3,
+            generation_start_pos: 1,
+            generation_start_source_ver: 1,
+        };
+
+        // Now both see source_version=5 in the next cycle
+        assert_eq!(chunk_0.next_version_for_source(5), Some(5));
+        assert_eq!(chunk_1.next_version_for_source(5), Some(5));
+        // chunk_1 skipped effective=4 (it was never seen) — that's expected; it was
+        // a version that existed only transiently between compactions for chunk_1.
+        // Both are now aligned at max_version=5.
+        assert_eq!(chunk_0.max_version, 5);
+        assert_eq!(chunk_1.max_version, 5);
+    }
+
+    #[test]
+    fn test_next_version_resurrection_across_chunks() {
+        // Both chunks had max_version=5 from gen 1, now the record is re-created
+        let mut chunk_0 = RevisionTracker {
+            max_version: 5,
+            generation_start_pos: 1,
+            generation_start_source_ver: 1,
+        };
+        let mut chunk_1 = RevisionTracker {
+            max_version: 5,
+            generation_start_pos: 1,
+            generation_start_source_ver: 1,
+        };
+
+        // Both see source_version=1 after resurrection
+        assert_eq!(chunk_0.next_version_for_source(1), Some(6));
+        assert_eq!(chunk_1.next_version_for_source(1), Some(6));
+
+        // New generation: start_pos=6, start_source_ver=1
+        assert_eq!(chunk_0.generation_start_pos, 6);
+        assert_eq!(chunk_1.generation_start_pos, 6);
+
+        // Next version in new generation
+        assert_eq!(chunk_0.next_version_for_source(2), Some(7));
+        assert_eq!(chunk_1.next_version_for_source(2), Some(7));
+    }
+
+    #[tokio::test]
+    async fn test_idempotent_recompaction() {
+        let executor = make_executor(None);
+
+        // Simulate: tracker already at max_version=3, gen starts at pos=1, source_ver=1
+        // Source record arrives with version=3 (already archived)
+        let mut output_segment = TestDistributedSegment::new().await;
+        let tracker_record = build_seed_tracker(
+            "page-1",
+            &RevisionTracker {
+                max_version: 3,
+                generation_start_pos: 1,
+                generation_start_source_ver: 1,
+            },
+        );
+        Box::pin(output_segment.compact_log(Chunk::new(vec![tracker_record].into()), 1)).await;
+
+        let output_record_segment_shard =
+            SegmentShard::try_from((&output_segment.record_segment, 0)).expect("valid shard index");
+        let output_record_reader = Box::pin(RecordSegmentReaderShard::from_segment(
+            &output_record_segment_shard,
+            &output_segment.blockfile_provider,
+            None,
+        ))
+        .await
+        .expect("output record reader creation succeeds");
+
+        // Record with source_version=3 (already archived — effective would be 3 <= max 3)
+        let records = vec![build_record(
+            "page-1",
+            HashMap::from([("version".to_string(), UpdateMetadataValue::Int(3))]),
+        )];
+        let logs = Chunk::new(records.into());
+        let materialized =
+            materialize_logs(&None, logs, None, &RecordSegmentReaderOptions::default())
+                .await
+                .expect("materialization should succeed");
+        let hydrated = hydrate_records(&materialized, None).await;
+        let input = Chunk::new(Arc::from(hydrated));
+
+        let output = executor
+            .execute(input, Some(&output_record_reader))
+            .await
+            .expect("execution succeeds");
+
+        // Should only have the tracker (no new revision emitted)
+        assert!(find_record_by_id(&output, "page-1::v3").is_none());
+        assert!(find_record_by_id(&output, "page-1::v4").is_none());
+        let tracker = find_record_by_id(&output, "page-1::v0").expect("tracker should exist");
+        let tracker_meta = tracker.record.metadata.as_ref().unwrap();
+        assert_eq!(
+            tracker_meta.get("max_version"),
+            Some(&UpdateMetadataValue::Int(3))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_version_skips_between_compactions() {
+        let executor = make_executor(None);
+
+        // Tracker at max_version=2 (source versions 1,2 archived). Source jumped to 5.
+        let mut output_segment = TestDistributedSegment::new().await;
+        let tracker_record = build_seed_tracker(
+            "page-1",
+            &RevisionTracker {
+                max_version: 2,
+                generation_start_pos: 1,
+                generation_start_source_ver: 1,
+            },
+        );
+        Box::pin(output_segment.compact_log(Chunk::new(vec![tracker_record].into()), 1)).await;
+
+        let output_record_segment_shard =
+            SegmentShard::try_from((&output_segment.record_segment, 0)).expect("valid shard index");
+        let output_record_reader = Box::pin(RecordSegmentReaderShard::from_segment(
+            &output_record_segment_shard,
+            &output_segment.blockfile_provider,
+            None,
+        ))
+        .await
+        .expect("output record reader creation succeeds");
+
+        // Materialized record has source_version=5 (versions 3,4 were never seen)
+        let records = vec![build_record(
+            "page-1",
+            HashMap::from([("version".to_string(), UpdateMetadataValue::Int(5))]),
+        )];
+        let logs = Chunk::new(records.into());
+        let materialized =
+            materialize_logs(&None, logs, None, &RecordSegmentReaderOptions::default())
+                .await
+                .expect("materialization should succeed");
+        let hydrated = hydrate_records(&materialized, None).await;
+        let input = Chunk::new(Arc::from(hydrated));
+
+        let output = executor
+            .execute(input, Some(&output_record_reader))
+            .await
+            .expect("execution succeeds");
+
+        // effective = 1 + (5 - 1) = 5. Versions 3,4 are gaps — that's correct,
+        // those versions were never observed by the function.
+        let rev = find_record_by_id(&output, "page-1::v5").expect("page-1::v5 should exist");
+        let meta = rev.record.metadata.as_ref().unwrap();
+        assert_eq!(meta.get("version"), Some(&UpdateMetadataValue::Int(5)));
+        assert_eq!(
+            meta.get("source_version"),
+            Some(&UpdateMetadataValue::Int(5))
+        );
+
+        let tracker = find_record_by_id(&output, "page-1::v0").expect("tracker should exist");
+        let tracker_meta = tracker.record.metadata.as_ref().unwrap();
+        assert_eq!(
+            tracker_meta.get("max_version"),
+            Some(&UpdateMetadataValue::Int(5))
+        );
+    }
+
+    #[test]
+    fn test_delete_tombstone_aligns_across_chunks() {
+        // Two chunks with different max_versions (chunk-1 missed some compactions).
+        // Both are "deleted" with the same last source_version=5 on the record.
+        // virtual_sv = 5 + 1 = 6. effective = 1 + (6-1) = 6 for BOTH.
+
+        let mut chunk_0 = RevisionTracker {
+            max_version: 5,
+            generation_start_pos: 1,
+            generation_start_source_ver: 1,
+        };
+        let mut chunk_1 = RevisionTracker {
+            max_version: 3, // missed sv=4,5 compactions
+            generation_start_pos: 1,
+            generation_start_source_ver: 1,
+        };
+
+        // Delete uses virtual_sv = last_source_version + 1 = 6
+        let virtual_sv = 5 + 1; // source_version was 5 on the deleted record
+        let eff_0 = chunk_0.next_version_for_source(virtual_sv);
+        let eff_1 = chunk_1.next_version_for_source(virtual_sv);
+
+        // Both produce the same effective_version
+        assert_eq!(eff_0, Some(6));
+        assert_eq!(eff_1, Some(6));
+        assert_eq!(chunk_0.max_version, 6);
+        assert_eq!(chunk_1.max_version, 6);
+
+        // After resurrection (sv=1), both start new gen at same position
+        let res_0 = chunk_0.next_version_for_source(1);
+        let res_1 = chunk_1.next_version_for_source(1);
+        assert_eq!(res_0, Some(7));
+        assert_eq!(res_1, Some(7));
+        assert_eq!(chunk_0.generation_start_pos, 7);
+        assert_eq!(chunk_1.generation_start_pos, 7);
     }
 }
