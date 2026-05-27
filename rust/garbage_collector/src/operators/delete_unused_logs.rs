@@ -382,7 +382,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                         return Err(DeleteUnusedLogsError::Gc(err));
                     };
                     match self.mode {
-                        CleanupMode::DeleteV2 => {
+                        CleanupMode::Delete => {
                             if let Err(err) = writer
                                 .garbage_collect_phase3_delete_garbage(
                                     &GarbageCollectionOptions::default(),
@@ -410,7 +410,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
             );
         }
         match self.mode {
-            CleanupMode::DeleteV2 => {
+            CleanupMode::Delete => {
                 if !input.collections_to_destroy.is_empty() {
                     let mut log_destroy_futures =
                         Vec::with_capacity(input.collections_to_destroy.len());
@@ -543,7 +543,7 @@ mod tests {
 
         DeleteUnusedLogsOperator {
             enabled: true,
-            mode: CleanupMode::DeleteV2,
+            mode: CleanupMode::Delete,
             storage: storage.clone(),
             logs: Log::InMemory(InMemoryLog::new()),
             regions_and_topologies: None,
@@ -586,7 +586,7 @@ mod tests {
 
         DeleteUnusedLogsOperator {
             enabled: true,
-            mode: CleanupMode::DryRunV2,
+            mode: CleanupMode::DryRun,
             storage: storage.clone(),
             logs: Log::InMemory(InMemoryLog::new()),
             regions_and_topologies: None,
@@ -619,7 +619,7 @@ mod tests {
 
         DeleteUnusedLogsOperator {
             enabled: true,
-            mode: CleanupMode::DeleteV2,
+            mode: CleanupMode::Delete,
             storage: storage.clone(),
             logs: Log::InMemory(InMemoryLog::new()),
             regions_and_topologies: None,

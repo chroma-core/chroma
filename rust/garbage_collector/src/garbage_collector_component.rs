@@ -69,7 +69,7 @@ enum GarbageCollectCollectionError {
     #[error("Uninitialized: missing dispatcher or system")]
     Uninitialized,
     #[error("Failed to run garbage collection orchestrator: {0}")]
-    OrchestratorV2Error(#[from] crate::garbage_collector_orchestrator_v2::GarbageCollectorError),
+    OrchestratorError(#[from] crate::garbage_collector_orchestrator::GarbageCollectorError),
     #[error("Collection not found")]
     NoSuchCollection,
     #[error("Failed to get collections: {0}")]
@@ -164,8 +164,8 @@ impl GarbageCollector {
         let result = match orchestrator.run(system.clone()).await {
             Ok(res) => res,
             Err(e) => {
-                tracing::error!("Failed to run garbage collection orchestrator v2: {:?}", e);
-                return Err(GarbageCollectCollectionError::OrchestratorV2Error(e));
+                tracing::error!("Failed to run garbage collection orchestrator: {:?}", e);
+                return Err(GarbageCollectCollectionError::OrchestratorError(e));
             }
         };
         Ok(result)
@@ -309,34 +309,33 @@ impl GarbageCollector {
                 .enable_log_gc_for_tenant
                 .contains(&collection.tenant);
 
-        let orchestrator =
-            crate::garbage_collector_orchestrator_v2::GarbageCollectorOrchestrator::new(
-                collection.id,
-                collection.database,
-                collection.version_file_path,
-                collection.lineage_file_path,
-                version_absolute_cutoff_time,
-                collection_soft_delete_absolute_cutoff_time,
-                self.sysdb_client.clone(),
-                dispatcher.clone(),
-                system.clone(),
-                self.storage.clone(),
-                self.logs.clone(),
-                self.regions_and_topologies.clone(),
-                self.root_manager.clone(),
-                cleanup_mode,
-                self.config.min_versions_to_keep,
-                enable_log_gc,
-                enable_dangerous_option_to_ignore_min_versions_for_wal3,
-                self.config
-                    .max_concurrent_list_files_operations_per_collection,
-            );
+        let orchestrator = crate::garbage_collector_orchestrator::GarbageCollectorOrchestrator::new(
+            collection.id,
+            collection.database,
+            collection.version_file_path,
+            collection.lineage_file_path,
+            version_absolute_cutoff_time,
+            collection_soft_delete_absolute_cutoff_time,
+            self.sysdb_client.clone(),
+            dispatcher.clone(),
+            system.clone(),
+            self.storage.clone(),
+            self.logs.clone(),
+            self.regions_and_topologies.clone(),
+            self.root_manager.clone(),
+            cleanup_mode,
+            self.config.min_versions_to_keep,
+            enable_log_gc,
+            enable_dangerous_option_to_ignore_min_versions_for_wal3,
+            self.config
+                .max_concurrent_list_files_operations_per_collection,
+        );
 
         let result = match orchestrator.run(system.clone()).await {
             Ok(res) => res,
             Err(e) => {
-                tracing::error!("Failed to run garbage collection orchestrator v2: {:?}", e);
-                return Err(GarbageCollectCollectionError::OrchestratorV2Error(e));
+                tracing::error!("Failed to run garbage collection orchestrator: {:?}", e);
+                return Err(GarbageCollectCollectionError::OrchestratorError(e));
             }
         };
         let duration_ms = started_at
@@ -1431,7 +1430,7 @@ mod tests {
         let tenant_id_for_dry_run_mode = format!("tenant-dry-run-mode-{}", Uuid::new_v4());
 
         let mut tenant_mode_overrides = HashMap::new();
-        tenant_mode_overrides.insert(tenant_id_for_delete_mode.clone(), CleanupMode::DeleteV2);
+        tenant_mode_overrides.insert(tenant_id_for_delete_mode.clone(), CleanupMode::Delete);
 
         let config = GarbageCollectorConfig {
             service_name: "gc".to_string(),
@@ -1460,7 +1459,7 @@ mod tests {
             regions_and_topologies: None,
             dispatcher_config: DispatcherConfig::default(),
             storage_config: Some(s3_config_for_localhost_with_bucket_name("chroma-storage").await),
-            default_mode: CleanupMode::DryRunV2,
+            default_mode: CleanupMode::DryRun,
             tenant_mode_overrides: Some(tenant_mode_overrides),
             assignment_policy: chroma_config::assignment::config::AssignmentPolicyConfig::default(),
             my_member_id: "test-gc".to_string(),
@@ -1473,8 +1472,6 @@ mod tests {
             log: LogConfig::Grpc(GrpcLogConfig::default()),
             enable_dangerous_option_to_ignore_min_versions_for_wal3: false,
             max_concurrent_list_files_operations_per_collection: 10,
-            heap_prune_buckets_to_read: 10,
-            heap_prune_max_items: 10000,
             max_attached_functions_to_gc_per_run: 100,
         };
         let registry = Registry::new();
@@ -1658,7 +1655,7 @@ mod tests {
 
     #[tokio::test]
     #[traced_test]
-    async fn test_k8s_integration_gc_v2_and_database_hard_delete() {
+    async fn test_k8s_integration_gc_and_database_hard_delete() {
         // Setup
         let tenant_id = format!("tenant-delete-mode-{}", Uuid::new_v4());
 
@@ -1683,7 +1680,7 @@ mod tests {
             },
             dispatcher_config: DispatcherConfig::default(),
             storage_config: Some(s3_config_for_localhost_with_bucket_name("chroma-storage").await),
-            default_mode: CleanupMode::DeleteV2,
+            default_mode: CleanupMode::Delete,
             tenant_mode_overrides: None,
             assignment_policy: chroma_config::assignment::config::AssignmentPolicyConfig::default(),
             my_member_id: "test-gc".to_string(),
@@ -1720,7 +1717,7 @@ mod tests {
         });
         let (collection_id, database_name) = collection_handle.await.unwrap();
 
-        // Fork collection to give it a lineage file (only GC v2 can handle fork trees)
+        // Fork collection to give it a lineage file
         {
             let source_collection = sysdb
                 .get_collections(GetCollectionsOptions {

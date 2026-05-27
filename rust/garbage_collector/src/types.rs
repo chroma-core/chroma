@@ -6,19 +6,16 @@ use chrono::DateTime;
 use petgraph::{graph::DiGraph, prelude::DiGraphMap};
 use uuid::Uuid;
 
-// GC will use it to rename a S3 file to a new name.
-pub(crate) const RENAMED_FILE_PREFIX: &str = "gc/renamed/";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum CleanupMode {
-    /// Move files to a deletion directory instead of removing them
-    Rename, // todo: remove:?
     /// Only list files that would be affected without making changes
     #[default]
-    DryRunV2,
+    #[serde(alias = "dryrunv2")]
+    DryRun,
     /// Permanently delete files
-    DeleteV2,
+    #[serde(alias = "deletev2")]
+    Delete,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -71,8 +68,6 @@ pub struct GarbageCollectorResponse {
     pub collection_id: CollectionUuid,
     pub num_versions_deleted: u32,
     pub num_files_deleted: u32,
-    #[deprecated = "only used by gc v1"]
-    pub deletion_list: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

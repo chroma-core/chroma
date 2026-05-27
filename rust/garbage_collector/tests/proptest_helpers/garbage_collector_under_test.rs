@@ -17,7 +17,7 @@ use chroma_types::chroma_proto::CollectionVersionFile;
 use chroma_types::{CollectionUuid, DatabaseName, Segment, SegmentScope, SegmentType};
 use chrono::DateTime;
 use futures::StreamExt;
-use garbage_collector_library::garbage_collector_orchestrator_v2::GarbageCollectorOrchestrator;
+use garbage_collector_library::garbage_collector_orchestrator::GarbageCollectorOrchestrator;
 use garbage_collector_library::types::CleanupMode;
 use proptest_state_machine::{ReferenceStateMachine, StateMachineTest};
 use prost::Message;
@@ -337,7 +337,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                                 state.logs.clone(),
                                 None,
                                 state.root_manager.clone(),
-                                CleanupMode::DeleteV2,
+                                CleanupMode::Delete,
                                 min_versions_to_keep as u32,
                                 true,
                                 false,

@@ -14,8 +14,7 @@ use chrono::Utc;
 use clap::Parser;
 use futures::StreamExt;
 use garbage_collector_library::{
-    config::GarbageCollectorConfig,
-    garbage_collector_orchestrator_v2::GarbageCollectorOrchestrator,
+    config::GarbageCollectorConfig, garbage_collector_orchestrator::GarbageCollectorOrchestrator,
     mcmr::instantiate_regions_and_topologies, types::CleanupMode,
 };
 use indicatif::ProgressBar;
@@ -40,15 +39,15 @@ fn is_sparse_index_file_type((key, _): &(String, FilePaths)) -> bool {
 
 #[derive(Debug, clap::ValueEnum, Clone)]
 enum CliCleanupMode {
-    DryRunV2,
-    DeleteV2,
+    DryRun,
+    Delete,
 }
 
 impl From<CliCleanupMode> for CleanupMode {
     fn from(mode: CliCleanupMode) -> Self {
         match mode {
-            CliCleanupMode::DryRunV2 => CleanupMode::DryRunV2,
-            CliCleanupMode::DeleteV2 => CleanupMode::DeleteV2,
+            CliCleanupMode::DryRun => CleanupMode::DryRun,
+            CliCleanupMode::Delete => CleanupMode::Delete,
         }
     }
 }
