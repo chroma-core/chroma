@@ -43,9 +43,11 @@ pub struct FoundationConfig {
     #[serde(default = "FoundationConfig::default_function_name")]
     pub function_name: String,
     /// Modal endpoint the attached function POSTs to. Threaded into the
-    /// attach `params` as `endpoint_url`. Default mirrors the POC.
-    #[serde(default = "FoundationConfig::default_function_endpoint_url")]
-    pub function_endpoint_url: String,
+    /// attach `params` as `endpoint_url`. Required — there is intentionally
+    /// no default, so a deploy can't silently fall back to a hardcoded
+    /// endpoint; `/init` errors if it is unset (absent in config -> `None`).
+    #[serde(default)]
+    pub function_endpoint_url: Option<String>,
     /// How many new source-collection records accumulate before the
     /// attached function is invoked. Matches the chroma frontend default.
     #[serde(default = "FoundationConfig::default_min_records_for_invocation")]
@@ -68,9 +70,6 @@ impl FoundationConfig {
     fn default_function_name() -> String {
         "http_generate".to_string()
     }
-    fn default_function_endpoint_url() -> String {
-        "https://chroma-core--foundation-research-generate-api.modal.run".to_string()
-    }
     fn default_min_records_for_invocation() -> u64 {
         100
     }
@@ -84,7 +83,7 @@ impl Default for FoundationConfig {
             wiki_revisions_collection: Self::default_wiki_revisions_collection(),
             source_collections: Self::default_source_collections(),
             function_name: Self::default_function_name(),
-            function_endpoint_url: Self::default_function_endpoint_url(),
+            function_endpoint_url: None,
             min_records_for_invocation: Self::default_min_records_for_invocation(),
         }
     }

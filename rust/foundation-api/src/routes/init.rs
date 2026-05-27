@@ -122,6 +122,20 @@ fn group_chunk_siblings_metadata() -> Metadata {
     metadata
 }
 
+/// Raised when `/init` needs the attached-function endpoint URL but the
+/// deployment never configured `foundation.function_endpoint_url`. Surfaced
+/// as a 500 so a misconfigured deploy fails loudly instead of attaching the
+/// function with a missing/placeholder endpoint.
+#[derive(Debug, thiserror::Error)]
+#[error("foundation.function_endpoint_url is not configured")]
+struct MissingFunctionEndpointUrl;
+
+impl ChromaError for MissingFunctionEndpointUrl {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
+    }
+}
+
 /// Idempotently attach the foundation function to a source collection,
 /// mirroring the CLI POC (chroma-core/foundation #97): the function reads
 /// the source collection and writes synthesized content to the wiki
@@ -140,8 +154,12 @@ async fn ensure_attached_function(
     cfg: &FoundationConfig,
 ) -> Result<(), ServerError> {
     let attachment_name = format!("{source_name}_to_wiki");
+    let endpoint_url = cfg
+        .function_endpoint_url
+        .as_ref()
+        .ok_or(MissingFunctionEndpointUrl)?;
     let params = serde_json::json!({
-        "endpoint_url": cfg.function_endpoint_url,
+        "endpoint_url": endpoint_url,
         "source_collection": source_name,
         "source_kind": source_name,
     });
