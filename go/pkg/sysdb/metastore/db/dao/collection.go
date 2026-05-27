@@ -630,6 +630,22 @@ func (s *collectionDb) UpdateVersionRelatedFields(collectionID, existingVersionF
 	return result.RowsAffected, nil
 }
 
+func (s *collectionDb) LockCollectionRow(collectionID string) (*bool, error) {
+	var collections []dbmodel.Collection
+	err := s.db.Model(&dbmodel.Collection{}).
+		Where("collections.id = ?", collectionID).Clauses(clause.Locking{
+		Strength: "UPDATE",
+	}).Find(&collections).Error
+	if err != nil {
+		return nil, err
+	}
+	if len(collections) == 0 {
+		return nil, common.ErrCollectionNotFound
+	}
+
+	return &collections[0].IsDeleted, nil
+}
+
 func (s *collectionDb) LockCollection(collectionID string) (*bool, error) {
 	var collections []dbmodel.Collection
 	err := s.db.Model(&dbmodel.Collection{}).

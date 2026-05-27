@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1502,6 +1503,253 @@ func assertExpectedSegmentInfoExist(suite *APIsTestSuite, expectedSegment *model
 		filePaths[key] = filePath.Paths
 	}
 	suite.Equal(filePaths, expectedSegment.FilePaths)
+}
+
+type registerFilePathsBlocker struct {
+	segmentIDs     map[string]struct{}
+	registered     chan struct{}
+	release        chan struct{}
+	registeredOnce sync.Once
+	releaseOnce    sync.Once
+}
+
+func newRegisterFilePathsBlocker(flushSegmentCompactions []*model.FlushSegmentCompaction) *registerFilePathsBlocker {
+	segmentIDs := make(map[string]struct{}, len(flushSegmentCompactions))
+	for _, flushSegmentCompaction := range flushSegmentCompactions {
+		segmentIDs[flushSegmentCompaction.ID.String()] = struct{}{}
+	}
+
+	return &registerFilePathsBlocker{
+		segmentIDs: segmentIDs,
+		registered: make(chan struct{}),
+		release:    make(chan struct{}),
+	}
+}
+
+func (b *registerFilePathsBlocker) releaseFlush() {
+	b.releaseOnce.Do(func() {
+		close(b.release)
+	})
+}
+
+func (b *registerFilePathsBlocker) shouldBlock(flushSegmentCompactions []*model.FlushSegmentCompaction) bool {
+	if len(flushSegmentCompactions) != len(b.segmentIDs) {
+		return false
+	}
+	for _, flushSegmentCompaction := range flushSegmentCompactions {
+		if _, ok := b.segmentIDs[flushSegmentCompaction.ID.String()]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func (b *registerFilePathsBlocker) blockAfterRegister(ctx context.Context, flushSegmentCompactions []*model.FlushSegmentCompaction) error {
+	if !b.shouldBlock(flushSegmentCompactions) {
+		return nil
+	}
+
+	shouldWait := false
+	b.registeredOnce.Do(func() {
+		shouldWait = true
+		close(b.registered)
+	})
+	if !shouldWait {
+		return nil
+	}
+
+	select {
+	case <-b.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+type registerFilePathsBlockingMetaDomain struct {
+	dbmodel.IMetaDomain
+	blocker *registerFilePathsBlocker
+}
+
+func (m *registerFilePathsBlockingMetaDomain) SegmentDb(ctx context.Context) dbmodel.ISegmentDb {
+	return &registerFilePathsBlockingSegmentDb{
+		ISegmentDb: m.IMetaDomain.SegmentDb(ctx),
+		ctx:        ctx,
+		blocker:    m.blocker,
+	}
+}
+
+type registerFilePathsBlockingSegmentDb struct {
+	dbmodel.ISegmentDb
+	ctx     context.Context
+	blocker *registerFilePathsBlocker
+}
+
+func (s *registerFilePathsBlockingSegmentDb) RegisterFilePaths(flushSegmentCompactions []*model.FlushSegmentCompaction) error {
+	if err := s.ISegmentDb.RegisterFilePaths(flushSegmentCompactions); err != nil {
+		return err
+	}
+	return s.blocker.blockAfterRegister(s.ctx, flushSegmentCompactions)
+}
+
+func waitForPostgresLockWait(ctx context.Context, db *gorm.DB) error {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		var blocked bool
+		err := db.WithContext(ctx).Raw(`
+			SELECT EXISTS (
+				SELECT 1
+				FROM pg_stat_activity
+				WHERE datname = current_database()
+					AND state = 'active'
+					AND wait_event_type = 'Lock'
+					AND query ILIKE '%FOR UPDATE%'
+			)
+		`).Scan(&blocked).Error
+		if err != nil {
+			return err
+		}
+		if blocked {
+			return nil
+		}
+
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+func waitForAsyncErr(ctx context.Context, errCh <-chan error) error {
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (suite *APIsTestSuite) TestForkAndFlushCollectionCompactionDoNotDeadlock() {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	sourceCreateCollection := &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         "test_fork_flush_deadlock_source",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+
+	sourceCreateMetadataSegment := &model.Segment{
+		ID:           types.NewUniqueID(),
+		Type:         "test_blockfile",
+		Scope:        "METADATA",
+		CollectionID: sourceCreateCollection.ID,
+	}
+
+	sourceCreateRecordSegment := &model.Segment{
+		ID:           types.NewUniqueID(),
+		Type:         "test_blockfile",
+		Scope:        "RECORD",
+		CollectionID: sourceCreateCollection.ID,
+	}
+
+	sourceCreateVectorSegment := &model.Segment{
+		ID:           types.NewUniqueID(),
+		Type:         "test_hnsw",
+		Scope:        "VECTOR",
+		CollectionID: sourceCreateCollection.ID,
+	}
+
+	_, _, err := suite.coordinator.CreateCollectionAndSegments(ctx, sourceCreateCollection, []*model.Segment{
+		sourceCreateMetadataSegment,
+		sourceCreateRecordSegment,
+		sourceCreateVectorSegment,
+	})
+	suite.Require().NoError(err)
+
+	sourceFlushCollectionCompaction := &model.FlushCollectionCompaction{
+		ID:                       sourceCreateCollection.ID,
+		TenantID:                 sourceCreateCollection.TenantID,
+		LogPosition:              1000,
+		CurrentCollectionVersion: 0,
+		FlushSegmentCompactions: []*model.FlushSegmentCompaction{
+			{
+				ID: sourceCreateMetadataSegment.ID,
+				FilePaths: map[string][]string{
+					"fts_index": {"metadata_sparse_index_file"},
+				},
+			},
+			{
+				ID: sourceCreateRecordSegment.ID,
+				FilePaths: map[string][]string{
+					"data_record": {"record_sparse_index_file"},
+				},
+			},
+			{
+				ID: sourceCreateVectorSegment.ID,
+				FilePaths: map[string][]string{
+					"hnsw_index": {"hnsw_source_layer_file"},
+				},
+			},
+		},
+		TotalRecordsPostCompaction: 1000,
+		SizeBytesPostCompaction:    65536,
+	}
+
+	originalMetaDomain := suite.coordinator.catalog.metaDomain
+	blocker := newRegisterFilePathsBlocker(sourceFlushCollectionCompaction.FlushSegmentCompactions)
+	suite.coordinator.catalog.metaDomain = &registerFilePathsBlockingMetaDomain{
+		IMetaDomain: originalMetaDomain,
+		blocker:     blocker,
+	}
+	defer func() {
+		blocker.releaseFlush()
+		suite.coordinator.catalog.metaDomain = originalMetaDomain
+	}()
+
+	flushErrCh := make(chan error, 1)
+	go func() {
+		_, err := suite.coordinator.FlushCollectionCompaction(ctx, sourceFlushCollectionCompaction)
+		flushErrCh <- err
+	}()
+
+	select {
+	case <-blocker.registered:
+	case err := <-flushErrCh:
+		suite.Require().NoError(err, "flush completed before the test could pause it")
+	case <-ctx.Done():
+		suite.Require().NoError(ctx.Err())
+	}
+
+	forkCollection := &model.ForkCollection{
+		SourceCollectionID:                   sourceCreateCollection.ID,
+		SourceCollectionLogCompactionOffset:  800,
+		SourceCollectionLogEnumerationOffset: 1200,
+		TargetCollectionID:                   types.NewUniqueID(),
+		TargetCollectionName:                 "test_fork_flush_deadlock_target",
+	}
+
+	forkErrCh := make(chan error, 1)
+	go func() {
+		_, _, err := suite.coordinator.ForkCollection(ctx, forkCollection)
+		forkErrCh <- err
+	}()
+
+	waitCtx, waitCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer waitCancel()
+	suite.Require().NoError(waitForPostgresLockWait(waitCtx, suite.db))
+
+	blocker.releaseFlush()
+	suite.Require().NoError(waitForAsyncErr(ctx, flushErrCh))
+	suite.Require().NoError(waitForAsyncErr(ctx, forkErrCh))
+
+	collections, err := suite.coordinator.GetCollections(ctx, []types.UniqueID{forkCollection.TargetCollectionID}, nil, sourceCreateCollection.TenantID, sourceCreateCollection.DatabaseName, nil, nil, false)
+	suite.Require().NoError(err)
+	suite.Len(collections, 1)
 }
 
 func (suite *APIsTestSuite) TestForkCollection() {
