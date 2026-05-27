@@ -26,7 +26,7 @@ pub struct FoundationInitResponse {
     pub wiki_revisions_collection_id: String,
 }
 
-/// `POST /api/foundation/init` — idempotent bootstrap for a team's Foundation
+/// `POST /api/init` — idempotent bootstrap for a team's Foundation
 /// workspace. Ensures the configured Foundation database and the wiki +
 /// wiki_revisions collections (names overridable via
 /// `CHROMA_FOUNDATION__*` env vars) exist in the tenant resolved from the
