@@ -9,10 +9,12 @@ axum = { workspace = true }
 figment = { workspace = true }
 http-body-util = { workspace = true }
 mdac = { workspace = true }
+opentelemetry = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tonic = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
 tracing = { workspace = true }

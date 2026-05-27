@@ -2814,15 +2814,15 @@ impl SysDb {
         }
     }
 
-    pub async fn are_invocations_done(
+    pub async fn check_invocation_status(
         &mut self,
-        request: chroma_types::chroma_proto::AreInvocationsDoneRequest,
+        request: chroma_types::chroma_proto::CheckInvocationStatusRequest,
     ) -> Result<
-        tonic::Response<chroma_types::chroma_proto::AreInvocationsDoneResponse>,
+        tonic::Response<chroma_types::chroma_proto::CheckInvocationStatusResponse>,
         tonic::Status,
     > {
         match self {
-            SysDb::Grpc(grpc) => grpc.client.clone().are_invocations_done(request).await,
+            SysDb::Grpc(grpc) => grpc.client.clone().check_invocation_status(request).await,
             SysDb::Sqlite(_) => unimplemented!(),
             SysDb::Test(_) => unimplemented!(),
         }

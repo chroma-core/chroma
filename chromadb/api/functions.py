@@ -27,6 +27,9 @@ class Function(str, Enum):
     REVISION_HISTORY = "revision_history"
     """Archives every version of a record into a lightweight history collection."""
 
+    DUMMY_ASYNC = "dummy_async"
+    """Async test helper function used for distributed task API coverage."""
+
     # Used only for failure testing - not a real function
     _NONEXISTENT_TEST_ONLY = "nonexistent_function"
 
@@ -35,3 +38,4 @@ class Function(str, Enum):
 STATISTICS_FUNCTION = Function.STATISTICS
 RECORD_COUNTER_FUNCTION = Function.RECORD_COUNTER
 REVISION_HISTORY_FUNCTION = Function.REVISION_HISTORY
+DUMMY_ASYNC_FUNCTION = Function.DUMMY_ASYNC

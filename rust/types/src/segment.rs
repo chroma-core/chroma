@@ -336,14 +336,16 @@ impl Segment {
     }
 
     fn check_metadata_consistency(&self, schema: &Schema) -> Result<(), SchemaMismatchError> {
-        let base_keys: &[&str] = &[
-            FULL_TEXT_PLS,
-            STRING_METADATA,
-            BOOL_METADATA,
-            F32_METADATA,
-            U32_METADATA,
-        ];
+        let base_keys: &[&str] = &[STRING_METADATA, BOOL_METADATA, F32_METADATA, U32_METADATA];
         self.require_keys(base_keys, &[])?;
+
+        if schema.is_fts_enabled() {
+            if schema.is_token_bitmap_fts_enabled() {
+                self.require_keys(&[FULL_TEXT_TOKEN], &[FULL_TEXT_PLS])?;
+            } else {
+                self.require_keys(&[FULL_TEXT_PLS], &[FULL_TEXT_TOKEN])?;
+            }
+        }
 
         if schema.is_sparse_index_enabled() {
             let wand_keys: &[&str] = &[SPARSE_MAX, SPARSE_OFFSET_VALUE];

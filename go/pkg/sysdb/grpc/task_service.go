@@ -169,13 +169,13 @@ func (s *Server) FinalizeAsyncAttachedFunctionRepair(ctx context.Context, req *c
 	return res, nil
 }
 
-func (s *Server) AreInvocationsDone(ctx context.Context, req *coordinatorpb.AreInvocationsDoneRequest) (*coordinatorpb.AreInvocationsDoneResponse, error) {
-	log.Info("AreInvocationsDone",
+func (s *Server) CheckInvocationStatus(ctx context.Context, req *coordinatorpb.CheckInvocationStatusRequest) (*coordinatorpb.CheckInvocationStatusResponse, error) {
+	log.Info("CheckInvocationStatus",
 		zap.Int("items_count", len(req.Items)))
 
 	// Check if the number of items exceeds the limit
 	if len(req.Items) > s.maxAreInvocationsDoneItems {
-		log.Error("AreInvocationsDone: too many items",
+		log.Error("CheckInvocationStatus: too many items",
 			zap.Int("items_count", len(req.Items)),
 			zap.Int("max_allowed", s.maxAreInvocationsDoneItems))
 		grpcErr, err := grpcutils.BuildInvalidArgumentGrpcError("items",
@@ -186,9 +186,9 @@ func (s *Server) AreInvocationsDone(ctx context.Context, req *coordinatorpb.AreI
 		return nil, grpcErr
 	}
 
-	res, err := s.coordinator.AreInvocationsDone(ctx, req)
+	res, err := s.coordinator.CheckInvocationStatus(ctx, req)
 	if err != nil {
-		log.Error("AreInvocationsDone failed", zap.Error(err))
+		log.Error("CheckInvocationStatus failed", zap.Error(err))
 		// If it's already a gRPC status error, return it directly
 		if _, ok := status.FromError(err); ok {
 			return nil, err
@@ -196,8 +196,8 @@ func (s *Server) AreInvocationsDone(ctx context.Context, req *coordinatorpb.AreI
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 
-	log.Info("AreInvocationsDone completed",
+	log.Info("CheckInvocationStatus completed",
 		zap.Int("items_count", len(req.Items)),
-		zap.Int("results_count", len(res.Done)))
+		zap.Int("results_count", len(res.Results)))
 	return res, nil
 }

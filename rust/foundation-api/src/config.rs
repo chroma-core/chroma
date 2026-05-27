@@ -18,7 +18,7 @@ pub struct FoundationApiConfig {
     pub foundation: FoundationConfig,
 }
 
-/// Names of the database and collections that `POST /api/foundation/init`
+/// Names of the database and collections that `POST /api/init`
 /// ensures. Overridable via env vars (e.g. `CHROMA_FOUNDATION__DATABASE_NAME`)
 /// so deployments and tests can point at non-default workspaces without a
 /// code change.

@@ -584,7 +584,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     pub(crate) fn count_blocks_for_prefix(&self, prefix: &str) -> usize {
         self.root
             .sparse_index
-            .get_block_ids_range(prefix..=prefix)
+            .get_block_ids_range::<_, K, _>(prefix..=prefix, ..)
             .len()
     }
 
@@ -615,7 +615,10 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         prefix: &str,
     ) -> Result<impl Iterator<Item = (K, V)>, Box<dyn ChromaError>> {
         // Get all block IDs that might contain this prefix
-        let block_ids = self.root.sparse_index.get_block_ids_range(prefix..=prefix);
+        let block_ids = self
+            .root
+            .sparse_index
+            .get_block_ids_range::<_, K, _>(prefix..=prefix, ..);
 
         if block_ids.is_empty() {
             return Ok(Vec::new().into_iter().flatten());
@@ -662,7 +665,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         futures::stream::iter(
             self.root
                 .sparse_index
-                .get_block_ids_range(prefix_range.clone())
+                .get_block_ids_range(prefix_range.clone(), key_range.clone())
                 .into_iter()
                 .map(Ok),
         )
@@ -697,7 +700,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let block_ids = self
             .root
             .sparse_index
-            .get_block_ids_range(prefix_range.clone());
+            .get_block_ids_range(prefix_range.clone(), key_range.clone());
 
         let block_futures_is_empty = block_ids.is_empty();
         let block_futures = block_ids.into_iter().map(|block_id| {
@@ -809,7 +812,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let block_ids = self
             .root
             .sparse_index
-            .get_block_ids_range(..=prefix)
+            .get_block_ids_range::<_, K, _>(..=prefix, ..)
             .into_iter()
             .take_while(|id| id != &last_block_id)
             .collect::<Vec<_>>();

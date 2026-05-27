@@ -13,5 +13,6 @@ pub mod collection_ops;
 pub mod config;
 pub mod errors;
 pub mod middleware;
+pub mod routes;
 pub mod traced_json;
 pub mod tracing;

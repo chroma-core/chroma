@@ -1,7 +1,7 @@
 //! Foundation API HTTP server.
 //!
 //! Per ADR "Foundation API: Long-Term Home", this crate hosts the foundation
-//! HTTP route surface (`/api/foundation/{ask,recall,brief,init}`, future
+//! HTTP route surface (`/api/{ask,recall,brief,init}`, future
 //! sync-domain endpoints). It depends on `frontend-core` for Axum scaffolding,
 //! middleware, the `AuthenticateAndAuthorize` trait, config primitives, error
 //! types, and OTEL bootstrap. It does NOT depend on `chroma-frontend`, and it

@@ -15,7 +15,7 @@ use chroma_sysdb::SysDb;
 use chroma_system::{Component, ComponentContext, ComponentRuntime, Handler};
 use chroma_types::chroma_proto::{
     try_finish_async_attached_function_invocation_response::Result as TryFinishResult,
-    AreInvocationsDoneRequest, InvocationCheckItem,
+    CheckInvocationStatusRequest, InvocationCheckItem, InvocationStatus, InvocationStatusResult,
     TryFinishAsyncAttachedFunctionInvocationRequest,
 };
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
@@ -69,6 +69,36 @@ pub(crate) struct WorkQueueManager {
         FinishResult,
         oneshot::Sender<Result<FinishResult, WorkQueueError>>,
     )>,
+}
+
+#[derive(Debug)]
+enum InvocationCompletionStatus {
+    NotDone,
+    Done,
+    NeedsRepair(i64),
+}
+
+#[derive(Debug, thiserror::Error)]
+enum InvocationCompletionStatusConversionError {
+    #[error("invalid invocation status: {0}")]
+    InvalidStatus(i32),
+}
+
+impl TryFrom<InvocationStatusResult> for InvocationCompletionStatus {
+    type Error = InvocationCompletionStatusConversionError;
+
+    fn try_from(result: InvocationStatusResult) -> Result<Self, Self::Error> {
+        match InvocationStatus::try_from(result.status) {
+            Ok(InvocationStatus::Done) => Ok(InvocationCompletionStatus::Done),
+            Ok(InvocationStatus::NeedsRepair) => Ok(InvocationCompletionStatus::NeedsRepair(
+                result.current_completion_offset,
+            )),
+            Ok(InvocationStatus::NotDone) => Ok(InvocationCompletionStatus::NotDone),
+            Err(_) => Err(InvocationCompletionStatusConversionError::InvalidStatus(
+                result.status,
+            )),
+        }
+    }
 }
 
 impl WorkQueueManager {
@@ -276,11 +306,24 @@ impl WorkQueueManager {
         }
     }
 
-    // Check invocation completion status
-    async fn check_invocations_done(
+    // Check invocation completion status (boolean version for compatibility)
+    async fn are_invocations_done(
         &mut self,
         items: &[WorkQueueRecord],
     ) -> Result<Vec<bool>, WorkQueueError> {
+        let statuses = self.check_invocations_status(items).await?;
+        // Map DONE to true, everything else (NOT_DONE, NEEDS_REPAIR) to false
+        Ok(statuses
+            .into_iter()
+            .map(|status| matches!(status, InvocationCompletionStatus::Done))
+            .collect())
+    }
+
+    // Check invocation completion status with detailed status
+    async fn check_invocations_status(
+        &mut self,
+        items: &[WorkQueueRecord],
+    ) -> Result<Vec<InvocationCompletionStatus>, WorkQueueError> {
         if items.is_empty() {
             return Ok(vec![]);
         }
@@ -294,17 +337,117 @@ impl WorkQueueManager {
             })
             .collect();
 
-        let request = AreInvocationsDoneRequest {
+        let request = CheckInvocationStatusRequest {
             items: invocation_items,
         };
 
         let response = self
             .sysdb
-            .are_invocations_done(request)
+            .check_invocation_status(request)
             .await
             .map_err(|e| WorkQueueError::CheckInvocationsFailed(e.message().to_string()))?;
 
-        Ok(response.into_inner().done)
+        let statuses = response
+            .into_inner()
+            .results
+            .into_iter()
+            .map(InvocationCompletionStatus::try_from)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| WorkQueueError::CheckInvocationsFailed(e.to_string()))?;
+
+        Ok(statuses)
+    }
+
+    // Check all pending items on startup and repair any that need it
+    async fn check_and_repair_pending_items(&mut self) {
+        if self.state.pending_work.is_empty() {
+            tracing::info!("No pending work items to check for repair");
+            return;
+        }
+
+        tracing::info!(
+            "Checking {} pending work items for repair",
+            self.state.pending_work.len()
+        );
+
+        // Get all pending items
+        let items: Vec<_> = self.state.pending_work.iter().cloned().collect();
+
+        // Check their statuses
+        let statuses = match self.check_invocations_status(&items).await {
+            Ok(statuses) => statuses,
+            Err(e) => {
+                tracing::error!("Failed to check invocation statuses for repair: {}", e);
+                return;
+            }
+        };
+
+        // Find items that need repair
+        let items_needing_repair: Vec<_> = items
+            .into_iter()
+            .zip(statuses.iter())
+            .filter_map(|(item, status)| match status {
+                InvocationCompletionStatus::NeedsRepair(current_completion_offset) => {
+                    Some((item, *current_completion_offset))
+                }
+                _ => None,
+            })
+            .collect();
+
+        if items_needing_repair.is_empty() {
+            tracing::info!("No items need repair");
+            return;
+        }
+
+        tracing::warn!("Found {} items needing repair", items_needing_repair.len());
+
+        for (item, current_completion_offset) in &items_needing_repair {
+            tracing::info!(
+                "Queueing repair for fn_id: {}, input_coll_id: {}, old_completion_offset: {}, current_completion_offset: {}",
+                item.fn_id,
+                item.input_coll_id,
+                item.completion_offset,
+                current_completion_offset
+            );
+
+            self.state
+                .push_work(item.fn_id, item.input_coll_id, *current_completion_offset);
+        }
+
+        if let Err(e) = self.persist().await {
+            tracing::error!(
+                "Failed to persist repaired work queue state; skipping sysdb repair finalization: {}",
+                e
+            );
+            return;
+        }
+
+        for (item, _) in items_needing_repair {
+            tracing::info!(
+                "Finalizing repair for fn_id: {}, input_coll_id: {}",
+                item.fn_id,
+                item.input_coll_id
+            );
+
+            let repair_request =
+                chroma_types::chroma_proto::FinalizeAsyncAttachedFunctionRepairRequest {
+                    attached_function_id: item.fn_id.to_string(),
+                };
+
+            if let Err(e) = self
+                .sysdb
+                .finalize_async_attached_function_repair(repair_request)
+                .await
+            {
+                tracing::error!(
+                    "Failed to finalize repair for function {}: {}",
+                    item.fn_id,
+                    e
+                );
+            }
+        }
+
+        tracing::info!("Repair check completed");
     }
 }
 
@@ -331,6 +474,9 @@ impl Component for WorkQueueManager {
             panic!("Cannot start without valid state");
         }
 
+        // Check all heap items to see if any need repair
+        self.check_and_repair_pending_items().await;
+
         // Schedule periodic persistence
         ctx.scheduler.schedule(
             PeriodicPersistMessage,
@@ -338,10 +484,6 @@ impl Component for WorkQueueManager {
             ctx,
             || None,
         );
-
-        // TODO(tanujnay112): Check to see if any entry needs repair.
-        // This is done by looking at all the heap items and seeing if
-        // any of them need a repair according to sysdb.
     }
 
     async fn on_stop(&mut self) -> Result<(), Box<dyn ChromaError>> {
@@ -456,7 +598,7 @@ impl Handler<GetWorkMessage> for WorkQueueManager {
         // Check invocations done
         // TODO(tanujnay112): We won't need this if we make sure finish_work
         // deletes the work item from the queue and we look for repair on bootup.
-        let done_flags = match self.check_invocations_done(&items).await {
+        let done_flags = match self.are_invocations_done(&items).await {
             Ok(flags) => flags,
             Err(e) => {
                 tracing::error!("Failed to check invocations done: {}", e);

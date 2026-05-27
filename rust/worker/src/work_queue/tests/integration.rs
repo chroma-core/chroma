@@ -3,9 +3,12 @@ mod tests {
     use crate::work_queue::work_queue_client::WorkQueueClient;
     use chroma_config::registry::Registry;
     use chroma_config::Configurable;
-    use chroma_sysdb::SysDb;
-    use chroma_types::chroma_proto::{AreInvocationsDoneRequest, InvocationCheckItem};
-    use chroma_types::{AttachedFunctionUuid, CollectionUuid};
+    use chroma_sysdb::{DatabaseOrTopology, GetCollectionsOptions, SysDb};
+    use chroma_types::chroma_proto::{
+        CheckInvocationStatusRequest, InvocationCheckItem, InvocationStatus,
+    };
+    use chroma_types::{AttachedFunctionUuid, CollectionUuid, DatabaseName, SegmentFlushInfo};
+    use std::sync::Arc;
     use uuid::Uuid;
 
     struct TestContext {
@@ -333,6 +336,7 @@ mod tests {
             let coll_id = CollectionUuid::new();
             let initial_offset = 100;
             let new_offset = 150;
+            let advanced_log_position = 200;
 
             // Create collection
             create_test_collection(&mut ctx.sysdb, coll_id, &ctx.tenant_id, &ctx.database_name)
@@ -343,6 +347,35 @@ mod tests {
             let fn_id = create_test_attached_function(&mut ctx.sysdb, coll_id)
                 .await
                 .expect("Failed to create async attached function");
+
+            let database_name =
+                DatabaseName::new(ctx.database_name.clone()).expect("Invalid database name");
+            let collections = ctx
+                .sysdb
+                .get_collections(GetCollectionsOptions {
+                    collection_id: Some(coll_id),
+                    tenant: Some(ctx.tenant_id.clone()),
+                    database_or_topology: Some(DatabaseOrTopology::Database(database_name.clone())),
+                    ..Default::default()
+                })
+                .await
+                .expect("Failed to fetch collection before advancing log position");
+            assert_eq!(collections.len(), 1, "Expected exactly one collection");
+
+            ctx.sysdb
+                .flush_compaction(
+                    ctx.tenant_id.clone(),
+                    database_name,
+                    coll_id,
+                    advanced_log_position,
+                    collections[0].version,
+                    Arc::<[SegmentFlushInfo]>::from([]),
+                    0,
+                    0,
+                    None,
+                )
+                .await
+                .expect("Failed to advance collection log position");
 
             // Push work
             ctx.work_queue_client
@@ -356,7 +389,7 @@ mod tests {
                 .await
                 .expect("Failed to finish work");
 
-            // Get work - should not contain our finished work
+            // Get work - should contain the requeued repair work at the new offset
             let work_items = ctx
                 .work_queue_client
                 .get_work("test_shard".to_string(), 10)
@@ -368,25 +401,28 @@ mod tests {
                 work_items.items.len()
             );
 
-            // Filter to check our function is not in the queue
+            // Filter to check our function is in the queue with the repaired offset
             let our_items: Vec<_> = work_items
                 .items
                 .iter()
                 .filter(|item| item.fn_id == fn_id.to_string())
                 .collect();
 
-            // Work should be completed (not in queue)
             assert_eq!(
                 our_items.len(),
-                0,
-                "Expected 0 work items for our function after repair"
+                1,
+                "Expected 1 work item for our function after finish_work requeued repair"
+            );
+            assert_eq!(
+                our_items[0].completion_offset, new_offset,
+                "Expected repaired work item to use the new completion offset"
             );
 
             // Check invocation status via sysdb
-            let are_done_response = ctx
+            let status_response = ctx
                 .sysdb
                 .clone()
-                .are_invocations_done(AreInvocationsDoneRequest {
+                .check_invocation_status(CheckInvocationStatusRequest {
                     items: vec![
                         InvocationCheckItem {
                             function_id: fn_id.to_string(),
@@ -405,20 +441,31 @@ mod tests {
                 .into_inner();
 
             // Verify invocation statuses
-            assert_eq!(are_done_response.done.len(), 2);
+            assert_eq!(status_response.results.len(), 2);
             println!(
-                "Invocation status: initial_offset={} done={}, new_offset={} done={}",
-                initial_offset, are_done_response.done[0], new_offset, are_done_response.done[1]
+                "Invocation status: initial_offset={} status={:?}, new_offset={} status={:?}",
+                initial_offset,
+                status_response.results[0].status,
+                new_offset,
+                status_response.results[1].status
             );
 
             // The initial offset (100) should be marked as done since we finished at 150
-            assert!(are_done_response.done[0], "Initial offset should be done");
+            assert_eq!(
+                status_response.results[0].status,
+                InvocationStatus::Done as i32,
+                "Initial offset should be done"
+            );
 
-            // The new_offset (150) should NOT be done because we never pushed work at that offset
-            // We only pushed work at offset 100, then called finish_work with offset 150
-            assert!(
-                !are_done_response.done[1],
-                "New offset should NOT be done - we never pushed work at that offset"
+            // The server finalizes repair before responding, so the new offset is back to a normal queued state.
+            assert_eq!(
+                status_response.results[1].status,
+                InvocationStatus::NotDone as i32,
+                "New offset should be marked as not done after repair is finalized"
+            );
+            assert_eq!(
+                status_response.results[1].current_completion_offset, new_offset,
+                "The queued work item should retain the new completion offset after repair"
             );
         })
         .await;
