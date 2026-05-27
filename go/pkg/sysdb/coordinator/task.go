@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -22,6 +23,8 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 )
+
+const maxAttachedFunctionDepth = 5
 
 // validateAttachedFunctionMatchesRequest validates that an existing attached function's parameters match the request parameters.
 // Returns (true, nil) if all parameters match (idempotent request).
@@ -82,6 +85,311 @@ func (s *Coordinator) validateAttachedFunctionMatchesRequest(ctx context.Context
 	}
 
 	return true, nil
+}
+
+func (s *Coordinator) resolveAttachedFunctionOutputCollectionID(ctx context.Context, attachedFunction *dbmodel.AttachedFunction, databaseName string) (*string, error) {
+	if attachedFunction.OutputCollectionID != nil {
+		return attachedFunction.OutputCollectionID, nil
+	}
+
+	existingCollections, err := s.catalog.metaDomain.CollectionDb(ctx).GetCollections(nil, &attachedFunction.OutputCollectionName, attachedFunction.TenantID, databaseName, nil, nil, false)
+	if err != nil {
+		return nil, err
+	}
+	if len(existingCollections) == 0 {
+		return nil, nil
+	}
+
+	outputCollectionID := existingCollections[0].Collection.ID
+	return &outputCollectionID, nil
+}
+
+type attachedFunctionGraphState struct {
+	coordinator  *Coordinator
+	ctx          context.Context
+	databaseName string
+	// upstreamFunctions caches functions that flow into the to-be input collection.
+	upstreamFunctions map[string][]*dbmodel.AttachedFunction
+	// downstreamFunctions caches functions that fan out from the to-be output collection.
+	downstreamFunctions map[string][]*dbmodel.AttachedFunction
+}
+
+func newAttachedFunctionGraphState(ctx context.Context, coordinator *Coordinator, databaseName string) *attachedFunctionGraphState {
+	return &attachedFunctionGraphState{
+		coordinator:         coordinator,
+		ctx:                 ctx,
+		databaseName:        databaseName,
+		upstreamFunctions:   make(map[string][]*dbmodel.AttachedFunction),
+		downstreamFunctions: make(map[string][]*dbmodel.AttachedFunction),
+	}
+}
+
+func (g *attachedFunctionGraphState) incoming(collectionID string) ([]*dbmodel.AttachedFunction, error) {
+	if incoming, ok := g.upstreamFunctions[collectionID]; ok {
+		return incoming, nil
+	}
+
+	incoming, err := g.coordinator.catalog.metaDomain.AttachedFunctionDb(g.ctx).GetAttachedFunctions(nil, nil, nil, &collectionID, nil, false)
+	if err != nil {
+		return nil, err
+	}
+	g.upstreamFunctions[collectionID] = incoming
+	return incoming, nil
+}
+
+func (g *attachedFunctionGraphState) outgoing(collectionID string) ([]*dbmodel.AttachedFunction, error) {
+	if outgoing, ok := g.downstreamFunctions[collectionID]; ok {
+		return outgoing, nil
+	}
+
+	outgoing, err := g.coordinator.catalog.metaDomain.AttachedFunctionDb(g.ctx).GetAttachedFunctions(nil, nil, &collectionID, nil, nil, false)
+	if err != nil {
+		return nil, err
+	}
+	g.downstreamFunctions[collectionID] = outgoing
+	return outgoing, nil
+}
+
+func (g *attachedFunctionGraphState) outputCollectionID(attachedFunction *dbmodel.AttachedFunction) (*string, error) {
+	return g.coordinator.resolveAttachedFunctionOutputCollectionID(g.ctx, attachedFunction, g.databaseName)
+}
+
+func (g *attachedFunctionGraphState) materializeIncoming(collectionID string, remainingDepth int, visited map[string]struct{}) error {
+	if remainingDepth < 0 {
+		return nil
+	}
+	if _, ok := visited[collectionID]; ok {
+		return nil
+	}
+	visited[collectionID] = struct{}{}
+
+	incoming, err := g.incoming(collectionID)
+	if err != nil {
+		return err
+	}
+	for _, attachedFunction := range incoming {
+		if err := g.materializeIncoming(attachedFunction.InputCollectionID, remainingDepth-1, visited); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (g *attachedFunctionGraphState) materializeOutgoing(collectionID string, remainingDepth int, visited map[string]struct{}) error {
+	if remainingDepth < 0 {
+		return nil
+	}
+	if _, ok := visited[collectionID]; ok {
+		return nil
+	}
+	visited[collectionID] = struct{}{}
+
+	outgoing, err := g.outgoing(collectionID)
+	if err != nil {
+		return err
+	}
+	for _, attachedFunction := range outgoing {
+		outputCollectionID, err := g.outputCollectionID(attachedFunction)
+		if err != nil {
+			return err
+		}
+		if outputCollectionID == nil {
+			continue
+		}
+		if err := g.materializeOutgoing(*outputCollectionID, remainingDepth-1, visited); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (g *attachedFunctionGraphState) maxPathLength(
+	collectionID string,
+	memo map[string]int,
+	visiting map[string]struct{},
+	cycleMessage string,
+	neighbors func(string) ([]string, error),
+) (int, error) {
+	if depth, ok := memo[collectionID]; ok {
+		return depth, nil
+	}
+	if _, ok := visiting[collectionID]; ok {
+		return 0, status.Errorf(codes.FailedPrecondition, cycleMessage)
+	}
+
+	visiting[collectionID] = struct{}{}
+	defer delete(visiting, collectionID)
+
+	nextCollections, err := neighbors(collectionID)
+	if err != nil {
+		return 0, err
+	}
+	if len(nextCollections) == 0 {
+		memo[collectionID] = 0
+		return 0, nil
+	}
+
+	maxDepth := 0
+	for _, nextCollectionID := range nextCollections {
+		childDepth, err := g.maxPathLength(nextCollectionID, memo, visiting, cycleMessage, neighbors)
+		if err != nil {
+			return 0, err
+		}
+		if childDepth+1 > maxDepth {
+			maxDepth = childDepth + 1
+		}
+	}
+
+	memo[collectionID] = maxDepth
+	return maxDepth, nil
+}
+
+func (g *attachedFunctionGraphState) incomingCollectionIDs(collectionID string) ([]string, error) {
+	incoming, err := g.incoming(collectionID)
+	if err != nil {
+		return nil, err
+	}
+
+	nextCollections := make([]string, 0, len(incoming))
+	for _, attachedFunction := range incoming {
+		nextCollections = append(nextCollections, attachedFunction.InputCollectionID)
+	}
+	return nextCollections, nil
+}
+
+func (g *attachedFunctionGraphState) outgoingCollectionIDs(collectionID string) ([]string, error) {
+	outgoing, err := g.outgoing(collectionID)
+	if err != nil {
+		return nil, err
+	}
+
+	nextCollections := make([]string, 0, len(outgoing))
+	for _, attachedFunction := range outgoing {
+		outputCollectionID, err := g.outputCollectionID(attachedFunction)
+		if err != nil {
+			return nil, err
+		}
+		if outputCollectionID != nil {
+			nextCollections = append(nextCollections, *outputCollectionID)
+		}
+	}
+	return nextCollections, nil
+}
+
+func (g *attachedFunctionGraphState) collectionDepth(collectionID string, memo map[string]int, visiting map[string]struct{}) (int, error) {
+	return g.maxPathLength(
+		collectionID,
+		memo,
+		visiting,
+		"attached function cycle detected while computing depth",
+		g.incomingCollectionIDs,
+	)
+}
+
+func (g *attachedFunctionGraphState) collectionTailDepth(collectionID string, memo map[string]int, visiting map[string]struct{}) (int, error) {
+	return g.maxPathLength(
+		collectionID,
+		memo,
+		visiting,
+		"attached function cycle detected while computing downstream depth",
+		g.outgoingCollectionIDs,
+	)
+}
+
+func (g *attachedFunctionGraphState) reaches(startCollectionID string, targetCollectionID string) (bool, error) {
+	if startCollectionID == targetCollectionID {
+		return true, nil
+	}
+
+	queue := []string{startCollectionID}
+	visited := map[string]struct{}{startCollectionID: {}}
+
+	for len(queue) > 0 {
+		currentCollectionID := queue[0]
+		queue = queue[1:]
+
+		outgoing, err := g.outgoing(currentCollectionID)
+		if err != nil {
+			return false, err
+		}
+		for _, attachedFunction := range outgoing {
+			outputCollectionID, err := g.outputCollectionID(attachedFunction)
+			if err != nil {
+				return false, err
+			}
+			if outputCollectionID == nil {
+				continue
+			}
+			if *outputCollectionID == targetCollectionID {
+				return true, nil
+			}
+			if _, ok := visited[*outputCollectionID]; !ok {
+				visited[*outputCollectionID] = struct{}{}
+				queue = append(queue, *outputCollectionID)
+			}
+		}
+	}
+
+	return false, nil
+}
+
+func (g *attachedFunctionGraphState) allCollectionIDs() []string {
+	collectionIDs := make(map[string]struct{})
+
+	for outputCollectionID, incoming := range g.upstreamFunctions {
+		collectionIDs[outputCollectionID] = struct{}{}
+		for _, attachedFunction := range incoming {
+			collectionIDs[attachedFunction.InputCollectionID] = struct{}{}
+		}
+	}
+
+	for inputCollectionID, outgoing := range g.downstreamFunctions {
+		collectionIDs[inputCollectionID] = struct{}{}
+		for _, attachedFunction := range outgoing {
+			if attachedFunction.OutputCollectionID != nil {
+				collectionIDs[*attachedFunction.OutputCollectionID] = struct{}{}
+			}
+		}
+	}
+
+	result := make([]string, 0, len(collectionIDs))
+	for collectionID := range collectionIDs {
+		result = append(result, collectionID)
+	}
+	slices.Sort(result)
+	return result
+}
+
+func (s *Coordinator) buildAttachFunctionGraph(ctx context.Context, inputCollectionID string, outputCollectionID string, databaseName string) (*attachedFunctionGraphState, error) {
+	graphState := newAttachedFunctionGraphState(ctx, s, databaseName)
+	if err := graphState.materializeIncoming(inputCollectionID, maxAttachedFunctionDepth, map[string]struct{}{}); err != nil {
+		return nil, err
+	}
+	if outputCollectionID != "" {
+		if err := graphState.materializeOutgoing(outputCollectionID, maxAttachedFunctionDepth, map[string]struct{}{}); err != nil {
+			return nil, err
+		}
+	}
+	return graphState, nil
+}
+
+func (s *Coordinator) lockAttachFunctionGraph(ctx context.Context, graphState *attachedFunctionGraphState, inputCollectionID string, outputCollectionID string) error {
+	collectionIDsToLock := graphState.allCollectionIDs()
+	if len(collectionIDsToLock) == 0 {
+		collectionIDsToLock = []string{inputCollectionID}
+		if outputCollectionID != "" && outputCollectionID != inputCollectionID {
+			collectionIDsToLock = append(collectionIDsToLock, outputCollectionID)
+			slices.Sort(collectionIDsToLock)
+		}
+	}
+
+	for _, collectionID := range collectionIDsToLock {
+		_, err := s.catalog.metaDomain.CollectionDb(ctx).LockCollection(collectionID)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // AttachFunction creates an output collection and attached function in a single transaction
@@ -166,27 +474,121 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 			return common.ErrCollectionNotFound
 		}
 
-		// Check if input collection is being used as an output collection by any attached function
-		inputCollectionIDStr := req.InputCollectionId
-		attachedFunctionsUsingAsOutput, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(nil, nil, nil, &inputCollectionIDStr, nil, false)
-		if err != nil {
-			log.Error("AttachFunction: failed to check if input collection is used as output", zap.Error(err))
-			return err
-		}
-		if len(attachedFunctionsUsingAsOutput) > 0 {
-			log.Error("AttachFunction: cannot attach function to a collection that is already an output collection",
-				zap.String("collection_id", req.InputCollectionId))
-			return common.ErrCannotAttachToOutputCollection
-		}
-
-		// Check if output collection already exists
-		existingOutputCollections, err := s.catalog.metaDomain.CollectionDb(txCtx).GetCollections(nil, &req.OutputCollectionName, req.TenantId, req.Database, nil, nil, false)
+		// Check if output collection already exists so we can materialize and then lock the full graph in a stable order.
+		existingOutputCollection, err := s.catalog.metaDomain.CollectionDb(txCtx).GetCollections(nil, &req.OutputCollectionName, req.TenantId, req.Database, nil, nil, false)
 		if err != nil {
 			log.Error("AttachFunction: failed to check for existing output collection", zap.Error(err))
 			return err
 		}
 
-		if len(existingOutputCollections) > 0 {
+		var existingOutputCollectionID string
+		if len(existingOutputCollection) > 0 {
+			existingOutputCollectionID = existingOutputCollection[0].Collection.ID
+		}
+
+		graphState, err := s.buildAttachFunctionGraph(txCtx, req.InputCollectionId, existingOutputCollectionID, req.Database)
+		if err != nil {
+			log.Error("AttachFunction: failed to materialize attached function graph", zap.Error(err))
+			return err
+		}
+		if err := s.lockAttachFunctionGraph(txCtx, graphState, req.InputCollectionId, existingOutputCollectionID); err != nil {
+			log.Error("AttachFunction: failed to lock attached function graph", zap.Error(err))
+			return err
+		}
+
+		// Rebuild the graph under locks before validating/inserting.
+		graphState, err = s.buildAttachFunctionGraph(txCtx, req.InputCollectionId, existingOutputCollectionID, req.Database)
+		if err != nil {
+			log.Error("AttachFunction: failed to rebuild attached function graph under locks", zap.Error(err))
+			return err
+		}
+
+		// Validate that the input collection can accept another upstream edge.
+		inputCollectionIDStr := req.InputCollectionId
+		attachedFunctionsUsingAsOutput := graphState.upstreamFunctions[inputCollectionIDStr]
+		if len(attachedFunctionsUsingAsOutput) > 0 {
+			// Load each referenced function once so we can check its execution mode.
+			functionIDs := make([]uuid.UUID, 0, len(attachedFunctionsUsingAsOutput))
+			seenFunctionIDs := make(map[uuid.UUID]struct{}, len(attachedFunctionsUsingAsOutput))
+			for _, attachedFunction := range attachedFunctionsUsingAsOutput {
+				if _, ok := seenFunctionIDs[attachedFunction.FunctionID]; ok {
+					continue
+				}
+				seenFunctionIDs[attachedFunction.FunctionID] = struct{}{}
+				functionIDs = append(functionIDs, attachedFunction.FunctionID)
+			}
+
+			functions, err := s.catalog.metaDomain.FunctionDb(txCtx).GetByIDs(functionIDs)
+			if err != nil {
+				log.Error("AttachFunction: failed to load functions for output collection validation", zap.Error(err))
+				return err
+			}
+
+			functionsByID := make(map[uuid.UUID]*dbmodel.Function, len(functions))
+			for _, existingFunction := range functions {
+				functionsByID[existingFunction.ID] = existingFunction
+			}
+
+			for _, attachedFunction := range attachedFunctionsUsingAsOutput {
+				existingFunction, ok := functionsByID[attachedFunction.FunctionID]
+				if !ok {
+					log.Error("AttachFunction: attached function references unknown function during output collection validation",
+						zap.String("collection_id", req.InputCollectionId),
+						zap.Stringer("function_id", attachedFunction.FunctionID))
+					return common.ErrFunctionNotFound
+				}
+				if !existingFunction.IsAsync {
+					log.Error("AttachFunction: cannot attach function to a collection that is already an output collection with sync upstream functions",
+						zap.String("collection_id", req.InputCollectionId),
+						zap.Stringer("function_id", attachedFunction.FunctionID),
+						zap.String("function_name", existingFunction.Name))
+					return common.ErrCannotAttachToOutputCollection
+				}
+			}
+		}
+
+		// Validate the output side of the new edge against the existing graph.
+		outputTailDepth := 0
+		if len(existingOutputCollection) > 0 {
+			wouldCreateCycle, err := graphState.reaches(existingOutputCollectionID, req.InputCollectionId)
+			if err != nil {
+				log.Error("AttachFunction: failed while checking for attached function cycles", zap.Error(err))
+				return err
+			}
+			if wouldCreateCycle {
+				log.Error("AttachFunction: cannot attach function because it would create a cycle",
+					zap.String("input_collection_id", req.InputCollectionId),
+					zap.String("output_collection_name", req.OutputCollectionName),
+					zap.String("output_collection_id", existingOutputCollectionID))
+				return common.ErrCannotAttachToOutputCollection
+			}
+
+			outputTailDepth, err = graphState.collectionTailDepth(existingOutputCollectionID, map[string]int{}, map[string]struct{}{})
+			if err != nil {
+				log.Error("AttachFunction: failed to compute output collection downstream depth", zap.Error(err))
+				return err
+			}
+		}
+
+		// Enforce the maximum chain length after splicing in the new function.
+		inputCollectionDepth, err := graphState.collectionDepth(req.InputCollectionId, map[string]int{}, map[string]struct{}{})
+		if err != nil {
+			log.Error("AttachFunction: failed to compute input collection depth", zap.Error(err))
+			return err
+		}
+
+		totalAttachedFunctionDepth := inputCollectionDepth + 1 + outputTailDepth
+		if totalAttachedFunctionDepth > maxAttachedFunctionDepth {
+			log.Error("AttachFunction: attached function depth exceeds maximum",
+				zap.String("input_collection_id", req.InputCollectionId),
+				zap.Int("input_collection_depth", inputCollectionDepth),
+				zap.Int("output_tail_depth", outputTailDepth),
+				zap.Int("total_attached_function_depth", totalAttachedFunctionDepth),
+				zap.Int("max_attached_function_depth", maxAttachedFunctionDepth))
+			return status.Errorf(codes.InvalidArgument, "attached function depth exceeds maximum of %d", maxAttachedFunctionDepth)
+		}
+
+		if len(existingOutputCollection) > 0 {
 			// Output collection exists - we now allow reusing any existing collection
 			log.Info("AttachFunction: output collection already exists, will reuse it",
 				zap.String("output_collection_name", req.OutputCollectionName))

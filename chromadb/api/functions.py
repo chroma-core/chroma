@@ -24,6 +24,9 @@ class Function(str, Enum):
     RECORD_COUNTER = "record_counter"
     """Counts records in a collection."""
 
+    DUMMY_ASYNC = "dummy_async"
+    """Async test helper function used for distributed task API coverage."""
+
     # Used only for failure testing - not a real function
     _NONEXISTENT_TEST_ONLY = "nonexistent_function"
 
@@ -31,3 +34,4 @@ class Function(str, Enum):
 # Convenience aliases for cleaner imports
 STATISTICS_FUNCTION = Function.STATISTICS
 RECORD_COUNTER_FUNCTION = Function.RECORD_COUNTER
+DUMMY_ASYNC_FUNCTION = Function.DUMMY_ASYNC
