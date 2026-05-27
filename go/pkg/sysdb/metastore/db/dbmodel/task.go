@@ -57,11 +57,24 @@ type IAttachedFunctionDb interface {
 	CleanupExpiredPartial(maxAgeSeconds uint64) ([]uuid.UUID, error)
 	GetAttachedFunctionsToGc(cutoffTime time.Time, limit int32) ([]*AttachedFunction, error)
 	HardDeleteAttachedFunction(id uuid.UUID) error
-	AreInvocationsDone(items []InvocationCheckItem) ([]bool, error)
+	CheckInvocationStatus(items []InvocationCheckItem) ([]InvocationStatusResult, error)
 }
 
 type InvocationCheckItem struct {
 	FunctionID        uuid.UUID
 	InputCollectionID string
 	CompletionOffset  int64
+}
+
+type InvocationStatus int
+
+const (
+	InvocationStatusNotDone InvocationStatus = iota
+	InvocationStatusDone
+	InvocationStatusNeedsRepair
+)
+
+type InvocationStatusResult struct {
+	Status                  InvocationStatus
+	CurrentCompletionOffset int64
 }

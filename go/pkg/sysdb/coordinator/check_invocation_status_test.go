@@ -13,14 +13,14 @@ import (
 	"github.com/stretchr/testify/suite"
 )
 
-type AreInvocationsDoneTestSuite struct {
+type CheckInvocationStatusTestSuite struct {
 	suite.Suite
 	mockMetaDomain         *dbmodel_mocks.IMetaDomain
 	mockAttachedFunctionDb *dbmodel_mocks.IAttachedFunctionDb
 	coordinator            *Coordinator
 }
 
-func (suite *AreInvocationsDoneTestSuite) SetupTest() {
+func (suite *CheckInvocationStatusTestSuite) SetupTest() {
 	suite.mockMetaDomain = &dbmodel_mocks.IMetaDomain{}
 	suite.mockMetaDomain.Test(suite.T())
 
@@ -34,12 +34,12 @@ func (suite *AreInvocationsDoneTestSuite) SetupTest() {
 	}
 }
 
-func (suite *AreInvocationsDoneTestSuite) TearDownTest() {
+func (suite *CheckInvocationStatusTestSuite) TearDownTest() {
 	suite.mockMetaDomain.AssertExpectations(suite.T())
 	suite.mockAttachedFunctionDb.AssertExpectations(suite.T())
 }
 
-func (suite *AreInvocationsDoneTestSuite) TestAreInvocationsDone_Success() {
+func (suite *CheckInvocationStatusTestSuite) TestCheckInvocationStatus_Success() {
 	ctx := context.Background()
 
 	// Test data
@@ -70,11 +70,15 @@ func (suite *AreInvocationsDoneTestSuite) TestAreInvocationsDone_Success() {
 		},
 	}
 
-	suite.mockAttachedFunctionDb.On("AreInvocationsDone", expectedItems).
-		Return([]bool{true, false, true}, nil).Once()
+	suite.mockAttachedFunctionDb.On("CheckInvocationStatus", expectedItems).
+		Return([]dbmodel.InvocationStatusResult{
+			{Status: dbmodel.InvocationStatusDone, CurrentCompletionOffset: 150},
+			{Status: dbmodel.InvocationStatusNotDone, CurrentCompletionOffset: 200},
+			{Status: dbmodel.InvocationStatusNeedsRepair, CurrentCompletionOffset: 75},
+		}, nil).Once()
 
 	// Create request
-	req := &coordinatorpb.AreInvocationsDoneRequest{
+	req := &coordinatorpb.CheckInvocationStatusRequest{
 		Items: []*coordinatorpb.InvocationCheckItem{
 			{
 				FunctionId:        fnID1.String(),
@@ -95,39 +99,45 @@ func (suite *AreInvocationsDoneTestSuite) TestAreInvocationsDone_Success() {
 	}
 
 	// Execute
-	resp, err := suite.coordinator.AreInvocationsDone(ctx, req)
+	resp, err := suite.coordinator.CheckInvocationStatus(ctx, req)
 
 	// Assert
 	suite.NoError(err)
 	suite.NotNil(resp)
-	suite.Equal([]bool{true, false, true}, resp.Done)
+	suite.Len(resp.Results, 3)
+	suite.Equal(coordinatorpb.InvocationStatus_INVOCATION_STATUS_DONE, resp.Results[0].Status)
+	suite.Equal(int64(150), resp.Results[0].CurrentCompletionOffset)
+	suite.Equal(coordinatorpb.InvocationStatus_INVOCATION_STATUS_NOT_DONE, resp.Results[1].Status)
+	suite.Equal(int64(200), resp.Results[1].CurrentCompletionOffset)
+	suite.Equal(coordinatorpb.InvocationStatus_INVOCATION_STATUS_NEEDS_REPAIR, resp.Results[2].Status)
+	suite.Equal(int64(75), resp.Results[2].CurrentCompletionOffset)
 }
 
-func (suite *AreInvocationsDoneTestSuite) TestAreInvocationsDone_EmptyRequest() {
+func (suite *CheckInvocationStatusTestSuite) TestCheckInvocationStatus_EmptyRequest() {
 	ctx := context.Background()
 
 	// No mocks needed for empty request
 
 	// Create request
-	req := &coordinatorpb.AreInvocationsDoneRequest{
+	req := &coordinatorpb.CheckInvocationStatusRequest{
 		Items: []*coordinatorpb.InvocationCheckItem{},
 	}
 
 	// Execute
-	resp, err := suite.coordinator.AreInvocationsDone(ctx, req)
+	resp, err := suite.coordinator.CheckInvocationStatus(ctx, req)
 
 	// Assert
 	suite.NoError(err)
 	suite.NotNil(resp)
-	suite.Equal([]bool{}, resp.Done)
+	suite.Equal([]*coordinatorpb.InvocationStatusResult{}, resp.Results)
 }
 
-func (suite *AreInvocationsDoneTestSuite) TestAreInvocationsDone_InvalidFunctionID() {
+func (suite *CheckInvocationStatusTestSuite) TestCheckInvocationStatus_InvalidFunctionID() {
 	ctx := context.Background()
 	collectionID := uuid.New().String()
 
 	// Create request with invalid UUID
-	req := &coordinatorpb.AreInvocationsDoneRequest{
+	req := &coordinatorpb.CheckInvocationStatusRequest{
 		Items: []*coordinatorpb.InvocationCheckItem{
 			{
 				FunctionId:        "invalid-uuid",
@@ -138,19 +148,19 @@ func (suite *AreInvocationsDoneTestSuite) TestAreInvocationsDone_InvalidFunction
 	}
 
 	// Execute
-	_, err := suite.coordinator.AreInvocationsDone(ctx, req)
+	_, err := suite.coordinator.CheckInvocationStatus(ctx, req)
 
 	// Assert
 	suite.Error(err)
 	suite.Contains(err.Error(), "invalid function_id at index 0")
 }
 
-func (suite *AreInvocationsDoneTestSuite) TestAreInvocationsDone_InvalidCollectionID() {
+func (suite *CheckInvocationStatusTestSuite) TestCheckInvocationStatus_InvalidCollectionID() {
 	ctx := context.Background()
 	fnID := uuid.New()
 
 	// Create request with invalid collection UUID
-	req := &coordinatorpb.AreInvocationsDoneRequest{
+	req := &coordinatorpb.CheckInvocationStatusRequest{
 		Items: []*coordinatorpb.InvocationCheckItem{
 			{
 				FunctionId:        fnID.String(),
@@ -161,14 +171,14 @@ func (suite *AreInvocationsDoneTestSuite) TestAreInvocationsDone_InvalidCollecti
 	}
 
 	// Execute
-	_, err := suite.coordinator.AreInvocationsDone(ctx, req)
+	_, err := suite.coordinator.CheckInvocationStatus(ctx, req)
 
 	// Assert
 	suite.Error(err)
 	suite.Contains(err.Error(), "invalid input_collection_id at index 0")
 }
 
-func (suite *AreInvocationsDoneTestSuite) TestAreInvocationsDone_DatabaseError() {
+func (suite *CheckInvocationStatusTestSuite) TestCheckInvocationStatus_DatabaseError() {
 	ctx := context.Background()
 	fnID := uuid.New()
 	collectionID := uuid.New().String()
@@ -184,11 +194,11 @@ func (suite *AreInvocationsDoneTestSuite) TestAreInvocationsDone_DatabaseError()
 		},
 	}
 
-	suite.mockAttachedFunctionDb.On("AreInvocationsDone", expectedItems).
+	suite.mockAttachedFunctionDb.On("CheckInvocationStatus", expectedItems).
 		Return(nil, errors.New("database error")).Once()
 
 	// Create request
-	req := &coordinatorpb.AreInvocationsDoneRequest{
+	req := &coordinatorpb.CheckInvocationStatusRequest{
 		Items: []*coordinatorpb.InvocationCheckItem{
 			{
 				FunctionId:        fnID.String(),
@@ -199,19 +209,19 @@ func (suite *AreInvocationsDoneTestSuite) TestAreInvocationsDone_DatabaseError()
 	}
 
 	// Execute
-	_, err := suite.coordinator.AreInvocationsDone(ctx, req)
+	_, err := suite.coordinator.CheckInvocationStatus(ctx, req)
 
 	// Assert
 	suite.Error(err)
 	suite.Contains(err.Error(), "database error")
 }
 
-func TestAreInvocationsDoneSuite(t *testing.T) {
-	suite.Run(t, new(AreInvocationsDoneTestSuite))
+func TestCheckInvocationStatusSuite(t *testing.T) {
+	suite.Run(t, new(CheckInvocationStatusTestSuite))
 }
 
-// TestAreInvocationsDone_BasicFunctionality tests that the function correctly identifies done/not-done invocations
-func TestAreInvocationsDone_BasicFunctionality(t *testing.T) {
+// TestCheckInvocationStatus_BasicFunctionality tests that the function correctly identifies all three status states
+func TestCheckInvocationStatus_BasicFunctionality(t *testing.T) {
 	ctx := context.Background()
 
 	// Setup mocks
@@ -231,7 +241,7 @@ func TestAreInvocationsDone_BasicFunctionality(t *testing.T) {
 	fnID2 := uuid.New() // Done: soft deleted
 	fnID3 := uuid.New() // Done: hard deleted (not in DB)
 	fnID4 := uuid.New() // Done: current_completion_offset > provided_completion_offset AND heap_entry_pending=false
-	fnID5 := uuid.New() // Not done: current_completion_offset > provided_completion_offset BUT heap_entry_pending=true
+	fnID5 := uuid.New() // NeedsRepair: current_completion_offset > provided_completion_offset AND heap_entry_pending=true
 	collectionID := uuid.New().String()
 
 	// Setup mock
@@ -250,12 +260,18 @@ func TestAreInvocationsDone_BasicFunctionality(t *testing.T) {
 	// - fnID2: done (soft deleted)
 	// - fnID3: done (hard deleted/not in DB)
 	// - fnID4: done (current_completion_offset > provided_completion_offset AND heap_entry_pending=false)
-	// - fnID5: not done (heap_entry_pending=true)
-	mockAttachedFunctionDb.On("AreInvocationsDone", expectedItems).
-		Return([]bool{false, true, true, true, false}, nil).Once()
+	// - fnID5: needs repair (current_completion_offset > provided_completion_offset AND heap_entry_pending=true)
+	mockAttachedFunctionDb.On("CheckInvocationStatus", expectedItems).
+		Return([]dbmodel.InvocationStatusResult{
+			{Status: dbmodel.InvocationStatusNotDone, CurrentCompletionOffset: 100},
+			{Status: dbmodel.InvocationStatusDone, CurrentCompletionOffset: 50},
+			{Status: dbmodel.InvocationStatusDone, CurrentCompletionOffset: 50},
+			{Status: dbmodel.InvocationStatusDone, CurrentCompletionOffset: 75},
+			{Status: dbmodel.InvocationStatusNeedsRepair, CurrentCompletionOffset: 75},
+		}, nil).Once()
 
 	// Create request
-	req := &coordinatorpb.AreInvocationsDoneRequest{
+	req := &coordinatorpb.CheckInvocationStatusRequest{
 		Items: []*coordinatorpb.InvocationCheckItem{
 			{FunctionId: fnID1.String(), InputCollectionId: collectionID, CompletionOffset: 100},
 			{FunctionId: fnID2.String(), InputCollectionId: collectionID, CompletionOffset: 50},
@@ -266,19 +282,33 @@ func TestAreInvocationsDone_BasicFunctionality(t *testing.T) {
 	}
 
 	// Execute
-	resp, err := coordinator.AreInvocationsDone(ctx, req)
+	resp, err := coordinator.CheckInvocationStatus(ctx, req)
 
 	// Assert
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
-	assert.Equal(t, []bool{false, true, true, true, false}, resp.Done)
+	assert.Len(t, resp.Results, 5)
+	assert.Equal(t, []coordinatorpb.InvocationStatus{
+		coordinatorpb.InvocationStatus_INVOCATION_STATUS_NOT_DONE,
+		coordinatorpb.InvocationStatus_INVOCATION_STATUS_DONE,
+		coordinatorpb.InvocationStatus_INVOCATION_STATUS_DONE,
+		coordinatorpb.InvocationStatus_INVOCATION_STATUS_DONE,
+		coordinatorpb.InvocationStatus_INVOCATION_STATUS_NEEDS_REPAIR,
+	}, []coordinatorpb.InvocationStatus{
+		resp.Results[0].Status,
+		resp.Results[1].Status,
+		resp.Results[2].Status,
+		resp.Results[3].Status,
+		resp.Results[4].Status,
+	})
 
 	// Verify the results match our expectations:
-	assert.False(t, resp.Done[0], "fnID1: current_completion_offset <= provided_completion_offset should be NOT done")
-	assert.True(t, resp.Done[1], "fnID2: soft deleted should be done")
-	assert.True(t, resp.Done[2], "fnID3: hard deleted should be done")
-	assert.True(t, resp.Done[3], "fnID4: current_completion_offset > provided_completion_offset AND heap_entry_pending=false should be done")
-	assert.False(t, resp.Done[4], "fnID5: heap_entry_pending=true should be NOT done")
+	assert.Equal(t, coordinatorpb.InvocationStatus_INVOCATION_STATUS_NOT_DONE, resp.Results[0].Status, "fnID1: current_completion_offset <= provided_completion_offset should be NOT done")
+	assert.Equal(t, coordinatorpb.InvocationStatus_INVOCATION_STATUS_DONE, resp.Results[1].Status, "fnID2: soft deleted should be done")
+	assert.Equal(t, coordinatorpb.InvocationStatus_INVOCATION_STATUS_DONE, resp.Results[2].Status, "fnID3: hard deleted should be done")
+	assert.Equal(t, coordinatorpb.InvocationStatus_INVOCATION_STATUS_DONE, resp.Results[3].Status, "fnID4: current_completion_offset > provided_completion_offset AND heap_entry_pending=false should be done")
+	assert.Equal(t, coordinatorpb.InvocationStatus_INVOCATION_STATUS_NEEDS_REPAIR, resp.Results[4].Status, "fnID5: heap_entry_pending=true should be NEEDS_REPAIR")
+	assert.Equal(t, int64(75), resp.Results[4].CurrentCompletionOffset, "fnID5 should return the new completion offset to queue for repair")
 
 	mockMetaDomain.AssertExpectations(t)
 	mockAttachedFunctionDb.AssertExpectations(t)
