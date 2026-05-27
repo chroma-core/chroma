@@ -10,11 +10,15 @@ use chroma_frontend::{
     },
     Frontend, FrontendConfig,
 };
-use chroma_log::config::{LogConfig, SqliteLogConfig};
+use chroma_log::{
+    config::{LogConfig, SqliteLogConfig},
+    LocalCompactionManager,
+};
 use chroma_segment::local_segment_manager::LocalSegmentManagerConfig;
 use chroma_sqlite::config::SqliteDBConfig;
+use chroma_sqlite::db::SqliteDb;
 use chroma_sysdb::{SqliteSysDbConfig, SysDbConfig};
-use chroma_system::System;
+use chroma_system::{ComponentHandle, System};
 use chroma_types::{
     Collection, CollectionConfiguration, CollectionMetadataUpdate, CountCollectionsRequest,
     CountResponse, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, Database,
@@ -33,7 +37,11 @@ const DEFAULT_TENANT: &str = "default_tenant";
 #[pyclass]
 pub(crate) struct Bindings {
     runtime: tokio::runtime::Runtime,
+    system: System,
+    sqlite_db: SqliteDb,
+    compactor_handle: ComponentHandle<LocalCompactionManager>,
     frontend: Frontend,
+    closed: bool,
 }
 
 #[pyclass]
@@ -137,10 +145,23 @@ impl Bindings {
         };
 
         let frontend = runtime.block_on(async {
-            Frontend::try_from_config(&(frontend_config, system), &registry).await
+            Frontend::try_from_config(&(frontend_config, system.clone()), &registry).await
         })?;
+        let sqlite_db = registry.get::<SqliteDb>()?;
+        let compactor_handle = registry.get::<ComponentHandle<LocalCompactionManager>>()?;
 
-        Ok(Bindings { runtime, frontend })
+        Ok(Bindings {
+            runtime,
+            system,
+            sqlite_db,
+            compactor_handle,
+            frontend,
+            closed: false,
+        })
+    }
+
+    fn close(&mut self) {
+        self.shutdown();
     }
 
     /// Returns the current eopch time in ns
@@ -744,5 +765,28 @@ impl Bindings {
             .extract::<String>()
             .map_err(WrappedPyErr)?;
         Ok(version)
+    }
+}
+
+impl Bindings {
+    fn shutdown(&mut self) {
+        if self.closed {
+            return;
+        }
+        self.closed = true;
+        self.compactor_handle.stop();
+
+        self.runtime.block_on(async {
+            let _ = self.compactor_handle.join().await;
+            self.system.stop().await;
+            self.system.join().await;
+            self.sqlite_db.close().await;
+        });
+    }
+}
+
+impl Drop for Bindings {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
