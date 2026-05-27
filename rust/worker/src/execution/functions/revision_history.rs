@@ -351,6 +351,7 @@ impl AttachedFunctionExecutor for RevisionHistoryExecutor {
                 trackers.insert(original_id.clone(), state);
             }
 
+            // SAFETY(hammadb): We know the tracker exists because we just inserted it above.
             let tracker = trackers.get_mut(&original_id).unwrap();
 
             if record.get_operation() == MaterializedLogOperation::DeleteExisting {
