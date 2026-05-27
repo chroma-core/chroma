@@ -76,8 +76,8 @@ impl Display for AuthzAction {
             AuthzAction::Search => write!(f, "collection:search"),
             AuthzAction::CreateAttachedFunction => write!(f, "collection:create_attached_function"),
             AuthzAction::RemoveAttachedFunction => write!(f, "collection:remove_attached_function"),
-            AuthzAction::InitFoundation => write!(f, "foundation:init"),
-            AuthzAction::ViewFoundation => write!(f, "foundation:view"),
+            AuthzAction::InitFoundation => write!(f, "foundation:init_foundation"),
+            AuthzAction::ViewFoundation => write!(f, "foundation:view_foundation"),
         }
     }
 }
