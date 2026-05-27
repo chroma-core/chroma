@@ -1284,6 +1284,14 @@ impl ChromaError for ListCollectionVersionsError {
 pub const CHROMA_KEY: &str = "chroma:";
 pub const CHROMA_DOCUMENT_KEY: &str = "chroma:document";
 pub const CHROMA_URI_KEY: &str = "chroma:uri";
+/// Collection-metadata flag (a `MetadataValue::Bool(true)`) that opts a
+/// collection into chunk-sibling grouping during log partitioning: records
+/// whose ids share a base before a trailing `-{idx}` are kept in one
+/// partition so they materialize in WAL order. Foundation source
+/// collections set this so the attached function observes a trailing
+/// end-of-job marker after all sibling chunks. Read by the worker's
+/// `PartitionOperator`; set by the foundation `/init` endpoint.
+pub const CHROMA_GROUP_CHUNK_SIBLINGS_KEY: &str = "chroma:group_chunk_siblings";
 
 ////////////////////////// AddCollectionRecords //////////////////////////
 

@@ -10,11 +10,10 @@ use thiserror::Error;
 /// `MetadataValue::Bool(true)` enables it; absent or any other value
 /// leaves the default (group by exact id) in place.
 ///
-/// The flag is *read* here; the code that *sets* it on the relevant
-/// collections (foundation source collections) lands in a separate PR.
-/// Until that ships, no collection carries the flag and this operator
-/// behaves exactly as before.
-pub const GROUP_CHUNK_SIBLINGS_METADATA_KEY: &str = "chroma:group_chunk_siblings";
+/// The flag is *read* here; the code that *sets* it on foundation source
+/// collections lives in the foundation `/init` endpoint. Re-exported from
+/// `chroma_types` so reader and writer share one definition.
+pub use chroma_types::CHROMA_GROUP_CHUNK_SIBLINGS_KEY as GROUP_CHUNK_SIBLINGS_METADATA_KEY;
 
 /// Grouping key used to assign a record to a partition.
 ///
