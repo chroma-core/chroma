@@ -540,12 +540,7 @@ impl GarbageCollectorOrchestrator {
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Result<(), GarbageCollectorError> {
-        if !self.file_listing_complete
-            || matches!(
-                self.attached_fn_completion_offset,
-                AttachedFunctionOffset::NotFetched
-            )
-        {
+        if !self.ready_to_start_delete_unused_logs() {
             return Ok(());
         }
 
@@ -643,6 +638,14 @@ impl GarbageCollectorOrchestrator {
             .await
             .map_err(GarbageCollectorError::Channel)?;
         Ok(())
+    }
+
+    fn ready_to_start_delete_unused_logs(&self) -> bool {
+        self.file_listing_complete
+            && !matches!(
+                self.attached_fn_completion_offset,
+                AttachedFunctionOffset::NotFetched
+            )
     }
 
     async fn handle_list_files_at_version_output(
@@ -1229,6 +1232,7 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
 #[cfg(test)]
 mod tests {
     use super::build_versions_to_mark;
+    use super::AttachedFunctionOffset;
     use super::GarbageCollectorError;
     use super::GarbageCollectorOrchestrator;
     use crate::operators::compute_versions_to_delete_from_graph::CollectionVersionAction;
@@ -1636,6 +1640,50 @@ mod tests {
         let mut paths = file_paths.iter().collect::<Vec<_>>();
         paths.sort();
         paths
+    }
+
+    #[tokio::test]
+    async fn delete_unused_logs_gate_is_closed_when_neither_prerequisite_is_ready() {
+        let (_storage_dir, storage) = test_storage();
+        let mut orchestrator = test_orchestrator(storage, CollectionUuid::new());
+
+        orchestrator.file_listing_complete = false;
+        orchestrator.attached_fn_completion_offset = AttachedFunctionOffset::NotFetched;
+
+        assert!(!orchestrator.ready_to_start_delete_unused_logs());
+    }
+
+    #[tokio::test]
+    async fn delete_unused_logs_gate_is_closed_when_only_file_listing_is_complete() {
+        let (_storage_dir, storage) = test_storage();
+        let mut orchestrator = test_orchestrator(storage, CollectionUuid::new());
+
+        orchestrator.file_listing_complete = true;
+        orchestrator.attached_fn_completion_offset = AttachedFunctionOffset::NotFetched;
+
+        assert!(!orchestrator.ready_to_start_delete_unused_logs());
+    }
+
+    #[tokio::test]
+    async fn delete_unused_logs_gate_is_closed_when_only_attached_function_offset_is_fetched() {
+        let (_storage_dir, storage) = test_storage();
+        let mut orchestrator = test_orchestrator(storage, CollectionUuid::new());
+
+        orchestrator.file_listing_complete = false;
+        orchestrator.attached_fn_completion_offset = AttachedFunctionOffset::Fetched(Some(42));
+
+        assert!(!orchestrator.ready_to_start_delete_unused_logs());
+    }
+
+    #[tokio::test]
+    async fn delete_unused_logs_gate_opens_when_both_prerequisites_are_ready() {
+        let (_storage_dir, storage) = test_storage();
+        let mut orchestrator = test_orchestrator(storage, CollectionUuid::new());
+
+        orchestrator.file_listing_complete = true;
+        orchestrator.attached_fn_completion_offset = AttachedFunctionOffset::Fetched(None);
+
+        assert!(orchestrator.ready_to_start_delete_unused_logs());
     }
 
     #[tokio::test]
