@@ -790,3 +790,67 @@ impl Drop for Bindings {
         self.shutdown();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chroma_sqlite::config::{MigrationHash, MigrationMode};
+    use tempfile::TempDir;
+
+    fn new_persistent_bindings() -> (TempDir, Bindings) {
+        let temp_dir = tempfile::tempdir().expect("temporary directory");
+        let persist_path = temp_dir
+            .path()
+            .to_str()
+            .expect("temporary path should be utf8")
+            .to_string();
+        let sqlite_path = temp_dir.path().join("chroma.sqlite3");
+        let sqlite_url = sqlite_path
+            .to_str()
+            .expect("sqlite path should be utf8")
+            .to_string();
+        let sqlite_db_config = SqliteDBConfig {
+            url: Some(sqlite_url),
+            hash_type: MigrationHash::MD5,
+            migration_mode: MigrationMode::Apply,
+        };
+        let bindings = Bindings::py_new(true, sqlite_db_config, 16, Some(persist_path))
+            .expect("persistent bindings");
+
+        (temp_dir, bindings)
+    }
+
+    #[test]
+    fn close_closes_sqlite_pool() {
+        let (temp_dir, mut bindings) = new_persistent_bindings();
+
+        bindings.close();
+
+        assert!(bindings.closed);
+        assert!(bindings.sqlite_db.get_conn().is_closed());
+        temp_dir.close().expect("persistent directory cleanup");
+    }
+
+    #[test]
+    fn close_is_idempotent() {
+        let (temp_dir, mut bindings) = new_persistent_bindings();
+
+        bindings.close();
+        bindings.close();
+
+        assert!(bindings.closed);
+        assert!(bindings.sqlite_db.get_conn().is_closed());
+        temp_dir.close().expect("persistent directory cleanup");
+    }
+
+    #[test]
+    fn drop_closes_sqlite_pool() {
+        let (temp_dir, bindings) = new_persistent_bindings();
+        let sqlite_db = bindings.sqlite_db.clone();
+
+        drop(bindings);
+
+        assert!(sqlite_db.get_conn().is_closed());
+        temp_dir.close().expect("persistent directory cleanup");
+    }
+}

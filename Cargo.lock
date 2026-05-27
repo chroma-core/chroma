@@ -2235,6 +2235,7 @@ dependencies = [
  "chroma-types",
  "pyo3",
  "serde_json",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "uuid",
