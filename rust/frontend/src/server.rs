@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use axum::{
     extract::{DefaultBodyLimit, Path, Query, State},
     http::{header::HeaderMap, StatusCode},
@@ -15,16 +16,16 @@ use chroma_tracing::add_tracing_middleware;
 use chroma_types::{
     decode_embeddings, maybe_decode_update_embeddings, plan::ReadLevel, validate_name,
     AddCollectionRecordsPayload, AddCollectionRecordsResponse, AttachFunctionRequest,
-    AttachFunctionResponse, ChecklistResponse, Collection, CollectionConfiguration,
-    CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
-    CountRequest, CountResponse, CreateCollectionPayload, CreateCollectionRequest,
-    CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
-    DatabaseName, DeleteCollectionRecordsPayload, DeleteCollectionRecordsResponse,
-    DeleteCollectionResponse, DeleteDatabaseRequest, DeleteDatabaseResponse, DetachFunctionRequest,
-    DetachFunctionResponse, ForkCollectionResponse, GetAttachedFunctionResponse,
-    GetCollectionByCrnRequest, GetCollectionByIdRequest, GetCollectionRequest, GetDatabaseRequest,
-    GetDatabaseResponse, GetRequest, GetRequestPayload, GetResponse, GetTenantRequest,
-    GetTenantResponse, IndexStatusResponse, InternalCollectionConfiguration,
+    AttachFunctionResponse, Collection, CollectionConfiguration, CollectionMetadataUpdate,
+    CollectionUuid, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
+    CreateCollectionPayload, CreateCollectionRequest, CreateDatabaseRequest,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, DatabaseName,
+    DeleteCollectionRecordsPayload, DeleteCollectionRecordsResponse, DeleteCollectionResponse,
+    DeleteDatabaseRequest, DeleteDatabaseResponse, DetachFunctionRequest, DetachFunctionResponse,
+    ForkCollectionResponse, GetAttachedFunctionResponse, GetCollectionByCrnRequest,
+    GetCollectionByIdRequest, GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse,
+    GetRequest, GetRequestPayload, GetResponse, GetTenantRequest, GetTenantResponse,
+    HealthCheckResponse, IndexStatusResponse, InternalCollectionConfiguration,
     InternalUpdateCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
     ListDatabasesRequest, ListDatabasesResponse, QueryRequest, QueryRequestPayload, QueryResponse,
     SearchRequest, SearchRequestPayload, SearchResponse, UpdateCollectionPayload,
@@ -32,6 +33,7 @@ use chroma_types::{
     UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsPayload,
     UpsertCollectionRecordsResponse,
 };
+use frontend_core::routes::{SystemMetrics, SystemState};
 use mdac::{Rule, Scorecard, ScorecardGuard};
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
@@ -127,12 +129,8 @@ async fn graceful_shutdown(system: System) {
 }
 
 pub struct Metrics {
-    healthcheck: Counter<u64>,
-    heartbeat: Counter<u64>,
-    pre_flight_checks: Counter<u64>,
+    system: SystemMetrics,
     reset: Counter<u64>,
-    version: Counter<u64>,
-    get_user_identity: Counter<u64>,
     create_tenant: Counter<u64>,
     get_tenant: Counter<u64>,
     update_tenant: Counter<u64>,
@@ -167,12 +165,8 @@ pub struct Metrics {
 impl Metrics {
     pub fn new(meter: Meter) -> Metrics {
         Metrics {
-            healthcheck: meter.u64_counter("healthcheck").build(),
-            heartbeat: meter.u64_counter("heartbeat").build(),
-            pre_flight_checks: meter.u64_counter("pre_flight_checks").build(),
+            system: SystemMetrics::new(&meter),
             reset: meter.u64_counter("reset").build(),
-            version: meter.u64_counter("version").build(),
-            get_user_identity: meter.u64_counter("get_user_identity").build(),
             create_tenant: meter.u64_counter("create_tenant").build(),
             get_tenant: meter.u64_counter("get_tenant").build(),
             update_tenant: meter.u64_counter("update_tenant").build(),
@@ -287,13 +281,8 @@ impl FrontendServer {
                     .head(v1_deprecation_notice)
                     .options(v1_deprecation_notice),
             )
-            .route("/api/v2", get(heartbeat))
-            .route("/api/v2/healthcheck", get(healthcheck))
-            .route("/api/v2/heartbeat", get(heartbeat))
-            .route("/api/v2/pre-flight-checks", get(pre_flight_checks))
+            .merge(frontend_core::routes::system_router::<FrontendServer>())
             .route("/api/v2/reset", post(reset))
-            .route("/api/v2/version", get(version))
-            .route("/api/v2/auth/identity", get(get_user_identity))
             .route("/api/v2/collections/{crn}", get(get_collection_by_crn))
             .route(
                 "/api/v2/tenants/{tenant}/databases/{database}/collections/by-id/{collection_id}",
@@ -487,98 +476,38 @@ impl FrontendServer {
     }
 }
 
+#[async_trait]
+impl SystemState for FrontendServer {
+    async fn healthcheck(&self) -> HealthCheckResponse {
+        self.frontend.healthcheck().await
+    }
+
+    async fn heartbeat(&self) -> Result<HeartbeatResponse, ServerError> {
+        Ok(self.frontend.heartbeat().await?)
+    }
+
+    fn max_batch_size(&self) -> u32 {
+        self.frontend.clone().get_max_batch_size()
+    }
+
+    fn version(&self) -> String {
+        // TODO: Decide on how to handle versioning across python / rust frontend
+        // for now return a hardcoded version
+        "1.0.0".to_string()
+    }
+
+    fn auth(&self) -> &dyn AuthenticateAndAuthorize {
+        self.auth.as_ref()
+    }
+
+    fn system_metrics(&self) -> &SystemMetrics {
+        &self.metrics.system
+    }
+}
+
 ////////////////////////// Method Handlers //////////////////////////
 // These handlers simply proxy the call and the relevant inputs into
 // the appropriate method on the `FrontendServer` struct.
-
-/// Health check endpoint that returns 200 if the server and executor are ready
-/// Healthcheck
-/// Returns the health status of the service.
-#[utoipa::path(
-    get,
-    path = "/api/v2/healthcheck",
-    summary = "Healthcheck",
-    description = "Returns the health status of the service.",
-    tag = "System",
-    responses(
-        (status = 200, description = "Success", body = String, content_type = "application/json"),
-        (status = 503, description = "Service Unavailable", body = ErrorResponse),
-    ),
-    extensions(
-        ("x-codeSamples" = json!([]))
-    )
-)]
-async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoResponse {
-    server.metrics.healthcheck.add(1, &[]);
-    let res = server.frontend.healthcheck().await;
-    let code = match res.get_status_code() {
-        tonic::Code::Ok => StatusCode::OK,
-        _ => StatusCode::SERVICE_UNAVAILABLE,
-    };
-    (code, Json(res))
-}
-
-/// Heartbeat
-/// Returns a nanosecond timestamp of the current time.
-#[utoipa::path(
-    get,
-    path = "/api/v2/heartbeat",
-    summary = "Heartbeat",
-    description = "Returns a nanosecond timestamp of the current time.",
-    tag = "System",
-    responses(
-        (status = 200, description = "Success", body = HeartbeatResponse),
-        (status = 500, description = "Server error", body = ErrorResponse)
-    ),
-    extensions(
-        ("x-codeSamples" = json!([
-            {
-                "lang": "typescript",
-                "label": "Heartbeat",
-                "source": "const timestamp = await client.heartbeat();"
-            },
-            {
-                "lang": "python",
-                "label": "Heartbeat",
-                "source": "timestamp = client.heartbeat()"
-            },
-            {
-                "lang": "rust",
-                "label": "Heartbeat",
-                "source": "let timestamp = client.heartbeat().await?;"
-            }
-        ]))
-    )
-)]
-async fn heartbeat(
-    State(server): State<FrontendServer>,
-) -> Result<Json<HeartbeatResponse>, ServerError> {
-    server.metrics.heartbeat.add(1, &[]);
-    Ok(Json(server.frontend.heartbeat().await?))
-}
-
-/// Pre-flight checks
-/// Returns basic readiness information.
-#[utoipa::path(
-    get,
-    path = "/api/v2/pre-flight-checks",
-    summary = "Pre-flight checks",
-    description = "Returns basic readiness information.",
-    tag = "System",
-    responses(
-        (status = 200, description = "Pre flight checks", body = ChecklistResponse),
-        (status = 500, description = "Server error", body = ErrorResponse)
-    )
-)]
-async fn pre_flight_checks(
-    State(server): State<FrontendServer>,
-) -> Result<Json<ChecklistResponse>, ServerError> {
-    server.metrics.pre_flight_checks.add(1, &[]);
-    Ok(Json(ChecklistResponse {
-        max_batch_size: server.frontend.clone().get_max_batch_size(),
-        supports_base64_encoding: true,
-    }))
-}
 
 /// Reset database
 /// Resets the database. Requires authorization.
@@ -618,63 +547,6 @@ async fn reset(
         .await?;
     server.frontend.reset().await?;
     Ok(Json(true))
-}
-
-/// Get version
-/// Returns the version of the server.
-#[utoipa::path(
-    get,
-    path = "/api/v2/version",
-    summary = "Get version",
-    description = "Returns the version of the server.",
-    tag = "System",
-    responses(
-        (status = 200, description = "Get server version", body = String)
-    ),
-    extensions(
-        ("x-codeSamples" = json!([
-            {
-                "lang": "typescript",
-                "label": "Get version",
-                "source": "const version = await client.version();"
-            },
-            {
-                "lang": "python",
-                "label": "Get version",
-                "source": "version = client.get_version()"
-            }
-        ]))
-    )
-)]
-async fn version(State(server): State<FrontendServer>) -> Json<String> {
-    server.metrics.version.add(1, &[]);
-    // TODO: Decide on how to handle versioning across python / rust frontend
-    // for now return a hardcoded version
-    Json("1.0.0".to_string())
-}
-
-/// Get user identity
-/// Returns the current user's identity, tenant, and databases.
-#[utoipa::path(
-    get,
-    path = "/api/v2/auth/identity",
-    summary = "Get user identity",
-    description = "Returns the current user's identity, tenant, and databases.",
-    tag = "Authentication",
-    security(
-        ("ApiKeyAuth" = [])
-    ),
-    responses(
-        (status = 200, description = "User identity", body = GetUserIdentityResponse),
-        (status = 500, description = "Server error", body = ErrorResponse)
-    )
-)]
-async fn get_user_identity(
-    headers: HeaderMap,
-    State(server): State<FrontendServer>,
-) -> Result<Json<GetUserIdentityResponse>, ServerError> {
-    server.metrics.get_user_identity.add(1, &[]);
-    Ok(Json(server.auth.get_user_identity(&headers).await?))
 }
 
 #[derive(Deserialize, Debug, ToSchema)]
@@ -3446,12 +3318,12 @@ impl Modify for ChromaTokenSecurityAddon {
 #[derive(OpenApi)]
 #[openapi(
     paths(
-        healthcheck,
-        heartbeat,
-        pre_flight_checks,
+        frontend_core::routes::healthcheck,
+        frontend_core::routes::heartbeat,
+        frontend_core::routes::pre_flight_checks,
         reset,
-        version,
-        get_user_identity,
+        frontend_core::routes::version,
+        frontend_core::routes::get_user_identity,
         create_tenant,
         get_tenant,
         update_tenant,
