@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 import chromadb
 from chromadb.config import Settings, System
 from chromadb.api import ClientAPI
+from chromadb.api.rust import RustBindingsAPI
 import chromadb.server.fastapi
 from chromadb.api.fastapi import FastAPI
 import pytest
@@ -278,3 +279,17 @@ def test_client_close_idempotent() -> None:
         client.close()
 
         client.clear_system_cache()
+
+
+def test_rust_bindings_api_stop_closes_bindings() -> None:
+    """Test RustBindingsAPI.stop() closes the underlying Rust bindings."""
+    api = RustBindingsAPI.__new__(RustBindingsAPI)
+    bindings = MagicMock()
+    api.bindings = bindings
+    api._running = True
+
+    api.stop()
+
+    bindings.close.assert_called_once_with()
+    assert hasattr(api, "bindings") is False
+    assert api._running is False
