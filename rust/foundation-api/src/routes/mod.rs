@@ -4,5 +4,5 @@ use axum::{routing::post, Router};
 pub(crate) mod init;
 
 pub(crate) fn router() -> Router<FoundationApiServer> {
-    Router::new().route("/api/foundation/init", post(init::foundation_init))
+    Router::new().route("/api/init", post(init::foundation_init))
 }
