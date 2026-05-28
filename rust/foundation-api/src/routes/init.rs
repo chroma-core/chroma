@@ -41,7 +41,7 @@ pub async fn foundation_init(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
 ) -> Result<Json<FoundationInitResponse>, ServerError> {
-    let tenant = whoami_and_authorize(&*server.auth, &headers, AuthzAction::CreateDatabase).await?;
+    let tenant = whoami_and_authorize(&*server.auth, &headers, AuthzAction::InitFoundation).await?;
 
     let _guard =
         server.scorecard_request(&["op:foundation_init", &format!("tenant:{}", tenant)])?;
@@ -319,6 +319,7 @@ mod tests {
     /// `authenticate_and_authorize` so tests can assert on it.
     struct FakeAuth {
         tenant: String,
+        captured_action: Mutex<Option<AuthzAction>>,
         captured_resource: Mutex<Option<AuthzResource>>,
     }
 
@@ -326,6 +327,7 @@ mod tests {
         fn new(tenant: &str) -> Self {
             Self {
                 tenant: tenant.to_string(),
+                captured_action: Mutex::new(None),
                 captured_resource: Mutex::new(None),
             }
         }
@@ -343,10 +345,11 @@ mod tests {
         fn authenticate_and_authorize(
             &self,
             _headers: &axum::http::HeaderMap,
-            _action: AuthzAction,
+            action: AuthzAction,
             resource: AuthzResource,
         ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>>
         {
+            *self.captured_action.lock().unwrap() = Some(action);
             *self.captured_resource.lock().unwrap() = Some(resource);
             let identity = self.identity();
             Box::pin(ready(Ok(identity)))
@@ -440,11 +443,17 @@ mod tests {
         let fake = FakeAuth::new("team_abc");
         let headers = HeaderMap::new();
 
-        let tenant = whoami_and_authorize(&fake, &headers, AuthzAction::CreateDatabase)
+        let tenant = whoami_and_authorize(&fake, &headers, AuthzAction::InitFoundation)
             .await
             .expect("auth should succeed");
 
         assert_eq!(tenant, "team_abc");
+        let captured_action = fake
+            .captured_action
+            .lock()
+            .unwrap()
+            .expect("authenticate_and_authorize should have been called");
+        assert_eq!(captured_action, AuthzAction::InitFoundation);
         let captured = fake
             .captured_resource
             .lock()
