@@ -26,3 +26,6 @@ chroma-system = { workspace = true }
 chroma-types = { workspace = true, features = ["pyo3"] }
 chroma-error = { workspace = true, features = ["validator"] }
 chroma-cli = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

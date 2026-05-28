@@ -10,11 +10,15 @@ use chroma_frontend::{
     },
     Frontend, FrontendConfig,
 };
-use chroma_log::config::{LogConfig, SqliteLogConfig};
+use chroma_log::{
+    config::{LogConfig, SqliteLogConfig},
+    LocalCompactionManager,
+};
 use chroma_segment::local_segment_manager::LocalSegmentManagerConfig;
 use chroma_sqlite::config::SqliteDBConfig;
+use chroma_sqlite::db::SqliteDb;
 use chroma_sysdb::{SqliteSysDbConfig, SysDbConfig};
-use chroma_system::System;
+use chroma_system::{ComponentHandle, System};
 use chroma_types::{
     Collection, CollectionConfiguration, CollectionMetadataUpdate, CountCollectionsRequest,
     CountResponse, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, Database,
@@ -33,7 +37,11 @@ const DEFAULT_TENANT: &str = "default_tenant";
 #[pyclass]
 pub(crate) struct Bindings {
     runtime: tokio::runtime::Runtime,
+    system: System,
+    sqlite_db: SqliteDb,
+    compactor_handle: ComponentHandle<LocalCompactionManager>,
     frontend: Frontend,
+    closed: bool,
 }
 
 #[pyclass]
@@ -137,10 +145,23 @@ impl Bindings {
         };
 
         let frontend = runtime.block_on(async {
-            Frontend::try_from_config(&(frontend_config, system), &registry).await
+            Frontend::try_from_config(&(frontend_config, system.clone()), &registry).await
         })?;
+        let sqlite_db = registry.get::<SqliteDb>()?;
+        let compactor_handle = registry.get::<ComponentHandle<LocalCompactionManager>>()?;
 
-        Ok(Bindings { runtime, frontend })
+        Ok(Bindings {
+            runtime,
+            system,
+            sqlite_db,
+            compactor_handle,
+            frontend,
+            closed: false,
+        })
+    }
+
+    fn close(&mut self) {
+        self.shutdown();
     }
 
     /// Returns the current eopch time in ns
@@ -744,5 +765,92 @@ impl Bindings {
             .extract::<String>()
             .map_err(WrappedPyErr)?;
         Ok(version)
+    }
+}
+
+impl Bindings {
+    fn shutdown(&mut self) {
+        if self.closed {
+            return;
+        }
+        self.closed = true;
+        self.compactor_handle.stop();
+
+        self.runtime.block_on(async {
+            let _ = self.compactor_handle.join().await;
+            self.system.stop().await;
+            self.system.join().await;
+            self.sqlite_db.close().await;
+        });
+    }
+}
+
+impl Drop for Bindings {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chroma_sqlite::config::{MigrationHash, MigrationMode};
+    use tempfile::TempDir;
+
+    fn new_persistent_bindings() -> (TempDir, Bindings) {
+        let temp_dir = tempfile::tempdir().expect("temporary directory");
+        let persist_path = temp_dir
+            .path()
+            .to_str()
+            .expect("temporary path should be utf8")
+            .to_string();
+        let sqlite_path = temp_dir.path().join("chroma.sqlite3");
+        let sqlite_url = sqlite_path
+            .to_str()
+            .expect("sqlite path should be utf8")
+            .to_string();
+        let sqlite_db_config = SqliteDBConfig {
+            url: Some(sqlite_url),
+            hash_type: MigrationHash::MD5,
+            migration_mode: MigrationMode::Apply,
+        };
+        let bindings = Bindings::py_new(true, sqlite_db_config, 16, Some(persist_path))
+            .expect("persistent bindings");
+
+        (temp_dir, bindings)
+    }
+
+    #[test]
+    fn close_closes_sqlite_pool() {
+        let (temp_dir, mut bindings) = new_persistent_bindings();
+
+        bindings.close();
+
+        assert!(bindings.closed);
+        assert!(bindings.sqlite_db.get_conn().is_closed());
+        temp_dir.close().expect("persistent directory cleanup");
+    }
+
+    #[test]
+    fn close_is_idempotent() {
+        let (temp_dir, mut bindings) = new_persistent_bindings();
+
+        bindings.close();
+        bindings.close();
+
+        assert!(bindings.closed);
+        assert!(bindings.sqlite_db.get_conn().is_closed());
+        temp_dir.close().expect("persistent directory cleanup");
+    }
+
+    #[test]
+    fn drop_closes_sqlite_pool() {
+        let (temp_dir, bindings) = new_persistent_bindings();
+        let sqlite_db = bindings.sqlite_db.clone();
+
+        drop(bindings);
+
+        assert!(sqlite_db.get_conn().is_closed());
+        temp_dir.close().expect("persistent directory cleanup");
     }
 }

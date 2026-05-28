@@ -128,7 +128,12 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def stop(self) -> None:
-        del self.bindings
+        if hasattr(self, "bindings"):
+            close = getattr(self.bindings, "close", None)
+            if close is not None:
+                close()
+            del self.bindings
+        super().stop()
 
     # ////////////////////////////// Admin API //////////////////////////////
 
