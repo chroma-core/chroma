@@ -1,7 +1,7 @@
 use axum::{
     body::Bytes,
     extract::State,
-    http::{header, HeaderMap, StatusCode},
+    http::{header, HeaderMap},
     response::{IntoResponse, Response},
 };
 
@@ -100,12 +100,7 @@ pub(crate) async fn ask(
         "mullet upstream response relayed",
     );
 
-    // `reqwest::StatusCode` and `axum::http::StatusCode` are the same
-    // `http` crate type, so round-tripping via `from_u16` is lossless.
-    let axum_status =
-        StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-
-    let mut response = (axum_status, response_bytes).into_response();
+    let mut response = (status, response_bytes).into_response();
     if let Some(ct) = content_type {
         response.headers_mut().insert(header::CONTENT_TYPE, ct);
     }
@@ -121,7 +116,7 @@ mod tests {
     };
     use axum::{
         body::Body,
-        http::{Method, Request},
+        http::{Method, Request, StatusCode},
         routing::post,
         Router,
     };
