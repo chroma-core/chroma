@@ -32,3 +32,10 @@ pub const FUNCTION_HTTP_GENERATE_ID: Uuid = Uuid::from_bytes([
 ]);
 /// Name of the built-in http_generate function
 pub const FUNCTION_HTTP_GENERATE_NAME: &str = "http_generate";
+
+/// UUID for the built-in revision_history function
+pub const FUNCTION_REVISION_HISTORY_ID: Uuid = Uuid::from_bytes([
+    0x2d, 0xf4, 0x34, 0x2c, 0x5b, 0x5a, 0x49, 0xaa, 0x83, 0x45, 0xc4, 0x65, 0x03, 0xe8, 0x55, 0x09,
+]);
+/// Name of the built-in revision_history function
+pub const FUNCTION_REVISION_HISTORY_NAME: &str = "revision_history";

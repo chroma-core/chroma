@@ -15,13 +15,14 @@ use chroma_types::{
     AttachedFunction, Chunk, CollectionUuid, LogRecord, MaterializedLogOperation, Operation,
     OperationRecord, Segment, SegmentShard, SegmentShardError, UpdateMetadataValue,
     FUNCTION_DUMMY_ASYNC_ID, FUNCTION_HTTP_GENERATE_ID, FUNCTION_RECORD_COUNTER_ID,
-    FUNCTION_STATISTICS_ID,
+    FUNCTION_REVISION_HISTORY_ID, FUNCTION_STATISTICS_ID,
 };
 use std::sync::Arc;
 use thiserror::Error;
 
 use crate::execution::functions::{
-    CounterFunctionFactory, HttpGenerateExecutor, StatisticsFunctionExecutor,
+    CounterFunctionFactory, HttpGenerateExecutor, RevisionHistoryExecutor,
+    StatisticsFunctionExecutor,
 };
 use crate::execution::operators::materialize_logs::MaterializeLogOutput;
 
@@ -198,6 +199,15 @@ impl ExecuteAttachedFunctionOperator {
                             "HttpGenerateExecutor: {e}"
                         ))
                     })?;
+                Arc::new(executor)
+            }
+            FUNCTION_REVISION_HISTORY_ID => {
+                let executor = RevisionHistoryExecutor::from_attached_function(attached_function)
+                    .map_err(|e| {
+                    ExecuteAttachedFunctionError::ExecutorConfig(format!(
+                        "RevisionHistoryExecutor: {e}"
+                    ))
+                })?;
                 Arc::new(executor)
             }
             _ => {
