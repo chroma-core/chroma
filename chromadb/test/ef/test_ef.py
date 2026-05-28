@@ -120,3 +120,135 @@ def test_validation_context_with_custom_ef() -> None:
     expected_msg = f"{original_msg} in custom_ef_call."
     assert str(excinfo.value) == expected_msg
     assert excinfo.value.args == (expected_msg,)
+
+
+def _construct_ef(name: str, monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
+    """Construct one of the affected EFs, skipping if its SDK is unavailable."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setenv("COHERE_API_KEY", "test")
+    monkeypatch.setenv("MORPH_API_KEY", "test")
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "test")
+    monkeypatch.setenv("TOGETHER_API_KEY", "test")
+    monkeypatch.setenv("VOYAGE_API_KEY", "test")
+    monkeypatch.setenv("JINA_API_KEY", "test")
+    monkeypatch.setenv("HUGGINGFACE_API_KEY", "test")
+    monkeypatch.setenv("CLOUDFLARE_API_KEY", "test")
+    monkeypatch.setenv("CHROMA_CLOUDFLARE_ACCOUNT_ID", "test")
+
+    if name == "openai":
+        from chromadb.utils.embedding_functions.openai_embedding_function import (
+            OpenAIEmbeddingFunction,
+        )
+
+        return OpenAIEmbeddingFunction(model_name="text-embedding-3-small")
+    if name == "cohere":
+        from chromadb.utils.embedding_functions.cohere_embedding_function import (
+            CohereEmbeddingFunction,
+        )
+
+        return CohereEmbeddingFunction()
+    if name == "morph":
+        from chromadb.utils.embedding_functions.morph_embedding_function import (
+            MorphEmbeddingFunction,
+        )
+
+        return MorphEmbeddingFunction()
+    if name == "perplexity":
+        from chromadb.utils.embedding_functions.perplexity_embedding_function import (
+            PerplexityEmbeddingFunction,
+        )
+
+        return PerplexityEmbeddingFunction()
+    if name == "together_ai":
+        from chromadb.utils.embedding_functions.together_ai_embedding_function import (
+            TogetherAIEmbeddingFunction,
+        )
+
+        monkeypatch.setenv("CHROMA_TOGETHER_AI_API_KEY", "test")
+        return TogetherAIEmbeddingFunction(model_name="togethercomputer/m2-bert-80M-8k-retrieval")
+    if name == "voyageai":
+        from chromadb.utils.embedding_functions.voyageai_embedding_function import (
+            VoyageAIEmbeddingFunction,
+        )
+
+        return VoyageAIEmbeddingFunction()
+    if name == "jina":
+        from chromadb.utils.embedding_functions.jina_embedding_function import (
+            JinaEmbeddingFunction,
+        )
+
+        return JinaEmbeddingFunction()
+    if name == "huggingface":
+        from chromadb.utils.embedding_functions.huggingface_embedding_function import (
+            HuggingFaceEmbeddingFunction,
+        )
+
+        return HuggingFaceEmbeddingFunction()
+    if name == "cloudflare_workers_ai":
+        from chromadb.utils.embedding_functions.cloudflare_workers_ai_embedding_function import (  # noqa: E501
+            CloudflareWorkersAIEmbeddingFunction,
+        )
+
+        monkeypatch.setenv("CHROMA_CLOUDFLARE_API_KEY", "test")
+        return CloudflareWorkersAIEmbeddingFunction(
+            model_name="@cf/baai/bge-base-en-v1.5", account_id="test"
+        )
+    raise AssertionError(f"unknown EF name {name}")
+
+
+# Builtin EFs that historically rejected any update whose new config contained
+# model_name, even when the value was unchanged. Tracked by name to keep the
+# test parametrization stable when an SDK is missing locally.
+_EF_NAMES = [
+    "openai",
+    "cohere",
+    "morph",
+    "perplexity",
+    "together_ai",
+    "voyageai",
+    "jina",
+    "huggingface",
+    "cloudflare_workers_ai",
+]
+
+
+@pytest.mark.parametrize("name", _EF_NAMES)
+def test_validate_config_update_accepts_unchanged_model_name(
+    name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Updating an EF with the same model_name must not raise.
+
+    Regression test: previously these EFs raised
+    "The model name cannot be changed after the embedding function has been
+    initialized." whenever the new config contained model_name at all, even
+    when it matched the existing value. That made it impossible to update any
+    other field through `overwrite_embedding_function`, since `get_config()`
+    always includes model_name.
+    """
+    try:
+        ef = _construct_ef(name, monkeypatch)
+    except (ImportError, ValueError) as exc:
+        # ValueError covers EFs that re-raise ImportError as ValueError when
+        # an optional SDK is missing.
+        pytest.skip(f"{name} SDK not available: {exc}")
+
+    cfg = ef.get_config()
+    ef.validate_config_update(cfg, cfg)
+
+
+@pytest.mark.parametrize("name", _EF_NAMES)
+def test_validate_config_update_rejects_changed_model_name(
+    name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Changing the model_name must still raise."""
+    try:
+        ef = _construct_ef(name, monkeypatch)
+    except (ImportError, ValueError) as exc:
+        pytest.skip(f"{name} SDK not available: {exc}")
+
+    old_cfg = ef.get_config()
+    new_cfg = dict(old_cfg)
+    key = "model_name" if "model_name" in new_cfg else "model"
+    new_cfg[key] = "definitely-a-different-model"
+    with pytest.raises(ValueError, match="cannot be changed"):
+        ef.validate_config_update(old_cfg, new_cfg)

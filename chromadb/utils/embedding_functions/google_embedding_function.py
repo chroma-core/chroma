@@ -171,23 +171,38 @@ class GoogleGeminiEmbeddingFunction(EmbeddingFunction[Documents]):
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
-        if "model_name" in new_config:
+        if (
+            "model_name" in new_config
+            and new_config["model_name"] != old_config.get("model_name")
+        ):
             raise ValueError(
                 "The model name cannot be changed after the embedding function has been initialized."
             )
-        if "dimension" in new_config:
+        if (
+            "dimension" in new_config
+            and new_config["dimension"] != old_config.get("dimension")
+        ):
             raise ValueError(
                 "The dimension cannot be changed after the embedding function has been initialized."
             )
-        if "vertexai" in new_config:
+        if (
+            "vertexai" in new_config
+            and new_config["vertexai"] != old_config.get("vertexai")
+        ):
             raise ValueError(
                 "The vertexai cannot be changed after the embedding function has been initialized."
             )
-        if "project" in new_config:
+        if (
+            "project" in new_config
+            and new_config["project"] != old_config.get("project")
+        ):
             raise ValueError(
                 "The project cannot be changed after the embedding function has been initialized."
             )
-        if "location" in new_config:
+        if (
+            "location" in new_config
+            and new_config["location"] != old_config.get("location")
+        ):
             raise ValueError(
                 "The location cannot be changed after the embedding function has been initialized."
             )
@@ -340,15 +355,24 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
-        if "model_name" in new_config:
+        if (
+            "model_name" in new_config
+            and new_config["model_name"] != old_config.get("model_name")
+        ):
             raise ValueError(
                 "The model name cannot be changed after the embedding function has been initialized."
             )
-        if "task_type" in new_config:
+        if (
+            "task_type" in new_config
+            and new_config["task_type"] != old_config.get("task_type")
+        ):
             raise ValueError(
                 "The task type cannot be changed after the embedding function has been initialized."
             )
-        if "dimension" in new_config:
+        if (
+            "dimension" in new_config
+            and new_config["dimension"] != old_config.get("dimension")
+        ):
             raise ValueError(
                 "The dimension cannot be changed after the embedding function has been initialized."
             )
@@ -469,7 +493,10 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
-        if "model_name" in new_config:
+        if (
+            "model_name" in new_config
+            and new_config["model_name"] != old_config.get("model_name")
+        ):
             raise ValueError(
                 "The model name cannot be changed after the embedding function has been initialized."
             )
@@ -615,15 +642,24 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
-        if "model_name" in new_config:
+        if (
+            "model_name" in new_config
+            and new_config["model_name"] != old_config.get("model_name")
+        ):
             raise ValueError(
                 "The model name cannot be changed after the embedding function has been initialized."
             )
-        if "project_id" in new_config:
+        if (
+            "project_id" in new_config
+            and new_config["project_id"] != old_config.get("project_id")
+        ):
             raise ValueError(
                 "The project ID cannot be changed after the embedding function has been initialized."
             )
-        if "region" in new_config:
+        if (
+            "region" in new_config
+            and new_config["region"] != old_config.get("region")
+        ):
             raise ValueError(
                 "The region cannot be changed after the embedding function has been initialized."
             )
