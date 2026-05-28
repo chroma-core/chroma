@@ -53,9 +53,9 @@ pub struct FetchLogOperator {
     pub database_name: DatabaseName,
     pub fetch_log_concurrency: usize,
     pub fragment_fetcher: Option<Arc<FragmentFetcher>>,
-    /// Upper bound log offset scouted by the frontend. When > 0, the operator
-    /// uses this as the ceiling and skips its own ScoutLogs call.
-    pub log_upper_bound_offset: i64,
+    /// Exclusive upper bound on log offsets. When present, the operator uses
+    /// this as the ceiling and skips its own scout call.
+    pub log_upper_bound_offset: Option<u64>,
 }
 
 type FetchLogInput = ();
@@ -87,8 +87,8 @@ impl FetchLogOperator {
     #[tracing::instrument(skip(self))]
     async fn run_grpc_pull(&self) -> Result<FetchLogOutput, FetchLogError> {
         let mut log_client = self.log_client.clone();
-        let mut limit_offset = if self.log_upper_bound_offset > 0 {
-            self.log_upper_bound_offset as u64
+        let mut limit_offset = if let Some(log_upper_bound_offset) = self.log_upper_bound_offset {
+            log_upper_bound_offset
         } else {
             log_client
                 .scout_logs(
@@ -177,7 +177,9 @@ impl FetchLogOperator {
             )
             .await?;
 
-        let mut limit_offset = response.first_uninserted_record_offset;
+        let mut limit_offset = self
+            .log_upper_bound_offset
+            .unwrap_or(response.first_uninserted_record_offset);
         if let Some(maximum_fetch_count) = self.maximum_fetch_count {
             limit_offset = std::cmp::min(
                 limit_offset,
@@ -278,7 +280,7 @@ mod tests {
             database_name: chroma_types::DatabaseName::new("test-db").unwrap(),
             fetch_log_concurrency: 10,
             fragment_fetcher: None,
-            log_upper_bound_offset: 0,
+            log_upper_bound_offset: None,
         };
 
         let logs = fetch_log_operator
@@ -307,7 +309,7 @@ mod tests {
             database_name: chroma_types::DatabaseName::new("test-db").unwrap(),
             fetch_log_concurrency: 10,
             fragment_fetcher: None,
-            log_upper_bound_offset: 0,
+            log_upper_bound_offset: None,
         };
 
         let logs = fetch_log_operator
@@ -336,7 +338,7 @@ mod tests {
             database_name: chroma_types::DatabaseName::new("test-db").unwrap(),
             fetch_log_concurrency: 10,
             fragment_fetcher: None,
-            log_upper_bound_offset: 5,
+            log_upper_bound_offset: Some(5),
         };
 
         let logs = fetch_log_operator
@@ -365,7 +367,7 @@ mod tests {
             database_name: chroma_types::DatabaseName::new("test-db").unwrap(),
             fetch_log_concurrency: 10,
             fragment_fetcher: None,
-            log_upper_bound_offset: 7,
+            log_upper_bound_offset: Some(7),
         };
 
         let logs = fetch_log_operator
