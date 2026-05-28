@@ -1756,6 +1756,19 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 			return common.ErrCollectionSoftDeleted
 		}
 
+		// Lock only the collection row before touching segment rows. Fork's
+		// LockCollection takes locks in collection row -> collection metadata ->
+		// segment rows -> segment metadata order; flush must take the same first
+		// lock to avoid deadlocks with fork while preserving the existing write
+		// order below.
+		isDeleted, err := tc.metaDomain.CollectionDb(txCtx).LockCollectionRow(flushCollectionCompaction.ID.String())
+		if err != nil {
+			return err
+		}
+		if *isDeleted {
+			return common.ErrCollectionSoftDeleted
+		}
+
 		// register files to Segment metadata
 		err = tc.metaDomain.SegmentDb(txCtx).RegisterFilePaths(flushCollectionCompaction.FlushSegmentCompactions)
 		if err != nil {
@@ -2030,39 +2043,57 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 		var txErr error
 
 		executeOperations := func(ctx context.Context, tx *gorm.DB) error {
-			// NOTE: DO NOT move UpdateTenantLastCompactionTime & RegisterFilePaths to the end of the transaction.
-			//		 Keep both these operations before the UpdateLogPositionAndVersionInfo.
-			//       UpdateLogPositionAndVersionInfo acts as a CAS operation whose failure will roll back the transaction.
-			//       If order is changed, we can still potentially loose an update to Collection entry by
-			//       a concurrent transaction that updates Collection entry immediately after UpdateLogPositionAndVersionInfo completes.
-			// The other approach is to use a "SELECT FOR UPDATE" to lock the Collection entry at the start of the transaction,
-			// which is costlier than the current approach that does not lock the Collection entry.
-
 			// Create context with transaction if provided
 			if tx != nil {
 				ctx = dbcore.CtxWithTransaction(ctx, tx)
 			}
 
-			// register files to Segment metadata
-			err := tc.metaDomain.SegmentDb(ctx).RegisterFilePaths(flushCollectionCompaction.FlushSegmentCompactions)
+			// Lock only the collection row before touching segment rows. Fork's
+			// LockCollection takes locks in collection row -> collection metadata ->
+			// segment rows -> segment metadata order; flush must take the same first
+			// lock to avoid deadlocks with fork.
+			//
+			// Do not use LockCollection here. Flush only needs the collection row
+			// prelock; RegisterFilePaths below owns the segment row updates.
+			isDeleted, err := tc.metaDomain.CollectionDb(ctx).LockCollectionRow(flushCollectionCompaction.ID.String())
 			if err != nil {
 				return err
 			}
+			if *isDeleted {
+				return common.ErrCollectionSoftDeleted
+			}
+
+			// NOTE: Keep UpdateTenantLastCompactionTime and RegisterFilePaths
+			// before UpdateLogPositionAndVersionInfo. This preserves the
+			// historical write order while UpdateLogPositionAndVersionInfo remains
+			// the CAS operation whose failure rolls back the transaction.
+			//
+			// The explicit SELECT FOR UPDATE in LockCollectionRow above is the
+			// collection-row prelock that makes this path follow fork's lock order
+			// without changing the relative order of the writes below.
+
+			// register files to Segment metadata
+			err = tc.metaDomain.SegmentDb(ctx).RegisterFilePaths(flushCollectionCompaction.FlushSegmentCompactions)
+			if err != nil {
+				return err
+			}
+
+			lastCompactionTime := time.Now().Unix()
+
 			// update tenant last compaction time
 			// TODO: add a system configuration to disable
 			// since this might cause resource contention if one tenant has a lot of collection compactions at the same time
-			lastCompactionTime := time.Now().Unix()
 			err = tc.metaDomain.TenantDb(ctx).UpdateTenantLastCompactionTime(flushCollectionCompaction.TenantID, lastCompactionTime)
 			if err != nil {
 				return err
 			}
 
-			// At this point, a concurrent Transaction can still update/commit
-			// the Collection entry.
-			// Since this Tx is ReadCommitted, the result of other Tx will be
-			// visible to the statement below. Hence the statement below will
-			// use WHERE clause to ensure that its update will not go through
-			// if the Collection entry is updated by another Tx.
+			// A concurrent transaction that locked this collection row first may
+			// have committed before LockCollectionRow returned. Since this Tx is
+			// READ COMMITTED, the result of that Tx is visible to the statement
+			// below. Hence the statement below uses the WHERE clause to ensure
+			// that its update will not go through if the Collection entry is
+			// already updated by another Tx.
 
 			// Update collection log position and version
 			rowsAffected, err := tc.metaDomain.CollectionDb(ctx).UpdateLogPositionAndVersionInfo(
@@ -2088,9 +2119,6 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 				// Error out the transaction, so that segment is not updated.
 				return common.ErrCollectionEntryIsStale
 			}
-
-			// CAS operation succeeded. Update tenant compaction time and then
-			// COMMIT the transaction.
 
 			// Set the result values that will be returned to the Compactor.
 			flushCollectionInfo.TenantLastCompactionTime = lastCompactionTime
