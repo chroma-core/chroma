@@ -68,6 +68,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_VERSION_KEY: &str = "version";
 
+/// Minimal placeholder embedding required by the materialization pipeline.
+/// The output collection should have no index, so this is stored but never indexed.
+/// TODO: allow this to occur so indexing doesn't occur
+const PLACEHOLDER_EMBEDDING: [f32; 1] = [0.0];
+
 /// Composite ID for a revision record: `"{original_id}::v{version}"`.
 fn revision_id(original_id: &str, version: i64) -> String {
     format!("{original_id}::v{version}")
@@ -236,7 +241,7 @@ impl RevisionTracker {
             log_offset: 0,
             record: OperationRecord {
                 id: tracker_id(original_id),
-                embedding: None,
+                embedding: Some(PLACEHOLDER_EMBEDDING.to_vec()),
                 encoding: None,
                 metadata: Some(metadata),
                 document: None,
@@ -387,7 +392,7 @@ impl AttachedFunctionExecutor for RevisionHistoryExecutor {
                     log_offset: 0,
                     record: OperationRecord {
                         id: composite_id,
-                        embedding: None,
+                        embedding: Some(PLACEHOLDER_EMBEDDING.to_vec()),
                         encoding: None,
                         metadata: Some(rev_meta.into_update_metadata(None)),
                         document: None,
@@ -433,7 +438,7 @@ impl AttachedFunctionExecutor for RevisionHistoryExecutor {
                     log_offset: 0,
                     record: OperationRecord {
                         id: composite_id,
-                        embedding: None,
+                        embedding: Some(PLACEHOLDER_EMBEDDING.to_vec()),
                         encoding: None,
                         metadata: Some(rev_meta.into_update_metadata(Some(&merged_metadata))),
                         document,
@@ -542,12 +547,9 @@ mod tests {
         hydrated_records
     }
 
-    /// Build a tracker record with a dummy embedding, suitable for seeding a TestDistributedSegment
-    /// (which requires embeddings for materialization).
+    /// Build a tracker record suitable for seeding a TestDistributedSegment.
     fn build_seed_tracker(original_id: &str, tracker: &RevisionTracker) -> LogRecord {
-        let mut record = tracker.to_log_record(original_id);
-        record.record.embedding = Some(vec![0.0]);
-        record
+        tracker.to_log_record(original_id)
     }
 
     fn find_record_by_id<'a>(output: &'a Chunk<LogRecord>, id: &str) -> Option<&'a LogRecord> {
@@ -598,7 +600,7 @@ mod tests {
         assert_eq!(record.record.id, "page-1::v0");
         assert_eq!(record.record.operation, Operation::Upsert);
         assert!(record.record.document.is_none());
-        assert!(record.record.embedding.is_none());
+        assert_eq!(record.record.embedding, Some(vec![0.0]));
 
         let metadata = record.record.metadata.unwrap();
         assert_eq!(
@@ -673,7 +675,7 @@ mod tests {
         );
         assert!(meta.get("archived_at").is_some());
         assert_eq!(rev1.record.document.as_deref(), Some("doc content"));
-        assert!(rev1.record.embedding.is_none());
+        assert_eq!(rev1.record.embedding, Some(vec![0.0]));
 
         // Check v0 tracker
         let tracker = find_record_by_id(&output, "page-1::v0").expect("page-1::v0 should exist");
@@ -805,7 +807,7 @@ mod tests {
         );
         assert_eq!(meta.get("version"), Some(&UpdateMetadataValue::Int(3)));
         assert!(tombstone.record.document.is_none());
-        assert!(tombstone.record.embedding.is_none());
+        assert_eq!(tombstone.record.embedding, Some(vec![0.0]));
 
         let tracker = find_record_by_id(&output, "page-1::v0").expect("tracker should exist");
         let tracker_meta = tracker.record.metadata.as_ref().unwrap();
