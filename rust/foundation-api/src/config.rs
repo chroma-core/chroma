@@ -52,6 +52,15 @@ pub struct FoundationConfig {
     /// attached function is invoked. Matches the chroma frontend default.
     #[serde(default = "FoundationConfig::default_min_records_for_invocation")]
     pub min_records_for_invocation: u64,
+    /// Base URL of the mullet backend that `/api/ask` (and future
+    /// `/api/{recall,brief}`) reverse-proxy to. Mirrors the dashboard-api
+    /// default so dev parity is automatic.
+    #[serde(default = "FoundationConfig::default_mullet_url")]
+    pub mullet_url: String,
+    /// Request timeout applied to the outbound mullet HTTP client. Matches
+    /// dashboard-api's 120s default.
+    #[serde(default = "FoundationConfig::default_mullet_timeout_secs")]
+    pub mullet_timeout_secs: u64,
 }
 
 impl FoundationConfig {
@@ -73,6 +82,12 @@ impl FoundationConfig {
     fn default_min_records_for_invocation() -> u64 {
         100
     }
+    fn default_mullet_url() -> String {
+        "https://mullet-mu.vercel.app".to_string()
+    }
+    fn default_mullet_timeout_secs() -> u64 {
+        120
+    }
 }
 
 impl Default for FoundationConfig {
@@ -85,6 +100,8 @@ impl Default for FoundationConfig {
             function_name: Self::default_function_name(),
             function_endpoint_url: None,
             min_records_for_invocation: Self::default_min_records_for_invocation(),
+            mullet_url: Self::default_mullet_url(),
+            mullet_timeout_secs: Self::default_mullet_timeout_secs(),
         }
     }
 }
