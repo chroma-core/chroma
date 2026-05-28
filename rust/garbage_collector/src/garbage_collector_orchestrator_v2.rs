@@ -46,7 +46,7 @@ use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use futures::TryStreamExt;
 use petgraph::algo::toposort;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::SystemTime;
 use thiserror::Error;
@@ -55,12 +55,6 @@ use tracing::Span;
 use wal3::LogPosition;
 
 use crate::mcmr::RegionsAndTopologies;
-
-#[derive(Debug, Clone)]
-enum AttachedFunctionOffset {
-    NotFetched,
-    Fetched(Option<u64>),
-}
 
 #[derive(Debug)]
 pub struct GarbageCollectorOrchestrator {
@@ -94,9 +88,6 @@ pub struct GarbageCollectorOrchestrator {
 
     num_files_deleted: u32,
     num_versions_deleted: u32,
-
-    attached_fn_completion_offset: AttachedFunctionOffset,
-    file_listing_complete: bool,
 
     enable_dangerous_option_to_ignore_min_versions_for_wal3: bool,
 }
@@ -153,9 +144,6 @@ impl GarbageCollectorOrchestrator {
 
             num_files_deleted: 0,
             num_versions_deleted: 0,
-
-            attached_fn_completion_offset: AttachedFunctionOffset::NotFetched,
-            file_listing_complete: false,
 
             enable_dangerous_option_to_ignore_min_versions_for_wal3,
             max_concurrent_list_files_operations_per_collection,
@@ -261,6 +249,51 @@ fn build_versions_to_mark(
                     database_id: collection_info.database_id.clone(),
                 })
             })())
+        })
+        .collect()
+}
+
+fn build_version_log_positions(
+    version_files: &HashMap<CollectionUuid, Arc<CollectionVersionFile>>,
+) -> Result<HashMap<CollectionUuid, BTreeMap<u64, i64>>, GarbageCollectorError> {
+    version_files
+        .iter()
+        .map(|(collection_id, version_file)| {
+            let version_history = version_file.version_history.as_ref().ok_or(
+                GarbageCollectorError::InvariantViolation(
+                    "Expected version file to contain version history".to_string(),
+                ),
+            )?;
+
+            let version_log_positions = version_history
+                .versions
+                .iter()
+                .filter_map(|version_info| {
+                    let collection_info = version_info.collection_info_mutable.as_ref()?;
+                    Some(
+                        collection_info
+                            .current_log_position
+                            .try_into()
+                            .map_err(|_| {
+                                GarbageCollectorError::InvariantViolation(
+                                    "Expected log offset to be unsigned".to_string(),
+                                )
+                            })
+                            .map(|log_position| (version_info.version, log_position)),
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .fold(BTreeMap::new(), |mut acc, (version, log_position)| {
+                    acc.entry(log_position)
+                        .and_modify(|existing_version: &mut i64| {
+                            *existing_version = (*existing_version).max(version);
+                        })
+                        .or_insert(version);
+                    acc
+                });
+
+            Ok::<_, GarbageCollectorError>((*collection_id, version_log_positions))
         })
         .collect()
 }
@@ -401,20 +434,17 @@ impl GarbageCollectorOrchestrator {
         self.version_files = output.version_files;
         self.graph = Some(output.graph.clone());
 
-        let task = wrap(
-            Box::new(ComputeVersionsToDeleteOperator {}),
-            ComputeVersionsToDeleteInput {
-                graph: output.graph,
-                soft_deleted_collections: self.soft_deleted_collections_to_gc.clone(),
-                cutoff_time: self.version_absolute_cutoff_time,
-                min_versions_to_keep: self.min_versions_to_keep,
+        let fetch_min_offset_task = wrap(
+            Box::new(FetchMinAttachedFunctionCompletionOffsetOperator::default()),
+            FetchMinAttachedFunctionCompletionOffsetInput {
+                sysdb_client: self.sysdb_client.clone(),
+                collection_ids: self.version_files.keys().cloned().collect(),
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
         );
-
         self.dispatcher()
-            .send(task, Some(Span::current()))
+            .send(fetch_min_offset_task, Some(Span::current()))
             .await
             .map_err(GarbageCollectorError::Channel)?;
         Ok(())
@@ -439,7 +469,6 @@ impl GarbageCollectorOrchestrator {
 
         self.versions_to_delete_output = Some(output.clone());
 
-        // First, mark versions as deleted in sysdb
         let versions_to_mark = build_versions_to_mark(&output.versions, &self.version_files)?;
 
         if !versions_to_mark.is_empty() {
@@ -452,20 +481,6 @@ impl GarbageCollectorOrchestrator {
         } else {
             tracing::debug!("No versions to mark for deletion in SysDb.");
         }
-
-        let fetch_min_offset_task = wrap(
-            Box::new(FetchMinAttachedFunctionCompletionOffsetOperator::default()),
-            FetchMinAttachedFunctionCompletionOffsetInput {
-                sysdb_client: self.sysdb_client.clone(),
-                collection_id: self.collection_id,
-            },
-            ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
-        );
-        self.dispatcher()
-            .send(fetch_min_offset_task, Some(Span::current()))
-            .await
-            .map_err(GarbageCollectorError::Channel)?;
 
         // Now, list files for each version
         let root_manager = self.root_manager.clone();
@@ -529,91 +544,17 @@ impl GarbageCollectorOrchestrator {
 
         tracing::debug!("Files listed for all versions.");
 
+        self.start_delete_unused_logs_operator(ctx).await?;
         self.start_delete_unused_files_operator(ctx).await?;
-        self.file_listing_complete = true;
-        self.try_start_delete_unused_logs_operator(ctx).await?;
-
         Ok(())
     }
 
-    async fn try_start_delete_unused_logs_operator(
+    async fn start_delete_unused_logs_operator(
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Result<(), GarbageCollectorError> {
-        if !self.ready_to_start_delete_unused_logs() {
-            return Ok(());
-        }
-
         let collections_to_destroy = self.soft_deleted_collections_to_gc.clone();
-        let mut collections_to_garbage_collect = HashMap::new();
-        let versions_to_delete = self.versions_to_delete_output.as_ref().ok_or(
-            GarbageCollectorError::InvariantViolation(
-                "Expected versions_to_delete_output to be set".to_string(),
-            ),
-        )?;
-
-        for (collection_id, versions) in &versions_to_delete.versions {
-            let Some(&min_version_to_keep) = versions
-                .iter()
-                .filter_map(|(version, action)| {
-                    (matches!(action, CollectionVersionAction::Keep) && *version > 0)
-                        .then_some(version)
-                })
-                .min()
-            else {
-                continue;
-            };
-            let version_file = self.version_files.get(collection_id).ok_or(
-                GarbageCollectorError::InvariantViolation(
-                    "Expected version file to be present".to_string(),
-                ),
-            )?;
-            let version_history = &version_file
-                .as_ref()
-                .version_history
-                .as_ref()
-                .ok_or(GarbageCollectorError::InvariantViolation(
-                    "Expected version file to contain version history".to_string(),
-                ))?
-                .versions;
-            let min_compaction_log_offset = version_history
-                .iter()
-                .find(|version_info| version_info.version == min_version_to_keep)
-                .ok_or(GarbageCollectorError::InvariantViolation(
-                    "Expected min kept version to be present in version history".to_string(),
-                ))?
-                .collection_info_mutable
-                .as_ref()
-                .ok_or(GarbageCollectorError::InvariantViolation(
-                    "Expected collection info to be present in version history".to_string(),
-                ))?
-                .current_log_position
-                .try_into()
-                .map_err(|_| {
-                    GarbageCollectorError::InvariantViolation(
-                        "Expected log offset to be unsigned".to_string(),
-                    )
-                })?;
-            // The minimum offset to keep is one after the minimum compaction offset.
-            let mut min_offset_to_keep = LogPosition::from_offset(min_compaction_log_offset) + 1u64;
-            // Attached functions may be behind compaction; clamp to the lowest
-            // completion_offset across live attached functions on this collection.
-            // TODO(tanujnay112): This needs to be changed when we support forking
-            // with functions. We would need to drop the assumption there is only
-            // one collection with an attached function in this fork tree and
-            // receive min_min_attached_fn_completion_offset for each collection
-            // in this forktree. That needs to be derived inline with where the
-            // fork tree is constructed.
-            if *collection_id == self.collection_id {
-                if let AttachedFunctionOffset::Fetched(Some(min_completion_offset)) =
-                    &self.attached_fn_completion_offset
-                {
-                    let attached_fn_floor = LogPosition::from_offset(*min_completion_offset) + 1u64;
-                    min_offset_to_keep = min_offset_to_keep.min(attached_fn_floor);
-                }
-            }
-            collections_to_garbage_collect.insert(*collection_id, min_offset_to_keep);
-        }
+        let collections_to_garbage_collect = self.compute_collections_to_garbage_collect()?;
 
         let task = wrap(
             Box::new(DeleteUnusedLogsOperator {
@@ -640,12 +581,58 @@ impl GarbageCollectorOrchestrator {
         Ok(())
     }
 
-    fn ready_to_start_delete_unused_logs(&self) -> bool {
-        self.file_listing_complete
-            && !matches!(
-                self.attached_fn_completion_offset,
-                AttachedFunctionOffset::NotFetched
-            )
+    fn compute_collections_to_garbage_collect(
+        &self,
+    ) -> Result<HashMap<CollectionUuid, LogPosition>, GarbageCollectorError> {
+        let mut collections_to_garbage_collect = HashMap::new();
+        let versions_to_delete = self.versions_to_delete_output.as_ref().ok_or(
+            GarbageCollectorError::InvariantViolation(
+                "Expected versions_to_delete_output to be set".to_string(),
+            ),
+        )?;
+
+        for (collection_id, versions) in &versions_to_delete.versions {
+            let version_file = self.version_files.get(collection_id).ok_or(
+                GarbageCollectorError::InvariantViolation(
+                    "Expected version file to be present".to_string(),
+                ),
+            )?;
+            let version_history = &version_file
+                .as_ref()
+                .version_history
+                .as_ref()
+                .ok_or(GarbageCollectorError::InvariantViolation(
+                    "Expected version file to contain version history".to_string(),
+                ))?
+                .versions;
+            // Derive the WAL floor from the earliest kept version that still
+            // has a known compaction log position.
+            let min_compaction_log_offset = version_history
+                .iter()
+                .filter_map(|version_info| {
+                    let action = versions.get(&version_info.version)?;
+                    if !matches!(action, CollectionVersionAction::Keep) {
+                        return None;
+                    }
+                    let collection_info = version_info.collection_info_mutable.as_ref()?;
+                    let log_offset: u64 = collection_info.current_log_position.try_into().ok()?;
+                    Some((version_info.version, log_offset))
+                })
+                .min_by_key(|(version, _)| *version)
+                .map(|(_, log_offset)| log_offset);
+            let Some(min_compaction_log_offset) = min_compaction_log_offset else {
+                tracing::debug!(
+                    collection_id = %collection_id,
+                    "Skipping log GC cutoff for collection because no kept version has collection_info_mutable"
+                );
+                continue;
+            };
+            // The minimum offset to keep is one after the minimum compaction offset.
+            let min_offset_to_keep = LogPosition::from_offset(min_compaction_log_offset) + 1u64;
+            collections_to_garbage_collect.insert(*collection_id, min_offset_to_keep);
+        }
+
+        Ok(collections_to_garbage_collect)
     }
 
     async fn handle_list_files_at_version_output(
@@ -1197,12 +1184,47 @@ impl
             None => return,
         };
         tracing::debug!(
-            min_completion_offset = ?output.min_completion_offset,
-            "Fetched min attached function completion offset"
+            min_completion_offsets = ?output.min_completion_offsets,
+            "Fetched min attached function completion offsets"
         );
-        self.attached_fn_completion_offset =
-            AttachedFunctionOffset::Fetched(output.min_completion_offset);
-        let res = self.try_start_delete_unused_logs_operator(ctx).await;
+        let graph = self
+            .graph
+            .clone()
+            .ok_or(GarbageCollectorError::InvariantViolation(
+                "Expected graph to be set".to_string(),
+            ));
+        let version_log_positions = build_version_log_positions(&self.version_files);
+
+        let res = match (graph, version_log_positions) {
+            (Ok(graph), Ok(version_log_positions)) => {
+                let task = wrap(
+                    Box::new(ComputeVersionsToDeleteOperator {}),
+                    ComputeVersionsToDeleteInput {
+                        graph,
+                        soft_deleted_collections: self.soft_deleted_collections_to_gc.clone(),
+                        cutoff_time: self.version_absolute_cutoff_time,
+                        min_versions_to_keep: self.min_versions_to_keep,
+                        min_attached_function_completion_offsets: output
+                            .min_completion_offsets
+                            .into_iter()
+                            .filter_map(|(collection_id, min_completion_offset)| {
+                                min_completion_offset.map(|offset| (collection_id, offset))
+                            })
+                            .collect(),
+                        version_log_positions,
+                    },
+                    ctx.receiver(),
+                    self.context.task_cancellation_token.clone(),
+                );
+
+                self.dispatcher()
+                    .send(task, Some(Span::current()))
+                    .await
+                    .map_err(GarbageCollectorError::Channel)
+            }
+            (Err(err), _) => Err(err),
+            (_, Err(err)) => Err(err),
+        };
         self.ok_or_terminate(res, ctx).await;
     }
 }
@@ -1232,7 +1254,6 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
 #[cfg(test)]
 mod tests {
     use super::build_versions_to_mark;
-    use super::AttachedFunctionOffset;
     use super::GarbageCollectorError;
     use super::GarbageCollectorOrchestrator;
     use crate::operators::compute_versions_to_delete_from_graph::CollectionVersionAction;
@@ -1247,8 +1268,9 @@ mod tests {
     use chroma_system::{Dispatcher, Orchestrator, System};
     use chroma_types::{
         chroma_proto::{
-            CollectionInfoImmutable, CollectionSegmentInfo, CollectionVersionFile,
-            CollectionVersionHistory, CollectionVersionInfo, FilePaths, FlushSegmentCompactionInfo,
+            CollectionInfoImmutable, CollectionInfoMutable, CollectionSegmentInfo,
+            CollectionVersionFile, CollectionVersionHistory, CollectionVersionInfo, FilePaths,
+            FlushSegmentCompactionInfo,
         },
         CollectionUuid, Segment, SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid,
     };
@@ -1548,7 +1570,13 @@ mod tests {
                     vec![]
                 },
             }),
-            collection_info_mutable: None,
+            collection_info_mutable: Some(CollectionInfoMutable {
+                current_log_position: version,
+                current_collection_version: version,
+                updated_at_secs: 0,
+                dimension: 0,
+                last_compaction_time_secs: 0,
+            }),
             created_at_secs: 0,
             version_change_reason: 0,
             version_file_name: String::new(),
@@ -1640,50 +1668,6 @@ mod tests {
         let mut paths = file_paths.iter().collect::<Vec<_>>();
         paths.sort();
         paths
-    }
-
-    #[tokio::test]
-    async fn delete_unused_logs_gate_is_closed_when_neither_prerequisite_is_ready() {
-        let (_storage_dir, storage) = test_storage();
-        let mut orchestrator = test_orchestrator(storage, CollectionUuid::new());
-
-        orchestrator.file_listing_complete = false;
-        orchestrator.attached_fn_completion_offset = AttachedFunctionOffset::NotFetched;
-
-        assert!(!orchestrator.ready_to_start_delete_unused_logs());
-    }
-
-    #[tokio::test]
-    async fn delete_unused_logs_gate_is_closed_when_only_file_listing_is_complete() {
-        let (_storage_dir, storage) = test_storage();
-        let mut orchestrator = test_orchestrator(storage, CollectionUuid::new());
-
-        orchestrator.file_listing_complete = true;
-        orchestrator.attached_fn_completion_offset = AttachedFunctionOffset::NotFetched;
-
-        assert!(!orchestrator.ready_to_start_delete_unused_logs());
-    }
-
-    #[tokio::test]
-    async fn delete_unused_logs_gate_is_closed_when_only_attached_function_offset_is_fetched() {
-        let (_storage_dir, storage) = test_storage();
-        let mut orchestrator = test_orchestrator(storage, CollectionUuid::new());
-
-        orchestrator.file_listing_complete = false;
-        orchestrator.attached_fn_completion_offset = AttachedFunctionOffset::Fetched(Some(42));
-
-        assert!(!orchestrator.ready_to_start_delete_unused_logs());
-    }
-
-    #[tokio::test]
-    async fn delete_unused_logs_gate_opens_when_both_prerequisites_are_ready() {
-        let (_storage_dir, storage) = test_storage();
-        let mut orchestrator = test_orchestrator(storage, CollectionUuid::new());
-
-        orchestrator.file_listing_complete = true;
-        orchestrator.attached_fn_completion_offset = AttachedFunctionOffset::Fetched(None);
-
-        assert!(orchestrator.ready_to_start_delete_unused_logs());
     }
 
     #[tokio::test]

@@ -5,7 +5,7 @@ use chroma_system::{Operator, OperatorType};
 use chroma_types::CollectionUuid;
 use chrono::{DateTime, Utc};
 use petgraph::visit::Topo;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use thiserror::Error;
 
 #[derive(Clone, Debug)]
@@ -17,6 +17,8 @@ pub struct ComputeVersionsToDeleteInput {
     pub soft_deleted_collections: HashSet<CollectionUuid>,
     pub cutoff_time: DateTime<Utc>,
     pub min_versions_to_keep: u32,
+    pub min_attached_function_completion_offsets: HashMap<CollectionUuid, u64>,
+    pub version_log_positions: HashMap<CollectionUuid, BTreeMap<u64, i64>>,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -40,6 +42,8 @@ pub enum ComputeVersionsToDeleteError {
     ParseError(#[from] prost::DecodeError),
     #[error("Graph is missing expected node")]
     MissingVersionGraphNode,
+    #[error("Version log positions missing for collection {0}")]
+    MissingVersionLogPositionsForCollection(CollectionUuid),
 }
 
 impl ChromaError for ComputeVersionsToDeleteError {
@@ -86,16 +90,42 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
             }
         }
 
-        for (_, versions) in versions_by_collection
+        for (collection_id, versions) in versions_by_collection
             .iter_mut()
             .filter(|(collection_id, _)| !input.soft_deleted_collections.contains(collection_id))
         {
-            for (version, created_at, mode) in versions
-                .iter_mut()
-                .rev()
-                .skip(input.min_versions_to_keep as usize)
-            {
-                if *created_at < input.cutoff_time {
+            let min_completion_offset = input
+                .min_attached_function_completion_offsets
+                .get(collection_id)
+                .copied();
+            let fn_protected_version = if let Some(min_completion_offset) = min_completion_offset {
+                let version_log_positions = input.version_log_positions.get(collection_id).ok_or(
+                    ComputeVersionsToDeleteError::MissingVersionLogPositionsForCollection(
+                        *collection_id,
+                    ),
+                )?;
+                // Pick the latest version at or below the attached
+                // function's completion floor.
+                version_log_positions
+                    .range(..=min_completion_offset)
+                    .next_back()
+                    .map(|(_, version)| *version)
+            } else {
+                None
+            };
+
+            for (i, (version, created_at, mode)) in versions.iter_mut().rev().enumerate() {
+                if fn_protected_version == Some(*version) {
+                    tracing::debug!(
+                        collection_id = %collection_id,
+                        protected_version = *version,
+                        min_completion_offset,
+                        "Keeping version <= attached function completion offset"
+                    );
+                    *mode = CollectionVersionAction::Keep;
+                } else if i >= input.min_versions_to_keep as usize
+                    && *created_at < input.cutoff_time
+                {
                     tracing::debug!(
                         version = *version,
                         created_at = %created_at,
@@ -217,6 +247,8 @@ mod tests {
             cutoff_time: now - Duration::hours(6),
             min_versions_to_keep: 1,
             soft_deleted_collections: HashSet::new(),
+            min_attached_function_completion_offsets: HashMap::new(),
+            version_log_positions: HashMap::new(),
         };
 
         let mut result = ComputeVersionsToDeleteOperator {}
@@ -330,6 +362,8 @@ mod tests {
             cutoff_time: now - Duration::hours(6),
             min_versions_to_keep: 1,
             soft_deleted_collections: HashSet::new(),
+            min_attached_function_completion_offsets: HashMap::new(),
+            version_log_positions: HashMap::new(),
         };
 
         let mut result = ComputeVersionsToDeleteOperator {}
@@ -461,6 +495,8 @@ mod tests {
             cutoff_time: now - Duration::hours(6),
             min_versions_to_keep: 1,
             soft_deleted_collections: HashSet::from([b_collection_id]), // B was soft deleted
+            min_attached_function_completion_offsets: HashMap::new(),
+            version_log_positions: HashMap::new(),
         };
 
         let mut result = ComputeVersionsToDeleteOperator {}
@@ -501,5 +537,141 @@ mod tests {
         let mut c_versions = c_versions.into_iter().collect::<Vec<_>>();
         c_versions.sort_by_key(|(version, _)| *version);
         assert_eq!(c_versions, vec![(0, CollectionVersionAction::Keep)]);
+    }
+
+    #[tokio::test]
+    async fn test_compute_versions_to_delete_keeps_version_below_attached_function_floor() {
+        let now = Utc::now();
+        let collection_id = CollectionUuid::new();
+
+        let mut graph = VersionGraph::new();
+        let v0 = graph.add_node(VersionGraphNode {
+            collection_id,
+            version: 0,
+            status: VersionStatus::Alive {
+                created_at: now - Duration::hours(48),
+            },
+        });
+        let v90 = graph.add_node(VersionGraphNode {
+            collection_id,
+            version: 90,
+            status: VersionStatus::Alive {
+                created_at: now - Duration::hours(24),
+            },
+        });
+        let v100 = graph.add_node(VersionGraphNode {
+            collection_id,
+            version: 100,
+            status: VersionStatus::Alive {
+                created_at: now - Duration::hours(1),
+            },
+        });
+        graph.add_edge(v0, v90, ());
+        graph.add_edge(v90, v100, ());
+
+        let input = ComputeVersionsToDeleteInput {
+            graph,
+            cutoff_time: now - Duration::hours(6),
+            min_versions_to_keep: 1,
+            soft_deleted_collections: HashSet::new(),
+            min_attached_function_completion_offsets: HashMap::from([(collection_id, 95)]),
+            version_log_positions: HashMap::from([(
+                collection_id,
+                BTreeMap::from([(0, 0), (90, 90), (100, 100)]),
+            )]),
+        };
+
+        let mut result = ComputeVersionsToDeleteOperator {}
+            .run(&input)
+            .await
+            .unwrap();
+        let versions = result.versions.remove(&collection_id).unwrap();
+
+        assert_eq!(versions.get(&90), Some(&CollectionVersionAction::Keep));
+        assert_eq!(versions.get(&100), Some(&CollectionVersionAction::Keep));
+    }
+
+    #[tokio::test]
+    async fn test_compute_versions_to_delete_keeps_versions_for_multiple_collections() {
+        let now = Utc::now();
+        let collection_a = CollectionUuid::new();
+        let collection_b = CollectionUuid::new();
+
+        let mut graph = VersionGraph::new();
+        let a_v0 = graph.add_node(VersionGraphNode {
+            collection_id: collection_a,
+            version: 0,
+            status: VersionStatus::Alive {
+                created_at: now - Duration::hours(48),
+            },
+        });
+        let a_v90 = graph.add_node(VersionGraphNode {
+            collection_id: collection_a,
+            version: 90,
+            status: VersionStatus::Alive {
+                created_at: now - Duration::hours(24),
+            },
+        });
+        let a_v100 = graph.add_node(VersionGraphNode {
+            collection_id: collection_a,
+            version: 100,
+            status: VersionStatus::Alive {
+                created_at: now - Duration::hours(1),
+            },
+        });
+        graph.add_edge(a_v0, a_v90, ());
+        graph.add_edge(a_v90, a_v100, ());
+
+        let b_v0 = graph.add_node(VersionGraphNode {
+            collection_id: collection_b,
+            version: 0,
+            status: VersionStatus::Alive {
+                created_at: now - Duration::hours(48),
+            },
+        });
+        let b_v40 = graph.add_node(VersionGraphNode {
+            collection_id: collection_b,
+            version: 40,
+            status: VersionStatus::Alive {
+                created_at: now - Duration::hours(24),
+            },
+        });
+        let b_v50 = graph.add_node(VersionGraphNode {
+            collection_id: collection_b,
+            version: 50,
+            status: VersionStatus::Alive {
+                created_at: now - Duration::hours(1),
+            },
+        });
+        graph.add_edge(b_v0, b_v40, ());
+        graph.add_edge(b_v40, b_v50, ());
+
+        let input = ComputeVersionsToDeleteInput {
+            graph,
+            cutoff_time: now - Duration::hours(6),
+            min_versions_to_keep: 1,
+            soft_deleted_collections: HashSet::new(),
+            min_attached_function_completion_offsets: HashMap::from([
+                (collection_a, 95),
+                (collection_b, 45),
+            ]),
+            version_log_positions: HashMap::from([
+                (collection_a, BTreeMap::from([(0, 0), (90, 90), (100, 100)])),
+                (collection_b, BTreeMap::from([(0, 0), (40, 40), (50, 50)])),
+            ]),
+        };
+
+        let mut result = ComputeVersionsToDeleteOperator {}
+            .run(&input)
+            .await
+            .unwrap();
+
+        let a_versions = result.versions.remove(&collection_a).unwrap();
+        assert_eq!(a_versions.get(&90), Some(&CollectionVersionAction::Keep));
+        assert_eq!(a_versions.get(&100), Some(&CollectionVersionAction::Keep));
+
+        let b_versions = result.versions.remove(&collection_b).unwrap();
+        assert_eq!(b_versions.get(&40), Some(&CollectionVersionAction::Keep));
+        assert_eq!(b_versions.get(&50), Some(&CollectionVersionAction::Keep));
     }
 }

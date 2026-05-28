@@ -1,19 +1,20 @@
 #[cfg(test)]
 mod tests {
     use crate::garbage_collector_orchestrator_v2::GarbageCollectorOrchestrator;
-    use crate::helper::{setup_tilt_log, setup_tilt_storage, ChromaGrpcClients};
+    use crate::helper::{setup_tilt_log, setup_tilt_storage};
     use chroma_blockstore::RootManager;
     use chroma_cache::nop::NopCache;
     use chroma_config::registry::Registry;
     use chroma_log::Log;
-    use chroma_storage::GetOptions;
+    use chroma_storage::{GetOptions, PutOptions};
     use chroma_sysdb::{GetCollectionsOptions, TestSysDb};
     use chroma_system::{Dispatcher, Orchestrator, System};
     use chroma_types::{
         AttachedFunction, AttachedFunctionUuid, CollectionUuid, DatabaseName, Operation,
         OperationRecord, Segment, SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid,
+        USER_ID_BLOOM_FILTER,
     };
-    use chrono::DateTime;
+    use chrono::Utc;
     use std::{collections::HashMap, sync::Arc, time::SystemTime};
     use uuid::Uuid;
     use wal3::{Cursor, CursorName, CursorStore, CursorStoreOptions, LogPosition};
@@ -44,15 +45,34 @@ mod tests {
         }
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_k8s_integration_gc_preserves_logs_for_attached_function() {
-        let mut clients = match ChromaGrpcClients::new().await {
-            Ok(clients) => clients,
-            Err(err) => {
-                panic!("Skipping test: Tilt gRPC services not reachable: {err:?}. Is Tilt running?")
-            }
-        };
+    async fn assert_paths_exist(
+        storage: &chroma_storage::Storage,
+        paths: &[String],
+        message: &str,
+    ) {
+        for path in paths {
+            storage
+                .get(path, GetOptions::default())
+                .await
+                .unwrap_or_else(|_| panic!("{message}: missing {path}"));
+        }
+    }
 
+    async fn assert_paths_deleted(
+        storage: &chroma_storage::Storage,
+        paths: &[String],
+        message: &str,
+    ) {
+        for path in paths {
+            assert!(
+                storage.get(path, GetOptions::default()).await.is_err(),
+                "{message}: still found {path}"
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_k8s_integration_gc_preserves_version_floor_for_attached_function() {
         let registry = Registry::new();
         let storage = setup_tilt_storage(&registry)
             .await
@@ -127,16 +147,74 @@ mod tests {
         }
 
         let mut seed_logs = grpc_log.clone();
-        push_test_logs(&mut seed_logs, collection_id, &database, 100).await;
+        push_test_logs(&mut seed_logs, collection_id, &database, 60).await;
+        let first_compaction_offset = 50;
+        let first_version_paths = vec![
+            format!("gc-attached-functions/{collection_id}/v1/metadata.bin"),
+            format!("gc-attached-functions/{collection_id}/v1/postings.bin"),
+        ];
+        for path in &first_version_paths {
+            storage
+                .put_bytes(path, vec![1, 2, 3], PutOptions::default())
+                .await
+                .expect("first version file path should be written");
+        }
 
-        let state_before_compaction = clients
-            .inspect_log_state(collection_id, &database)
+        sysdb
+            .flush_compaction(
+                tenant.clone(),
+                database.clone(),
+                collection_id,
+                first_compaction_offset,
+                0,
+                Arc::new([SegmentFlushInfo {
+                    segment_id,
+                    file_paths: HashMap::from([(
+                        USER_ID_BLOOM_FILTER.to_string(),
+                        first_version_paths.clone(),
+                    )]),
+                }]),
+                60,
+                0,
+                None,
+            )
             .await
-            .expect("inspect_log_state should succeed");
-        let compaction_offset = state_before_compaction
-            .limit
-            .checked_sub(1)
-            .expect("log should contain at least one record");
+            .expect("first flush_compaction should succeed");
+
+        push_test_logs(&mut seed_logs, collection_id, &database, 60).await;
+        let second_compaction_offset = 110;
+        let second_version_paths = vec![
+            format!("gc-attached-functions/{collection_id}/v2/metadata.bin"),
+            format!("gc-attached-functions/{collection_id}/v2/postings.bin"),
+        ];
+        for path in &second_version_paths {
+            storage
+                .put_bytes(path, vec![4, 5, 6], PutOptions::default())
+                .await
+                .expect("second version file path should be written");
+        }
+
+        sysdb
+            .flush_compaction(
+                tenant.clone(),
+                database.clone(),
+                collection_id,
+                second_compaction_offset,
+                1,
+                Arc::new([SegmentFlushInfo {
+                    segment_id,
+                    file_paths: HashMap::from([(
+                        USER_ID_BLOOM_FILTER.to_string(),
+                        second_version_paths.clone(),
+                    )]),
+                }]),
+                120,
+                0,
+                None,
+            )
+            .await
+            .expect("second flush_compaction should succeed");
+
         let cursor_store = CursorStore::new(
             CursorStoreOptions::default(),
             Arc::new(storage.clone()),
@@ -147,36 +225,13 @@ mod tests {
             .init(
                 &CursorName::new("so_you_may_gc").expect("cursor name should be valid"),
                 Cursor {
-                    position: LogPosition::from_offset(compaction_offset),
-                    epoch_us: compaction_offset,
+                    position: LogPosition::from_offset(second_compaction_offset as u64),
+                    epoch_us: second_compaction_offset as u64,
                     writer: "test-writer".to_string(),
                 },
             )
             .await
             .expect("cursor should initialize");
-
-        let new_compaction_offset: i64 = 80;
-
-        sysdb
-            .flush_compaction(
-                tenant.clone(),
-                database.clone(),
-                collection_id,
-                new_compaction_offset,
-                0,
-                Arc::new([SegmentFlushInfo {
-                    segment_id,
-                    file_paths: HashMap::from([(
-                        "foo".to_string(),
-                        vec![uuid::Uuid::new_v4().to_string()],
-                    )]),
-                }]),
-                0,
-                0,
-                None,
-            )
-            .await
-            .expect("flush_compaction should succeed");
 
         let mut collections = sysdb
             .get_collections(GetCollectionsOptions {
@@ -187,25 +242,7 @@ mod tests {
             .expect("get_collections should succeed");
         let collection = collections.pop().expect("collection should exist");
 
-        let now = DateTime::from_timestamp(
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .expect("system time should be after epoch")
-                .as_secs() as i64,
-            0,
-        )
-        .expect("timestamp should be valid");
-
-        let fragment_prefix = format!("{}/log/", collection_id.storage_prefix_for_log());
-        let fragment_count_before_first_gc = storage
-            .list_prefix(&fragment_prefix, GetOptions::default())
-            .await
-            .expect("list_prefix before first GC should succeed")
-            .len();
-        assert!(
-            fragment_count_before_first_gc > 0,
-            "expected WAL fragments before first GC"
-        );
+        let now = Utc::now();
 
         let orchestrator = GarbageCollectorOrchestrator::new(
             collection_id,
@@ -236,47 +273,29 @@ mod tests {
             .await
             .expect("first GC run should succeed");
 
-        let state_after_first_gc = clients
-            .inspect_log_state(collection_id, &database)
+        assert_paths_exist(
+            &storage,
+            &first_version_paths,
+            "first GC should preserve the first compacted version while the attached function is behind",
+        )
+        .await;
+        assert_paths_exist(
+            &storage,
+            &second_version_paths,
+            "first GC should keep the current compacted version",
+        )
+        .await;
+
+        let first_gc_versions = sysdb
+            .list_collection_versions(collection_id)
             .await
-            .expect("inspect_log_state should succeed");
-        assert_eq!(
-            state_after_first_gc.start, 51,
-            "first GC should keep logs starting at offset 51 while the attached function is behind"
-        );
-        let mut read_logs = grpc_log.clone();
-        let read_from_50 = read_logs
-            .read("test_tenant", database.clone(), collection_id, 50, 2, None)
-            .await;
+            .expect("list_collection_versions after first GC should succeed");
         assert!(
-            read_from_50.is_err(),
-            "offset 50 should no longer be readable after the first GC pass"
+            first_gc_versions.iter().any(|version| version.version == 1),
+            "first GC should retain the first compacted version in version history"
         );
 
-        let read_from_51 = read_logs
-            .read("test_tenant", database.clone(), collection_id, 51, 1, None)
-            .await
-            .expect("read from offset 51 should succeed");
-        assert_eq!(
-            read_from_51.first().map(|r| r.log_offset),
-            Some(51),
-            "offset 51 should remain readable after the first GC pass"
-        );
-
-        let fragment_count_after_first_gc = storage
-            .list_prefix(&fragment_prefix, GetOptions::default())
-            .await
-            .expect("list_prefix after first GC should succeed")
-            .len();
-        assert!(
-            fragment_count_after_first_gc < fragment_count_before_first_gc,
-            "first GC should delete some WAL fragments: before={} after={}",
-            fragment_count_before_first_gc,
-            fragment_count_after_first_gc
-        );
-
-        // Attached function is ahead of compaction now.
-        let new_completion_offset = new_compaction_offset + 4;
+        let new_completion_offset = second_compaction_offset + 4;
 
         let finish_request =
             chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationRequest {
@@ -300,7 +319,7 @@ mod tests {
             None,
             now,
             now,
-            sysdb,
+            sysdb.clone(),
             dispatcher_handle,
             system.clone(),
             storage.clone(),
@@ -319,26 +338,28 @@ mod tests {
             .await
             .expect("second GC run should succeed");
 
-        let state_after_second_gc = clients
-            .inspect_log_state(collection_id, &database)
-            .await
-            .expect("inspect_log_state should succeed");
-        assert_eq!(
-            state_after_second_gc.start,
-            (new_compaction_offset + 1) as u64,
-            "once the attached function catches up, GC should advance to the compaction boundary"
-        );
+        assert_paths_deleted(
+            &storage,
+            &first_version_paths,
+            "second GC should delete the first compacted version once the attached function catches up",
+        )
+        .await;
+        assert_paths_exist(
+            &storage,
+            &second_version_paths,
+            "second GC should keep the current compacted version",
+        )
+        .await;
 
-        let fragment_count_after_second_gc = storage
-            .list_prefix(&fragment_prefix, GetOptions::default())
+        let second_gc_versions = sysdb
+            .list_collection_versions(collection_id)
             .await
-            .expect("list_prefix after second GC should succeed")
-            .len();
+            .expect("list_collection_versions after second GC should succeed");
         assert!(
-            fragment_count_after_second_gc < fragment_count_after_first_gc,
-            "second GC should delete additional WAL fragments: first={} second={}",
-            fragment_count_after_first_gc,
-            fragment_count_after_second_gc
+            second_gc_versions
+                .iter()
+                .all(|version| version.version != 1),
+            "second GC should delete the first compacted version from version history"
         );
 
         system.stop().await;
