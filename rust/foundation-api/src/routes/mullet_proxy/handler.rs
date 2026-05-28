@@ -6,8 +6,7 @@ use axum::{
 };
 
 use crate::{
-    auth::{AuthzAction, AuthzResource},
-    errors::ServerError,
+    auth::AuthzAction, errors::ServerError, routes::whoami::whoami_and_authorize,
     server::FoundationApiServer,
 };
 
@@ -23,34 +22,15 @@ use super::merge::merge_user;
 ///
 /// Mullet's status, `content-type`, and body bytes are relayed verbatim;
 /// mullet's own 4xx/5xx pass through unchanged. An upstream/network
-/// failure surfaces as 503 (the Rust `ChromaError` ladder has no 502,
-/// which is dashboard-api's choice).
+/// failure surfaces as 503.
 pub(crate) async fn ask(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
     body: Bytes,
 ) -> Result<Response, ServerError> {
-    // Two-step auth: resolve identity, then authorize against that tenant.
-    // The Cloud `authenticate_and_authorize` impl enforces
-    // `resource.tenant == identity.tenant` (403 on mismatch, including
-    // `tenant: None`). `init.rs::whoami_and_authorize` documents the same
-    // gotcha; inlined here because the proxy needs both `tenant` (for the
-    // scorecard tag) and `user_id` (to inject into the upstream body),
-    // and the existing helper only returns the tenant.
-    let identity = server.auth.get_user_identity(&headers).await?;
-    let tenant = identity.tenant.clone();
-    server
-        .auth
-        .authenticate_and_authorize(
-            &headers,
-            AuthzAction::ViewFoundation,
-            AuthzResource {
-                tenant: Some(tenant.clone()),
-                database: None,
-                collection: None,
-            },
-        )
-        .await?;
+    let identity =
+        whoami_and_authorize(&*server.auth, &headers, AuthzAction::ViewFoundation).await?;
+    let tenant = identity.tenant;
     let user_id = identity.user_id;
 
     let _guard = server.scorecard_request(&["op:foundation_ask", &format!("tenant:{}", tenant)])?;
@@ -111,7 +91,7 @@ pub(crate) async fn ask(
 mod tests {
     use super::*;
     use crate::{
-        auth::{AuthError, AuthenticateAndAuthorize},
+        auth::{AuthError, AuthenticateAndAuthorize, AuthzResource},
         config::FoundationApiConfig,
     };
     use axum::{

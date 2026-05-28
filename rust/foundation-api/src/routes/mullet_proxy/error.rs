@@ -5,10 +5,6 @@ use chroma_error::{ChromaError, ErrorCodes};
 /// existing `ChromaError` impls; this enum covers the two failure modes
 /// unique to the proxy itself: a body the proxy can't merge `user` into,
 /// and an upstream/mullet network failure.
-///
-/// Note: dashboard-api returns 502 for upstream failures, but the Rust
-/// `ChromaError` ladder has no 502 — `Unavailable` maps to 503. The
-/// divergence is intentional and called out in the PR.
 #[derive(Debug, thiserror::Error)]
 pub(super) enum MulletProxyError {
     #[error("invalid JSON body: {0}")]
