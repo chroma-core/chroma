@@ -1,0 +1,118 @@
+{{- if (and .Values.foundationService .Values.foundationService.enabled) -}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: foundation-server-config
+  namespace: {{ .Values.namespace }}
+data:
+  config.yaml: |
+{{ .Values.foundationService.configuration | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: foundation-server-deployment
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: {{ .Values.foundationService.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      app: foundation-server
+  template:
+    metadata:
+      namespace: {{ .Values.namespace }}
+      labels:
+        app: foundation-server
+    spec:
+      containers:
+        - name: foundation-server
+          image: "{{ .Values.foundationService.image.repository }}:{{ .Values.foundationService.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          {{- if .Values.foundationService.resources }}
+          resources:
+            requests:
+              cpu: {{ .Values.foundationService.resources.requests.cpu }}
+              memory: {{ .Values.foundationService.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.foundationService.resources.limits.cpu }}
+              memory: {{ .Values.foundationService.resources.limits.memory }}
+          {{- end }}
+          ports:
+            - containerPort: {{ .Values.foundationService.port | default 8000 }}
+              name: http
+          readinessProbe:
+            periodSeconds: 1
+            failureThreshold: 30 # 30 seconds to allow for initial startup
+            httpGet:
+              port: {{ .Values.foundationService.port | default 8000 }}
+              path: /api/v2/healthcheck
+          livenessProbe:
+            periodSeconds: 10
+            failureThreshold: 3
+            httpGet:
+              port: {{ .Values.foundationService.port | default 8000 }}
+              path: /api/v2/healthcheck
+          env:
+            - name: CONFIG_PATH
+              value: "/config/config.yaml"
+            {{- with .Values.foundationService.env }}
+{{ toYaml . | indent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: foundation-server-config
+              mountPath: /config/
+      {{- with .Values.foundationService.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.foundationService.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.foundationService.affinity }}
+      affinity:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      volumes:
+        - name: foundation-server-config
+          configMap:
+            name: foundation-server-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: foundation-server
+  namespace: {{ .Values.namespace }}
+spec:
+  ports:
+    - name: http
+      port: {{ .Values.foundationService.port | default 8000 }}
+      targetPort: http
+  selector:
+    app: foundation-server
+  type: ClusterIP
+{{- with .Values.foundationService.ingress }}
+{{- if .host }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: foundation-server-ingress
+  namespace: {{ $.Values.namespace }}
+spec:
+  ingressClassName: haproxy
+  rules:
+    - host: {{ .host }}
+      http:
+        paths:
+          - path: "/"
+            pathType: Prefix
+            backend:
+              service:
+                name: foundation-server
+                port:
+                  number: {{ $.Values.foundationService.port | default 8000 }}
+{{- end }}
+{{- end }}
+{{- end -}}
