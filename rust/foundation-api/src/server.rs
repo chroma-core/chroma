@@ -53,11 +53,6 @@ pub struct FoundationApiServer {
     pub(crate) scorecard: Arc<Scorecard<'static>>,
     pub(crate) system: System,
     pub(crate) metrics: Arc<SystemMetrics>,
-    /// Shared outbound HTTP client used by reverse-proxy handlers
-    /// (currently `/api/ask` -> mullet). Carries a request timeout sourced
-    /// from `foundation.mullet_timeout_secs`. `reqwest::Client` is cheaply
-    /// cloneable (internal `Arc`), so it lives directly on the axum state
-    /// rather than behind another `Arc`.
     pub(crate) http_client: reqwest::Client,
 }
 
