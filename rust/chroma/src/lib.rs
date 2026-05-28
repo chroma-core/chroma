@@ -108,6 +108,7 @@ pub mod types;
 pub use client::ChromaHttpClient;
 pub use client::ChromaHttpClientOptions;
 pub use collection::ChromaCollection;
+pub use collection::IntoOptionalEmbeddings;
 
 #[cfg(test)]
 mod tests {

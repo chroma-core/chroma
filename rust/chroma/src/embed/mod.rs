@@ -13,6 +13,8 @@ use std::{
 pub mod bm25;
 /// Text tokenization utilities for BM25.
 pub mod bm25_tokenizer;
+/// Chroma Cloud embedding function implementations.
+pub mod chroma_cloud;
 /// MurmurHash3 absolute value hasher for token hashing.
 pub mod murmur3_abs_hasher;
 #[cfg(feature = "ollama")]
@@ -72,6 +74,18 @@ pub trait EmbeddingFunction: Send + Sync + 'static {
     /// # }
     /// ```
     async fn embed_strs(&self, batches: &[&str]) -> Result<Vec<Self::Embedding>, Self::Error>;
+
+    /// Converts query strings into embedding representations.
+    ///
+    /// Embedding models may choose to encode documents and queries differently. Implementations
+    /// that do not need separate query behavior can rely on the default, which delegates to
+    /// [`embed_strs`](Self::embed_strs).
+    async fn embed_query_strs(
+        &self,
+        batches: &[&str],
+    ) -> Result<Vec<Self::Embedding>, Self::Error> {
+        self.embed_strs(batches).await
+    }
 }
 
 /// Generic tokenizer interface for text processing.
