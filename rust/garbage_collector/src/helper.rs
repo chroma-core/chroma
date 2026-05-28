@@ -8,12 +8,11 @@ use chroma_system::System;
 use chroma_types::chroma_proto::log_service_client::LogServiceClient;
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::chroma_proto::{
-    CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, InspectLogStateRequest,
-    InspectLogStateResponse, ListCollectionVersionsRequest, ListCollectionVersionsResponse,
-    OperationRecord, PushLogsRequest, Segment, SegmentScope, Vector,
+    CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest,
+    ListCollectionVersionsRequest, ListCollectionVersionsResponse, OperationRecord,
+    PushLogsRequest, Segment, SegmentScope, Vector,
 };
 use chroma_types::InternalCollectionConfiguration;
-use chroma_types::{CollectionUuid, DatabaseName};
 use std::time::Duration;
 use tonic::transport::Channel;
 use uuid::Uuid;
@@ -37,20 +36,6 @@ impl ChromaGrpcClients {
             sysdb: SysDbClient::new(sysdb_channel),
             log_service: LogServiceClient::new(logservice_channel),
         })
-    }
-
-    pub async fn inspect_log_state(
-        &mut self,
-        collection_id: CollectionUuid,
-        database_name: &DatabaseName,
-    ) -> Result<InspectLogStateResponse, tonic::Status> {
-        self.log_service
-            .inspect_log_state(InspectLogStateRequest {
-                collection_id: collection_id.to_string(),
-                database_name: database_name.clone().into_string(),
-            })
-            .await
-            .map(|response| response.into_inner())
     }
 
     pub async fn create_database_and_collection(

@@ -11,20 +11,20 @@ pub struct FetchMinAttachedFunctionCompletionOffsetOperator {}
 
 pub struct FetchMinAttachedFunctionCompletionOffsetInput {
     pub sysdb_client: SysDb,
-    pub collection_id: CollectionUuid,
+    pub collection_ids: Vec<CollectionUuid>,
 }
 
 impl Debug for FetchMinAttachedFunctionCompletionOffsetInput {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FetchMinAttachedFunctionCompletionOffsetInput")
-            .field("collection_id", &self.collection_id)
+            .field("collection_ids", &self.collection_ids)
             .finish_non_exhaustive()
     }
 }
 
 #[derive(Debug)]
 pub struct FetchMinAttachedFunctionCompletionOffsetOutput {
-    pub min_completion_offset: Option<u64>,
+    pub min_completion_offsets: std::collections::HashMap<CollectionUuid, Option<u64>>,
 }
 
 #[derive(Error, Debug)]
@@ -61,21 +61,25 @@ impl
         FetchMinAttachedFunctionCompletionOffsetOutput,
         FetchMinAttachedFunctionCompletionOffsetError,
     > {
-        // TODO(tanujny112): replace with a server-side MIN(completion_offset) aggregate so
-        // we don't pay to serialize every AttachedFunction row.
-        let attached_functions = input
-            .sysdb_client
-            .clone()
-            .list_attached_functions(input.collection_id)
-            .await?;
+        let mut min_completion_offsets = std::collections::HashMap::new();
+        for collection_id in &input.collection_ids {
+            // TODO(tanujnay112): replace with a server-side MIN(completion_offset)
+            // aggregate so we don't pay to serialize every AttachedFunction row.
+            let attached_functions = input
+                .sysdb_client
+                .clone()
+                .list_attached_functions(*collection_id)
+                .await?;
 
-        let min_completion_offset = attached_functions
-            .iter()
-            .map(|af| af.completion_offset)
-            .min();
+            let min_completion_offset = attached_functions
+                .iter()
+                .map(|af| af.completion_offset)
+                .min();
+            min_completion_offsets.insert(*collection_id, min_completion_offset);
+        }
 
         Ok(FetchMinAttachedFunctionCompletionOffsetOutput {
-            min_completion_offset,
+            min_completion_offsets,
         })
     }
 }
@@ -127,11 +131,14 @@ mod tests {
 
         let input = FetchMinAttachedFunctionCompletionOffsetInput {
             sysdb_client: sysdb,
-            collection_id,
+            collection_ids: vec![collection_id],
         };
 
         let output = operator.run(&input).await.unwrap();
-        assert_eq!(output.min_completion_offset, None);
+        assert_eq!(
+            output.min_completion_offsets.get(&collection_id),
+            Some(&None)
+        );
     }
 
     #[tokio::test]
@@ -171,11 +178,14 @@ mod tests {
         let operator = FetchMinAttachedFunctionCompletionOffsetOperator::default();
         let input = FetchMinAttachedFunctionCompletionOffsetInput {
             sysdb_client: sysdb,
-            collection_id,
+            collection_ids: vec![collection_id],
         };
 
         let output = operator.run(&input).await.unwrap();
-        assert_eq!(output.min_completion_offset, Some(80));
+        assert_eq!(
+            output.min_completion_offsets.get(&collection_id),
+            Some(&Some(80))
+        );
     }
 
     #[tokio::test]
@@ -201,10 +211,69 @@ mod tests {
         let operator = FetchMinAttachedFunctionCompletionOffsetOperator::default();
         let input = FetchMinAttachedFunctionCompletionOffsetInput {
             sysdb_client: sysdb,
-            collection_id: target_collection, // Different from where function is attached
+            collection_ids: vec![target_collection], // Different from where function is attached
         };
 
         let output = operator.run(&input).await.unwrap();
-        assert_eq!(output.min_completion_offset, None);
+        assert_eq!(
+            output.min_completion_offsets.get(&target_collection),
+            Some(&None)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_fetch_min_offset_multiple_collections() {
+        let collection_a = CollectionUuid::new();
+        let collection_b = CollectionUuid::new();
+
+        let mut test_sysdb = TestSysDb::new();
+        let mut attached_functions = HashMap::new();
+        attached_functions.insert(
+            collection_a,
+            vec![create_test_attached_function(
+                AttachedFunctionUuid::new(),
+                "fn_a",
+                collection_a,
+                Some(CollectionUuid::new()),
+                42,
+            )],
+        );
+        attached_functions.insert(
+            collection_b,
+            vec![
+                create_test_attached_function(
+                    AttachedFunctionUuid::new(),
+                    "fn_b1",
+                    collection_b,
+                    Some(CollectionUuid::new()),
+                    100,
+                ),
+                create_test_attached_function(
+                    AttachedFunctionUuid::new(),
+                    "fn_b2",
+                    collection_b,
+                    Some(CollectionUuid::new()),
+                    75,
+                ),
+            ],
+        );
+        test_sysdb.set_attached_functions(attached_functions);
+        let sysdb = SysDb::Test(test_sysdb);
+
+        let operator = FetchMinAttachedFunctionCompletionOffsetOperator::default();
+        let input = FetchMinAttachedFunctionCompletionOffsetInput {
+            sysdb_client: sysdb,
+            collection_ids: vec![collection_a, collection_b],
+        };
+
+        let output = operator.run(&input).await.unwrap();
+        assert_eq!(
+            output.min_completion_offsets.get(&collection_a),
+            Some(&Some(42))
+        );
+        assert_eq!(
+            output.min_completion_offsets.get(&collection_b),
+            Some(&Some(75))
+        );
     }
 }
