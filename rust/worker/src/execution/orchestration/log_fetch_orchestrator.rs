@@ -22,8 +22,8 @@ use chroma_system::{
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    Chunk, CollectionUuid, JobId, LogRecord, SchemaMismatchError, SegmentFlushInfo, SegmentScope,
-    SegmentShard, SegmentShardError,
+    Chunk, CollectionUuid, JobId, LogRecord, MetadataValue, SchemaMismatchError, SegmentFlushInfo,
+    SegmentScope, SegmentShard, SegmentShardError,
 };
 use opentelemetry::trace::TraceContextExt;
 use std::sync::{atomic::AtomicU32, Arc};
@@ -46,7 +46,10 @@ use crate::{
                 MaterializeLogInput, MaterializeLogOperator, MaterializeLogOperatorError,
                 MaterializeLogOutput,
             },
-            partition_log::{PartitionError, PartitionInput, PartitionOperator, PartitionOutput},
+            partition_log::{
+                PartitionError, PartitionInput, PartitionOperator, PartitionOutput,
+                GROUP_CHUNK_SIBLINGS_METADATA_KEY,
+            },
             prefetch_segment::{
                 PrefetchSegmentError, PrefetchSegmentInput, PrefetchSegmentOperator,
                 PrefetchSegmentOutput,
@@ -383,7 +386,23 @@ impl LogFetchOrchestrator {
         self.state = ExecutionState::Partition;
         let operator = PartitionOperator::new();
         tracing::info!("Sending N Records: {:?}", records.len());
-        let input = PartitionInput::new(records, self.context.max_partition_size);
+        // Opt-in per collection: fold chunk siblings ({base}-{idx}) onto a
+        // shared base so they partition together and preserve per-document
+        // WAL order. Defaults to false when the collection (or its
+        // metadata) doesn't carry the flag.
+        let group_chunk_siblings = self
+            .context
+            .get_collection_info()
+            .ok()
+            .and_then(|info| info.collection.metadata.as_ref())
+            .and_then(|metadata| metadata.get(GROUP_CHUNK_SIBLINGS_METADATA_KEY))
+            .map(|value| matches!(value, MetadataValue::Bool(true)))
+            .unwrap_or(false);
+        let input = PartitionInput::new(
+            records,
+            self.context.max_partition_size,
+            group_chunk_siblings,
+        );
         let task = wrap(
             operator,
             input,
