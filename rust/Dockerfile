@@ -18,6 +18,7 @@ ENV RUSTFLAGS=${ADDRESS_SANITIZER:+'-Z sanitizer=address'}
 ENV CC_x86_64_unknown_linux_gnu=${ADDRESS_SANITIZER:+gcc}
 ENV CXX_x86_64_unknown_linux_gnu=${ADDRESS_SANITIZER:+g++}
 ENV AR_x86_64_unknown_linux_gnu=${ADDRESS_SANITIZER:+ar}
+ENV CARGO_INCREMENTAL=0
 
 WORKDIR /chroma
 
@@ -66,7 +67,7 @@ RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
   build_dir=$( [ "$RELEASE_MODE" = "1" ] && echo release || echo debug ) && \
   build_dir=$( [ "${ADDRESS_SANITIZER}" = "1" ] && echo "x86_64-unknown-linux-gnu/${build_dir}" || echo "${build_dir}" ) && \
   for bin in chroma garbage_collector_service chroma-load log_service heap_tender_service query_service compaction_service work_queue_service fn_consumer sysdb_service spanner_migration; do \
-  mv "target/${build_dir}/${bin}" "./${bin}"; \
+  cp "target/${build_dir}/${bin}" "./${bin}"; \
   done
 
 FROM debian:stable-slim AS runner
