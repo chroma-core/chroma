@@ -66,7 +66,7 @@ RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
   fi && \
   build_dir=$( [ "$RELEASE_MODE" = "1" ] && echo release || echo debug ) && \
   build_dir=$( [ "${ADDRESS_SANITIZER}" = "1" ] && echo "x86_64-unknown-linux-gnu/${build_dir}" || echo "${build_dir}" ) && \
-  for bin in chroma garbage_collector_service chroma-load log_service heap_tender_service query_service compaction_service work_queue_service fn_consumer sysdb_service spanner_migration foundation_service; do \
+  for bin in chroma garbage_collector_service chroma-load log_service heap_tender_service query_service compaction_service work_queue_service fn_consumer sysdb_service spanner_migration; do \
   cp "target/${build_dir}/${bin}" "./${bin}"; \
   done
 
