@@ -1,4 +1,6 @@
-use super::garbage_collector_reference::{CollectionStatus, ReferenceGarbageCollector};
+use super::garbage_collector_reference::{
+    CollectionStatus, ReferenceGarbageCollector, ReferenceState,
+};
 use super::proptest_types::SegmentIds;
 use crate::define_thread_local_stats;
 use crate::proptest_helpers::proptest_types::Transition;
@@ -19,11 +21,13 @@ use chrono::DateTime;
 use futures::StreamExt;
 use garbage_collector_library::garbage_collector_orchestrator_v2::GarbageCollectorOrchestrator;
 use garbage_collector_library::types::CleanupMode;
+use proptest::test_runner::Config;
 use proptest_state_machine::{ReferenceStateMachine, StateMachineTest};
 use prost::Message;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{self, AtomicUsize};
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Instant, SystemTime};
 use tokio::sync::OnceCell;
 use tracing::{Instrument, Span};
 use uuid::Uuid;
@@ -37,6 +41,8 @@ pub struct GarbageCollectorUnderTest {
     logs: Log,
     root_manager: RootManager,
     collection_id_to_segment_ids: HashMap<CollectionUuid, SegmentIds>,
+    tenant_prefix: String,
+    written_files: HashSet<String>,
 }
 
 impl Drop for GarbageCollectorUnderTest {
@@ -50,7 +56,7 @@ impl Drop for GarbageCollectorUnderTest {
 
             let files = self
                 .storage
-                .list_prefix("", GetOptions::default())
+                .list_prefix(&self.tenant_prefix, GetOptions::default())
                 .await
                 .unwrap();
             if files.is_empty() {
@@ -76,6 +82,162 @@ impl Drop for GarbageCollectorUnderTest {
 // The S3 client is a bit expensive to construct, so we cache it since the config is identical across all test cases.
 static STORAGE_ONCE: OnceCell<Storage> = OnceCell::const_new();
 
+impl GarbageCollectorUnderTest {
+    fn check_expensive_invariants(state: &Self, ref_state: &ReferenceState) {
+        ref_state.check_invariants();
+
+        let expected_versions_by_collection = ref_state.expected_versions_by_collection();
+
+        ref_state.runtime.block_on({
+            let mut sysdb = state.sysdb.clone();
+            let storage = state.storage.clone();
+
+            async move {
+                let collection_statuses = sysdb
+                    .batch_get_collection_soft_delete_status(
+                        None,
+                        ref_state.collection_status.keys().cloned().collect(),
+                    )
+                    .await
+                    .unwrap();
+                for (collection_id, status) in ref_state.collection_status.iter() {
+                    match status {
+                        CollectionStatus::Deleted => {
+                            assert!(
+                                !collection_statuses.contains_key(collection_id),
+                                "Collection {} is supposed to be hard deleted, but still exists in the sysdb. Is soft deleted: {:?}",
+                                collection_id,
+                                collection_statuses.get(collection_id)
+                            );
+                        }
+                        CollectionStatus::Alive => match collection_statuses.get(collection_id) {
+                            Some(&true) => {
+                                panic!("Collection {} is supposed to be alive, but is marked as soft deleted in the sysdb.", collection_id);
+                            }
+                            Some(&false) => {
+                                // Expected case
+                            }
+                            None => {
+                                panic!("Collection {} is supposed to be alive, but does not exist in the sysdb.", collection_id);
+                            }
+                        },
+                        CollectionStatus::SoftDeleted => {
+                            match collection_statuses.get(collection_id) {
+                                Some(&true) => {
+                                    // Expected case
+                                }
+                                Some(&false) => {
+                                    panic!("Collection {} is supposed to be soft deleted, but is marked as alive in the sysdb.", collection_id);
+                                }
+                                None => {
+                                    panic!("Collection {} is supposed to be soft deleted, but does not exist in the sysdb.", collection_id);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                futures::stream::iter(expected_versions_by_collection)
+                    .map(move |(collection_id, expected_versions)| {
+                        let mut sysdb = sysdb.clone();
+                        let storage = storage.clone();
+
+                        async move {
+                            let collections = sysdb
+                                .get_collections(GetCollectionsOptions {
+                                    collection_id: Some(collection_id),
+                                    ..Default::default()
+                                })
+                                .await
+                                .unwrap();
+
+                            let collection = collections.first().unwrap_or_else(|| {
+                                panic!(
+                                    "Collection {} is expected to be alive with versions {:?}, but does not exist in sysdb.",
+                                    collection_id, expected_versions
+                                )
+                            });
+                            let version_file_path = collection.version_file_path.as_ref().unwrap();
+                            tracing::trace!(
+                                "Version file path for collection {}: {}",
+                                collection_id,
+                                version_file_path
+                            );
+
+                            let version_file = storage
+                                .get(version_file_path, GetOptions::default())
+                                .await
+                                .unwrap();
+                            let version_file =
+                                CollectionVersionFile::decode(version_file.as_slice()).unwrap();
+
+                            let versions = version_file
+                                .version_history
+                                .as_ref()
+                                .unwrap()
+                                .versions
+                                .iter()
+                                .map(|v| v.version as u64)
+                                .collect::<Vec<_>>();
+
+                            let versions_marked_for_deletion = version_file
+                                .version_history
+                                .unwrap()
+                                .versions
+                                .iter()
+                                .filter_map(|v| {
+                                    if v.marked_for_deletion {
+                                        Some(v.version as u64)
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect::<Vec<_>>();
+
+                            assert_eq!(
+                                versions, expected_versions,
+                                "Version file for collection {} does not match expected versions. Expected: {:?}, found: {:?}. The version file has versions {:?} marked for deletion.",
+                                collection_id, expected_versions, versions,
+                                versions_marked_for_deletion
+                            );
+                        }
+                    })
+                    .buffer_unordered(32)
+                    .collect::<Vec<_>>()
+                    .await;
+            }
+        });
+
+        let file_ref_counts = ref_state.get_file_ref_counts();
+        let files_on_disk = ref_state
+            .runtime
+            .block_on(
+                state
+                    .storage
+                    .list_prefix(&state.tenant_prefix, GetOptions::default()),
+            )
+            .unwrap()
+            .into_iter()
+            .collect::<HashSet<_>>();
+
+        for (file_path, refs) in file_ref_counts {
+            let on_disk = files_on_disk.contains(&file_path);
+
+            if refs.is_empty() && on_disk {
+                panic!(
+                    "Invariant violation: file {} has zero references but is still on disk.",
+                    file_path
+                );
+            } else if !refs.is_empty() && !on_disk {
+                panic!(
+                  "Invariant violation: file reference {} has a non-zero count {} but is not on disk. Referenced by: {:#?}",
+                  file_path, refs.len(), refs
+              );
+            }
+        }
+    }
+}
+
 impl StateMachineTest for GarbageCollectorUnderTest {
     type SystemUnderTest = Self;
     type Reference = ReferenceGarbageCollector;
@@ -84,6 +246,10 @@ impl StateMachineTest for GarbageCollectorUnderTest {
         ref_state: &<Self::Reference as ReferenceStateMachine>::State,
     ) -> Self::SystemUnderTest {
         tracing::debug!("Starting test");
+
+        STATS.with_borrow_mut(|stats| {
+            stats.record_test_case_start();
+        });
 
         ref_state.runtime.block_on(async {
             let registry = Registry::new();
@@ -127,6 +293,8 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                 logs,
                 root_manager,
                 collection_id_to_segment_ids: HashMap::new(),
+                tenant_prefix: format!("tenant/{}/", ref_state.tenant),
+                written_files: HashSet::new(),
             }
         })
     }
@@ -137,6 +305,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
         transition: <Self::Reference as ReferenceStateMachine>::Transition,
     ) -> Self::SystemUnderTest {
         tracing::debug!("Applying transition: {:#?}", transition);
+        let transition_start = Instant::now();
 
         STATS.with_borrow_mut(|stats| {
             stats.record_transition(&transition, ref_state);
@@ -148,7 +317,9 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                 segments,
             } => {
                 ref_state.runtime.block_on(async {
-                    segments.write_files(&state.storage).await;
+                    segments
+                        .write_files(&state.storage, &mut state.written_files)
+                        .await;
 
                     let segments = vec![
                         Segment {
@@ -228,11 +399,14 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                 let segment_ids = state
                     .collection_id_to_segment_ids
                     .get(&collection_id)
+                    .copied()
                     .unwrap();
                 ref_state.runtime.block_on(async {
-                    next_segments.write_files(&state.storage).await;
+                    next_segments
+                        .write_files(&state.storage, &mut state.written_files)
+                        .await;
 
-                    let segment_flush_info = next_segments.into_segment_flushes(segment_ids);
+                    let segment_flush_info = next_segments.into_segment_flushes(&segment_ids);
 
                     for sfi in segment_flush_info.iter() {
                         assert!(!sfi.file_paths.is_empty());
@@ -362,149 +536,64 @@ impl StateMachineTest for GarbageCollectorUnderTest {
             ref_state.get_graphviz_of_graph()
         );
 
+        STATS.with_borrow_mut(|stats| {
+            stats.record_transition_duration(transition_start.elapsed());
+        });
+
         state
+    }
+
+    fn test_sequential(
+        config: Config,
+        mut ref_state: <Self::Reference as ReferenceStateMachine>::State,
+        transitions: Vec<<Self::Reference as ReferenceStateMachine>::Transition>,
+        mut seen_counter: Option<Arc<AtomicUsize>>,
+    ) {
+        let _ = config;
+
+        let mut concrete_state = Self::init_test(&ref_state);
+
+        Self::check_invariants(&concrete_state, &ref_state);
+        Self::check_expensive_invariants(&concrete_state, &ref_state);
+        let mut full_checked_current_state = true;
+
+        for transition in transitions {
+            if let Some(seen_counter) = seen_counter.as_mut() {
+                seen_counter.fetch_add(1, atomic::Ordering::SeqCst);
+            }
+
+            let check_expensive = matches!(
+                &transition,
+                Transition::CreateCollection { .. }
+                    | Transition::IncrementCollectionVersion { .. }
+                    | Transition::ForkCollection { .. }
+                    | Transition::DeleteCollection(_)
+                    | Transition::GarbageCollect { .. }
+            );
+
+            ref_state = <Self::Reference as ReferenceStateMachine>::apply(ref_state, &transition);
+            concrete_state = Self::apply(concrete_state, &ref_state, transition);
+
+            Self::check_invariants(&concrete_state, &ref_state);
+            full_checked_current_state = false;
+            if check_expensive {
+                Self::check_expensive_invariants(&concrete_state, &ref_state);
+                full_checked_current_state = true;
+            }
+        }
+
+        if !full_checked_current_state {
+            Self::check_expensive_invariants(&concrete_state, &ref_state);
+        }
+
+        Self::teardown(concrete_state);
     }
 
     fn check_invariants(
         state: &Self::SystemUnderTest,
         ref_state: &<Self::Reference as ReferenceStateMachine>::State,
     ) {
-        // Check invariants in the reference state
+        let _ = state;
         ref_state.check_invariants();
-
-        // Check version files
-        let expected_versions_by_collection = ref_state.expected_versions_by_collection();
-
-        ref_state.runtime.block_on({
-            let mut sysdb = state.sysdb.clone();
-            let storage = state.storage.clone();
-
-            async move {
-                let collection_statuses = sysdb.batch_get_collection_soft_delete_status(None, ref_state.collection_status.keys().cloned().collect()).await.unwrap();
-                for (collection_id, status) in ref_state.collection_status.iter() {
-                    match status {
-                        CollectionStatus::Deleted => {
-                            assert!(
-                                !collection_statuses.contains_key(collection_id),
-                                "Collection {} is supposed to be hard deleted, but still exists in the sysdb. Is soft deleted: {:?}",
-                                collection_id,
-                                collection_statuses.get(collection_id)
-                            );
-                        }
-                        CollectionStatus::Alive => {
-                            match collection_statuses.get(collection_id) {
-                                Some(&true) => {
-                                    panic!("Collection {} is supposed to be alive, but is marked as soft deleted in the sysdb.", collection_id);
-                                }
-                                Some(&false) => {
-                                    // Expected case
-                                }
-                                None => {
-                                    panic!("Collection {} is supposed to be alive, but does not exist in the sysdb.", collection_id);
-                                }
-                            }
-                        }
-                        CollectionStatus::SoftDeleted => {
-                            match collection_statuses.get(collection_id) {
-                                Some(&true) => {
-                                    // Expected case
-                                }
-                                Some(&false) => {
-                                    panic!("Collection {} is supposed to be soft deleted, but is marked as alive in the sysdb.", collection_id);
-                                }
-                                None => {
-                                    panic!("Collection {} is supposed to be soft deleted, but does not exist in the sysdb.", collection_id);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                futures::stream::iter(expected_versions_by_collection)
-                    .map(move |(collection_id, expected_versions)| {
-                        let mut sysdb = sysdb.clone();
-                        let storage = storage.clone();
-
-                        async move {
-                            let collections = sysdb
-                                .get_collections(
-                                   GetCollectionsOptions {
-                                        collection_id: Some(collection_id),
-                                        ..Default::default()
-                                })
-                                .await
-                                .unwrap();
-
-                            let collection = collections.first().unwrap();
-                            let version_file_path = collection.version_file_path.as_ref().unwrap();
-                            tracing::trace!("Version file path for collection {}: {}", collection_id, version_file_path);
-
-                            let version_file = storage
-                                .get(version_file_path, GetOptions::default())
-                                .await
-                                .unwrap();
-                            let version_file =
-                                CollectionVersionFile::decode(version_file.as_slice()).unwrap();
-
-                            let versions = version_file
-                                .version_history
-                                .as_ref()
-                                .unwrap()
-                                .versions
-                                .iter()
-                                .map(|v| v.version as u64)
-                                .collect::<Vec<_>>();
-
-                            let versions_marked_for_deletion = version_file
-                                .version_history
-                                .unwrap()
-                                .versions
-                                .iter()
-                                .filter_map(|v| {
-                                    if v.marked_for_deletion {
-                                        Some(v.version as u64)
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect::<Vec<_>>();
-
-                            assert_eq!(
-                                versions, expected_versions,
-                                "Version file for collection {} does not match expected versions. Expected: {:?}, found: {:?}. The version file has versions {:?} marked for deletion.",
-                                collection_id, expected_versions, versions,
-                                versions_marked_for_deletion
-                            );
-                        }
-                    })
-                    .buffer_unordered(32)
-                    .collect::<Vec<_>>()
-                    .await;
-            }
-        });
-
-        let file_ref_counts = ref_state.get_file_ref_counts();
-        let files_on_disk = ref_state
-            .runtime
-            .block_on(state.storage.list_prefix("", GetOptions::default()))
-            .unwrap()
-            .into_iter()
-            .collect::<HashSet<_>>();
-
-        for (file_path, refs) in file_ref_counts {
-            let on_disk = files_on_disk.contains(&file_path);
-
-            if refs.is_empty() && on_disk {
-                panic!(
-                    "Invariant violation: file {} has zero references but is still on disk.",
-                    file_path
-                );
-            } else if !refs.is_empty() && !on_disk {
-                panic!(
-                  "Invariant violation: file reference {} has a non-zero count {} but is not on disk. Referenced by: {:#?}",
-                  file_path, refs.len(), refs
-              );
-            }
-        }
     }
 }
