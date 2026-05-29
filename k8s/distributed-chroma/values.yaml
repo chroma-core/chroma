@@ -13,6 +13,22 @@ rustFrontendService:
     requests:
       cpu: '1000m'
       memory: '512Mi'
+foundationService:
+  # Hosted-only by default. Hosted deployments override `enabled: true` and
+  # supply their own image; pure-OSS users can opt in by enabling it and
+  # pointing at their own foundation-service binary.
+  enabled: false
+  image:
+    repository: 'foundation-service'
+    tag: 'latest'
+  replicaCount: 1
+  port: 8000
+  configuration: |
+    foundation:
+      port: 8000
+      listen_address: "0.0.0.0"
+    auth: noop
+    ingestion_engine: noop
 sysdb:
   image:
     repository: 'sysdb'
