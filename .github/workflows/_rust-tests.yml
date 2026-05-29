@@ -202,5 +202,8 @@ jobs:
         uses: ./.github/actions/rust
         with:
           github-token: ${{ github.token }}
-      - name: Build in release mode
-        run: cargo build --release
+          install-nextest: "false"
+      # PR CI only needs to catch release-profile compile errors. Release
+      # workflows still build the optimized artifacts with cargo build --release.
+      - name: Check release mode
+        run: cargo check --release
