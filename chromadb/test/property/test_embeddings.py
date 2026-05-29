@@ -39,6 +39,7 @@ from chromadb.test.conftest import (
     is_client_in_process,
     NOT_CLUSTER_ONLY,
     create_isolated_database,
+    override_hypothesis_profile,
 )
 import numpy as np
 import uuid
@@ -52,6 +53,15 @@ traces: DefaultDict[str, int] = defaultdict(lambda: 0)
 
 
 VERSION_INCREASE_WAIT_TIME = 300
+
+EMBEDDINGS_STATE_MACHINE_SETTINGS = settings(
+    deadline=90000,
+    parent=override_hypothesis_profile(
+        normal=hypothesis.settings(max_examples=76),
+        slow=hypothesis.settings(max_examples=152),
+    ),
+    suppress_health_check=[HealthCheck.filter_too_much],
+)
 
 
 def trace(key: str) -> None:
@@ -476,9 +486,7 @@ def test_embeddings_state(caplog: pytest.LogCaptureFixture, client: ClientAPI) -
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(
         lambda: EmbeddingStateMachine(client),
-        settings=settings(
-            deadline=90000, suppress_health_check=[HealthCheck.filter_too_much]
-        ),
+        settings=EMBEDDINGS_STATE_MACHINE_SETTINGS,
     )  # type: ignore
     print_traces()
 
@@ -494,9 +502,7 @@ def test_embeddings_state_with_search(
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(
         lambda: EmbeddingStateMachine(client, use_search=True),
-        settings=settings(
-            deadline=90000, suppress_health_check=[HealthCheck.filter_too_much]
-        ),
+        settings=EMBEDDINGS_STATE_MACHINE_SETTINGS,
     )  # type: ignore
     print_traces()
 
