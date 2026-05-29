@@ -17,7 +17,7 @@ collections_with_segments_provider:
     lru:
       name: "collections_with_segments_cache"
       capacity: 1000
-  cache_ttl_secs: 60
+  cache_ttl_secs: 2
   permitted_parallelism: 180
   cache_invalidation_retry_policy:
     delay_ms: 0

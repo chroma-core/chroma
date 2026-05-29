@@ -257,4 +257,23 @@ mod tests {
         let config = FrontendServerConfig::load_from_path("sample_configs/single_node_full.yaml");
         assert_eq!(config.port, 8000);
     }
+
+    #[test]
+    fn tilt_dev_configs_use_short_cache_ttl() {
+        for path in [
+            "sample_configs/distributed.yaml",
+            "sample_configs/distributed_mcmr.yaml",
+            "sample_configs/distributed2.yaml",
+        ] {
+            let config = FrontendServerConfig::load_from_path(path);
+            assert_eq!(
+                config
+                    .frontend
+                    .collections_with_segments_provider
+                    .cache_ttl_secs,
+                2,
+                "{path}"
+            );
+        }
+    }
 }
