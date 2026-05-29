@@ -1,19 +1,30 @@
-use crate::{CollectionRequest, FrontendReferenceState};
+use crate::CollectionRequest;
 use chroma_types::{
     strategies::{
         arbitrary_metadata, arbitrary_update_metadata, TestWhereFilter, TestWhereFilterParams,
         DOCUMENT_TEXT_STRATEGY,
     },
-    AddCollectionRecordsRequest, DeleteCollectionRecordsRequest, GetRequest, Include, IncludeList,
+    AddCollectionRecordsRequest, DeleteCollectionRecordsRequest, GetRequest, IncludeList,
     QueryRequest, UpdateCollectionRecordsRequest, UpsertCollectionRecordsRequest,
 };
 use proptest::{prelude::*, sample::SizeRange};
+
+use super::frontend_reference::FrontendGenerationState;
 
 pub struct CollectionRequestArbitraryParams {
     pub min_log_size: usize,
     pub max_log_size: usize,
     pub metadata_num_pairs: SizeRange,
-    pub current_state: FrontendReferenceState,
+    pub current_state: Option<FrontendGenerationState>,
+}
+
+impl CollectionRequestArbitraryParams {
+    pub fn new(current_state: FrontendGenerationState) -> Self {
+        Self {
+            current_state: Some(current_state),
+            ..Default::default()
+        }
+    }
 }
 
 impl Default for CollectionRequestArbitraryParams {
@@ -22,7 +33,7 @@ impl Default for CollectionRequestArbitraryParams {
             min_log_size: 0,
             max_log_size: 10,
             metadata_num_pairs: (0..=10usize).into(),
-            current_state: FrontendReferenceState::default(),
+            current_state: None,
         }
     }
 }
@@ -36,10 +47,12 @@ impl Arbitrary for CollectionRequest {
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
-        let state = args.current_state;
-        let collection = state.collection.clone().unwrap();
+        let state = args
+            .current_state
+            .expect("collection request generation requires current reference state");
+        let collection = state.collection.clone();
         let embedding_strategy = state.get_embedding_strategy();
-        let known_ids = state.get_known_ids();
+        let known_ids = state.known_ids.clone();
 
         let id_strategy = if known_ids.is_empty() {
             "\\PC{1,}".boxed()
@@ -239,7 +252,7 @@ impl Arbitrary for CollectionRequest {
             update_strategy,
             upsert_strategy,
             delete_strategy,
-            arbitrary_get_request(&state),
+            arbitrary_get_request(state),
             // todo: enable KNN requests
             // arbitrary_query_request(state),
         ]
@@ -248,46 +261,17 @@ impl Arbitrary for CollectionRequest {
 }
 
 fn arbitrary_get_request(
-    state: &FrontendReferenceState,
+    state: FrontendGenerationState,
 ) -> impl Strategy<Value = CollectionRequest> {
-    let collection = state.collection.clone().unwrap();
-
-    let frontend = state.frontend.clone().unwrap();
-    let records = frontend
-        .get(
-            GetRequest::try_new(
-                collection.tenant.clone(),
-                collection.database.clone(),
-                collection.collection_id,
-                None,
-                None,
-                None,
-                0,
-                IncludeList(vec![Include::Metadata, Include::Document]),
-            )
-            .unwrap(),
-        )
-        .unwrap();
-    let documents = records
-        .documents
-        .unwrap()
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
-    let metadatas = records
-        .metadatas
-        .unwrap()
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
+    let collection = state.collection.clone();
 
     let where_strategy = any_with::<TestWhereFilter>(TestWhereFilterParams {
-        seed_documents: Some(documents),
-        seed_metadata: Some(metadatas),
+        seed_documents: Some(state.seed_documents.clone()),
+        seed_metadata: Some(state.seed_metadata.clone()),
         ..Default::default()
     });
 
-    let known_ids = state.get_known_ids();
+    let known_ids = state.known_ids.clone();
 
     let ids_strategy = if !known_ids.is_empty() {
         let known_ids_len = known_ids.len();
@@ -343,46 +327,17 @@ fn arbitrary_get_request(
 
 #[allow(dead_code)]
 fn arbitrary_query_request(
-    state: &FrontendReferenceState,
+    state: FrontendGenerationState,
 ) -> impl Strategy<Value = CollectionRequest> {
-    let collection = state.collection.clone().unwrap();
-
-    let frontend = state.frontend.clone().unwrap();
-    let records = frontend
-        .get(
-            GetRequest::try_new(
-                collection.tenant.clone(),
-                collection.database.clone(),
-                collection.collection_id,
-                None,
-                None,
-                None,
-                0,
-                IncludeList(vec![Include::Metadata, Include::Document]),
-            )
-            .unwrap(),
-        )
-        .unwrap();
-    let documents = records
-        .documents
-        .unwrap()
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
-    let metadatas = records
-        .metadatas
-        .unwrap()
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
+    let collection = state.collection.clone();
 
     let where_strategy = any_with::<TestWhereFilter>(TestWhereFilterParams {
-        seed_documents: Some(documents),
-        seed_metadata: Some(metadatas),
+        seed_documents: Some(state.seed_documents.clone()),
+        seed_metadata: Some(state.seed_metadata.clone()),
         ..Default::default()
     });
 
-    let known_ids = state.get_known_ids();
+    let known_ids = state.known_ids.clone();
 
     let ids_strategy = if !known_ids.is_empty() {
         let known_ids_len = known_ids.len();
