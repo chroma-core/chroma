@@ -249,6 +249,9 @@ impl FnConsumerManager {
     }
 
     async fn poll_and_dispatch(&mut self) {
+        let span = tracing::debug_span!("FnConsumerManager::poll_and_dispatch");
+        let _guard = span.enter();
+
         self.evict_expired();
         let rem = self.compute_remaining_capacity();
         if rem == 0 {

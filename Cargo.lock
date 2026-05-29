@@ -11427,6 +11427,7 @@ dependencies = [
  "tokio-util",
  "tonic 0.14.5",
  "tonic-health",
+ "tower 0.5.3",
  "tracing",
  "tracing-opentelemetry",
  "uuid",
