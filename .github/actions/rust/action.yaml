@@ -7,6 +7,10 @@ inputs:
   workspaces:
     description: "Workspace paths to cache (see documentation on Swatinem/rust-cache for details)"
     required: false
+  install-nextest:
+    description: "Install cargo-nextest"
+    required: false
+    default: "true"
 runs:
   using: "composite"
   steps:
@@ -36,4 +40,5 @@ runs:
       with:
         workspaces: ${{ inputs.workspaces }}
     - name: Setup Nextest
+      if: ${{ inputs.install-nextest == 'true' }}
       uses: taiki-e/install-action@nextest
