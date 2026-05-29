@@ -1,13 +1,16 @@
 use axum::{extract::State, http::HeaderMap, Json};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_sysdb::{AttachFunctionError, SysDb};
+use chroma_sysdb::SysDb;
 use chroma_types::{
     Collection, CollectionUuid, CreateDatabaseError, DatabaseName, IndexConfig, KnnIndex, Metadata,
     MetadataValue, Schema, SparseIndexAlgorithm, SparseVectorIndexConfig,
     CHROMA_GROUP_CHUNK_SIBLINGS_KEY,
 };
-use frontend_core::collection_ops::{
-    plan_create_collection, supported_segment_types, ExecutorKind, TenantFeatureFlags,
+use frontend_core::{
+    attached_function_ops,
+    collection_ops::{
+        plan_create_collection, supported_segment_types, ExecutorKind, TenantFeatureFlags,
+    },
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -91,7 +94,6 @@ pub async fn foundation_init(
         ensure_attached_function(
             &mut sysdb,
             tenant.clone(),
-            foundation_cfg.database_name.clone(),
             source.collection_id,
             source_name,
             foundation_cfg,
@@ -142,13 +144,11 @@ impl ChromaError for MissingFunctionEndpointUrl {
 /// collection. The attachment name is `{source}_to_wiki`; `params` carry
 /// the modal `endpoint_url` plus `source_collection` / `source_kind`.
 ///
-/// `/init` is safe to call repeatedly, so an already-attached function
-/// (`AlreadyExists` or `CollectionAlreadyHasFunction`) is treated as
-/// success rather than an error.
+/// `/init` is safe to call repeatedly — the shared helper treats an
+/// already-existing function as a no-op (`created = false`).
 async fn ensure_attached_function(
     sysdb: &mut SysDb,
     tenant: String,
-    database_name: String,
     input_collection_id: CollectionUuid,
     source_name: &str,
     cfg: &FoundationConfig,
@@ -163,25 +163,21 @@ async fn ensure_attached_function(
         "source_collection": source_name,
         "source_kind": source_name,
     });
-    match sysdb
-        .create_attached_function(
-            attachment_name,
-            cfg.function_name.clone(),
-            input_collection_id,
-            cfg.wiki_collection.clone(),
-            params,
-            tenant,
-            database_name,
-            cfg.min_records_for_invocation,
-        )
-        .await
-    {
-        Ok(_) => Ok(()),
-        // Idempotent: the function is already attached to this collection.
-        Err(AttachFunctionError::AlreadyExists(_))
-        | Err(AttachFunctionError::CollectionAlreadyHasFunction(_)) => Ok(()),
-        Err(e) => Err(e.into()),
-    }
+    let output_schema = Schema::new_record_only();
+    attached_function_ops::create_attached_function(
+        sysdb,
+        attachment_name,
+        cfg.function_name.clone(),
+        input_collection_id,
+        cfg.wiki_collection.clone(),
+        params,
+        tenant,
+        cfg.database_name.clone(),
+        cfg.min_records_for_invocation,
+        output_schema,
+    )
+    .await?;
+    Ok(())
 }
 
 #[derive(Debug, thiserror::Error)]

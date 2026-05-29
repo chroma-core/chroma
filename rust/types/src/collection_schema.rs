@@ -1003,6 +1003,126 @@ impl Schema {
         }
     }
 
+    /// Create a record-only Schema with all indexing disabled.
+    ///
+    /// Suitable for output collections that are never queried via vector
+    /// search, metadata filtering, or full-text search
+    /// Records are stored but no inverted,
+    /// vector, FTS, or sparse indexes are built at query-planning time.
+    pub fn new_record_only() -> Self {
+        let defaults = ValueTypes {
+            string: Some(StringValueType {
+                string_inverted_index: Some(StringInvertedIndexType {
+                    enabled: false,
+                    config: StringInvertedIndexConfig {},
+                }),
+                fts_index: Some(FtsIndexType {
+                    enabled: false,
+                    config: FtsIndexConfig::default(),
+                }),
+            }),
+            float: Some(FloatValueType {
+                float_inverted_index: Some(FloatInvertedIndexType {
+                    enabled: false,
+                    config: FloatInvertedIndexConfig {},
+                }),
+            }),
+            int: Some(IntValueType {
+                int_inverted_index: Some(IntInvertedIndexType {
+                    enabled: false,
+                    config: IntInvertedIndexConfig {},
+                }),
+            }),
+            boolean: Some(BoolValueType {
+                bool_inverted_index: Some(BoolInvertedIndexType {
+                    enabled: false,
+                    config: BoolInvertedIndexConfig {},
+                }),
+            }),
+            float_list: Some(FloatListValueType {
+                vector_index: Some(VectorIndexType {
+                    enabled: false,
+                    config: VectorIndexConfig {
+                        space: Some(default_space()),
+                        embedding_function: None,
+                        source_key: None,
+                        hnsw: Some(HnswIndexConfig {
+                            ef_construction: Some(default_construction_ef()),
+                            max_neighbors: Some(default_m()),
+                            ef_search: Some(default_search_ef()),
+                            num_threads: Some(default_num_threads()),
+                            batch_size: Some(default_batch_size()),
+                            sync_threshold: Some(default_sync_threshold()),
+                            resize_factor: Some(default_resize_factor()),
+                        }),
+                        spann: None,
+                    },
+                }),
+            }),
+            sparse_vector: Some(SparseVectorValueType {
+                sparse_vector_index: Some(SparseVectorIndexType {
+                    enabled: false,
+                    config: SparseVectorIndexConfig {
+                        embedding_function: Some(EmbeddingFunctionConfiguration::Unknown),
+                        source_key: None,
+                        bm25: Some(false),
+                        algorithm: SparseIndexAlgorithm::Wand,
+                    },
+                }),
+            }),
+        };
+
+        let mut keys = HashMap::new();
+
+        // #embedding: vector index disabled
+        let embedding_defaults = ValueTypes {
+            float_list: Some(FloatListValueType {
+                vector_index: Some(VectorIndexType {
+                    enabled: false,
+                    config: VectorIndexConfig {
+                        space: Some(default_space()),
+                        embedding_function: None,
+                        source_key: Some(DOCUMENT_KEY.to_string()),
+                        hnsw: Some(HnswIndexConfig {
+                            ef_construction: Some(default_construction_ef()),
+                            max_neighbors: Some(default_m()),
+                            ef_search: Some(default_search_ef()),
+                            num_threads: Some(default_num_threads()),
+                            batch_size: Some(default_batch_size()),
+                            sync_threshold: Some(default_sync_threshold()),
+                            resize_factor: Some(default_resize_factor()),
+                        }),
+                        spann: None,
+                    },
+                }),
+            }),
+            ..Default::default()
+        };
+        keys.insert(EMBEDDING_KEY.to_string(), embedding_defaults);
+
+        // #document: FTS disabled
+        let document_defaults = ValueTypes {
+            string: Some(StringValueType {
+                fts_index: Some(FtsIndexType {
+                    enabled: false,
+                    config: FtsIndexConfig::default(),
+                }),
+                string_inverted_index: Some(StringInvertedIndexType {
+                    enabled: false,
+                    config: StringInvertedIndexConfig {},
+                }),
+            }),
+            ..Default::default()
+        };
+        keys.insert(DOCUMENT_KEY.to_string(), document_defaults);
+
+        Schema {
+            defaults,
+            keys,
+            cmek: None,
+        }
+    }
+
     pub fn get_spann_config(&self) -> Option<(SpannIndexConfig, Space)> {
         let extract = |vector_index: &VectorIndexType| {
             let space = vector_index.config.space.clone().unwrap_or_default();
@@ -3305,6 +3425,44 @@ mod tests {
         EmbeddingFunctionNewConfiguration, InternalHnswConfiguration, InternalSpannConfiguration,
     };
     use serde_json::json;
+
+    #[test]
+    fn test_record_only_schema_disables_all_indexes() {
+        let schema = Schema::new_record_only();
+
+        // All metadata inverted indexes must be disabled
+        let string = schema.defaults.string.as_ref().unwrap();
+        assert!(!string.string_inverted_index.as_ref().unwrap().enabled);
+        assert!(!string.fts_index.as_ref().unwrap().enabled);
+
+        let float = schema.defaults.float.as_ref().unwrap();
+        assert!(!float.float_inverted_index.as_ref().unwrap().enabled);
+
+        let int = schema.defaults.int.as_ref().unwrap();
+        assert!(!int.int_inverted_index.as_ref().unwrap().enabled);
+
+        let boolean = schema.defaults.boolean.as_ref().unwrap();
+        assert!(!boolean.bool_inverted_index.as_ref().unwrap().enabled);
+
+        // Default vector index must be disabled
+        let float_list = schema.defaults.float_list.as_ref().unwrap();
+        assert!(!float_list.vector_index.as_ref().unwrap().enabled);
+
+        // Sparse vector must be disabled
+        let sparse = schema.defaults.sparse_vector.as_ref().unwrap();
+        assert!(!sparse.sparse_vector_index.as_ref().unwrap().enabled);
+
+        // #embedding key override: vector index disabled
+        let embedding = schema.keys.get(EMBEDDING_KEY).unwrap();
+        let emb_vector = embedding.float_list.as_ref().unwrap();
+        assert!(!emb_vector.vector_index.as_ref().unwrap().enabled);
+
+        // #document key override: FTS disabled
+        let document = schema.keys.get(DOCUMENT_KEY).unwrap();
+        let doc_string = document.string.as_ref().unwrap();
+        assert!(!doc_string.fts_index.as_ref().unwrap().enabled);
+        assert!(!doc_string.string_inverted_index.as_ref().unwrap().enabled);
+    }
 
     #[test]
     fn test_reconcile_with_defaults_none_user_schema() {
