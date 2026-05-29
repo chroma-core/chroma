@@ -64,6 +64,8 @@ pub async fn foundation_init(
         db_name.clone(),
         &foundation_cfg.wiki_collection,
         None,
+        // NOTE(hammadb): Foundation uses Qwen0.6B by default which is 1024 dims
+        Some(1024),
     )
     .await?;
     let wiki_revisions = ensure_collection(
@@ -72,6 +74,7 @@ pub async fn foundation_init(
         db_name.clone(),
         &foundation_cfg.wiki_revisions_collection,
         None,
+        Some(1),
     )
     .await?;
 
@@ -99,6 +102,7 @@ pub async fn foundation_init(
             db_name.clone(),
             source_name,
             Some(group_chunk_siblings_metadata()),
+            Some(1024),
         )
         .await?;
         ensure_attached_function(
@@ -282,6 +286,7 @@ async fn ensure_collection(
     database_name: DatabaseName,
     collection_name: &str,
     metadata: Option<Metadata>,
+    dimension: Option<i32>,
 ) -> Result<Collection, ServerError> {
     let schema = foundation_collection_schema();
     let plan = plan_create_collection(
@@ -303,8 +308,7 @@ async fn ensure_collection(
             plan.configuration,
             plan.schema,
             metadata,
-            // NOTE(hammadb): Foundation uses Qwen0.6B by default which is 1024 dims
-            Some(1024),
+            dimension,
             GET_OR_CREATE,
         )
         .await?;
