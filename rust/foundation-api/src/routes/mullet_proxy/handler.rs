@@ -1,0 +1,433 @@
+use axum::{
+    body::Bytes,
+    extract::State,
+    http::{header, HeaderMap},
+    response::{IntoResponse, Response},
+};
+
+use crate::{
+    auth::AuthzAction, errors::ServerError, routes::whoami::whoami_and_authorize,
+    server::FoundationApiServer,
+};
+
+use super::error::MulletProxyError;
+use super::merge::merge_user;
+
+/// `POST /api/ask` — reverse-proxy to mullet's `/api/ask`.
+///
+/// Authenticates the caller via the Chroma auth layer, then forwards the
+/// JSON body with `user` set to the caller's `user_id` (the team-membership
+/// id from `GetUserIdentityResponse`). The auth-resolved `user` overrides
+/// any caller-supplied `user` so a client can't impersonate.
+///
+/// Mullet's status, `content-type`, and body bytes are relayed verbatim;
+/// mullet's own 4xx/5xx pass through unchanged. An upstream/network
+/// failure surfaces as 503.
+pub(crate) async fn ask(
+    headers: HeaderMap,
+    State(server): State<FoundationApiServer>,
+    body: Bytes,
+) -> Result<Response, ServerError> {
+    let identity =
+        whoami_and_authorize(&*server.auth, &headers, AuthzAction::ViewFoundation).await?;
+    let tenant = identity.tenant;
+    let user_id = identity.user_id;
+
+    let _guard = server.scorecard_request(&["op:foundation_ask", &format!("tenant:{}", tenant)])?;
+
+    let body_json = merge_user(&body, user_id)?;
+
+    let upstream_url = format!(
+        "{}/api/ask",
+        server.config.foundation.mullet_url.trim_end_matches('/')
+    );
+
+    let upstream = server
+        .http_client
+        .post(&upstream_url)
+        .header(header::ACCEPT, "application/json")
+        .json(&body_json)
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::warn!(
+                upstream = %upstream_url,
+                tenant = %tenant,
+                error = %e,
+                "mullet upstream request failed",
+            );
+            MulletProxyError::Upstream
+        })?;
+
+    let status = upstream.status();
+    let content_type = upstream.headers().get(header::CONTENT_TYPE).cloned();
+    let response_bytes = upstream.bytes().await.map_err(|e| {
+        tracing::warn!(
+            upstream = %upstream_url,
+            tenant = %tenant,
+            error = %e,
+            "failed to read mullet response body",
+        );
+        MulletProxyError::Upstream
+    })?;
+
+    tracing::info!(
+        upstream = %upstream_url,
+        tenant = %tenant,
+        op = "foundation_ask",
+        status = status.as_u16(),
+        bytes = response_bytes.len(),
+        "mullet upstream response relayed",
+    );
+
+    let mut response = (status, response_bytes).into_response();
+    if let Some(ct) = content_type {
+        response.headers_mut().insert(header::CONTENT_TYPE, ct);
+    }
+    Ok(response)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        auth::{AuthError, AuthenticateAndAuthorize, AuthzResource},
+        config::FoundationApiConfig,
+    };
+    use axum::{
+        body::Body,
+        http::{Method, Request, StatusCode},
+        routing::post,
+        Router,
+    };
+    use chroma_api_types::GetUserIdentityResponse;
+    use chroma_sysdb::{SysDb, TestSysDb};
+    use chroma_system::System;
+    use serde_json::Value;
+    use std::{
+        collections::HashSet,
+        future::{ready, Future},
+        pin::Pin,
+        sync::{Arc, Mutex},
+    };
+    use tower::ServiceExt;
+
+    /// Test auth that returns a fixed identity. Captures the action and
+    /// resource passed to `authenticate_and_authorize` so tests can assert
+    /// the two-step auth gotcha (resolved tenant flows into the resource).
+    struct FakeAuth {
+        user_id: String,
+        tenant: String,
+        captured_action: Mutex<Option<AuthzAction>>,
+        captured_resource: Mutex<Option<AuthzResource>>,
+    }
+
+    impl FakeAuth {
+        fn new(user_id: &str, tenant: &str) -> Self {
+            Self {
+                user_id: user_id.to_string(),
+                tenant: tenant.to_string(),
+                captured_action: Mutex::new(None),
+                captured_resource: Mutex::new(None),
+            }
+        }
+
+        fn identity(&self) -> GetUserIdentityResponse {
+            GetUserIdentityResponse {
+                user_id: self.user_id.clone(),
+                tenant: self.tenant.clone(),
+                databases: HashSet::new(),
+            }
+        }
+    }
+
+    impl AuthenticateAndAuthorize for FakeAuth {
+        fn authenticate_and_authorize(
+            &self,
+            _headers: &HeaderMap,
+            action: AuthzAction,
+            resource: AuthzResource,
+        ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>>
+        {
+            *self.captured_action.lock().unwrap() = Some(action);
+            *self.captured_resource.lock().unwrap() = Some(resource);
+            let identity = self.identity();
+            Box::pin(ready(Ok(identity)))
+        }
+
+        fn authenticate_and_authorize_collection(
+            &self,
+            _headers: &HeaderMap,
+            _action: AuthzAction,
+            _resource: AuthzResource,
+            _collection: chroma_types::Collection,
+        ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>>
+        {
+            let identity = self.identity();
+            Box::pin(ready(Ok(identity)))
+        }
+
+        fn get_user_identity(
+            &self,
+            _headers: &HeaderMap,
+        ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>>
+        {
+            let identity = self.identity();
+            Box::pin(ready(Ok(identity)))
+        }
+    }
+
+    /// Test auth that always rejects, used to verify 401 propagation.
+    struct UnauthorizedAuth;
+
+    impl AuthenticateAndAuthorize for UnauthorizedAuth {
+        fn authenticate_and_authorize(
+            &self,
+            _headers: &HeaderMap,
+            _action: AuthzAction,
+            _resource: AuthzResource,
+        ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>>
+        {
+            Box::pin(ready(Err(AuthError(StatusCode::UNAUTHORIZED))))
+        }
+
+        fn authenticate_and_authorize_collection(
+            &self,
+            _headers: &HeaderMap,
+            _action: AuthzAction,
+            _resource: AuthzResource,
+            _collection: chroma_types::Collection,
+        ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>>
+        {
+            Box::pin(ready(Err(AuthError(StatusCode::UNAUTHORIZED))))
+        }
+
+        fn get_user_identity(
+            &self,
+            _headers: &HeaderMap,
+        ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>>
+        {
+            Box::pin(ready(Err(AuthError(StatusCode::UNAUTHORIZED))))
+        }
+    }
+
+    /// Build a `FoundationApiServer` for tests, pointed at the given
+    /// upstream `mullet_url`. Uses an in-memory `TestSysDb`; the proxy
+    /// handler doesn't touch sysdb so it's effectively unused, just
+    /// required by the constructor.
+    fn build_test_server(
+        auth: Arc<dyn AuthenticateAndAuthorize>,
+        mullet_url: String,
+    ) -> FoundationApiServer {
+        let mut config = FoundationApiConfig::default();
+        config.foundation.mullet_url = mullet_url;
+        // Short timeout so the upstream-unreachable test fails fast
+        // rather than waiting 120s. Connection refused fails immediately
+        // anyway, but this guards against environments that hang.
+        config.foundation.mullet_timeout_secs = 5;
+        let sysdb = SysDb::Test(TestSysDb::new());
+        let system = System::new();
+        FoundationApiServer::new(config, auth, sysdb, vec![], system)
+    }
+
+    fn build_test_app(server: FoundationApiServer) -> Router {
+        Router::new()
+            .route("/api/ask", post(ask))
+            .with_state(server)
+    }
+
+    /// Spawn a tiny axum server on `127.0.0.1:0` that records every JSON
+    /// body it receives on `/api/ask` and returns the supplied response.
+    /// Returns the base URL (`http://127.0.0.1:<port>`) and the shared
+    /// capture buffer.
+    async fn spawn_mullet_stub() -> (String, Arc<Mutex<Vec<Value>>>) {
+        let captures: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let captures_in_handler = Arc::clone(&captures);
+        let app = Router::new().route(
+            "/api/ask",
+            post(move |axum::Json(body): axum::Json<Value>| {
+                let captures = Arc::clone(&captures_in_handler);
+                async move {
+                    captures.lock().unwrap().push(body);
+                    axum::Json(serde_json::json!({"result": "ok", "sources": []}))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (format!("http://{}", addr), captures)
+    }
+
+    async fn read_body_json(resp: Response) -> Value {
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        if bytes.is_empty() {
+            return Value::Null;
+        }
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn ask_injects_auth_resolved_user_and_relays_response() {
+        let (mullet_url, captures) = spawn_mullet_stub().await;
+        let auth: Arc<dyn AuthenticateAndAuthorize> =
+            Arc::new(FakeAuth::new("user_42", "team_abc"));
+        let server = build_test_server(Arc::clone(&auth), mullet_url);
+        let app = build_test_app(server);
+
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/api/ask")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"query":"hi","user":"spoof"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = read_body_json(resp).await;
+        assert_eq!(body["result"], "ok");
+
+        let received = captures.lock().unwrap().clone();
+        assert_eq!(
+            received.len(),
+            1,
+            "stub should have been called exactly once"
+        );
+        let upstream_body = &received[0];
+        // Auth's user_id overrides the caller-supplied `user`.
+        assert_eq!(upstream_body["user"], "user_42");
+        assert_eq!(upstream_body["query"], "hi");
+        // Email/tenant are intentionally not injected — see plan.
+        assert!(upstream_body.get("email").is_none());
+        assert!(upstream_body.get("tenant").is_none());
+    }
+
+    #[tokio::test]
+    async fn ask_passes_resolved_tenant_to_authz_check() {
+        // Regression: the Cloud authz impl 403s if
+        // `resource.tenant != identity.tenant` (including `tenant: None`).
+        // The proxy must resolve the identity first and pass that tenant
+        // explicitly to `authenticate_and_authorize`.
+        let (mullet_url, _) = spawn_mullet_stub().await;
+        let fake = Arc::new(FakeAuth::new("user_42", "team_abc"));
+        let auth: Arc<dyn AuthenticateAndAuthorize> = Arc::clone(&fake) as _;
+        let server = build_test_server(auth, mullet_url);
+        let app = build_test_app(server);
+
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/api/ask")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"query":"hi"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        assert_eq!(
+            *fake.captured_action.lock().unwrap(),
+            Some(AuthzAction::ViewFoundation)
+        );
+        let captured = fake.captured_resource.lock().unwrap().clone().unwrap();
+        assert_eq!(captured.tenant, Some("team_abc".to_string()));
+        assert_eq!(captured.database, None);
+        assert_eq!(captured.collection, None);
+    }
+
+    #[tokio::test]
+    async fn ask_returns_401_when_auth_rejects() {
+        // Mullet URL won't be hit; point at an unbound port to confirm
+        // we short-circuit before forwarding.
+        let auth: Arc<dyn AuthenticateAndAuthorize> = Arc::new(UnauthorizedAuth);
+        let server = build_test_server(auth, "http://127.0.0.1:1".to_string());
+        let app = build_test_app(server);
+
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/api/ask")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"query":"hi"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn ask_returns_503_when_upstream_is_unreachable() {
+        // Port 1 is not listening; connection should refuse immediately.
+        let auth: Arc<dyn AuthenticateAndAuthorize> =
+            Arc::new(FakeAuth::new("user_42", "team_abc"));
+        let server = build_test_server(auth, "http://127.0.0.1:1".to_string());
+        let app = build_test_app(server);
+
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/api/ask")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"query":"hi"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn ask_relays_mullet_4xx_verbatim() {
+        // Stub that returns 400 with a mullet-style zod-error JSON body.
+        let app = Router::new().route(
+            "/api/ask",
+            post(|| async {
+                (
+                    StatusCode::BAD_REQUEST,
+                    axum::Json(serde_json::json!({"error": "ZodError", "issues": []})),
+                )
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mullet_url = format!("http://{}", addr);
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        let auth: Arc<dyn AuthenticateAndAuthorize> =
+            Arc::new(FakeAuth::new("user_42", "team_abc"));
+        let server = build_test_server(auth, mullet_url);
+        let proxy_app = build_test_app(server);
+
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/api/ask")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"bogus":"body"}"#))
+            .unwrap();
+        let resp = proxy_app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body = read_body_json(resp).await;
+        assert_eq!(body["error"], "ZodError");
+    }
+
+    #[tokio::test]
+    async fn ask_rejects_non_object_body_with_400() {
+        let (mullet_url, captures) = spawn_mullet_stub().await;
+        let auth: Arc<dyn AuthenticateAndAuthorize> =
+            Arc::new(FakeAuth::new("user_42", "team_abc"));
+        let server = build_test_server(auth, mullet_url);
+        let app = build_test_app(server);
+
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/api/ask")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"["not","an","object"]"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert!(
+            captures.lock().unwrap().is_empty(),
+            "upstream must not be called when body validation fails",
+        );
+    }
+}
