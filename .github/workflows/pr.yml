@@ -293,6 +293,24 @@ jobs:
           jobs: ${{ toJSON(needs) }}
           allowed-skips: build-images,python-tests,python-vulnerability-scan,javascript-client-tests,rust-tests,rust-feature-tests,go-tests,check-spanner-migrations,check-helm-version-bump,delete-helm-comment
 
+  runtime-report:
+    name: Runtime report
+    if: always()
+    needs:
+      - all-required-pr-checks-passed
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Generate runtime report
+        continue-on-error: true
+        uses: ./.github/actions/runtime-report
+        with:
+          github-token: ${{ github.token }}
+
   notify-slack-on-failure:
     name: Notify Slack on Test Failure
     if: github.ref == 'refs/heads/main' && failure()

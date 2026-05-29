@@ -215,6 +215,24 @@ jobs:
     uses: ./.github/workflows/_deploy.yml
     secrets: inherit
 
+  runtime-report:
+    name: Runtime report
+    if: always()
+    needs:
+      - deploy-staging
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Generate runtime report
+        continue-on-error: true
+        uses: ./.github/actions/runtime-report
+        with:
+          github-token: ${{ github.token }}
+
   notify-slack-on-failure:
     name: Notify Slack on ChromaDB Release Failure
     if: failure()

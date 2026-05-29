@@ -1,0 +1,32 @@
+name: Runtime report
+description: Generate and upload a GitHub Actions job runtime report
+inputs:
+  github-token:
+    description: Token used by gh api to read workflow jobs
+    required: true
+  out-dir:
+    description: Directory to write report files
+    required: false
+    default: gha-runtime-report
+  max-step-rows:
+    description: Maximum rows in step-level Markdown tables
+    required: false
+    default: "50"
+runs:
+  using: composite
+  steps:
+    - name: Generate runtime report
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        bin/ci/gha-runtime-report.sh \
+          --out-dir "${{ inputs.out-dir }}" \
+          --max-step-rows "${{ inputs.max-step-rows }}"
+        cat "${{ inputs.out-dir }}/gha-runtime-report.md" >> "$GITHUB_STEP_SUMMARY"
+    - name: Upload runtime report
+      uses: actions/upload-artifact@v4
+      with:
+        name: gha-runtime-report
+        path: ${{ inputs.out-dir }}/
+        if-no-files-found: warn
