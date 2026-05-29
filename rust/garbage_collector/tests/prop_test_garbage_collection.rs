@@ -1,15 +1,68 @@
 mod proptest_helpers;
 
 // Tip: run with `RUST_LOG=prop_test_garbage_collection=debug,garbage_collector=trace`
+//
+// Fast/default timing:
+// /usr/bin/time -p cargo test -p garbage_collector --test prop_test_garbage_collection -- --exact tests::test_k8s_integration_garbage_collection --nocapture
+//
+// Deep timing:
+// env CHROMA_GC_PROPTEST_PROFILE=deep /usr/bin/time -p cargo test -p garbage_collector --test prop_test_garbage_collection -- --exact tests::test_k8s_integration_garbage_collection --nocapture
 #[cfg(test)]
 mod tests {
     use crate::proptest_helpers::garbage_collector_under_test::GarbageCollectorUnderTest;
+    use proptest::test_runner::Config;
     use proptest_state_machine::prop_state_machine;
+    use std::ops::Range;
+
+    struct GarbageCollectorProptestProfile {
+        cases: u32,
+        max_shrink_iters: u32,
+        transition_range: Range<usize>,
+        replay_regressions: bool,
+    }
+
+    fn garbage_collector_proptest_profile() -> GarbageCollectorProptestProfile {
+        match std::env::var("CHROMA_GC_PROPTEST_PROFILE").as_deref() {
+            Ok("deep") => GarbageCollectorProptestProfile {
+                cases: 256,
+                max_shrink_iters: 1024,
+                transition_range: 1..50,
+                replay_regressions: true,
+            },
+            _ => GarbageCollectorProptestProfile {
+                cases: 32,
+                max_shrink_iters: 256,
+                transition_range: 1..25,
+                replay_regressions: false,
+            },
+        }
+    }
+
+    fn garbage_collector_proptest_config() -> Config {
+        let profile = garbage_collector_proptest_profile();
+
+        Config {
+            cases: profile.cases,
+            max_shrink_iters: profile.max_shrink_iters,
+            failure_persistence: if profile.replay_regressions {
+                Config::default().failure_persistence
+            } else {
+                None
+            },
+            fork: false,
+            ..Config::default()
+        }
+    }
+
+    fn garbage_collector_transition_range() -> Range<usize> {
+        garbage_collector_proptest_profile().transition_range
+    }
 
     prop_state_machine! {
+        #![proptest_config(garbage_collector_proptest_config())]
         fn run_test(
             sequential
-            1..50
+            garbage_collector_transition_range()
             =>
           GarbageCollectorUnderTest
         );
