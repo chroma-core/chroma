@@ -563,8 +563,12 @@ impl StateMachineTest for GarbageCollectorUnderTest {
             }
 
             let check_expensive = matches!(
-                transition,
-                Transition::DeleteCollection(_) | Transition::GarbageCollect { .. }
+                &transition,
+                Transition::CreateCollection { .. }
+                    | Transition::IncrementCollectionVersion { .. }
+                    | Transition::ForkCollection { .. }
+                    | Transition::DeleteCollection(_)
+                    | Transition::GarbageCollect { .. }
             );
 
             ref_state = <Self::Reference as ReferenceStateMachine>::apply(ref_state, &transition);

@@ -657,67 +657,54 @@ async fn write_files_for_segment(
                     let block_paths = block_paths
                         .iter()
                         .filter(|file| new_files.contains(*file))
+                        .map(String::as_str)
                         .collect::<Vec<_>>();
                     if block_paths.is_empty() {
                         continue;
                     }
 
-                    // Write blocks
-                    let contents = vec![0; 8];
-                    futures::stream::iter(block_paths)
-                        .map(|file| {
-                            let storage = storage.clone();
-                            let contents = contents.clone();
-                            async move {
-                                storage
-                                    .put_bytes(file, contents, Default::default())
-                                    .await
-                                    .unwrap();
-                            }
-                        })
-                        .buffer_unordered(32)
-                        .collect()
-                        .await
+                    write_placeholder_files(storage, block_paths).await;
                 }
                 FileReference::Hnsw { file_paths, .. } => {
                     let file_paths = file_paths
                         .iter()
                         .filter(|file| new_files.contains(*file))
+                        .map(String::as_str)
                         .collect::<Vec<_>>();
                     if file_paths.is_empty() {
                         continue;
                     }
 
-                    let contents = vec![0; 8];
-                    futures::stream::iter(file_paths)
-                        .map(|file| {
-                            let storage = storage.clone();
-                            let contents = contents.clone();
-                            async move {
-                                storage
-                                    .put_bytes(file, contents, Default::default())
-                                    .await
-                                    .unwrap();
-                            }
-                        })
-                        .buffer_unordered(32)
-                        .collect()
-                        .await
+                    write_placeholder_files(storage, file_paths).await;
                 }
                 FileReference::USearch { file_path } => {
                     if !new_files.contains(file_path) {
                         continue;
                     }
 
-                    let contents = vec![0; 8];
-                    storage
-                        .put_bytes(file_path, contents, Default::default())
-                        .await
-                        .unwrap();
+                    write_placeholder_files(storage, vec![file_path.as_str()]).await;
                 }
             }
         }
     }
+}
+
+async fn write_placeholder_files(storage: &Storage, file_paths: Vec<&str>) {
+    let contents = vec![0; 8];
+    futures::stream::iter(file_paths)
+        .map(|file| {
+            let storage = storage.clone();
+            let contents = contents.clone();
+            async move {
+                storage
+                    .put_bytes(file, contents, Default::default())
+                    .await
+                    .unwrap();
+            }
+        })
+        .buffer_unordered(32)
+        .collect()
+        .await
 }
 
 impl Arbitrary for SegmentGroup {

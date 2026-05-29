@@ -10,7 +10,7 @@ mod proptest_helpers;
 #[cfg(test)]
 mod tests {
     use crate::proptest_helpers::garbage_collector_under_test::GarbageCollectorUnderTest;
-    use proptest::test_runner::Config;
+    use proptest::test_runner::{Config, FileFailurePersistence};
     use proptest_state_machine::prop_state_machine;
     use std::ops::Range;
 
@@ -18,7 +18,6 @@ mod tests {
         cases: u32,
         max_shrink_iters: u32,
         transition_range: Range<usize>,
-        replay_regressions: bool,
     }
 
     fn garbage_collector_proptest_profile() -> GarbageCollectorProptestProfile {
@@ -27,13 +26,11 @@ mod tests {
                 cases: 256,
                 max_shrink_iters: 1024,
                 transition_range: 1..50,
-                replay_regressions: true,
             },
             _ => GarbageCollectorProptestProfile {
                 cases: 32,
                 max_shrink_iters: 256,
                 transition_range: 1..25,
-                replay_regressions: false,
             },
         }
     }
@@ -44,11 +41,11 @@ mod tests {
         Config {
             cases: profile.cases,
             max_shrink_iters: profile.max_shrink_iters,
-            failure_persistence: if profile.replay_regressions {
-                Config::default().failure_persistence
-            } else {
-                None
-            },
+            // Integration tests live outside src/, so SourceParallel cannot
+            // find a crate root. Keep using this test's checked-in sidecar.
+            failure_persistence: Some(Box::new(FileFailurePersistence::WithSource(
+                "proptest-regressions",
+            ))),
             fork: false,
             ..Config::default()
         }
