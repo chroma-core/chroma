@@ -22,6 +22,8 @@ utoipa = { workspace = true }
 
 chroma-api-types = { workspace = true, features = ["utoipa"] }
 chroma-error = { workspace = true, features = ["validator", "http"] }
+chroma-log = { workspace = true }
+chroma-sysdb = { workspace = true }
 chroma-tracing = { workspace = true, features = ["middleware"] }
 chroma-types = { workspace = true, features = ["utoipa"] }
 

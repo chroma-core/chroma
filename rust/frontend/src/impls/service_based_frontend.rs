@@ -2510,7 +2510,6 @@ impl ServiceBasedFrontend {
             ..
         }: AttachFunctionRequest,
     ) -> Result<AttachFunctionResponse, chroma_types::AttachFunctionError> {
-        // Parse collection_id from path parameter - client-side validation
         let input_collection_id =
             CollectionUuid(uuid::Uuid::parse_str(&collection_id).map_err(|e| {
                 chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
@@ -2521,62 +2520,34 @@ impl ServiceBasedFrontend {
                 )))
             })?);
 
-        // Step 1: Create attached function with is_ready = false
-        let (attached_function_id, created) = self
-            .sysdb_client
-            .create_attached_function(
+        let input_collection = self
+            .get_cached_collection(database_name.clone(), input_collection_id)
+            .await?;
+
+        // Must use HNSW: the Go coordinator's FinishCreateAttachedFunction
+        // hardcodes hnsw-distributed vector segments for the output collection.
+        let output_schema = Schema::new_default(KnnIndex::Hnsw);
+
+        // TODO(tanujnay112): Make num_backfill_records configurable or
+        // better yet a separate RPC to the logs service.
+        let (attached_function_id, created) =
+            frontend_core::attached_function_ops::create_attached_function_with_backfill(
+                &mut self.sysdb_client,
+                &mut self.log_client,
                 name.clone(),
                 function_id.clone(),
                 input_collection_id,
                 output_collection.clone(),
                 params,
-                tenant_name.clone(),
-                database_name.clone().into_string(),
+                tenant_name,
+                database_name,
                 self.min_records_for_invocation,
+                output_schema,
+                &input_collection,
+                250,
             )
-            .await?;
-
-        // If this was an idempotent request (function already exists and is ready),
-        // skip backfill and finish steps - just return the existing function
-        if !created {
-            return Ok(AttachFunctionResponse {
-                attached_function: chroma_types::AttachedFunctionInfo {
-                    id: attached_function_id.to_string(),
-                    name,
-                    function_name: function_id,
-                },
-                created,
-            });
-        }
-
-        // Step 2: Start backfill (only for newly created functions)
-        self.start_backfill(
-            tenant_name,
-            database_name,
-            input_collection_id,
-            attached_function_id,
-        )
-        .await?;
-
-        // Step 3: Create output collection and set is_ready = true
-        // Generate a default HNSW schema for the output collection
-        let output_schema = Schema::new_default(KnnIndex::Hnsw);
-        let output_schema_str = serde_json::to_string(&output_schema).map_err(|e| {
-            chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
-                tonic::Status::internal(format!(
-                    "Failed to serialize output collection schema: {}",
-                    e
-                )),
-            )))
-        })?;
-
-        // The returned `created` flag from finish is for idempotency at this layer,
-        // but we already handle it via the initial create call's `created` flag
-        let _finish_created = self
-            .sysdb_client
-            .finish_create_attached_function(attached_function_id, output_schema_str)
             .await
-            .map_err(chroma_types::AttachFunctionError::from)?;
+            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
 
         Ok(AttachFunctionResponse {
             attached_function: chroma_types::AttachedFunctionInfo {
@@ -2586,41 +2557,6 @@ impl ServiceBasedFrontend {
             },
             created,
         })
-    }
-
-    // Stub method for backfill - will be implemented later
-    async fn start_backfill(
-        &mut self,
-        tenant: String,
-        database_name: DatabaseName,
-        collection_id: CollectionUuid,
-        _attached_function_id: chroma_types::AttachedFunctionUuid,
-    ) -> Result<(), chroma_types::AttachFunctionError> {
-        let collection = self
-            .get_cached_collection(database_name.clone(), collection_id)
-            .await?;
-        let embedding_dim = collection.dimension.unwrap_or(1);
-        let fake_embedding = vec![0.0; embedding_dim as usize];
-        // TODO(tanujnay112): Make this either a configurable or better yet a separate
-        // RPC to the logs service.
-        let num_fake_logs = 250;
-        let logs = vec![
-            OperationRecord {
-                id: "backfill_id".to_string(),
-                embedding: Some(fake_embedding),
-                encoding: None,
-                metadata: None,
-                document: None,
-                operation: Operation::BackfillFn,
-            };
-            num_fake_logs
-        ];
-
-        let cmek = collection.schema.and_then(|schema| schema.cmek.clone());
-        self.retryable_push_logs(&tenant, database_name, collection_id, logs, cmek)
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
-        Ok(())
     }
 
     pub async fn get_attached_function(
