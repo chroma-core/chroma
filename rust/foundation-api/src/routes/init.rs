@@ -75,6 +75,16 @@ pub async fn foundation_init(
     )
     .await?;
 
+    // Attach revision_history to the wiki collection so every mutation is
+    // archived into wiki_revisions automatically on compaction.
+    ensure_revision_history_function(
+        &mut sysdb,
+        tenant.clone(),
+        wiki.collection_id,
+        foundation_cfg,
+    )
+    .await?;
+
     // Source collections are the attached function's *input*. They carry
     // the chunk-sibling grouping flag so a job's chunk records stay in one
     // partition and the trailing end-of-job marker on `{base}-0` is
@@ -170,6 +180,35 @@ async fn ensure_attached_function(
         cfg.function_name.clone(),
         input_collection_id,
         cfg.wiki_collection.clone(),
+        params,
+        tenant,
+        cfg.database_name.clone(),
+        cfg.min_records_for_invocation,
+        output_schema,
+    )
+    .await?;
+    Ok(())
+}
+
+/// Attach the built-in `revision_history` function to the wiki
+/// collection so every upsert/delete is archived into the wiki_revisions
+/// collection on compaction.
+async fn ensure_revision_history_function(
+    sysdb: &mut SysDb,
+    tenant: String,
+    wiki_collection_id: CollectionUuid,
+    cfg: &FoundationConfig,
+) -> Result<(), ServerError> {
+    let params = serde_json::json!({
+        "version_key": "version",
+    });
+    let output_schema = Schema::new_record_only();
+    attached_function_ops::create_attached_function(
+        sysdb,
+        "wiki_revision_history".to_string(),
+        "revision_history".to_string(),
+        wiki_collection_id,
+        cfg.wiki_revisions_collection.clone(),
         params,
         tenant,
         cfg.database_name.clone(),
