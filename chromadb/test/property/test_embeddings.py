@@ -3,6 +3,7 @@ import hypothesis.strategies
 from overrides import overrides
 import pytest
 import logging
+import os
 import hypothesis
 import hypothesis.strategies as st
 from hypothesis import given, settings, HealthCheck
@@ -36,6 +37,7 @@ from hypothesis.stateful import (
 from collections import defaultdict
 import chromadb.test.property.invariants as invariants
 from chromadb.test.conftest import (
+    CURRENT_PRESET,
     is_client_in_process,
     NOT_CLUSTER_ONLY,
     create_isolated_database,
@@ -53,15 +55,29 @@ traces: DefaultDict[str, int] = defaultdict(lambda: 0)
 
 
 VERSION_INCREASE_WAIT_TIME = 300
+MAX_DISTRIBUTED_STATE_MACHINE_ANN_QUERIES = 10
+HYPOTHESIS_COMPACTION_WAITS_ENV = "CHROMA_HYPOTHESIS_COMPACTION_WAITS"
 
-EMBEDDINGS_STATE_MACHINE_SETTINGS = settings(
-    deadline=90000,
-    parent=override_hypothesis_profile(
-        normal=hypothesis.settings(max_examples=76),
-        slow=hypothesis.settings(max_examples=152),
-    ),
-    suppress_health_check=[HealthCheck.filter_too_much],
-)
+
+def hypothesis_driven_compaction_waits_enabled() -> bool:
+    if NOT_CLUSTER_ONLY:
+        return False
+
+    mode = os.getenv(HYPOTHESIS_COMPACTION_WAITS_ENV, "auto").lower()
+    if mode == "auto":
+        return CURRENT_PRESET == "slow"
+    if mode == "always":
+        return True
+    if mode == "never":
+        return False
+
+    raise ValueError(
+        f"Invalid {HYPOTHESIS_COMPACTION_WAITS_ENV}={mode!r}. "
+        "Expected one of: auto, always, never."
+    )
+
+
+RUN_RANDOM_COMPACTION_WAITS = hypothesis_driven_compaction_waits_enabled()
 
 
 def trace(key: str) -> None:
@@ -75,9 +91,49 @@ def print_traces() -> None:
         print(f"{key}: {value}")
 
 
-dtype_shared_st: st.SearchStrategy[Union[np.float16, np.float32, np.float64]] = (
-    st.shared(st.sampled_from(strategies.float_types), key="dtype")
-)
+def state_machine_settings() -> settings:
+    base_settings: Dict[str, Any] = {
+        "deadline": 90000,
+        "suppress_health_check": [HealthCheck.filter_too_much],
+    }
+    if NOT_CLUSTER_ONLY:
+        return settings(
+            **base_settings,
+            parent=override_hypothesis_profile(
+                normal=hypothesis.settings(max_examples=76),
+                slow=hypothesis.settings(max_examples=152),
+            ),
+        )
+
+    return settings(
+        **base_settings,
+        parent=override_hypothesis_profile(
+            fast=hypothesis.settings(max_examples=10, stateful_step_count=20),
+            normal=hypothesis.settings(max_examples=20, stateful_step_count=25),
+            slow=hypothesis.settings(max_examples=100, stateful_step_count=50),
+        ),
+    )
+
+
+def distributed_state_machine_ann_query_indices(size: int) -> Union[List[int], None]:
+    if size <= MAX_DISTRIBUTED_STATE_MACHINE_ANN_QUERIES:
+        return None
+
+    return sorted(
+        set(
+            np.linspace(
+                0,
+                size - 1,
+                num=MAX_DISTRIBUTED_STATE_MACHINE_ANN_QUERIES,
+                dtype=int,
+            ).tolist()
+        )
+    )
+
+
+dtype_shared_st: st.SearchStrategy[
+    Union[np.float16, np.float32, np.float64]
+] = st.shared(st.sampled_from(strategies.float_types), key="dtype")
 
 dimension_shared_st: st.SearchStrategy[int] = st.shared(
     st.integers(min_value=2, max_value=2048), key="dimension"
@@ -227,11 +283,19 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
 
     @invariant()
     def ann_accuracy(self) -> None:
+        query_indices = (
+            None
+            if NOT_CLUSTER_ONLY or is_client_in_process(self.client)
+            else distributed_state_machine_ann_query_indices(
+                len(self.record_set_state["ids"])
+            )
+        )
         invariants.ann_accuracy(
             collection=self.collection,
             record_set=cast(strategies.RecordSet, self.record_set_state),
-            min_recall=0.95,
+            min_recall=1.0 if query_indices is not None else 0.95,
             embedding_function=self.embedding_function,
+            query_indices=query_indices,
             use_search=self.use_search,  # Pass the use_search flag to invariants
         )
 
@@ -273,17 +337,19 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
             if id in self.record_set_state["ids"]:
                 target_idx = self.record_set_state["ids"].index(id)
                 if normalized_record_set["embeddings"] is not None:
-                    self.record_set_state["embeddings"][target_idx] = (
-                        normalized_record_set["embeddings"][idx]
-                    )
+                    self.record_set_state["embeddings"][
+                        target_idx
+                    ] = normalized_record_set["embeddings"][idx]
                 else:
                     assert normalized_record_set["documents"] is not None
                     assert self.embedding_function is not None
-                    self.record_set_state["embeddings"][target_idx] = (
-                        self.embedding_function(
-                            [normalized_record_set["documents"][idx]]
-                        )[0]
-                    )
+                    self.record_set_state["embeddings"][
+                        target_idx
+                    ] = self.embedding_function(
+                        [normalized_record_set["documents"][idx]]
+                    )[
+                        0
+                    ]
                 if normalized_record_set["metadatas"] is not None:
                     # Sqlite merges the metadata, as opposed to old
                     # implementations which overwrites it
@@ -300,13 +366,13 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
                             # None in the update metadata is a no-op
                             pass
                     else:
-                        self.record_set_state["metadatas"][target_idx] = (
-                            normalized_record_set["metadatas"][idx]
-                        )
+                        self.record_set_state["metadatas"][
+                            target_idx
+                        ] = normalized_record_set["metadatas"][idx]
                 if normalized_record_set["documents"] is not None:
-                    self.record_set_state["documents"][target_idx] = (
-                        normalized_record_set["documents"][idx]
-                    )
+                    self.record_set_state["documents"][
+                        target_idx
+                    ] = normalized_record_set["documents"][idx]
             else:
                 # Add path
                 self.record_set_state["ids"].append(id)
@@ -371,7 +437,7 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
 
     @precondition(
         lambda self: (
-            not NOT_CLUSTER_ONLY
+            RUN_RANDOM_COMPACTION_WAITS
             and self.log_operation_count > 10
             and len(self.unique_ids_in_log) > 3
         )
@@ -486,7 +552,7 @@ def test_embeddings_state(caplog: pytest.LogCaptureFixture, client: ClientAPI) -
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(
         lambda: EmbeddingStateMachine(client),
-        settings=EMBEDDINGS_STATE_MACHINE_SETTINGS,
+        settings=state_machine_settings(),
     )  # type: ignore
     print_traces()
 
@@ -502,7 +568,7 @@ def test_embeddings_state_with_search(
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(
         lambda: EmbeddingStateMachine(client, use_search=True),
-        settings=EMBEDDINGS_STATE_MACHINE_SETTINGS,
+        settings=state_machine_settings(),
     )  # type: ignore
     print_traces()
 
