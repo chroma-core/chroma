@@ -53,6 +53,7 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 tonic = { workspace = true }
 tonic-health = { workspace = true }
+tower = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
 num_cpus = { workspace = true }

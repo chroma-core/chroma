@@ -71,6 +71,7 @@ pub async fn service_entrypoint() {
 
     // Start server (this blocks forever)
     tonic::transport::Server::builder()
+        .layer(chroma_tracing::GrpcServerTraceLayer)
         .add_service(server)
         .add_service(health_service)
         .serve(addr)

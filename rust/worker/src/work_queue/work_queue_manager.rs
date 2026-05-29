@@ -123,6 +123,7 @@ impl WorkQueueManager {
     //     self.distributor = Some(WorkDistributor::new(members));
     // }
 
+    #[tracing::instrument(name = "WorkQueueManager::load_state", skip(self))]
     async fn load_state(&mut self) -> Result<(), WorkQueueError> {
         match self
             .storage
@@ -155,6 +156,7 @@ impl WorkQueueManager {
         }
     }
 
+    #[tracing::instrument(name = "WorkQueueManager::persist", skip(self), level = "debug")]
     async fn persist(&mut self) -> Result<(), WorkQueueError> {
         if !self.state.dirty {
             self.notify_pending_responses();
@@ -276,6 +278,7 @@ impl WorkQueueManager {
     }
 
     // Call sysdb's TryFinishAsyncAttachedFunctionInvocation
+    #[tracing::instrument(name = "WorkQueueManager::try_finish_invocation", skip(self))]
     async fn try_finish_invocation(
         &mut self,
         fn_id: &AttachedFunctionUuid,
@@ -320,6 +323,11 @@ impl WorkQueueManager {
     }
 
     // Check invocation completion status with detailed status
+    #[tracing::instrument(
+        name = "WorkQueueManager::check_invocations_status",
+        skip(self, items),
+        level = "debug"
+    )]
     async fn check_invocations_status(
         &mut self,
         items: &[WorkQueueRecord],
@@ -359,6 +367,7 @@ impl WorkQueueManager {
     }
 
     // Check all pending items on startup and repair any that need it
+    #[tracing::instrument(name = "WorkQueueManager::check_and_repair_pending_items", skip(self))]
     async fn check_and_repair_pending_items(&mut self) {
         if self.state.pending_work.is_empty() {
             tracing::info!("No pending work items to check for repair");

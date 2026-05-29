@@ -7,11 +7,13 @@ use chroma_types::chroma_proto::{
 use std::time::Duration;
 use tonic::transport::Endpoint;
 use tonic::Request;
+use tower::ServiceBuilder;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct WorkQueueClient {
-    client: WorkQueueServiceClient<tonic::transport::Channel>,
+    client:
+        WorkQueueServiceClient<chroma_tracing::GrpcClientTraceService<tonic::transport::Channel>>,
 }
 
 #[allow(dead_code)]
@@ -29,25 +31,36 @@ impl WorkQueueClient {
             .connect_timeout(Duration::from_millis(config.connect_timeout_ms))
             .timeout(Duration::from_millis(config.request_timeout_ms));
 
-        let client = WorkQueueServiceClient::connect(endpoint)
-            .await
-            .map_err(|e| {
-                let err: Box<dyn ChromaError> =
-                    Box::new(WorkQueueClientError::ConnectionError(e.to_string()));
-                err
-            })?;
+        let channel = endpoint.connect().await.map_err(|e| {
+            let err: Box<dyn ChromaError> =
+                Box::new(WorkQueueClientError::ConnectionError(e.to_string()));
+            err
+        })?;
+        let channel = ServiceBuilder::new()
+            .layer(chroma_tracing::GrpcClientTraceLayer)
+            .service(channel);
+        let client = WorkQueueServiceClient::new(channel);
 
         Ok(Self { client })
     }
 
     pub async fn new(endpoint: String) -> Result<Self, Box<dyn ChromaError>> {
-        let client = WorkQueueServiceClient::connect(endpoint)
+        let channel = Endpoint::from_shared(endpoint)
+            .map_err(|e| {
+                Box::new(WorkQueueClientError::ConnectionError(e.to_string()))
+                    as Box<dyn ChromaError>
+            })?
+            .connect()
             .await
             .map_err(|e| {
                 let err: Box<dyn ChromaError> =
                     Box::new(WorkQueueClientError::ConnectionError(e.to_string()));
                 err
             })?;
+        let channel = ServiceBuilder::new()
+            .layer(chroma_tracing::GrpcClientTraceLayer)
+            .service(channel);
+        let client = WorkQueueServiceClient::new(channel);
 
         Ok(Self { client })
     }
