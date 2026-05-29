@@ -15,11 +15,7 @@ metadata:
   name: foundation-server-deployment
   namespace: {{ .Values.namespace }}
 spec:
-  {{- if hasKey .Values.foundationService "replicaCount" }}
   replicas: {{ .Values.foundationService.replicaCount }}
-  {{- else }}
-  replicas: 1
-  {{- end }}
   selector:
     matchLabels:
       app: foundation-server
