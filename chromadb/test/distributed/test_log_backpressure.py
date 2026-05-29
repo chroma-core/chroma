@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import pytest
 
 from chromadb.api import ClientAPI
+from chromadb.errors import RateLimitError
 from chromadb.test.conftest import (
     reset,
     skip_if_not_cluster,
@@ -15,10 +16,22 @@ EXPECTED_BACKPRESSURE_ERROR = (
     "log needs compaction before accepting more writes; "
     "please backoff exponentially and retry"
 )
+EXPECTED_RATE_LIMIT_ERRORS = (
+    "Too many requests; backoff and try again",
+    "Rate limit exceeded.",
+)
 RECORDS = 2_000_000
 BATCH_SIZE = 300
 PARALLELISM = 4
 EMBEDDING = [0.0, 0.0, 0.0]
+INITIAL_RATE_LIMIT_BACKOFF_SECONDS = 0.1
+MAX_RATE_LIMIT_BACKOFF_SECONDS = 1.0
+
+
+def is_rate_limit_error(exc: Exception) -> bool:
+    return isinstance(exc, RateLimitError) or any(
+        error in str(exc) for error in EXPECTED_RATE_LIMIT_ERRORS
+    )
 
 
 @skip_if_not_cluster()
@@ -45,15 +58,28 @@ def test_log_backpressure(
             i = batch * BATCH_SIZE
             ids = [str(x) for x in range(i, i + BATCH_SIZE)]
             embeddings = [EMBEDDING] * BATCH_SIZE
-            try:
-                collection.add(ids=ids, embeddings=embeddings)
-            except Exception as exc:
-                print(f"Caught exception:\n{exc}")
-                if EXPECTED_BACKPRESSURE_ERROR in str(exc):
+            backoff = INITIAL_RATE_LIMIT_BACKOFF_SECONDS
+            while not stop_event.is_set():
+                try:
+                    collection.add(ids=ids, embeddings=embeddings)
+                    break
+                except Exception as exc:
+                    if EXPECTED_BACKPRESSURE_ERROR in str(exc):
+                        print(f"Caught exception:\n{exc}")
+                        stop_event.set()
+                        return True
+                    if is_rate_limit_error(exc):
+                        if stop_event.wait(backoff):
+                            return False
+                        backoff = min(
+                            backoff * 2,
+                            MAX_RATE_LIMIT_BACKOFF_SECONDS,
+                        )
+                        continue
+
+                    print(f"Caught exception:\n{exc}")
                     stop_event.set()
-                    return True
-                stop_event.set()
-                raise
+                    raise
         return False
 
     with ThreadPoolExecutor(max_workers=PARALLELISM) as executor:
