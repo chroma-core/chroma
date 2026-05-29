@@ -20,6 +20,7 @@ on:
 
 env:
   CHROMA_HYPOTHESIS_CI_REPRODUCE_ONLY: "1"
+  CHROMA_HYPOTHESIS_COMPACTION_WAITS: "auto"
 
 jobs:
   test-rust-bindings:
