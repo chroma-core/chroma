@@ -151,6 +151,11 @@ jobs:
           - "chromadb/test/distributed/test_statistics_wrapper.py"
           - "chromadb/test/api/test_indexing_status.py"
         include:
+          - test-glob: "chromadb/test/api"
+            pytest-extra-args: >-
+              --ignore=chromadb/test/api/test_collection.py
+              --ignore=chromadb/test/api/test_indexing_status.py
+              --ignore=chromadb/test/api/test_limit_offset.py
           - test-glob: "chromadb/test/property/test_add.py"
             parallelized: false
           - test-glob: "chromadb/test/property/test_embeddings.py"
@@ -179,7 +184,7 @@ jobs:
       - name: Start Tilt services
         uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest -x "${{ matrix.test-glob }}" ${{ matrix.parallelized && '-n auto --dist worksteal' || '' }} --durations 10'
+        run: bin/cluster-test.sh bash -c 'python -m pytest -x "${{ matrix.test-glob }}" ${{ matrix.pytest-extra-args || '' }} ${{ matrix.parallelized && '-n auto --dist worksteal' || '' }} --durations 10'
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
