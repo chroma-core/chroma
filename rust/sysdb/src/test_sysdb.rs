@@ -618,25 +618,51 @@ impl TestSysDb {
         _epoch_id: i64,
         versions: Vec<VersionListForCollection>,
     ) -> Result<(), String> {
-        // For testing success case, return Ok when versions are not empty
-        if !versions.is_empty() && !versions[0].versions.is_empty() {
-            // Simulate error case when version is 0
-            if versions[0].versions.contains(&0) {
-                return Err("Failed to mark version for deletion".to_string());
+        let mut inner = self.inner.lock();
+        for version_list in versions {
+            let collection_id = CollectionUuid(
+                uuid::Uuid::parse_str(&version_list.collection_id)
+                    .map_err(|e| format!("Invalid collection ID: {e}"))?,
+            );
+            let version_file = inner
+                .collection_to_version_file
+                .get_mut(&collection_id)
+                .ok_or_else(|| format!("Collection not found: {}", version_list.collection_id))?;
+            let version_history = version_file.version_history.as_mut().ok_or_else(|| {
+                format!("Version history missing: {}", version_list.collection_id)
+            })?;
+
+            for version in &mut version_history.versions {
+                if version_list.versions.contains(&version.version) {
+                    version.marked_for_deletion = true;
+                }
             }
-            Ok(())
-        } else {
-            Ok(())
         }
+        Ok(())
     }
 
     pub async fn delete_collection_version(
         &self,
-        _versions: Vec<VersionListForCollection>,
+        versions: Vec<VersionListForCollection>,
     ) -> HashMap<String, bool> {
-        // For testing, return success for all collections
         let mut results = HashMap::new();
-        for version_list in _versions {
+        let mut inner = self.inner.lock();
+        for version_list in versions {
+            let Ok(collection_uuid) = uuid::Uuid::parse_str(&version_list.collection_id) else {
+                results.insert(version_list.collection_id, true);
+                continue;
+            };
+            let collection_id = CollectionUuid(collection_uuid);
+            let Some(version_file) = inner.collection_to_version_file.get_mut(&collection_id)
+            else {
+                results.insert(version_list.collection_id, true);
+                continue;
+            };
+            if let Some(version_history) = version_file.version_history.as_mut() {
+                version_history
+                    .versions
+                    .retain(|version| !version_list.versions.contains(&version.version));
+            }
             results.insert(version_list.collection_id, true);
         }
         results
