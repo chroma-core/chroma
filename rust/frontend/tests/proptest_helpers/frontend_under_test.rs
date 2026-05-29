@@ -9,7 +9,9 @@ use chroma_types::{
     IncludeList,
 };
 use proptest_state_machine::{ReferenceStateMachine, StateMachineTest};
+use std::cell::Cell;
 use std::sync::Arc;
+use std::time::Instant;
 
 define_thread_local_stats!(STATS);
 
@@ -17,6 +19,9 @@ pub(crate) struct FrontendUnderTest {
     collection: Option<Collection>,
     frontend: Frontend,
     runtime: Arc<tokio::runtime::Runtime>,
+    case_started_at: Instant,
+    applied_transitions: usize,
+    full_sweep_pending: Cell<bool>,
 }
 
 impl StateMachineTest for FrontendUnderTest {
@@ -26,6 +31,8 @@ impl StateMachineTest for FrontendUnderTest {
     fn init_test(
         ref_state: &<Self::Reference as ReferenceStateMachine>::State,
     ) -> Self::SystemUnderTest {
+        STATS.with_borrow_mut(|stats| stats.start_run());
+
         let runtime = ref_state.runtime.clone();
         let frontend = runtime.block_on(async {
             let system = System::new();
@@ -45,6 +52,9 @@ impl StateMachineTest for FrontendUnderTest {
             collection: None,
             frontend,
             runtime,
+            case_started_at: Instant::now(),
+            applied_transitions: 0,
+            full_sweep_pending: Cell::new(false),
         }
     }
 
@@ -53,6 +63,8 @@ impl StateMachineTest for FrontendUnderTest {
         ref_state: &<Self::Reference as ReferenceStateMachine>::State,
         transition: <Self::Reference as ReferenceStateMachine>::Transition,
     ) -> Self::SystemUnderTest {
+        state.applied_transitions += 1;
+
         state.runtime.block_on(async {
             match transition {
                 CollectionRequest::Init { .. } => {
@@ -75,6 +87,7 @@ impl StateMachineTest for FrontendUnderTest {
                         .await
                         .unwrap();
                     state.collection = Some(collection);
+                    state.full_sweep_pending.set(true);
                 }
                 CollectionRequest::Add(mut request) => {
                     let collection = state.collection.clone().unwrap();
@@ -85,6 +98,7 @@ impl StateMachineTest for FrontendUnderTest {
                     STATS.with_borrow_mut(|stats| stats.num_log_operations += request.ids.len());
 
                     state.frontend.add(request).await.unwrap();
+                    state.full_sweep_pending.set(true);
                 }
                 CollectionRequest::Update(mut request) => {
                     let collection = state.collection.clone().unwrap();
@@ -95,6 +109,7 @@ impl StateMachineTest for FrontendUnderTest {
                     STATS.with_borrow_mut(|stats| stats.num_log_operations += request.ids.len());
 
                     state.frontend.update(request).await.unwrap();
+                    state.full_sweep_pending.set(true);
                 }
                 CollectionRequest::Upsert(mut request) => {
                     let collection = state.collection.clone().unwrap();
@@ -105,6 +120,7 @@ impl StateMachineTest for FrontendUnderTest {
                     STATS.with_borrow_mut(|stats| stats.num_log_operations += request.ids.len());
 
                     state.frontend.upsert(request).await.unwrap();
+                    state.full_sweep_pending.set(true);
                 }
                 CollectionRequest::Delete(mut request) => {
                     let collection = state.collection.clone().unwrap();
@@ -146,6 +162,7 @@ impl StateMachineTest for FrontendUnderTest {
                     Box::pin(state.frontend.delete(request.clone(), String::new()))
                         .await
                         .unwrap();
+                    state.full_sweep_pending.set(true);
                 }
                 CollectionRequest::Get(mut request) => {
                     let expected_result = {
@@ -156,29 +173,13 @@ impl StateMachineTest for FrontendUnderTest {
 
                         ref_state
                             .frontend
-                            .clone()
+                            .as_ref()
                             .unwrap()
                             .get(request.clone())
                             .unwrap()
                     };
 
-                    let count = {
-                        let collection = ref_state.collection.clone().unwrap();
-                        ref_state
-                            .frontend
-                            .clone()
-                            .unwrap()
-                            .count(
-                                CountRequest::try_new(
-                                    collection.tenant,
-                                    collection.database,
-                                    collection.collection_id,
-                                    ReadLevel::default(),
-                                )
-                                .unwrap(),
-                            )
-                            .unwrap()
-                    };
+                    let count = ref_state.current_count();
 
                     if count > 0 {
                         let selectivity = expected_result.ids.len() as f64 / count as f64;
@@ -226,23 +227,7 @@ impl StateMachineTest for FrontendUnderTest {
                             .unwrap()
                     };
 
-                    let count = {
-                        let collection = ref_state.collection.clone().unwrap();
-                        ref_state
-                            .frontend
-                            .clone()
-                            .unwrap()
-                            .count(
-                                CountRequest::try_new(
-                                    collection.tenant,
-                                    collection.database,
-                                    collection.collection_id,
-                                    ReadLevel::default(),
-                                )
-                                .unwrap(),
-                            )
-                            .unwrap()
-                    };
+                    let count = ref_state.current_count();
 
                     if count > 0 {
                         let selectivity = expected_result.ids.len() as f64 / count as f64;
@@ -276,44 +261,37 @@ impl StateMachineTest for FrontendUnderTest {
         state
     }
 
+    fn teardown(state: Self::SystemUnderTest) {
+        STATS.with_borrow_mut(|stats| {
+            stats.record_case(state.case_started_at.elapsed(), state.applied_transitions)
+        });
+    }
+
     fn check_invariants(
         state: &Self::SystemUnderTest,
         ref_state: &<Self::Reference as ReferenceStateMachine>::State,
     ) {
-        let reference_frontend = match ref_state.frontend.as_ref() {
-            Some(frontend) => frontend,
-            None => return,
-        };
-
         let reference_collection = match ref_state.collection.as_ref() {
             Some(collection) => collection.clone(),
             None => return,
         };
 
-        let mut frontend_under_test = state.frontend.clone();
         let collection_under_test = match state.collection.clone() {
             Some(collection) => collection,
             None => return,
         };
 
+        let mut frontend_under_test = state.frontend.clone();
+        let count_collection_under_test = collection_under_test.clone();
+        let expected_count = ref_state.current_count();
+
         state.runtime.block_on(async move {
-            let expected_count = reference_frontend
-                .count(
-                    CountRequest::try_new(
-                        reference_collection.tenant.clone(),
-                        reference_collection.database.clone(),
-                        reference_collection.collection_id,
-                        ReadLevel::default(),
-                    )
-                    .unwrap(),
-                )
-                .unwrap();
             let received_count = frontend_under_test
                 .count(
                     CountRequest::try_new(
-                        collection_under_test.tenant.clone(),
-                        collection_under_test.database.clone(),
-                        collection_under_test.collection_id,
+                        count_collection_under_test.tenant.clone(),
+                        count_collection_under_test.database.clone(),
+                        count_collection_under_test.collection_id,
                         ReadLevel::default(),
                     )
                     .unwrap(),
@@ -325,23 +303,31 @@ impl StateMachineTest for FrontendUnderTest {
                 "Expected {:?} to be equal to {:?}",
                 expected_count, received_count
             );
+        });
 
-            let expected_results = reference_frontend
-                .get(
-                    GetRequest::try_new(
-                        reference_collection.tenant.clone(),
-                        reference_collection.database.clone(),
-                        reference_collection.collection_id,
-                        None,
-                        None,
-                        None,
-                        0,
-                        IncludeList::default_get(),
-                    )
-                    .unwrap(),
+        if !state.full_sweep_pending.replace(false) {
+            return;
+        }
+
+        let reference_frontend = ref_state.frontend.as_ref().unwrap();
+        let expected_results = reference_frontend
+            .get(
+                GetRequest::try_new(
+                    reference_collection.tenant.clone(),
+                    reference_collection.database.clone(),
+                    reference_collection.collection_id,
+                    None,
+                    None,
+                    None,
+                    0,
+                    IncludeList::default_get(),
                 )
-                .unwrap();
+                .unwrap(),
+            )
+            .unwrap();
 
+        let mut frontend_under_test = state.frontend.clone();
+        state.runtime.block_on(async move {
             let received_results = Box::pin(
                 frontend_under_test.get(
                     GetRequest::try_new(
