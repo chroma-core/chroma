@@ -7,24 +7,27 @@ use std::fmt::Debug;
 use thiserror::Error;
 
 #[derive(Debug, Clone)]
-pub struct FinishAsyncWorkInput {
-    pub function_id: AttachedFunctionUuid,
+pub struct FinishAsyncWorkItem {
     pub input_collection_id: CollectionUuid,
     pub completion_offset: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct FinishAsyncWorkInput {
+    pub function_id: AttachedFunctionUuid,
+    pub work_items: Vec<FinishAsyncWorkItem>,
     pub work_queue_client: WorkQueueClient,
 }
 
 impl FinishAsyncWorkInput {
     pub fn new(
         function_id: AttachedFunctionUuid,
-        input_collection_id: CollectionUuid,
-        completion_offset: i64,
+        work_items: Vec<FinishAsyncWorkItem>,
         work_queue_client: WorkQueueClient,
     ) -> Self {
         Self {
             function_id,
-            input_collection_id,
-            completion_offset,
+            work_items,
             work_queue_client,
         }
     }
@@ -78,21 +81,22 @@ impl Operator<FinishAsyncWorkInput, FinishAsyncWorkOutput> for FinishAsyncWorkOp
     ) -> Result<FinishAsyncWorkOutput, FinishAsyncWorkError> {
         let mut work_queue_client = input.work_queue_client.clone();
 
-        // Call finish_work on the work queue client
-        work_queue_client
-            .finish_work(
-                input.function_id.0.to_string(),
-                input.input_collection_id.0.to_string(),
-                input.completion_offset,
-            )
-            .await?;
+        for work_item in &input.work_items {
+            work_queue_client
+                .finish_work(
+                    input.function_id.0.to_string(),
+                    work_item.input_collection_id.0.to_string(),
+                    work_item.completion_offset,
+                )
+                .await?;
 
-        tracing::info!(
-            "Successfully marked async work as complete - function: {}, collection: {}, offset: {}",
-            input.function_id.0,
-            input.input_collection_id.0,
-            input.completion_offset
-        );
+            tracing::info!(
+                "Successfully marked async work as complete - function: {}, collection: {}, offset: {}",
+                input.function_id.0,
+                work_item.input_collection_id.0,
+                work_item.completion_offset
+            );
+        }
 
         Ok(FinishAsyncWorkOutput {})
     }

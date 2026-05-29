@@ -287,29 +287,31 @@ fn metadata_value_to_json(value: &chroma_types::MetadataValue) -> serde_json::Va
 impl AttachedFunctionExecutor for HttpGenerateExecutor {
     async fn execute(
         &self,
-        input_records: Chunk<HydratedMaterializedLogRecord<'_, '_>>,
+        input_records: Vec<Chunk<HydratedMaterializedLogRecord<'_, '_>>>,
         _output_reader: Option<&chroma_segment::blockfile_record::RecordSegmentReaderShard<'_>>,
     ) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>> {
         let mut records = Vec::new();
 
-        for (record, _) in input_records.iter() {
-            if record.get_operation() == MaterializedLogOperation::DeleteExisting {
-                continue;
+        for input_batch in &input_records {
+            for (record, _) in input_batch.iter() {
+                if record.get_operation() == MaterializedLogOperation::DeleteExisting {
+                    continue;
+                }
+
+                let id = record.get_user_id().to_string();
+                let document = record.merged_document_ref().unwrap_or("").to_string();
+                let metadata: HashMap<String, serde_json::Value> = record
+                    .merged_metadata()
+                    .into_iter()
+                    .map(|(k, v)| (k, metadata_value_to_json(&v)))
+                    .collect();
+
+                records.push(GenerateRecord {
+                    id,
+                    document,
+                    metadata,
+                });
             }
-
-            let id = record.get_user_id().to_string();
-            let document = record.merged_document_ref().unwrap_or("").to_string();
-            let metadata: HashMap<String, serde_json::Value> = record
-                .merged_metadata()
-                .into_iter()
-                .map(|(k, v)| (k, metadata_value_to_json(&v)))
-                .collect();
-
-            records.push(GenerateRecord {
-                id,
-                document,
-                metadata,
-            });
         }
 
         if records.is_empty() {

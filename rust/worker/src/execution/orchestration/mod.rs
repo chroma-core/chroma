@@ -3,6 +3,7 @@ pub(crate) mod async_function_boundary;
 pub mod attached_function_orchestrator;
 pub(crate) mod compact;
 pub(crate) mod count;
+pub mod function_execution;
 pub mod get;
 pub mod knn;
 pub mod knn_filter;

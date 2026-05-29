@@ -8,12 +8,13 @@ use chroma_sysdb::SysDb;
 use chroma_system::{Component, ComponentContext, ComponentHandle, Dispatcher, Handler, System};
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
 use futures::future::join_all;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, SystemTime};
 use thiserror::Error;
 use tracing::span;
 
 use crate::execution::orchestration::compact::CompactionContext;
+use crate::execution::orchestration::function_execution::FunctionExecutionContext;
 use crate::fn_consumer::config::FnConsumerConfig;
 use crate::work_queue::work_queue_client::WorkQueueClient;
 
@@ -140,34 +141,47 @@ impl FnConsumerManager {
     }
 
     fn compute_remaining_capacity(&self) -> usize {
-        self.context
-            .max_concurrent_workers
-            .saturating_sub(self.in_progress.len())
+        self.context.max_concurrent_workers.saturating_sub(
+            self.in_progress
+                .keys()
+                .map(|(fn_id, _)| *fn_id)
+                .collect::<HashSet<_>>()
+                .len(),
+        )
     }
 
-    /// Runs the compaction workflow for the given function and collection.
-    async fn dispatch_item(
+    fn fn_in_progress(&self, fn_id: AttachedFunctionUuid) -> bool {
+        self.in_progress
+            .keys()
+            .any(|(active_fn_id, _)| *active_fn_id == fn_id)
+    }
+
+    /// Runs the attached function workflow for the given function across a batch of input collections.
+    async fn dispatch_batch(
         &self,
         fn_id: AttachedFunctionUuid,
-        input_coll_id: CollectionUuid,
-        completion_offset: i64,
+        batch: Vec<(CollectionUuid, i64)>,
     ) -> Result<(), DispatchError> {
         let Some(dispatcher) = self.context.dispatcher.clone() else {
             tracing::error!("Dispatcher not set on FnConsumerManager");
             return Err(DispatchError::DispatcherNotInitialized);
         };
 
+        let Some((first_input_coll_id, _)) = batch.first().cloned() else {
+            return Ok(());
+        };
+
         // Fetch collection information to get the database name
         let mut sysdb = self.context.sysdb.clone();
         let collection_info = match sysdb
-            .get_collection_with_segments(None, input_coll_id)
+            .get_collection_with_segments(None, first_input_coll_id)
             .await
         {
             Ok(info) => info,
             Err(e) => {
                 tracing::error!(
                     fn_id = %fn_id,
-                    input_coll_id = %input_coll_id,
+                    input_coll_id = %first_input_coll_id,
                     "Failed to fetch collection information: {}",
                     e,
                 );
@@ -185,7 +199,7 @@ impl FnConsumerManager {
                 None => {
                     tracing::error!(
                         fn_id = %fn_id,
-                        input_coll_id = %input_coll_id,
+                        input_coll_id = %first_input_coll_id,
                         database = collection_info.collection.database,
                         "Invalid database name"
                     );
@@ -198,7 +212,7 @@ impl FnConsumerManager {
             };
 
         // Create CompactionContext with is_fn_consumer = true
-        let mut compaction_context = CompactionContext::new_with_log_offset(
+        let compaction_context = CompactionContext::new_with_log_offset(
             None,  // rebuild_info
             100,   // fetch_log_batch_size
             10,    // fetch_log_concurrency
@@ -216,12 +230,12 @@ impl FnConsumerManager {
             None,                                 // bloom_filter_manager
             None,                                 // shard_size
             Some(self.work_queue_client.clone()), // work_queue_client
-            completion_offset,                    // log_start_offset
+            0,                                    // log_start_offset
         );
 
-        // Run compaction workflow
-        let result = Box::pin(compaction_context.run_compaction(
-            input_coll_id,
+        let function_execution_context = FunctionExecutionContext::new(&compaction_context);
+        let result = Box::pin(function_execution_context.run(
+            batch.clone(),
             database_name,
             self.context.system.clone(),
         ))
@@ -231,7 +245,8 @@ impl FnConsumerManager {
             Ok(_response) => {
                 tracing::info!(
                     fn_id = %fn_id,
-                    input_coll_id = %input_coll_id,
+                    input_coll_id = %first_input_coll_id,
+                    batch_size = batch.len(),
                     "Function consumer workflow completed successfully"
                 );
                 Ok(())
@@ -239,7 +254,8 @@ impl FnConsumerManager {
             Err(e) => {
                 tracing::error!(
                     fn_id = %fn_id,
-                    input_coll_id = %input_coll_id,
+                    input_coll_id = %first_input_coll_id,
+                    batch_size = batch.len(),
                     "Function consumer workflow failed: {}",
                     e,
                 );
@@ -255,7 +271,7 @@ impl FnConsumerManager {
             tracing::debug!("fn_consumer at capacity, skipping poll");
             return;
         }
-        let limit = rem.min(self.context.get_work_batch_size as usize) as u32;
+        let limit = self.context.get_work_batch_size;
         let resp = match self
             .work_queue_client
             .get_work(self.context.my_member_id.clone(), limit)
@@ -284,52 +300,77 @@ impl FnConsumerManager {
             work_items.push((fn_id, input_coll_id, item.completion_offset));
         }
 
-        let mut items_to_process = Vec::new();
+        let mut grouped_work_items: HashMap<AttachedFunctionUuid, Vec<(CollectionUuid, i64)>> =
+            HashMap::new();
         for (fn_id, input_coll_id, completion_offset) in work_items {
-            let key = (fn_id, input_coll_id);
+            grouped_work_items
+                .entry(fn_id)
+                .or_default()
+                .push((input_coll_id, completion_offset));
+        }
 
-            if self.in_progress.contains_key(&key) {
-                tracing::debug!(?key, "skipping: already in progress");
+        let mut batches_to_process = Vec::new();
+        for (fn_id, items) in grouped_work_items {
+            if batches_to_process.len() >= rem {
+                break;
+            }
+
+            if self.fn_in_progress(fn_id) {
+                tracing::debug!(fn_id = %fn_id, "skipping batch: function already in progress");
                 continue;
             }
 
-            self.in_progress
-                .insert(key, InProgressFn::new(self.context.job_expiry_seconds));
+            let mut batch = Vec::new();
+            for (input_coll_id, completion_offset) in items {
+                let key = (fn_id, input_coll_id);
+                if self.in_progress.contains_key(&key) {
+                    tracing::debug!(?key, "skipping: already in progress");
+                    continue;
+                }
 
-            items_to_process.push((fn_id, input_coll_id, completion_offset));
+                self.in_progress
+                    .insert(key, InProgressFn::new(self.context.job_expiry_seconds));
+                batch.push((input_coll_id, completion_offset));
+            }
+
+            if !batch.is_empty() {
+                batches_to_process.push((fn_id, batch));
+            }
         }
 
-        let futures: Vec<_> = items_to_process
+        let futures: Vec<_> = batches_to_process
             .into_iter()
-            .map(|(fn_id, input_coll_id, completion_offset)| {
-                let fut = self.dispatch_item(fn_id, input_coll_id, completion_offset);
+            .map(|(fn_id, batch)| {
+                let batch_for_result = batch.clone();
+                let fut = self.dispatch_batch(fn_id, batch);
                 Box::pin(async move {
                     let result = fut.await;
-                    (fn_id, input_coll_id, result)
+                    (fn_id, batch_for_result, result)
                 })
             })
             .collect();
 
         let results = join_all(futures).await;
 
-        for (fn_id, input_coll_id, result) in results {
-            let key = (fn_id, input_coll_id);
-            self.in_progress.remove(&key);
+        for (fn_id, batch, result) in results {
+            for (input_coll_id, _) in &batch {
+                self.in_progress.remove(&(fn_id, *input_coll_id));
+            }
 
             match result {
                 Ok(()) => {
                     tracing::debug!(
                         fn_id = %fn_id,
-                        input_coll_id = %input_coll_id,
-                        "Successfully completed work item"
+                        batch_size = batch.len(),
+                        "Successfully completed work batch"
                     );
                 }
                 Err(e) => {
                     tracing::warn!(
                         fn_id = %fn_id,
-                        input_coll_id = %input_coll_id,
+                        batch_size = batch.len(),
                         error = %e,
-                        "Failed to process work item"
+                        "Failed to process work batch"
                     );
                 }
             }
