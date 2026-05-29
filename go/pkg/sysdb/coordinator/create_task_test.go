@@ -89,7 +89,7 @@ func (suite *AttachFunctionTestSuite) setupAttachFunctionMocks(ctx context.Conte
 
 	suite.mockCollectionDb.On("GetCollections",
 		[]string{inputCollectionID}, (*string)(nil), tenantID, databaseName, (*int32)(nil), (*int32)(nil), false).
-		Return([]*dbmodel.CollectionAndMetadata{{Collection: &dbmodel.Collection{ID: inputCollectionID}}}, nil).Once()
+		Return([]*dbmodel.CollectionAndMetadata{{Collection: &dbmodel.Collection{ID: inputCollectionID}}}, nil).Times(2)
 
 	suite.mockMetaDomain.On("CollectionDb", mock.Anything).Return(suite.mockCollectionDb).Once()
 	suite.mockCollectionDb.On("GetCollections",
@@ -187,13 +187,12 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_SuccessfulCreation() {
 	// Check input collection exists
 	suite.mockCollectionDb.On("GetCollections",
 		[]string{inputCollectionID}, (*string)(nil), tenantID, databaseName, (*int32)(nil), (*int32)(nil), false).
-		Return([]*dbmodel.CollectionAndMetadata{{Collection: &dbmodel.Collection{ID: inputCollectionID}}}, nil).Once()
+		Return([]*dbmodel.CollectionAndMetadata{{Collection: &dbmodel.Collection{ID: inputCollectionID}}}, nil).Times(2)
 
 	// Check if input collection is being used as an output collection
-	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
+	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Times(2)
 	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), (*string)(nil), matchStringPtr(inputCollectionID), []uuid.UUID(nil), false).
 		Return([]*dbmodel.AttachedFunction{}, nil).Twice()
-
 	// Check if output collection already exists
 	suite.mockCollectionDb.On("GetCollections",
 		[]string(nil), matchStringPtr(outputCollectionName), tenantID, databaseName, (*int32)(nil), (*int32)(nil), false).
@@ -374,7 +373,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_AllowsOutputCollectionI
 
 	suite.mockCollectionDb.On("GetCollections",
 		[]string{inputCollectionID}, (*string)(nil), tenantID, databaseName, (*int32)(nil), (*int32)(nil), false).
-		Return([]*dbmodel.CollectionAndMetadata{{Collection: &dbmodel.Collection{ID: inputCollectionID}}}, nil).Once()
+		Return([]*dbmodel.CollectionAndMetadata{{Collection: &dbmodel.Collection{ID: inputCollectionID}}}, nil).Times(2)
 
 	existingUpstream := &dbmodel.AttachedFunction{
 		ID:                uuid.New(),
@@ -387,7 +386,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_AllowsOutputCollectionI
 		FunctionID: upstreamFunctionID,
 	}
 
-	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
+	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Times(4)
 	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), (*string)(nil), matchStringPtr(inputCollectionID), []uuid.UUID(nil), false).
 		Return([]*dbmodel.AttachedFunction{existingUpstream}, nil).Twice()
 	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), (*string)(nil), matchStringPtr("root-input-collection"), []uuid.UUID(nil), false).
@@ -574,13 +573,12 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow() {
 
 	suite.mockCollectionDb.On("GetCollections",
 		[]string{inputCollectionID}, (*string)(nil), tenantID, databaseName, (*int32)(nil), (*int32)(nil), false).
-		Return([]*dbmodel.CollectionAndMetadata{{Collection: &dbmodel.Collection{ID: inputCollectionID}}}, nil).Once()
+		Return([]*dbmodel.CollectionAndMetadata{{Collection: &dbmodel.Collection{ID: inputCollectionID}}}, nil).Times(2)
 
 	// Check if input collection is being used as an output collection
-	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
+	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Times(2)
 	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), (*string)(nil), matchStringPtr(inputCollectionID), []uuid.UUID(nil), false).
 		Return([]*dbmodel.AttachedFunction{}, nil).Twice()
-
 	// Check if output collection already exists
 	suite.mockCollectionDb.On("GetCollections",
 		[]string(nil), matchStringPtr(outputCollectionName), tenantID, databaseName, (*int32)(nil), (*int32)(nil), false).
@@ -753,6 +751,140 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 
 func TestAttachFunctionTestSuite(t *testing.T) {
 	suite.Run(t, new(AttachFunctionTestSuite))
+}
+
+func (suite *AttachFunctionTestSuite) TestAddAttachedFunctionInput_SuccessfulCreation() {
+	ctx := context.Background()
+
+	attachedFunctionID := uuid.New()
+	functionID := uuid.New()
+	tenantID := "test-tenant"
+	databaseName := "test-database"
+	databaseID := "database-uuid"
+	existingInputCollectionID := "existing-input-collection-id"
+	newInputCollectionID := "new-input-collection-id"
+	outputCollectionName := "output-collection"
+	functionName := "dummy_async"
+
+	req := &coordinatorpb.AddAttachedFunctionInputRequest{
+		AttachedFunctionId: attachedFunctionID.String(),
+		InputCollectionId:  newInputCollectionID,
+	}
+
+	baseAttachedFunction := &dbmodel.AttachedFunction{
+		ID:                      attachedFunctionID,
+		Name:                    "test-attached-function",
+		TenantID:                tenantID,
+		DatabaseID:              databaseID,
+		InputCollectionID:       existingInputCollectionID,
+		OutputCollectionName:    outputCollectionName,
+		FunctionID:              functionID,
+		FunctionParams:          "{}",
+		MinRecordsForInvocation: 100,
+		IsReady:                 true,
+	}
+
+	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Times(3)
+	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", &attachedFunctionID, (*string)(nil), (*string)(nil), (*string)(nil), []uuid.UUID(nil), false).
+		Return([]*dbmodel.AttachedFunction{baseAttachedFunction}, nil).Once()
+	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &newInputCollectionID, (*string)(nil), []uuid.UUID(nil), false).
+		Return([]*dbmodel.AttachedFunction{}, nil).Once()
+
+	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Once()
+	suite.mockFunctionDb.On("GetByID", functionID).
+		Return(&dbmodel.Function{ID: functionID, Name: functionName, IsAsync: true}, nil).Once()
+
+	suite.mockMetaDomain.On("DatabaseDb", mock.Anything).Return(suite.mockDatabaseDb).Once()
+	suite.mockDatabaseDb.On("GetByID", databaseID).
+		Return(&dbmodel.Database{ID: databaseID, Name: databaseName}, nil).Once()
+
+	suite.mockMetaDomain.On("CollectionDb", mock.Anything).Return(suite.mockCollectionDb).Once()
+	suite.mockCollectionDb.On("GetCollections",
+		[]string{newInputCollectionID}, (*string)(nil), tenantID, databaseName, (*int32)(nil), (*int32)(nil), false).
+		Return([]*dbmodel.CollectionAndMetadata{{Collection: &dbmodel.Collection{ID: newInputCollectionID}}}, nil).Once()
+
+	suite.mockAttachedFunctionDb.On("Insert", mock.MatchedBy(func(attachedFunction *dbmodel.AttachedFunction) bool {
+		return attachedFunction.ID == attachedFunctionID &&
+			attachedFunction.InputCollectionID == newInputCollectionID &&
+			attachedFunction.Name == baseAttachedFunction.Name &&
+			attachedFunction.OutputCollectionName == outputCollectionName &&
+			attachedFunction.FunctionID == functionID &&
+			attachedFunction.TenantID == tenantID &&
+			attachedFunction.DatabaseID == databaseID &&
+			attachedFunction.IsReady == false
+	})).Return(nil).Once()
+
+	suite.mockTxImpl.On("Transaction", ctx, mock.AnythingOfType("func(context.Context) error")).
+		Run(func(args mock.Arguments) {
+			txFunc := args.Get(1).(func(context.Context) error)
+			txCtx := context.Background()
+			err := txFunc(txCtx)
+			suite.NoError(err)
+		}).Return(nil).Once()
+
+	resp, err := suite.coordinator.AddAttachedFunctionInput(ctx, req)
+
+	suite.NoError(err)
+	suite.NotNil(resp)
+	suite.Equal(attachedFunctionID.String(), resp.AttachedFunction.Id)
+	suite.True(resp.Created)
+
+	suite.mockMetaDomain.AssertExpectations(suite.T())
+	suite.mockAttachedFunctionDb.AssertExpectations(suite.T())
+	suite.mockFunctionDb.AssertExpectations(suite.T())
+	suite.mockDatabaseDb.AssertExpectations(suite.T())
+	suite.mockCollectionDb.AssertExpectations(suite.T())
+	suite.mockTxImpl.AssertExpectations(suite.T())
+}
+
+func (suite *AttachFunctionTestSuite) TestAddAttachedFunctionInput_RejectsNonAsyncFunction() {
+	ctx := context.Background()
+
+	attachedFunctionID := uuid.New()
+	functionID := uuid.New()
+	newInputCollectionID := "new-input-collection-id"
+
+	req := &coordinatorpb.AddAttachedFunctionInputRequest{
+		AttachedFunctionId: attachedFunctionID.String(),
+		InputCollectionId:  newInputCollectionID,
+	}
+
+	baseAttachedFunction := &dbmodel.AttachedFunction{
+		ID:                attachedFunctionID,
+		Name:              "test-attached-function",
+		TenantID:          "test-tenant",
+		DatabaseID:        "database-uuid",
+		InputCollectionID: "existing-input-collection-id",
+		FunctionID:        functionID,
+		IsReady:           true,
+	}
+
+	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
+	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", &attachedFunctionID, (*string)(nil), (*string)(nil), (*string)(nil), []uuid.UUID(nil), false).
+		Return([]*dbmodel.AttachedFunction{baseAttachedFunction}, nil).Once()
+
+	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Once()
+	suite.mockFunctionDb.On("GetByID", functionID).
+		Return(&dbmodel.Function{ID: functionID, Name: "record_counter", IsAsync: false}, nil).Once()
+
+	suite.mockTxImpl.On("Transaction", ctx, mock.AnythingOfType("func(context.Context) error")).
+		Run(func(args mock.Arguments) {
+			txFunc := args.Get(1).(func(context.Context) error)
+			txCtx := context.Background()
+			err := txFunc(txCtx)
+			suite.Error(err)
+		}).Return(status.Error(codes.InvalidArgument, "multiple input collections are only supported for async attached functions")).Once()
+
+	resp, err := suite.coordinator.AddAttachedFunctionInput(ctx, req)
+
+	suite.Nil(resp)
+	suite.Error(err)
+	suite.Equal(codes.InvalidArgument, status.Code(err))
+
+	suite.mockMetaDomain.AssertExpectations(suite.T())
+	suite.mockAttachedFunctionDb.AssertExpectations(suite.T())
+	suite.mockFunctionDb.AssertExpectations(suite.T())
+	suite.mockTxImpl.AssertExpectations(suite.T())
 }
 
 // TestGetAttachedFunctionsToGc_TimestampConsistency verifies that timestamps

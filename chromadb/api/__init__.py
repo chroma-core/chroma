@@ -950,6 +950,30 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         pass
 
     @abstractmethod
+    def add_attached_function_input(
+        self,
+        name: str,
+        existing_input_collection_id: UUID,
+        new_input_collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> Tuple["AttachedFunction", bool]:
+        """Add a new input collection to an existing async attached function.
+
+        Args:
+            name: Name of the attached function
+            existing_input_collection_id: Existing input collection currently associated with the function
+            new_input_collection_id: New input collection to add
+            tenant: The tenant name
+            database: The database name
+
+        Returns:
+            Tuple of (AttachedFunction, created) where created is True if newly added,
+            False if the input was already associated with the function
+        """
+        pass
+
+    @abstractmethod
     def detach_function(
         self,
         name: str,

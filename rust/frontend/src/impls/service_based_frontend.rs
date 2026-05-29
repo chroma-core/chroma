@@ -25,8 +25,9 @@ use chroma_types::{
         SearchPayloadResult, SearchRecord, SearchResult, Select,
     },
     plan::{Count, Get, Knn, Search, SearchPayload},
-    AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
-    AttachFunctionRequest, AttachFunctionResponse, Cmek, Collection, CollectionAndSegments,
+    AddAttachedFunctionInputRequest, AddAttachedFunctionInputResponse, AddCollectionRecordsError,
+    AddCollectionRecordsRequest, AddCollectionRecordsResponse, AttachFunctionRequest,
+    AttachFunctionResponse, AttachedFunctionApiResponse, Cmek, Collection, CollectionAndSegments,
     CollectionUuid, CountCollectionsError, CountCollectionsRequest, CountCollectionsResponse,
     CountRequest, CountResponse, CreateCollectionError, CreateCollectionRequest,
     CreateCollectionResponse, CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse,
@@ -2655,6 +2656,108 @@ impl ServiceBasedFrontend {
             .into_iter()
             .next()
             .ok_or_else(|| chroma_sysdb::GetAttachedFunctionError::NotFound)
+    }
+
+    pub async fn add_attached_function_input(
+        &mut self,
+        tenant_name: String,
+        database_name: DatabaseName,
+        collection_id: String,
+        function_name: String,
+        AddAttachedFunctionInputRequest {
+            input_collection_id,
+            ..
+        }: AddAttachedFunctionInputRequest,
+    ) -> Result<AddAttachedFunctionInputResponse, chroma_types::AttachFunctionError> {
+        let collection_uuid =
+            CollectionUuid(uuid::Uuid::parse_str(&collection_id).map_err(|e| {
+                chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
+                    tonic::Status::invalid_argument(format!(
+                        "Client validation error: Invalid collection_id UUID format: {}",
+                        e
+                    )),
+                )))
+            })?);
+
+        let attached_function = self
+            .sysdb_client
+            .get_attached_functions(
+                Some(function_name.clone()),
+                Some(collection_uuid),
+                vec![],
+                true,
+            )
+            .await
+            .map_err(|e| chroma_types::AttachFunctionError::Internal(Box::new(e)))?
+            .into_iter()
+            .next()
+            .ok_or_else(|| chroma_types::AttachFunctionError::FunctionNotFound(function_name))?;
+
+        if !attached_function.is_async {
+            return Err(chroma_types::AttachFunctionError::InvalidArgument(
+                "multiple input collections are only supported for async attached functions"
+                    .to_string(),
+            ));
+        }
+
+        let output_collection_id = attached_function.output_collection_id.ok_or_else(|| {
+            chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
+                tonic::Status::internal("Attached function output collection is not ready"),
+            )))
+        })?;
+
+        let output_collection = self
+            .sysdb_client
+            .get_collection_with_segments(Some(database_name.clone()), output_collection_id)
+            .await
+            .map_err(|e| chroma_types::AttachFunctionError::Internal(Box::new(e)))?;
+
+        let output_schema = output_collection.collection.schema.ok_or_else(|| {
+            chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
+                tonic::Status::internal("Attached function output collection is missing schema"),
+            )))
+        })?;
+
+        let output_schema_str = serde_json::to_string(&output_schema).map_err(|e| {
+            chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
+                tonic::Status::internal(format!(
+                    "Failed to serialize output collection schema: {}",
+                    e
+                )),
+            )))
+        })?;
+
+        let (attached_function_id, created) = self
+            .sysdb_client
+            .add_attached_function_input(attached_function.id, input_collection_id)
+            .await?;
+
+        if created {
+            self.start_backfill(
+                tenant_name,
+                database_name.clone(),
+                input_collection_id,
+                attached_function_id,
+            )
+            .await?;
+        }
+
+        let _finish_created = self
+            .sysdb_client
+            .finish_create_attached_function(attached_function_id, output_schema_str)
+            .await
+            .map_err(|e| chroma_types::AttachFunctionError::Internal(Box::new(e)))?;
+
+        Ok(AddAttachedFunctionInputResponse {
+            attached_function: AttachedFunctionApiResponse::from_attached_function(
+                chroma_types::AttachedFunction {
+                    input_collection_id,
+                    ..attached_function
+                },
+            )
+            .map_err(|e| chroma_types::AttachFunctionError::Internal(Box::new(e)))?,
+            created,
+        })
     }
 
     pub async fn detach_function(
