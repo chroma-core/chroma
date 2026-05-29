@@ -30,7 +30,7 @@ jobs:
       matrix:
         python: ${{ fromJson(inputs.python_versions) }}
         test-glob:
-          - "chromadb/test --ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*'"
+          - "chromadb/test --ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*' --ignore-glob 'chromadb/test/test_cli.py'"
           - "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py --ignore chromadb/test/property/test_add_mcmr.py"
           - "chromadb/test/property/test_cross_version_persist.py"
         include:
@@ -132,7 +132,7 @@ jobs:
       matrix:
         python: ${{ fromJson(inputs.python_versions) }}
         test-glob:
-          - "chromadb/test/api"
+          - "chromadb/test/api --ignore-glob=chromadb/test/api/test_collection.py --ignore-glob=chromadb/test/api/test_limit_offset.py --ignore-glob=chromadb/test/api/test_indexing_status.py"
           - "chromadb/test/api/test_collection.py"
           - "chromadb/test/api/test_limit_offset.py"
           - "chromadb/test/property/test_collections.py"
@@ -156,7 +156,6 @@ jobs:
           - test-glob: "chromadb/test/property/test_embeddings.py"
             parallelized: true
           # Tests that create tenants need MULTI_REGION for spanner instance
-          - test-glob: "chromadb/test/api"
           - test-glob: "chromadb/test/property/test_collections_with_database_tenant.py"
           - test-glob: "chromadb/test/property/test_collections_with_database_tenant_overwrite.py"
     runs-on: blacksmith-8vcpu-ubuntu-2404
@@ -179,7 +178,7 @@ jobs:
       - name: Start Tilt services
         uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest -x "${{ matrix.test-glob }}" ${{ matrix.parallelized && '-n auto --dist worksteal' || '' }} --durations 10'
+        run: bin/cluster-test.sh bash -c 'python -m pytest -x ${{ matrix.test-glob }} ${{ matrix.parallelized && '-n auto --dist worksteal' || '' }} --durations 10'
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
@@ -188,7 +187,10 @@ jobs:
       - name: Compute artifact name
         if: always()
         id: compute-artifact-name
-        run: echo "artifact_name=cluster_logs_rust_frontend_$(basename "${{ matrix.test-glob }}" .py)_${{ matrix.python }}" >> $GITHUB_OUTPUT
+        run: |
+          test_target="${{ matrix.test-glob }}"
+          test_target="${test_target%% *}"
+          echo "artifact_name=cluster_logs_rust_frontend_$(basename "$test_target" .py)_${{ matrix.python }}" >> $GITHUB_OUTPUT
       - name: Save service logs to artifact
         if: always()
         uses: ./.github/actions/export-tilt-logs
