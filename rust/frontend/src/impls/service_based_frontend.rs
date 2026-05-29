@@ -2524,7 +2524,9 @@ impl ServiceBasedFrontend {
             .get_cached_collection(database_name.clone(), input_collection_id)
             .await?;
 
-        let output_schema = Schema::new_default(self.default_knn_index);
+        // Must use HNSW: the Go coordinator's FinishCreateAttachedFunction
+        // hardcodes hnsw-distributed vector segments for the output collection.
+        let output_schema = Schema::new_default(KnnIndex::Hnsw);
 
         // TODO(tanujnay112): Make num_backfill_records configurable or
         // better yet a separate RPC to the logs service.
