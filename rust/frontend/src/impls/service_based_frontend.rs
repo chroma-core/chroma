@@ -2744,7 +2744,7 @@ impl ServiceBasedFrontend {
             .sysdb_client
             .finish_create_attached_function(attached_function_id, output_schema_str)
             .await
-            .map_err(|e| chroma_types::AttachFunctionError::Internal(Box::new(e)))?;
+            .map_err(chroma_types::AttachFunctionError::from)?;
 
         Ok(AddAttachedFunctionInputResponse {
             attached_function: AttachedFunctionApiResponse::from_attached_function(
