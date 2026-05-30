@@ -230,6 +230,50 @@ def test_sync_threshold(settings: Settings) -> None:
     last_modified_at = get_index_last_modified_at()
 
 
+def test_clean_shutdown_persists_hnsw_below_sync_threshold() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        settings = Settings(
+            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_segment_manager_impl=(
+                "chromadb.segment.impl.manager.local.LocalSegmentManager"
+            ),
+            allow_reset=True,
+            is_persistent=True,
+            persist_directory=tmpdir,
+        )
+        system = System(settings)
+        system.start()
+        client = ClientCreator.from_system(system)
+        collection = client.create_collection(
+            name="test",
+            metadata={"hnsw:batch_size": 3, "hnsw:sync_threshold": 10},
+        )
+        manager = system.instance(LocalSegmentManager)
+        segment = manager.get_segment(collection.id, VectorReader)
+        metadata_file = segment._get_metadata_file()  # type: ignore[attr-defined]
+
+        collection.upsert(
+            ids=["1", "2", "3"],
+            embeddings=[[1.0], [2.0], [3.0]],  # type: ignore[arg-type]
+        )
+
+        system.stop()
+        assert os.path.exists(metadata_file)
+
+        system = System(settings)
+        system.start()
+        client = ClientCreator.from_system(system)
+        collection = client.get_collection("test")
+        result = collection.query(query_embeddings=[[1.0]], n_results=3)
+
+        assert set(result["ids"][0]) == {"1", "2", "3"}
+
+        system.stop()
+
+
 def load_and_check(
     settings: Settings,
     collection_name: str,
