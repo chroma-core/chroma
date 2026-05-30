@@ -343,7 +343,7 @@ impl AttachedFunctionExecutor for RevisionHistoryExecutor {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
-            .as_millis() as i64;
+            .as_secs() as i64;
 
         let mut trackers: HashMap<String, RevisionTracker> = HashMap::new();
         let mut output = Vec::new();
