@@ -65,8 +65,10 @@ pub async fn foundation_init(
         None,
         // NOTE(hammadb): Foundation uses Qwen0.6B by default which is 1024 dims
         Some(1024),
-        Some(qwen_embedding_function()),
-        Some(splade_embedding_function()),
+        CollectionEmbeddingFunctions {
+            dense: Some(qwen_embedding_function()),
+            sparse: Some(splade_embedding_function()),
+        },
     )
     .await?;
     let wiki_revisions = ensure_collection(
@@ -76,8 +78,7 @@ pub async fn foundation_init(
         &foundation_cfg.wiki_revisions_collection,
         None,
         Some(1),
-        None,
-        None,
+        CollectionEmbeddingFunctions::default(),
     )
     .await?;
 
@@ -106,8 +107,7 @@ pub async fn foundation_init(
             source_name,
             Some(group_chunk_siblings_metadata()),
             Some(1024),
-            None,
-            None,
+            CollectionEmbeddingFunctions::default(),
         )
         .await?;
         ensure_attached_function(
@@ -298,38 +298,40 @@ fn splade_embedding_function() -> EmbeddingFunctionConfiguration {
     })
 }
 
+/// Dense + sparse embedding functions to register on a Foundation
+/// collection. A supplied function makes Chroma auto-embed that modality
+/// from the document server-side; `None` leaves the corresponding index
+/// EF-less (the writer supplies vectors).
+#[derive(Default)]
+struct CollectionEmbeddingFunctions {
+    dense: Option<EmbeddingFunctionConfiguration>,
+    sparse: Option<EmbeddingFunctionConfiguration>,
+}
+
 /// Build the [`Schema`] used for Foundation collections. Adds a
 /// `sparse_embedding` sparse vector index for SPLADE.
 ///
-/// `dense_embedding_function` is set on the dense vector index (defaults +
-/// `#embedding`); `sparse_embedding_function` is set on the sparse index. A
-/// supplied embedding function makes Chroma auto-embed that modality from the
-/// document server-side; `None` leaves it EF-less (the writer supplies
-/// vectors).
-fn foundation_collection_schema(
-    dense_embedding_function: Option<EmbeddingFunctionConfiguration>,
-    sparse_embedding_function: Option<EmbeddingFunctionConfiguration>,
-) -> Schema {
+/// The dense function is set on the dense vector index (defaults +
+/// `#embedding`); the sparse function is set on the sparse index. Mirrors
+/// the hosted-chroma file-upload `build_collection_schema`.
+fn foundation_collection_schema(embedding_functions: CollectionEmbeddingFunctions) -> Schema {
+    let CollectionEmbeddingFunctions { dense, sparse } = embedding_functions;
     // Both branches default the dense vector index to SPANN — what the
     // distributed frontend uses by default — and the planner is also given
     // `KnnIndex::Spann` in `ensure_collection`. When an embedding function
     // is supplied, `default_with_embedding_function` is the schema-native
     // way to set it on both the schema defaults and the `#embedding` key.
-    let base = match dense_embedding_function {
-        Some(dense_embedding_function) => {
-            Schema::default_with_embedding_function(dense_embedding_function)
-        }
+    let base = match dense {
+        Some(dense) => Schema::default_with_embedding_function(dense),
         None => Schema::new_default(KnnIndex::Spann),
     };
     // Auto-embed sparse vectors from the document only when a sparse EF is
     // supplied; otherwise leave `source_key` unset alongside the EF.
-    let sparse_source_key = sparse_embedding_function
-        .as_ref()
-        .map(|_| DOCUMENT_KEY.to_string());
+    let sparse_source_key = sparse.as_ref().map(|_| DOCUMENT_KEY.to_string());
     base.create_index(
         Some("sparse_embedding"),
         IndexConfig::SparseVector(SparseVectorIndexConfig {
-            embedding_function: sparse_embedding_function,
+            embedding_function: sparse,
             source_key: sparse_source_key,
             bm25: Some(false),
             // TODO: Change this to MaxScore
@@ -351,10 +353,9 @@ async fn ensure_collection(
     collection_name: &str,
     metadata: Option<Metadata>,
     dimension: Option<i32>,
-    dense_embedding_function: Option<EmbeddingFunctionConfiguration>,
-    sparse_embedding_function: Option<EmbeddingFunctionConfiguration>,
+    embedding_functions: CollectionEmbeddingFunctions,
 ) -> Result<Collection, ServerError> {
-    let schema = foundation_collection_schema(dense_embedding_function, sparse_embedding_function);
+    let schema = foundation_collection_schema(embedding_functions);
     let plan = plan_create_collection(
         None,
         Some(schema),
@@ -388,7 +389,7 @@ mod tests {
 
     #[test]
     fn foundation_schema_has_sparse_vector_index() {
-        let schema = foundation_collection_schema(None, None);
+        let schema = foundation_collection_schema(CollectionEmbeddingFunctions::default());
         assert!(
             schema.is_sparse_index_enabled(),
             "schema must have a sparse vector index for SPLADE embeddings"
@@ -397,7 +398,7 @@ mod tests {
 
     #[test]
     fn foundation_schema_sparse_key_is_sparse_embedding() {
-        let schema = foundation_collection_schema(None, None);
+        let schema = foundation_collection_schema(CollectionEmbeddingFunctions::default());
         let sparse_vt = schema
             .keys
             .get("sparse_embedding")
@@ -413,7 +414,7 @@ mod tests {
 
     #[test]
     fn foundation_plan_produces_schema_and_segments() {
-        let schema = foundation_collection_schema(None, None);
+        let schema = foundation_collection_schema(CollectionEmbeddingFunctions::default());
         let plan = plan_create_collection(
             None,
             Some(schema),
@@ -486,10 +487,10 @@ mod tests {
 
     #[test]
     fn auto_embed_schema_sets_splade_sparse_function() {
-        let schema = foundation_collection_schema(
-            Some(qwen_embedding_function()),
-            Some(splade_embedding_function()),
-        );
+        let schema = foundation_collection_schema(CollectionEmbeddingFunctions {
+            dense: Some(qwen_embedding_function()),
+            sparse: Some(splade_embedding_function()),
+        });
         let sparse_idx = schema
             .keys
             .get("sparse_embedding")
@@ -505,7 +506,7 @@ mod tests {
 
     #[test]
     fn no_dense_ef_leaves_sparse_function_unset() {
-        let schema = foundation_collection_schema(None, None);
+        let schema = foundation_collection_schema(CollectionEmbeddingFunctions::default());
         let sparse_idx = schema
             .keys
             .get("sparse_embedding")
@@ -519,8 +520,10 @@ mod tests {
     #[test]
     fn foundation_schema_sets_dense_embedding_function() {
         let ef = qwen_embedding_function();
-        let schema =
-            foundation_collection_schema(Some(ef.clone()), Some(splade_embedding_function()));
+        let schema = foundation_collection_schema(CollectionEmbeddingFunctions {
+            dense: Some(ef.clone()),
+            sparse: Some(splade_embedding_function()),
+        });
 
         let defaults_ef = schema
             .defaults
@@ -547,7 +550,7 @@ mod tests {
 
     #[test]
     fn foundation_schema_without_embedding_function_leaves_it_unset() {
-        let schema = foundation_collection_schema(None, None);
+        let schema = foundation_collection_schema(CollectionEmbeddingFunctions::default());
         let defaults_ef = schema
             .defaults
             .float_list
