@@ -8,6 +8,9 @@ on:
       branch_name:
         description: 'Name of branch (release/* or rc/*) to apply hotfix to. Defaults to latest release branch.'
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   resolve-branch:
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -16,7 +19,7 @@ jobs:
       branch_type: ${{ steps.resolve_branch.outputs.branch_type }}
     steps:
       - name: Check out repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -45,7 +48,7 @@ jobs:
       - resolve-branch
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           token: ${{ secrets.HOSTED_CHROMA_WORKFLOW_DISPATCH_TOKEN }}
           fetch-depth: 0
@@ -93,7 +96,7 @@ jobs:
           git push origin $BRANCH_NAME
 
       - name: Create Pull Request
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.HOSTED_CHROMA_WORKFLOW_DISPATCH_TOKEN }}
           script: |

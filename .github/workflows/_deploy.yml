@@ -9,13 +9,16 @@ on:
         default: false
         type: boolean
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   deploy:
     name: Deploy all -- staging
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Deploy all -- staging
-        uses: actions/github-script@v6
+        uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.HOSTED_CHROMA_WORKFLOW_DISPATCH_TOKEN}}
           script: |

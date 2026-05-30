@@ -64,6 +64,7 @@ on:
         value: ${{ jobs.build.outputs.commit_short_sha }}
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   AWS_REGION: us-east-1
 
 # Avoid two concurrent runs building the same commit. A second trigger
@@ -84,7 +85,7 @@ jobs:
       commit_short_sha: ${{ steps.bake.outputs.commit_short_sha }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ inputs.commit-sha || github.sha }}
 

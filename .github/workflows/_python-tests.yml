@@ -19,6 +19,7 @@ on:
         type: string
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   CHROMA_HYPOTHESIS_CI_REPRODUCE_ONLY: "1"
   CHROMA_HYPOTHESIS_COMPACTION_WAITS: "auto"
 
@@ -39,7 +40,7 @@ jobs:
 
     runs-on: ${{ inputs.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Setup Python
         uses: ./.github/actions/python
         with:
@@ -81,7 +82,7 @@ jobs:
     runs-on: ${{ inputs.runner }}
     steps:
     - name: Checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
     - name: Setup Python (${{ matrix.python }})
       uses: ./.github/actions/python
     - name: Setup Rust
@@ -108,7 +109,7 @@ jobs:
     runs-on: ${{ inputs.runner }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup Python (${{ matrix.python }})
         uses: ./.github/actions/python
         with:
@@ -171,7 +172,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup Python (${{ matrix.python }})
         uses: ./.github/actions/python
         with:
@@ -206,7 +207,7 @@ jobs:
     needs: test-cluster-rust-frontend
     steps:
       - name: Merge
-        uses: actions/upload-artifact/merge@v4
+        uses: actions/upload-artifact/merge@v7
         with:
           name: cluster_test_logs
           pattern: cluster_logs_*
@@ -220,7 +221,7 @@ jobs:
     runs-on: ${{ inputs.runner }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup Python (${{ matrix.python }})
         uses: ./.github/actions/python
         with:
@@ -251,7 +252,7 @@ jobs:
     runs-on: ${{ inputs.runner }}
     steps:
     - name: Checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
     - name: Setup Python (${{ matrix.python }})
       uses: ./.github/actions/python
     - name: Setup Rust
@@ -284,7 +285,7 @@ jobs:
     runs-on: 8core-32gb-windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup Python
         uses: ./.github/actions/python
         with:

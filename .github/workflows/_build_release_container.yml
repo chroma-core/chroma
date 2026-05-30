@@ -41,6 +41,7 @@ permissions:
   packages: write
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   GHCR_IMAGE_NAME: "ghcr.io/chroma-core/chroma"
   DOCKERHUB_IMAGE_NAME: "chromadb/chroma"
 
@@ -61,7 +62,7 @@ jobs:
             docker_platform: linux/arm64
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -123,7 +124,7 @@ jobs:
       - build
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Set up Docker
         uses: ./.github/actions/docker
         with:
