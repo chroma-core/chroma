@@ -27,7 +27,7 @@ runs:
       run: |
         rustup default $(grep -m1 '^channel' rust-toolchain.toml | cut -d'"' -f2)
     - name: Install Protoc
-      uses: chroma-core/setup-protoc@v4a
+      uses: chroma-core/setup-protoc@v4b
       with:
         repo-token: ${{ inputs.github-token }}
         version: v35.0
