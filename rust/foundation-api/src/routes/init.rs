@@ -23,10 +23,13 @@ use uuid::Uuid;
 #[derive(Serialize)]
 pub struct FoundationInitResponse {
     pub tenant: String,
+    pub user_id: String,
     pub database: String,
     pub database_id: String,
     pub wiki_collection_id: String,
     pub wiki_revisions_collection_id: String,
+    pub file_uploads_collection_id: String,
+    pub agent_sessions_collection_id: String,
     /// Source collection name -> id for each ensured source collection
     /// (slack, notion, …). Each carries the chunk-sibling grouping flag.
     pub source_collection_ids: std::collections::HashMap<String, String>,
@@ -41,9 +44,10 @@ pub async fn foundation_init(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
 ) -> Result<Json<FoundationInitResponse>, ServerError> {
-    let tenant = whoami_and_authorize(&*server.auth, &headers, AuthzAction::InitFoundation)
-        .await?
-        .tenant;
+    let identity =
+        whoami_and_authorize(&*server.auth, &headers, AuthzAction::InitFoundation).await?;
+    let tenant = identity.tenant;
+    let user_id = identity.user_id;
 
     let _guard =
         server.scorecard_request(&["op:foundation_init", &format!("tenant:{}", tenant)])?;
@@ -92,6 +96,38 @@ pub async fn foundation_init(
     )
     .await?;
 
+    // Private (per-user) collections — namespaced by user_id so each team
+    // member gets their own isolated collection for uploads and traces.
+    let file_uploads_name = format!("{}_{}", foundation_cfg.file_uploads_collection, user_id);
+    let file_uploads = ensure_collection(
+        &mut sysdb,
+        tenant.clone(),
+        db_name.clone(),
+        &file_uploads_name,
+        None,
+        Some(1024),
+        CollectionEmbeddingFunctions {
+            dense: Some(qwen_embedding_function()),
+            sparse: Some(splade_embedding_function()),
+        },
+    )
+    .await?;
+
+    let agent_sessions_name = format!("{}_{}", foundation_cfg.agent_sessions_collection, user_id);
+    let agent_sessions = ensure_collection(
+        &mut sysdb,
+        tenant.clone(),
+        db_name.clone(),
+        &agent_sessions_name,
+        None,
+        Some(1024),
+        CollectionEmbeddingFunctions {
+            dense: Some(qwen_embedding_function()),
+            sparse: Some(splade_embedding_function()),
+        },
+    )
+    .await?;
+
     // Source collections are the attached function's *input*. They carry
     // the chunk-sibling grouping flag so a job's chunk records stay in one
     // partition and the trailing end-of-job marker on `{base}-0` is
@@ -123,10 +159,13 @@ pub async fn foundation_init(
 
     Ok(Json(FoundationInitResponse {
         tenant,
+        user_id,
         database: foundation_cfg.database_name.clone(),
         database_id: database_id.to_string(),
         wiki_collection_id: wiki.collection_id.to_string(),
         wiki_revisions_collection_id: wiki_revisions.collection_id.to_string(),
+        file_uploads_collection_id: file_uploads.collection_id.to_string(),
+        agent_sessions_collection_id: agent_sessions.collection_id.to_string(),
         source_collection_ids,
     }))
 }

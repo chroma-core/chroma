@@ -32,6 +32,15 @@ pub struct FoundationConfig {
     pub wiki_collection: String,
     #[serde(default = "FoundationConfig::default_wiki_revisions_collection")]
     pub wiki_revisions_collection: String,
+    /// Base name for the per-user file-uploads collection. The actual
+    /// collection name is `{base}_{user_id}`, making it private to the
+    /// authenticated user rather than shared tenant-wide.
+    #[serde(default = "FoundationConfig::default_file_uploads_collection")]
+    pub file_uploads_collection: String,
+    /// Base name for the per-user coding-agent session collection.
+    /// Like file uploads, the real name is `{base}_{user_id}`.
+    #[serde(default = "FoundationConfig::default_agent_sessions_collection")]
+    pub agent_sessions_collection: String,
     /// Source collections (one per ingest source) that `/init` ensures.
     /// These receive the chunk-sibling grouping flag so the attached
     /// function observes the per-job end-of-job marker after all of a
@@ -64,6 +73,12 @@ impl FoundationConfig {
     fn default_wiki_revisions_collection() -> String {
         "wiki_revisions".to_string()
     }
+    fn default_file_uploads_collection() -> String {
+        "file_uploads".to_string()
+    }
+    fn default_agent_sessions_collection() -> String {
+        "agent_sessions".to_string()
+    }
     fn default_source_collections() -> Vec<String> {
         vec!["slack".to_string(), "notion".to_string()]
     }
@@ -81,6 +96,8 @@ impl Default for FoundationConfig {
             database_name: Self::default_database_name(),
             wiki_collection: Self::default_wiki_collection(),
             wiki_revisions_collection: Self::default_wiki_revisions_collection(),
+            file_uploads_collection: Self::default_file_uploads_collection(),
+            agent_sessions_collection: Self::default_agent_sessions_collection(),
             source_collections: Self::default_source_collections(),
             function_name: Self::default_function_name(),
             function_endpoint_url: None,
