@@ -2017,6 +2017,15 @@ async fn collection_add(
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
         .map(|val| val.to_string());
+
+    let database_name = DatabaseName::new(&database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
+    let collection = server
+        .frontend
+        .get_cached_collection(database_name, collection_id)
+        .await?;
+
     let mut quota_payload = QuotaPayload::new(Action::Add, tenant.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
 
@@ -2032,6 +2041,9 @@ async fn collection_add(
         quota_payload = quota_payload.with_uris(uris);
     }
     quota_payload = quota_payload.with_collection_uuid(collection_id);
+    if let Some(ref schema) = collection.schema {
+        quota_payload = quota_payload.with_schema(schema);
+    }
     let _ = server.quota_enforcer.enforce(&quota_payload).await?;
 
     // Create a metering context
@@ -2151,6 +2163,15 @@ async fn collection_update(
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
         .map(|val| val.to_string());
+
+    let database_name = DatabaseName::new(&database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
+    let collection = server
+        .frontend
+        .get_cached_collection(database_name, collection_id)
+        .await?;
+
     let mut quota_payload = QuotaPayload::new(Action::Update, tenant.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
     let payload_embeddings: Option<Vec<Option<Vec<f32>>>> =
@@ -2166,6 +2187,9 @@ async fn collection_update(
     }
     if let Some(uris) = &payload.uris {
         quota_payload = quota_payload.with_uris(uris);
+    }
+    if let Some(ref schema) = collection.schema {
+        quota_payload = quota_payload.with_schema(schema);
     }
     let _ = server.quota_enforcer.enforce(&quota_payload).await?;
 
@@ -2288,6 +2312,15 @@ async fn collection_upsert(
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
         .map(|val| val.to_string());
+
+    let database_name = DatabaseName::new(&database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
+    let collection = server
+        .frontend
+        .get_cached_collection(database_name, collection_id)
+        .await?;
+
     let mut quota_payload = QuotaPayload::new(Action::Upsert, tenant.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
     let payload_embeddings: Vec<Vec<f32>> = decode_embeddings(payload.embeddings)?;
@@ -2302,6 +2335,9 @@ async fn collection_upsert(
         quota_payload = quota_payload.with_uris(uris);
     }
     quota_payload = quota_payload.with_collection_uuid(collection_id);
+    if let Some(ref schema) = collection.schema {
+        quota_payload = quota_payload.with_schema(schema);
+    }
     let _ = server.quota_enforcer.enforce(&quota_payload).await?;
 
     // Create a metering context
