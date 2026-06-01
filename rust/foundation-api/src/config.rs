@@ -61,6 +61,16 @@ pub struct FoundationConfig {
     /// attached function is invoked. Matches the chroma frontend default.
     #[serde(default = "FoundationConfig::default_min_records_for_invocation")]
     pub min_records_for_invocation: u64,
+    /// Modal `/ask` endpoint URL that `POST /api/ask` reverse-proxies to.
+    /// Required at call time (no silent default): the `/api/ask` handler
+    /// errors if it is unset. Override via
+    /// `CHROMA_FOUNDATION__ASK_ENDPOINT_URL`.
+    #[serde(default)]
+    pub ask_endpoint_url: Option<String>,
+    /// Request timeout applied to the outbound `/ask` HTTP client. Set
+    /// high enough to tolerate Modal cold starts.
+    #[serde(default = "FoundationConfig::default_ask_timeout_secs")]
+    pub ask_timeout_secs: u64,
 }
 
 impl FoundationConfig {
@@ -88,6 +98,9 @@ impl FoundationConfig {
     fn default_min_records_for_invocation() -> u64 {
         100
     }
+    fn default_ask_timeout_secs() -> u64 {
+        120
+    }
 }
 
 impl Default for FoundationConfig {
@@ -102,6 +115,8 @@ impl Default for FoundationConfig {
             function_name: Self::default_function_name(),
             function_endpoint_url: None,
             min_records_for_invocation: Self::default_min_records_for_invocation(),
+            ask_endpoint_url: None,
+            ask_timeout_secs: Self::default_ask_timeout_secs(),
         }
     }
 }

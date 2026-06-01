@@ -53,6 +53,14 @@ pub struct FoundationApiServer {
     pub(crate) scorecard: Arc<Scorecard<'static>>,
     pub(crate) system: System,
     pub(crate) metrics: Arc<SystemMetrics>,
+    pub(crate) http_client: reqwest::Client,
+    // Modal service-to-service credentials. Loaded from `MODAL_KEY` /
+    // `MODAL_SECRET` env vars at server construction time, mirroring the
+    // chroma worker `http_generate` attached function. `None` if either
+    // var is unset; the `/api/ask` handler errors at call time if so,
+    // letting deploys that don't need Modal start without those secrets.
+    pub(crate) modal_key: Option<String>,
+    pub(crate) modal_secret: Option<String>,
 }
 
 impl FoundationApiServer {
@@ -70,6 +78,14 @@ impl FoundationApiServer {
         // SAFETY(rescrv): This is safe because 128 is non-zero.
         let scorecard = Arc::new(Scorecard::new(&(), rules, 128.try_into().unwrap()));
         let metrics = Arc::new(SystemMetrics::new(&global::meter("foundation-api")));
+        let http_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(
+                config.foundation.ask_timeout_secs,
+            ))
+            .build()
+            .expect("failed to build foundation-api outbound HTTP client");
+        let modal_key = std::env::var("MODAL_KEY").ok();
+        let modal_secret = std::env::var("MODAL_SECRET").ok();
         FoundationApiServer {
             config,
             auth,
@@ -78,7 +94,19 @@ impl FoundationApiServer {
             scorecard,
             system,
             metrics,
+            http_client,
+            modal_key,
+            modal_secret,
         }
+    }
+
+    /// Test-only setter for Modal credentials so integration tests don't
+    /// need to mutate process-wide env vars.
+    #[cfg(test)]
+    pub(crate) fn with_modal_creds(mut self, key: String, secret: String) -> Self {
+        self.modal_key = Some(key);
+        self.modal_secret = Some(secret);
+        self
     }
 
     /// Track this request against the scorecard rate limiter. Returns a guard
