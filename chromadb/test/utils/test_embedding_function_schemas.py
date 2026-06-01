@@ -52,11 +52,11 @@ class TestEmbeddingFunctionSchemas:
                 f"{ef_name} requires arguments that we cannot provide without external deps: {e}"
             )
 
-        # Mock __call__ to avoid needing to actually generate embeddings
-        mock_call = MagicMock(return_value=mock_embeddings(["test"]))
-        mock_common_deps.setattr(ef_instance, "__call__", mock_call)
-
-        # Get the config from the real instance
+        # Get the config from the real instance. We do not mock __call__
+        # because Python only looks up dunder methods on the class, so
+        # setting it on the instance would not intercept anything anyway;
+        # get_config() does not invoke the embedding function, so a real
+        # instance is safe here.
         config = ef_instance.get_config()
 
         # Test recreation from config
