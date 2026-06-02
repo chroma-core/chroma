@@ -185,13 +185,11 @@ jobs:
           prerelease: false
           makeLatest: true
           generateReleaseNotes: true
-      - name: Update Tag
-        uses: richardsimko/update-tag@v1.0.5
+      - name: Update latest tag
         if: ${{ needs.check-tag.outputs.tag_matches != 'true' }}
-        with:
-          tag_name: latest
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git tag --force latest
+          git push --force origin refs/tags/latest
       - name: Release Latest
         uses: ncipollo/release-action@v1.14.0
         if: ${{ needs.check-tag.outputs.tag_matches != 'true' }}
