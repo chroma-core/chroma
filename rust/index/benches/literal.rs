@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use chroma_benchmark::{
     benchmark::{bench_run, tokio_multi_thread},
     datasets::rust::TheStackDedupRust,

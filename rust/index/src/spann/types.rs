@@ -983,9 +983,8 @@ impl SpannIndexWriter {
                 .insert(doc_offset_id, next_version);
         }
         // Append to the posting list.
-        for (nearest_head_id, nearest_head_embedding) in nearest_head_ids
-            .into_iter()
-            .zip(nearest_head_embeddings.into_iter())
+        for (nearest_head_id, nearest_head_embedding) in
+            nearest_head_ids.into_iter().zip(nearest_head_embeddings)
         {
             if self.is_outdated(doc_offset_id, next_version).await? {
                 return Ok(());
@@ -1804,9 +1803,8 @@ impl SpannIndexWriter {
             let (nearest_head_ids, _, nearest_head_embeddings) = self
                 .get_nearby_heads(head_embedding, self.params.num_centers_to_merge_to as usize)
                 .await?;
-            for (nearest_head_id, nearest_head_embedding) in nearest_head_ids
-                .into_iter()
-                .zip(nearest_head_embeddings.into_iter())
+            for (nearest_head_id, nearest_head_embedding) in
+                nearest_head_ids.into_iter().zip(nearest_head_embeddings)
             {
                 // Skip if it is the current head. Can't a merge a head into itself.
                 if nearest_head_id == head_id {
@@ -4405,7 +4403,7 @@ mod tests {
                 .await
                 .expect("Error scanning spann index reader");
             assert_eq!(results.len(), 10000);
-            results.sort_by(|a, b| a.doc_offset_id.cmp(&b.doc_offset_id));
+            results.sort_by_key(|a| a.doc_offset_id);
 
             for i in 0..10000 {
                 assert_eq!(results[i].doc_offset_id, doc_offset_ids[i]);
@@ -4544,7 +4542,7 @@ mod tests {
                 .await
                 .expect("Error scanning spann index reader");
             assert_eq!(results.len(), 10000);
-            results.sort_by(|a, b| a.doc_offset_id.cmp(&b.doc_offset_id));
+            results.sort_by_key(|a| a.doc_offset_id);
 
             for i in 0..10000 {
                 assert_eq!(results[i].doc_offset_id, doc_offset_ids_arc[i]);
@@ -4671,7 +4669,7 @@ mod tests {
                 .await
                 .expect("Error scanning spann index reader");
             assert_eq!(results.len(), 10000);
-            results.sort_by(|a, b| a.doc_offset_id.cmp(&b.doc_offset_id));
+            results.sort_by_key(|a| a.doc_offset_id);
 
             for i in 0..10000 {
                 assert_eq!(results[i].doc_offset_id, doc_offset_ids[i]);
@@ -4825,7 +4823,7 @@ mod tests {
                 .await
                 .expect("Error scanning spann index reader");
             assert_eq!(results.len(), 10000);
-            results.sort_by(|a, b| a.doc_offset_id.cmp(&b.doc_offset_id));
+            results.sort_by_key(|a| a.doc_offset_id);
 
             for i in 0..10000 {
                 assert_eq!(results[i].doc_offset_id, doc_offset_ids_arc[i]);
@@ -5123,7 +5121,7 @@ mod tests {
                 .scan()
                 .await
                 .expect("Error scanning spann index reader");
-            results.sort_by(|a, b| a.doc_offset_id.cmp(&b.doc_offset_id));
+            results.sort_by_key(|a| a.doc_offset_id);
 
             let mut actual_pairs: Vec<(u32, Option<Vec<f32>>)> = doc_offset_ids
                 .iter()
@@ -5199,7 +5197,7 @@ mod tests {
                 .scan()
                 .await
                 .expect("Error scanning spann index reader");
-            results.sort_by(|a, b| a.doc_offset_id.cmp(&b.doc_offset_id));
+            results.sort_by_key(|a| a.doc_offset_id);
             let mut count = 0;
             for (id, embedding) in actual_pairs.iter() {
                 if embedding.is_none() {

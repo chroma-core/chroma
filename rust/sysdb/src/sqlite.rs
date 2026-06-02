@@ -419,8 +419,7 @@ impl SqliteSysDb {
             let collections = collections.unwrap();
             let collection = collections.into_iter().next().unwrap();
             // if schema exists, update schema instead of configuration
-            if collection.schema.is_some() {
-                let mut existing_schema = collection.schema.unwrap();
+            if let Some(mut existing_schema) = collection.schema {
                 existing_schema.update(&configuration);
                 schema_str = Some(
                     serde_json::to_string(&existing_schema)

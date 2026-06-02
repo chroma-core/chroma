@@ -617,7 +617,7 @@ impl FastSpannIndexWriter {
         let mut nearby_ids2: Vec<usize> = Vec::with_capacity(k);
         let mut nearby_distances2: Vec<f32> = Vec::with_capacity(k);
         // Get the embeddings also for distance computation.
-        for (id, distance) in nearby_ids.into_iter().zip(nearby_distances.into_iter()) {
+        for (id, distance) in nearby_ids.into_iter().zip(nearby_distances) {
             // Skip concurrently deleted heads.
             let Some(head_data) = self.heads.get(&(id as u32)) else {
                 continue;
@@ -633,7 +633,7 @@ impl FastSpannIndexWriter {
         // Embeddings that were obtained are already normalized.
         for (id, (distance, embedding)) in nearby_ids2
             .into_iter()
-            .zip(nearby_distances2.into_iter().zip(embeddings.into_iter()))
+            .zip(nearby_distances2.into_iter().zip(embeddings))
         {
             if res_ids.len() >= replica_count {
                 break;
@@ -800,7 +800,7 @@ impl FastSpannIndexWriter {
             distances: Vec::with_capacity(k),
             embeddings: Vec::with_capacity(k),
         };
-        for (id, distance) in nearest_ids.into_iter().zip(nearest_distances.into_iter()) {
+        for (id, distance) in nearest_ids.into_iter().zip(nearest_distances) {
             // Skip heads that are too far from the nearest head.
             if let Some(limit) = limit_dist {
                 if distance > limit {
@@ -856,9 +856,8 @@ impl FastSpannIndexWriter {
         }; // guard dropped here
 
         // Append to the posting list.
-        for (nearest_head_id, nearest_head_embedding) in nearest_head_ids
-            .into_iter()
-            .zip(nearest_head_embeddings.into_iter())
+        for (nearest_head_id, nearest_head_embedding) in
+            nearest_head_ids.into_iter().zip(nearest_head_embeddings)
         {
             if self.is_outdated(doc_offset_id, next_version)? {
                 return Ok(());
@@ -1574,7 +1573,7 @@ impl FastSpannIndexWriter {
             return Ok(());
         }
         // Otherwise add to the posting list of these arrays.
-        for (head_id, head_embedding) in ids.into_iter().zip(head_embeddings.into_iter()) {
+        for (head_id, head_embedding) in ids.into_iter().zip(head_embeddings) {
             Box::pin(self.append(
                 head_id as u32,
                 id,

@@ -2581,11 +2581,11 @@ impl Schema {
                 }
                 // Falls through to dispatch
             }
-            IndexConfig::SparseVector(_) => {
+            IndexConfig::SparseVector(_) if key.is_none() => {
                 // SparseVector requires a specific key
-                if key.is_none() {
-                    return Err(SchemaBuilderError::SparseVectorRequiresKey);
-                }
+                return Err(SchemaBuilderError::SparseVectorRequiresKey);
+            }
+            IndexConfig::SparseVector(_) => {
                 // Falls through to dispatch
             }
             _ => {}

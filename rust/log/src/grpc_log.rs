@@ -720,7 +720,7 @@ impl GrpcLog {
             }
         }
         if !futures.is_empty() {
-            futures::future::try_join_all(futures.into_iter()).await?;
+            futures::future::try_join_all(futures).await?;
         }
         Ok(())
     }
