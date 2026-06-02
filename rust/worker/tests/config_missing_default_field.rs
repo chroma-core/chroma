@@ -3,6 +3,7 @@ use figment::Jail;
 use worker::config::RootConfig;
 
 #[test]
+#[allow(clippy::result_large_err)]
 fn test_missing_default_field() {
     Jail::expect_with(|jail| {
         let _ = jail.create_file(

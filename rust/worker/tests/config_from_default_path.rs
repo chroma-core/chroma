@@ -7,6 +7,7 @@ use worker::config::RootConfig;
 
 #[test]
 #[serial]
+#[allow(clippy::result_large_err)]
 fn test_config_from_default_path() {
     Jail::expect_with(|jail| {
         let _ = jail.create_file(

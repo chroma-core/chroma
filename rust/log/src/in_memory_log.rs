@@ -125,7 +125,7 @@ impl InMemoryLog {
             }
 
             let mut logs = filtered_records.to_vec();
-            logs.sort_by(|a, b| a.log_offset.cmp(&b.log_offset));
+            logs.sort_by_key(|a| a.log_offset);
             collections.push(CollectionInfo {
                 collection_id: *collection_id,
                 topology_name: None,
