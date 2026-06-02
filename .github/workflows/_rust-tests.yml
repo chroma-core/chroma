@@ -2,14 +2,6 @@ name: Rust tests
 
 on:
   workflow_call:
-    inputs:
-      # PR workflow passes false to save runner time; release keeps benches enabled.
-      # If benchmarks prove useful for regression detection, add a scheduled workflow
-      # (e.g. nightly) that calls this reusable workflow with run_rust_benchmarks: true.
-      run_rust_benchmarks:
-        description: Whether to run the cargo bench matrix jobs
-        type: boolean
-        default: true
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -118,32 +110,6 @@ jobs:
         uses: ./.github/actions/export-tilt-logs
         with:
           artifact-name: "rust-integration-test-${{ matrix.nextest_profile }}-${{ matrix.partition }}"
-  test-benches:
-    if: inputs.run_rust_benchmarks
-    strategy:
-      matrix:
-        platform: [blacksmith-16vcpu-ubuntu-2404]
-        bench-command:
-          - "--bench blockfile_writer -- --sample-size 10"
-          - "--bench distance_metrics"
-          - "--bench filter"
-          - "--bench get"
-          - "--bench limit"
-          - "--bench query"
-    runs-on: ${{ matrix.platform }}
-    env:
-      RUST_BACKTRACE: 1
-      RUST_MIN_STACK_SIZE: 8388608
-      CARGO_TERM_COLOR: always
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-      - name: Setup
-        uses: ./.github/actions/rust
-        with:
-          github-token: ${{ github.token }}
-      - name: Run benchmark
-        run: cargo bench ${{ matrix.bench-command }}
 
   # test-mcmr-integration:
   #   runs-on: blacksmith-16vcpu-ubuntu-2404
