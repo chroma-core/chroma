@@ -177,7 +177,7 @@ compaction_service:
   compactor:
     compaction_manager_queue_size: 1000
     max_concurrent_jobs: 50
-    compaction_interval_sec: 10
+    compaction_interval_sec: 1
     min_compaction_size: 10
     max_compaction_size: 10000
     max_partition_size: 5000
@@ -268,6 +268,7 @@ log_service:
   record_count_threshold: 10
   reinsert_threshold: 0
   suggested_compaction_threshold: 10
+  rollup_interval_secs: 1
   opentelemetry:
     service_name: "rust-log-service"
     endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"

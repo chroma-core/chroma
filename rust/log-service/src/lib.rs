@@ -2223,7 +2223,7 @@ impl LogServer {
         }
         let s3_fut = async {
             loop {
-                tokio::time::sleep(self.config.rollup_interval).await;
+                tokio::time::sleep(Duration::from_secs(self.config.rollup_interval_secs)).await;
                 if let Err(err) = self.roll_dirty_log_s3_cycle().await {
                     tracing::error!("could not roll up dirty log (s3): {err:?}");
                 }
@@ -2231,7 +2231,7 @@ impl LogServer {
         };
         let repl_fut = async {
             loop {
-                tokio::time::sleep(self.config.rollup_interval).await;
+                tokio::time::sleep(Duration::from_secs(self.config.rollup_interval_secs)).await;
                 if let Err(err) = self.roll_dirty_log_repl_cycle().await {
                     tracing::error!("could not roll up dirty log (repl): {err:?}");
                 }
@@ -3567,8 +3567,8 @@ pub struct LogServerConfig {
     pub reinsert_threshold: u64,
     #[serde(default = "LogServerConfig::default_suggested_compaction_threshold")]
     pub suggested_compaction_threshold: u64,
-    #[serde(default = "LogServerConfig::default_rollup_interval")]
-    pub rollup_interval: Duration,
+    #[serde(default = "LogServerConfig::default_rollup_interval_secs")]
+    pub rollup_interval_secs: u64,
     #[serde(default = "LogServerConfig::default_timeout_us")]
     pub timeout_us: u64,
     #[serde(default)]
@@ -3643,8 +3643,8 @@ impl LogServerConfig {
         250
     }
     /// rollup every ten seconds
-    fn default_rollup_interval() -> Duration {
-        Duration::from_secs(10)
+    fn default_rollup_interval_secs() -> u64 {
+        10
     }
 
     /// force compaction if a candidate has been on the log for one day.
@@ -3703,7 +3703,7 @@ impl Default for LogServerConfig {
             num_records_before_backpressure: Self::default_num_records_before_backpressure(),
             reinsert_threshold: Self::default_reinsert_threshold(),
             suggested_compaction_threshold: Self::default_suggested_compaction_threshold(),
-            rollup_interval: Self::default_rollup_interval(),
+            rollup_interval_secs: Self::default_rollup_interval_secs(),
             timeout_us: Self::default_timeout_us(),
             proxy_to: None,
             max_encoding_message_size: Self::default_max_encoding_message_size(),
@@ -4708,7 +4708,7 @@ mod tests {
         assert_eq!(100, config.record_count_threshold);
         assert_eq!(1_000_000, config.num_records_before_backpressure);
         assert_eq!(10, config.reinsert_threshold);
-        assert_eq!(Duration::from_secs(10), config.rollup_interval);
+        assert_eq!(10, config.rollup_interval_secs);
         assert_eq!(86_400_000_000, config.timeout_us);
         assert!(config.proxy_to.is_none());
     }
