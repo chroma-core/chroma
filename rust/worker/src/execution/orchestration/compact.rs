@@ -5144,6 +5144,68 @@ mod tests {
 
         Box::pin(fn_consumer_context.cleanup()).await;
 
+        // Repeat from the second boundary to prove fn-consumer continues to hop
+        // exactly one committed compaction window at a time.
+        let mut second_window_context = CompactionContext::new_with_log_offset(
+            None,
+            50,
+            10,
+            1000,
+            50,
+            log.clone(),
+            sysdb.clone(),
+            test_segments.blockfile_provider.clone(),
+            test_segments.hnsw_provider.clone(),
+            test_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            false,
+            true, // is_fn_consumer
+            None,
+            None,
+            None,
+            None,
+            199,
+        );
+
+        let second_fetch_response = second_window_context
+            .run_get_logs(collection_id, database_name.clone(), system.clone(), false)
+            .await
+            .expect("second fn-consumer log fetch should succeed");
+
+        match second_fetch_response {
+            LogFetchOrchestratorResponse::Success(success) => {
+                assert_eq!(
+                    success.collection_info.pulled_log_offset, 299,
+                    "fn-consumer should continue to the next committed boundary on later runs"
+                );
+
+                let total_materialized_records: usize = success
+                    .materialized
+                    .iter()
+                    .map(|batch| batch.result.len())
+                    .sum();
+                assert_eq!(
+                    total_materialized_records, 100,
+                    "each fn-consumer run should materialize exactly one compaction window"
+                );
+
+                for batch in &success.materialized {
+                    for shard_result in batch.result.iter() {
+                        for record in shard_result {
+                            assert_eq!(
+                                record.get_operation(),
+                                chroma_types::MaterializedLogOperation::AddNew,
+                                "later boundary windows should also replay as new adds"
+                            );
+                        }
+                    }
+                }
+            }
+            other => panic!("expected successful second fn-consumer fetch, got {other:?}"),
+        }
+
+        Box::pin(second_window_context.cleanup()).await;
+
         // Clean up - delete the collections
         // Note: We don't have segment IDs easily available here, so we can't delete
         // the collections. In a real test cleanup, you'd want to track the segment IDs.

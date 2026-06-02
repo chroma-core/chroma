@@ -1,12 +1,18 @@
-use std::collections::HashMap;
-
-use chroma_types::chroma_proto::{CollectionVersionFile, CollectionVersionInfo, FilePaths};
+use chroma_types::chroma_proto::CollectionVersionFile;
 use chroma_types::Segment;
 
 #[derive(Debug, Clone)]
 pub(crate) struct AsyncFnBoundaryPlan {
-    pub(crate) historical_record_segment: Segment,
+    pub(crate) historical_record_segment: Option<Segment>,
     pub(crate) target_log_position: i64,
+}
+
+impl AsyncFnBoundaryPlan {
+    pub(crate) fn record_segment_for_reader(&self, live_record_segment: &Segment) -> Segment {
+        self.historical_record_segment
+            .clone()
+            .unwrap_or_else(|| live_record_segment.empty_segment())
+    }
 }
 
 pub(crate) fn resolve_boundary_plan_from_version_file(
@@ -15,8 +21,6 @@ pub(crate) fn resolve_boundary_plan_from_version_file(
     max_compaction_size: usize,
     live_record_segment: &Segment,
 ) -> Result<AsyncFnBoundaryPlan, String> {
-    let empty_record_segment = empty_record_segment(live_record_segment);
-
     let Some(version_file) = version_file else {
         return Err(format!(
             "async fn completion offset {} has no next compaction boundary",
@@ -37,96 +41,68 @@ pub(crate) fn resolve_boundary_plan_from_version_file(
     let version_infos = version_history
         .versions
         .iter()
+        // GC only marks versions for deletion after a newer version supersedes them.
+        // Fn-consumers should only resolve boundaries against the still-live versions
+        // whose segment files are expected to remain readable. GC makes sure to
+        // keep at least one version live below the completion offset.
         .filter(|version| !version.marked_for_deletion)
         .filter_map(|version| {
             version
                 .collection_info_mutable
                 .as_ref()
                 .map(|mutable| (version, mutable.current_log_position))
-        });
+        })
+        .collect::<Vec<_>>();
 
     let mut historical_version = None;
     let mut next_boundary = None;
-    for (version, log_position) in version_infos.rev() {
-        if log_position > completion_offset {
-            next_boundary = Some(log_position);
-            continue;
+    for (version, log_position) in version_infos.into_iter().rev() {
+        if log_position <= completion_offset {
+            historical_version = Some((version, log_position));
+            break;
         }
 
-        historical_version = Some((version, log_position));
-        break;
+        next_boundary = Some(log_position);
     }
 
     let historical_record_segment = match historical_version {
         Some((_, log_position)) if completion_offset > 0 && log_position < completion_offset => {
             return Err(format!(
-                "async fn completion offset {} does not align to a compaction boundary",
+                "Invariant violation: async fn completion offset {} does not align to a compaction boundary",
                 completion_offset
             ));
         }
-        Some((version, _)) => historical_record_segment_for_version(live_record_segment, version),
-        None => empty_record_segment,
+        Some((version, _)) => Some(
+            live_record_segment.historical_segment_for_version(version, live_record_segment.id)?,
+        ),
+        None => None,
     };
 
-    if let Some(next_boundary) = next_boundary {
-        let log_window_size = usize::try_from(next_boundary - completion_offset)
-            .map_err(|_| "next boundary precedes completion offset".to_string())?;
-        if log_window_size > max_compaction_size {
-            return Err(format!(
-                "next compaction boundary window {} exceeds max_compaction_size {}",
-                log_window_size, max_compaction_size
-            ));
-        }
-    } else {
-        return Err(format!(
+    let target_log_position = next_boundary.ok_or_else(|| {
+        format!(
             "async fn completion offset {} has no next compaction boundary",
             completion_offset
+        )
+    })?;
+    let log_window_size =
+        usize::try_from(target_log_position - completion_offset).map_err(|_| {
+            format!(
+                "Invariant violation: next compaction boundary {} precedes completion offset {}",
+                target_log_position, completion_offset
+            )
+        })?;
+    if log_window_size > max_compaction_size {
+        return Err(format!(
+            "next compaction boundary window {} exceeds max_compaction_size {}",
+            log_window_size, max_compaction_size
         ));
     }
 
     Ok(AsyncFnBoundaryPlan {
         historical_record_segment,
-        target_log_position: next_boundary.unwrap(),
+        target_log_position,
     })
 }
-
-fn empty_record_segment(record_segment: &Segment) -> Segment {
-    let mut segment = record_segment.clone();
-    segment.file_path.clear();
-    segment
-}
-
-fn historical_record_segment_for_version(
-    record_segment: &Segment,
-    version: &CollectionVersionInfo,
-) -> Segment {
-    let mut historical_segment = record_segment.clone();
-    let Some(segment_info) = version.segment_info.as_ref() else {
-        historical_segment.file_path.clear();
-        return historical_segment;
-    };
-
-    let Some(record_segment_info) = segment_info
-        .segment_compaction_info
-        .iter()
-        .find(|segment_info| segment_info.segment_id == record_segment.id.to_string())
-    else {
-        historical_segment.file_path.clear();
-        return historical_segment;
-    };
-
-    historical_segment.file_path = record_segment_info
-        .file_paths
-        .iter()
-        .map(|(key, value)| (key.clone(), file_paths_to_vec(value)))
-        .collect::<HashMap<_, _>>();
-    historical_segment
-}
-
-fn file_paths_to_vec(file_paths: &FilePaths) -> Vec<String> {
-    file_paths.paths.clone()
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -211,7 +187,7 @@ mod tests {
 
         assert_eq!(plan.target_log_position, 150);
         assert_eq!(
-            plan.historical_record_segment.file_path["offset_id_to_data"],
+            plan.historical_record_segment.unwrap().file_path["offset_id_to_data"],
             vec!["record/v100".to_string()]
         );
     }
@@ -235,7 +211,7 @@ mod tests {
 
         assert_eq!(plan.target_log_position, 100);
         assert!(
-            plan.historical_record_segment.file_path.is_empty(),
+            plan.historical_record_segment.is_none(),
             "completion offset zero should use the empty pre-compaction state"
         );
     }
@@ -261,6 +237,67 @@ mod tests {
         )
         .unwrap_err();
 
+        assert!(err.contains("does not align to a compaction boundary"));
+    }
+
+    #[test]
+    fn ignores_deleted_versions_when_finding_next_boundary() {
+        let record_segment = test_record_segment();
+        let mut deleted_version = version_info(2, 150, record_segment.id, "record/v150");
+        deleted_version.marked_for_deletion = true;
+
+        let version_file = CollectionVersionFile {
+            version_history: Some(CollectionVersionHistory {
+                versions: vec![
+                    version_info(1, 100, record_segment.id, "record/v100"),
+                    deleted_version,
+                    version_info(3, 200, record_segment.id, "record/v200"),
+                ],
+            }),
+            ..Default::default()
+        };
+
+        let plan = resolve_boundary_plan_from_version_file(
+            Some(&version_file),
+            100,
+            1024,
+            &record_segment,
+        )
+        .unwrap();
+
+        assert_eq!(plan.target_log_position, 200);
+        assert_eq!(
+            plan.historical_record_segment.unwrap().file_path["offset_id_to_data"],
+            vec!["record/v100".to_string()]
+        );
+    }
+
+    #[test]
+    fn rejects_completion_offsets_that_only_match_deleted_versions() {
+        let record_segment = test_record_segment();
+        let mut deleted_version = version_info(2, 150, record_segment.id, "record/v150");
+        deleted_version.marked_for_deletion = true;
+
+        let version_file = CollectionVersionFile {
+            version_history: Some(CollectionVersionHistory {
+                versions: vec![
+                    version_info(1, 100, record_segment.id, "record/v100"),
+                    deleted_version,
+                    version_info(3, 200, record_segment.id, "record/v200"),
+                ],
+            }),
+            ..Default::default()
+        };
+
+        let err = resolve_boundary_plan_from_version_file(
+            Some(&version_file),
+            150,
+            1024,
+            &record_segment,
+        )
+        .unwrap_err();
+
+        assert!(err.contains("Invariant violation"));
         assert!(err.contains("does not align to a compaction boundary"));
     }
 }

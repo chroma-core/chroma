@@ -340,32 +340,22 @@ impl Orchestrator for LogFetchOrchestrator {
 
 impl LogFetchOrchestrator {
     async fn get_async_fn_fetch_boundaries(
-        &mut self,
         collection: &chroma_types::Collection,
         record_segment: &chroma_types::Segment,
         completion_offset: i64,
-        ctx: &ComponentContext<Self>,
-    ) -> Option<AsyncFnBoundaryPlan> {
-        let boundary_plan = match self
-            .ok_or_terminate(
-                GetAsyncFnFetchBoundariesOperator::new()
-                    .run(&GetAsyncFnFetchBoundariesInput {
-                        collection: collection.clone(),
-                        record_segment: record_segment.clone(),
-                        completion_offset,
-                        max_compaction_size: self.context.max_compaction_size,
-                        blockfile_provider: self.context.blockfile_provider.clone(),
-                    })
-                    .await
-                    .map_err(LogFetchOrchestratorError::from),
-                ctx,
-            )
+        max_compaction_size: usize,
+        blockfile_provider: BlockfileProvider,
+    ) -> Result<AsyncFnBoundaryPlan, LogFetchOrchestratorError> {
+        GetAsyncFnFetchBoundariesOperator::new()
+            .run(&GetAsyncFnFetchBoundariesInput {
+                collection: collection.clone(),
+                record_segment: record_segment.clone(),
+                completion_offset,
+                max_compaction_size,
+                blockfile_provider,
+            })
             .await
-        {
-            Some(plan) => plan,
-            None => return None,
-        };
-        Some(boundary_plan)
+            .map_err(LogFetchOrchestratorError::from)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -550,46 +540,50 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         let mut log_upper_bound_offset = None;
 
         if self.context.is_fn_consumer {
-            let completion_offset = match self
-                .ok_or_terminate(
-                    self.context.log_start_offset.ok_or_else(|| {
-                        LogFetchOrchestratorError::InvariantViolation(
-                            "fn-consumer log fetch requires log_start_offset",
-                        )
-                    }),
-                    ctx,
-                )
-                .await
-            {
+            let completion_offset = match self.context.log_start_offset {
                 Some(offset) => offset,
-                None => return,
+                None => {
+                    self.terminate_with_result(
+                        Err(LogFetchOrchestratorError::InvariantViolation(
+                            "fn-consumer log fetch requires log_start_offset",
+                        )),
+                        ctx,
+                    )
+                    .await;
+                    return;
+                }
             };
 
-            let boundary_plan = match self
-                .get_async_fn_fetch_boundaries(
-                    &collection,
-                    &output.record_segment,
-                    completion_offset,
-                    ctx,
-                )
-                .await
+            let max_compaction_size = self.context.max_compaction_size;
+            let blockfile_provider = self.context.blockfile_provider.clone();
+            let boundary_plan = match LogFetchOrchestrator::get_async_fn_fetch_boundaries(
+                &collection,
+                &output.record_segment,
+                completion_offset,
+                max_compaction_size,
+                blockfile_provider,
+            )
+            .await
             {
-                Some(plan) => plan,
-                None => return,
+                Ok(plan) => plan,
+                Err(err) => {
+                    self.terminate_with_result(Err(err), ctx).await;
+                    return;
+                }
             };
 
             tracing::info!(
                 collection_id = %collection.collection_id,
                 completion_offset,
                 target_log_position = boundary_plan.target_log_position,
-                historical_record_segment_id = %boundary_plan.historical_record_segment.id,
+                uses_pre_compaction_state = boundary_plan.historical_record_segment.is_none(),
                 "Resolved async function execution boundary"
             );
 
-            record_segment_for_reader = boundary_plan.historical_record_segment;
+            record_segment_for_reader =
+                boundary_plan.record_segment_for_reader(&output.record_segment);
             pulled_log_offset = boundary_plan.target_log_position;
-            log_upper_bound_offset =
-                Some(u64::try_from(boundary_plan.target_log_position + 1).unwrap_or_default());
+            log_upper_bound_offset = Some((boundary_plan.target_log_position + 1) as u64);
         }
 
         // Create RecordSegmentReader for MaterializeLogOperator
