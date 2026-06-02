@@ -16,7 +16,7 @@ runs:
   steps:
     - name: Cache Rust toolchain
       id: cache-rustup
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       if: ${{ runner.os != 'windows' }}
       with:
         path: ~/.rustup
@@ -31,7 +31,7 @@ runs:
       run: |
         rustup default $(grep -m1 '^channel' rust-toolchain.toml | cut -d'"' -f2)
     - name: Install Protoc
-      uses: chroma-core/setup-protoc@v3
+      uses: chroma-core/setup-protoc@v4b
       with:
         repo-token: ${{ inputs.github-token }}
         version: v35.0

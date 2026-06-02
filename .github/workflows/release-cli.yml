@@ -10,13 +10,16 @@ on:
     tags:
       - 'cli_release_[0-9]*.[0-9]*.[0-9]*'
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   build-linux:
     name: Build Linux binary
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v5
 
       - name: Setup Rust
         uses: ./.github/actions/rust
@@ -30,7 +33,7 @@ jobs:
         run: mv target/release/chroma ./chroma-linux
 
       - name: Upload Linux binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: chroma-linux
           path: chroma-linux
@@ -40,7 +43,7 @@ jobs:
     runs-on: 8core-32gb-windows-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v5
 
       - name: Setup Rust
         uses: ./.github/actions/rust
@@ -58,7 +61,7 @@ jobs:
           Get-ChildItem -Path ..
 
       - name: Upload Windows binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: chroma-windows
           path: chroma-windows.exe
@@ -68,7 +71,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v5
 
       - name: Setup Rust
         uses: ./.github/actions/rust
@@ -95,13 +98,13 @@ jobs:
           chmod +x ./chroma-macos-intel ./chroma-macos-arm64
 
       - name: Upload macOS Intel binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: chroma-macos-intel
           path: chroma-macos-intel
 
       - name: Upload macOS ARM64 binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: chroma-macos-arm64
           path: chroma-macos-arm64
@@ -110,12 +113,14 @@ jobs:
     name: Create GitHub Release and Attach Assets
     runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [ build-linux, build-windows, build-macos ]
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v5
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: artifacts
 
@@ -140,54 +145,15 @@ jobs:
             echo "tag_name=${{ github.event.inputs.release_name }}" >> $GITHUB_OUTPUT
           fi
 
-      - name: Create GitHub Release
-        id: create_release
-        uses: actions/create-release@v1
+      - name: Create GitHub release and upload assets
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ steps.release_info.outputs.tag_name }}
-          release_name: ${{ steps.release_info.outputs.release_name }}
-          body: "CLI release."
-          draft: false
-          prerelease: false
-
-      - name: Upload Linux binary to release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: artifacts/chroma-linux/chroma-linux
-          asset_name: chroma-linux
-          asset_content_type: application/octet-stream
-
-      - name: Upload Windows binary to release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: artifacts/chroma-windows/chroma-windows.exe
-          asset_name: chroma-windows.exe
-          asset_content_type: application/octet-stream
-
-      - name: Upload macOS Intel binary to release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: artifacts/chroma-macos-intel/chroma-macos-intel
-          asset_name: chroma-macos-intel
-          asset_content_type: application/octet-stream
-
-      - name: Upload macOS ARM64 binary to release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: artifacts/chroma-macos-arm64/chroma-macos-arm64
-          asset_name: chroma-macos-arm64
-          asset_content_type: application/octet-stream
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.release_info.outputs.tag_name }}" \
+            "artifacts/chroma-linux/chroma-linux#chroma-linux" \
+            "artifacts/chroma-windows/chroma-windows.exe#chroma-windows.exe" \
+            "artifacts/chroma-macos-intel/chroma-macos-intel#chroma-macos-intel" \
+            "artifacts/chroma-macos-arm64/chroma-macos-arm64#chroma-macos-arm64" \
+            --target "${{ github.sha }}" \
+            --title "${{ steps.release_info.outputs.release_name }}" \
+            --notes "CLI release."

@@ -3,6 +3,9 @@ name: Go tests
 on:
   workflow_call:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   cluster-test:
     runs-on: "blacksmith-16vcpu-ubuntu-2404"
@@ -12,7 +15,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup
         uses: ./.github/actions/go
       - name: Set up Docker
