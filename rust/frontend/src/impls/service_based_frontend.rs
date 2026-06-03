@@ -2605,6 +2605,7 @@ impl ServiceBasedFrontend {
             ..
         }: AddAttachedFunctionInputRequest,
     ) -> Result<AddAttachedFunctionInputResponse, chroma_types::AttachFunctionError> {
+        let mut sysdb_client = self.sysdb_client.clone();
         let collection_uuid =
             CollectionUuid(uuid::Uuid::parse_str(&collection_id).map_err(|e| {
                 chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
@@ -2615,72 +2616,31 @@ impl ServiceBasedFrontend {
                 )))
             })?);
 
-        let attached_function = self
-            .sysdb_client
-            .get_attached_functions(
-                Some(function_name.clone()),
-                Some(collection_uuid),
-                vec![],
-                true,
-            )
-            .await
-            .map_err(|e| chroma_types::AttachFunctionError::Internal(Box::new(e)))?
-            .into_iter()
-            .next()
-            .ok_or_else(|| chroma_types::AttachFunctionError::FunctionNotFound(function_name))?;
+        let add_input_result = frontend_core::attached_function::add_attached_function_input(
+            &mut sysdb_client,
+            function_name,
+            collection_uuid,
+            input_collection_id,
+            database_name.clone(),
+        )
+        .await?;
 
-        if !attached_function.is_async {
-            return Err(chroma_types::AttachFunctionError::InvalidArgument(
-                "multiple input collections are only supported for async attached functions"
-                    .to_string(),
-            ));
-        }
-
-        let output_collection_id = attached_function.output_collection_id.ok_or_else(|| {
-            chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
-                tonic::Status::internal("Attached function output collection is not ready"),
-            )))
-        })?;
-
-        let output_collection = self
-            .sysdb_client
-            .get_collection_with_segments(Some(database_name.clone()), output_collection_id)
-            .await
-            .map_err(|e| chroma_types::AttachFunctionError::Internal(Box::new(e)))?;
-
-        let output_schema = output_collection.collection.schema.ok_or_else(|| {
-            chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
-                tonic::Status::internal("Attached function output collection is missing schema"),
-            )))
-        })?;
-
-        let output_schema_str = serde_json::to_string(&output_schema).map_err(|e| {
-            chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
-                tonic::Status::internal(format!(
-                    "Failed to serialize output collection schema: {}",
-                    e
-                )),
-            )))
-        })?;
-
-        let (attached_function_id, created) = self
-            .sysdb_client
-            .add_attached_function_input(attached_function.id, input_collection_id)
-            .await?;
-
-        if created {
+        if add_input_result.created {
             self.start_backfill(
                 tenant_name,
                 database_name.clone(),
                 input_collection_id,
-                attached_function_id,
+                add_input_result.attached_function_id,
             )
             .await?;
         }
 
         let _finish_created = self
             .sysdb_client
-            .finish_create_attached_function(attached_function_id, output_schema_str)
+            .finish_create_attached_function(
+                add_input_result.attached_function_id,
+                add_input_result.output_schema_str,
+            )
             .await
             .map_err(|e| chroma_types::AttachFunctionError::Internal(Box::new(e)))?;
 
@@ -2688,11 +2648,11 @@ impl ServiceBasedFrontend {
             attached_function: AttachedFunctionApiResponse::from_attached_function(
                 chroma_types::AttachedFunction {
                     input_collection_id,
-                    ..attached_function
+                    ..add_input_result.attached_function
                 },
             )
             .map_err(|e| chroma_types::AttachFunctionError::Internal(Box::new(e)))?,
-            created,
+            created: add_input_result.created,
         })
     }
 

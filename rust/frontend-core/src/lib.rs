@@ -9,6 +9,8 @@
 
 pub mod ac;
 pub mod attached_function_ops;
+pub mod attached_function;
+pub mod attached_function_ops;
 pub mod auth;
 pub mod collection_ops;
 pub mod config;
