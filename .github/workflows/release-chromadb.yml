@@ -52,6 +52,16 @@ jobs:
       python_versions: '["3.9", "3.10", "3.11", "3.12"]'
       property_testing_preset: 'normal'
 
+  python-tests-windows:
+    uses: ./.github/workflows/_python-tests.yml
+    secrets: inherit
+    with:
+      # we only run windows tests on 3.12 because windows runners are expensive
+      # and we usually don't see failures that are isolated to a specific version
+      python_versions: '["3.12"]'
+      property_testing_preset: 'normal'
+      runner: '8core-32gb-windows-latest'
+
   javascript-client-tests:
     name: JavaScript client tests
     uses: ./.github/workflows/_javascript-client-tests.yml
@@ -72,6 +82,7 @@ jobs:
       - check-tag
       - get-version
       - python-tests-linux
+      - python-tests-windows
       - javascript-client-tests
       - rust-tests
       - go-tests
@@ -88,6 +99,7 @@ jobs:
       - check-tag
       - get-version
       - python-tests-linux
+      - python-tests-windows
       - javascript-client-tests
       - rust-tests
       - go-tests
@@ -104,6 +116,7 @@ jobs:
     needs:
       - check-tag
       - python-tests-linux
+      - python-tests-windows
       - javascript-client-tests
       - rust-tests
       - go-tests
