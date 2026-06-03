@@ -43,7 +43,7 @@ use serde_json::{to_string_pretty, Error as JsonError};
 const COLLECTION_NAME: &str = "rust_chroma_cloud_embeddings_example";
 const DENSE_KEY: &str = "#embedding";
 const SPARSE_KEY: &str = "sparse_embedding";
-const QUERY: &str = "How do I create embeddings with the Rust client?";
+const QUERY: &str = "How do I create embeddings with Chroma's Rust client?";
 
 struct ExampleRecord {
     id: &'static str,
