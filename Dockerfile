@@ -15,7 +15,6 @@ RUN apt-get update --fix-missing && apt-get install -y --fix-missing \
     rm -rf /var/lib/apt/lists/* && \
     mkdir /install
 ENV PATH="/root/.cargo/bin:$PATH"
-ENV CARGO_INCREMENTAL=0
 
 RUN ARCH=$(uname -m) && \
   if [ "$ARCH" = "x86_64" ]; then \
@@ -38,39 +37,24 @@ COPY ./requirements.txt requirements.txt
 
 RUN --mount=type=cache,target=/root/.cache/pip pip install maturin cffi patchelf
 RUN --mount=type=cache,target=/root/.cache/pip pip install --upgrade --prefix="/install" -r requirements.txt
-RUN --mount=type=cache,target=/root/.cache/pip pip install --upgrade --prefix="/install" "fastapi>=0.115.9" "opentelemetry-instrumentation-fastapi>=0.41b0"
 RUN --mount=type=cache,target=/root/.cache/pip if [ "$REBUILD_HNSWLIB" = "true" ]; then pip install --no-binary :all: --force-reinstall --prefix="/install" chroma-hnswlib; fi
 
 # Install gRPC tools for Python with fixed version
-RUN --mount=type=cache,target=/root/.cache/pip pip install grpcio==1.58.0 grpcio-tools==1.58.0
-
-WORKDIR /chroma
-
-# Copy only package build inputs so unrelated repository files do not
-# invalidate the wheel build layer.
-COPY ./Cargo.toml ./Cargo.toml
-COPY ./Cargo.lock ./Cargo.lock
-COPY ./LICENSE ./LICENSE
-COPY ./README.md ./README.md
-COPY ./pyproject.toml ./pyproject.toml
-COPY ./rust-toolchain.toml ./rust-toolchain.toml
-COPY ./chromadb ./chromadb
-COPY ./idl ./idl
-COPY ./rust ./rust
-COPY ./schemas ./schemas
+RUN pip install grpcio==1.58.0 grpcio-tools==1.58.0
+# Copy source files to build Protobufs
+COPY ./ /chroma
 
 # Generate Protobufs
+WORKDIR /chroma
 RUN make -C idl proto_python
-RUN --mount=type=cache,sharing=locked,target=/root/.cargo/registry/ \
-    --mount=type=cache,sharing=locked,target=/root/.cargo/git/ \
-    --mount=type=cache,sharing=locked,target=/chroma/target/ \
-    python3 -m maturin build --out /wheels
-RUN pip install --prefix="/install" --no-deps /wheels/*.whl
+RUN python3 -m maturin build
+RUN pip uninstall chromadb -y
+RUN pip install --prefix="/install" --find-links target/wheels/ --upgrade  chromadb
 
 FROM python:3.11-slim-bookworm AS final
 
 # Create working directory
-RUN mkdir -p /chroma/chromadb
+RUN mkdir /chroma
 WORKDIR /chroma
 
 # Copy entrypoint
@@ -80,9 +64,9 @@ RUN apt-get update --fix-missing && apt-get install -y curl && \
     chmod +x /docker_entrypoint.sh && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy built dependencies and runtime files
+# Copy built dependencies and generated Protobufs
 COPY --from=builder /install /usr/local
-COPY --from=builder /chroma/chromadb/log_config.yml /chroma/chromadb/log_config.yml
+COPY --from=builder /chroma /chroma
 
 ENV CHROMA_HOST_ADDR="0.0.0.0"
 ENV CHROMA_HOST_PORT=8000

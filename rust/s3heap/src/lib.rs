@@ -788,7 +788,7 @@ impl HeapWriter {
         // Execute bucket writes in parallel with concurrency limit
         use futures::stream::{self, StreamExt, TryStreamExt};
 
-        stream::iter(buckets)
+        stream::iter(buckets.into_iter())
             .map(|(bucket, entries)| async move {
                 self.internal.merge_on_s3(bucket, &entries).await
             })

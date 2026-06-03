@@ -109,7 +109,8 @@ impl ArrowWriteableValue for &SpannPostingList<'_> {
 
         let inner_offset_id_ref = builder.doc_offset_ids_builder.values();
         let inner_version_ref = builder.doc_versions_builder.values();
-        for (doc_offset_id, doc_version) in doc_offset_ids.into_iter().zip(doc_versions) {
+        for (doc_offset_id, doc_version) in doc_offset_ids.into_iter().zip(doc_versions.into_iter())
+        {
             inner_offset_id_ref.append_value(doc_offset_id);
             inner_version_ref.append_value(doc_version);
         }

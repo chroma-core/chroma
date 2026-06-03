@@ -5,7 +5,6 @@ use worker::config::RootConfig;
 
 #[test]
 #[serial]
-#[allow(clippy::result_large_err)]
 fn test_config_with_env_override() {
     Jail::expect_with(|jail| {
         jail.set_env("CHROMA_QUERY_SERVICE__MY_MEMBER_ID", "query-service-0");

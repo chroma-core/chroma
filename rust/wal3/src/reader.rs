@@ -323,7 +323,9 @@ impl<P: FragmentPointer, FC: FragmentConsumer, MC: ManifestConsumer<P>> LogReade
             let resolved = futures::future::try_join_all(futures).await?;
             // NOTE(rescrv):  This empties snapshots before the first loop so we can fill it
             // incrementally as we find snapshots that reference snapshots.
-            for (r, s) in std::iter::zip(resolved.iter(), std::mem::take(&mut snapshots)) {
+            for (r, s) in
+                std::iter::zip(resolved.iter(), std::mem::take(&mut snapshots).into_iter())
+            {
                 if let Some(r) = r {
                     snapshots.extend(r.snapshots.iter().cloned());
                     fragments.extend(r.fragments.iter().cloned());

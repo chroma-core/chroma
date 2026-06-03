@@ -1,5 +1,3 @@
-#![recursion_limit = "256"]
-
 use std::iter::once;
 
 use chroma_benchmark::benchmark::{bench_run, tokio_multi_thread};

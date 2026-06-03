@@ -151,7 +151,7 @@ impl RecordSegmentWriter {
             .shards
             .iter()
             .zip(partitions.iter())
-            .zip(shard_readers)
+            .zip(shard_readers.into_iter())
             .map(|((shard, partitioned), shard_reader)| async move {
                 shard
                     .apply_materialized_log_chunk(&shard_reader, partitioned)

@@ -1,5 +1,3 @@
-#![recursion_limit = "256"]
-
 use chroma_config::Configurable;
 use chroma_jemalloc_pprof_server::spawn_pprof_server;
 use chroma_memberlist::memberlist_provider::CustomResourceMemberlistProvider;

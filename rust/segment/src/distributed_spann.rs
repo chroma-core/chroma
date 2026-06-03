@@ -1028,7 +1028,7 @@ mod test {
             .await
             .expect("Error gettting all data from reader")
             .collect::<Vec<_>>();
-        versions_map.sort_by_key(|a| a.1);
+        versions_map.sort_by(|a, b| a.1.cmp(&b.1));
         assert_eq!(
             versions_map
                 .into_iter()

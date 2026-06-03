@@ -1,5 +1,3 @@
-#![recursion_limit = "256"]
-
 use chroma_benchmark::benchmark::{bench_run, tokio_multi_thread};
 use chroma_log::test::{upsert_generator, LoadFromGenerator};
 use chroma_segment::test::TestDistributedSegment;

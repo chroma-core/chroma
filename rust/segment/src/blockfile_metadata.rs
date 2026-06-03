@@ -386,7 +386,7 @@ impl<'me> MetadataSegmentWriter<'me> {
             .shards
             .iter()
             .zip(partitions.iter())
-            .zip(shard_readers)
+            .zip(shard_readers.into_iter())
             .map(|((shard, partitioned), shard_reader)| {
                 let schema_clone = schema.clone();
                 async move {

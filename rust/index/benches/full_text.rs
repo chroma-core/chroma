@@ -1,5 +1,3 @@
-#![recursion_limit = "256"]
-
 use anyhow::Result;
 use chroma_benchmark::datasets::types::Record;
 use chroma_benchmark::datasets::{

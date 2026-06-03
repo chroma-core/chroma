@@ -1,5 +1,3 @@
-#![recursion_limit = "256"]
-
 mod common;
 
 mod ms_01_blockfile_roundtrip;

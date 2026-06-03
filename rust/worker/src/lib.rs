@@ -1,5 +1,3 @@
-#![recursion_limit = "256"]
-
 mod compactor;
 pub mod fn_consumer;
 mod server;

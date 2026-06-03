@@ -13,27 +13,8 @@ runs:
       env:
         TILT_VERSION: "0.34.2"
       run: |
-        install_tilt() (
-          set -euo pipefail
-
-          tmp_dir="$(mktemp -d)"
-          trap 'rm -rf "${tmp_dir}"' EXIT
-
-          tilt_archive="${tmp_dir}/tilt.${TILT_VERSION}.linux.x86_64.tar.gz"
-          tilt_url="https://github.com/tilt-dev/tilt/releases/download/v${TILT_VERSION}/tilt.${TILT_VERSION}.linux.x86_64.tar.gz"
-
-          echo "Downloading Tilt ${TILT_VERSION} from ${tilt_url}"
-          curl --fail --location --retry 5 --retry-all-errors --retry-delay 2 \
-            --output "${tilt_archive}" \
-            "${tilt_url}"
-          tar -xzf "${tilt_archive}" -C "${tmp_dir}" tilt
-          install -m 0755 "${tmp_dir}/tilt" /usr/local/bin/tilt
-          tilt version
-        )
-        export -f install_tilt
-
         parallel --tag --linebuffer ::: \
-          "bash -c install_tilt" \
+          "bash -c 'curl -fsSL https://github.com/tilt-dev/tilt/releases/download/v${TILT_VERSION}/tilt.${TILT_VERSION}.linux.x86_64.tar.gz | tar -xzv -C /usr/local/bin tilt'" \
           "docker buildx bake -f ${{ github.action_path }}/docker-bake.hcl --load" \
           "bash ${{ github.action_path }}/pull_external_images.sh"
       working-directory: ${{ github.action_path }}/../../../ # this allows other repos to reuse this workflow when this repo may not be the current working directory

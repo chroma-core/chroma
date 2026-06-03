@@ -62,7 +62,7 @@ impl Drop for GarbageCollectorUnderTest {
             if files.is_empty() {
                 return;
             }
-            futures::stream::iter(files)
+            futures::stream::iter(files.into_iter())
                 .map(|file| {
                     let storage = self.storage.clone();
                     async move {

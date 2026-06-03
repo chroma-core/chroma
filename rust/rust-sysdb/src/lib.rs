@@ -1,5 +1,3 @@
-#![recursion_limit = "256"]
-
 use chroma_config::Configurable;
 
 use crate::config::RootConfig;
