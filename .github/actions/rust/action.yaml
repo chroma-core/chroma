@@ -4,6 +4,10 @@ inputs:
   github-token:
     description: "GitHub token"
     required: false
+  toolchain:
+    description: "Rust toolchain to install and use"
+    required: false
+    default: "stable"
   workspaces:
     description: "Workspace paths to cache (see documentation on Swatinem/rust-cache for details)"
     required: false
@@ -14,6 +18,16 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Set up Rust toolchain
+      shell: bash
+      env:
+        RUST_TOOLCHAIN: ${{ inputs.toolchain }}
+      run: |
+        rustup set profile minimal
+        rustup update "$RUST_TOOLCHAIN"
+        rustup default "$RUST_TOOLCHAIN"
+        rustc --version
+        cargo --version
     - name: Install Protoc
       uses: chroma-core/setup-protoc@v4b
       with:
