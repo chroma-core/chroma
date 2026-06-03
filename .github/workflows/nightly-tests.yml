@@ -27,6 +27,7 @@ jobs:
         with:
           python-version: "3.12"
       - uses: useblacksmith/setup-docker-builder@v1
+      - uses: ./.github/actions/preload-default-onnx-model
       - uses: ./.github/actions/tilt
       - name: Test
         run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"'

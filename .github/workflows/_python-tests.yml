@@ -190,6 +190,8 @@ jobs:
       - name: Install built wheel
         shell: bash
         run: pip install --no-index --find-links target/wheels/ chromadb
+      - name: Preload default ONNX model
+        uses: ./.github/actions/preload-default-onnx-model
       - name: Test
         run: >-
           python bin/ci/pytest-shard.py
@@ -349,6 +351,8 @@ jobs:
       if: runner.os != 'Windows'
       run: chmod +x target/debug/chroma
       shell: bash
+    - name: Preload default ONNX model
+      uses: ./.github/actions/preload-default-onnx-model
     - name: Rust Integration Test
       run: bin/rust-integration-test.sh -x ${{ matrix.test_target.args }}
       shell: bash
@@ -418,6 +422,8 @@ jobs:
         if: runner.os != 'Windows'
         run: chmod +x target/debug/chroma
         shell: bash
+      - name: Preload default ONNX model
+        uses: ./.github/actions/preload-default-onnx-model
       - name: Test
         run: bin/rust-integration-test.sh -x ${{ matrix.test_target.args }}
         shell: bash
@@ -495,6 +501,8 @@ jobs:
         with:
           dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
           dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Preload default ONNX model
+        uses: ./.github/actions/preload-default-onnx-model
       - name: Start Tilt services
         uses: ./.github/actions/tilt
       - name: Test
@@ -562,6 +570,8 @@ jobs:
       - name: Install built wheel
         shell: bash
         run: pip install --no-index --find-links target/wheels/ chromadb
+      - name: Preload default ONNX model
+        uses: ./.github/actions/preload-default-onnx-model
       - name: Test
         run: python -m pytest -x chromadb/test/stress --durations 10
         shell: bash
@@ -602,6 +612,8 @@ jobs:
     - name: Install built wheel
       shell: bash
       run: pip install --no-index --find-links target/wheels/ chromadb
+    - name: Preload default ONNX model
+      uses: ./.github/actions/preload-default-onnx-model
     - name: Integration Test
       run: python -m pytest -x "chromadb/test/test_cli.py"
       shell: bash
@@ -647,6 +659,8 @@ jobs:
       - name: Install built wheel
         shell: bash
         run: pip install --no-index --find-links target/wheels/ chromadb
+      - name: Preload default ONNX model
+        uses: ./.github/actions/preload-default-onnx-model
       - name: Run tests
         run: python -m pytest -x chromadb/test/test_api.py ${{ matrix.parallelized && '-n auto --dist worksteal' || '' }} -v --color=yes --durations 10
         shell: bash
