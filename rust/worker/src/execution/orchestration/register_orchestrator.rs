@@ -226,6 +226,19 @@ impl Orchestrator for RegisterOrchestrator {
             if function_context.is_async && self.context.is_fn_consumer {
                 // For async functions, use FinishAsyncWorkOperator to call work queue
                 if let Some(work_queue_client) = self.context.work_queue_client.clone() {
+                    let output_collection_flush = match collection_flush_infos.first() {
+                        Some(info) => info.clone(),
+                        None => {
+                            self.terminate_with_result(
+                                Err(RegisterOrchestratorError::InvariantViolation(
+                                    "Async attached function requires output collection flush info",
+                                )),
+                                ctx,
+                            )
+                            .await;
+                            return vec![];
+                        }
+                    };
                     let work_items = function_context
                         .input_progress
                         .iter()
@@ -240,6 +253,7 @@ impl Orchestrator for RegisterOrchestrator {
                             FinishAsyncWorkInput::new(
                                 function_context.attached_function_id,
                                 work_items,
+                                output_collection_flush,
                                 work_queue_client,
                             ),
                             ctx.receiver(),

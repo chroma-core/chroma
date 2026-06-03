@@ -12,6 +12,13 @@ pub const FUNCTION_RECORD_COUNTER_ID: Uuid = Uuid::from_bytes([
 /// Name of the built-in record_counter function
 pub const FUNCTION_RECORD_COUNTER_NAME: &str = "record_counter";
 
+/// UUID for the built-in count_async function
+pub const FUNCTION_COUNT_ASYNC_ID: Uuid = Uuid::from_bytes([
+    0x4c, 0xad, 0xdd, 0x3b, 0xd4, 0x9d, 0x46, 0x25, 0xae, 0x1b, 0xd4, 0x18, 0x35, 0x30, 0x82, 0x4a,
+]);
+/// Name of the built-in count_async function
+pub const FUNCTION_COUNT_ASYNC_NAME: &str = "count_async";
+
 /// UUID for the built-in statistics function
 pub const FUNCTION_STATISTICS_ID: Uuid = Uuid::from_bytes([
     0x30, 0x4b, 0x58, 0xad, 0xa5, 0xcb, 0x41, 0xdc, 0xb8, 0x8f, 0x36, 0xdd, 0x3b, 0xf1, 0xd4, 0x01,

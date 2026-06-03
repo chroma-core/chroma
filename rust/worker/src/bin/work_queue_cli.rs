@@ -1,4 +1,7 @@
+use chroma_types::{CollectionFlushInfo, CollectionUuid, DatabaseName};
 use clap::{Parser, Subcommand};
+use std::str::FromStr;
+use std::sync::Arc;
 use worker::work_queue::work_queue_client::WorkQueueClient;
 
 #[derive(Parser)]
@@ -94,8 +97,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             collection_id,
             offset,
         } => {
+            let output_collection_flush = CollectionFlushInfo {
+                tenant_id: "default_tenant".to_string(),
+                database_name: DatabaseName::new("default_database".to_string()).unwrap(),
+                collection_id: CollectionUuid::from_str(&collection_id)?,
+                log_position: offset,
+                collection_version: 0,
+                segment_flush_info: Arc::from([]),
+                total_records_post_compaction: 0,
+                size_bytes_post_compaction: 0,
+                schema: None,
+            };
             client
-                .finish_work(function_id, collection_id, offset)
+                .finish_work(function_id, collection_id, offset, output_collection_flush)
                 .await?;
             println!("✓ Work marked as finished");
         }

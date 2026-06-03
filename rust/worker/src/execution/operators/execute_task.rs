@@ -14,8 +14,8 @@ use chroma_system::{Operator, OperatorType};
 use chroma_types::{
     AttachedFunction, Chunk, CollectionUuid, LogRecord, MaterializedLogOperation, Operation,
     OperationRecord, Segment, SegmentShard, SegmentShardError, UpdateMetadataValue,
-    FUNCTION_DUMMY_ASYNC_ID, FUNCTION_HTTP_GENERATE_ID, FUNCTION_RECORD_COUNTER_ID,
-    FUNCTION_REVISION_HISTORY_ID, FUNCTION_STATISTICS_ID,
+    FUNCTION_COUNT_ASYNC_ID, FUNCTION_DUMMY_ASYNC_ID, FUNCTION_HTTP_GENERATE_ID,
+    FUNCTION_RECORD_COUNTER_ID, FUNCTION_REVISION_HISTORY_ID, FUNCTION_STATISTICS_ID,
 };
 use std::sync::Arc;
 use thiserror::Error;
@@ -189,7 +189,7 @@ impl ExecuteAttachedFunctionOperator {
     ) -> Result<Self, ExecuteAttachedFunctionError> {
         let function_id = attached_function.function_id;
         let executor: Arc<dyn AttachedFunctionExecutor> = match function_id {
-            FUNCTION_RECORD_COUNTER_ID => Arc::new(CountAttachedFunction),
+            FUNCTION_RECORD_COUNTER_ID | FUNCTION_COUNT_ASYNC_ID => Arc::new(CountAttachedFunction),
             FUNCTION_STATISTICS_ID => {
                 Arc::new(StatisticsFunctionExecutor(Box::new(CounterFunctionFactory)))
             }

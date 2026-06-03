@@ -650,6 +650,28 @@ message TryFinishAsyncAttachedFunctionInvocationRequest {
   uint64 new_completion_offset = 3;
 }
 
+message AsyncInvocationUpdate {
+  string attached_function_id = 1;
+  string collection_id = 2;
+  uint64 new_completion_offset = 3;
+}
+
+message AsyncInvocationNeedsRepair {
+  string attached_function_id = 1;
+  string collection_id = 2;
+  uint64 compaction_offset = 3;
+}
+
+message FlushCollectionCompactionsAndFinishAsyncRequest {
+  FlushCollectionCompactionRequest output_collection_flush = 1;
+  repeated AsyncInvocationUpdate async_invocation_updates = 2;
+}
+
+message FlushCollectionCompactionsAndFinishAsyncResponse {
+  repeated CollectionCompactionInfo collections = 1;
+  repeated AsyncInvocationNeedsRepair needs_repair = 2;
+}
+
 message TryFinishAsyncAttachedFunctionInvocationResponse {
   oneof result {
     FinishAsyncSuccess success = 1;
@@ -795,6 +817,7 @@ service SysDB {
   rpc FinishAttachedFunctionDeletion(FinishAttachedFunctionDeletionRequest) returns (FinishAttachedFunctionDeletionResponse) {}
   rpc CheckInvocationStatus(CheckInvocationStatusRequest) returns (CheckInvocationStatusResponse) {}
   rpc FlushCollectionCompactionAndAttachedFunction(FlushCollectionCompactionAndAttachedFunctionRequest) returns (FlushCollectionCompactionAndAttachedFunctionResponse) {}
+  rpc FlushCollectionCompactionsAndFinishAsync(FlushCollectionCompactionsAndFinishAsyncRequest) returns (FlushCollectionCompactionsAndFinishAsyncResponse) {}
   rpc TryFinishAsyncAttachedFunctionInvocation(TryFinishAsyncAttachedFunctionInvocationRequest) returns (TryFinishAsyncAttachedFunctionInvocationResponse) {}
   rpc FinalizeAsyncAttachedFunctionRepair(FinalizeAsyncAttachedFunctionRepairRequest) returns (FinalizeAsyncAttachedFunctionRepairResponse) {}
   rpc IncrementCompactionFailureCount(IncrementCompactionFailureCountRequest) returns (IncrementCompactionFailureCountResponse) {}

@@ -2917,6 +2917,30 @@ impl SysDb {
         }
     }
 
+    pub async fn flush_collection_compactions_and_finish_async(
+        &mut self,
+        request: chroma_types::chroma_proto::FlushCollectionCompactionsAndFinishAsyncRequest,
+    ) -> Result<
+        tonic::Response<
+            chroma_types::chroma_proto::FlushCollectionCompactionsAndFinishAsyncResponse,
+        >,
+        tonic::Status,
+    > {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.client
+                    .clone()
+                    .flush_collection_compactions_and_finish_async(request)
+                    .await
+            }
+            SysDb::Sqlite(_) => unimplemented!(),
+            SysDb::Test(test) => {
+                test.flush_collection_compactions_and_finish_async(request)
+                    .await
+            }
+        }
+    }
+
     pub async fn check_invocation_status(
         &mut self,
         request: chroma_types::chroma_proto::CheckInvocationStatusRequest,

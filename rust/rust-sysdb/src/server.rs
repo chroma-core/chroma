@@ -32,21 +32,23 @@ use chroma_types::chroma_proto::{
     FinishCreateAttachedFunctionResponse, FinishDatabaseDeletionRequest,
     FinishDatabaseDeletionResponse, FlushCollectionCompactionAndAttachedFunctionRequest,
     FlushCollectionCompactionAndAttachedFunctionResponse, FlushCollectionCompactionRequest,
-    FlushCollectionCompactionResponse, ForkCollectionRequest, ForkCollectionResponse,
-    GetAttachedFunctionsRequest, GetAttachedFunctionsResponse, GetAttachedFunctionsToGcRequest,
-    GetAttachedFunctionsToGcResponse, GetCollectionByResourceNameRequest, GetCollectionRequest,
-    GetCollectionResponse, GetCollectionSizeRequest, GetCollectionSizeResponse,
-    GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetCollectionsRequest,
-    GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetFunctionsRequest,
-    GetFunctionsResponse, GetLastCompactionTimeForTenantRequest,
-    GetLastCompactionTimeForTenantResponse, GetSegmentsRequest, GetSegmentsResponse,
-    GetTenantRequest, GetTenantResponse, IncrementCompactionFailureCountRequest,
-    IncrementCompactionFailureCountResponse, ListCollectionVersionsRequest,
-    ListCollectionVersionsResponse, ListCollectionsToGcRequest, ListCollectionsToGcResponse,
-    ListDatabasesRequest, ListDatabasesResponse, MarkVersionForDeletionRequest,
-    MarkVersionForDeletionResponse, ResetStateResponse, RestoreCollectionRequest,
-    RestoreCollectionResponse, SetLastCompactionTimeForTenantRequest, SetTenantResourceNameRequest,
-    SetTenantResourceNameResponse, TryFinishAsyncAttachedFunctionInvocationRequest,
+    FlushCollectionCompactionResponse, FlushCollectionCompactionsAndFinishAsyncRequest,
+    FlushCollectionCompactionsAndFinishAsyncResponse, ForkCollectionRequest,
+    ForkCollectionResponse, GetAttachedFunctionsRequest, GetAttachedFunctionsResponse,
+    GetAttachedFunctionsToGcRequest, GetAttachedFunctionsToGcResponse,
+    GetCollectionByResourceNameRequest, GetCollectionRequest, GetCollectionResponse,
+    GetCollectionSizeRequest, GetCollectionSizeResponse, GetCollectionWithSegmentsRequest,
+    GetCollectionWithSegmentsResponse, GetCollectionsRequest, GetCollectionsResponse,
+    GetDatabaseRequest, GetDatabaseResponse, GetFunctionsRequest, GetFunctionsResponse,
+    GetLastCompactionTimeForTenantRequest, GetLastCompactionTimeForTenantResponse,
+    GetSegmentsRequest, GetSegmentsResponse, GetTenantRequest, GetTenantResponse,
+    IncrementCompactionFailureCountRequest, IncrementCompactionFailureCountResponse,
+    ListCollectionVersionsRequest, ListCollectionVersionsResponse, ListCollectionsToGcRequest,
+    ListCollectionsToGcResponse, ListDatabasesRequest, ListDatabasesResponse,
+    MarkVersionForDeletionRequest, MarkVersionForDeletionResponse, ResetStateResponse,
+    RestoreCollectionRequest, RestoreCollectionResponse, SetLastCompactionTimeForTenantRequest,
+    SetTenantResourceNameRequest, SetTenantResourceNameResponse,
+    TryFinishAsyncAttachedFunctionInvocationRequest,
     TryFinishAsyncAttachedFunctionInvocationResponse, UpdateCollectionRequest,
     UpdateCollectionResponse, UpdateSegmentRequest, UpdateSegmentResponse,
 };
@@ -988,6 +990,15 @@ impl SysDb for SysdbService {
     ) -> Result<Response<TryFinishAsyncAttachedFunctionInvocationResponse>, Status> {
         Err(Status::unimplemented(
             "try_finish_async_attached_function_invocation is not supported",
+        ))
+    }
+
+    async fn flush_collection_compactions_and_finish_async(
+        &self,
+        _request: Request<FlushCollectionCompactionsAndFinishAsyncRequest>,
+    ) -> Result<Response<FlushCollectionCompactionsAndFinishAsyncResponse>, Status> {
+        Err(Status::unimplemented(
+            "flush_collection_compactions_and_finish_async is not supported",
         ))
     }
 

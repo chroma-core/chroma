@@ -702,6 +702,86 @@ func (s *Server) FlushCollectionCompactionAndAttachedFunction(ctx context.Contex
 	return res, nil
 }
 
+func (s *Server) FlushCollectionCompactionsAndFinishAsync(ctx context.Context, req *coordinatorpb.FlushCollectionCompactionsAndFinishAsyncRequest) (*coordinatorpb.FlushCollectionCompactionsAndFinishAsyncResponse, error) {
+	flushReq := req.GetOutputCollectionFlush()
+	if flushReq == nil {
+		log.Error("FlushCollectionCompactionsAndFinishAsync failed. output_collection_flush is missing")
+		return nil, grpcutils.BuildInternalGrpcError("output_collection_flush is required")
+	}
+
+	updates := req.GetAsyncInvocationUpdates()
+	if len(updates) == 0 {
+		log.Error("FlushCollectionCompactionsAndFinishAsync failed. async_invocation_updates is empty")
+		return nil, grpcutils.BuildInternalGrpcError("at least one async_invocation_update is required")
+	}
+
+	collectionID, err := types.ToUniqueID(&flushReq.CollectionId)
+	err = grpcutils.BuildErrorForUUID(collectionID, "collection", err)
+	if err != nil {
+		log.Error("FlushCollectionCompactionsAndFinishAsync failed. error parsing collection id", zap.Error(err), zap.String("collection_id", flushReq.CollectionId))
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	segmentCompactionInfo := make([]*model.FlushSegmentCompaction, 0, len(flushReq.SegmentCompactionInfo))
+	for _, flushSegmentCompaction := range flushReq.SegmentCompactionInfo {
+		segmentID, err := types.ToUniqueID(&flushSegmentCompaction.SegmentId)
+		err = grpcutils.BuildErrorForUUID(segmentID, "segment", err)
+		if err != nil {
+			log.Error("FlushCollectionCompactionsAndFinishAsync failed. error parsing segment id", zap.Error(err), zap.String("collection_id", flushReq.CollectionId))
+			return nil, grpcutils.BuildInternalGrpcError(err.Error())
+		}
+		filePaths := make(map[string][]string)
+		for key, filePath := range flushSegmentCompaction.FilePaths {
+			filePaths[key] = filePath.Paths
+		}
+		segmentCompactionInfo = append(segmentCompactionInfo, &model.FlushSegmentCompaction{
+			ID:        segmentID,
+			FilePaths: filePaths,
+		})
+	}
+
+	outputCollectionFlush := &model.FlushCollectionCompaction{
+		ID:                         collectionID,
+		TenantID:                   flushReq.TenantId,
+		LogPosition:                flushReq.LogPosition,
+		CurrentCollectionVersion:   flushReq.CollectionVersion,
+		FlushSegmentCompactions:    segmentCompactionInfo,
+		TotalRecordsPostCompaction: flushReq.TotalRecordsPostCompaction,
+		SizeBytesPostCompaction:    flushReq.SizeBytesPostCompaction,
+		SchemaStr:                  flushReq.SchemaStr,
+	}
+
+	extendedFlushInfo, needsRepair, err := s.coordinator.FlushCollectionCompactionsAndFinishAsync(
+		ctx,
+		outputCollectionFlush,
+		updates,
+	)
+	if err != nil {
+		log.Error("FlushCollectionCompactionsAndFinishAsync failed", zap.Error(err))
+		if err == common.ErrCollectionSoftDeleted {
+			return nil, grpcutils.BuildFailedPreconditionGrpcError(err.Error())
+		}
+		if err == common.ErrAttachedFunctionNotFound {
+			return nil, grpcutils.BuildNotFoundGrpcError(err.Error())
+		}
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	res := &coordinatorpb.FlushCollectionCompactionsAndFinishAsyncResponse{
+		Collections: make([]*coordinatorpb.CollectionCompactionInfo, 0, len(extendedFlushInfo.Collections)),
+		NeedsRepair: needsRepair,
+	}
+	for _, flushInfo := range extendedFlushInfo.Collections {
+		res.Collections = append(res.Collections, &coordinatorpb.CollectionCompactionInfo{
+			CollectionId:       flushInfo.ID,
+			CollectionVersion:  flushInfo.CollectionVersion,
+			LastCompactionTime: flushInfo.TenantLastCompactionTime,
+		})
+	}
+
+	return res, nil
+}
+
 func (s *Server) ListCollectionsToGc(ctx context.Context, req *coordinatorpb.ListCollectionsToGcRequest) (*coordinatorpb.ListCollectionsToGcResponse, error) {
 	absoluteCutoffTimeSecs := (*uint64)(nil)
 	if req.CutoffTime != nil {

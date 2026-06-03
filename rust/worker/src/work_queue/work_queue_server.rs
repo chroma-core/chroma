@@ -1,4 +1,4 @@
-use crate::work_queue::types::{FinishResult, WorkQueueError};
+use crate::work_queue::types::{FinishResult, FinishWorkItem, WorkQueueError};
 use crate::work_queue::work_queue_manager::{
     FinishWorkMessage, GetWorkMessage, PushWorkMessage, WorkQueueManager,
 };
@@ -95,15 +95,38 @@ impl WorkQueueService for WorkQueueServer {
         let req = request.into_inner();
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
-        let fn_id = AttachedFunctionUuid::from_str(&req.fn_id)
-            .map_err(|e| Status::invalid_argument(format!("Invalid fn_id: {}", e)))?;
-        let input_coll_id = CollectionUuid::from_str(&req.input_coll_id)
-            .map_err(|e| Status::invalid_argument(format!("Invalid collection_id: {}", e)))?;
+        let work_items = if req.work_items.is_empty() {
+            vec![FinishWorkItem {
+                fn_id: AttachedFunctionUuid::from_str(&req.fn_id)
+                    .map_err(|e| Status::invalid_argument(format!("Invalid fn_id: {}", e)))?,
+                input_coll_id: CollectionUuid::from_str(&req.input_coll_id).map_err(|e| {
+                    Status::invalid_argument(format!("Invalid collection_id: {}", e))
+                })?,
+                completion_offset: req.completion_offset,
+            }]
+        } else {
+            req.work_items
+                .into_iter()
+                .map(|item| {
+                    Ok(FinishWorkItem {
+                        fn_id: AttachedFunctionUuid::from_str(&item.fn_id).map_err(|e| {
+                            Status::invalid_argument(format!("Invalid fn_id: {}", e))
+                        })?,
+                        input_coll_id: CollectionUuid::from_str(&item.input_coll_id).map_err(
+                            |e| Status::invalid_argument(format!("Invalid collection_id: {}", e)),
+                        )?,
+                        completion_offset: item.completion_offset,
+                    })
+                })
+                .collect::<Result<Vec<_>, Status>>()?
+        };
+        let output_collection_flush = req
+            .output_collection_flush
+            .ok_or_else(|| Status::invalid_argument("Missing output_collection_flush"))?;
 
         let msg = FinishWorkMessage {
-            fn_id,
-            input_coll_id,
-            new_completion_offset: req.completion_offset,
+            work_items,
+            output_collection_flush,
             response_tx,
         };
 
@@ -124,11 +147,13 @@ impl WorkQueueService for WorkQueueServer {
                 // Success case - just return ok
                 Ok(Response::new(()))
             }
-            FinishResult::NeedsRepair => {
+            FinishResult::NeedsRepair(repair_items) => {
                 // NeedsRepair case - handle repair
-                self.handle_repair(&fn_id, &input_coll_id)
-                    .await
-                    .map_err(|e| Status::internal(e.to_string()))?;
+                for repair_item in repair_items {
+                    self.handle_repair(&repair_item.fn_id, &repair_item.input_coll_id)
+                        .await
+                        .map_err(|e| Status::internal(e.to_string()))?;
+                }
                 Ok(Response::new(()))
             }
         }

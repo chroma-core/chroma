@@ -19,6 +19,10 @@ var (
 	// Must match: migration 20251023154800.sql and rust/types/src/functions.rs::FUNCTION_RECORD_COUNTER_ID
 	FunctionRecordCounter = uuid.MustParse("ccf2e3ba-633e-43ba-9394-46b0c54c61e3")
 
+	// FunctionCountAsync is the UUID for the built-in count_async function
+	// Must match: migration 20260602120000.sql and rust/types/src/operators_generated.rs::FUNCTION_COUNT_ASYNC_ID
+	FunctionCountAsync = uuid.MustParse("4caddd3b-d49d-4625-ae1b-d4183530824a")
+
 	// FunctionStatistics is the UUID for the built-in statistics function
 	// Must match: migration 20251029223300.sql and rust/types/src/functions.rs::FUNCTION_STATISTICS_ID
 	FunctionStatistics = uuid.MustParse("304b58ad-a5cb-41dc-b88f-36dd3bf1d401")
@@ -41,6 +45,9 @@ const (
 	// FunctionNameRecordCounter must match rust/types/src/functions.rs::FUNCTION_RECORD_COUNTER_NAME
 	FunctionNameRecordCounter = "record_counter"
 
+	// FunctionNameCountAsync must match rust/types/src/operators_generated.rs::FUNCTION_COUNT_ASYNC_NAME
+	FunctionNameCountAsync = "count_async"
+
 	// FunctionNameStatistics must match rust/types/src/functions.rs::FUNCTION_STATISTICS_NAME
 	FunctionNameStatistics = "statistics"
 
@@ -58,6 +65,7 @@ const (
 // This avoids DB lookups for known built-in functions.
 var functionIDToName = map[uuid.UUID]string{
 	FunctionRecordCounter:   FunctionNameRecordCounter,
+	FunctionCountAsync:      FunctionNameCountAsync,
 	FunctionStatistics:      FunctionNameStatistics,
 	FunctionDummyAsync:      FunctionNameDummyAsync,
 	FunctionHttpGenerate:    FunctionNameHttpGenerate,
