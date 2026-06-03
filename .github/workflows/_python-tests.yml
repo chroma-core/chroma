@@ -22,6 +22,8 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   CHROMA_HYPOTHESIS_CI_REPRODUCE_ONLY: "1"
   CHROMA_HYPOTHESIS_COMPACTION_WAITS: "auto"
+  PYTEST_ADDOPTS: "-p chromadb.test.pytest_inventory"
+  CHROMA_TEST_INVENTORY_RUNNER: ${{ inputs.runner }}
 
 jobs:
   test-rust-bindings:
@@ -63,6 +65,17 @@ jobs:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
           CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
           RUST_BACKTRACE: 1
+          CHROMA_TEST_INVENTORY_JSON: ${{ runner.temp }}/python-test-inventory/shard.json
+          CHROMA_TEST_INVENTORY_JOB: test-rust-bindings
+          CHROMA_TEST_INVENTORY_PYTHON: ${{ matrix.python }}
+          CHROMA_TEST_INVENTORY_TARGET: ${{ matrix.test-glob }}
+      - name: Upload test inventory shard
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-test-inventory-shard-${{ inputs.runner }}-test-rust-bindings-${{ runner.os }}-${{ matrix.python }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/python-test-inventory/shard.json
+          if-no-files-found: warn
 
   test-rust-single-node-integration:
     strategy:
@@ -95,6 +108,17 @@ jobs:
       env:
         ENV_FILE: ${{ contains(inputs.runner, 'ubuntu') && 'compose-env.linux' || 'compose-env.windows' }}
         PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+        CHROMA_TEST_INVENTORY_JSON: ${{ runner.temp }}/python-test-inventory/shard.json
+        CHROMA_TEST_INVENTORY_JOB: test-rust-single-node-integration
+        CHROMA_TEST_INVENTORY_PYTHON: ${{ matrix.python }}
+        CHROMA_TEST_INVENTORY_TARGET: ${{ matrix.test-glob }}
+    - name: Upload test inventory shard
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: python-test-inventory-shard-${{ inputs.runner }}-test-rust-single-node-integration-${{ runner.os }}-${{ matrix.python }}-${{ strategy.job-index }}
+        path: ${{ runner.temp }}/python-test-inventory/shard.json
+        if-no-files-found: warn
 
   test-rust-thin-client:
     strategy:
@@ -125,6 +149,17 @@ jobs:
           CHROMA_THIN_CLIENT: "1"
           ENV_FILE: ${{ contains(inputs.runner, 'ubuntu') && 'compose-env.linux' || 'compose-env.windows' }}
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+          CHROMA_TEST_INVENTORY_JSON: ${{ runner.temp }}/python-test-inventory/shard.json
+          CHROMA_TEST_INVENTORY_JOB: test-rust-thin-client
+          CHROMA_TEST_INVENTORY_PYTHON: ${{ matrix.python }}
+          CHROMA_TEST_INVENTORY_TARGET: ${{ matrix.test-glob }}
+      - name: Upload test inventory shard
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-test-inventory-shard-${{ inputs.runner }}-test-rust-thin-client-${{ runner.os }}-${{ matrix.python }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/python-test-inventory/shard.json
+          if-no-files-found: warn
 
   test-cluster-rust-frontend:
     if: ${{ contains(inputs.runner, 'ubuntu') }}
@@ -190,6 +225,17 @@ jobs:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
           CHROMA_RUST_FRONTEND_TEST_ONLY: "1"
           CHROMA_SERVER_HOST: "localhost:8000"
+          CHROMA_TEST_INVENTORY_JSON: ${{ runner.temp }}/python-test-inventory/shard.json
+          CHROMA_TEST_INVENTORY_JOB: test-cluster-rust-frontend
+          CHROMA_TEST_INVENTORY_PYTHON: ${{ matrix.python }}
+          CHROMA_TEST_INVENTORY_TARGET: ${{ matrix.test-glob }}
+      - name: Upload test inventory shard
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-test-inventory-shard-${{ inputs.runner }}-test-cluster-rust-frontend-${{ runner.os }}-${{ matrix.python }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/python-test-inventory/shard.json
+          if-no-files-found: warn
       - name: Compute artifact name
         if: always()
         id: compute-artifact-name
@@ -245,6 +291,17 @@ jobs:
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
           CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
+          CHROMA_TEST_INVENTORY_JSON: ${{ runner.temp }}/python-test-inventory/shard.json
+          CHROMA_TEST_INVENTORY_JOB: test-rust-bindings-stress
+          CHROMA_TEST_INVENTORY_PYTHON: ${{ matrix.python }}
+          CHROMA_TEST_INVENTORY_TARGET: chromadb/test/stress
+      - name: Upload test inventory shard
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-test-inventory-shard-${{ inputs.runner }}-test-rust-bindings-stress-${{ runner.os }}-${{ matrix.python }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/python-test-inventory/shard.json
+          if-no-files-found: warn
 
   test-python-cli:
     strategy:
@@ -274,6 +331,17 @@ jobs:
       env:
         ENV_FILE: ${{ contains(inputs.runner, 'ubuntu') && 'compose-env.linux' || 'compose-env.windows' }}
         PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+        CHROMA_TEST_INVENTORY_JSON: ${{ runner.temp }}/python-test-inventory/shard.json
+        CHROMA_TEST_INVENTORY_JOB: test-python-cli
+        CHROMA_TEST_INVENTORY_PYTHON: ${{ matrix.python }}
+        CHROMA_TEST_INVENTORY_TARGET: chromadb/test/test_cli.py
+    - name: Upload test inventory shard
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: python-test-inventory-shard-${{ inputs.runner }}-test-python-cli-${{ runner.os }}-${{ matrix.python }}-${{ strategy.job-index }}
+        path: ${{ runner.temp }}/python-test-inventory/shard.json
+        if-no-files-found: warn
 
   test-windows-smoke:
     # only run windows smoke tests when the runner isn't already windows,
@@ -309,3 +377,45 @@ jobs:
         env:
           CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
           RUST_BACKTRACE: 1
+          CHROMA_TEST_INVENTORY_JSON: ${{ runner.temp }}/python-test-inventory/shard.json
+          CHROMA_TEST_INVENTORY_JOB: test-windows-smoke
+          CHROMA_TEST_INVENTORY_PYTHON: ${{ matrix.python }}
+          CHROMA_TEST_INVENTORY_TARGET: chromadb/test/test_api.py
+      - name: Upload test inventory shard
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-test-inventory-shard-${{ inputs.runner }}-test-windows-smoke-${{ runner.os }}-${{ matrix.python }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/python-test-inventory/shard.json
+          if-no-files-found: warn
+
+  merge-python-test-inventory:
+    if: always()
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs:
+      - test-rust-bindings
+      - test-rust-single-node-integration
+      - test-rust-thin-client
+      - test-cluster-rust-frontend
+      - test-rust-bindings-stress
+      - test-python-cli
+      - test-windows-smoke
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Download test inventory shards
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          pattern: python-test-inventory-shard-${{ inputs.runner }}-*
+          path: python-test-inventory-shards
+      - name: Merge test inventory shards
+        run: python3 bin/ci/merge_python_test_inventory.py python-test-inventory-shards python-test-inventory/python-test-inventory.json
+        shell: bash
+      - name: Upload test inventory
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-test-inventory-${{ inputs.runner }}
+          path: python-test-inventory/python-test-inventory.json
+          if-no-files-found: error
