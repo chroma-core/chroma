@@ -15,7 +15,7 @@ runs:
   using: "composite"
   steps:
     - name: Install Protoc
-      uses: chroma-core/setup-protoc@v4b
+      uses: chroma-core/setup-protoc@v4c
       with:
         repo-token: ${{ inputs.github-token }}
         version: v35.0
