@@ -156,7 +156,7 @@ impl FullTextIndexWriter {
                             }
                         });
 
-                    token_instances.extend(trigrams_to_delete.into_iter());
+                    token_instances.extend(trigrams_to_delete);
                 }
 
                 DocumentMutation::Delete {
@@ -180,7 +180,7 @@ impl FullTextIndexWriter {
                             }
                         });
 
-                    token_instances.extend(trigrams_to_delete.into_iter());
+                    token_instances.extend(trigrams_to_delete);
                 }
             }
         }

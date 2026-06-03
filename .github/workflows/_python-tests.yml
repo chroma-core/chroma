@@ -22,22 +22,16 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   CHROMA_HYPOTHESIS_CI_REPRODUCE_ONLY: "1"
   CHROMA_HYPOTHESIS_COMPACTION_WAITS: "auto"
+  PYTEST_ADDOPTS: "-p chromadb.test.pytest_inventory"
+  CHROMA_TEST_INVENTORY_RUNNER: ${{ inputs.runner }}
 
 jobs:
-  test-rust-bindings:
+  build-rust-bindings:
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         python: ${{ fromJson(inputs.python_versions) }}
-        test-glob:
-          - "chromadb/test --ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*' --ignore-glob 'chromadb/test/test_cli.py'"
-          - "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py --ignore chromadb/test/property/test_add_mcmr.py"
-          - "chromadb/test/property/test_cross_version_persist.py"
-        include:
-          - test-glob: "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py --ignore chromadb/test/property/test_add_mcmr.py"
-            parallelized: false  # Disabled to fix INTERNALERROR crashes in CI
-
     runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@v5
@@ -53,60 +47,361 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           command: build
+      - name: Upload wheel
+        uses: actions/upload-artifact@v7
+        with:
+          name: rust-bindings-${{ runner.os }}-py${{ matrix.python }}
+          path: target/wheels/*.whl
+          if-no-files-found: error
+
+  build-rust-cli:
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
+          install-nextest: "false"
+      - name: Build CLI
+        run: cargo build --bin chroma
+      - name: Upload CLI
+        uses: actions/upload-artifact@v7
+        with:
+          name: chroma-cli-${{ runner.os }}
+          path: target/debug/chroma${{ runner.os == 'Windows' && '.exe' || '' }}
+          if-no-files-found: error
+
+  test-rust-bindings:
+    timeout-minutes: 90
+    needs: build-rust-bindings
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ${{ fromJson(inputs.python_versions) }}
+        test_target:
+          - name: core-1
+            args: >-
+              chromadb/test
+              --ignore-glob 'chromadb/test/property/*'
+              --ignore-glob 'chromadb/test/stress/*'
+              --ignore-glob 'chromadb/test/distributed/*'
+              --ignore-glob 'chromadb/test/test_cli.py'
+            shard_index: 1
+            shard_count: 6
+          - name: core-2
+            args: >-
+              chromadb/test
+              --ignore-glob 'chromadb/test/property/*'
+              --ignore-glob 'chromadb/test/stress/*'
+              --ignore-glob 'chromadb/test/distributed/*'
+              --ignore-glob 'chromadb/test/test_cli.py'
+            shard_index: 2
+            shard_count: 6
+          - name: core-3
+            args: >-
+              chromadb/test
+              --ignore-glob 'chromadb/test/property/*'
+              --ignore-glob 'chromadb/test/stress/*'
+              --ignore-glob 'chromadb/test/distributed/*'
+              --ignore-glob 'chromadb/test/test_cli.py'
+            shard_index: 3
+            shard_count: 6
+          - name: core-4
+            args: >-
+              chromadb/test
+              --ignore-glob 'chromadb/test/property/*'
+              --ignore-glob 'chromadb/test/stress/*'
+              --ignore-glob 'chromadb/test/distributed/*'
+              --ignore-glob 'chromadb/test/test_cli.py'
+            shard_index: 4
+            shard_count: 6
+          - name: core-5
+            args: >-
+              chromadb/test
+              --ignore-glob 'chromadb/test/property/*'
+              --ignore-glob 'chromadb/test/stress/*'
+              --ignore-glob 'chromadb/test/distributed/*'
+              --ignore-glob 'chromadb/test/test_cli.py'
+            shard_index: 5
+            shard_count: 6
+          - name: core-6
+            args: >-
+              chromadb/test
+              --ignore-glob 'chromadb/test/property/*'
+              --ignore-glob 'chromadb/test/stress/*'
+              --ignore-glob 'chromadb/test/distributed/*'
+              --ignore-glob 'chromadb/test/test_cli.py'
+            shard_index: 6
+            shard_count: 6
+          - name: property-1
+            args: >-
+              chromadb/test/property
+              --ignore-glob chromadb/test/property/test_cross_version_persist.py
+              --ignore chromadb/test/property/test_add_mcmr.py
+            shard_index: 1
+            shard_count: 4
+          - name: property-2
+            args: >-
+              chromadb/test/property
+              --ignore-glob chromadb/test/property/test_cross_version_persist.py
+              --ignore chromadb/test/property/test_add_mcmr.py
+            shard_index: 2
+            shard_count: 4
+          - name: property-3
+            args: >-
+              chromadb/test/property
+              --ignore-glob chromadb/test/property/test_cross_version_persist.py
+              --ignore chromadb/test/property/test_add_mcmr.py
+            shard_index: 3
+            shard_count: 4
+          - name: property-4
+            args: >-
+              chromadb/test/property
+              --ignore-glob chromadb/test/property/test_cross_version_persist.py
+              --ignore chromadb/test/property/test_add_mcmr.py
+            shard_index: 4
+            shard_count: 4
+          - name: cross-version-1
+            args: chromadb/test/property/test_cross_version_persist.py
+            shard_index: 1
+            shard_count: 3
+          - name: cross-version-2
+            args: chromadb/test/property/test_cross_version_persist.py
+            shard_index: 2
+            shard_count: 3
+          - name: cross-version-3
+            args: chromadb/test/property/test_cross_version_persist.py
+            shard_index: 3
+            shard_count: 3
+    runs-on: ${{ inputs.runner }}
+    name: test-rust-bindings (${{ matrix.python }}, ${{ matrix.test_target.name }})
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Python
+        uses: ./.github/actions/python
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Download wheel
+        uses: actions/download-artifact@v7
+        with:
+          name: rust-bindings-${{ runner.os }}-py${{ matrix.python }}
+          path: target/wheels
       - name: Install built wheel
         shell: bash
         run: pip install --no-index --find-links target/wheels/ chromadb
       - name: Test
-        run: python -m pytest -x ${{ matrix.test-glob }} ${{ matrix.parallelized && '-n auto --dist worksteal' || '' }} -v --color=yes --durations 10
+        run: >-
+          python bin/ci/pytest-shard.py
+          --shard-index ${{ matrix.test_target.shard_index }}
+          --shard-count ${{ matrix.test_target.shard_count }}
+          --pytest-arg=-x
+          --pytest-arg=-v
+          --pytest-arg=--color=yes
+          --pytest-arg=--durations
+          --pytest-arg=10
+          -- ${{ matrix.test_target.args }}
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
           CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
           RUST_BACKTRACE: 1
+          CHROMA_TEST_INVENTORY_JSON: ${{ runner.temp }}/python-test-inventory/shard.json
+          CHROMA_TEST_INVENTORY_JOB: test-rust-bindings
+          CHROMA_TEST_INVENTORY_PYTHON: ${{ matrix.python }}
+          CHROMA_TEST_INVENTORY_TARGET: ${{ matrix.test-glob }}
+      - name: Upload test inventory shard
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-test-inventory-shard-${{ inputs.runner }}-test-rust-bindings-${{ runner.os }}-${{ matrix.python }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/python-test-inventory/shard.json
+          if-no-files-found: warn
 
   test-rust-single-node-integration:
+    needs: build-rust-cli
     strategy:
       fail-fast: false
       matrix:
         python: ${{ fromJson(inputs.python_versions) }}
-        test-glob:
-          - "chromadb/test --ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*'"
-          - "chromadb/test/property/test_add.py"
-          - "chromadb/test/property/test_collections.py"
-          - "chromadb/test/property/test_collections_with_database_tenant.py"
-          - "chromadb/test/property/test_cross_version_persist.py"
-          - "chromadb/test/property/test_embeddings.py"
-          - "chromadb/test/property/test_filtering.py"
-          - "chromadb/test/property/test_persist.py"
-          - "chromadb/test/stress"
+        test_target:
+          - name: core-1
+            args: >-
+              chromadb/test
+              --ignore-glob 'chromadb/test/property/*'
+              --ignore-glob 'chromadb/test/stress/*'
+              --ignore='chromadb/test/test_cli.py'
+              --ignore-glob 'chromadb/test/distributed/*'
+            shard_index: 1
+            shard_count: 6
+          - name: core-2
+            args: >-
+              chromadb/test
+              --ignore-glob 'chromadb/test/property/*'
+              --ignore-glob 'chromadb/test/stress/*'
+              --ignore='chromadb/test/test_cli.py'
+              --ignore-glob 'chromadb/test/distributed/*'
+            shard_index: 2
+            shard_count: 6
+          - name: core-3
+            args: >-
+              chromadb/test
+              --ignore-glob 'chromadb/test/property/*'
+              --ignore-glob 'chromadb/test/stress/*'
+              --ignore='chromadb/test/test_cli.py'
+              --ignore-glob 'chromadb/test/distributed/*'
+            shard_index: 3
+            shard_count: 6
+          - name: core-4
+            args: >-
+              chromadb/test
+              --ignore-glob 'chromadb/test/property/*'
+              --ignore-glob 'chromadb/test/stress/*'
+              --ignore='chromadb/test/test_cli.py'
+              --ignore-glob 'chromadb/test/distributed/*'
+            shard_index: 4
+            shard_count: 6
+          - name: core-5
+            args: >-
+              chromadb/test
+              --ignore-glob 'chromadb/test/property/*'
+              --ignore-glob 'chromadb/test/stress/*'
+              --ignore='chromadb/test/test_cli.py'
+              --ignore-glob 'chromadb/test/distributed/*'
+            shard_index: 5
+            shard_count: 6
+          - name: core-6
+            args: >-
+              chromadb/test
+              --ignore-glob 'chromadb/test/property/*'
+              --ignore-glob 'chromadb/test/stress/*'
+              --ignore='chromadb/test/test_cli.py'
+              --ignore-glob 'chromadb/test/distributed/*'
+            shard_index: 6
+            shard_count: 6
+          - name: add
+            args: chromadb/test/property/test_add.py
+            shard_index: 1
+            shard_count: 1
+          - name: collections
+            args: chromadb/test/property/test_collections.py
+            shard_index: 1
+            shard_count: 1
+          - name: collections-db-tenant-1
+            args: chromadb/test/property/test_collections_with_database_tenant.py
+            shard_index: 1
+            shard_count: 2
+          - name: collections-db-tenant-2
+            args: chromadb/test/property/test_collections_with_database_tenant.py
+            shard_index: 2
+            shard_count: 2
+          - name: cross-version-1
+            args: chromadb/test/property/test_cross_version_persist.py
+            shard_index: 1
+            shard_count: 3
+          - name: cross-version-2
+            args: chromadb/test/property/test_cross_version_persist.py
+            shard_index: 2
+            shard_count: 3
+          - name: cross-version-3
+            args: chromadb/test/property/test_cross_version_persist.py
+            shard_index: 3
+            shard_count: 3
+          - name: embeddings
+            args: chromadb/test/property/test_embeddings.py
+            shard_index: 1
+            shard_count: 1
+          - name: filtering
+            args: chromadb/test/property/test_filtering.py
+            shard_index: 1
+            shard_count: 1
+          - name: persist-1
+            args: chromadb/test/property/test_persist.py
+            shard_index: 1
+            shard_count: 3
+          - name: persist-2
+            args: chromadb/test/property/test_persist.py
+            shard_index: 2
+            shard_count: 3
+          - name: persist-3
+            args: chromadb/test/property/test_persist.py
+            shard_index: 3
+            shard_count: 3
+          - name: stress
+            args: chromadb/test/stress
+            shard_index: 1
+            shard_count: 1
     runs-on: ${{ inputs.runner }}
+    name: test-rust-single-node-integration (${{ matrix.python }}, ${{ matrix.test_target.name }})
     steps:
     - name: Checkout
       uses: actions/checkout@v5
     - name: Setup Python (${{ matrix.python }})
       uses: ./.github/actions/python
-    - name: Setup Rust
-      uses: ./.github/actions/rust
       with:
-          github-token: ${{ github.token }}
+        python-version: ${{ matrix.python }}
+    - name: Download CLI
+      uses: actions/download-artifact@v7
+      with:
+        name: chroma-cli-${{ runner.os }}
+        path: target/debug
+    - name: Make CLI executable
+      if: runner.os != 'Windows'
+      run: chmod +x target/debug/chroma
+      shell: bash
     - name: Rust Integration Test
-      run: bin/rust-integration-test.sh -x ${{ matrix.test-glob }}
+      run: bin/rust-integration-test.sh -x ${{ matrix.test_target.args }}
       shell: bash
       env:
+        CHROMA_BIN: ${{ runner.os == 'Windows' && 'target/debug/chroma.exe' || './target/debug/chroma' }}
         ENV_FILE: ${{ contains(inputs.runner, 'ubuntu') && 'compose-env.linux' || 'compose-env.windows' }}
         PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+        CHROMA_TEST_INVENTORY_JSON: ${{ runner.temp }}/python-test-inventory/shard.json
+        CHROMA_TEST_INVENTORY_JOB: test-rust-single-node-integration
+        CHROMA_TEST_INVENTORY_PYTHON: ${{ matrix.python }}
+        CHROMA_TEST_INVENTORY_TARGET: ${{ matrix.test-glob }}
+        PYTEST_SHARD_INDEX: ${{ matrix.test_target.shard_index }}
+        PYTEST_SHARD_COUNT: ${{ matrix.test_target.shard_count }}
+    - name: Upload test inventory shard
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: python-test-inventory-shard-${{ inputs.runner }}-test-rust-single-node-integration-${{ runner.os }}-${{ matrix.python }}-${{ strategy.job-index }}
+        path: ${{ runner.temp }}/python-test-inventory/shard.json
+        if-no-files-found: warn
 
   test-rust-thin-client:
+    needs: build-rust-cli
     strategy:
       matrix:
         python: ${{ fromJson(inputs.python_versions) }}
-        test-glob:
-          - "chromadb/test/property/test_add.py"
-          - "chromadb/test/property/test_collections.py"
-          - "chromadb/test/property/test_collections_with_database_tenant.py"
-          - "chromadb/test/property/test_embeddings.py"
-          - "chromadb/test/property/test_filtering.py"
+        test_target:
+          - name: add
+            args: chromadb/test/property/test_add.py
+            shard_index: 1
+            shard_count: 1
+          - name: collections
+            args: chromadb/test/property/test_collections.py
+            shard_index: 1
+            shard_count: 1
+          - name: collections-db-tenant-1
+            args: chromadb/test/property/test_collections_with_database_tenant.py
+            shard_index: 1
+            shard_count: 2
+          - name: collections-db-tenant-2
+            args: chromadb/test/property/test_collections_with_database_tenant.py
+            shard_index: 2
+            shard_count: 2
+          - name: embeddings
+            args: chromadb/test/property/test_embeddings.py
+            shard_index: 1
+            shard_count: 1
+          - name: filtering
+            args: chromadb/test/property/test_filtering.py
+            shard_index: 1
+            shard_count: 1
     runs-on: ${{ inputs.runner }}
+    name: test-rust-thin-client (${{ matrix.python }}, ${{ matrix.test_target.name }})
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -114,17 +409,36 @@ jobs:
         uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
-      - name: Setup Rust
-        uses: ./.github/actions/rust
+      - name: Download CLI
+        uses: actions/download-artifact@v7
         with:
-          github-token: ${{ github.token }}
+          name: chroma-cli-${{ runner.os }}
+          path: target/debug
+      - name: Make CLI executable
+        if: runner.os != 'Windows'
+        run: chmod +x target/debug/chroma
+        shell: bash
       - name: Test
-        run: bin/rust-integration-test.sh -x ${{ matrix.test-glob }}
+        run: bin/rust-integration-test.sh -x ${{ matrix.test_target.args }}
         shell: bash
         env:
+          CHROMA_BIN: ${{ runner.os == 'Windows' && 'target/debug/chroma.exe' || './target/debug/chroma' }}
           CHROMA_THIN_CLIENT: "1"
           ENV_FILE: ${{ contains(inputs.runner, 'ubuntu') && 'compose-env.linux' || 'compose-env.windows' }}
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+          CHROMA_TEST_INVENTORY_JSON: ${{ runner.temp }}/python-test-inventory/shard.json
+          CHROMA_TEST_INVENTORY_JOB: test-rust-thin-client
+          CHROMA_TEST_INVENTORY_PYTHON: ${{ matrix.python }}
+          CHROMA_TEST_INVENTORY_TARGET: ${{ matrix.test-glob }}
+          PYTEST_SHARD_INDEX: ${{ matrix.test_target.shard_index }}
+          PYTEST_SHARD_COUNT: ${{ matrix.test_target.shard_count }}
+      - name: Upload test inventory shard
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-test-inventory-shard-${{ inputs.runner }}-test-rust-thin-client-${{ runner.os }}-${{ matrix.python }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/python-test-inventory/shard.json
+          if-no-files-found: warn
 
   test-cluster-rust-frontend:
     if: ${{ contains(inputs.runner, 'ubuntu') }}
@@ -190,6 +504,17 @@ jobs:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
           CHROMA_RUST_FRONTEND_TEST_ONLY: "1"
           CHROMA_SERVER_HOST: "localhost:8000"
+          CHROMA_TEST_INVENTORY_JSON: ${{ runner.temp }}/python-test-inventory/shard.json
+          CHROMA_TEST_INVENTORY_JOB: test-cluster-rust-frontend
+          CHROMA_TEST_INVENTORY_PYTHON: ${{ matrix.python }}
+          CHROMA_TEST_INVENTORY_TARGET: ${{ matrix.test-glob }}
+      - name: Upload test inventory shard
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-test-inventory-shard-${{ inputs.runner }}-test-cluster-rust-frontend-${{ runner.os }}-${{ matrix.python }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/python-test-inventory/shard.json
+          if-no-files-found: warn
       - name: Compute artifact name
         if: always()
         id: compute-artifact-name
@@ -216,6 +541,7 @@ jobs:
 
   test-rust-bindings-stress:
     timeout-minutes: 90
+    needs: build-rust-bindings
     strategy:
       fail-fast: false
       matrix:
@@ -228,14 +554,11 @@ jobs:
         uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
-      - name: Setup Rust
-        uses: ./.github/actions/rust
+      - name: Download wheel
+        uses: actions/download-artifact@v7
         with:
-          github-token: ${{ github.token }}
-      - name: Build Rust bindings
-        uses: PyO3/maturin-action@v1
-        with:
-          command: build
+          name: rust-bindings-${{ runner.os }}-py${{ matrix.python }}
+          path: target/wheels
       - name: Install built wheel
         shell: bash
         run: pip install --no-index --find-links target/wheels/ chromadb
@@ -245,8 +568,20 @@ jobs:
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
           CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
+          CHROMA_TEST_INVENTORY_JSON: ${{ runner.temp }}/python-test-inventory/shard.json
+          CHROMA_TEST_INVENTORY_JOB: test-rust-bindings-stress
+          CHROMA_TEST_INVENTORY_PYTHON: ${{ matrix.python }}
+          CHROMA_TEST_INVENTORY_TARGET: chromadb/test/stress
+      - name: Upload test inventory shard
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-test-inventory-shard-${{ inputs.runner }}-test-rust-bindings-stress-${{ runner.os }}-${{ matrix.python }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/python-test-inventory/shard.json
+          if-no-files-found: warn
 
   test-python-cli:
+    needs: build-rust-bindings
     strategy:
       fail-fast: false
       matrix:
@@ -257,14 +592,13 @@ jobs:
       uses: actions/checkout@v5
     - name: Setup Python (${{ matrix.python }})
       uses: ./.github/actions/python
-    - name: Setup Rust
-      uses: ./.github/actions/rust
       with:
-        github-token: ${{ github.token }}
-    - name: Build Rust bindings
-      uses: PyO3/maturin-action@v1
+        python-version: ${{ matrix.python }}
+    - name: Download wheel
+      uses: actions/download-artifact@v7
       with:
-        command: build
+        name: rust-bindings-${{ runner.os }}-py${{ matrix.python }}
+        path: target/wheels
     - name: Install built wheel
       shell: bash
       run: pip install --no-index --find-links target/wheels/ chromadb
@@ -274,11 +608,21 @@ jobs:
       env:
         ENV_FILE: ${{ contains(inputs.runner, 'ubuntu') && 'compose-env.linux' || 'compose-env.windows' }}
         PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+        CHROMA_TEST_INVENTORY_JSON: ${{ runner.temp }}/python-test-inventory/shard.json
+        CHROMA_TEST_INVENTORY_JOB: test-python-cli
+        CHROMA_TEST_INVENTORY_PYTHON: ${{ matrix.python }}
+        CHROMA_TEST_INVENTORY_TARGET: chromadb/test/test_cli.py
+    - name: Upload test inventory shard
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: python-test-inventory-shard-${{ inputs.runner }}-test-python-cli-${{ runner.os }}-${{ matrix.python }}-${{ strategy.job-index }}
+        path: ${{ runner.temp }}/python-test-inventory/shard.json
+        if-no-files-found: warn
 
   test-windows-smoke:
-    # only run windows smoke tests when the runner isn't already windows,
-    # also only run the smoke tests on PRs (ie not main and not tags) since
-    # we are already running the full suite on Windows in those cases
+    # Keep a Windows smoke signal on PRs. Main/tag release CI stays on the
+    # fast Linux path; Windows package builds are covered by release builders.
     if: ${{ !contains(inputs.runner, 'windows') && github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
     strategy:
       fail-fast: false
@@ -309,3 +653,45 @@ jobs:
         env:
           CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
           RUST_BACKTRACE: 1
+          CHROMA_TEST_INVENTORY_JSON: ${{ runner.temp }}/python-test-inventory/shard.json
+          CHROMA_TEST_INVENTORY_JOB: test-windows-smoke
+          CHROMA_TEST_INVENTORY_PYTHON: ${{ matrix.python }}
+          CHROMA_TEST_INVENTORY_TARGET: chromadb/test/test_api.py
+      - name: Upload test inventory shard
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-test-inventory-shard-${{ inputs.runner }}-test-windows-smoke-${{ runner.os }}-${{ matrix.python }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/python-test-inventory/shard.json
+          if-no-files-found: warn
+
+  merge-python-test-inventory:
+    if: always()
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs:
+      - test-rust-bindings
+      - test-rust-single-node-integration
+      - test-rust-thin-client
+      - test-cluster-rust-frontend
+      - test-rust-bindings-stress
+      - test-python-cli
+      - test-windows-smoke
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Download test inventory shards
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          pattern: python-test-inventory-shard-${{ inputs.runner }}-*
+          path: python-test-inventory-shards
+      - name: Merge test inventory shards
+        run: python3 bin/ci/merge_python_test_inventory.py python-test-inventory-shards python-test-inventory/python-test-inventory.json
+        shell: bash
+      - name: Upload test inventory
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-test-inventory-${{ inputs.runner }}
+          path: python-test-inventory/python-test-inventory.json
+          if-no-files-found: error

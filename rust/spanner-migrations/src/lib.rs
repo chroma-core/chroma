@@ -68,11 +68,9 @@ const DDL_WAIT_POLL_INTERVAL_MS: u64 = 10_000;
 /// operation is still in progress is retried.
 pub fn ddl_wait_retry_setting(admin_rpc_timeout_secs: u64) -> RetrySetting {
     let poll_interval_secs = DDL_WAIT_POLL_INTERVAL_MS / 1000;
-    let take = if poll_interval_secs == 0 {
-        0
-    } else {
-        (admin_rpc_timeout_secs / poll_interval_secs) as usize
-    };
+    let take = admin_rpc_timeout_secs
+        .checked_div(poll_interval_secs)
+        .unwrap_or(0) as usize;
     RetrySetting {
         from_millis: DDL_WAIT_POLL_INTERVAL_MS,
         max_delay: Some(Duration::from_millis(DDL_WAIT_POLL_INTERVAL_MS)),

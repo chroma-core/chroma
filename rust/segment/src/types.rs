@@ -672,10 +672,8 @@ impl MaterializeLogsResult {
                 }
             }
             None => {
-                let mut new_offset_id = 1u32;
-                for record in other_mat_logs.iter() {
+                for (new_offset_id, record) in (1u32..).zip(other_mat_logs.iter()) {
                     record.set_offset_id(new_offset_id);
-                    new_offset_id += 1;
                 }
             }
         }
@@ -1117,7 +1115,7 @@ pub async fn materialize_logs_for_rebuild(
 
     let mut res = Vec::with_capacity(logs.len());
 
-    for ((log_record, log_index), offset_id) in logs.iter().zip(offset_ids.into_iter()) {
+    for ((log_record, log_index), offset_id) in logs.iter().zip(offset_ids) {
         if log_record.record.operation != Operation::Add {
             return Err(LogMaterializerError::UnsupportedOperationForRebuild(
                 log_record.record.operation,
@@ -1371,7 +1369,7 @@ impl VectorSegmentWriter {
             .shards
             .iter()
             .zip(partitions.iter())
-            .zip(shard_readers.into_iter())
+            .zip(shard_readers)
             .map(|((shard, partitions_logs), shard_reader)| async move {
                 shard
                     .apply_materialized_log_chunk(&shard_reader, partitions_logs)
