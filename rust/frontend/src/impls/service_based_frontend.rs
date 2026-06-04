@@ -2656,6 +2656,53 @@ impl ServiceBasedFrontend {
         })
     }
 
+    async fn start_backfill(
+        &mut self,
+        tenant_name: String,
+        database_name: DatabaseName,
+        input_collection_id: CollectionUuid,
+        _attached_function_id: chroma_types::AttachedFunctionUuid,
+    ) -> Result<(), chroma_types::AttachFunctionError> {
+        let input_collection = self
+            .get_cached_collection(database_name.clone(), input_collection_id)
+            .await
+            .map_err(|e| chroma_types::AttachFunctionError::Internal(Box::new(e)))?;
+
+        let dim = input_collection.dimension.unwrap_or(1) as usize;
+        let fake_embedding = vec![0.0; dim];
+        let cmek: Option<Cmek> = input_collection
+            .schema
+            .as_ref()
+            .and_then(|schema| schema.cmek.clone());
+
+        // Match the existing attach flow and push enough dummy records to
+        // trigger compaction for the newly added input collection.
+        let records = vec![
+            OperationRecord {
+                id: "backfill_id".to_string(),
+                embedding: Some(fake_embedding),
+                encoding: None,
+                metadata: None,
+                document: None,
+                operation: Operation::BackfillFn,
+            };
+            250
+        ];
+
+        self.log_client
+            .push_logs(
+                &tenant_name,
+                database_name,
+                input_collection_id,
+                records,
+                cmek,
+            )
+            .await
+            .map_err(|e| chroma_types::AttachFunctionError::Internal(Box::new(e)))?;
+
+        Ok(())
+    }
+
     pub async fn detach_function(
         &mut self,
         _tenant_id: String,
