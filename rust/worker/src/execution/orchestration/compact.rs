@@ -546,6 +546,7 @@ impl CompactionContext {
             self.fragment_fetcher.clone(),
             self.bloom_filter_manager.clone(),
             self.work_queue_client.clone(),
+            self.is_fn_consumer,
             self.log_start_offset,
         );
 
@@ -1230,7 +1231,7 @@ mod tests {
             database_name: chroma_types::DatabaseName::new("test_db").unwrap(),
             fetch_log_concurrency: 10,
             fragment_fetcher: None,
-            log_upper_bound_offset: 0,
+            log_upper_bound_offset: None,
         };
 
         let filter = Filter {
@@ -1413,7 +1414,7 @@ mod tests {
             database_name: database_name.clone(),
             fetch_log_concurrency: 10,
             fragment_fetcher: None,
-            log_upper_bound_offset: 0,
+            log_upper_bound_offset: None,
         };
 
         let limit = Limit {
@@ -1511,7 +1512,7 @@ mod tests {
             database_name: database_name.clone(),
             fetch_log_concurrency: 10,
             fragment_fetcher: None,
-            log_upper_bound_offset: 0,
+            log_upper_bound_offset: None,
         };
 
         // Query again to verify FTS still works after rebuild
@@ -1667,7 +1668,7 @@ mod tests {
             database_name: chroma_types::DatabaseName::new("test_db").unwrap(),
             fetch_log_concurrency: 10,
             fragment_fetcher: None,
-            log_upper_bound_offset: 0,
+            log_upper_bound_offset: None,
         };
         let filter = Filter {
             query_ids: None,
@@ -4932,7 +4933,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_k8s_integration_async_attached_function() {
         // Setup test environment
         let config = RootConfig::default();
@@ -4943,36 +4944,20 @@ mod tests {
             .expect("Should be able to initialize dispatcher");
         let dispatcher_handle = system.start_component(dispatcher);
 
-        // Connect to Grpc SysDb (requires Tilt running)
-        let grpc_sysdb = chroma_sysdb::GrpcSysDb::try_from_config(
-            &(
-                chroma_sysdb::GrpcSysDbConfig {
-                    host: "localhost".to_string(),
-                    port: 50051,
-                    connect_timeout_ms: 5000,
-                    request_timeout_ms: 10000,
-                    num_channels: 4,
-                },
-                None,
-            ),
-            &registry,
-        )
-        .await
-        .expect("Should connect to grpc sysdb");
-        let mut sysdb = SysDb::Grpc(grpc_sysdb);
-
-        // Connect to WorkQueue (requires Tilt running)
-        let work_queue_client = crate::work_queue::work_queue_client::WorkQueueClient::new(
-            "http://localhost:50058".to_string(),
-        )
-        .await
-        .expect("Should connect to work queue");
-
         let test_segments = TestDistributedSegment::new().await;
+        let mut test_sysdb = TestSysDb::new();
+        test_sysdb.set_storage(
+            test_segments
+                .blockfile_provider
+                .storage()
+                .map(|storage| storage.as_ref().clone()),
+        );
+        let mut sysdb = SysDb::Test(test_sysdb);
         let mut in_memory_log = InMemoryLog::new();
 
-        // Create input collection
-        let collection_id = CollectionUuid::new();
+        // Create input collection using the fixture collection ID so the
+        // prebuilt segments in `test_segments` remain associated correctly.
+        let collection_id = test_segments.collection.collection_id;
         let database_name =
             chroma_types::DatabaseName::new(test_segments.collection.database.clone())
                 .expect("database name should be valid");
@@ -5017,33 +5002,10 @@ mod tests {
             .await
             .expect("Should be able to update log_position");
 
-        // Create async attached function via sysdb
-        let test_run_id = uuid::Uuid::new_v4();
-        let attached_function_name = format!("test_async_fn_{}", test_run_id);
-        let output_collection_name = format!("test_async_output_{}", test_run_id);
-
-        let (attached_function_id, _created) = sysdb
-            .create_attached_function(
-                attached_function_name.clone(),
-                "dummy_async".to_string(), // This is the async operator
-                collection_id,
-                output_collection_name.clone(),
-                serde_json::Value::Object(serde_json::Map::new()), // Empty params
-                tenant.clone(),
-                db.clone(),
-                1, // min_records_for_invocation
-            )
-            .await
-            .expect("Attached function creation should succeed");
-
-        let output_schema = chroma_types::Schema::new_default(chroma_types::KnnIndex::Hnsw);
-        let output_schema_str = serde_json::to_string(&output_schema).unwrap();
-        sysdb
-            .finish_create_attached_function(attached_function_id, output_schema_str)
-            .await
-            .unwrap();
-
-        // Add 5 records
+        // Add 300 records with zero-based offsets.  The in-memory log test
+        // double treats requested log offsets as storage indices, so the
+        // logical `LogRecord.log_offset` values must stay aligned with the
+        // contiguous internal offsets.
         for i in 0..300 {
             let log_record = chroma_types::LogRecord {
                 log_offset: i,
@@ -5074,93 +5036,175 @@ mod tests {
 
         let log = Log::InMemory(in_memory_log);
 
-        // Run compaction with work queue client
-        let compact_result = Box::pin(compact(
-            system.clone(),
-            collection_id,
-            database_name.clone(),
+        // Run three regular compactions to create boundaries at 99, 199, and 299.
+        // The async fn-consumer will later read from the historical version at 99
+        // and fetch only through the next boundary at 199.
+        for expected_log_position in [99, 199, 299] {
+            let compact_result = Box::pin(compact(
+                system.clone(),
+                collection_id,
+                database_name.clone(),
+                None,
+                50,
+                10,
+                100, // one boundary per run
+                50,
+                log.clone(),
+                sysdb.clone(),
+                test_segments.blockfile_provider.clone(),
+                test_segments.hnsw_provider.clone(),
+                test_segments.spann_provider.clone(),
+                dispatcher_handle.clone(),
+                false,
+                None,
+                None,
+                None,
+                None,
+                None, // poison_offset for test
+            ))
+            .await;
+
+            assert!(
+                compact_result.is_ok(),
+                "Compaction should succeed: {:?}",
+                compact_result.err()
+            );
+
+            let collection_after_compact = sysdb
+                .get_collection_with_segments(None, collection_id)
+                .await
+                .expect("Collection should exist after compaction");
+            assert_eq!(
+                collection_after_compact.collection.log_position, expected_log_position,
+                "Expected collection log_position to advance to the compaction boundary"
+            );
+        }
+
+        // Now simulate fn-consumer execution from the first boundary. This must:
+        // 1. read against the historical version compacted through offset 99
+        // 2. stop fetching at the next committed boundary (199)
+        // 3. materialize exactly the 100 records in (99, 199]
+        let mut fn_consumer_context = CompactionContext::new_with_log_offset(
             None,
             50,
             10,
             1000,
             50,
-            log,
+            log.clone(),
             sysdb.clone(),
             test_segments.blockfile_provider.clone(),
             test_segments.hnsw_provider.clone(),
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
+            true, // is_fn_consumer
             None,
             None,
             None,
-            Some(work_queue_client.clone()),
-            None, // poison_offset for test
-        ))
-        .await;
-
-        assert!(
-            compact_result.is_ok(),
-            "Compaction should succeed: {:?}",
-            compact_result.err()
+            None,
+            99,
         );
 
-        // Verify the attached function was found
-        let attached_functions = sysdb
-            .get_attached_functions(
-                Some(attached_function_name.clone()),
-                Some(collection_id),
-                vec![],
-                true,
-            )
+        let fetch_response = fn_consumer_context
+            .run_get_logs(collection_id, database_name.clone(), system.clone(), false)
             .await
-            .expect("Attached function query should succeed");
-        let attached_function_after_compact = attached_functions
-            .into_iter()
-            .next()
-            .expect("Attached function should be found");
+            .expect("fn-consumer log fetch should succeed");
 
-        assert!(
-            attached_function_after_compact
-                .output_collection_id
-                .is_some(),
-            "Output collection should be created"
-        );
+        match fetch_response {
+            LogFetchOrchestratorResponse::Success(success) => {
+                assert_eq!(
+                    success.collection_info.pulled_log_offset, 199,
+                    "fn-consumer should only fetch through the next committed boundary"
+                );
 
-        let _output_collection_id = attached_function_after_compact
-            .output_collection_id
-            .expect("Output collection should exist");
+                let total_materialized_records: usize = success
+                    .materialized
+                    .iter()
+                    .map(|batch| batch.result.len())
+                    .sum();
+                assert_eq!(
+                    total_materialized_records, 100,
+                    "fn-consumer should materialize exactly the records between boundaries"
+                );
 
-        // Check work queue for the async function
-        let mut wq_client = work_queue_client.clone();
-        let work_response = wq_client
-            .get_work("test_shard".to_string(), 10)
-            .await
-            .expect("Should be able to get work from queue");
-
-        // Filter for our specific function
-        println!("Got {} items, expected {}", work_response.items.len(), 1);
-        println!(
-            "Looking for fn_id: {}, coll_id: {}",
-            attached_function_id.0, collection_id
-        );
-
-        for item in &work_response.items {
-            println!(
-                "Work item: fn_id: {}, coll_id: {}, offset: {}",
-                item.fn_id, item.input_coll_id, item.completion_offset
-            );
+                for batch in &success.materialized {
+                    for shard_result in batch.result.iter() {
+                        for record in shard_result {
+                            assert_eq!(
+                                record.get_operation(),
+                                chroma_types::MaterializedLogOperation::AddNew,
+                                "historical version lookup should keep the boundary window as new adds"
+                            );
+                        }
+                    }
+                }
+            }
+            other => panic!("expected successful fn-consumer fetch, got {other:?}"),
         }
 
-        let our_work_item = work_response.items.into_iter().find(|item| {
-            item.fn_id == attached_function_id.0.to_string()
-                && item.input_coll_id == collection_id.to_string()
-        });
+        Box::pin(fn_consumer_context.cleanup()).await;
 
-        assert!(
-            our_work_item.is_some(),
-            "Should find our async function in the work queue"
+        // Repeat from the second boundary to prove fn-consumer continues to hop
+        // exactly one committed compaction window at a time.
+        let mut second_window_context = CompactionContext::new_with_log_offset(
+            None,
+            50,
+            10,
+            1000,
+            50,
+            log.clone(),
+            sysdb.clone(),
+            test_segments.blockfile_provider.clone(),
+            test_segments.hnsw_provider.clone(),
+            test_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            false,
+            true, // is_fn_consumer
+            None,
+            None,
+            None,
+            None,
+            199,
         );
+
+        let second_fetch_response = second_window_context
+            .run_get_logs(collection_id, database_name.clone(), system.clone(), false)
+            .await
+            .expect("second fn-consumer log fetch should succeed");
+
+        match second_fetch_response {
+            LogFetchOrchestratorResponse::Success(success) => {
+                assert_eq!(
+                    success.collection_info.pulled_log_offset, 299,
+                    "fn-consumer should continue to the next committed boundary on later runs"
+                );
+
+                let total_materialized_records: usize = success
+                    .materialized
+                    .iter()
+                    .map(|batch| batch.result.len())
+                    .sum();
+                assert_eq!(
+                    total_materialized_records, 100,
+                    "each fn-consumer run should materialize exactly one compaction window"
+                );
+
+                for batch in &success.materialized {
+                    for shard_result in batch.result.iter() {
+                        for record in shard_result {
+                            assert_eq!(
+                                record.get_operation(),
+                                chroma_types::MaterializedLogOperation::AddNew,
+                                "later boundary windows should also replay as new adds"
+                            );
+                        }
+                    }
+                }
+            }
+            other => panic!("expected successful second fn-consumer fetch, got {other:?}"),
+        }
+
+        Box::pin(second_window_context.cleanup()).await;
 
         // Clean up - delete the collections
         // Note: We don't have segment IDs easily available here, so we can't delete

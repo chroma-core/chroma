@@ -381,7 +381,7 @@ mod tests {
                         .unwrap(),
                         fetch_log_concurrency: 10,
                         fragment_fetcher: None,
-                        log_upper_bound_offset: TOTAL as i64,
+                        log_upper_bound_offset: Some(TOTAL as u64),
                     },
                     read_level,
                     limit,

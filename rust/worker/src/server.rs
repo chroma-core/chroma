@@ -277,7 +277,8 @@ impl WorkerServer {
             database_name,
             fetch_log_concurrency: self.fetch_log_concurrency,
             fragment_fetcher,
-            log_upper_bound_offset,
+            log_upper_bound_offset: (log_upper_bound_offset > 0)
+                .then_some(log_upper_bound_offset as u64),
         })
     }
 

@@ -5,6 +5,7 @@ use super::{
 use crate::collection_schema::Schema;
 use crate::{chroma_proto, DatabaseUuid};
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_proto::CollectionVersionInfo;
 use std::{collections::HashMap, str::FromStr};
 use thiserror::Error;
 use tonic::Status;
@@ -127,6 +128,46 @@ pub struct Segment {
 }
 
 impl Segment {
+    /// Returns this segment with its identity/metadata preserved but without
+    /// any on-disk file paths.
+    pub fn empty_segment(&self) -> Self {
+        let mut segment = self.clone();
+        segment.file_path.clear();
+        segment
+    }
+
+    pub fn historical_segment_for_version(
+        &self,
+        version: &CollectionVersionInfo,
+        segment_id: SegmentUuid,
+    ) -> Result<Self, String> {
+        let mut historical_segment = self.clone();
+        let all_segments_info = version.segment_info.as_ref().ok_or_else(|| {
+            format!(
+                "Invariant violation: collection version {} is missing segment info",
+                version.version
+            )
+        })?;
+
+        let segment_info = all_segments_info
+            .segment_compaction_info
+            .iter()
+            .find(|segment_info| segment_info.segment_id == segment_id.to_string())
+            .ok_or_else(|| {
+                format!(
+                    "Invariant violation: collection version {} is missing segment {}",
+                    version.version, segment_id
+                )
+            })?;
+
+        historical_segment.file_path = segment_info
+            .file_paths
+            .iter()
+            .map(|(key, value)| (key.clone(), value.paths.clone()))
+            .collect::<HashMap<_, _>>();
+        Ok(historical_segment)
+    }
+
     // INVARIANT: THIS ALWAYS RETURNS AT LEAST ONE SHARD
     pub fn get_shards(&self) -> Result<Vec<SegmentShard>, SegmentShardError> {
         let num_shards = self.num_shards()?;

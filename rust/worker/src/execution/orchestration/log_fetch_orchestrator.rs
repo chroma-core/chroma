@@ -18,8 +18,8 @@ use chroma_segment::{
 };
 use chroma_sysdb::sysdb::SysDb;
 use chroma_system::{
-    wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
-    OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
+    wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Operator,
+    Orchestrator, OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
     Chunk, CollectionUuid, JobId, LogRecord, MetadataValue, SchemaMismatchError, SegmentFlushInfo,
@@ -38,6 +38,10 @@ use crate::{
         operators::{
             fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
             fragment_fetch::FragmentFetcher,
+            get_async_fn_fetch_boundaries::{
+                GetAsyncFnFetchBoundariesError, GetAsyncFnFetchBoundariesInput,
+                GetAsyncFnFetchBoundariesOperator,
+            },
             get_collection_and_segments::{
                 GetCollectionAndSegmentsError, GetCollectionAndSegmentsOperator,
                 GetCollectionAndSegmentsOutput,
@@ -60,9 +64,12 @@ use crate::{
                 SourceRecordSegmentV2Operator, SourceRecordSegmentV2Output,
             },
         },
-        orchestration::compact::{
-            CollectionCompactInfo, CompactWriters, CompactionContext, CompactionContextError,
-            ExecutionState,
+        orchestration::{
+            async_function_boundary::AsyncFnBoundaryPlan,
+            compact::{
+                CollectionCompactInfo, CompactWriters, CompactionContext, CompactionContextError,
+                ExecutionState,
+            },
         },
     },
     work_queue::work_queue_client::WorkQueueClient,
@@ -124,6 +131,8 @@ pub enum LogFetchOrchestratorError {
     MetadataSegmentWriter(#[from] chroma_segment::blockfile_metadata::MetadataSegmentWriterError),
     #[error("Error creating vector segment writer: {0}")]
     VectorSegmentWriter(#[from] chroma_segment::types::VectorSegmentWriterError),
+    #[error("Error resolving async fn-consumer fetch plan: {0}")]
+    GetAsyncFnFetchBoundaries(#[from] GetAsyncFnFetchBoundariesError),
 }
 
 impl ChromaError for LogFetchOrchestratorError {
@@ -170,6 +179,7 @@ impl ChromaError for LogFetchOrchestratorError {
                 Self::CountError(e) => e.should_trace_error(),
                 Self::MetadataSegmentWriter(e) => e.should_trace_error(),
                 Self::VectorSegmentWriter(e) => e.should_trace_error(),
+                Self::GetAsyncFnFetchBoundaries(e) => e.should_trace_error(),
             }
         }
     }
@@ -329,6 +339,25 @@ impl Orchestrator for LogFetchOrchestrator {
 }
 
 impl LogFetchOrchestrator {
+    async fn get_async_fn_fetch_boundaries(
+        collection: &chroma_types::Collection,
+        record_segment: &chroma_types::Segment,
+        completion_offset: i64,
+        max_compaction_size: usize,
+        blockfile_provider: BlockfileProvider,
+    ) -> Result<AsyncFnBoundaryPlan, LogFetchOrchestratorError> {
+        GetAsyncFnFetchBoundariesOperator::new()
+            .run(&GetAsyncFnFetchBoundariesInput {
+                collection: collection.clone(),
+                record_segment: record_segment.clone(),
+                completion_offset,
+                max_compaction_size,
+                blockfile_provider,
+            })
+            .await
+            .map_err(LogFetchOrchestratorError::from)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         collection_id: CollectionUuid,
@@ -347,6 +376,7 @@ impl LogFetchOrchestrator {
         fragment_fetcher: Option<Arc<FragmentFetcher>>,
         bloom_filter_manager: Option<BloomFilterManager>,
         work_queue_client: Option<WorkQueueClient>,
+        is_fn_consumer: bool,
         log_start_offset: Option<i64>,
     ) -> Self {
         let mut context = CompactionContext::new(
@@ -362,7 +392,7 @@ impl LogFetchOrchestrator {
             spann_provider,
             dispatcher.clone(),
             false, // LogFetchOrchestrator doesn't need is_function_disabled
-            false, // is_fn_consumer
+            is_fn_consumer,
             fragment_fetcher,
             bloom_filter_manager,
             None, // shard_size
@@ -505,12 +535,62 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         };
 
         let collection = output.collection.clone();
+        let mut record_segment_for_reader = output.record_segment.clone();
+        let mut pulled_log_offset = collection.log_position;
+        let mut log_upper_bound_offset = None;
+
+        if self.context.is_fn_consumer {
+            let completion_offset = match self.context.log_start_offset {
+                Some(offset) => offset,
+                None => {
+                    self.terminate_with_result(
+                        Err(LogFetchOrchestratorError::InvariantViolation(
+                            "fn-consumer log fetch requires log_start_offset",
+                        )),
+                        ctx,
+                    )
+                    .await;
+                    return;
+                }
+            };
+
+            let max_compaction_size = self.context.max_compaction_size;
+            let blockfile_provider = self.context.blockfile_provider.clone();
+            let boundary_plan = match LogFetchOrchestrator::get_async_fn_fetch_boundaries(
+                &collection,
+                &output.record_segment,
+                completion_offset,
+                max_compaction_size,
+                blockfile_provider,
+            )
+            .await
+            {
+                Ok(plan) => plan,
+                Err(err) => {
+                    self.terminate_with_result(Err(err), ctx).await;
+                    return;
+                }
+            };
+
+            tracing::info!(
+                collection_id = %collection.collection_id,
+                completion_offset,
+                target_log_position = boundary_plan.target_log_position,
+                uses_pre_compaction_state = boundary_plan.historical_record_segment.is_none(),
+                "Resolved async function execution boundary"
+            );
+
+            record_segment_for_reader =
+                boundary_plan.record_segment_for_reader(&output.record_segment);
+            pulled_log_offset = boundary_plan.target_log_position;
+            log_upper_bound_offset = Some((boundary_plan.target_log_position + 1) as u64);
+        }
 
         // Create RecordSegmentReader for MaterializeLogOperator
         let record_segment_reader = match self
             .ok_or_terminate(
                 Box::pin(RecordSegmentReader::from_segment(
-                    &output.record_segment,
+                    &record_segment_for_reader,
                     &self.context.blockfile_provider,
                     self.context.bloom_filter_manager.clone(),
                 ))
@@ -619,7 +699,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                     database_name,
                     fetch_log_concurrency: self.context.fetch_log_concurrency,
                     fragment_fetcher: self.context.fragment_fetcher.clone(),
-                    log_upper_bound_offset: 0,
+                    log_upper_bound_offset,
                 }),
                 (),
                 ctx.receiver(),
@@ -651,7 +731,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             collection_id: collection.collection_id,
             collection: collection.clone(),
             writers: None,
-            pulled_log_offset: collection.log_position,
+            pulled_log_offset,
             hnsw_index_uuid: None,
             schema: collection.schema.clone(),
             original_segment_flush_infos,
