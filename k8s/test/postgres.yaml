@@ -1,3 +1,23 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: chroma
+spec:
+  # `ReadWriteOnce` (single-writer) is fine because we pair this with
+  # `strategy: Recreate` on the Deployment below — a PVC can only be
+  # mounted by one pod at a time on most cluster types.
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      # 5 GiB covers the sysdb + log databases for typical Tilt-stack
+      # development. The PVC's StorageClass-default is left implicit so
+      # it works on k3d / kind / OrbStack / minikube without per-cluster
+      # tweaks.
+      storage: 5Gi
+
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -8,6 +28,12 @@ spec:
   selector:
     matchLabels:
       app: postgres
+  # PVCs with `ReadWriteOnce` can only be mounted by one pod at a
+  # time. Default `RollingUpdate` would try to bring up the new pod
+  # before tearing the old one down → the new pod would be Pending
+  # forever waiting for the volume. `Recreate` does the right thing.
+  strategy:
+    type: Recreate
   template:
     metadata:
       labels:
@@ -16,11 +42,21 @@ spec:
       containers:
         - name: postgres
           image: chroma-postgres
+          # 100m / 100m was too tight once the dev stack grew to ~20
+          # parallel clients (sync-frontend + indexer + cron + change-
+          # notifier + dashboard-api + foundation-server + hosted-
+          # frontend-db-migration + various test pods). With that
+          # ceiling postgres' auth path can't keep up: clients see
+          # `canceling authentication due to timeout`, the
+          # `pg_isready -U chroma` readiness probe with its 1s deadline
+          # starts failing, the pod flaps 0/1, and downstream initContainers
+          # CrashLoopBackOff with `ECONNREFUSED`. Bumping the limit
+          # restores headroom without changing the image.
           resources:
             requests:
-              cpu: "100m"
+              cpu: "200m"
             limits:
-              cpu: "100m"
+              cpu: "1"
           env:
             - name: POSTGRES_MULTIPLE_DATABASES
               value: "sysdb,log"
@@ -28,8 +64,18 @@ spec:
               value: chroma
             - name: POSTGRES_PASSWORD
               value: chroma
+            # The official postgres image refuses to initdb into a
+            # non-empty data dir. Using a subdir keeps the PVC root
+            # clean of `lost+found` etc. from the underlying volume
+            # and lets us share the volume across multiple databases
+            # cleanly.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
           ports:
             - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
           readinessProbe:
             exec:
               command:
@@ -38,6 +84,10 @@ spec:
                 - chroma
             periodSeconds: 1
             failureThreshold: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgres-data
 
 ---
 apiVersion: v1
