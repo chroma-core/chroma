@@ -39,3 +39,10 @@ pub const FUNCTION_REVISION_HISTORY_ID: Uuid = Uuid::from_bytes([
 ]);
 /// Name of the built-in revision_history function
 pub const FUNCTION_REVISION_HISTORY_NAME: &str = "revision_history";
+
+/// UUID for the built-in count_to_file_async function
+pub const FUNCTION_COUNT_TO_FILE_ASYNC_ID: Uuid = Uuid::from_bytes([
+    0xeb, 0x12, 0x5f, 0x49, 0x1e, 0x8b, 0x45, 0xd9, 0xbb, 0x20, 0xe8, 0x4f, 0x2e, 0xae, 0x4e, 0x92,
+]);
+/// Name of the built-in count_to_file_async function
+pub const FUNCTION_COUNT_TO_FILE_ASYNC_NAME: &str = "count_to_file_async";

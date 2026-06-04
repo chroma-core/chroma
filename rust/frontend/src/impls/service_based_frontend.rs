@@ -18,6 +18,7 @@ use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
 use chroma_sysdb::{DatabaseOrTopology, GetCollectionsOptions, SysDb};
 use chroma_system::System;
+use chroma_types::operators_generated::FUNCTION_COUNT_TO_FILE_ASYNC_NAME;
 use chroma_types::{
     operator::{
         Aggregate, CountResult, Filter, GetResult, GroupBy, Key, KnnBatch, KnnBatchResult,
@@ -2525,6 +2526,8 @@ impl ServiceBasedFrontend {
             .get_cached_collection(database_name.clone(), input_collection_id)
             .await?;
 
+        self.ensure_function_attachment_allowed(&function_id)?;
+
         // Must use HNSW: the Go coordinator's FinishCreateAttachedFunction
         // hardcodes hnsw-distributed vector segments for the output collection.
         let output_schema = Schema::new_default(KnnIndex::Hnsw);
@@ -2614,6 +2617,8 @@ impl ServiceBasedFrontend {
                 )))
             })?);
 
+        self.ensure_function_attachment_allowed(&function_name)?;
+
         let add_input_result =
             frontend_core::attached_function_ops::prepare_add_attached_function_input(
                 &mut sysdb_client,
@@ -2653,6 +2658,19 @@ impl ServiceBasedFrontend {
             .map_err(|e| chroma_types::AttachFunctionError::Internal(Box::new(e)))?,
             created: add_input_result.created,
         })
+    }
+
+    fn ensure_function_attachment_allowed(
+        &self,
+        function_name: &str,
+    ) -> Result<(), chroma_types::AttachFunctionError> {
+        if !self.allow_reset && function_name == FUNCTION_COUNT_TO_FILE_ASYNC_NAME {
+            return Err(chroma_types::AttachFunctionError::NotAllowed(
+                "count_to_file_async is only enabled when allow_reset is true".to_string(),
+            ));
+        }
+
+        Ok(())
     }
 
     async fn start_backfill(
@@ -2934,6 +2952,7 @@ mod tests {
         // Validate that hardcoded Rust function constants match the live database.
         // This prevents drift between constants and database migrations.
         use chroma_types::{
+            FUNCTION_COUNT_TO_FILE_ASYNC_ID, FUNCTION_COUNT_TO_FILE_ASYNC_NAME,
             FUNCTION_DUMMY_ASYNC_ID, FUNCTION_DUMMY_ASYNC_NAME, FUNCTION_HTTP_GENERATE_ID,
             FUNCTION_HTTP_GENERATE_NAME, FUNCTION_RECORD_COUNTER_ID, FUNCTION_RECORD_COUNTER_NAME,
             FUNCTION_REVISION_HISTORY_ID, FUNCTION_REVISION_HISTORY_NAME, FUNCTION_STATISTICS_ID,
@@ -2947,6 +2966,10 @@ mod tests {
             (FUNCTION_RECORD_COUNTER_NAME, FUNCTION_RECORD_COUNTER_ID),
             (FUNCTION_STATISTICS_NAME, FUNCTION_STATISTICS_ID),
             (FUNCTION_DUMMY_ASYNC_NAME, FUNCTION_DUMMY_ASYNC_ID),
+            (
+                FUNCTION_COUNT_TO_FILE_ASYNC_NAME,
+                FUNCTION_COUNT_TO_FILE_ASYNC_ID,
+            ),
             (FUNCTION_HTTP_GENERATE_NAME, FUNCTION_HTTP_GENERATE_ID),
             (FUNCTION_REVISION_HISTORY_NAME, FUNCTION_REVISION_HISTORY_ID),
         ]

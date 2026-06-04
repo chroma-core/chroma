@@ -14,14 +14,15 @@ use chroma_system::{Operator, OperatorType};
 use chroma_types::{
     AttachedFunction, Chunk, CollectionUuid, LogRecord, MaterializedLogOperation, Operation,
     OperationRecord, Segment, SegmentShard, SegmentShardError, UpdateMetadataValue,
-    FUNCTION_DUMMY_ASYNC_ID, FUNCTION_HTTP_GENERATE_ID, FUNCTION_RECORD_COUNTER_ID,
-    FUNCTION_REVISION_HISTORY_ID, FUNCTION_STATISTICS_ID,
+    FUNCTION_COUNT_TO_FILE_ASYNC_ID, FUNCTION_DUMMY_ASYNC_ID, FUNCTION_HTTP_GENERATE_ID,
+    FUNCTION_RECORD_COUNTER_ID, FUNCTION_REVISION_HISTORY_ID, FUNCTION_STATISTICS_ID,
 };
 use std::sync::Arc;
 use thiserror::Error;
 
 use crate::execution::functions::{
-    CounterFunctionFactory, HttpGenerateExecutor, RevisionHistoryExecutor,
+    CountToFileAsyncExecutor, CounterFunctionFactory, HttpGenerateExecutor,
+    RevisionHistoryExecutor,
     StatisticsFunctionExecutor,
 };
 use crate::execution::operators::materialize_logs::MaterializeLogOutput;
@@ -186,6 +187,7 @@ impl ExecuteAttachedFunctionOperator {
     pub(crate) fn from_attached_function(
         attached_function: &AttachedFunction,
         log_client: Log,
+        storage: Option<chroma_storage::Storage>,
     ) -> Result<Self, ExecuteAttachedFunctionError> {
         let function_id = attached_function.function_id;
         let executor: Arc<dyn AttachedFunctionExecutor> = match function_id {
@@ -194,6 +196,16 @@ impl ExecuteAttachedFunctionOperator {
                 Arc::new(StatisticsFunctionExecutor(Box::new(CounterFunctionFactory)))
             }
             FUNCTION_DUMMY_ASYNC_ID => Arc::new(DummyAttachedFunction),
+            FUNCTION_COUNT_TO_FILE_ASYNC_ID => {
+                let executor =
+                    CountToFileAsyncExecutor::from_attached_function(attached_function, storage)
+                        .map_err(|e| {
+                            ExecuteAttachedFunctionError::ExecutorConfig(format!(
+                                "CountToFileAsyncExecutor: {e}"
+                            ))
+                        })?;
+                Arc::new(executor)
+            }
             FUNCTION_HTTP_GENERATE_ID => {
                 let executor = HttpGenerateExecutor::from_attached_function(attached_function)
                     .map_err(|e| {
