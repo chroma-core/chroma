@@ -8,7 +8,6 @@
 //! error types, config primitives, and OTEL bootstrap.
 
 pub mod ac;
-pub mod attached_function_ops;
 pub mod attached_function;
 pub mod attached_function_ops;
 pub mod auth;
