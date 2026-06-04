@@ -73,16 +73,7 @@
         "kwargs": {
             "type": "object",
             "description": "Additional arguments to pass to the model",
-            "additionalProperties": {
-                "type": [
-                    "string",
-                    "integer",
-                    "number",
-                    "boolean",
-                    "array",
-                    "object"
-                ]
-            }
+            "additionalProperties": false
         }
     },
     "required": [

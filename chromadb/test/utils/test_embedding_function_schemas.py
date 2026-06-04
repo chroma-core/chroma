@@ -32,6 +32,41 @@ def get_embedding_function_names() -> List[str]:
 class TestEmbeddingFunctionSchemas:
     """Test class for embedding function schemas"""
 
+    @pytest.mark.parametrize(
+        "schema_name,config",
+        [
+            (
+                "sentence_transformer",
+                {
+                    "model_name": "attacker/model",
+                    "device": "cpu",
+                    "normalize_embeddings": False,
+                    "kwargs": {"trust_remote_code": True},
+                },
+            ),
+            (
+                "huggingface_sparse",
+                {
+                    "model_name": "attacker/model",
+                    "device": "cpu",
+                    "kwargs": {"trust_remote_code": True},
+                },
+            ),
+            (
+                "fastembed_sparse",
+                {
+                    "model_name": "attacker/model",
+                    "kwargs": {"trust_remote_code": True},
+                },
+            ),
+        ],
+    )
+    def test_local_model_loader_schemas_reject_non_empty_kwargs(
+        self, schema_name: str, config: Dict[str, Any]
+    ) -> None:
+        with pytest.raises(ValidationError):
+            validate_config_schema(config, schema_name)
+
     @pytest.mark.parametrize("ef_name", get_embedding_function_names())
     def test_embedding_function_config_roundtrip(
         self,
