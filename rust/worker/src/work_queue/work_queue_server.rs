@@ -28,11 +28,16 @@ impl WorkQueueServer {
     }
 
     // Handle repair by finalizing the repair in sysdb
-    async fn handle_repair(&self, fn_id: &AttachedFunctionUuid) -> Result<(), WorkQueueError> {
+    async fn handle_repair(
+        &self,
+        fn_id: &AttachedFunctionUuid,
+        input_coll_id: &CollectionUuid,
+    ) -> Result<(), WorkQueueError> {
         // The work has already been re-pushed by WorkQueueManager
         // We just need to finalize the repair
         let repair_request = FinalizeAsyncAttachedFunctionRepairRequest {
             attached_function_id: fn_id.to_string(),
+            collection_id: input_coll_id.to_string(),
         };
 
         let mut sysdb = self.sysdb.clone();
@@ -41,7 +46,11 @@ impl WorkQueueServer {
             .await
             .map_err(|e| WorkQueueError::RepairFailed(e.to_string()))?;
 
-        tracing::info!("Repair finalized for function {}", fn_id);
+        tracing::info!(
+            "Repair finalized for function {} and collection {}",
+            fn_id,
+            input_coll_id
+        );
 
         Ok(())
     }
@@ -117,7 +126,7 @@ impl WorkQueueService for WorkQueueServer {
             }
             FinishResult::NeedsRepair => {
                 // NeedsRepair case - handle repair
-                self.handle_repair(&fn_id)
+                self.handle_repair(&fn_id, &input_coll_id)
                     .await
                     .map_err(|e| Status::internal(e.to_string()))?;
                 Ok(Response::new(()))

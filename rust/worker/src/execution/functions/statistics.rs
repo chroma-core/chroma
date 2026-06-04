@@ -351,17 +351,49 @@ impl StatisticsFunctionExecutor {
 impl AttachedFunctionExecutor for StatisticsFunctionExecutor {
     async fn execute(
         &self,
-        input_records: Chunk<HydratedMaterializedLogRecord<'_, '_>>,
+        input_records: Vec<Chunk<HydratedMaterializedLogRecord<'_, '_>>>,
         output_reader: Option<&RecordSegmentReaderShard<'_>>,
     ) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>> {
         // Load existing statistics from output_reader if available
         let mut counts = self.load_existing_statistics(output_reader).await?;
 
         // Process new input records and update counts
-        for (hydrated_record, _index) in input_records.iter() {
-            if hydrated_record.get_operation() == MaterializedLogOperation::DeleteExisting {
-                for (key, old_value) in hydrated_record.merged_metadata() {
-                    for stats_value in StatisticsValue::from_metadata_value(&old_value) {
+        for input_batch in &input_records {
+            for (hydrated_record, _index) in input_batch.iter() {
+                if hydrated_record.get_operation() == MaterializedLogOperation::DeleteExisting {
+                    for (key, old_value) in hydrated_record.merged_metadata() {
+                        for stats_value in StatisticsValue::from_metadata_value(&old_value) {
+                            let inner_map = counts.entry(key.to_string()).or_default();
+                            inner_map
+                                .entry(stats_value)
+                                .or_insert_with(|| self.0.create())
+                                .observe_delete(hydrated_record);
+                        }
+                    }
+
+                    counts
+                        .entry(SUMMARY_KEY.to_string())
+                        .or_default()
+                        .entry(total_count_value())
+                        .or_insert_with(|| self.0.create())
+                        .observe_delete(hydrated_record);
+                    continue;
+                }
+
+                if hydrated_record.get_operation() == MaterializedLogOperation::AddNew {
+                    counts
+                        .entry(SUMMARY_KEY.to_string())
+                        .or_default()
+                        .entry(total_count_value())
+                        .or_insert_with(|| self.0.create())
+                        .observe_insert(hydrated_record);
+                }
+
+                let metadata_delta = hydrated_record.compute_metadata_delta();
+
+                // Decrement counts for deleted metadata
+                for (key, old_value) in metadata_delta.metadata_to_delete {
+                    for stats_value in StatisticsValue::from_metadata_value(old_value) {
                         let inner_map = counts.entry(key.to_string()).or_default();
                         inner_map
                             .entry(stats_value)
@@ -370,66 +402,36 @@ impl AttachedFunctionExecutor for StatisticsFunctionExecutor {
                     }
                 }
 
-                counts
-                    .entry(SUMMARY_KEY.to_string())
-                    .or_default()
-                    .entry(total_count_value())
-                    .or_insert_with(|| self.0.create())
-                    .observe_delete(hydrated_record);
-                continue;
-            }
-
-            if hydrated_record.get_operation() == MaterializedLogOperation::AddNew {
-                counts
-                    .entry(SUMMARY_KEY.to_string())
-                    .or_default()
-                    .entry(total_count_value())
-                    .or_insert_with(|| self.0.create())
-                    .observe_insert(hydrated_record);
-            }
-
-            let metadata_delta = hydrated_record.compute_metadata_delta();
-
-            // Decrement counts for deleted metadata
-            for (key, old_value) in metadata_delta.metadata_to_delete {
-                for stats_value in StatisticsValue::from_metadata_value(old_value) {
-                    let inner_map = counts.entry(key.to_string()).or_default();
-                    inner_map
-                        .entry(stats_value)
-                        .or_insert_with(|| self.0.create())
-                        .observe_delete(hydrated_record);
+                // Decrement counts for old values in updates
+                for (key, (old_value, _new_value)) in &metadata_delta.metadata_to_update {
+                    for stats_value in StatisticsValue::from_metadata_value(old_value) {
+                        let inner_map = counts.entry(key.to_string()).or_default();
+                        inner_map
+                            .entry(stats_value)
+                            .or_insert_with(|| self.0.create())
+                            .observe_delete(hydrated_record);
+                    }
                 }
-            }
 
-            // Decrement counts for old values in updates
-            for (key, (old_value, _new_value)) in &metadata_delta.metadata_to_update {
-                for stats_value in StatisticsValue::from_metadata_value(old_value) {
-                    let inner_map = counts.entry(key.to_string()).or_default();
-                    inner_map
-                        .entry(stats_value)
-                        .or_insert_with(|| self.0.create())
-                        .observe_delete(hydrated_record);
-                }
-            }
-
-            // Increment counts for new values in both updates and inserts
-            for (key, value) in metadata_delta
-                .metadata_to_update
-                .iter()
-                .map(|(k, (_old, new))| (*k, *new))
-                .chain(
-                    metadata_delta
-                        .metadata_to_insert
-                        .iter()
-                        .map(|(k, v)| (*k, *v)),
-                )
-            {
-                for stats_value in StatisticsValue::from_metadata_value(value) {
-                    let inner_map = counts.entry(key.to_string()).or_default();
-                    inner_map
-                        .entry(stats_value)
-                        .or_insert_with(|| self.0.create())
-                        .observe_insert(hydrated_record);
+                // Increment counts for new values in both updates and inserts
+                for (key, value) in metadata_delta
+                    .metadata_to_update
+                    .iter()
+                    .map(|(k, (_old, new))| (*k, *new))
+                    .chain(
+                        metadata_delta
+                            .metadata_to_insert
+                            .iter()
+                            .map(|(k, v)| (*k, *v)),
+                    )
+                {
+                    for stats_value in StatisticsValue::from_metadata_value(value) {
+                        let inner_map = counts.entry(key.to_string()).or_default();
+                        inner_map
+                            .entry(stats_value)
+                            .or_insert_with(|| self.0.create())
+                            .observe_insert(hydrated_record);
+                    }
                 }
             }
         }
@@ -731,7 +733,7 @@ mod tests {
         let input = Chunk::new(std::sync::Arc::from(hydrated));
 
         let output = executor
-            .execute(input, None)
+            .execute(vec![input], None)
             .await
             .expect("execution succeeds");
 
@@ -844,7 +846,7 @@ mod tests {
         let input = Chunk::new(std::sync::Arc::from(hydrated));
 
         let output = executor
-            .execute(input, None)
+            .execute(vec![input], None)
             .await
             .expect("execution succeeds");
 
@@ -903,7 +905,7 @@ mod tests {
         let input = Chunk::new(std::sync::Arc::from(hydrated));
 
         let output = executor
-            .execute(input, None)
+            .execute(vec![input], None)
             .await
             .expect("execution succeeds");
 
@@ -952,7 +954,7 @@ mod tests {
         let input = Chunk::new(std::sync::Arc::from(hydrated));
 
         let output = executor
-            .execute(input, None)
+            .execute(vec![input], None)
             .await
             .expect("execution succeeds");
 
@@ -982,7 +984,7 @@ mod tests {
         let input = Chunk::new(std::sync::Arc::from(hydrated));
 
         let output = executor
-            .execute(input, None)
+            .execute(vec![input], None)
             .await
             .expect("execution succeeds");
 
@@ -1060,7 +1062,7 @@ mod tests {
 
         // Execute with OUTPUT collection reader to load existing statistics
         let output = executor
-            .execute(input, Some(&output_record_reader))
+            .execute(vec![input], Some(&output_record_reader))
             .await
             .expect("execution succeeds");
 
@@ -1118,7 +1120,7 @@ mod tests {
         let empty_input = Chunk::new(std::sync::Arc::from(hydrated));
 
         let output = executor
-            .execute(empty_input, Some(&record_reader))
+            .execute(vec![empty_input], Some(&record_reader))
             .await
             .expect("execution succeeds");
 
@@ -1200,7 +1202,7 @@ mod tests {
 
         // Execute with OUTPUT collection reader to load existing statistics
         let output = executor
-            .execute(input, Some(&output_record_reader))
+            .execute(vec![input], Some(&output_record_reader))
             .await
             .expect("execution succeeds");
 

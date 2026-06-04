@@ -42,7 +42,7 @@ use crate::execution::{
     },
     orchestration::{
         apply_logs_orchestrator::ApplyLogsOrchestratorResponse,
-        attached_function_orchestrator::FunctionContext,
+        function_execution::{FunctionContext, FunctionInputCollectionData},
         log_fetch_orchestrator::LogFetchOrchestratorError,
         register_orchestrator::{RegisterOrchestratorError, RegisterOrchestratorResponse},
     },
@@ -651,18 +651,18 @@ impl CompactionContext {
     // Should be invoked on output collection context
     pub(crate) async fn run_attached_function(
         &mut self,
-        data_fetch_records: Vec<MaterializeLogOutput>,
+        input_collection_data: Vec<FunctionInputCollectionData>,
         system: System,
         is_backfill: bool,
+        attached_function_id_filter: Option<chroma_types::AttachedFunctionUuid>,
     ) -> Result<AttachedFunctionOrchestratorResponse, AttachedFunctionOrchestratorError> {
-        let collection_info = self.get_collection_info()?.clone();
         let attached_function_orchestrator = AttachedFunctionOrchestrator::new(
-            collection_info,
+            input_collection_data,
             self.clone_for_new_collection(),
             self.dispatcher.clone(),
-            data_fetch_records,
             is_backfill,
             self.is_fn_consumer,
+            attached_function_id_filter,
         );
 
         let attached_function_response =
@@ -721,7 +721,10 @@ impl CompactionContext {
             self.sysdb.clone(),
             collection_id,
         ));
-        let input = GetAttachedFunctionInput { collection_id };
+        let input = GetAttachedFunctionInput {
+            collection_id,
+            attached_function_id: None,
+        };
 
         // Create a receiver for the task
         let (receiver, rx) = chroma_system::OneshotMessageReceiver::new();
@@ -801,8 +804,21 @@ impl CompactionContext {
             }
         };
 
-        let result =
-            Box::pin(self.run_attached_function_workflow(log_fetch_records, system, true)).await?;
+        let input_collection_data = FunctionInputCollectionData {
+            collection_info: self
+                .get_collection_info()
+                .map_err(CompactionError::CompactionContextError)?
+                .clone(),
+            materialized_log_data: log_fetch_records,
+        };
+
+        let result = Box::pin(self.run_attached_function_workflow(
+            vec![input_collection_data],
+            system,
+            true,
+            None,
+        ))
+        .await?;
 
         match result {
             Some((function_context, collection_register_info)) => {
@@ -815,15 +831,20 @@ impl CompactionContext {
         }
     }
 
-    async fn run_attached_function_workflow(
+    pub(crate) async fn run_attached_function_workflow(
         &mut self,
-        log_fetch_records: Vec<MaterializeLogOutput>,
+        input_collection_data: Vec<FunctionInputCollectionData>,
         system: System,
         is_backfill: bool,
+        attached_function_id_filter: Option<chroma_types::AttachedFunctionUuid>,
     ) -> Result<Option<(FunctionContext, CollectionRegisterInfo)>, CompactionError> {
-        let attached_function_result =
-            Box::pin(self.run_attached_function(log_fetch_records, system.clone(), is_backfill))
-                .await?;
+        let attached_function_result = Box::pin(self.run_attached_function(
+            input_collection_data,
+            system.clone(),
+            is_backfill,
+            attached_function_id_filter,
+        ))
+        .await?;
 
         match attached_function_result {
             AttachedFunctionOrchestratorResponse::NoAttachedFunction { .. } => Ok(None),
@@ -899,7 +920,7 @@ impl CompactionContext {
             .run_get_logs(collection_id, database_name.clone(), system.clone(), false)
             .await?;
 
-        let (log_fetch_records, _) = match result {
+        let (log_fetch_records, collection_info) = match result {
             LogFetchOrchestratorResponse::Success(success) => {
                 (success.materialized, success.collection_info)
             }
@@ -956,8 +977,10 @@ impl CompactionContext {
             }
         };
 
-        // Wrap in Arc to avoid cloning large MaterializeLogOutput data
-        let log_fetch_records_clone = log_fetch_records.clone();
+        let function_input_collection_data = FunctionInputCollectionData {
+            collection_info: collection_info.clone(),
+            materialized_log_data: log_fetch_records.clone(),
+        };
 
         let mut self_clone_fn = self.clone();
         // TODO(tanujnay112): Think about a better way to pass mutable state to these futures
@@ -976,9 +999,10 @@ impl CompactionContext {
                 Ok(None)
             } else {
                 Box::pin(self_clone_fn.run_attached_function_workflow(
-                    log_fetch_records_clone,
+                    vec![function_input_collection_data],
                     system_clone_fn,
                     false,
+                    None,
                 ))
                 .await
             }

@@ -440,6 +440,61 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByID_Ignores
 	suite.db.Unscoped().Delete(&dbmodel.AttachedFunction{}, "id = ?", attachedFunction.ID)
 }
 
+func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_UpdateHeapEntryPendingScopesToInputCollection() {
+	attachedFunctionID := uuid.New()
+	functionID := dbmodel.FunctionRecordCounter
+	inputCollectionID1 := "repair-input-1"
+	inputCollectionID2 := "repair-input-2"
+
+	attachedFunction1 := &dbmodel.AttachedFunction{
+		ID:                      attachedFunctionID,
+		Name:                    "test-repair-scoped",
+		FunctionID:              functionID,
+		InputCollectionID:       inputCollectionID1,
+		OutputCollectionName:    "repair-output",
+		FunctionParams:          "{}",
+		TenantID:                "tenant1",
+		DatabaseID:              "db1",
+		MinRecordsForInvocation: 100,
+		IsReady:                 true,
+		HeapEntryPending:        true,
+	}
+	attachedFunction2 := &dbmodel.AttachedFunction{
+		ID:                      attachedFunctionID,
+		Name:                    "test-repair-scoped",
+		FunctionID:              functionID,
+		InputCollectionID:       inputCollectionID2,
+		OutputCollectionName:    "repair-output",
+		FunctionParams:          "{}",
+		TenantID:                "tenant1",
+		DatabaseID:              "db1",
+		MinRecordsForInvocation: 100,
+		IsReady:                 true,
+		HeapEntryPending:        true,
+	}
+
+	err := suite.Db.Insert(attachedFunction1)
+	suite.Require().NoError(err)
+	err = suite.Db.Insert(attachedFunction2)
+	suite.Require().NoError(err)
+
+	err = suite.Db.UpdateHeapEntryPending(attachedFunctionID, inputCollectionID1, false)
+	suite.Require().NoError(err)
+
+	var retrieved []dbmodel.AttachedFunction
+	err = suite.db.
+		Where("id = ?", attachedFunctionID).
+		Order("input_collection_id ASC").
+		Find(&retrieved).
+		Error
+	suite.Require().NoError(err)
+	suite.Require().Len(retrieved, 2)
+	suite.Require().False(retrieved[0].HeapEntryPending)
+	suite.Require().True(retrieved[1].HeapEntryPending)
+
+	suite.db.Unscoped().Delete(&dbmodel.AttachedFunction{}, "id = ?", attachedFunctionID)
+}
+
 func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetAttachedFunctions_ErrorWhenBothIdAndIdsProvided() {
 	// Create two test attached functions
 	attachedFunction1 := &dbmodel.AttachedFunction{

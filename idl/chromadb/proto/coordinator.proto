@@ -667,6 +667,7 @@ message FinishAsyncNeedsRepair {
 
 message FinalizeAsyncAttachedFunctionRepairRequest {
   string attached_function_id = 1;
+  string collection_id = 2;
 }
 
 message FinalizeAsyncAttachedFunctionRepairResponse {}

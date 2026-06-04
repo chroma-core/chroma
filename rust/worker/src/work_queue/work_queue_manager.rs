@@ -441,6 +441,7 @@ impl WorkQueueManager {
             let repair_request =
                 chroma_types::chroma_proto::FinalizeAsyncAttachedFunctionRepairRequest {
                     attached_function_id: item.fn_id.to_string(),
+                    collection_id: item.input_coll_id.to_string(),
                 };
 
             if let Err(e) = self

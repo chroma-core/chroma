@@ -48,7 +48,7 @@ type IAttachedFunctionDb interface {
 	GetAttachedFunctions(id *uuid.UUID, name *string, inputCollectionID *string, outputCollectionID *string, ids []uuid.UUID, onlyReady bool) ([]*AttachedFunction, error)
 	Update(attachedFunction *AttachedFunction) error
 	UpdateCompletionOffsetAndHeapEntry(id uuid.UUID, collectionID string, newOffset int64) error
-	UpdateHeapEntryPending(id uuid.UUID, heapEntryPending bool) error
+	UpdateHeapEntryPending(id uuid.UUID, collectionID string, heapEntryPending bool) error
 	Finish(id uuid.UUID) error
 	SoftDelete(inputCollectionID string, name string) error
 	SoftDeleteByID(id uuid.UUID, inputCollectionID uuid.UUID) error

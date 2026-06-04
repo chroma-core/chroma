@@ -2600,12 +2600,10 @@ impl ServiceBasedFrontend {
         database_name: DatabaseName,
         collection_id: String,
         function_name: String,
-        AddAttachedFunctionInputRequest {
-            input_collection_id,
-            ..
-        }: AddAttachedFunctionInputRequest,
+        request: AddAttachedFunctionInputRequest,
     ) -> Result<AddAttachedFunctionInputResponse, chroma_types::AttachFunctionError> {
         let mut sysdb_client = self.sysdb_client.clone();
+        let input_collection_id = request.input_collection_id;
         let collection_uuid =
             CollectionUuid(uuid::Uuid::parse_str(&collection_id).map_err(|e| {
                 chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(

@@ -12,7 +12,8 @@ use tokio::sync::oneshot::Sender;
 use tracing::Span;
 
 use crate::execution::operators::finish_async_work::{
-    FinishAsyncWorkError, FinishAsyncWorkInput, FinishAsyncWorkOperator, FinishAsyncWorkOutput,
+    FinishAsyncWorkError, FinishAsyncWorkInput, FinishAsyncWorkItem, FinishAsyncWorkOperator,
+    FinishAsyncWorkOutput,
 };
 use crate::execution::operators::finish_attached_function::{
     FinishAttachedFunctionError, FinishAttachedFunctionInput, FinishAttachedFunctionOperator,
@@ -21,9 +22,9 @@ use crate::execution::operators::finish_attached_function::{
 use crate::execution::operators::register::{
     RegisterError, RegisterInput, RegisterOperator, RegisterOutput,
 };
-use crate::execution::orchestration::attached_function_orchestrator::FunctionContext;
 use crate::execution::orchestration::compact::CollectionCompactInfo;
 use crate::execution::orchestration::compact::CompactionContextError;
+use crate::execution::orchestration::function_execution::FunctionContext;
 
 use super::compact::{CompactionContext, ExecutionState};
 
@@ -211,16 +212,34 @@ impl Orchestrator for RegisterOrchestrator {
             }
         };
         if let Some(function_context) = &self.function_context {
+            if function_context.input_progress.len() > 1 && !function_context.is_async {
+                self.terminate_with_result(
+                    Err(RegisterOrchestratorError::InvariantViolation(
+                        "Only async attached functions may register batched input progress",
+                    )),
+                    ctx,
+                )
+                .await;
+                return vec![];
+            }
+
             if function_context.is_async && self.context.is_fn_consumer {
                 // For async functions, use FinishAsyncWorkOperator to call work queue
                 if let Some(work_queue_client) = self.context.work_queue_client.clone() {
+                    let work_items = function_context
+                        .input_progress
+                        .iter()
+                        .map(|progress| FinishAsyncWorkItem {
+                            input_collection_id: progress.input_collection_id,
+                            completion_offset: progress.updated_completion_offset as i64,
+                        })
+                        .collect();
                     vec![(
                         wrap(
                             Box::new(FinishAsyncWorkOperator::new()),
                             FinishAsyncWorkInput::new(
                                 function_context.attached_function_id,
-                                function_context.input_collection_id,
-                                function_context.updated_completion_offset as i64,
+                                work_items,
                                 work_queue_client,
                             ),
                             ctx.receiver(),
@@ -246,13 +265,30 @@ impl Orchestrator for RegisterOrchestrator {
                 vec![(
                     wrap(
                         FinishAttachedFunctionOperator::new(),
-                        FinishAttachedFunctionInput::new(
-                            collection_flush_infos,
-                            function_context.attached_function_id,
-                            function_context.updated_completion_offset,
-                            self.context.sysdb.clone(),
-                            self.context.log.clone(),
-                        ),
+                        {
+                            let progress = match function_context.input_progress.first() {
+                                Some(progress) if function_context.input_progress.len() == 1 => {
+                                    progress
+                                }
+                                _ => {
+                                    self.terminate_with_result(
+                                        Err(RegisterOrchestratorError::InvariantViolation(
+                                            "Sync attached functions must have exactly one input progress entry",
+                                        )),
+                                        ctx,
+                                    )
+                                    .await;
+                                    return vec![];
+                                }
+                            };
+                            FinishAttachedFunctionInput::new(
+                                collection_flush_infos,
+                                function_context.attached_function_id,
+                                progress.updated_completion_offset,
+                                self.context.sysdb.clone(),
+                                self.context.log.clone(),
+                            )
+                        },
                         ctx.receiver(),
                         self.context
                             .orchestrator_context

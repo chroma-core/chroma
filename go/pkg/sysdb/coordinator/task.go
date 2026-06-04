@@ -1467,7 +1467,13 @@ func (s *Coordinator) FinalizeAsyncAttachedFunctionRepair(ctx context.Context, r
 		return nil, status.Errorf(codes.InvalidArgument, "invalid attached_function_id: %v", err)
 	}
 
-	err = s.catalog.metaDomain.AttachedFunctionDb(ctx).UpdateHeapEntryPending(attachedFunctionID, false)
+	collectionID, err := types.ToUniqueID(&req.CollectionId)
+	if err != nil {
+		log.Error("Invalid collection ID", zap.Error(err))
+		return nil, status.Errorf(codes.InvalidArgument, "invalid collection_id: %v", err)
+	}
+
+	err = s.catalog.metaDomain.AttachedFunctionDb(ctx).UpdateHeapEntryPending(attachedFunctionID, collectionID.String(), false)
 	if err != nil {
 		log.Error("Failed to update heap_entry_pending", zap.Error(err))
 		return nil, err
