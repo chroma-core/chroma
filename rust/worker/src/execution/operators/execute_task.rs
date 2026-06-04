@@ -22,8 +22,7 @@ use thiserror::Error;
 
 use crate::execution::functions::{
     CountToFileAsyncExecutor, CounterFunctionFactory, HttpGenerateExecutor,
-    RevisionHistoryExecutor,
-    StatisticsFunctionExecutor,
+    RevisionHistoryExecutor, StatisticsFunctionExecutor,
 };
 use crate::execution::operators::materialize_logs::MaterializeLogOutput;
 

@@ -18,7 +18,6 @@ use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
 use chroma_sysdb::{DatabaseOrTopology, GetCollectionsOptions, SysDb};
 use chroma_system::System;
-use chroma_types::operators_generated::FUNCTION_COUNT_TO_FILE_ASYNC_NAME;
 use chroma_types::{
     operator::{
         Aggregate, CountResult, Filter, GetResult, GroupBy, Key, KnnBatch, KnnBatchResult,
@@ -2526,7 +2525,10 @@ impl ServiceBasedFrontend {
             .get_cached_collection(database_name.clone(), input_collection_id)
             .await?;
 
-        self.ensure_function_attachment_allowed(&function_id)?;
+        frontend_core::attached_function::ensure_function_attachment_allowed(
+            &function_id,
+            self.allow_reset,
+        )?;
 
         // Must use HNSW: the Go coordinator's FinishCreateAttachedFunction
         // hardcodes hnsw-distributed vector segments for the output collection.
@@ -2617,7 +2619,10 @@ impl ServiceBasedFrontend {
                 )))
             })?);
 
-        self.ensure_function_attachment_allowed(&function_name)?;
+        frontend_core::attached_function::ensure_function_attachment_allowed(
+            &function_name,
+            self.allow_reset,
+        )?;
 
         let add_input_result =
             frontend_core::attached_function_ops::prepare_add_attached_function_input(
@@ -2658,19 +2663,6 @@ impl ServiceBasedFrontend {
             .map_err(|e| chroma_types::AttachFunctionError::Internal(Box::new(e)))?,
             created: add_input_result.created,
         })
-    }
-
-    fn ensure_function_attachment_allowed(
-        &self,
-        function_name: &str,
-    ) -> Result<(), chroma_types::AttachFunctionError> {
-        if !self.allow_reset && function_name == FUNCTION_COUNT_TO_FILE_ASYNC_NAME {
-            return Err(chroma_types::AttachFunctionError::NotAllowed(
-                "count_to_file_async is only enabled when allow_reset is true".to_string(),
-            ));
-        }
-
-        Ok(())
     }
 
     async fn start_backfill(

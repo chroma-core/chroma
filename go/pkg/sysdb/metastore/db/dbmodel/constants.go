@@ -64,11 +64,11 @@ const (
 // functionIDToName maps function UUIDs to their names.
 // This avoids DB lookups for known built-in functions.
 var functionIDToName = map[uuid.UUID]string{
-	FunctionRecordCounter:   FunctionNameRecordCounter,
-	FunctionStatistics:      FunctionNameStatistics,
-	FunctionDummyAsync:      FunctionNameDummyAsync,
-	FunctionHttpGenerate:    FunctionNameHttpGenerate,
-	FunctionRevisionHistory: FunctionNameRevisionHistory,
+	FunctionRecordCounter:    FunctionNameRecordCounter,
+	FunctionStatistics:       FunctionNameStatistics,
+	FunctionDummyAsync:       FunctionNameDummyAsync,
+	FunctionHttpGenerate:     FunctionNameHttpGenerate,
+	FunctionRevisionHistory:  FunctionNameRevisionHistory,
 	FunctionCountToFileAsync: FunctionNameCountToFileAsync,
 }
 
