@@ -25,8 +25,9 @@ use chroma_types::{
         SearchPayloadResult, SearchRecord, SearchResult, Select,
     },
     plan::{Count, Get, Knn, Search, SearchPayload},
-    AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
-    AttachFunctionRequest, AttachFunctionResponse, Cmek, Collection, CollectionAndSegments,
+    AddAttachedFunctionInputRequest, AddAttachedFunctionInputResponse, AddCollectionRecordsError,
+    AddCollectionRecordsRequest, AddCollectionRecordsResponse, AttachFunctionRequest,
+    AttachFunctionResponse, AttachedFunctionApiResponse, Cmek, Collection, CollectionAndSegments,
     CollectionUuid, CountCollectionsError, CountCollectionsRequest, CountCollectionsResponse,
     CountRequest, CountResponse, CreateCollectionError, CreateCollectionRequest,
     CreateCollectionResponse, CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse,
@@ -2591,6 +2592,115 @@ impl ServiceBasedFrontend {
             .into_iter()
             .next()
             .ok_or_else(|| chroma_sysdb::GetAttachedFunctionError::NotFound)
+    }
+
+    pub async fn add_attached_function_input(
+        &mut self,
+        tenant_name: String,
+        database_name: DatabaseName,
+        collection_id: String,
+        function_name: String,
+        AddAttachedFunctionInputRequest {
+            input_collection_id,
+            ..
+        }: AddAttachedFunctionInputRequest,
+    ) -> Result<AddAttachedFunctionInputResponse, chroma_types::AttachFunctionError> {
+        let mut sysdb_client = self.sysdb_client.clone();
+        let collection_uuid =
+            CollectionUuid(uuid::Uuid::parse_str(&collection_id).map_err(|e| {
+                chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
+                    tonic::Status::invalid_argument(format!(
+                        "Client validation error: Invalid collection_id UUID format: {}",
+                        e
+                    )),
+                )))
+            })?);
+
+        let add_input_result = frontend_core::attached_function::add_attached_function_input(
+            &mut sysdb_client,
+            function_name,
+            collection_uuid,
+            input_collection_id,
+            database_name.clone(),
+        )
+        .await?;
+
+        if add_input_result.created {
+            self.start_backfill(
+                tenant_name,
+                database_name.clone(),
+                input_collection_id,
+                add_input_result.attached_function_id,
+            )
+            .await?;
+        }
+
+        let _finish_created = self
+            .sysdb_client
+            .finish_create_attached_function(
+                add_input_result.attached_function_id,
+                add_input_result.output_schema_str,
+            )
+            .await
+            .map_err(|e| chroma_types::AttachFunctionError::Internal(Box::new(e)))?;
+
+        Ok(AddAttachedFunctionInputResponse {
+            attached_function: AttachedFunctionApiResponse::from_attached_function(
+                chroma_types::AttachedFunction {
+                    input_collection_id,
+                    ..add_input_result.attached_function
+                },
+            )
+            .map_err(|e| chroma_types::AttachFunctionError::Internal(Box::new(e)))?,
+            created: add_input_result.created,
+        })
+    }
+
+    async fn start_backfill(
+        &mut self,
+        tenant_name: String,
+        database_name: DatabaseName,
+        input_collection_id: CollectionUuid,
+        _attached_function_id: chroma_types::AttachedFunctionUuid,
+    ) -> Result<(), chroma_types::AttachFunctionError> {
+        let input_collection = self
+            .get_cached_collection(database_name.clone(), input_collection_id)
+            .await
+            .map_err(|e| chroma_types::AttachFunctionError::Internal(Box::new(e)))?;
+
+        let dim = input_collection.dimension.unwrap_or(1) as usize;
+        let fake_embedding = vec![0.0; dim];
+        let cmek: Option<Cmek> = input_collection
+            .schema
+            .as_ref()
+            .and_then(|schema| schema.cmek.clone());
+
+        // Match the existing attach flow and push enough dummy records to
+        // trigger compaction for the newly added input collection.
+        let records = vec![
+            OperationRecord {
+                id: "backfill_id".to_string(),
+                embedding: Some(fake_embedding),
+                encoding: None,
+                metadata: None,
+                document: None,
+                operation: Operation::BackfillFn,
+            };
+            250
+        ];
+
+        self.log_client
+            .push_logs(
+                &tenant_name,
+                database_name,
+                input_collection_id,
+                records,
+                cmek,
+            )
+            .await
+            .map_err(|e| chroma_types::AttachFunctionError::Internal(Box::new(e)))?;
+
+        Ok(())
     }
 
     pub async fn detach_function(

@@ -30,6 +30,26 @@ func (s *Server) AttachFunction(ctx context.Context, req *coordinatorpb.AttachFu
 	return res, nil
 }
 
+func (s *Server) AddAttachedFunctionInput(ctx context.Context, req *coordinatorpb.AddAttachedFunctionInputRequest) (*coordinatorpb.AddAttachedFunctionInputResponse, error) {
+	log.Info("AddAttachedFunctionInput",
+		zap.String("attached_function_id", req.AttachedFunctionId),
+		zap.String("input_collection_id", req.InputCollectionId))
+
+	res, err := s.coordinator.AddAttachedFunctionInput(ctx, req)
+	if err != nil {
+		log.Error("AddAttachedFunctionInput failed", zap.Error(err))
+		if err == common.ErrAttachedFunctionAlreadyExists {
+			return nil, grpcutils.BuildAlreadyExistsGrpcError(err.Error())
+		}
+		if err == common.ErrFunctionNotFound || err == common.ErrAttachedFunctionNotFound {
+			return nil, grpcutils.BuildNotFoundGrpcError(err.Error())
+		}
+		return nil, err
+	}
+
+	return res, nil
+}
+
 func (s *Server) GetAttachedFunctions(ctx context.Context, req *coordinatorpb.GetAttachedFunctionsRequest) (*coordinatorpb.GetAttachedFunctionsResponse, error) {
 	log.Info("GetAttachedFunctions",
 		zap.Any("id", req.Id),

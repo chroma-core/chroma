@@ -597,6 +597,16 @@ message GetAttachedFunctionsResponse {
   repeated AttachedFunction attached_functions = 1;
 }
 
+message AddAttachedFunctionInputRequest {
+  string attached_function_id = 1;
+  string input_collection_id = 2;
+}
+
+message AddAttachedFunctionInputResponse {
+  AttachedFunction attached_function = 1;
+  bool created = 2;
+}
+
 message AttachedFunction {
   string id = 1;
   string name = 2;
@@ -774,6 +784,7 @@ service SysDB {
   rpc BatchGetCollectionSoftDeleteStatus(BatchGetCollectionSoftDeleteStatusRequest) returns (BatchGetCollectionSoftDeleteStatusResponse) {}
   rpc FlushCollectionCompaction(FlushCollectionCompactionRequest) returns (FlushCollectionCompactionResponse) {}
   rpc AttachFunction(AttachFunctionRequest) returns (AttachFunctionResponse) {}
+  rpc AddAttachedFunctionInput(AddAttachedFunctionInputRequest) returns (AddAttachedFunctionInputResponse) {}
   rpc GetAttachedFunctions(GetAttachedFunctionsRequest) returns (GetAttachedFunctionsResponse) {}
   rpc DetachFunction(DetachFunctionRequest) returns (DetachFunctionResponse) {}
   rpc FinishCreateAttachedFunction(FinishCreateAttachedFunctionRequest) returns (FinishCreateAttachedFunctionResponse) {}

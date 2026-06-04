@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Dict, Any
+from typing import TYPE_CHECKING, Optional, Dict, Any, Tuple
 from uuid import UUID
 import json
 
@@ -73,6 +73,16 @@ class AttachedFunction:
     def params(self) -> Optional[Dict[str, Any]]:
         """The function parameters."""
         return self._params
+
+    def add_input(self, input_collection_id: UUID) -> Tuple["AttachedFunction", bool]:
+        """Add a new input collection to this async attached function."""
+        return self._client.add_attached_function_input(
+            name=self._name,
+            existing_input_collection_id=self._input_collection_id,
+            new_input_collection_id=input_collection_id,
+            tenant=self._tenant,
+            database=self._database,
+        )
 
     @staticmethod
     def _normalize_params(params: Optional[Any]) -> Dict[str, Any]:

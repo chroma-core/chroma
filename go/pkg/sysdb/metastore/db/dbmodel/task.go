@@ -11,7 +11,7 @@ type AttachedFunction struct {
 	Name                    string     `gorm:"column:name;type:text;not null;uniqueIndex:unique_attached_function_per_collection,priority:2"`
 	TenantID                string     `gorm:"column:tenant_id;type:text;not null"`
 	DatabaseID              string     `gorm:"column:database_id;type:text;not null"`
-	InputCollectionID       string     `gorm:"column:input_collection_id;type:text;not null;uniqueIndex:unique_attached_function_per_collection,priority:1"`
+	InputCollectionID       string     `gorm:"column:input_collection_id;primaryKey;type:text;not null;uniqueIndex:unique_attached_function_per_collection,priority:1"`
 	OutputCollectionName    string     `gorm:"column:output_collection_name;type:text;not null"`
 	OutputCollectionID      *string    `gorm:"column:output_collection_id;type:text;default:null"`
 	FunctionID              uuid.UUID  `gorm:"column:function_id;type:uuid;not null"`
