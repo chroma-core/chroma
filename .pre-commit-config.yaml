@@ -28,8 +28,11 @@ repos:
     rev: 7.0.0
     hooks:
       - id: flake8
+        additional_dependencies:
+          - flake8-tidy-imports
         args:
-          - "--extend-ignore=E203,E501,E503"
+          - "--extend-ignore=E203,E501,E503,I250"
+          - "--ban-relative-imports=true"
           - "--max-line-length=88"
 
   - repo: https://github.com/pre-commit/mirrors-mypy
