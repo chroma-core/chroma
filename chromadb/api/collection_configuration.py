@@ -6,6 +6,7 @@ from chromadb.api.types import (
     UpdateMetadata,
     EmbeddingFunction,
 )
+from chromadb.errors import InvalidArgumentError
 from chromadb.utils.embedding_functions import (
     known_embedding_functions,
     register_embedding_function,
@@ -60,7 +61,7 @@ def load_collection_configuration_from_json(
         config_json_map.get("spann") is not None
         and config_json_map.get("hnsw") is not None
     ):
-        raise ValueError("hnsw and spann cannot both be provided")
+        raise InvalidArgumentError("hnsw and spann cannot both be provided")
 
     hnsw_config = None
     spann_config = None
@@ -86,19 +87,19 @@ def load_collection_configuration_from_json(
             try:
                 ef_name = ef_config["name"]
             except KeyError:
-                raise ValueError(
+                raise InvalidArgumentError(
                     f"Embedding function name not found in config: {ef_config}"
                 )
             try:
                 ef = known_embedding_functions[ef_name]
             except KeyError:
-                raise ValueError(
+                raise InvalidArgumentError(
                     f"Embedding function {ef_name} not found. Add @register_embedding_function decorator to the class definition."
                 )
             try:
                 ef = ef.build_from_config(ef_config["config"])  # type: ignore
             except Exception as e:
-                raise ValueError(
+                raise InvalidArgumentError(
                     f"Could not build embedding function {ef_config['name']} from config {ef_config['config']}: {e}"
                 )
     else:
@@ -139,12 +140,12 @@ def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[st
         try:
             hnsw_config = cast(HNSWConfiguration, hnsw_config)
         except Exception as e:
-            raise ValueError(f"not a valid hnsw config: {e}")
+            raise InvalidArgumentError(f"not a valid hnsw config: {e}")
     if spann_config is not None:
         try:
             spann_config = cast(SpannConfiguration, spann_config)
         except Exception as e:
-            raise ValueError(f"not a valid spann config: {e}")
+            raise InvalidArgumentError(f"not a valid spann config: {e}")
 
     if ef is None:
         ef = None
@@ -197,7 +198,7 @@ def json_to_create_hnsw_configuration(
         if space_value in get_args(Space):
             config["space"] = space_value
         else:
-            raise ValueError(f"not a valid space: {space_value}")
+            raise InvalidArgumentError(f"not a valid space: {space_value}")
     if "ef_construction" in json_map:
         config["ef_construction"] = json_map["ef_construction"]
     if "max_neighbors" in json_map:
@@ -240,7 +241,7 @@ def json_to_create_spann_configuration(
         if space_value in get_args(Space):
             config["space"] = space_value
         else:
-            raise ValueError(f"not a valid space: {space_value}")
+            raise InvalidArgumentError(f"not a valid space: {space_value}")
     if "ef_construction" in json_map:
         config["ef_construction"] = json_map["ef_construction"]
     if "ef_search" in json_map:
@@ -292,7 +293,7 @@ def load_create_collection_configuration_from_json(
     json_map: Dict[str, Any]
 ) -> CreateCollectionConfiguration:
     if json_map.get("hnsw") is not None and json_map.get("spann") is not None:
-        raise ValueError("hnsw and spann cannot both be provided")
+        raise InvalidArgumentError("hnsw and spann cannot both be provided")
 
     result = CreateCollectionConfiguration()
 
@@ -340,12 +341,12 @@ def create_collection_configuration_to_json(
         try:
             hnsw_config = cast(CreateHNSWConfiguration, hnsw_config)
         except Exception as e:
-            raise ValueError(f"not a valid hnsw config: {e}")
+            raise InvalidArgumentError(f"not a valid hnsw config: {e}")
     if spann_config is not None:
         try:
             spann_config = cast(CreateSpannConfiguration, spann_config)
         except Exception as e:
-            raise ValueError(f"not a valid spann config: {e}")
+            raise InvalidArgumentError(f"not a valid spann config: {e}")
 
     if hnsw_config is not None and spann_config is not None:
         raise ValueError("hnsw and spann cannot both be provided")
@@ -607,7 +608,7 @@ def load_update_collection_configuration_from_json(
 ) -> UpdateCollectionConfiguration:
     """Convert a JSON dict to an UpdateCollectionConfiguration"""
     if json_map.get("hnsw") is not None and json_map.get("spann") is not None:
-        raise ValueError("hnsw and spann cannot both be provided")
+        raise InvalidArgumentError("hnsw and spann cannot both be provided")
 
     result = UpdateCollectionConfiguration()
 
