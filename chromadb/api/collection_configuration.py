@@ -349,7 +349,7 @@ def create_collection_configuration_to_json(
             raise InvalidArgumentError(f"not a valid spann config: {e}")
 
     if hnsw_config is not None and spann_config is not None:
-        raise ValueError("hnsw and spann cannot both be provided")
+        raise InvalidArgumentError("hnsw and spann cannot both be provided")
 
     if config.get("embedding_function") is None:
         ef = None
@@ -565,13 +565,13 @@ def update_collection_configuration_to_json(
         try:
             hnsw_config = cast(UpdateHNSWConfiguration, hnsw_config)
         except Exception as e:
-            raise ValueError(f"not a valid hnsw config: {e}")
+            raise InvalidArgumentError(f"not a valid hnsw config: {e}")
 
     if spann_config is not None:
         try:
             spann_config = cast(UpdateSpannConfiguration, spann_config)
         except Exception as e:
-            raise ValueError(f"not a valid spann config: {e}")
+            raise InvalidArgumentError(f"not a valid spann config: {e}")
 
     ef_config: Dict[str, Any] | None = None
     if ef is not None:
@@ -692,7 +692,7 @@ def overwrite_embedding_function(
 
     # Validate function compatibility
     if existing_embedding_function.name() != update_embedding_function.name():
-        raise ValueError(
+        raise InvalidArgumentError(
             f"Cannot update embedding function: incompatible types "
             f"({existing_embedding_function.name()} vs {update_embedding_function.name()})"
         )
@@ -712,7 +712,7 @@ def overwrite_collection_configuration(
     update_spann = update_config.get("spann")
     update_hnsw = update_config.get("hnsw")
     if update_spann is not None and update_hnsw is not None:
-        raise ValueError("hnsw and spann cannot both be provided")
+        raise InvalidArgumentError("hnsw and spann cannot both be provided")
 
     # Handle HNSW configuration update
 
@@ -770,7 +770,7 @@ def validate_embedding_function_conflict_on_create(
             embedding_function.name() != "default"
             and embedding_function.name() != configuration_ef.name()
         ):
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"Multiple embedding functions provided. Please provide only one. Embedding function conflict: {embedding_function.name()} vs {configuration_ef.name()}"
             )
     return None
@@ -793,7 +793,7 @@ def validate_embedding_function_conflict_on_get(
             and persisted_ef_config.get("name") is not None
             and persisted_ef_config.get("name") != embedding_function.name()
         ):
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"An embedding function already exists in the collection configuration, and a new one is provided. If this is intentional, please embed documents separately. Embedding function conflict: new: {embedding_function.name()} vs persisted: {persisted_ef_config.get('name')}"
             )
     return None
@@ -819,18 +819,18 @@ def update_schema_from_collection_configuration(
         schema.defaults.float_list is None
         or schema.defaults.float_list.vector_index is None
     ):
-        raise ValueError("Schema is missing defaults.float_list.vector_index")
+        raise InvalidArgumentError("Schema is missing defaults.float_list.vector_index")
 
     embedding_key = "#embedding"
     if embedding_key not in schema.keys:
-        raise ValueError(f"Schema is missing keys[{embedding_key}]")
+        raise InvalidArgumentError(f"Schema is missing keys[{embedding_key}]")
 
     embedding_value_types = schema.keys[embedding_key]
     if (
         embedding_value_types.float_list is None
         or embedding_value_types.float_list.vector_index is None
     ):
-        raise ValueError(
+        raise InvalidArgumentError(
             f"Schema is missing keys[{embedding_key}].float_list.vector_index"
         )
 
@@ -842,7 +842,7 @@ def update_schema_from_collection_configuration(
         if "hnsw" in configuration and configuration["hnsw"] is not None:
             # Update HNSW config
             if vector_index.config.hnsw is None:
-                raise ValueError("Trying to update HNSW config but schema has SPANN")
+                raise InvalidArgumentError("Trying to update HNSW config but schema has SPANN")
 
             hnsw_config = vector_index.config.hnsw
             update_hnsw = configuration["hnsw"]
@@ -862,7 +862,7 @@ def update_schema_from_collection_configuration(
         elif "spann" in configuration and configuration["spann"] is not None:
             # Update SPANN config
             if vector_index.config.spann is None:
-                raise ValueError("Trying to update SPANN config but schema has HNSW")
+                raise InvalidArgumentError("Trying to update SPANN config but schema has HNSW")
 
             spann_config = vector_index.config.spann
             update_spann = configuration["spann"]
