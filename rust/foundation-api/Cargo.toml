@@ -12,6 +12,7 @@ async-trait = { workspace = true }
 axum = { workspace = true }
 figment = { workspace = true }
 opentelemetry = { workspace = true }
+reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

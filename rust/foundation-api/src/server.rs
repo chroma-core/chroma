@@ -132,13 +132,27 @@ impl FoundationApiServer {
                 })
                 .collect::<Vec<_>>();
 
-            let mut cors_builder = CorsLayer::new()
-                .allow_headers(tower_http::cors::Any)
-                .allow_methods(tower_http::cors::Any);
+            let mut cors_builder = CorsLayer::new().allow_methods(tower_http::cors::Any);
             if origins.len() == 1 && origins[0] == "*" {
-                cors_builder = cors_builder.allow_origin(tower_http::cors::Any);
+                // Wildcard origins are incompatible with `allow_credentials`
+                // per the CORS spec — keep the existing permissive setup
+                // for this case (CLI / non-browser callers don't need
+                // credentialed requests).
+                cors_builder = cors_builder
+                    .allow_origin(tower_http::cors::Any)
+                    .allow_headers(tower_http::cors::Any);
             } else {
-                cors_builder = cors_builder.allow_origin(origins);
+                // Explicit origin list → safe to enable credentialed
+                // cookie requests so foundation-ui can call us with
+                // `credentials: 'include'` and the session cookie rides
+                // through to the cookie-auth path on `/api/sync-status`.
+                cors_builder = cors_builder
+                    .allow_origin(origins)
+                    .allow_headers([
+                        axum::http::header::CONTENT_TYPE,
+                        axum::http::HeaderName::from_static("x-chroma-token"),
+                    ])
+                    .allow_credentials(true);
             }
 
             app = app.layer(cors_builder);

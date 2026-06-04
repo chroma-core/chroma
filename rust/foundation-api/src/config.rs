@@ -61,6 +61,21 @@ pub struct FoundationConfig {
     /// attached function is invoked. Matches the chroma frontend default.
     #[serde(default = "FoundationConfig::default_min_records_for_invocation")]
     pub min_records_for_invocation: u64,
+    /// Base URL of the sync-frontend service (e.g.
+    /// `http://sync-frontend.chroma-sync.svc.cluster.local:8007`).
+    /// `GET /api/sync-status` proxies to
+    /// `${sync_frontend_url}/foundation/status`, forwarding the caller's
+    /// `x-chroma-token`. Absent in config -> the route returns 503.
+    #[serde(default)]
+    pub sync_frontend_url: Option<String>,
+    /// Base URL of dashboard-api (e.g.
+    /// `http://dashboard-api.chroma-management.svc.cluster.local:8002`).
+    /// Foundation-api calls dashboard-api's session-identity endpoint to
+    /// translate browser session cookies into team API keys it can use
+    /// against downstream services. Absent in config -> only the
+    /// `x-chroma-token` (CLI) path works; cookie requests return 503.
+    #[serde(default)]
+    pub dashboard_api_url: Option<String>,
 }
 
 impl FoundationConfig {
@@ -102,6 +117,8 @@ impl Default for FoundationConfig {
             function_name: Self::default_function_name(),
             function_endpoint_url: None,
             min_records_for_invocation: Self::default_min_records_for_invocation(),
+            sync_frontend_url: None,
+            dashboard_api_url: None,
         }
     }
 }
