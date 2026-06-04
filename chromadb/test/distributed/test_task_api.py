@@ -420,6 +420,50 @@ def test_attach_to_output_collection_succeeds_for_async_upstream(
     assert created is True
 
 
+def test_async_attached_function_can_add_multiple_inputs(
+    basic_http_client: System,
+) -> None:
+    """Test that an async attached function can add another input collection through the client handle."""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    input_collection_1 = client.create_collection(name="multi_input_collection_1")
+    input_collection_1.add(ids=["id1"], documents=["doc1"])
+
+    input_collection_2 = client.create_collection(name="multi_input_collection_2")
+    input_collection_2.add(ids=["id2"], documents=["doc2"])
+
+    attached_fn, created = input_collection_1.attach_function(
+        name="multi_input_async_function",
+        function=DUMMY_ASYNC_FUNCTION,
+        output_collection="multi_input_output_collection",
+        params=None,
+    )
+
+    assert created is True
+    assert attached_fn.input_collection_id == input_collection_1.id
+
+    added_input_fn = attached_fn.add_input(input_collection_2)
+    assert added_input_fn.id == attached_fn.id
+    assert added_input_fn.name == attached_fn.name
+    assert added_input_fn.function_name == attached_fn.function_name
+    assert added_input_fn.input_collection_id == input_collection_2.id
+    assert added_input_fn.output_collection == attached_fn.output_collection
+
+    retrieved_from_first_input = input_collection_1.get_attached_function(
+        attached_fn.name
+    )
+    assert retrieved_from_first_input == attached_fn
+
+    retrieved_from_second_input = input_collection_2.get_attached_function(
+        attached_fn.name
+    )
+    assert retrieved_from_second_input == added_input_fn
+
+    # Re-adding the same input should be idempotent and return the same handle shape.
+    assert added_input_fn.add_input(input_collection_2) == added_input_fn
+
+
 def test_attach_to_output_collection_fails_for_mixed_sync_and_async_upstream(
     basic_http_client: System,
 ) -> None:

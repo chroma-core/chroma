@@ -20,17 +20,17 @@ use chroma_types::{
     plan::{ReadLevel, SearchPayload},
     AddCollectionRecordsRequest, AddCollectionRecordsResponse, AttachFunctionResponse, Collection,
     CollectionUuid, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse,
-    DetachFunctionResponse, EmbeddingFunctionConfiguration, GetAttachedFunctionResponse,
-    GetRequest, GetResponse, IncludeList, IndexStatusResponse, Metadata, QueryRequest,
-    QueryResponse, Schema, SearchRequest, SearchResponse, UpdateCollectionRecordsRequest,
-    UpdateCollectionRecordsResponse, UpdateMetadata, UpsertCollectionRecordsRequest,
-    UpsertCollectionRecordsResponse, Where, EMBEDDING_KEY,
+    DetachFunctionResponse, EmbeddingFunctionConfiguration, GetRequest, GetResponse, IncludeList,
+    IndexStatusResponse, Metadata, QueryRequest, QueryResponse, Schema, SearchRequest,
+    SearchResponse, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
+    UpdateMetadata, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where,
+    EMBEDDING_KEY,
 };
 use reqwest::Method;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::embed::{chroma_cloud::ChromaCloudQwenEmbeddingFunction, EmbeddingFunction};
-use crate::{client::ChromaHttpClientError, ChromaHttpClient};
+use crate::{client::ChromaHttpClientError, ChromaAttachedFunction, ChromaHttpClient};
 
 #[derive(Deserialize)]
 struct ForkCountResponse {
@@ -271,6 +271,20 @@ impl ChromaCollection {
     /// ```
     pub fn id(&self) -> CollectionUuid {
         self.collection.collection_id
+    }
+
+    /// Gets an attached function by name for this collection.
+    ///
+    /// Returns a handle scoped to this collection's participation in the attached
+    /// function. For multi-input async attached functions, the returned handle can
+    /// be used to add more input collections via [`ChromaAttachedFunction::add_input`].
+    pub async fn get_attached_function(
+        &self,
+        name: impl AsRef<str>,
+    ) -> Result<ChromaAttachedFunction, ChromaHttpClientError> {
+        self.client
+            .get_attached_function(self.collection.collection_id, name)
+            .await
     }
 
     /// Returns the version number of this collection's schema or configuration.
@@ -1092,31 +1106,6 @@ impl ChromaCollection {
             .await?;
         let created = response.created;
         Ok((response, created))
-    }
-
-    /// Gets an attached function by name for this collection.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - Name of the attached function instance
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// # use chroma::ChromaCollection;
-    /// # async fn example(collection: ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
-    /// let response = collection.get_attached_function("my_stats").await?;
-    /// println!("Function: {}", response.attached_function.function_name);
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn get_attached_function(
-        &self,
-        name: impl AsRef<str>,
-    ) -> Result<GetAttachedFunctionResponse, ChromaHttpClientError> {
-        let path = format!("functions/{}", name.as_ref());
-        self.send::<(), _>(true, "get_attached_function", &path, Method::GET, None)
-            .await
     }
 
     /// Detaches a function from this collection, preventing further executions.
