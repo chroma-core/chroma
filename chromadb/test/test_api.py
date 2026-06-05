@@ -853,6 +853,24 @@ def test_where_validation_query(client):
         collection.query(query_embeddings=[0, 0, 0], where={"value": {"nested": "5"}})
 
 
+def test_where_in_bool_int_order_independent():
+    """validate_where $in/$nin must reject mixed bool/int regardless of element order."""
+    from chromadb.api.types import validate_where
+
+    # Both orderings should raise — bool and int are distinct types
+    for operand in [[True, 1], [1, True]]:
+        with pytest.raises(ValueError, match="same type"):
+            validate_where({"key": {"$in": operand}})
+        with pytest.raises(ValueError, match="same type"):
+            validate_where({"key": {"$nin": operand}})
+
+    # Homogeneous lists should pass
+    validate_where({"key": {"$in": [True, False]}})
+    validate_where({"key": {"$in": [1, 2, 3]}})
+    validate_where({"key": {"$nin": [True, False]}})
+    validate_where({"key": {"$nin": [1, 2, 3]}})
+
+
 operator_records = {
     "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
     "ids": ["id1", "id2"],
