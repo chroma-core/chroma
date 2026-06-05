@@ -4,6 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_types::{AttachedFunction, Chunk, LogRecord, MaterializedLogOperation};
+use frontend_core::foundation::source_kind_for_collection_name;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -36,7 +37,7 @@ struct GenerateRecordSet {
 
 #[derive(Debug, Serialize)]
 struct GenerateRequest {
-    record_set: GenerateRecordSet,
+    record_sets: Vec<GenerateRecordSet>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -53,11 +54,7 @@ struct StatusResponse {
 #[derive(Debug)]
 pub struct HttpGenerateExecutor {
     endpoint_url: String,
-    source_collection: String,
-    source_kind: String,
     output_collection: String,
-    tenant_id: String,
-    database_id: String,
     modal_key: String,
     modal_secret: String,
     client: reqwest::Client,
@@ -91,8 +88,7 @@ impl ChromaError for HttpGenerateError {
 impl HttpGenerateExecutor {
     /// Build from an `AttachedFunction`.
     ///
-    /// Reads `endpoint_url`, `source_collection`, and `source_kind` from
-    /// params JSON.  Modal proxy-auth tokens come from env vars
+    /// Reads `endpoint_url` from params JSON. Modal proxy-auth tokens come from env vars
     /// `MODAL_KEY` and `MODAL_SECRET`.
     pub fn from_attached_function(af: &AttachedFunction) -> Result<Self, Box<dyn ChromaError>> {
         let params_json = af.params.as_deref().unwrap_or("{}");
@@ -112,8 +108,6 @@ impl HttpGenerateExecutor {
         };
 
         let endpoint_url = get_str("endpoint_url")?;
-        let source_collection = get_str("source_collection")?;
-        let source_kind = get_str("source_kind")?;
 
         let modal_key = std::env::var("MODAL_KEY").map_err(|_| {
             Box::new(HttpGenerateError::MissingEnvVar("MODAL_KEY".into())) as Box<dyn ChromaError>
@@ -125,11 +119,7 @@ impl HttpGenerateExecutor {
 
         Ok(Self {
             endpoint_url,
-            source_collection,
-            source_kind,
             output_collection: af.output_collection_name.clone(),
-            tenant_id: af.tenant_id.clone(),
-            database_id: af.database_id.clone(),
             modal_key,
             modal_secret,
             client: reqwest::Client::builder()
@@ -289,10 +279,11 @@ impl AttachedFunctionExecutor for HttpGenerateExecutor {
         input_batches: Vec<HydratedInputBatch<'_, '_>>,
         _output_reader: Option<&chroma_segment::blockfile_record::RecordSegmentReaderShard<'_>>,
     ) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>> {
-        let mut records = Vec::new();
+        let mut record_sets = Vec::new();
 
-        for input_batch in &input_batches {
-            for (record, _) in input_batch.records.iter() {
+        for batch in &input_batches {
+            let mut records = Vec::new();
+            for (record, _) in batch.records.iter() {
                 if record.get_operation() == MaterializedLogOperation::DeleteExisting {
                     continue;
                 }
@@ -311,43 +302,75 @@ impl AttachedFunctionExecutor for HttpGenerateExecutor {
                     metadata,
                 });
             }
+
+            if records.is_empty() {
+                continue;
+            }
+
+            record_sets.push(GenerateRecordSet {
+                tenant_id: batch.tenant_id.clone(),
+                database_id: batch.database_id.clone(),
+                source_collection: batch.input_collection_name.clone(),
+                source_kind: source_kind_for_collection_name(&batch.input_collection_name)
+                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?
+                    .to_string(),
+                output_collection: self.output_collection.clone(),
+                base_collection: None,
+                records,
+                completion_offset: batch.completion_offset,
+            });
         }
 
-        if records.is_empty() {
+        if record_sets.is_empty() {
             tracing::info!("[HttpGenerateExecutor] No non-delete records to process");
             return Ok(Chunk::new(Arc::from(Vec::<LogRecord>::new())));
         }
 
-        let num_records = records.len();
-        let request_body = GenerateRequest {
-            record_set: GenerateRecordSet {
-                tenant_id: self.tenant_id.clone(),
-                database_id: self.database_id.clone(),
-                source_collection: self.source_collection.clone(),
-                source_kind: self.source_kind.clone(),
-                output_collection: self.output_collection.clone(),
-                base_collection: None,
-                records,
-                // TODO: Remove completion offset from the schema of this request
-                completion_offset: 0,
-            },
-        };
+        let total_records: usize = record_sets
+            .iter()
+            .map(|record_set| record_set.records.len())
+            .sum();
+        let request_body = GenerateRequest { record_sets };
 
         tracing::info!(
-            "[HttpGenerateExecutor] Spawning generation for {} records via {}",
-            num_records,
+            "[HttpGenerateExecutor] Spawning generation for {} record sets / {} records via {}",
+            request_body.record_sets.len(),
+            total_records,
             self.endpoint_url,
         );
 
-        // 1. POST /generate → get call_id
         let call_id = self.spawn_generation(&request_body).await?;
         tracing::info!(
             "[HttpGenerateExecutor] Job spawned with call_id={call_id}, polling for completion"
         );
 
-        // 2. Poll GET /status/{call_id} until done
         self.poll_until_done(&call_id).await?;
 
         Ok(Chunk::new(Arc::from(Vec::<LogRecord>::new())))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GenerateRecordSet;
+    use frontend_core::foundation::source_kind_for_collection_name;
+
+    #[test]
+    fn generate_record_set_carries_canonical_source_kind() {
+        let record_set = GenerateRecordSet {
+            tenant_id: "tenant".to_string(),
+            database_id: "database".to_string(),
+            source_collection: "slack_master".to_string(),
+            source_kind: source_kind_for_collection_name("slack_master")
+                .unwrap()
+                .to_string(),
+            output_collection: "wiki".to_string(),
+            base_collection: None,
+            records: Vec::new(),
+            completion_offset: 0,
+        };
+
+        assert_eq!(record_set.source_kind, "slack");
+        assert_eq!(record_set.source_collection, "slack_master");
     }
 }
