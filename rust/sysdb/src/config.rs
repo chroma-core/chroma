@@ -63,6 +63,8 @@ impl Default for GrpcSysDbConfig {
 pub struct SqliteSysDbConfig {
     pub log_topic_namespace: String,
     pub log_tenant: String,
+    #[serde(default)]
+    pub persist_path: Option<String>,
 }
 
 impl Default for SqliteSysDbConfig {
@@ -70,6 +72,7 @@ impl Default for SqliteSysDbConfig {
         SqliteSysDbConfig {
             log_topic_namespace: "default".to_string(),
             log_tenant: "default".to_string(),
+            persist_path: None,
         }
     }
 }
