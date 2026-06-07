@@ -1,3 +1,4 @@
+# TODO(#2586): Tests migrated to chromadb/test/api/ — this file will be removed after migration is complete
 # type: ignore
 import os
 import shutil
