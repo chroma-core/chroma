@@ -891,6 +891,10 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
         let operator = match ExecuteAttachedFunctionOperator::from_attached_function(
             &attached_function.attached_function,
             self.output_context.log.clone(),
+            self.output_context
+                .blockfile_provider
+                .storage()
+                .map(|storage| storage.as_ref().clone()),
         ) {
             Ok(op) => Box::new(op),
             Err(e) => {
