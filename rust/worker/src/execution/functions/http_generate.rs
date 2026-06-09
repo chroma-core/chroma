@@ -3,12 +3,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chroma_error::ChromaError;
-use chroma_segment::types::HydratedMaterializedLogRecord;
 use chroma_types::{AttachedFunction, Chunk, LogRecord, MaterializedLogOperation};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::execution::operators::execute_task::AttachedFunctionExecutor;
+use crate::execution::operators::execute_task::{AttachedFunctionExecutor, HydratedInputBatch};
 
 const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
@@ -287,13 +286,13 @@ fn metadata_value_to_json(value: &chroma_types::MetadataValue) -> serde_json::Va
 impl AttachedFunctionExecutor for HttpGenerateExecutor {
     async fn execute(
         &self,
-        input_records: Vec<Chunk<HydratedMaterializedLogRecord<'_, '_>>>,
+        input_batches: Vec<HydratedInputBatch<'_, '_>>,
         _output_reader: Option<&chroma_segment::blockfile_record::RecordSegmentReaderShard<'_>>,
     ) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>> {
         let mut records = Vec::new();
 
-        for input_batch in &input_records {
-            for (record, _) in input_batch.iter() {
+        for input_batch in &input_batches {
+            for (record, _) in input_batch.records.iter() {
                 if record.get_operation() == MaterializedLogOperation::DeleteExisting {
                     continue;
                 }

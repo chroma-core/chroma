@@ -3,12 +3,11 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::blockfile_record::RecordSegmentReaderShard;
-use chroma_segment::types::HydratedMaterializedLogRecord;
 use chroma_storage::{PutOptions, Storage, StorageError};
 use chroma_types::{AttachedFunction, Chunk, LogRecord, MaterializedLogOperation};
 use thiserror::Error;
 
-use crate::execution::operators::execute_task::AttachedFunctionExecutor;
+use crate::execution::operators::execute_task::{AttachedFunctionExecutor, HydratedInputBatch};
 
 const DEFAULT_PARAM_KEY: &str = "s3_path";
 
@@ -131,24 +130,24 @@ impl CountToFileAsyncExecutor {
 impl AttachedFunctionExecutor for CountToFileAsyncExecutor {
     async fn execute(
         &self,
-        input_records: Vec<Chunk<HydratedMaterializedLogRecord<'_, '_>>>,
+        input_batches: Vec<HydratedInputBatch<'_, '_>>,
         _output_reader: Option<&RecordSegmentReaderShard<'_>>,
     ) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>> {
         let key = self
             .parse_storage_key(&self.storage)
             .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
 
-        let delete_count = input_records
+        let delete_count = input_batches
             .iter()
-            .flat_map(|batch| batch.iter())
+            .flat_map(|batch| batch.records.iter())
             .filter(|(record, _)| {
                 record.get_operation() == MaterializedLogOperation::DeleteExisting
             })
             .count() as i64;
 
-        let insert_count = input_records
+        let insert_count = input_batches
             .iter()
-            .flat_map(|batch| batch.iter())
+            .flat_map(|batch| batch.records.iter())
             .filter(|(record, _)| record.get_operation() == MaterializedLogOperation::AddNew)
             .count() as i64;
 

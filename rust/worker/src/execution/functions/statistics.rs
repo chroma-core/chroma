@@ -19,7 +19,7 @@ use chroma_types::{
 };
 use futures::StreamExt;
 
-use crate::execution::operators::execute_task::AttachedFunctionExecutor;
+use crate::execution::operators::execute_task::{AttachedFunctionExecutor, HydratedInputBatch};
 
 /// Create an accumulator for statistics.
 pub trait StatisticsFunctionFactory: std::fmt::Debug + Send + Sync {
@@ -351,15 +351,15 @@ impl StatisticsFunctionExecutor {
 impl AttachedFunctionExecutor for StatisticsFunctionExecutor {
     async fn execute(
         &self,
-        input_records: Vec<Chunk<HydratedMaterializedLogRecord<'_, '_>>>,
+        input_batches: Vec<HydratedInputBatch<'_, '_>>,
         output_reader: Option<&RecordSegmentReaderShard<'_>>,
     ) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>> {
         // Load existing statistics from output_reader if available
         let mut counts = self.load_existing_statistics(output_reader).await?;
 
         // Process new input records and update counts
-        for input_batch in &input_records {
-            for (hydrated_record, _index) in input_batch.iter() {
+        for input_batch in &input_batches {
+            for (hydrated_record, _index) in input_batch.records.iter() {
                 if hydrated_record.get_operation() == MaterializedLogOperation::DeleteExisting {
                     for (key, old_value) in hydrated_record.merged_metadata() {
                         for stats_value in StatisticsValue::from_metadata_value(&old_value) {
@@ -552,6 +552,19 @@ mod tests {
         hydrated_records
     }
 
+    fn make_input_batch<'a>(
+        records: Chunk<HydratedMaterializedLogRecord<'a, 'a>>,
+    ) -> HydratedInputBatch<'a, 'a> {
+        HydratedInputBatch {
+            input_collection_id: chroma_types::CollectionUuid::new(),
+            input_collection_name: "test-input".to_string(),
+            tenant_id: "test-tenant".to_string(),
+            database_id: "test-database".to_string(),
+            completion_offset: 0,
+            records,
+        }
+    }
+
     fn extract_metadata_tuple(metadata: &UpdateMetadata) -> (i64, String, String, String) {
         let count = match metadata.get("count") {
             Some(UpdateMetadataValue::Int(value)) => *value,
@@ -733,7 +746,7 @@ mod tests {
         let input = Chunk::new(std::sync::Arc::from(hydrated));
 
         let output = executor
-            .execute(vec![input], None)
+            .execute(vec![make_input_batch(input)], None)
             .await
             .expect("execution succeeds");
 
@@ -846,7 +859,7 @@ mod tests {
         let input = Chunk::new(std::sync::Arc::from(hydrated));
 
         let output = executor
-            .execute(vec![input], None)
+            .execute(vec![make_input_batch(input)], None)
             .await
             .expect("execution succeeds");
 
@@ -905,7 +918,7 @@ mod tests {
         let input = Chunk::new(std::sync::Arc::from(hydrated));
 
         let output = executor
-            .execute(vec![input], None)
+            .execute(vec![make_input_batch(input)], None)
             .await
             .expect("execution succeeds");
 
@@ -954,7 +967,7 @@ mod tests {
         let input = Chunk::new(std::sync::Arc::from(hydrated));
 
         let output = executor
-            .execute(vec![input], None)
+            .execute(vec![make_input_batch(input)], None)
             .await
             .expect("execution succeeds");
 
@@ -984,7 +997,7 @@ mod tests {
         let input = Chunk::new(std::sync::Arc::from(hydrated));
 
         let output = executor
-            .execute(vec![input], None)
+            .execute(vec![make_input_batch(input)], None)
             .await
             .expect("execution succeeds");
 
@@ -1062,7 +1075,7 @@ mod tests {
 
         // Execute with OUTPUT collection reader to load existing statistics
         let output = executor
-            .execute(vec![input], Some(&output_record_reader))
+            .execute(vec![make_input_batch(input)], Some(&output_record_reader))
             .await
             .expect("execution succeeds");
 
@@ -1120,7 +1133,7 @@ mod tests {
         let empty_input = Chunk::new(std::sync::Arc::from(hydrated));
 
         let output = executor
-            .execute(vec![empty_input], Some(&record_reader))
+            .execute(vec![make_input_batch(empty_input)], Some(&record_reader))
             .await
             .expect("execution succeeds");
 
@@ -1202,7 +1215,7 @@ mod tests {
 
         // Execute with OUTPUT collection reader to load existing statistics
         let output = executor
-            .execute(vec![input], Some(&output_record_reader))
+            .execute(vec![make_input_batch(input)], Some(&output_record_reader))
             .await
             .expect("execution succeeds");
 
