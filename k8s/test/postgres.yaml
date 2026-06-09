@@ -50,13 +50,17 @@ spec:
           # `canceling authentication due to timeout`, the
           # `pg_isready -U chroma` readiness probe with its 1s deadline
           # starts failing, the pod flaps 0/1, and downstream initContainers
-          # CrashLoopBackOff with `ECONNREFUSED`. Bumping the limit
-          # restores headroom without changing the image.
+          # CrashLoopBackOff with `ECONNREFUSED`. The 200m request is the
+          # guaranteed share that actually protects the auth path under
+          # contention; the 500m limit is burst headroom. Capped at 500m
+          # (not a full core) so two of these fit a single CI runner when
+          # MULTI_REGION/MCMR brings up a second stack in `chroma2` — keep
+          # this in sync with k8s/test/postgres2.yaml.
           resources:
             requests:
               cpu: "200m"
             limits:
-              cpu: "1"
+              cpu: "500m"
           env:
             - name: POSTGRES_MULTIPLE_DATABASES
               value: "sysdb,log"

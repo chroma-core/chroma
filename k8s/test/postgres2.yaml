@@ -16,11 +16,16 @@ spec:
       containers:
         - name: postgres
           image: chroma-postgres
+          # Mirrors the chroma-namespace postgres (k8s/test/postgres.yaml):
+          # 200m guaranteed share for the auth path under contention, 500m
+          # burst. Sized so this region-2 postgres and the region-1 one
+          # both fit a single CI runner under MULTI_REGION/MCMR. Keep the
+          # two in sync.
           resources:
             requests:
-              cpu: "100m"
+              cpu: "200m"
             limits:
-              cpu: "100m"
+              cpu: "500m"
           env:
             - name: POSTGRES_MULTIPLE_DATABASES
               value: "sysdb,log"
