@@ -85,6 +85,14 @@ jobs:
               - 'bin/**'
               - '**/docker-compose*.yml'
               - 'Makefile'
+              # The Tilt-stack test manifests (postgres, minio, otel, etc.)
+              # are the harness every k8s integration test runs against.
+              # A change here is invisible to the rust/python/go path
+              # filters, so without this line a manifest-only PR skips the
+              # very suites that exercise it (and the breakage surfaces
+              # later on an unrelated PR). Excludes k8s/distributed-chroma,
+              # which is the Helm chart and has its own filter.
+              - 'k8s/test/**'
 
       - name: Determine tests to run
         id: determine-tests
