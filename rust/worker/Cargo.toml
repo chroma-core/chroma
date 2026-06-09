@@ -68,6 +68,7 @@ chroma-cache = { workspace = true }
 chroma-config = { workspace = true }
 chroma-distance = { workspace = true }
 chroma-error = { workspace = true }
+frontend-core = { workspace = true }
 chroma-index = { workspace = true }
 chroma-log = { workspace = true }
 chroma-memberlist = { workspace = true }
