@@ -833,6 +833,51 @@ impl TestSysDb {
         Ok(tonic::Response::new(response))
     }
 
+    pub(crate) async fn flush_collection_compactions_and_finish_async(
+        &mut self,
+        request: chroma_types::chroma_proto::FlushCollectionCompactionsAndFinishAsyncRequest,
+    ) -> Result<
+        tonic::Response<
+            chroma_types::chroma_proto::FlushCollectionCompactionsAndFinishAsyncResponse,
+        >,
+        tonic::Status,
+    > {
+        use chroma_types::chroma_proto::{
+            AsyncInvocationNeedsRepair, FlushCollectionCompactionsAndFinishAsyncResponse,
+        };
+
+        let mut needs_repair = Vec::new();
+        for update in request.async_invocation_updates {
+            let response = self
+                .try_finish_async_attached_function_invocation(
+                    chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationRequest {
+                        attached_function_id: update.attached_function_id.clone(),
+                        collection_id: update.collection_id.clone(),
+                        new_completion_offset: update.new_completion_offset,
+                    },
+                )
+                .await?
+                .into_inner();
+
+            if let Some(chroma_types::chroma_proto::try_finish_async_attached_function_invocation_response::Result::NeedsRepair(repair)) =
+                response.result
+            {
+                needs_repair.push(AsyncInvocationNeedsRepair {
+                    attached_function_id: update.attached_function_id,
+                    collection_id: update.collection_id,
+                    compaction_offset: repair.current_collection_log_offset,
+                });
+            }
+        }
+
+        Ok(tonic::Response::new(
+            FlushCollectionCompactionsAndFinishAsyncResponse {
+                collections: Vec::new(),
+                needs_repair,
+            },
+        ))
+    }
+
     pub(crate) async fn batch_get_collection_version_file_paths(
         &self,
         collection_ids: Vec<CollectionUuid>,

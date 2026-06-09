@@ -7,7 +7,9 @@ for automatically processing collections.
 
 import pytest
 from chromadb.api.client import Client as ClientCreator
+from chromadb.api.models.Collection import Collection
 from chromadb.api.functions import (
+    COUNT_ASYNC_FUNCTION,
     DUMMY_ASYNC_FUNCTION,
     RECORD_COUNTER_FUNCTION,
     STATISTICS_FUNCTION,
@@ -462,6 +464,171 @@ def test_async_attached_function_can_add_multiple_inputs(
 
     # Re-adding the same input should be idempotent and return the same handle shape.
     assert added_input_fn.add_input(input_collection_2) == added_input_fn
+
+
+def test_count_async_duplicate_add_input_does_not_double_count(
+    basic_http_client: System,
+) -> None:
+    """Test duplicate add_input calls do not register duplicate input progress rows."""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    def add_records(collection: Collection, start: int, count: int) -> None:
+        collection.add(
+            ids=[f"{collection.name}_doc_{i}" for i in range(start, start + count)],
+            documents=["test document"] * count,
+        )
+
+    input_collection_1 = client.create_collection(name="dedupe_count_async_input_1")
+    input_collection_2 = client.create_collection(name="dedupe_count_async_input_2")
+
+    attached_fn, created = input_collection_1.attach_function(
+        name="dedupe_count_async",
+        function=COUNT_ASYNC_FUNCTION,
+        output_collection="dedupe_count_async_output",
+        params=None,
+    )
+    assert created is True
+
+    added_input_fn = attached_fn.add_input(input_collection_2)
+    assert added_input_fn.add_input(input_collection_2) == added_input_fn
+
+    input_1_version = get_collection_version(client, input_collection_1.name)
+    input_2_version = get_collection_version(client, input_collection_2.name)
+    output_version = get_collection_version(client, "dedupe_count_async_output")
+
+    add_records(input_collection_1, 0, 100)
+    add_records(input_collection_2, 0, 100)
+
+    wait_for_version_increase(client, input_collection_1.name, input_1_version)
+    wait_for_version_increase(client, input_collection_2.name, input_2_version)
+    wait_for_version_increase(client, "dedupe_count_async_output", output_version)
+    sleep(60)
+
+    result = client.get_collection("dedupe_count_async_output").get("function_output")
+    assert result["metadatas"] is not None
+    assert result["metadatas"][0]["total_count"] == 200
+
+
+def test_count_async_repairs_lagging_input_to_sysdb_offset(
+    basic_http_client: System,
+) -> None:
+    """Test a later write to one input is picked up without dropping other inputs."""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    def add_records(collection: Collection, start: int, count: int) -> None:
+        collection.add(
+            ids=[f"{collection.name}_doc_{i}" for i in range(start, start + count)],
+            documents=["test document"] * count,
+        )
+
+    def assert_total_count(expected_total: int) -> int:
+        result = client.get_collection("repair_count_async_output").get(
+            "function_output"
+        )
+        assert result["metadatas"] is not None
+        assert result["metadatas"][0]["total_count"] == expected_total
+        return get_collection_version(client, "repair_count_async_output")
+
+    input_collection_1 = client.create_collection(name="repair_count_async_input_1")
+    input_collection_2 = client.create_collection(name="repair_count_async_input_2")
+
+    attached_fn, created = input_collection_1.attach_function(
+        name="repair_count_async",
+        function=COUNT_ASYNC_FUNCTION,
+        output_collection="repair_count_async_output",
+        params=None,
+    )
+    assert created is True
+
+    attached_fn.add_input(input_collection_2)
+
+    input_1_version = get_collection_version(client, input_collection_1.name)
+    input_2_version = get_collection_version(client, input_collection_2.name)
+    output_version = get_collection_version(client, "repair_count_async_output")
+
+    add_records(input_collection_1, 0, 100)
+    add_records(input_collection_2, 0, 100)
+
+    wait_for_version_increase(client, input_collection_1.name, input_1_version)
+    wait_for_version_increase(client, input_collection_2.name, input_2_version)
+    wait_for_version_increase(client, "repair_count_async_output", output_version)
+    sleep(60)
+    output_version = assert_total_count(200)
+
+    input_2_version = get_collection_version(client, input_collection_2.name)
+    add_records(input_collection_2, 100, 100)
+    add_records(input_collection_2, 200, 100)
+
+    wait_for_version_increase(client, input_collection_2.name, input_2_version)
+    wait_for_version_increase(client, "repair_count_async_output", output_version)
+    sleep(60)
+    assert_total_count(400)
+
+
+def test_count_async_attached_function_counts_late_inputs(
+    basic_http_client: System,
+) -> None:
+    """Test that one async count function processes existing and newly added inputs."""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    def add_records(collection: Collection, start: int, count: int) -> None:
+        collection.add(
+            ids=[f"{collection.name}_doc_{i}" for i in range(start, start + count)],
+            documents=["test document"] * count,
+        )
+
+    def assert_total_count(expected_total: int) -> int:
+        result = client.get_collection("count_async_output").get("function_output")
+        assert result["metadatas"] is not None
+        assert result["metadatas"][0]["total_count"] == expected_total
+        return get_collection_version(client, "count_async_output")
+
+    input_collection_1 = client.create_collection(name="count_async_input_1")
+    input_collection_2 = client.create_collection(name="count_async_input_2")
+
+    attached_fn, created = input_collection_1.attach_function(
+        name="count_async_function",
+        function=COUNT_ASYNC_FUNCTION,
+        output_collection="count_async_output",
+        params=None,
+    )
+    assert created is True
+
+    attached_fn.add_input(input_collection_2)
+
+    input_1_version = get_collection_version(client, input_collection_1.name)
+    input_2_version = get_collection_version(client, input_collection_2.name)
+    output_version = get_collection_version(client, "count_async_output")
+
+    add_records(input_collection_1, 0, 300)
+    add_records(input_collection_2, 0, 300)
+
+    wait_for_version_increase(client, input_collection_1.name, input_1_version)
+    wait_for_version_increase(client, input_collection_2.name, input_2_version)
+    wait_for_version_increase(client, "count_async_output", output_version)
+    sleep(60)
+    output_version = assert_total_count(600)
+
+    input_2_version = get_collection_version(client, input_collection_2.name)
+    add_records(input_collection_2, 300, 300)
+
+    wait_for_version_increase(client, input_collection_2.name, input_2_version)
+    wait_for_version_increase(client, "count_async_output", output_version)
+    sleep(60)
+    output_version = assert_total_count(900)
+
+    input_collection_3 = client.create_collection(name="count_async_input_3")
+    input_3_version = get_collection_version(client, input_collection_3.name)
+    add_records(input_collection_3, 0, 300)
+    attached_fn.add_input(input_collection_3)
+
+    wait_for_version_increase(client, input_collection_3.name, input_3_version)
+    wait_for_version_increase(client, "count_async_output", output_version)
+    sleep(60)
+    assert_total_count(1200)
 
 
 def test_attach_to_output_collection_fails_for_mixed_sync_and_async_upstream(

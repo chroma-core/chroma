@@ -7,7 +7,9 @@ mod tests {
     use chroma_types::chroma_proto::{
         CheckInvocationStatusRequest, InvocationCheckItem, InvocationStatus,
     };
-    use chroma_types::{AttachedFunctionUuid, CollectionUuid, DatabaseName, SegmentFlushInfo};
+    use chroma_types::{
+        AttachedFunctionUuid, CollectionFlushInfo, CollectionUuid, DatabaseName, SegmentFlushInfo,
+    };
     use std::sync::Arc;
     use uuid::Uuid;
 
@@ -115,10 +117,30 @@ mod tests {
         Ok(())
     }
 
+    fn empty_output_collection_flush(
+        collection_id: CollectionUuid,
+        tenant_id: &str,
+        database_name: &str,
+        log_position: i64,
+        collection_version: i32,
+    ) -> CollectionFlushInfo {
+        CollectionFlushInfo {
+            tenant_id: tenant_id.to_string(),
+            database_name: DatabaseName::new(database_name.to_string()).unwrap(),
+            collection_id,
+            log_position,
+            collection_version,
+            segment_flush_info: Arc::from([]),
+            total_records_post_compaction: 0,
+            size_bytes_post_compaction: 0,
+            schema: None,
+        }
+    }
+
     async fn create_test_attached_function(
         sysdb: &mut SysDb,
         collection_id: CollectionUuid,
-    ) -> Result<AttachedFunctionUuid, Box<dyn std::error::Error>> {
+    ) -> Result<(AttachedFunctionUuid, CollectionUuid), Box<dyn std::error::Error>> {
         // Create a test attached function similar to compact.rs test
         let fn_name = format!("test_function_{}", Uuid::new_v4());
         let output_collection_name = format!("output_collection_{}", Uuid::new_v4());
@@ -144,7 +166,16 @@ mod tests {
             .finish_create_attached_function(attached_function_id, output_schema.to_string())
             .await?;
 
-        Ok(attached_function_id)
+        let attached_functions = sysdb
+            .get_attached_functions(None, Some(collection_id), vec![], true)
+            .await?;
+        let output_collection_id = attached_functions
+            .iter()
+            .find(|attached_function| attached_function.id == attached_function_id)
+            .and_then(|attached_function| attached_function.output_collection_id)
+            .ok_or("Expected attached function output collection to be ready")?;
+
+        Ok((attached_function_id, output_collection_id))
     }
 
     // Note: In a real scenario, updating collection log position would be done
@@ -163,7 +194,7 @@ mod tests {
                 .expect("Failed to create collection");
 
             // Create async attached function
-            let fn_id = create_test_attached_function(&mut ctx.sysdb, coll_id)
+            let (fn_id, output_coll_id) = create_test_attached_function(&mut ctx.sysdb, coll_id)
                 .await
                 .expect("Failed to create async attached function");
 
@@ -199,8 +230,20 @@ mod tests {
             assert_eq!(our_items[0].completion_offset, offset);
 
             // Finish work
+            let output_collection_flush = empty_output_collection_flush(
+                output_coll_id,
+                &ctx.tenant_id,
+                &ctx.database_name,
+                200,
+                0,
+            );
             ctx.work_queue_client
-                .finish_work(fn_id.to_string(), coll_id.to_string(), 200)
+                .finish_work(
+                    fn_id.to_string(),
+                    coll_id.to_string(),
+                    200,
+                    output_collection_flush,
+                )
                 .await
                 .expect("Failed to finish work");
 
@@ -239,16 +282,17 @@ mod tests {
                     .await
                     .expect("Failed to create collection");
 
-                let fn_id = create_test_attached_function(&mut ctx.sysdb, coll_id)
-                    .await
-                    .expect("Failed to create async attached function");
+                let (fn_id, output_coll_id) =
+                    create_test_attached_function(&mut ctx.sysdb, coll_id)
+                        .await
+                        .expect("Failed to create async attached function");
 
                 ctx.work_queue_client
                     .push_work(fn_id.to_string(), coll_id.to_string(), i * 100)
                     .await
                     .expect("Failed to push work");
 
-                work_items.push((fn_id, coll_id, i * 100));
+                work_items.push((fn_id, coll_id, output_coll_id, i * 100));
             }
 
             // Get work - should return in FIFO order
@@ -263,7 +307,7 @@ mod tests {
             // Filter to only our test items
             let our_fn_ids: std::collections::HashSet<String> = work_items
                 .iter()
-                .map(|(fn_id, _, _)| fn_id.to_string())
+                .map(|(fn_id, _, _, _)| fn_id.to_string())
                 .collect();
 
             let our_retrieved: Vec<_> = retrieved
@@ -290,11 +334,19 @@ mod tests {
 
             // Mark some as completed
             for i in [0, 2] {
+                let output_collection_flush = empty_output_collection_flush(
+                    work_items[i].2,
+                    &ctx.tenant_id,
+                    &ctx.database_name,
+                    work_items[i].3 + 50,
+                    0,
+                );
                 ctx.work_queue_client
                     .finish_work(
                         work_items[i].0.to_string(),
                         work_items[i].1.to_string(),
-                        work_items[i].2 + 50,
+                        work_items[i].3 + 50,
+                        output_collection_flush,
                     )
                     .await
                     .expect("Failed to finish work");
@@ -325,7 +377,7 @@ mod tests {
                 1,
                 "Expected 1 remaining work item for our function"
             );
-            assert_eq!(our_filtered[0].completion_offset, work_items[1].2);
+            assert_eq!(our_filtered[0].completion_offset, work_items[1].3);
         })
         .await;
     }
@@ -344,7 +396,7 @@ mod tests {
                 .expect("Failed to create collection");
 
             // Create async attached function
-            let fn_id = create_test_attached_function(&mut ctx.sysdb, coll_id)
+            let (fn_id, output_coll_id) = create_test_attached_function(&mut ctx.sysdb, coll_id)
                 .await
                 .expect("Failed to create async attached function");
 
@@ -384,8 +436,20 @@ mod tests {
                 .expect("Failed to push work");
 
             // Finish work - should trigger repair if collection's log position is ahead
+            let output_collection_flush = empty_output_collection_flush(
+                output_coll_id,
+                &ctx.tenant_id,
+                &ctx.database_name,
+                new_offset,
+                0,
+            );
             ctx.work_queue_client
-                .finish_work(fn_id.to_string(), coll_id.to_string(), new_offset)
+                .finish_work(
+                    fn_id.to_string(),
+                    coll_id.to_string(),
+                    new_offset,
+                    output_collection_flush,
+                )
                 .await
                 .expect("Failed to finish work");
 
@@ -415,7 +479,7 @@ mod tests {
             );
             assert_eq!(
                 our_items[0].completion_offset, new_offset,
-                "Expected repaired work item to use the new completion offset"
+                "Expected repaired work item to retain the attempted finish offset"
             );
 
             // Check invocation status via sysdb

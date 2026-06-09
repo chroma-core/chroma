@@ -3,7 +3,6 @@ use chroma_types::{AttachedFunctionUuid, CollectionUuid};
 use thiserror::Error;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
-#[allow(dead_code)]
 pub struct WorkQueueRecord {
     pub fn_id: AttachedFunctionUuid,
     pub input_coll_id: CollectionUuid,
@@ -11,8 +10,14 @@ pub struct WorkQueueRecord {
     pub insertion_order: u64,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct FinishWorkItem {
+    pub fn_id: AttachedFunctionUuid,
+    pub input_coll_id: CollectionUuid,
+    pub completion_offset: i64,
+}
+
 #[derive(Error, Debug, Clone)]
-#[allow(dead_code)]
 pub enum WorkQueueError {
     #[error("Storage error: {0}")]
     Storage(String),
@@ -63,18 +68,8 @@ impl ChromaError for WorkQueueError {
     }
 }
 
-// Stub types for future sysdb integration
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub enum FinishResult {
     Success,
-    NeedsRepair,
-}
-
-// Response type for FinishWork operations
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub enum FinishWorkResponse {
-    Success,
-    NeedsRepair { fn_id: AttachedFunctionUuid },
+    NeedsRepair(Vec<FinishWorkItem>),
 }

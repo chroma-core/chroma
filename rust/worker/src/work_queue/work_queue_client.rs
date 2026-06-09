@@ -1,9 +1,11 @@
 use crate::fn_consumer::config::GrpcWorkQueueConfig;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::chroma_proto::{
-    work_queue_service_client::WorkQueueServiceClient, FinishWorkRequest, GetWorkRequest,
-    GetWorkResponse, PushWorkRequest,
+    work_queue_service_client::WorkQueueServiceClient, FinishWorkRequest,
+    FlushCollectionCompactionRequest, GetWorkRequest, GetWorkResponse, PushWorkRequest,
+    WorkItemResult,
 };
+use chroma_types::CollectionFlushInfo;
 use std::time::Duration;
 use tonic::transport::Endpoint;
 use tonic::Request;
@@ -90,11 +92,47 @@ impl WorkQueueClient {
         fn_id: String,
         input_coll_id: String,
         completion_offset: i64,
+        output_collection_flush: CollectionFlushInfo,
     ) -> Result<(), Box<dyn ChromaError>> {
+        self.finish_work_batch(
+            vec![(fn_id, input_coll_id, completion_offset)],
+            output_collection_flush,
+        )
+        .await
+    }
+
+    pub async fn finish_work_batch(
+        &mut self,
+        work_items: Vec<(String, String, i64)>,
+        output_collection_flush: CollectionFlushInfo,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        let Some((first_fn_id, first_input_coll_id, first_completion_offset)) = work_items.first()
+        else {
+            return Err(Box::new(WorkQueueClientError::ConversionError(
+                "finish_work_batch requires at least one work item".to_string(),
+            )));
+        };
+
         let request = Request::new(FinishWorkRequest {
-            fn_id,
-            input_coll_id,
-            completion_offset,
+            fn_id: first_fn_id.clone(),
+            input_coll_id: first_input_coll_id.clone(),
+            completion_offset: *first_completion_offset,
+            output_collection_flush: Some(
+                FlushCollectionCompactionRequest::try_from(output_collection_flush).map_err(
+                    |e| {
+                        Box::new(WorkQueueClientError::ConversionError(e.to_string()))
+                            as Box<dyn ChromaError>
+                    },
+                )?,
+            ),
+            work_items: work_items
+                .into_iter()
+                .map(|(fn_id, input_coll_id, completion_offset)| WorkItemResult {
+                    fn_id,
+                    input_coll_id,
+                    completion_offset,
+                })
+                .collect(),
         });
 
         self.client.finish_work(request).await.map_err(|e| {
@@ -129,12 +167,16 @@ pub enum WorkQueueClientError {
 
     #[error("Request failed: {0}")]
     RequestError(tonic::Status),
+
+    #[error("Failed to convert request: {0}")]
+    ConversionError(String),
 }
 
 impl ChromaError for WorkQueueClientError {
     fn code(&self) -> ErrorCodes {
         match self {
             WorkQueueClientError::ConnectionError(_) => ErrorCodes::Unavailable,
+            WorkQueueClientError::ConversionError(_) => ErrorCodes::Internal,
             WorkQueueClientError::RequestError(status) => match status.code() {
                 tonic::Code::Unavailable => ErrorCodes::Unavailable,
                 tonic::Code::DeadlineExceeded => ErrorCodes::DeadlineExceeded,

@@ -2,7 +2,7 @@ use crate::work_queue::work_queue_client::WorkQueueClient;
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_system::Operator;
-use chroma_types::{AttachedFunctionUuid, CollectionUuid};
+use chroma_types::{AttachedFunctionUuid, CollectionFlushInfo, CollectionUuid};
 use std::fmt::Debug;
 use thiserror::Error;
 
@@ -16,6 +16,7 @@ pub struct FinishAsyncWorkItem {
 pub struct FinishAsyncWorkInput {
     pub function_id: AttachedFunctionUuid,
     pub work_items: Vec<FinishAsyncWorkItem>,
+    pub output_collection_flush: CollectionFlushInfo,
     pub work_queue_client: WorkQueueClient,
 }
 
@@ -23,11 +24,13 @@ impl FinishAsyncWorkInput {
     pub fn new(
         function_id: AttachedFunctionUuid,
         work_items: Vec<FinishAsyncWorkItem>,
+        output_collection_flush: CollectionFlushInfo,
         work_queue_client: WorkQueueClient,
     ) -> Self {
         Self {
             function_id,
             work_items,
+            output_collection_flush,
             work_queue_client,
         }
     }
@@ -81,22 +84,28 @@ impl Operator<FinishAsyncWorkInput, FinishAsyncWorkOutput> for FinishAsyncWorkOp
     ) -> Result<FinishAsyncWorkOutput, FinishAsyncWorkError> {
         let mut work_queue_client = input.work_queue_client.clone();
 
-        for work_item in &input.work_items {
-            work_queue_client
-                .finish_work(
-                    input.function_id.0.to_string(),
-                    work_item.input_collection_id.0.to_string(),
-                    work_item.completion_offset,
-                )
-                .await?;
+        work_queue_client
+            .finish_work_batch(
+                input
+                    .work_items
+                    .iter()
+                    .map(|work_item| {
+                        (
+                            input.function_id.0.to_string(),
+                            work_item.input_collection_id.0.to_string(),
+                            work_item.completion_offset,
+                        )
+                    })
+                    .collect(),
+                input.output_collection_flush.clone(),
+            )
+            .await?;
 
-            tracing::info!(
-                "Successfully marked async work as complete - function: {}, collection: {}, offset: {}",
-                input.function_id.0,
-                work_item.input_collection_id.0,
-                work_item.completion_offset
-            );
-        }
+        tracing::info!(
+            "Successfully marked async work as complete - function: {}, work_items: {}",
+            input.function_id.0,
+            input.work_items.len()
+        );
 
         Ok(FinishAsyncWorkOutput {})
     }
