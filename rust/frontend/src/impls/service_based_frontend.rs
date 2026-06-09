@@ -2614,14 +2614,15 @@ impl ServiceBasedFrontend {
                 )))
             })?);
 
-        let add_input_result = frontend_core::attached_function::add_attached_function_input(
-            &mut sysdb_client,
-            function_name,
-            collection_uuid,
-            input_collection_id,
-            database_name.clone(),
-        )
-        .await?;
+        let add_input_result =
+            frontend_core::attached_function_ops::prepare_add_attached_function_input(
+                &mut sysdb_client,
+                function_name,
+                collection_uuid,
+                input_collection_id,
+                database_name.clone(),
+            )
+            .await?;
 
         if add_input_result.created {
             self.start_backfill(

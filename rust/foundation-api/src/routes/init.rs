@@ -131,10 +131,11 @@ pub async fn foundation_init(
     // Source collections are the attached function's *input*. They carry
     // the chunk-sibling grouping flag so a job's chunk records stay in one
     // partition and the trailing end-of-job marker on `{base}-0` is
-    // observed after every sibling chunk (ADR 0001 §6). Each gets the
-    // server-side function attached, with the wiki collection as output —
-    // mirroring the foundation CLI POC (chroma-core/foundation #97).
+    // observed after every sibling chunk (ADR 0001 §6). All sources share
+    // one async attached function, and extra sources are added via
+    // `add_input()`.
     let mut source_collection_ids = HashMap::new();
+    let mut source_collections = Vec::new();
     for source_name in &foundation_cfg.source_collections {
         let source = ensure_collection(
             &mut sysdb,
@@ -146,15 +147,30 @@ pub async fn foundation_init(
             CollectionEmbeddingFunctions::default(),
         )
         .await?;
+        source_collections.push((source_name.clone(), source.collection_id));
+        source_collection_ids.insert(source_name.clone(), source.collection_id.to_string());
+    }
+
+    if let Some((base_source_name, base_source_id)) = source_collections.first() {
         ensure_attached_function(
             &mut sysdb,
             tenant.clone(),
-            source.collection_id,
-            source_name,
+            *base_source_id,
+            base_source_name,
             foundation_cfg,
         )
         .await?;
-        source_collection_ids.insert(source_name.clone(), source.collection_id.to_string());
+
+        for (_, source_collection_id) in source_collections.iter().skip(1) {
+            attached_function_ops::add_attached_function_input(
+                &mut sysdb,
+                foundation_attached_function_name(),
+                *base_source_id,
+                *source_collection_id,
+                db_name.clone(),
+            )
+            .await?;
+        }
     }
 
     Ok(Json(FoundationInitResponse {
@@ -196,11 +212,10 @@ impl ChromaError for MissingFunctionEndpointUrl {
     }
 }
 
-/// Idempotently attach the foundation function to a source collection,
-/// mirroring the CLI POC (chroma-core/foundation #97): the function reads
-/// the source collection and writes synthesized content to the wiki
-/// collection. The attachment name is `{source}_to_wiki`; `params` carry
-/// the modal `endpoint_url` plus `source_collection` / `source_kind`.
+/// Idempotently create the shared foundation function on the base source
+/// collection. Additional source collections are attached later via
+/// `add_input()`. Params carry the modal endpoint and the base source kind,
+/// matching the existing Foundation function contract.
 ///
 /// `/init` is safe to call repeatedly — the shared helper treats an
 /// already-existing function as a no-op (`created = false`).
@@ -208,23 +223,22 @@ async fn ensure_attached_function(
     sysdb: &mut SysDb,
     tenant: String,
     input_collection_id: CollectionUuid,
-    source_name: &str,
+    base_source_name: &str,
     cfg: &FoundationConfig,
 ) -> Result<(), ServerError> {
-    let attachment_name = format!("{source_name}_to_wiki");
     let endpoint_url = cfg
         .function_endpoint_url
         .as_ref()
         .ok_or(MissingFunctionEndpointUrl)?;
     let params = serde_json::json!({
         "endpoint_url": endpoint_url,
-        "source_collection": source_name,
-        "source_kind": source_name,
+        "source_collection": base_source_name,
+        "source_kind": base_source_name,
     });
     let output_schema = Schema::new_record_only();
     attached_function_ops::create_attached_function(
         sysdb,
-        attachment_name,
+        foundation_attached_function_name(),
         cfg.function_name.clone(),
         input_collection_id,
         cfg.wiki_collection.clone(),
@@ -236,6 +250,10 @@ async fn ensure_attached_function(
     )
     .await?;
     Ok(())
+}
+
+fn foundation_attached_function_name() -> String {
+    "foundation_sources_to_wiki".to_string()
 }
 
 /// Attach the built-in `revision_history` function to the wiki
