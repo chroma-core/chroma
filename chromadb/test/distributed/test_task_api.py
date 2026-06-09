@@ -5,14 +5,21 @@ Tests the task creation, execution, and removal functionality
 for automatically processing collections.
 """
 
+import functools
 import pytest
+import time
+import urllib.parse
+import uuid
+from typing import Any, Optional, cast
 from chromadb.api.client import Client as ClientCreator
 from chromadb.api.functions import (
+    COUNT_TO_FILE_ASYNC_FUNCTION,
     DUMMY_ASYNC_FUNCTION,
     RECORD_COUNTER_FUNCTION,
     STATISTICS_FUNCTION,
     Function,
 )
+from chromadb.api.models.Collection import Collection
 from chromadb.config import System
 from chromadb.errors import ChromaError, NotFoundError
 from chromadb.test.conftest import skip_if_not_cluster
@@ -23,6 +30,65 @@ from chromadb.test.utils.wait_for_version_increase import (
 from time import sleep
 
 pytestmark = [skip_if_not_cluster()]
+
+MINIO_S3_ENDPOINT = "http://localhost:9000"
+MINIO_ACCESS_KEY = "minio"
+MINIO_SECRET_KEY = "minio123"
+MINIO_REGION = "us-east-1"
+MINIO_BUCKET = "chroma-storage"
+
+
+@functools.lru_cache(maxsize=1)
+def _minio_client() -> Any:
+    boto3 = pytest.importorskip(
+        "boto3", reason="count_to_file_async test requires boto3"
+    )
+    return boto3.client(
+        "s3",
+        endpoint_url=MINIO_S3_ENDPOINT,
+        aws_access_key_id=MINIO_ACCESS_KEY,
+        aws_secret_access_key=MINIO_SECRET_KEY,
+        region_name=MINIO_REGION,
+    )
+
+
+def _minio_get_object(bucket: str, key: str) -> Optional[bytes]:
+    botocore_exceptions = pytest.importorskip(
+        "botocore.exceptions", reason="count_to_file_async test requires botocore"
+    )
+
+    try:
+        response = _minio_client().get_object(Bucket=bucket, Key=key)
+    except botocore_exceptions.ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code")
+        if error_code in {"404", "NoSuchKey"}:
+            return None
+        pytest.fail(f"Failed to read MinIO object s3://{bucket}/{key}: {e}")
+
+    return cast(bytes, response["Body"].read())
+
+
+def _wait_for_minio_count(
+    s3_path: str, expected_count: int, timeout_seconds: float = 180.0
+) -> None:
+    parsed = urllib.parse.urlparse(s3_path)
+    assert parsed.scheme == "s3"
+    assert parsed.netloc
+    key = parsed.path.lstrip("/")
+
+    deadline = time.monotonic() + timeout_seconds
+    last_body = None
+    while time.monotonic() < deadline:
+        body = _minio_get_object(parsed.netloc, key)
+        if body is not None:
+            last_body = body.decode("utf-8").strip()
+            if last_body == str(expected_count):
+                return
+        sleep(5)
+
+    pytest.fail(
+        f"Timed out waiting for {s3_path} to contain {expected_count}. Last observed body={last_body!r}"
+    )
 
 
 def test_count_function_attach_and_detach(basic_http_client: System) -> None:
@@ -504,6 +570,67 @@ def test_attach_to_output_collection_fails_for_mixed_sync_and_async_upstream(
             output_collection="mixed_downstream_output_collection",
             params=None,
         )
+
+
+def test_count_to_file_async_attached_function_counts_late_inputs(
+    basic_http_client: System,
+) -> None:
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    def add_records(collection: Collection, start: int, count: int) -> None:
+        collection.add(
+            ids=[f"{collection.name}_doc_{i}" for i in range(start, start + count)],
+            documents=["test document"] * count,
+        )
+
+    file_key = f"task-api/count-to-file-{uuid.uuid4()}.txt"
+    s3_path = f"s3://{MINIO_BUCKET}/{file_key}"
+
+    input_collection_1 = client.create_collection(name="count_to_file_async_input_1")
+    input_collection_2 = client.create_collection(name="count_to_file_async_input_2")
+
+    # This function currently writes its result to object storage and does not
+    # populate the attached output collection yet.
+    attached_fn, created = input_collection_1.attach_function(
+        name="count_to_file_async_function",
+        function=COUNT_TO_FILE_ASYNC_FUNCTION,
+        output_collection="count_to_file_async_output",
+        params={"s3_path": s3_path},
+    )
+    assert created is True
+
+    attached_fn_input_2 = attached_fn.add_input(input_collection_2.id)
+    assert attached_fn_input_2 is not None
+
+    input_collection_1_version = get_collection_version(client, input_collection_1.name)
+    input_collection_2_version = get_collection_version(client, input_collection_2.name)
+    add_records(input_collection_1, 0, 300)
+    add_records(input_collection_2, 0, 300)
+    wait_for_version_increase(
+        client, input_collection_1.name, input_collection_1_version
+    )
+    wait_for_version_increase(
+        client, input_collection_2.name, input_collection_2_version
+    )
+    _wait_for_minio_count(s3_path, 600)
+
+    input_collection_2_version = get_collection_version(client, input_collection_2.name)
+    add_records(input_collection_2, 300, 300)
+    wait_for_version_increase(
+        client, input_collection_2.name, input_collection_2_version
+    )
+    _wait_for_minio_count(s3_path, 900)
+
+    input_collection_3 = client.create_collection(name="count_to_file_async_input_3")
+    input_collection_3_version = get_collection_version(client, input_collection_3.name)
+    add_records(input_collection_3, 0, 300)
+    wait_for_version_increase(
+        client, input_collection_3.name, input_collection_3_version
+    )
+    attached_fn_input_3 = attached_fn.add_input(input_collection_3.id)
+    assert attached_fn_input_3 is not None
+    _wait_for_minio_count(s3_path, 1200)
 
 
 def test_attach_to_existing_output_collection_rejects_cycle(

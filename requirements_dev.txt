@@ -1,4 +1,5 @@
 black==23.3.0 # match what's in pyproject.toml
+boto3
 build
 chroma-hnswlib==0.7.6
 fastapi>=0.115.9

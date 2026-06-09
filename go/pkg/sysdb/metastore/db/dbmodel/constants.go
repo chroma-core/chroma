@@ -34,6 +34,10 @@ var (
 	// FunctionRevisionHistory is the UUID for the built-in revision_history function
 	// Must match: migration 20260525150000.sql and rust/types/src/operators_generated.rs::FUNCTION_REVISION_HISTORY_ID
 	FunctionRevisionHistory = uuid.MustParse("2df4342c-5b5a-49aa-8345-c46503e85509")
+
+	// FunctionCountToFileAsync is the UUID for the built-in count_to_file_async function
+	// Must match: migration 20260604123000.sql and rust/types/src/operators_generated.rs::FUNCTION_COUNT_TO_FILE_ASYNC_ID
+	FunctionCountToFileAsync = uuid.MustParse("eb125f49-1e8b-45d9-bb20-e84f2eae4e92")
 )
 
 // Function names - must stay in sync with database and Rust constants.
@@ -52,16 +56,20 @@ const (
 
 	// FunctionNameRevisionHistory must match rust/types/src/operators_generated.rs::FUNCTION_REVISION_HISTORY_NAME
 	FunctionNameRevisionHistory = "revision_history"
+
+	// FunctionNameCountToFileAsync must match rust/types/src/operators_generated.rs::FUNCTION_COUNT_TO_FILE_ASYNC_NAME
+	FunctionNameCountToFileAsync = "count_to_file_async"
 )
 
 // functionIDToName maps function UUIDs to their names.
 // This avoids DB lookups for known built-in functions.
 var functionIDToName = map[uuid.UUID]string{
-	FunctionRecordCounter:   FunctionNameRecordCounter,
-	FunctionStatistics:      FunctionNameStatistics,
-	FunctionDummyAsync:      FunctionNameDummyAsync,
-	FunctionHttpGenerate:    FunctionNameHttpGenerate,
-	FunctionRevisionHistory: FunctionNameRevisionHistory,
+	FunctionRecordCounter:    FunctionNameRecordCounter,
+	FunctionStatistics:       FunctionNameStatistics,
+	FunctionDummyAsync:       FunctionNameDummyAsync,
+	FunctionHttpGenerate:     FunctionNameHttpGenerate,
+	FunctionRevisionHistory:  FunctionNameRevisionHistory,
+	FunctionCountToFileAsync: FunctionNameCountToFileAsync,
 }
 
 // GetFunctionNameByID returns the function name for a given function ID.

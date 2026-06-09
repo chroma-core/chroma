@@ -2525,6 +2525,11 @@ impl ServiceBasedFrontend {
             .get_cached_collection(database_name.clone(), input_collection_id)
             .await?;
 
+        frontend_core::attached_function::ensure_function_attachment_allowed(
+            &function_id,
+            self.allow_reset,
+        )?;
+
         // Must use HNSW: the Go coordinator's FinishCreateAttachedFunction
         // hardcodes hnsw-distributed vector segments for the output collection.
         let output_schema = Schema::new_default(KnnIndex::Hnsw);
@@ -2613,6 +2618,11 @@ impl ServiceBasedFrontend {
                     )),
                 )))
             })?);
+
+        frontend_core::attached_function::ensure_function_attachment_allowed(
+            &function_name,
+            self.allow_reset,
+        )?;
 
         let add_input_result =
             frontend_core::attached_function_ops::prepare_add_attached_function_input(
@@ -2934,6 +2944,7 @@ mod tests {
         // Validate that hardcoded Rust function constants match the live database.
         // This prevents drift between constants and database migrations.
         use chroma_types::{
+            FUNCTION_COUNT_TO_FILE_ASYNC_ID, FUNCTION_COUNT_TO_FILE_ASYNC_NAME,
             FUNCTION_DUMMY_ASYNC_ID, FUNCTION_DUMMY_ASYNC_NAME, FUNCTION_HTTP_GENERATE_ID,
             FUNCTION_HTTP_GENERATE_NAME, FUNCTION_RECORD_COUNTER_ID, FUNCTION_RECORD_COUNTER_NAME,
             FUNCTION_REVISION_HISTORY_ID, FUNCTION_REVISION_HISTORY_NAME, FUNCTION_STATISTICS_ID,
@@ -2947,6 +2958,10 @@ mod tests {
             (FUNCTION_RECORD_COUNTER_NAME, FUNCTION_RECORD_COUNTER_ID),
             (FUNCTION_STATISTICS_NAME, FUNCTION_STATISTICS_ID),
             (FUNCTION_DUMMY_ASYNC_NAME, FUNCTION_DUMMY_ASYNC_ID),
+            (
+                FUNCTION_COUNT_TO_FILE_ASYNC_NAME,
+                FUNCTION_COUNT_TO_FILE_ASYNC_ID,
+            ),
             (FUNCTION_HTTP_GENERATE_NAME, FUNCTION_HTTP_GENERATE_ID),
             (FUNCTION_REVISION_HISTORY_NAME, FUNCTION_REVISION_HISTORY_ID),
         ]
