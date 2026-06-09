@@ -310,23 +310,6 @@ impl AttachedFunctionOrchestrator {
         &self.input_collection_data
     }
 
-    fn get_input_tenant(&self) -> Result<String, AttachedFunctionOrchestratorError> {
-        let input_collection_data = self.require_input_collection_data()?;
-        let tenant_id = self
-            .first_input_collection_info()?
-            .collection
-            .tenant
-            .clone();
-        for input_collection in input_collection_data.iter().skip(1) {
-            if input_collection.collection_info.collection.tenant != tenant_id {
-                return Err(AttachedFunctionOrchestratorError::InvariantViolation(
-                    "All input collections must share the same tenant".to_string(),
-                ));
-            }
-        }
-        Ok(tenant_id)
-    }
-
     fn shared_input_cmek(
         &self,
     ) -> Result<Option<chroma_types::Cmek>, AttachedFunctionOrchestratorError> {
@@ -1010,22 +993,22 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
             input_batches: self
                 .input_collection_data()
                 .iter()
-                .map(|input_collection| ExecuteAttachedFunctionBatchInput {
-                    materialized_logs: input_collection.materialized_log_data.clone(),
-                    input_record_segment: input_collection
-                        .collection_info
-                        .writers
-                        .as_ref()
-                        .and_then(|writers| writers.record_reader.clone()),
+                .map(|input_collection| {
+                    let collection_info = &input_collection.collection_info;
+                    ExecuteAttachedFunctionBatchInput {
+                        materialized_logs: input_collection.materialized_log_data.clone(),
+                        input_record_segment: collection_info
+                            .writers
+                            .as_ref()
+                            .and_then(|writers| writers.record_reader.clone()),
+                        input_collection_id: collection_info.collection_id,
+                        input_collection_name: collection_info.collection.name.clone(),
+                        tenant_id: collection_info.collection.tenant.clone(),
+                        database_id: collection_info.collection.database_id.to_string(),
+                        completion_offset: collection_info.pulled_log_offset as u64,
+                    }
                 })
                 .collect(),
-            tenant_id: match self.get_input_tenant() {
-                Ok(tenant_id) => tenant_id,
-                Err(e) => {
-                    self.terminate_with_result(Err(e), ctx).await;
-                    return;
-                }
-            },
             output_collection_id: message.collection.collection_id,
             output_record_segment: message.record_segment.clone(),
             blockfile_provider: self.output_context.blockfile_provider.clone(),
