@@ -26,6 +26,13 @@ pub struct FoundationApiConfig {
 pub struct FoundationConfig {
     #[serde(default = "FoundationConfig::default_database_name")]
     pub database_name: String,
+    /// Base URL of the Chroma frontend (FE) ingress that record-I/O routes
+    /// proxy to (e.g. `https://foundation-fe.internal`). This must point at the
+    /// HAProxy ingress rather than the internal ClusterIP so the ingress can
+    /// consistent-hash on the collection id in the request path. Required for
+    /// `/upsert-page`; absent in config -> `None`, which disables that route.
+    #[serde(default)]
+    pub frontend_ingress_url: Option<String>,
     // TODO(hammadb): collection identities should move onto Chroma collection
     // metadata rather than living as a deployment-side config field.
     #[serde(default = "FoundationConfig::default_wiki_collection")]
@@ -94,6 +101,7 @@ impl Default for FoundationConfig {
     fn default() -> Self {
         Self {
             database_name: Self::default_database_name(),
+            frontend_ingress_url: None,
             wiki_collection: Self::default_wiki_collection(),
             wiki_revisions_collection: Self::default_wiki_revisions_collection(),
             file_uploads_collection: Self::default_file_uploads_collection(),

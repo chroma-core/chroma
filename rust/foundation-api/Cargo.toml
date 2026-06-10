@@ -12,6 +12,7 @@ async-trait = { workspace = true }
 axum = { workspace = true }
 figment = { workspace = true }
 opentelemetry = { workspace = true }
+reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -20,6 +21,7 @@ tower-http = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 
+chroma = { workspace = true }
 chroma-api-types = { workspace = true }
 chroma-config = { workspace = true }
 chroma-error = { workspace = true, features = ["validator", "http"] }

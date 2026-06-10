@@ -12,6 +12,7 @@ use std::sync::Arc;
 pub mod config;
 pub(crate) mod routes;
 pub mod server;
+pub(crate) mod wiki;
 
 pub use frontend_core::{ac, auth, errors, middleware as server_middleware, traced_json};
 
