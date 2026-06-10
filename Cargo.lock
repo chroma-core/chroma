@@ -3638,6 +3638,7 @@ version = "1.0.0"
 dependencies = [
  "async-trait",
  "axum 0.8.8",
+ "chroma",
  "chroma-api-types",
  "chroma-config",
  "chroma-error",
@@ -3649,6 +3650,7 @@ dependencies = [
  "frontend-core",
  "mdac",
  "opentelemetry",
+ "reqwest 0.13.2",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

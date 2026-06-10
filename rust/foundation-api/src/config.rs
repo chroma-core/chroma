@@ -29,8 +29,8 @@ pub struct FoundationConfig {
     /// Base URL of the Chroma frontend (FE) ingress that record-I/O routes
     /// proxy to (e.g. `https://foundation-fe.internal`). This must point at the
     /// HAProxy ingress rather than the internal ClusterIP so the ingress can
-    /// consistent-hash on the collection id in the request path. Required for
-    /// `/upsert-page`; absent in config -> `None`, which disables that route.
+    /// consistent-hash on the collection id in the request path.
+    /// absent in config -> `None` should disable dependent routes.
     #[serde(default)]
     pub frontend_ingress_url: Option<String>,
     // TODO(hammadb): collection identities should move onto Chroma collection
