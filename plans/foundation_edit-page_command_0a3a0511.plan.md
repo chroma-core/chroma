@@ -112,16 +112,22 @@ Port `RawSourceDateResolver` from `foundation-research/source_dates.py`: for eac
 
 Each PR stacks on the previous, is independently reviewable, and builds + passes tests on its own.
 
-- **PR 1 — Chroma client (proxy to FE ingress).** Add the `chroma` dep + `frontend_ingress_url` config; per-request `ChromaHttpClient` forwarding the user's `x-chroma-token` + tenant + `FOUNDATION` db; helper to fetch the `wiki` collection. Build + smoke test. `[ENH](foundation-api): Add Chroma client proxying to FE ingress`
-- **PR 2 — Chunking port.** Add `tree-sitter` + `tree-sitter-md`; `wiki/chunking.rs` + ported parity tests. Pure, self-contained. `[ENH](foundation-api): Port wiki markdown chunking`
-- **PR 3 — Sparse embedding helper.** `wiki/embed.rs` (SPLADE via user token, batched 100). Unit-testable. `[ENH](foundation-api): Add SPLADE sparse embedding helper`
-- **PR 4 — `UpsertFoundation` authz + route skeleton.** Add `AuthzAction::UpsertFoundation`; `routes/upsert_page.rs` request/response + auth + validation returning a stub; register `POST /api/upsert-page`. `[ENH](foundation-api): Add upsert-page authz + validation`
-- **PR 5 — Wire the upsert-page flow.** Resolve collection + chunking config, get `{slug}-0`, delete-by-slug, re-chunk/embed, batched `add` with full metadata (incl `sparse_embedding`); integration tests (version/created_at preservation, delete+re-add chunk count, sparse shape). `[ENH](foundation-api): Implement upsert-page replace flow`
-- **PR 6 — (optional) `latest_raw_source_date`.** Port `RawSourceDateResolver`. `[ENH](foundation-api): Resolve latest raw source date`
+| PR | Branch | Summary | Commit message |
+|----|--------|---------|----------------|
+| 1 | `hammad/foundation-api-chroma-client` | Add `chroma` dep + `frontend_ingress_url` config; per-request `ChromaHttpClient` forwarding `x-chroma-token` + tenant + `FOUNDATION` db; resolve + cache wiki collection identity by tenant (TTL + NotFound invalidation). Build + smoke test. | `[ENH](foundation-api): Add Chroma client proxying to FE ingress` |
+| 2 | `hammad/foundation-api-chunking` | Add `tree-sitter` + `tree-sitter-md`; `wiki/chunking.rs` + ported parity tests. Pure, self-contained. | `[ENH](foundation-api): Port wiki markdown chunking` |
+| 3 | `hammad/foundation-api-sparse-embed` | `wiki/embed.rs` (SPLADE via user token, batched 100). Unit-testable. | `[ENH](foundation-api): Add SPLADE sparse embedding helper` |
+| 4 | `hammad/foundation-api-upsert-page-skeleton` | Add `AuthzAction::UpsertFoundation`; `routes/upsert_page.rs` request/response + auth + validation returning a stub; register `POST /api/upsert-page`. | `[ENH](foundation-api): Add upsert-page authz + validation` |
+| 5 | `hammad/foundation-api-upsert-page-flow` | Wire full flow: resolve collection + chunking config, get `{slug}-0`, delete-by-slug, re-chunk/embed, batched `add` with full metadata (incl `sparse_embedding`); integration tests. | `[ENH](foundation-api): Implement upsert-page replace flow` |
+| 6 | `hammad/foundation-api-source-date` | (Optional) Port `RawSourceDateResolver`. | `[ENH](foundation-api): Resolve latest raw source date` |
 
 ```mermaid
 flowchart LR
-    PR1 --> PR2 --> PR3 --> PR4 --> PR5 --> PR6
+    PR1["hammad/foundation-api-chroma-client"] --> PR2["hammad/foundation-api-chunking"]
+    PR2 --> PR3["hammad/foundation-api-sparse-embed"]
+    PR3 --> PR4["hammad/foundation-api-upsert-page-skeleton"]
+    PR4 --> PR5["hammad/foundation-api-upsert-page-flow"]
+    PR5 --> PR6["hammad/foundation-api-source-date"]
 ```
 
 Notes: PRs 2 and 3 only depend on PR 1's crate wiring (not on each other) and could be reviewed in parallel, but keep them stacked linearly for a clean merge train.
