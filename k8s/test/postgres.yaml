@@ -45,22 +45,26 @@ spec:
           # 100m / 100m was too tight once the dev stack grew to ~20
           # parallel clients (sync-frontend + indexer + cron + change-
           # notifier + dashboard-api + foundation-server + hosted-
-          # frontend-db-migration + various test pods). With that
-          # ceiling postgres' auth path can't keep up: clients see
-          # `canceling authentication due to timeout`, the
-          # `pg_isready -U chroma` readiness probe with its 1s deadline
-          # starts failing, the pod flaps 0/1, and downstream initContainers
-          # CrashLoopBackOff with `ECONNREFUSED`. The 200m request is the
-          # guaranteed share that actually protects the auth path under
-          # contention; the 500m limit is burst headroom. Capped at 500m
-          # (not a full core) so two of these fit a single CI runner when
-          # MULTI_REGION/MCMR brings up a second stack in `chroma2` — keep
-          # this in sync with k8s/test/postgres2.yaml.
+          # frontend-db-migration + various test pods): postgres' auth
+          # path couldn't keep up, clients saw `canceling authentication
+          # due to timeout`, the `pg_isready -U chroma` readiness probe
+          # (1s deadline) flapped the pod 0/1, and downstream
+          # initContainers CrashLoopBackOff'd with `ECONNREFUSED`.
+          #
+          # The binding constraint there was the *ceiling*, not the floor:
+          # the 100m limit hard-capped postgres even with idle cores. So
+          # raise the limit (1000m = burst into idle CPU during the startup
+          # connection storm) while keeping the request small. The small
+          # request is deliberate: scheduling bin-packs on requests only
+          # (no ResourceQuota/LimitRange in k8s/), so 100m x 2 regions =
+          # 200m lets both this and chroma2's postgres fit the ~4 vCPU
+          # MULTI_REGION/MCMR cluster with room for ~30 other pods. Keep in
+          # sync with k8s/test/postgres2.yaml.
           resources:
             requests:
-              cpu: "200m"
+              cpu: "100m"
             limits:
-              cpu: "500m"
+              cpu: "1000m"
           env:
             - name: POSTGRES_MULTIPLE_DATABASES
               value: "sysdb,log"

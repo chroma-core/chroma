@@ -17,15 +17,16 @@ spec:
         - name: postgres
           image: chroma-postgres
           # Mirrors the chroma-namespace postgres (k8s/test/postgres.yaml):
-          # 200m guaranteed share for the auth path under contention, 500m
-          # burst. Sized so this region-2 postgres and the region-1 one
-          # both fit a single CI runner under MULTI_REGION/MCMR. Keep the
-          # two in sync.
+          # small 100m request (bin-packs region-1 + region-2 into the
+          # ~4 vCPU MULTI_REGION/MCMR cluster — scheduling counts requests,
+          # not limits) + 1000m burst limit (the original starvation was
+          # the 100m *ceiling*; the limit lets postgres use idle CPU during
+          # the startup connection storm). Keep the two in sync.
           resources:
             requests:
-              cpu: "200m"
+              cpu: "100m"
             limits:
-              cpu: "500m"
+              cpu: "1000m"
           env:
             - name: POSTGRES_MULTIPLE_DATABASES
               value: "sysdb,log"
