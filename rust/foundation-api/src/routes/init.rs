@@ -15,6 +15,7 @@ use frontend_core::{
     collection_ops::{
         plan_create_collection, supported_segment_types, ExecutorKind, TenantFeatureFlags,
     },
+    foundation::source_kind_for_collection_name,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -230,10 +231,11 @@ async fn ensure_attached_function(
         .function_endpoint_url
         .as_ref()
         .ok_or(MissingFunctionEndpointUrl)?;
+    let source_kind = source_kind_for_collection_name(base_source_name)?;
     let params = serde_json::json!({
         "endpoint_url": endpoint_url,
         "source_collection": base_source_name,
-        "source_kind": base_source_name,
+        "source_kind": source_kind,
     });
     let output_schema = Schema::new_record_only();
     attached_function_ops::create_attached_function(

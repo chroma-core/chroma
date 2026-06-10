@@ -14,6 +14,7 @@ pub mod auth;
 pub mod collection_ops;
 pub mod config;
 pub mod errors;
+pub mod foundation;
 pub mod middleware;
 pub mod routes;
 pub mod traced_json;

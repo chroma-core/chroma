@@ -248,9 +248,9 @@ impl AttachedFunctionOrchestrator {
         input_collection_data: Vec<FunctionInputCollectionData>,
         output_context: CompactionContext,
         dispatcher: ComponentHandle<Dispatcher>,
+        attached_function_id_filter: Option<AttachedFunctionUuid>,
         is_for_backfill: bool,
         is_fn_consumer: bool,
-        attached_function_id_filter: Option<AttachedFunctionUuid>,
     ) -> Self {
         let orchestrator_context = OrchestratorContext::new(dispatcher.clone());
 
@@ -268,98 +268,17 @@ impl AttachedFunctionOrchestrator {
         }
     }
 
-    fn require_input_collection_data(
-        &self,
-    ) -> Result<&[FunctionInputCollectionData], AttachedFunctionOrchestratorError> {
-        if self.input_collection_data.is_empty() {
-            return Err(AttachedFunctionOrchestratorError::InvariantViolation(
-                "Attached function execution requires at least one input collection".to_string(),
-            ));
-        }
-        Ok(self.input_collection_data())
-    }
-
-    fn first_input_collection_info(
-        &self,
-    ) -> Result<&CollectionCompactInfo, AttachedFunctionOrchestratorError> {
-        let input_collection_data = self.require_input_collection_data()?;
-        input_collection_data
+    /// Get the input collection info, following the same pattern as CompactionContext
+    pub fn get_input_collection_info(&self) -> &CollectionCompactInfo {
+        &self
+            .input_collection_data
             .first()
-            .map(|input_collection| &input_collection.collection_info)
-            .ok_or(AttachedFunctionOrchestratorError::InvariantViolation(
-                "Attached function execution requires at least one input collection".to_string(),
-            ))
+            .expect("AttachedFunctionOrchestrator requires at least one input collection")
+            .collection_info
     }
 
-    fn single_input_collection_info(
-        &self,
-    ) -> Result<&CollectionCompactInfo, AttachedFunctionOrchestratorError> {
-        let input_collection_data = self.require_input_collection_data()?;
-        if input_collection_data.len() != 1 {
-            return Err(AttachedFunctionOrchestratorError::InvariantViolation(
-                format!(
-                    "Expected exactly one input collection, found {}",
-                    input_collection_data.len()
-                ),
-            ));
-        }
-        self.first_input_collection_info()
-    }
-
-    pub fn input_collection_data(&self) -> &[FunctionInputCollectionData] {
+    pub fn get_input_collection_data(&self) -> &[FunctionInputCollectionData] {
         &self.input_collection_data
-    }
-
-    fn get_input_tenant(&self) -> Result<String, AttachedFunctionOrchestratorError> {
-        let input_collection_data = self.require_input_collection_data()?;
-        let tenant_id = self
-            .first_input_collection_info()?
-            .collection
-            .tenant
-            .clone();
-        for input_collection in input_collection_data.iter().skip(1) {
-            if input_collection.collection_info.collection.tenant != tenant_id {
-                return Err(AttachedFunctionOrchestratorError::InvariantViolation(
-                    "All input collections must share the same tenant".to_string(),
-                ));
-            }
-        }
-        Ok(tenant_id)
-    }
-
-    fn shared_input_cmek(
-        &self,
-    ) -> Result<Option<chroma_types::Cmek>, AttachedFunctionOrchestratorError> {
-        let input_collection_data = self.require_input_collection_data()?;
-        let seed_cmek = self
-            .first_input_collection_info()?
-            .collection
-            .schema
-            .as_ref()
-            .and_then(|schema| schema.cmek.clone());
-        for input_collection in input_collection_data.iter().skip(1) {
-            let cmek = input_collection
-                .collection_info
-                .collection
-                .schema
-                .as_ref()
-                .and_then(|schema| schema.cmek.clone());
-            if cmek != seed_cmek {
-                return Err(AttachedFunctionOrchestratorError::InvariantViolation(
-                    "All input collections must share the same CMEK policy".to_string(),
-                ));
-            }
-        }
-        Ok(seed_cmek)
-    }
-
-    fn response_job_id(&self) -> Result<JobId, AttachedFunctionOrchestratorError> {
-        if self.input_collection_data.len() == 1 {
-            return Ok(self.single_input_collection_info()?.collection_id.into());
-        }
-        self.get_function_context()
-            .map(|function_context| function_context.attached_function_id.into())
-            .ok_or(AttachedFunctionOrchestratorError::FunctionContextNotSet)
     }
 
     /// Get the output collection info if it has been set
@@ -408,13 +327,8 @@ impl AttachedFunctionOrchestrator {
     }
 
     async fn finish_no_attached_function(&mut self, ctx: &ComponentContext<Self>) {
-        let job_id = match self.response_job_id() {
-            Ok(job_id) => job_id,
-            Err(e) => {
-                self.terminate_with_result(Err(e), ctx).await;
-                return;
-            }
-        };
+        let collection_info = self.get_input_collection_info();
+        let job_id = collection_info.collection_id.into();
         self.terminate_with_result(
             Ok(AttachedFunctionOrchestratorResponse::NoAttachedFunction { job_id }),
             ctx,
@@ -427,6 +341,8 @@ impl AttachedFunctionOrchestrator {
         materialized_output: Vec<MaterializeLogOutput>,
         ctx: &ComponentContext<Self>,
     ) {
+        let collection_info = self.get_input_collection_info();
+
         // Get output collection info - should always exist in success case
         let output_collection_info = match self.get_output_collection_info() {
             Ok(info) => info.clone(),
@@ -449,17 +365,18 @@ impl AttachedFunctionOrchestrator {
             }
         };
 
-        // Update the completion offsets from the input collections' pulled log offsets.
-        // For async functions outside the fn consumer, these offsets are advanced when the
-        // queued work is later consumed.
+        // Update the completion offset from the input collection's pulled log offset
+        // For async functions, we don't update the completion offset here as they will
+        // be processed through a separate queue mechanism
         if !function_context.is_async || self.is_fn_consumer {
             function_context.input_progress = self
-                .input_collection_data()
+                .get_input_collection_data()
                 .iter()
-                .map(|input_collection| FunctionExecutionProgress {
-                    input_collection_id: input_collection.collection_info.collection_id,
-                    updated_completion_offset: input_collection.collection_info.pulled_log_offset
-                        as u64,
+                .map(|input_collection_data| FunctionExecutionProgress {
+                    input_collection_id: input_collection_data.collection_info.collection_id,
+                    updated_completion_offset: input_collection_data
+                        .collection_info
+                        .pulled_log_offset as u64,
                 })
                 .collect();
         }
@@ -474,13 +391,7 @@ impl AttachedFunctionOrchestrator {
             materialized_output.len()
         );
 
-        let job_id = match self.response_job_id() {
-            Ok(job_id) => job_id,
-            Err(e) => {
-                self.terminate_with_result(Err(e), ctx).await;
-                return;
-            }
-        };
+        let job_id = collection_info.collection_id.into();
         self.terminate_with_result(
             Ok(AttachedFunctionOrchestratorResponse::Success {
                 job_id,
@@ -596,13 +507,7 @@ impl Orchestrator for AttachedFunctionOrchestrator {
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
         // Start by getting the attached function for this collection
-        let collection_info = match self.first_input_collection_info() {
-            Ok(info) => info,
-            Err(e) => {
-                self.terminate_with_result(Err(e), ctx).await;
-                return vec![];
-            }
-        };
+        let collection_info = self.get_input_collection_info();
         let operator = Box::new(GetAttachedFunctionOperator::new(
             self.output_context.sysdb.clone(),
             collection_info.collection_id,
@@ -685,10 +590,16 @@ impl Handler<TaskResult<GetAttachedFunctionOutput, GetAttachedFunctionOperatorEr
                     .set_function_context(FunctionContext {
                         attached_function_id: attached_function.id,
                         function_id: attached_function.function_id,
-                        input_progress: vec![FunctionExecutionProgress {
-                            input_collection_id: attached_function.input_collection_id,
-                            updated_completion_offset: attached_function.completion_offset,
-                        }],
+                        input_progress: self
+                            .get_input_collection_data()
+                            .iter()
+                            .map(|input_collection_data| FunctionExecutionProgress {
+                                input_collection_id: input_collection_data
+                                    .collection_info
+                                    .collection_id,
+                                updated_completion_offset: attached_function.completion_offset,
+                            })
+                            .collect(),
                         is_async: attached_function.is_async,
                         attached_function: attached_function.clone(),
                     })
@@ -712,13 +623,7 @@ impl Handler<TaskResult<GetAttachedFunctionOutput, GetAttachedFunctionOperatorEr
                             Box::new(QueueFunctionOperator::new(work_queue_client.clone()));
                         let input = QueueFunctionInput::new(
                             attached_function.id,
-                            match self.single_input_collection_info() {
-                                Ok(info) => info.collection_id,
-                                Err(e) => {
-                                    self.terminate_with_result(Err(e), ctx).await;
-                                    return;
-                                }
-                            },
+                            self.get_input_collection_info().collection_id,
                             attached_function.completion_offset as i64,
                         );
                         let task = wrap(
@@ -762,25 +667,25 @@ impl Handler<TaskResult<GetAttachedFunctionOutput, GetAttachedFunctionOperatorEr
                 };
 
                 // Next step: get the output collection segments using the existing GetCollectionAndSegmentsOperator
-                let database_name =
-                    match self
-                        .first_input_collection_info()
-                        .and_then(|collection_info| {
-                            chroma_types::DatabaseName::new(
-                                collection_info.collection.database.clone(),
-                            )
-                            .ok_or(
-                                AttachedFunctionOrchestratorError::InvariantViolation(
-                                    "Invalid database name".to_string(),
-                                ),
-                            )
-                        }) {
-                        Ok(name) => name,
-                        Err(e) => {
-                            self.terminate_with_result(Err(e), ctx).await;
-                            return;
-                        }
-                    };
+                let database_name = match chroma_types::DatabaseName::new(
+                    self.get_input_collection_info().collection.database.clone(),
+                ) {
+                    Some(name) => name,
+                    None => {
+                        tracing::error!(
+                            "Invalid database name in input collection: {}",
+                            self.get_input_collection_info().collection.database
+                        );
+                        self.terminate_with_result(
+                            Err(AttachedFunctionOrchestratorError::InvariantViolation(
+                                "Invalid database name".to_string(),
+                            )),
+                            ctx,
+                        )
+                        .await;
+                        return;
+                    }
+                };
 
                 let operator = Box::new(GetCollectionAndSegmentsOperator::new(
                     self.output_context.sysdb.clone(),
@@ -847,13 +752,12 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
 
         // Extract CMEK from input collection schema (inherit for output collection segments)
         // The output collection inherits the input collection's encryption policy
-        let cmek = match self.shared_input_cmek() {
-            Ok(cmek) => cmek,
-            Err(e) => {
-                self.terminate_with_result(Err(e), ctx).await;
-                return;
-            }
-        };
+        let cmek = self
+            .get_input_collection_info()
+            .collection
+            .schema
+            .as_ref()
+            .and_then(|s| s.cmek.clone());
 
         let record_writer = match self
             .ok_or_terminate(
@@ -1005,27 +909,28 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
             }
         };
 
-        // Get the input collection info to access pulled_log_offset
         let input = ExecuteAttachedFunctionInput {
             input_batches: self
-                .input_collection_data()
+                .get_input_collection_data()
                 .iter()
-                .map(|input_collection| ExecuteAttachedFunctionBatchInput {
-                    materialized_logs: input_collection.materialized_log_data.clone(),
-                    input_record_segment: input_collection
-                        .collection_info
+                .map(|input_collection_data| {
+                    let collection_info = &input_collection_data.collection_info;
+                    let input_record_segment = collection_info
                         .writers
                         .as_ref()
-                        .and_then(|writers| writers.record_reader.clone()),
+                        .and_then(|writers| writers.record_reader.clone());
+
+                    ExecuteAttachedFunctionBatchInput {
+                        materialized_logs: input_collection_data.materialized_log_data.clone(),
+                        input_record_segment,
+                        input_collection_id: collection_info.collection_id,
+                        input_collection_name: collection_info.collection.name.clone(),
+                        tenant_id: collection_info.collection.tenant.clone(),
+                        database_id: collection_info.collection.database_id.to_string(),
+                        completion_offset: collection_info.pulled_log_offset as u64,
+                    }
                 })
                 .collect(),
-            tenant_id: match self.get_input_tenant() {
-                Ok(tenant_id) => tenant_id,
-                Err(e) => {
-                    self.terminate_with_result(Err(e), ctx).await;
-                    return;
-                }
-            },
             output_collection_id: message.collection.collection_id,
             output_record_segment: message.record_segment.clone(),
             blockfile_provider: self.output_context.blockfile_provider.clone(),
@@ -1090,13 +995,8 @@ impl Handler<TaskResult<QueueFunctionOutput, QueueFunctionError>> for AttachedFu
 
         // For async functions, we don't have any output records to apply
         // The function will be processed asynchronously by an external consumer
-        let job_id = match self.response_job_id() {
-            Ok(job_id) => job_id,
-            Err(e) => {
-                self.terminate_with_result(Err(e), ctx).await;
-                return;
-            }
-        };
+        let collection_info = self.get_input_collection_info();
+        let job_id = collection_info.collection_id.into();
         self.terminate_with_result(
             Ok(AttachedFunctionOrchestratorResponse::NoAttachedFunction { job_id }),
             ctx,

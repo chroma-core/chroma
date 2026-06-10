@@ -660,9 +660,9 @@ impl CompactionContext {
             input_collection_data,
             self.clone_for_new_collection(),
             self.dispatcher.clone(),
+            attached_function_id_filter,
             is_backfill,
             self.is_fn_consumer,
-            attached_function_id_filter,
         );
 
         let attached_function_response =

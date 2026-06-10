@@ -208,6 +208,8 @@ worker_config_file = 'rust/worker/chroma_mcmr.yaml' if os.environ.get('MULTI_REG
 distributed_chroma_values = "k8s/distributed-chroma/values.yaml,k8s/distributed-chroma/values.dev.yaml"
 if os.environ.get('ADDITIONAL_DISTRIBUTED_CHROMA_VALUES'):
   distributed_chroma_values += ',' + os.environ.get('ADDITIONAL_DISTRIBUTED_CHROMA_VALUES')
+if os.path.exists('k8s/distributed-chroma/values.foundation.local.yaml'):
+  distributed_chroma_values += ',k8s/distributed-chroma/values.foundation.local.yaml'
 
 # We manually call helm template so we can call set-file
 k8s_yaml(

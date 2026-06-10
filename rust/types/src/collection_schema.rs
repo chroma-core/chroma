@@ -2574,11 +2574,11 @@ impl Schema {
                 self._set_vector_index_config_builder(cfg.clone());
                 return Ok(self);
             }
-            IndexConfig::Fts(_) => {
+            IndexConfig::Fts(_) if key != Some(DOCUMENT_KEY) => {
                 // FTS is only allowed on #document key
-                if key != Some(DOCUMENT_KEY) {
-                    return Err(SchemaBuilderError::FtsIndexOnlyOnDocument);
-                }
+                return Err(SchemaBuilderError::FtsIndexOnlyOnDocument);
+            }
+            IndexConfig::Fts(_) => {
                 // Falls through to dispatch
             }
             IndexConfig::SparseVector(_) if key.is_none() => {
@@ -2655,11 +2655,11 @@ impl Schema {
                 // Vector deletion not supported
                 return Err(SchemaBuilderError::VectorIndexDeletionNotSupported);
             }
-            IndexConfig::Fts(_) => {
+            IndexConfig::Fts(_) if key != Some(DOCUMENT_KEY) => {
                 // FTS deletion is only allowed on #document key
-                if key != Some(DOCUMENT_KEY) {
-                    return Err(SchemaBuilderError::FtsIndexDeletionOnlyOnDocument);
-                }
+                return Err(SchemaBuilderError::FtsIndexDeletionOnlyOnDocument);
+            }
+            IndexConfig::Fts(_) => {
                 // Falls through to dispatch
             }
             IndexConfig::SparseVector(_) => {
