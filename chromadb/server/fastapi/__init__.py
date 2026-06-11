@@ -1529,8 +1529,20 @@ class FastAPI(Server):
     def setup_v1_routes(self) -> None:
         self.router.add_api_route("/api/v1", self.root, methods=["GET"])
         self.router.add_api_route("/api/v1/reset", self.reset, methods=["POST"])
-        self.router.add_api_route("/api/v1/version", self.version, methods=["GET"])
-        self.router.add_api_route("/api/v1/heartbeat", self.heartbeat, methods=["GET"])
+        self.router.add_api_route(
+            "/api/v1/version",
+            self.version,
+            methods=["GET"],
+            summary="Get server version",
+            description="Returns the current version string of the running Chroma server.",
+        )
+        self.router.add_api_route(
+            "/api/v1/heartbeat",
+            self.heartbeat,
+            methods=["GET"],
+            summary="Check server health",
+            description="Returns a simple heartbeat response to verify the server is running and responsive.",
+        )
         self.router.add_api_route(
             "/api/v1/pre-flight-checks", self.pre_flight_checks, methods=["GET"]
         )
@@ -1570,6 +1582,8 @@ class FastAPI(Server):
             self.list_collections_v1,
             methods=["GET"],
             response_model=None,
+            summary="List all collections",
+            description="Returns a list of all collection names available in the current database.",
         )
         self.router.add_api_route(
             "/api/v1/count_collections",
@@ -1582,6 +1596,8 @@ class FastAPI(Server):
             self.create_collection_v1,
             methods=["POST"],
             response_model=None,
+            summary="Create a new collection",
+            description="Creates a new collection with the specified configuration. Returns the created collection metadata.",
             openapi_extra=self.get_openapi_extras_for_body_model(CreateCollection),
         )
 
