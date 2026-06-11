@@ -3651,6 +3651,7 @@ dependencies = [
  "httpmock",
  "mdac",
  "opentelemetry",
+ "regex",
  "reqwest 0.13.2",
  "serde",
  "serde_json",
@@ -3661,6 +3662,7 @@ dependencies = [
  "tree-sitter",
  "tree-sitter-md",
  "uuid",
+ "validator",
 ]
 
 [[package]]

@@ -12,6 +12,7 @@ async-trait = { workspace = true }
 axum = { workspace = true }
 figment = { workspace = true }
 opentelemetry = { workspace = true }
+regex = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -22,6 +23,7 @@ tracing = { workspace = true }
 tree-sitter = "0.26"
 tree-sitter-md = "0.5"
 uuid = { workspace = true }
+validator = { workspace = true }
 
 chroma = { workspace = true }
 chroma-api-types = { workspace = true }
