@@ -3648,6 +3648,7 @@ dependencies = [
  "chroma-types",
  "figment",
  "frontend-core",
+ "httpmock",
  "mdac",
  "opentelemetry",
  "reqwest 0.13.2",

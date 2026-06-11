@@ -10,7 +10,7 @@ todos:
     status: completed
   - id: pr3-embed
     content: "PR 3 - Add wiki/embed.rs: SPLADE sparse embedding via user x-chroma-token batched at 100 (dense handled by the collection's Qwen EF on add)."
-    status: pending
+    status: completed
   - id: pr4-authz-route-skeleton
     content: "PR 4 - Add AuthzAction::UpsertFoundation; add routes/upsert_page.rs request/response + auth + validation (slug/categories/source_ids), register POST /api/upsert-page returning a stub."
     status: pending
