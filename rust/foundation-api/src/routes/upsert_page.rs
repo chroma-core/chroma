@@ -118,12 +118,14 @@ fn validate_source_ids(source_ids: &[String]) -> Result<(), ValidationError> {
     for source_id in source_ids {
         match source_id.split_once(':') {
             Some((collection, _record_id)) if !collection.is_empty() => {}
-            _ => return Err(ValidationError::new("source_ids").with_message(
-                format!(
+            _ => {
+                return Err(ValidationError::new("source_ids").with_message(
+                    format!(
                     "invalid source id '{source_id}': expected format '<collection>:<record_id>'"
                 )
-                .into(),
-            )),
+                    .into(),
+                ))
+            }
         }
     }
     Ok(())
