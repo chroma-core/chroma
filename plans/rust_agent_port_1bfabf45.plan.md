@@ -148,16 +148,16 @@ pub enum Entry { Action(Action), Observation(Observation) }
 pub struct Trajectory { pub entries: Vec<Entry>, pub id: Uuid }
 
 // inference.rs
+// (OpenAI-Responses-only fields like previous_response_id/skip_response_id_update
+// were dropped as speculative; add them when a provider needs them.)
 pub struct InferenceContext<'a> {
     pub trajectory: Trajectory,
     pub toolset: &'a ToolSet,
     pub max_tokens: Option<u32>,
-    pub previous_response_id: Option<String>,
-    pub skip_response_id_update: bool,
 }
 #[async_trait]
 pub trait AgentInferenceModel: Send + Sync {
-    async fn infer(&self, ctx: &mut InferenceContext<'_>) -> Result<Option<Action>, AgentError>;
+    async fn infer(&self, ctx: &InferenceContext<'_>) -> Result<Option<Action>, AgentError>;
 }
 ```
 
@@ -192,8 +192,8 @@ classDiagram
     }
     class InferenceContext {
         +Trajectory trajectory
+        +toolset
         +max_tokens
-        +previous_response_id
     }
     class Trajectory {
         +Vec~Entry~ entries
@@ -293,7 +293,7 @@ flowchart TD
 `GetWeatherTool` in `tools/weather.rs` implements `Tool` with `type ModelSuppliedParams = WeatherParams { location: String }` (derives `Deserialize` + `JsonSchema`; `location` non-`Option` so it's required), `type RuntimeParams = ()`, `name() = "get_weather"`, and `call(params, ())` returning a canned string (e.g. `"It is 72F and sunny in {location}."`) with `None` metadata. Registered via `toolset.add(GetWeatherTool)` — the schema is generated from `WeatherParams` automatically. This verifies schemars schema generation -> centralized Anthropic tool-format conversion, model-issued `tool_use`, typed deserialization, execution, and observation round-trip. No hand-written schema anywhere.
 
 ## Anthropic inference model
-`AnthropicAgentInferenceModel` calls the Anthropic Messages API via `reqwest` (model default `claude-opus-4-5`, `thinking` enabled, interleaved-thinking beta header). Parse response content blocks into an `Action` via an `ActionBuilder`: `thinking` -> `Reasoning { text, signature }`, `text` -> `ActionItem::SendUserText`, `tool_use` -> `ActionItem::Call { name, params, id }` (name validated against `ToolSet`). Mirrors `agent.py` lines 231-317 (non-streaming to start; streaming can be added later). API key from `ANTHROPIC_API_KEY`.
+`AnthropicAgentInferenceModel` calls the Anthropic Messages API via `reqwest` (non-streaming; model default `claude-opus-4-5-20251101`, `max_tokens` 4096, `temperature` 1.0, `thinking` enabled with a 6000-token budget, `anthropic-beta: interleaved-thinking-2025-05-14` header). A pure `parse_anthropic_response(&Value, &ToolSet)` helper (testable without network) parses response content blocks into an `Action` via an `ActionBuilder`: `thinking` -> `Reasoning { text, signature }`, `text` -> `ActionItem::SendUserText`, `tool_use` -> `ActionItem::Call { name, params, id }` (name validated against `ToolSet`; `redacted_thinking` -> `Unsupported`). Mirrors `agent.py` lines 231-317; streaming can be added later. Key via `new(api_key)` or `from_env()` (`ANTHROPIC_API_KEY`).
 
 ## Agent state machine + behavior composition
 
@@ -304,7 +304,7 @@ The `Agent` is a state machine exposing the same two driving modes as the Python
 
 So nothing external is required to run it: `run` is the default driver; manual mode is opt-in for callers who need step-level control.
 
-Port the base `Agent`: `reset`/`observe`/`infer`/`act`/`is_done` + the `run` auto-driver, including parallel tool execution (`join_all` over `ActionItem::Call`s, looked up in the `ToolSet` by name) and terminal detection (action whose items are all `ActionItem::SendUserText`). `InferenceContext` carries trajectory + toolset (+ `previous_response_id` placeholder for parity).
+Port the base `Agent`: `reset`/`observe`/`infer`/`act`/`is_done` + the `run` auto-driver, including parallel tool execution (`join_all` over `ActionItem::Call`s, looked up in the `ToolSet` by name) and terminal detection (action whose items are all `ActionItem::SendUserText`). `InferenceContext` carries trajectory + toolset + optional `max_tokens`.
 
 The concrete dedup/pruning subclasses are NOT ported, but we DO port the composition mechanism that replaces Python's subclass + `super()` chaining. Decision: composable behavior hooks (middleware), not trait-inheritance, because Rust trait default methods have no `super`, so layering dedup + budget would otherwise require hand-merged structs or duplicated bodies.
 
