@@ -12,7 +12,7 @@ todos:
     content: Define typed Tool trait (assoc ModelSuppliedParams + RuntimeParams), blanket impl<T:Tool> DynTool (schemars schema gen + Any downcast of runtime params), ToolCallMetadata, ToolSet (add<T:Tool> caching schema/get/get_formats) (tool.rs)
     status: pending
   - id: trajectory
-    content: Define Action(Vec<ActionItem Text|Call>)/Observation(Vec<ObservationItem User|ToolResult>)/Trajectory enums + builders with plain derive serde and to_anthropic_messages converter (trajectory.rs)
+    content: Define Action(Vec<ActionItem SendUserText|Call>)/Observation(Vec<ObservationItem User|ToolResult>)/Trajectory enums + builders with plain derive serde and to_provider_format (Anthropic) converter (trajectory.rs)
     status: pending
   - id: weather-tool
     content: Implement dummy GetWeatherTool impl Tool with ModelSuppliedParams = WeatherParams { location }; schema auto-generated on add (tools/weather.rs)
@@ -50,7 +50,7 @@ rust/agent/
     tool.rs           # Tool trait (typed, what you write) + blanket DynTool impl (internal), ToolCallMetadata, ToolSet
     tools/
       weather.rs      # dummy GetWeatherTool: impl Tool with ModelSuppliedParams = WeatherParams { location }
-    trajectory.rs     # Action/Observation/Trajectory (name+text enums) + builders + to_anthropic_messages
+    trajectory.rs     # Action/Observation/Trajectory (name+text enums) + builders + to_provider_format
     inference.rs      # AgentInferenceModel trait + AnthropicAgentInferenceModel
     agent.rs          # base Agent driver + AgentBehavior hook trait
     error.rs          # AgentError (thiserror): InvalidJson, UnknownTool, ToolRuntimeParamsTypeMismatch, Http, Unsupported, ...
@@ -130,7 +130,7 @@ impl ToolSet {
 // The trajectory records tool *names* + text only (tools live in the ToolSet).
 // No Arc<dyn ...> here, no UserTextTool, no custom serde -> plain derive(Serialize, Deserialize).
 pub struct Call { pub name: String, pub params: Value, pub id: String }
-pub enum ActionItem { Text(String), Call(Call) }     // Text = agent message to user
+pub enum ActionItem { SendUserText(String), Call(Call) } // SendUserText = talk to the user (no tool result)
 pub struct Reasoning {
     pub text: String,
     pub signature: Option<String>, // provider round-trip data (e.g. Anthropic thinking signature); None elsewhere
@@ -198,7 +198,7 @@ classDiagram
     class Trajectory {
         +Vec~Entry~ entries
         +Uuid id
-        +to_anthropic_messages() Value
+        +to_provider_format(p) Value
     }
     class Entry { <<enum>> }
     class Action {
@@ -209,7 +209,7 @@ classDiagram
         +String text
         +Option~String~ signature
     }
-    class ActionItem { <<enum>> Text|Call }
+    class ActionItem { <<enum>> SendUserText|Call }
     class Call {
         +String name
         +Value params
@@ -285,15 +285,15 @@ flowchart TD
 - `ToolCallMetadata` pydantic subclassing -> a simple `ToolCallMetadata` type/enum (empty for now; the weather tool returns `None`). Kept as an extension point for future tool metadata.
 - Python's always-present `reasoning` + `reasoning_signature` fields on `Action` -> a single `reasoning: Option<Reasoning>` where `Reasoning { text, signature: Option<String> }`. The Anthropic-specific signature is nested inside the (optional) reasoning block where it semantically belongs, instead of being a stray sibling field on every action.
 - Python's `overrides` dict (runtime side-channel: `ignore_ids`/`query`/`max_tokens`) -> a second, per-tool typed associated type `Tool::RuntimeParams` (model-supplied `ModelSuppliedParams` vs harness-supplied `RuntimeParams`). `call(params, runtime)`. Across the object-safe `DynTool` boundary, the runtime params travel as `Option<Box<dyn Any + Send>>` and are downcast to `T::RuntimeParams` in the blanket impl (the agent resolved the tool by name, so the injector knows the concrete type); `None` falls back to `RuntimeParams::default()`. A type mismatch is a typed `AgentError::ToolRuntimeParamsTypeMismatch`, not a panic. This milestone: the weather tool sets `type RuntimeParams = ()` and the driver passes `None` (no behaviors yet); the wiring for behaviors to *produce* a `RuntimeParams` box is finalized with dedup/budget.
-- Trajectory decoupled from tools: instead of Python's parallel arrays of `Tool` objects, the trajectory records names/text only via enums — `Action { items: Vec<ActionItem> }` where `ActionItem` is `Text(String)` (agent message; replaces `UserTextTool`) or `Call { name, params, id }`, and `Observation { items: Vec<ObservationItem> }` where `ObservationItem` is `User(String)` or `ToolResult { call_id, text, metadata }`. Tool schemas are sent once in the request's `tools` array (from the `ToolSet`), so a per-call tool object is unnecessary. This removes `Arc<dyn ...>` from the trajectory, the `SerializedTool`/hydration machinery, and `UserTextTool`.
+- Trajectory decoupled from tools: instead of Python's parallel arrays of `Tool` objects, the trajectory records names/text only via enums — `Action { items: Vec<ActionItem> }` where `ActionItem` is `SendUserText(String)` (talk to the user; replaces `UserTextTool`, but as an explicit variant rather than a faked tool) or `Call { name, params, id }`, and `Observation { items: Vec<ObservationItem> }` where `ObservationItem` is `User(String)` or `ToolResult { call_id, text, metadata }`. The `SendUserText` vs `Call` split mirrors Anthropic's own `text` vs `tool_use` content-block taxonomy, so the Python `name == "user_text"` checks scattered across every formatter collapse into one match arm. Tool schemas are sent once in the request's `tools` array (from the `ToolSet`), so a per-call tool object is unnecessary. This removes `Arc<dyn ...>` from the trajectory, the `SerializedTool`/hydration machinery, and `UserTextTool`.
 - Serialization: the trajectory is plain `#[derive(Serialize, Deserialize)]` (no tool objects to erase), so no custom serde is needed.
-- `to_provider_format(ANTHROPIC)` -> `to_anthropic_messages()` producing `serde_json::Value` matching the structure in `[trajectory.py](.../trajectory.py)` (`thinking`/`text`/`tool_use` assistant blocks, `text`/`tool_result` user blocks). Other format methods stubbed with an `Unsupported` error for now.
+- `to_provider_format(ANTHROPIC)` -> `Trajectory::to_provider_format(ProviderFormat)` dispatching to a private `to_anthropic_messages()` that produces `serde_json::Value` matching the structure in `[trajectory.py](.../trajectory.py)` (`thinking`/`text`/`tool_use` assistant blocks, `text`/`tool_result` user blocks). Additional providers slot into the match later.
 
 ## Dummy weather tool
 `GetWeatherTool` in `tools/weather.rs` implements `Tool` with `type ModelSuppliedParams = WeatherParams { location: String }` (derives `Deserialize` + `JsonSchema`; `location` non-`Option` so it's required), `type RuntimeParams = ()`, `name() = "get_weather"`, and `call(params, ())` returning a canned string (e.g. `"It is 72F and sunny in {location}."`) with `None` metadata. Registered via `toolset.add(GetWeatherTool)` — the schema is generated from `WeatherParams` automatically. This verifies schemars schema generation -> centralized Anthropic tool-format conversion, model-issued `tool_use`, typed deserialization, execution, and observation round-trip. No hand-written schema anywhere.
 
 ## Anthropic inference model
-`AnthropicAgentInferenceModel` calls the Anthropic Messages API via `reqwest` (model default `claude-opus-4-5`, `thinking` enabled, interleaved-thinking beta header). Parse response content blocks into an `Action` via an `ActionBuilder`: `thinking` -> `Reasoning { text, signature }`, `text` -> `ActionItem::Text`, `tool_use` -> `ActionItem::Call { name, params, id }` (name validated against `ToolSet`). Mirrors `agent.py` lines 231-317 (non-streaming to start; streaming can be added later). API key from `ANTHROPIC_API_KEY`.
+`AnthropicAgentInferenceModel` calls the Anthropic Messages API via `reqwest` (model default `claude-opus-4-5`, `thinking` enabled, interleaved-thinking beta header). Parse response content blocks into an `Action` via an `ActionBuilder`: `thinking` -> `Reasoning { text, signature }`, `text` -> `ActionItem::SendUserText`, `tool_use` -> `ActionItem::Call { name, params, id }` (name validated against `ToolSet`). Mirrors `agent.py` lines 231-317 (non-streaming to start; streaming can be added later). API key from `ANTHROPIC_API_KEY`.
 
 ## Agent state machine + behavior composition
 
@@ -304,7 +304,7 @@ The `Agent` is a state machine exposing the same two driving modes as the Python
 
 So nothing external is required to run it: `run` is the default driver; manual mode is opt-in for callers who need step-level control.
 
-Port the base `Agent`: `reset`/`observe`/`infer`/`act`/`is_done` + the `run` auto-driver, including parallel tool execution (`join_all` over `ActionItem::Call`s, looked up in the `ToolSet` by name) and terminal detection (action whose items are all `ActionItem::Text`). `InferenceContext` carries trajectory + toolset (+ `previous_response_id` placeholder for parity).
+Port the base `Agent`: `reset`/`observe`/`infer`/`act`/`is_done` + the `run` auto-driver, including parallel tool execution (`join_all` over `ActionItem::Call`s, looked up in the `ToolSet` by name) and terminal detection (action whose items are all `ActionItem::SendUserText`). `InferenceContext` carries trajectory + toolset (+ `previous_response_id` placeholder for parity).
 
 The concrete dedup/pruning subclasses are NOT ported, but we DO port the composition mechanism that replaces Python's subclass + `super()` chaining. Decision: composable behavior hooks (middleware), not trait-inheritance, because Rust trait default methods have no `super`, so layering dedup + budget would otherwise require hand-merged structs or duplicated bodies.
 
@@ -349,12 +349,12 @@ flowchart LR
 - Testable milestone (no network): unit tests assert (a) `ToolSet::add(GetWeatherTool)` then `get_formats(Anthropic)` yields the expected `{name, description, input_schema}` JSON with `location` required; (b) `call_json(json!({"location":"Paris"}), None)` returns the canned string and injecting a `TemperatureUnit::Celsius` runtime param switches the unit; (c) a wrong-typed runtime-params box surfaces `ToolRuntimeParamsTypeMismatch` rather than panicking.
 
 ### PR 3 - `hammad/rust-agent-trajectory`
-- Scope (todo: `trajectory`): `trajectory.rs` types (`Action`/`Observation`/`Trajectory`/`Entry`/`Call`/`Reasoning`), builders, and `to_anthropic_messages()`.
-- Testable milestone (no network): serde round-trip test (`Trajectory` -> JSON -> `Trajectory` equality); `to_anthropic_messages()` shape test asserting `thinking`/`text`/`tool_use` assistant blocks and `text`/`tool_result` user blocks match the Python reference structure.
+- Scope (todo: `trajectory`): `trajectory.rs` types (`Action`/`Observation`/`Trajectory`/`Entry`/`Call`/`Reasoning`), builders, and `to_provider_format(ProviderFormat)`.
+- Testable milestone (no network): serde round-trip test (`Trajectory` -> JSON -> `Trajectory` equality); `to_provider_format(Anthropic)` shape test asserting `thinking`/`text`/`tool_use` assistant blocks and `text`/`tool_result` user blocks match the Python reference structure.
 
 ### PR 4 - `hammad/rust-agent-inference`
 - Scope (todo: `inference`): `inference.rs` (`InferenceContext`, `AgentInferenceModel` trait, `AnthropicAgentInferenceModel` via `reqwest`).
-- Testable milestone: unit test feeds a canned Anthropic Messages response body (fixture JSON) through the content-block -> `Action` parser and asserts `thinking`->`Reasoning`, `text`->`ActionItem::Text`, `tool_use`->`ActionItem::Call`. A live single-shot inference test is gated behind `ANTHROPIC_API_KEY` / `#[ignore]`.
+- Testable milestone: unit test feeds a canned Anthropic Messages response body (fixture JSON) through the content-block -> `Action` parser and asserts `thinking`->`Reasoning`, `text`->`ActionItem::SendUserText`, `tool_use`->`ActionItem::Call`. A live single-shot inference test is gated behind `ANTHROPIC_API_KEY` / `#[ignore]`.
 
 ### PR 5 - `hammad/rust-agent-driver`
 - Scope (todos: `agent`, `validate`): `agent.rs` (base `Agent` driver `reset`/`observe`/`infer`/`act`/`is_done`/`run`, `AgentBehavior` hook trait, empty behaviors vec) plus `lib.rs` re-exports.
@@ -366,7 +366,7 @@ Notes:
 
 ## Validation
 - `cargo build -p chroma-agent` and `cargo clippy`.
-- Unit tests (no network): trajectory builders, `to_anthropic_messages` JSON shape, `ToolSet` registration, and `GetWeatherTool` output.
+- Unit tests (no network): trajectory builders, `to_provider_format` JSON shape, `ToolSet` registration, and `GetWeatherTool` output.
 - End-to-end Anthropic loop test ("What's the weather in Paris?") gated behind `ANTHROPIC_API_KEY` / `#[ignore]`, consistent with `rust/chroma` test conventions.
 
 ## Open follow-ups to flag (not done here)
