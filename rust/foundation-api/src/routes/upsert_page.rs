@@ -182,6 +182,11 @@ async fn upsert_page(
         ),
     )
     .await?;
+    // Page existence is driven by chunk-0's *presence* (its id is always
+    // returned), not by whether it carries metadata: a chunk-0 row with no
+    // metadata still means the page exists and its other chunks must be
+    // cleared. Reading metadata separately lets the recovery branch below fire.
+    let exists = !existing.ids.is_empty();
     let existing_meta = existing
         .metadatas
         .and_then(|metas| metas.into_iter().next().flatten());
@@ -190,8 +195,8 @@ async fn upsert_page(
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs() as i64)
         .unwrap_or(0);
-    let (op, created_at, version) = match &existing_meta {
-        Some(meta) => {
+    let (op, created_at, version) = match (exists, &existing_meta) {
+        (true, Some(meta)) => {
             // chunk-0 exists, so the page exists; an absent or non-integer
             // created_at / version means corrupt or pre-versioning metadata.
             // Recover (so the upsert still succeeds) but warn — this should
@@ -218,7 +223,18 @@ async fn upsert_page(
             };
             ("updated", created_at, version)
         }
-        None => ("added", now, 1),
+        (true, None) => {
+            // chunk-0 exists but carries no metadata at all (corrupt or
+            // pre-versioning row). Treat it as an update so the delete-by-slug
+            // still clears any orphan chunks, but reset created_at / version
+            // since there is nothing to recover.
+            tracing::warn!(
+                slug = %slug,
+                "existing wiki chunk-0 has no metadata; treating as update with reset created_at/version"
+            );
+            ("updated", now, 1)
+        }
+        (false, _) => ("added", now, 1),
     };
 
     // Re-chunk + compute sparse vectors (dense is auto-embedded on `add`).
@@ -241,15 +257,12 @@ async fn upsert_page(
         &request.source_ids,
     );
 
-    // delete-then-add is non-atomic: a mid-flight failure can leave the page
+    // delete-then-add is non-atomic (see the module docstring for the planned
+    // compare-and-set replacement): a mid-flight failure can leave the page
     // partially removed, and there is no fencing against a concurrent upsert of
     // the same slug. We only delete when the page already exists so a brand-new
-    // page is never briefly absent. TODO: replace this delete-then-add with an
-    // atomic put-if-absent / put-if-none (compare-and-set) op once the data
-    // plane exposes one, which removes both the partial-write window and the
-    // read-then-write race. This is temporary until the data plane exposes an
-    // such an api.
-    if existing_meta.is_some() {
+    // page is never briefly absent.
+    if exists {
         let where_slug = Where::Metadata(MetadataExpression {
             key: "slug".to_string(),
             comparison: MetadataComparison::Primitive(

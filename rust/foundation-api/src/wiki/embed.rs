@@ -28,6 +28,10 @@ pub enum WikiEmbedError {
     /// The downstream Chroma Cloud embedding service returned an error.
     #[error("sparse embedding failed: {0}")]
     Embedding(#[from] ChromaCloudEmbeddingError),
+    /// The service returned a different number of vectors than documents,
+    /// violating the embedder's one-vector-per-document contract.
+    #[error("sparse embedding returned {got} vectors for {expected} documents")]
+    CountMismatch { expected: usize, got: usize },
 }
 
 impl ChromaError for WikiEmbedError {
@@ -76,6 +80,14 @@ impl WikiEmbedder {
         let mut embeddings = Vec::with_capacity(documents.len());
         for batch in documents.chunks(EMBED_BATCH_SIZE) {
             embeddings.extend(embedding_function.embed_strs(batch).await?);
+        }
+        // Enforce the one-vector-per-document contract: a short return would
+        // otherwise silently truncate when zipped with the chunks downstream.
+        if embeddings.len() != documents.len() {
+            return Err(WikiEmbedError::CountMismatch {
+                expected: documents.len(),
+                got: embeddings.len(),
+            });
         }
         Ok(embeddings)
     }
@@ -129,12 +141,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn embed_sparse_slices_into_batches_of_100() {
+    async fn embed_sparse_errors_on_vector_count_mismatch() {
         let server = MockServer::start_async().await;
-        // Each call returns a single vector regardless of how many texts it
-        // received; we assert only the call count, which pins the 100-doc
-        // batch boundary (250 docs => ceil(250 / 100) == 3 requests).
-        let mock = server
+        // Service returns a single vector for two documents — a contract
+        // violation that must surface as an error, not silently truncate.
+        server
             .mock_async(|when, then| {
                 when.method("POST").path("/embed_sparse");
                 then.status(200).json_body(json!({
@@ -144,9 +155,42 @@ mod tests {
             .await;
 
         let embedder = WikiEmbedder::new(Some(server.base_url()));
-        let docs = vec!["x"; 250];
-        embedder.embed_sparse("user-token", &docs).await.unwrap();
+        let err = embedder
+            .embed_sparse("user-token", &["a", "b"])
+            .await
+            .unwrap_err();
 
-        assert_eq!(mock.calls(), 3);
+        assert!(matches!(
+            err,
+            WikiEmbedError::CountMismatch {
+                expected: 2,
+                got: 1
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn embed_sparse_slices_into_batches_of_100() {
+        let server = MockServer::start_async().await;
+        // Each call echoes back one vector per document in the batch (the
+        // contract embed_sparse now enforces). With 200 docs and a 100-doc
+        // batch limit we expect exactly ceil(200 / 100) == 2 requests.
+        let batch_vectors: Vec<_> = (0..EMBED_BATCH_SIZE)
+            .map(|_| json!({ "indices": [0], "values": [1.0] }))
+            .collect();
+        let mock = server
+            .mock_async(|when, then| {
+                when.method("POST").path("/embed_sparse");
+                then.status(200)
+                    .json_body(json!({ "embeddings": batch_vectors }));
+            })
+            .await;
+
+        let embedder = WikiEmbedder::new(Some(server.base_url()));
+        let docs = vec!["x"; 2 * EMBED_BATCH_SIZE];
+        let embeddings = embedder.embed_sparse("user-token", &docs).await.unwrap();
+
+        assert_eq!(embeddings.len(), 2 * EMBED_BATCH_SIZE);
+        assert_eq!(mock.calls(), 2);
     }
 }
