@@ -12,12 +12,65 @@ use crate::provider::ProviderFormat;
 use crate::tool::ToolSet;
 use crate::trajectory::{Action, ActionBuilder, Call, Reasoning};
 
-const DEFAULT_MAX_TOKENS: u32 = 4096;
-const DEFAULT_THINKING_BUDGET: u32 = 6000;
-const DEFAULT_TEMPERATURE: f64 = 1.0;
 const ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
-const ANTHROPIC_BETA: &str = "interleaved-thinking-2025-05-14";
+
+/// Opt-in feature flags sent in the `anthropic-beta` header.
+///
+/// The header is a comma-separated list, so several betas can be enabled at
+/// once (see [`AnthropicAgentInferenceModel::with_betas`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnthropicBeta {
+    /// Allow `thinking` blocks to interleave with `tool_use`
+    /// (`interleaved-thinking-2025-05-14`). Pairs with the `thinking` config in
+    /// [`AnthropicAgentInferenceModel::request_body`].
+    InterleavedThinking,
+}
+
+impl AnthropicBeta {
+    /// The flag token as it appears in the `anthropic-beta` header.
+    pub fn id(self) -> &'static str {
+        match self {
+            AnthropicBeta::InterleavedThinking => "interleaved-thinking-2025-05-14",
+        }
+    }
+}
+
+/// The set of `anthropic-beta` flags enabled on a request.
+///
+/// [`Default`] enables interleaved thinking, which pairs with the always-on
+/// `thinking` config; an empty set omits the header entirely.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnthropicBetas(pub Vec<AnthropicBeta>);
+
+impl Default for AnthropicBetas {
+    fn default() -> Self {
+        Self(vec![AnthropicBeta::InterleavedThinking])
+    }
+}
+
+impl AnthropicBetas {
+    /// Render the comma-separated `anthropic-beta` header value, or `None` when
+    /// no betas are enabled (in which case the header should be omitted).
+    fn header_value(&self) -> Option<String> {
+        if self.0.is_empty() {
+            return None;
+        }
+        Some(
+            self.0
+                .iter()
+                .map(|beta| beta.id())
+                .collect::<Vec<_>>()
+                .join(","),
+        )
+    }
+}
+
+impl From<Vec<AnthropicBeta>> for AnthropicBetas {
+    fn from(betas: Vec<AnthropicBeta>) -> Self {
+        Self(betas)
+    }
+}
 
 /// Known Anthropic model snapshots.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,26 +91,47 @@ impl AnthropicModel {
     }
 }
 
+/// Tunable Messages API request knobs, separated from the required api key and
+/// model so they can carry sensible defaults via [`Default`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnthropicRequestConfig {
+    /// Default max output tokens (an [`InferenceContext`] may override per call).
+    pub max_tokens: u32,
+    pub temperature: f64,
+    /// Token budget for the always-on `thinking` block.
+    pub thinking_budget: u32,
+    /// `anthropic-beta` feature flags to enable.
+    pub betas: AnthropicBetas,
+}
+
+impl Default for AnthropicRequestConfig {
+    fn default() -> Self {
+        Self {
+            max_tokens: 4096,
+            temperature: 1.0,
+            thinking_budget: 6000,
+            betas: AnthropicBetas::default(),
+        }
+    }
+}
+
 /// Anthropic Messages API inference model.
 pub struct AnthropicAgentInferenceModel {
     client: reqwest::Client,
     api_key: String,
     model: AnthropicModel,
-    max_tokens: u32,
-    temperature: f64,
-    thinking_budget: u32,
+    config: AnthropicRequestConfig,
 }
 
 impl AnthropicAgentInferenceModel {
-    /// Construct with the given API key and model.
+    /// Construct with the given API key and model, using the default
+    /// [`AnthropicRequestConfig`] (interleaved thinking enabled).
     pub fn new(api_key: impl Into<String>, model: AnthropicModel) -> Self {
         Self {
             client: reqwest::Client::new(),
             api_key: api_key.into(),
             model,
-            max_tokens: DEFAULT_MAX_TOKENS,
-            temperature: DEFAULT_TEMPERATURE,
-            thinking_budget: DEFAULT_THINKING_BUDGET,
+            config: AnthropicRequestConfig::default(),
         }
     }
 
@@ -68,12 +142,26 @@ impl AnthropicAgentInferenceModel {
         Ok(Self::new(api_key, model))
     }
 
+    /// Replace the request config (max tokens, temperature, thinking budget,
+    /// betas).
+    pub fn with_config(mut self, config: AnthropicRequestConfig) -> Self {
+        self.config = config;
+        self
+    }
+
+    /// Replace the enabled `anthropic-beta` feature flags (empty disables the
+    /// header entirely).
+    pub fn with_betas(mut self, betas: impl Into<AnthropicBetas>) -> Self {
+        self.config.betas = betas.into();
+        self
+    }
+
     fn request_body(&self, ctx: &InferenceContext<'_>) -> Value {
         json!({
             "model": self.model.id(),
-            "max_tokens": ctx.max_tokens.unwrap_or(self.max_tokens),
-            "temperature": self.temperature,
-            "thinking": { "type": "enabled", "budget_tokens": self.thinking_budget },
+            "max_tokens": ctx.max_tokens.unwrap_or(self.config.max_tokens),
+            "temperature": self.config.temperature,
+            "thinking": { "type": "enabled", "budget_tokens": self.config.thinking_budget },
             "tools": ctx.toolset.get_formats(ProviderFormat::Anthropic),
             "messages": ctx.trajectory.to_provider_format(ProviderFormat::Anthropic),
         })
@@ -83,18 +171,18 @@ impl AnthropicAgentInferenceModel {
 #[async_trait]
 impl AgentInferenceModel for AnthropicAgentInferenceModel {
     async fn infer(&self, ctx: &InferenceContext<'_>) -> Result<Option<Action>, AgentError> {
-        let response: Value = self
+        let mut request = self
             .client
             .post(format!("{ANTHROPIC_BASE_URL}/v1/messages"))
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", ANTHROPIC_VERSION)
-            .header("anthropic-beta", ANTHROPIC_BETA)
-            .json(&self.request_body(ctx))
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
+            .json(&self.request_body(ctx));
+
+        if let Some(betas) = self.config.betas.header_value() {
+            request = request.header("anthropic-beta", betas);
+        }
+
+        let response: Value = request.send().await?.error_for_status()?.json().await?;
 
         parse_anthropic_response(&response, ctx.toolset)
     }
@@ -193,6 +281,24 @@ mod tests {
         let mut toolset = ToolSet::new();
         toolset.add(GetWeatherTool);
         toolset
+    }
+
+    #[test]
+    fn beta_header_value_renders_and_omits() {
+        assert_eq!(
+            AnthropicBetas::default().header_value().as_deref(),
+            Some("interleaved-thinking-2025-05-14")
+        );
+        assert_eq!(
+            AnthropicBetas(vec![
+                AnthropicBeta::InterleavedThinking,
+                AnthropicBeta::InterleavedThinking,
+            ])
+            .header_value()
+            .as_deref(),
+            Some("interleaved-thinking-2025-05-14,interleaved-thinking-2025-05-14")
+        );
+        assert_eq!(AnthropicBetas(vec![]).header_value(), None);
     }
 
     #[test]

@@ -17,7 +17,8 @@ mod trajectory;
 
 pub use error::AgentError;
 pub use inference::{
-    AgentInferenceModel, AnthropicAgentInferenceModel, AnthropicModel, InferenceContext,
+    AgentInferenceModel, AnthropicAgentInferenceModel, AnthropicBeta, AnthropicBetas,
+    AnthropicModel, AnthropicRequestConfig, InferenceContext,
 };
 pub use provider::ProviderFormat;
 pub use tool::{DynTool, Tool, ToolCallMetadata, ToolSet};

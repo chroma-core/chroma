@@ -6,7 +6,10 @@
 
 mod anthropic;
 
-pub use anthropic::{AnthropicAgentInferenceModel, AnthropicModel};
+pub use anthropic::{
+    AnthropicAgentInferenceModel, AnthropicBeta, AnthropicBetas, AnthropicModel,
+    AnthropicRequestConfig,
+};
 
 use async_trait::async_trait;
 
