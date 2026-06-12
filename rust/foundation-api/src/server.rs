@@ -27,6 +27,7 @@ use crate::{
     errors::ServerError,
     routes,
     server_middleware::{always_json_errors_middleware, default_json_content_type_middleware},
+    wiki::{WikiClient, WikiClientError},
 };
 
 /// Placeholder batch limit reported by `/api/v2/pre-flight-checks`.
@@ -53,6 +54,12 @@ pub struct FoundationApiServer {
     pub(crate) scorecard: Arc<Scorecard<'static>>,
     pub(crate) system: System,
     pub(crate) metrics: Arc<SystemMetrics>,
+    /// Proxying Chroma client for wiki record I/O, shared across requests so
+    /// its per-tenant collection cache persists. `None` when
+    /// `frontend_ingress_url` is unset or invalid, which disables wiki routes.
+    // Read by the wiki record-I/O routes added later in the stack.
+    #[allow(dead_code)]
+    pub(crate) wiki_client: Option<WikiClient>,
 }
 
 impl FoundationApiServer {
@@ -70,6 +77,22 @@ impl FoundationApiServer {
         // SAFETY(rescrv): This is safe because 128 is non-zero.
         let scorecard = Arc::new(Scorecard::new(&(), rules, 128.try_into().unwrap()));
         let metrics = Arc::new(SystemMetrics::new(&global::meter("foundation-api")));
+        let wiki_client = match WikiClient::from_config(&config.foundation) {
+            Ok(client) => Some(client),
+            Err(WikiClientError::MissingIngressUrl) => {
+                tracing::info!(
+                    "foundation frontend_ingress_url unset; wiki record-I/O routes disabled",
+                );
+                None
+            }
+            Err(err) => {
+                tracing::error!(
+                    error = %err,
+                    "invalid foundation frontend_ingress_url; wiki record-I/O routes disabled",
+                );
+                None
+            }
+        };
         FoundationApiServer {
             config,
             auth,
@@ -78,6 +101,7 @@ impl FoundationApiServer {
             scorecard,
             system,
             metrics,
+            wiki_client,
         }
     }
 

@@ -211,6 +211,28 @@ impl ChromaCollection {
         }
     }
 
+    /// Builds a collection handle from an already-resolved [`Collection`]
+    /// model without performing a network lookup.
+    ///
+    /// This is useful when the collection identity (id, schema, metadata) has
+    /// been cached out of band and only needs to be re-bound to a fresh client
+    /// (for example, one carrying a per-request authentication token). The
+    /// dense embedding function is re-derived from the collection schema,
+    /// mirroring [`ChromaHttpClient::get_collection`](crate::ChromaHttpClient::get_collection).
+    pub fn from_collection_model(client: ChromaHttpClient, collection: Collection) -> Self {
+        Self::new(client, collection)
+    }
+
+    /// Returns a clone of the underlying [`Collection`] model (id, name,
+    /// schema, metadata, ...).
+    ///
+    /// Useful for caching the collection identity so a handle can later be
+    /// rebuilt with [`ChromaCollection::from_collection_model`] without another
+    /// network round trip.
+    pub fn to_collection_model(&self) -> Collection {
+        (*self.collection).clone()
+    }
+
     /// Sets the embedding function used when record embeddings are omitted.
     ///
     /// Passing `None` clears the callback. When set, [`add`](Self::add),
