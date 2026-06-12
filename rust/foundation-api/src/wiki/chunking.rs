@@ -136,7 +136,6 @@ pub fn chunk_treesitter_markdown(slug: &str, content: &str, max_bytes: usize) ->
         line_no: title_idx,
         text: lines[title_idx].to_string(),
     }];
-    let mut next_id = 1usize;
 
     let rest_start = title_idx + 1;
     if rest_start >= lines.len() {
@@ -160,7 +159,7 @@ pub fn chunk_treesitter_markdown(slug: &str, content: &str, max_bytes: usize) ->
         pack_blocks(&blocks, rest_lines, max_bytes)
     };
 
-    for (cs, ce) in ranges {
+    for (next_id, (cs, ce)) in (1usize..).zip(ranges) {
         chunks.push(Chunk {
             id: chunk_id_for(slug, next_id),
             slug: slug.to_string(),
@@ -168,7 +167,6 @@ pub fn chunk_treesitter_markdown(slug: &str, content: &str, max_bytes: usize) ->
             line_no: rest_start + cs,
             text: rest_lines[cs..=ce].join("\n"),
         });
-        next_id += 1;
     }
 
     append_inter_chunk_separators(chunks)
