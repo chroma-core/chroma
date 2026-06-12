@@ -13,9 +13,17 @@
 //! only ever writes new wiki pages and so only ports the tree-sitter chunker.
 //!
 //! The invariants the Python tests pin — chunk 0 is always the title line,
-//! `chunk_id`s are dense, `join_chunks(chunk(content)) == content`, and no
-//! non-empty input ever produces an empty document — are reproduced here and
+//! `chunk_id`s are dense, `join_chunks(chunk(content)) == content` for content
+//! whose blank lines are truly empty and which has no trailing blank lines, and
+//! no non-empty input ever produces an empty document — are reproduced here and
 //! covered by the ported parity tests below.
+//!
+//! The round-trip is line-reconstructed from each chunk's `line_no`, so it is
+//! lossy in two bounded ways that match the Python reference: trailing blank
+//! rows are dropped (`"# Title\nBody\n"` round-trips to `"# Title\nBody"`), and
+//! whitespace-only blank lines normalize to empty. Content drifts at most once
+//! on the first read-modify-write and is stable thereafter, with no semantic
+//! markdown change. [`ts_trailing_newline_is_dropped`] locks this boundary.
 
 use chroma_types::{Metadata, MetadataValue};
 
@@ -334,6 +342,10 @@ fn parse_markdown(text: &str) -> tree_sitter::Tree {
 /// Reassembles chunks back into their original content using each chunk's
 /// `line_no` to place its first line; intervening gaps become empty lines so
 /// paragraph breaks survive the round-trip.
+///
+/// Because the output length is derived from the chunks' line spans, blank rows
+/// past the last chunk's content are not represented and are dropped, and
+/// whitespace-only blank lines come back as empty. See the module docs.
 pub fn join_chunks(chunks: &[Chunk]) -> String {
     if chunks.is_empty() {
         return String::new();
@@ -406,6 +418,37 @@ mod tests {
     #[test]
     fn ts_multiple_blank_lines_preserved() {
         assert_ts_round_trip("# Title\n\n\n\nBody", DEFAULT_MAX_BYTES, true);
+    }
+
+    /// Locks the documented round-trip boundary: the line-reconstructed
+    /// `join_chunks` cannot represent blank rows past the last chunk, so
+    /// trailing newlines are dropped.
+    #[test]
+    fn ts_trailing_newline_is_dropped() {
+        for (input, expected) in [
+            ("# Title\nBody\n", "# Title\nBody"),
+            ("# Title\n\nBody\n", "# Title\n\nBody"),
+            ("# Title\n", "# Title"),
+            ("# Title\n\n\n", "# Title"),
+        ] {
+            let joined = join_chunks(&chunk_treesitter_markdown("p", input, DEFAULT_MAX_BYTES));
+            assert_eq!(joined, expected, "trailing newline handling for {input:?}");
+            // The dropped form is a fixed point: no further drift on re-chunk.
+            let twice = join_chunks(&chunk_treesitter_markdown("p", &joined, DEFAULT_MAX_BYTES));
+            assert_eq!(twice, expected, "re-chunking must be stable for {input:?}");
+        }
+    }
+
+    /// Whitespace-only blank lines normalize to empty on round-trip, matching
+    /// CommonMark blank-line semantics and the Python reference.
+    #[test]
+    fn ts_whitespace_only_blank_line_normalizes() {
+        let joined = join_chunks(&chunk_treesitter_markdown(
+            "p",
+            "# Title\n  \nBody",
+            DEFAULT_MAX_BYTES,
+        ));
+        assert_eq!(joined, "# Title\n\nBody");
     }
 
     #[test]
