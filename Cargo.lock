@@ -1575,6 +1575,7 @@ name = "chroma-agent"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "futures",
  "indexmap 2.13.0",
  "reqwest 0.13.2",
  "schemars",

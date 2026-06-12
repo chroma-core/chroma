@@ -227,6 +227,15 @@ impl TrajectoryBuilder {
         self.trajectory.entries.is_empty()
     }
 
+    /// Borrow the trajectory accumulated so far without consuming the builder.
+    ///
+    /// The driver needs to inspect/clone the in-progress trajectory between
+    /// steps (e.g. to build a masked inference view or to return the final
+    /// record), so this complements the consuming [`Self::build`].
+    pub fn trajectory(&self) -> &Trajectory {
+        &self.trajectory
+    }
+
     pub fn build(self) -> Trajectory {
         self.trajectory
     }
