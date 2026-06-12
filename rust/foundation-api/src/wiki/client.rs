@@ -2,10 +2,11 @@
 //!
 //! A single long-lived [`ChromaHttpClient`] (one shared connection pool to the
 //! FE ingress) is built once at startup. Each request cheaply re-scopes it via
-//! [`ChromaHttpClient::with_auth_method`] to forward the caller's
-//! `x-chroma-token` and tenant against the `FOUNDATION` database, so the FE
-//! remains the single point that enforces auth, quota, metering, and billing
-//! while connections stay pooled across requests and tenants.
+//! [`ChromaHttpClient::with_scope`], which swaps the caller's auth method
+//! (forwarding their `x-chroma-token`), tenant, and the `FOUNDATION` database
+//! in one call, so the FE remains the single point that enforces auth, quota,
+//! metering, and billing while connections stay pooled across requests and
+//! tenants.
 //!
 //! Requests target the FE's HAProxy ingress URL (not the internal ClusterIP)
 //! so the ingress can consistent-hash on the collection id in the request
