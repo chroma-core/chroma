@@ -1,12 +1,9 @@
-//! Markdown chunking for wiki pages, ported from
-//! `foundation-research/src/foundation_research/chunking.py`.
+//! Markdown chunking for wiki pages.
 //!
-//! This is a byte-faithful Rust port of the generate-flow chunker so
-//! `/upsert-page` writes are indistinguishable from pages written by
-//! `foundation-research`. The chunker parses markdown with the
-//! `tree-sitter-md` block grammar, emits chunk 0 as the first non-blank line
-//! (so title search keeps working), then greedy-packs top-level blocks into
-//! chunks no larger than `max_bytes` of UTF-8 text.
+//! The chunker parses markdown with the `tree-sitter-md` block grammar, emits
+//! chunk 0 as the first non-blank line (so title search keeps working), then
+//! greedy-packs top-level blocks into chunks no larger than `max_bytes` of
+//! UTF-8 text.
 //!
 //! `foundation-research` also has a legacy one-chunk-per-line strategy for
 //! collections written before the tree-sitter chunker existed; foundation-api
@@ -46,8 +43,8 @@ pub struct Chunk {
 }
 
 /// The metadata string value persisted for the tree-sitter chunking strategy.
-/// foundation-research keys its `chunking_strategy` marker off this value, so
-/// keep it in sync with `ChunkStrategy.TREESITTER_MARKDOWN` there.
+/// Other readers/writers of the collection key their chunking strategy off this
+/// value, so it is part of the on-collection contract.
 pub const CHUNKING_STRATEGY: &str = "treesitter-markdown";
 
 /// Per-collection chunking parameters, recoverable from collection metadata
@@ -72,7 +69,7 @@ impl ChunkingConfig {
     /// Only the `max_bytes` budget is configurable — foundation-api always
     /// tree-sitter chunks — so missing or malformed metadata simply yields the
     /// default budget. The `chunking_strategy` marker is ignored on read; it
-    /// exists only for foundation-research interop.
+    /// exists only as on-collection interop for other readers.
     pub fn from_collection_metadata(metadata: Option<&Metadata>) -> Self {
         let max_bytes = metadata
             .and_then(|metadata| metadata.get("chunking_max_bytes"))
@@ -86,8 +83,8 @@ impl ChunkingConfig {
     }
 
     /// Serializes this config to collection metadata, including the
-    /// `chunking_strategy` marker so foundation-research readers recover the
-    /// tree-sitter chunker.
+    /// `chunking_strategy` marker so other readers recover the tree-sitter
+    /// chunker.
     pub fn to_metadata(self) -> Metadata {
         let mut metadata = Metadata::new();
         metadata.insert(
@@ -309,7 +306,8 @@ fn pack_lines(
 ) -> Vec<(usize, usize)> {
     let mut out: Vec<(usize, usize)> = Vec::new();
     let mut cur_start = start_row;
-    // `None` mirrors the Python `cur_end = start_row - 1` empty sentinel.
+    // `None` is the empty-run sentinel (no line accumulated into the current
+    // chunk yet).
     let mut cur_end: Option<usize> = None;
     for r in start_row..=end_row {
         let prospective = byte_len(rest_lines, cur_start, r);
@@ -400,7 +398,7 @@ mod tests {
         chunks.iter().map(|c| c.text.as_str()).collect()
     }
 
-    // --- treesitter: round-trip parity (ports test_chunking_treesitter.py) ---
+    // --- treesitter: round-trip ---
 
     fn assert_ts_round_trip(content: &str, max_bytes: usize, concat_check: bool) {
         let chunks = chunk_treesitter_markdown("p", content, max_bytes);

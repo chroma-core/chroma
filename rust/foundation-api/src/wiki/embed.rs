@@ -1,11 +1,10 @@
 //! SPLADE sparse embedding for wiki pages.
 //!
-//! `foundation-research` pre-computes a SPLADE sparse vector client-side for
-//! every chunk and stores it under the `sparse_embedding` metadata key; the
-//! dense Qwen vector is produced by the collection's schema-bound embedding
-//! function on `add`. This ports that sparse path: build a Chroma Cloud SPLADE
-//! embedding function scoped to the caller's `x-chroma-token` (so embed usage
-//! bills to the user) and embed documents in batches of
+//! A SPLADE sparse vector is computed client-side for every chunk and stored
+//! under the `sparse_embedding` metadata key; the dense Qwen vector is produced
+//! by the collection's schema-bound embedding function on `add`. Build a Chroma
+//! Cloud SPLADE embedding function scoped to the caller's `x-chroma-token` (so
+//! embed usage bills to the user) and embed documents in batches of
 //! [`EMBED_BATCH_SIZE`] — the limit the Chroma Cloud embedding service accepts
 //! per request — concatenating the per-batch results in input order.
 
@@ -14,14 +13,13 @@ use chroma::embed::EmbeddingFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::SparseVector;
 
-/// Metadata key under which the SPLADE sparse vector is stored on each chunk.
-/// Must match `foundation_research.embeddings.SPARSE_KEY`.
+/// Metadata key under which the SPLADE sparse vector is stored on each chunk;
+/// it must match the key the wiki search path queries.
 pub const SPARSE_KEY: &str = "sparse_embedding";
 
 /// Maximum documents per Chroma Cloud embedding request. The service rejects
 /// larger calls with a 413, so documents are sliced into batches of this size
-/// and the resulting vectors concatenated. Matches foundation-research's
-/// `EMBED_BATCH_SIZE`.
+/// and the resulting vectors concatenated.
 pub const EMBED_BATCH_SIZE: usize = 100;
 
 /// Errors raised while computing sparse embeddings.
@@ -68,7 +66,7 @@ impl WikiEmbedder {
             return Ok(Vec::new());
         }
         // Default builder => model `prithivida/Splade_PP_en_v1`, tokens not
-        // included — matching foundation-research's `make_sparse_ef`.
+        // included.
         let mut builder = ChromaCloudSpladeEmbeddingFunction::builder().api_key(token);
         if let Some(embed_url) = &self.embed_url {
             builder = builder.embed_url(embed_url.clone());

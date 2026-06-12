@@ -154,6 +154,16 @@ impl WikiClient {
     }
 }
 
+/// Whether a proxied call failed because the resource was not found (HTTP 404).
+/// A 404 on a collection-id path means the cached id is stale (the collection
+/// was recreated/forked), so callers invalidate the cache on it.
+pub(crate) fn is_not_found(err: &ChromaHttpClientError) -> bool {
+    matches!(
+        err,
+        ChromaHttpClientError::ApiError(_, status) if *status == reqwest::StatusCode::NOT_FOUND
+    )
+}
+
 /// A tenant-keyed, TTL-bounded cache of resolved wiki collection identities.
 #[derive(Debug)]
 struct WikiCollectionCache {
@@ -281,6 +291,20 @@ mod tests {
 
         cache.invalidate("t1");
         assert!(cache.get_at("t1", start).is_none());
+    }
+
+    #[test]
+    fn is_not_found_matches_only_http_404() {
+        use reqwest::StatusCode;
+        assert!(is_not_found(&ChromaHttpClientError::ApiError(
+            "missing".to_string(),
+            StatusCode::NOT_FOUND,
+        )));
+        assert!(!is_not_found(&ChromaHttpClientError::ApiError(
+            "boom".to_string(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )));
+        assert!(!is_not_found(&ChromaHttpClientError::NoBackendAvailable));
     }
 
     #[test]
