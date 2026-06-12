@@ -30,6 +30,23 @@ use crate::trajectory::{
 /// Default cap on trajectory entries, matching the Python default.
 const DEFAULT_MAX_TRAJECTORY_LENGTH: usize = 32;
 
+/// How [`Agent::act`] handles a tool call that fails (errors or unknown tool).
+///
+/// A failed call still leaves an unanswered `tool_use` in the trajectory; how
+/// it is resolved is the difference between a self-correcting agent and a hard
+/// stop. Note that providers like Anthropic *require* every `tool_use` to have
+/// a matching `tool_result` in the next turn, so [`Self::ReportToModel`] is
+/// what keeps a continuing run well-formed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ToolErrorPolicy {
+    /// Record the error as a `tool_result` (marked `is_error`) so the model
+    /// sees the failure and can self-correct; the run continues. Default.
+    #[default]
+    ReportToModel,
+    /// Abort [`Agent::act`] and propagate the error, terminating the run.
+    Terminate,
+}
+
 /// Composable lifecycle hooks layered onto the [`Agent`] driver.
 ///
 /// Each hook has an empty default, so a behavior overrides only what it needs.
@@ -72,6 +89,7 @@ pub struct Agent {
     inference_model: Box<dyn AgentInferenceModel>,
     behaviors: Vec<Box<dyn AgentBehavior>>,
     max_trajectory_length: usize,
+    tool_error_policy: ToolErrorPolicy,
     builder: TrajectoryBuilder,
 }
 
@@ -83,6 +101,7 @@ impl Agent {
             inference_model,
             behaviors: Vec::new(),
             max_trajectory_length: DEFAULT_MAX_TRAJECTORY_LENGTH,
+            tool_error_policy: ToolErrorPolicy::default(),
             builder: TrajectoryBuilder::new(),
         }
     }
@@ -90,6 +109,12 @@ impl Agent {
     /// Register a behavior (invoked after any already-registered behaviors).
     pub fn with_behavior(mut self, behavior: Box<dyn AgentBehavior>) -> Self {
         self.behaviors.push(behavior);
+        self
+    }
+
+    /// Set how a failed tool call is handled (see [`ToolErrorPolicy`]).
+    pub fn with_tool_error_policy(mut self, policy: ToolErrorPolicy) -> Self {
+        self.tool_error_policy = policy;
         self
     }
 
@@ -161,6 +186,12 @@ impl Agent {
     /// Record `action`, then execute its tool calls (in parallel) and return the
     /// resulting observation. Returns `Ok(None)` for a terminal action with no
     /// tool calls.
+    ///
+    /// A failed tool call is handled per the [`ToolErrorPolicy`]: by default the
+    /// error becomes a `tool_result` (so the observation answers every
+    /// `tool_use` and the model can self-correct); under
+    /// [`ToolErrorPolicy::Terminate`] the error propagates. Either way the
+    /// `action` has already been recorded before this returns.
     pub async fn act(&mut self, action: Action) -> Result<Option<Observation>, AgentError> {
         let calls: Vec<Call> = action
             .items
@@ -200,11 +231,27 @@ impl Agent {
 
         let mut observation_builder = ObservationBuilder::new();
         for (call, result) in calls.iter().zip(results) {
-            let (call_id, output, metadata) = result?;
-            for behavior in &mut self.behaviors {
-                behavior.after_tool_call(call, &output, &metadata);
+            match result {
+                Ok((call_id, output, metadata)) => {
+                    for behavior in &mut self.behaviors {
+                        behavior.after_tool_call(call, &output, &metadata);
+                    }
+                    observation_builder.push_tool_result(call_id, output, metadata);
+                }
+                // Terminate: propagate, leaving the recorded action unanswered.
+                Err(error) if self.tool_error_policy == ToolErrorPolicy::Terminate => {
+                    return Err(error);
+                }
+                // ReportToModel: surface the error as a tool_result so the
+                // observation answers every tool_use and the model can correct.
+                Err(error) => {
+                    let message = error.to_string();
+                    for behavior in &mut self.behaviors {
+                        behavior.after_tool_call(call, &message, &None);
+                    }
+                    observation_builder.push_tool_error(&call.id, message);
+                }
             }
-            observation_builder.push_tool_result(call_id, output, metadata);
         }
 
         let mut observation = observation_builder.build();
@@ -370,5 +417,115 @@ mod tests {
 
         let err = agent.infer().await.expect_err("cap exceeded");
         assert!(matches!(err, AgentError::MaxTrajectoryLengthExceeded(0)));
+    }
+
+    #[derive(serde::Deserialize, schemars::JsonSchema)]
+    struct NoParams {}
+
+    /// A tool that always fails.
+    struct BoomTool;
+
+    #[async_trait]
+    impl crate::tool::Tool for BoomTool {
+        type ModelSuppliedParams = NoParams;
+        type RuntimeParams = ();
+
+        fn name(&self) -> &str {
+            "boom"
+        }
+        fn description(&self) -> &str {
+            "Always fails."
+        }
+        async fn call(
+            &self,
+            _params: NoParams,
+            _runtime: (),
+        ) -> Result<(String, Option<ToolCallMetadata>), AgentError> {
+            Err(AgentError::Unsupported("boom exploded".to_string()))
+        }
+    }
+
+    /// Calls `boom` first; once it sees a tool result, ends with text.
+    struct BoomThenText;
+
+    #[async_trait]
+    impl AgentInferenceModel for BoomThenText {
+        async fn infer(&self, ctx: &InferenceContext<'_>) -> Result<Option<Action>, AgentError> {
+            let has_tool_result = ctx.trajectory.entries.iter().any(|entry| {
+                matches!(entry, Entry::Observation(obs)
+                    if obs.items.iter().any(|i| matches!(i, ObservationItem::ToolResult { .. })))
+            });
+
+            let mut action = ActionBuilder::new();
+            if has_tool_result {
+                action.push_send_user_text("Sorry, the tool failed.");
+            } else {
+                action.push_call(Call {
+                    name: "boom".to_string(),
+                    params: json!({}),
+                    id: "call_boom".to_string(),
+                });
+            }
+            Ok(Some(action.build()))
+        }
+    }
+
+    fn boom_agent() -> Agent {
+        let mut toolset = ToolSet::new();
+        toolset.add(BoomTool);
+        Agent::new(toolset, Box::new(BoomThenText))
+    }
+
+    #[tokio::test]
+    async fn tool_error_reported_to_model_by_default() {
+        let mut agent = boom_agent();
+        let mut initial = ObservationBuilder::new();
+        initial.push_user("do it");
+
+        let trajectory = agent
+            .run(initial.build())
+            .await
+            .expect("run continues past a tool error");
+
+        // user -> action(boom) -> error observation -> terminal text action.
+        assert_eq!(trajectory.entries.len(), 4);
+
+        // The failed call still produced a tool_result, flagged as an error,
+        // carrying the message — so the trajectory answers the tool_use.
+        let errored = trajectory.entries.iter().find_map(|entry| match entry {
+            Entry::Observation(obs) => obs.items.iter().find_map(|item| match item {
+                ObservationItem::ToolResult {
+                    call_id,
+                    text,
+                    is_error: true,
+                    ..
+                } => Some((call_id.clone(), text.clone())),
+                _ => None,
+            }),
+            _ => None,
+        });
+        let (call_id, text) = errored.expect("an error tool result");
+        assert_eq!(call_id, "call_boom");
+        assert!(text.contains("boom exploded"), "got: {text}");
+    }
+
+    #[tokio::test]
+    async fn tool_error_terminates_when_configured() {
+        let mut agent = boom_agent().with_tool_error_policy(ToolErrorPolicy::Terminate);
+        let mut initial = ObservationBuilder::new();
+        initial.push_user("do it");
+
+        let err = agent
+            .run(initial.build())
+            .await
+            .expect_err("run propagates the tool error");
+        assert!(matches!(err, AgentError::Unsupported(_)));
+
+        // The action was recorded before the error propagated (no trailing
+        // observation), so the run stopped cleanly at the failing step.
+        assert!(matches!(
+            agent.trajectory().entries.last(),
+            Some(Entry::Action(_))
+        ));
     }
 }

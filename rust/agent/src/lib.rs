@@ -16,7 +16,7 @@ mod tool;
 pub mod tools;
 mod trajectory;
 
-pub use agent::{Agent, AgentBehavior};
+pub use agent::{Agent, AgentBehavior, ToolErrorPolicy};
 pub use error::AgentError;
 pub use inference::{
     AgentInferenceModel, AnthropicAgentInferenceModel, AnthropicBeta, AnthropicBetas,

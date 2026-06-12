@@ -50,10 +50,16 @@ fn observation_to_message(observation: &Observation) -> Value {
     for item in &observation.items {
         match item {
             ObservationItem::User(text) => content.push(json!({ "type": "text", "text": text })),
-            ObservationItem::ToolResult { call_id, text, .. } => content.push(json!({
+            ObservationItem::ToolResult {
+                call_id,
+                text,
+                is_error,
+                ..
+            } => content.push(json!({
                 "type": "tool_result",
                 "tool_use_id": call_id,
                 "content": [{ "type": "text", "text": text }],
+                "is_error": is_error,
             })),
         }
     }
