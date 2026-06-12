@@ -471,10 +471,15 @@ impl FrontendServer {
         database_name: DatabaseName,
         collection_id: CollectionUuid,
     ) -> Result<GetUserIdentityResponse, ServerError> {
-        let collection = self
-            .frontend
-            .get_cached_collection(database_name, collection_id)
-            .await?;
+        let collection = if let Some(tenant) = resource.tenant.as_deref() {
+            self.frontend
+                .get_cached_collection_for_tenant(database_name, collection_id, tenant)
+                .await?
+        } else {
+            self.frontend
+                .get_cached_collection(database_name, collection_id)
+                .await?
+        };
         Ok(self
             .auth
             .authenticate_and_authorize_collection(headers, action, resource, collection)
@@ -1901,7 +1906,7 @@ async fn collection_add(
     })?;
     let collection = server
         .frontend
-        .get_cached_collection(database_name, collection_id)
+        .get_cached_collection_for_tenant(database_name, collection_id, &tenant)
         .await?;
 
     let mut quota_payload = QuotaPayload::new(Action::Add, tenant.clone(), api_token);
@@ -2047,7 +2052,7 @@ async fn collection_update(
     })?;
     let collection = server
         .frontend
-        .get_cached_collection(database_name, collection_id)
+        .get_cached_collection_for_tenant(database_name, collection_id, &tenant)
         .await?;
 
     let mut quota_payload = QuotaPayload::new(Action::Update, tenant.clone(), api_token);
@@ -2196,7 +2201,7 @@ async fn collection_upsert(
     })?;
     let collection = server
         .frontend
-        .get_cached_collection(database_name, collection_id)
+        .get_cached_collection_for_tenant(database_name, collection_id, &tenant)
         .await?;
 
     let mut quota_payload = QuotaPayload::new(Action::Upsert, tenant.clone(), api_token);
@@ -2616,7 +2621,7 @@ async fn indexing_status(
     Ok(Json(
         server
             .frontend
-            .indexing_status(database_name, collection_id)
+            .indexing_status(tenant, database_name, collection_id)
             .meter(metering_context_container)
             .await?,
     ))
