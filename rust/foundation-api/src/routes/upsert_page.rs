@@ -1,8 +1,7 @@
 //! `POST /api/upsert-page` — replace a wiki page's chunks.
 //!
 //! This module currently implements the request/response contract, coarse
-//! foundation authorization, and input validation ported from
-//! `foundation-research`'s `WikiStore`/`WikiTool`. The replace flow itself
+//! foundation authorization, and input validation. The replace flow itself
 //! (resolve the wiki collection, read `{slug}-0`, delete-by-slug, re-chunk +
 //! embed, batched add) lands in a later change; until then the handler returns
 //! a stub response after authorizing and validating the request.
@@ -18,15 +17,14 @@ use std::sync::LazyLock;
 use validator::{Validate, ValidationError};
 
 /// `^(?:[a-z0-9][a-z0-9-]*|category:[a-z0-9][a-z0-9-]*|)$` — the wiki slug
-/// shape from `WikiStore.SLUG_RE` (empty root, lowercase alnum/hyphen, or a
-/// `category:<slug>`). The empty alternative makes the root slug valid.
+/// shape (empty root, lowercase alnum/hyphen, or a `category:<slug>`). The
+/// empty alternative makes the root slug valid.
 static SLUG_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(?:[a-z0-9][a-z0-9-]*|category:[a-z0-9][a-z0-9-]*|)$")
         .expect("the wiki slug regex should be valid")
 });
 
-/// `^[a-z0-9][a-z0-9-]*$` — the category-name shape from
-/// `WikiStore.CATEGORY_NAME_RE`.
+/// `^[a-z0-9][a-z0-9-]*$` — the category-name shape.
 static CATEGORY_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^[a-z0-9][a-z0-9-]*$").expect("the category-name regex should be valid")
 });
@@ -99,7 +97,7 @@ pub async fn foundation_upsert_page(
     }))
 }
 
-/// Validates the slug against [`SLUG_RE`] (mirrors `WikiStore.validate_slug`).
+/// Validates the slug against [`SLUG_RE`].
 fn validate_slug(slug: &str) -> Result<(), ValidationError> {
     if SLUG_RE.is_match(slug) {
         Ok(())
@@ -112,8 +110,8 @@ fn validate_slug(slug: &str) -> Result<(), ValidationError> {
 }
 
 /// Validates each source id is `<collection>:<record_id>` with a non-empty
-/// collection, mirroring `citations.parse_source_id`. The record id (after the
-/// first `:`) may be empty (the wiki root's citation id).
+/// collection. The record id (after the first `:`) may be empty (the wiki
+/// root's citation id).
 fn validate_source_ids(source_ids: &[String]) -> Result<(), ValidationError> {
     for source_id in source_ids {
         match source_id.split_once(':') {
@@ -145,7 +143,7 @@ fn validate_categories(categories: &[String]) -> Result<(), ValidationError> {
 }
 
 /// Deduplicates and lexicographically sorts the (already-validated) category
-/// list, mirroring `sorted(set(categories or []))` in `WikiStore.upsert_file`.
+/// list.
 fn normalize_categories(categories: &[String]) -> Vec<String> {
     categories
         .iter()
