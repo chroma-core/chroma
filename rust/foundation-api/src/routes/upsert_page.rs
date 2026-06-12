@@ -81,7 +81,7 @@ pub struct UpsertPageRequest {
     /// persisted on the page: the text can be large and may carry sensitive
     /// context, so we only log that a reason was supplied (not its content) as
     /// an audit signal.
-    #[validate(length(max = 350, message = "reason must be at most 250 characters"))]
+    #[validate(length(max = 350, message = "reason must be at most 350 characters"))]
     pub reason: Option<String>,
     /// The version the caller expects to be replacing: the page's current
     /// `version` on an update, or `0` when the caller expects to create a new
@@ -538,10 +538,10 @@ mod tests {
     #[test]
     fn request_validate_bounds_reason_length() {
         let mut req = request("foo", "body", &[], &[]);
-        req.reason = Some("a".repeat(2000));
+        req.reason = Some("a".repeat(350));
         req.validate().unwrap();
 
-        req.reason = Some("a".repeat(2001));
+        req.reason = Some("a".repeat(351));
         assert!(req.validate().is_err());
     }
 }
