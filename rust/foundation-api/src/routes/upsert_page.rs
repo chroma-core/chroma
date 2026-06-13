@@ -77,6 +77,23 @@ pub struct UpsertPageRequest {
     #[serde(default)]
     #[validate(custom(function = "validate_categories"))]
     pub categories: Vec<String>,
+    /// Optional caller-supplied reason for this change. Deliberately not
+    /// persisted on the page: the text can be large and may carry sensitive
+    /// context, so we only log that a reason was supplied (not its content) as
+    /// an audit signal.
+    #[validate(length(max = 350, message = "reason must be at most 350 characters"))]
+    pub reason: Option<String>,
+    /// The version the caller expects to be replacing: the page's current
+    /// `version` on an update, or `0` when the caller expects to create a new
+    /// page.
+    ///
+    /// Required so clients adopt the optimistic-concurrency contract now, but
+    /// intentionally *not* enforced yet. The replace is a non-atomic
+    /// delete-then-add (see the module docs), so comparing here would be a racy
+    /// check-then-act that gives false confidence. Once the data plane exposes
+    /// an atomic compare-and-set, this becomes the precondition and a mismatch
+    /// returns `409 Conflict`; until then it is accepted and ignored.
+    pub expected_version: u32,
 }
 
 /// Response body for `POST /api/upsert-page`.
@@ -305,6 +322,20 @@ async fn upsert_page(
         .await?;
     }
 
+    // `request.expected_version` is intentionally not checked here yet (see its
+    // field docs): enforcing it on the non-atomic flow above would be racy.
+    // `reason` is logged as a presence flag only — never its content, which can
+    // be large and may leak sensitive context.
+    tracing::info!(
+        slug = %slug,
+        op,
+        version,
+        num_chunks,
+        expected_version = request.expected_version,
+        reason_provided = request.reason.is_some(),
+        "wiki upsert-page complete"
+    );
+
     Ok(UpsertPageResponse {
         slug: slug.to_string(),
         op: op.to_string(),
@@ -422,6 +453,8 @@ mod tests {
             content: content.to_string(),
             source_ids: source_ids.iter().map(|s| s.to_string()).collect(),
             categories: categories.iter().map(|s| s.to_string()).collect(),
+            reason: None,
+            expected_version: 0,
         }
     }
 
@@ -500,5 +533,15 @@ mod tests {
         request("foo", "# Title\n\nBody", &["slack_master:abc"], &["z", "a"])
             .validate()
             .unwrap();
+    }
+
+    #[test]
+    fn request_validate_bounds_reason_length() {
+        let mut req = request("foo", "body", &[], &[]);
+        req.reason = Some("a".repeat(350));
+        req.validate().unwrap();
+
+        req.reason = Some("a".repeat(351));
+        assert!(req.validate().is_err());
     }
 }
