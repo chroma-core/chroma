@@ -33,3 +33,6 @@ chroma-tracing = { workspace = true, features = ["middleware"] }
 chroma-types = { workspace = true }
 frontend-core = { workspace = true }
 mdac = { workspace = true }
+
+[dev-dependencies]
+httpmock = "0.8.2"

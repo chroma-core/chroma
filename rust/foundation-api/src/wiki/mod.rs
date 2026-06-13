@@ -15,4 +15,8 @@ pub(crate) mod client;
 // `/upsert-page` route added later in the stack, so unused on its own for now.
 #[allow(dead_code)]
 pub(crate) mod chunking;
+// SPLADE sparse embedding helper; also consumed by the `/upsert-page` route
+// added later in the stack, so unused on its own for now.
+#[allow(dead_code)]
+pub(crate) mod embed;
 pub(crate) use client::{WikiClient, WikiClientError};
