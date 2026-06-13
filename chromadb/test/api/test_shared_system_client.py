@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.base_http_client import BaseHTTPClient
 from chromadb.config import System
+import chromadb
 from typing import Optional, Dict, Generator
 
 
@@ -161,7 +162,6 @@ def test_extracts_api_key_with_mixed_case_header() -> None:
 
     assert api_key == "mixed-case-key"
 
-
 def test_multiple_clients_returns_one_key() -> None:
     """Test that multiple clients return one of the available keys."""
     mock_api_1 = create_mock_http_client(
@@ -178,3 +178,8 @@ def test_multiple_clients_returns_one_key() -> None:
     api_key = SharedSystemClient.get_chroma_cloud_api_key_from_clients()
 
     assert api_key in ["key-1", "key-2"]
+    
+def test_multiple_persistent_clients_different_paths(tmp_path):
+    client1 = chromadb.PersistentClient(path=str(tmp_path / "db1"))
+    client2 = chromadb.PersistentClient(path=str(tmp_path / "db2"))
+    assert client1 is not client2
