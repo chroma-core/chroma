@@ -7,7 +7,7 @@ todos:
     status: pending
   - id: pr2-chunking
     content: "PR 2 - Add tree-sitter + tree-sitter-md; port chunking.py to wiki/chunking.rs (ChunkingConfig, split_lines, chunk_treesitter_markdown, packing, separators, title_from_content); port parity tests."
-    status: pending
+    status: completed
   - id: pr3-embed
     content: "PR 3 - Add wiki/embed.rs: SPLADE sparse embedding via user x-chroma-token batched at 100 (dense handled by the collection's Qwen EF on add)."
     status: pending
