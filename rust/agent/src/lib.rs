@@ -1,16 +1,21 @@
 //! `chroma-agent`: a provider-agnostic agent core ported from the Python
 //! search-agent research framework.
 //!
-//! This milestone lands the crate scaffold: the [`ProviderFormat`] dispatch
-//! seam and the crate-wide [`AgentError`] type. The tool abstraction,
-//! trajectory, inference models, and the agent driver land in subsequent PRs
-//! (see `plans/`).
+//! So far this crate provides the [`ProviderFormat`] dispatch seam, the
+//! crate-wide [`AgentError`] type, and the tool abstraction ([`Tool`] /
+//! [`DynTool`] / [`ToolSet`]) with a dummy [`GetWeatherTool`]. The trajectory,
+//! inference models, and the agent driver land in subsequent PRs (see
+//! `plans/`).
 
 mod error;
 mod provider;
+mod tool;
+pub mod tools;
 
 pub use error::AgentError;
 pub use provider::ProviderFormat;
+pub use tool::{DynTool, Tool, ToolCallMetadata, ToolSet};
+pub use tools::weather::{GetWeatherTool, TemperatureUnit};
 
 #[cfg(test)]
 mod tests {

@@ -6,7 +6,7 @@ todos:
     content: Create rust/agent crate, add to workspace members + workspace dep in root Cargo.toml, set up Cargo.toml deps (tokio, reqwest, serde, serde_json, schemars, async-trait, thiserror, tracing, uuid, futures, indexmap)
     status: pending
   - id: provider-schema
-    content: Define ProviderFormat enum (Anthropic) and ToolSchema + to_provider_format/to_anthropic_format written once (provider.rs, schema.rs)
+    content: Define ProviderFormat enum (Anthropic) with format_tool tool serialization written once (provider.rs)
     status: pending
   - id: tool-core
     content: Define typed Tool trait (assoc ModelSuppliedParams + RuntimeParams), blanket impl<T:Tool> DynTool (schemars schema gen + Any downcast of runtime params), ToolCallMetadata, ToolSet (add<T:Tool> caching schema/get/get_formats) (tool.rs)
@@ -32,7 +32,7 @@ isProject: false
 # Port the search-agent framework to `rust/agent`
 
 ## Scope (confirmed)
-- Provider-agnostic core: `Agent` state machine, `Trajectory`/`Action`/`Observation` + builders, `ToolSet`/`Tool` abstraction, `ToolSchema`, and the trajectory -> Anthropic message converter.
+- Provider-agnostic core: `Agent` state machine, `Trajectory`/`Action`/`Observation` + builders, `ToolSet`/`Tool` abstraction, `ProviderFormat` tool serialization, and the trajectory -> Anthropic message converter.
 - Anthropic inference model only (other providers deferred).
 - A single dummy `get_weather` tool to exercise the Tool abstraction and the full infer -> act -> observe loop. Concrete Chroma-backed tools are deferred.
 
@@ -47,7 +47,6 @@ rust/agent/
   src/
     lib.rs            # re-exports
     provider.rs       # ProviderFormat enum (single Anthropic variant for now)
-    schema.rs         # ToolSchema + to_provider_format/to_anthropic_format, written once (tools.py)
     tool.rs           # Tool trait (typed, what you write) + blanket DynTool impl (internal), ToolCallMetadata, ToolSet
     tools/
       weather.rs      # dummy GetWeatherTool: impl Tool with ModelSuppliedParams = WeatherParams { location }
@@ -65,22 +64,21 @@ rust/agent/
 // Single variant for now; the dispatch seam stays so new providers slot in later.
 pub enum ProviderFormat { Anthropic }
 
-// schema.rs — written ONCE; every tool + every provider format benefits for free.
-pub struct ToolSchema {
-    pub name: String,
-    pub description: String,
-    pub input_schema: Value, // generated from Tool::Params via schemars (properties + required)
-}
-impl ToolSchema {
-    pub fn to_provider_format(&self, provider: ProviderFormat) -> Value; // dispatch (anthropic now)
-    fn to_anthropic_format(&self) -> Value; // { name, description, input_schema }
+// provider.rs — tool serialization written ONCE; every tool + every provider
+// format benefits for free. No intermediate `ToolSchema` struct: the only
+// provider-agnostic inputs are name, description, and the params JSON schema
+// (a `Value` generated from `Tool::ModelSuppliedParams` via schemars), so the
+// provider formats those directly.
+impl ProviderFormat {
+    pub fn format_tool(self, name: &str, description: &str, params_schema: Value) -> Value;
+    // Anthropic => { name, description, input_schema: params_schema }
 }
 
 // tool.rs
 pub enum ToolCallMetadata { /* extension point; empty in this milestone */ }
 
-// THE trait you implement to define a tool. Schema is derived from `ModelSuppliedParams`;
-// you never write a ToolSchema or any provider conversion.
+// THE trait you implement to define a tool. The params schema is derived from
+// `ModelSuppliedParams`; you never write a schema or any provider conversion.
 // `ModelSuppliedParams` come from the model; `RuntimeParams` are harness/externally-supplied
 // (Python's `overrides`, e.g. ignore_ids/query/max_tokens).
 #[async_trait]
@@ -100,14 +98,17 @@ pub trait Tool: Send + Sync + 'static {
 #[async_trait]
 pub trait DynTool: Send + Sync {
     fn name(&self) -> &str;
-    fn schema(&self) -> ToolSchema;                       // schemars::schema_for::<T::ModelSuppliedParams>()
+    fn description(&self) -> &str;
+    fn to_provider_format(&self, provider: ProviderFormat) -> Value; // params schema gen + ProviderFormat::format_tool
     async fn call_json(&self, params: Value, runtime: Option<Box<dyn Any + Send>>)
         -> Result<(String, Option<ToolCallMetadata>), AgentError>;
 }
 #[async_trait]
 impl<T: Tool> DynTool for T {
     fn name(&self) -> &str { Tool::name(self) }
-    fn schema(&self) -> ToolSchema { /* name + description + schema_for::<T::ModelSuppliedParams>() */ }
+    fn to_provider_format(&self, provider: ProviderFormat) -> Value {
+        provider.format_tool(Tool::name(self), Tool::description(self), schema_for::<T::ModelSuppliedParams>())
+    }
     async fn call_json(&self, params: Value, runtime: Option<Box<dyn Any + Send>>) -> Result<_, AgentError> {
         let p: T::ModelSuppliedParams = serde_json::from_value(params)?;
         let r: T::RuntimeParams = match runtime {
@@ -118,11 +119,11 @@ impl<T: Tool> DynTool for T {
     }
 }
 
-pub struct ToolSet { tools: IndexMap<String, (Arc<dyn DynTool>, ToolSchema)> } // schema cached at add
+pub struct ToolSet { tools: IndexMap<String, Arc<dyn DynTool>> } // ordered for stable provider payloads + O(1) lookup
 impl ToolSet {
-    pub fn add<T: Tool>(&mut self, tool: T);                  // Arc::new(tool) as Arc<dyn DynTool>; cache schema
+    pub fn add<T: Tool>(&mut self, tool: T);                  // Arc::new(tool) as Arc<dyn DynTool>
     pub fn get(&self, name: &str) -> Option<Arc<dyn DynTool>>;
-    pub fn get_formats(&self, provider: ProviderFormat) -> Vec<Value>; // to_provider_format per cached schema
+    pub fn get_formats(&self, provider: ProviderFormat) -> Vec<Value>; // schema() -> to_provider_format on demand
 }
 
 // trajectory.rs
@@ -228,19 +229,20 @@ classDiagram
     class DynTool {
         <<trait>>
         +name()
-        +schema() ToolSchema
+        +description()
+        +to_provider_format(p) Value
         +call_json(params, runtime?)
     }
-    class ToolSchema {
-        +input_schema
-        +to_provider_format(p)
+    class ProviderFormat {
+        <<enum>> Anthropic
+        +format_tool(name, desc, schema) Value
     }
     class GetWeatherTool
 
     AnthropicAgentInferenceModel ..|> AgentInferenceModel
     GetWeatherTool ..|> Tool
     Tool ..|> DynTool : blanket impl
-    DynTool ..> ToolSchema : generates
+    DynTool ..> ProviderFormat : format_tool
     Agent o-- AgentInferenceModel
     Agent o-- AgentBehavior
     Agent *-- ToolSet
@@ -277,9 +279,9 @@ flowchart TD
 ```
 
 ## Key design translations (Python -> Rust)
-- `Tool` ABC -> a typed `#[async_trait] trait Tool` with an associated `Params: DeserializeOwned + JsonSchema` that you implement (params type + name + description + `call`). A blanket `impl<T: Tool> DynTool for T` (no wrapper struct) gives the object-safe `DynTool` stored as `Arc<dyn DynTool>` in the `ToolSet`; its `schema()` is generated from `Params` via `schemars` and `call_json` deserializes `Value -> Params`. You write the tool once; schema and all provider formats come for free, and you never implement `DynTool` or write a `ToolSchema`.
-- `ToolSchema.parameters`/`required` (two fields) -> a single `input_schema: Value` generated by `schemars` (required-ness comes from `Option<T>` field optionality). Provider conversion lives once in `ToolSchema::to_provider_format`, so every tool gets every format without per-tool code.
-- `ProviderFormat` enum -> kept, but with only the `Anthropic` variant for now. `to_provider_format(ProviderFormat)` dispatch stays on both `Trajectory` and `ToolSchema` so additional providers slot in without API churn.
+- `Tool` ABC -> a typed `#[async_trait] trait Tool` with an associated `ModelSuppliedParams: DeserializeOwned + JsonSchema` that you implement (params type + name + description + `call`). A blanket `impl<T: Tool> DynTool for T` (no wrapper struct) gives the object-safe `DynTool` stored as `Arc<dyn DynTool>` in the `ToolSet`; its `to_provider_format` generates the params schema from `ModelSuppliedParams` via `schemars` and `call_json` deserializes `Value -> ModelSuppliedParams`. You write the tool once; the schema and all provider formats come for free, and you never implement `DynTool` or write a schema.
+- `ToolSchema.parameters`/`required` (two fields) -> dropped entirely. The params schema is a single `Value` generated by `schemars` (required-ness comes from `Option<T>` field optionality) and passed straight to the provider; there is no stored `ToolSchema` wrapper since it would just hold a `Value` that gets reformatted anyway.
+- `ProviderFormat` enum -> kept, but with only the `Anthropic` variant for now. It owns the single-place tool serialization (`format_tool`) and (later) trajectory message conversion, so additional providers slot in without API churn.
 - `ToolCallMetadata` pydantic subclassing -> a simple `ToolCallMetadata` type/enum (empty for now; the weather tool returns `None`). Kept as an extension point for future tool metadata.
 - Python's always-present `reasoning` + `reasoning_signature` fields on `Action` -> a single `reasoning: Option<Reasoning>` where `Reasoning { text, signature: Option<String> }`. The Anthropic-specific signature is nested inside the (optional) reasoning block where it semantically belongs, instead of being a stray sibling field on every action.
 - Python's `overrides` dict (runtime side-channel: `ignore_ids`/`query`/`max_tokens`) -> a second, per-tool typed associated type `Tool::RuntimeParams` (model-supplied `ModelSuppliedParams` vs harness-supplied `RuntimeParams`). `call(params, runtime)`. Across the object-safe `DynTool` boundary, the runtime params travel as `Option<Box<dyn Any + Send>>` and are downcast to `T::RuntimeParams` in the blanket impl (the agent resolved the tool by name, so the injector knows the concrete type); `None` falls back to `RuntimeParams::default()`. A type mismatch is a typed `AgentError::ToolRuntimeParamsTypeMismatch`, not a panic. This milestone: the weather tool sets `type RuntimeParams = ()` and the driver passes `None` (no behaviors yet); the wiring for behaviors to *produce* a `RuntimeParams` box is finalized with dedup/budget.
@@ -343,8 +345,8 @@ flowchart LR
 - Testable milestone: `cargo build -p chroma-agent` succeeds from the workspace; a trivial unit test constructs `ProviderFormat::Anthropic` and asserts an `AgentError` variant `Display`s. CI sees the new crate compile.
 
 ### PR 2 - `hammad/rust-agent-tool-core`
-- Scope (todos: `provider-schema` remainder, `tool-core`, `weather-tool`): `schema.rs` (`ToolSchema` + `to_provider_format`/`to_anthropic_format`), `tool.rs` (typed `Tool` trait, blanket `impl<T: Tool> DynTool`, `ToolCallMetadata`, `ToolSet`), and `tools/weather.rs` (`GetWeatherTool`).
-- Testable milestone (no network): unit tests assert (a) `ToolSet::add(GetWeatherTool)` then `get_formats(Anthropic)` yields the expected `{name, description, input_schema}` JSON with `location` required; (b) `call_json(json!({"location":"Paris"}), None)` returns the canned string; (c) a wrong-typed runtime-params box surfaces `ToolRuntimeParamsTypeMismatch` rather than panicking.
+- Scope (todos: `provider-schema` remainder, `tool-core`, `weather-tool`): `provider.rs` (`ProviderFormat::format_tool`), `tool.rs` (typed `Tool` trait, blanket `impl<T: Tool> DynTool`, `ToolCallMetadata`, `ToolSet`), and `tools/weather.rs` (`GetWeatherTool`).
+- Testable milestone (no network): unit tests assert (a) `ToolSet::add(GetWeatherTool)` then `get_formats(Anthropic)` yields the expected `{name, description, input_schema}` JSON with `location` required; (b) `call_json(json!({"location":"Paris"}), None)` returns the canned string and injecting a `TemperatureUnit::Celsius` runtime param switches the unit; (c) a wrong-typed runtime-params box surfaces `ToolRuntimeParamsTypeMismatch` rather than panicking.
 
 ### PR 3 - `hammad/rust-agent-trajectory`
 - Scope (todo: `trajectory`): `trajectory.rs` types (`Action`/`Observation`/`Trajectory`/`Entry`/`Call`/`Reasoning`), builders, and `to_anthropic_messages()`.

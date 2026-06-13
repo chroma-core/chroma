@@ -1574,9 +1574,13 @@ dependencies = [
 name = "chroma-agent"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "indexmap 2.13.0",
+ "schemars",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]
