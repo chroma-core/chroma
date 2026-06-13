@@ -2,20 +2,25 @@
 //! search-agent research framework.
 //!
 //! So far this crate provides the [`ProviderFormat`] dispatch seam, the
-//! crate-wide [`AgentError`] type, and the tool abstraction ([`Tool`] /
-//! [`DynTool`] / [`ToolSet`]) with a dummy [`GetWeatherTool`]. The trajectory,
-//! inference models, and the agent driver land in subsequent PRs (see
-//! `plans/`).
+//! crate-wide [`AgentError`] type, the tool abstraction ([`Tool`] /
+//! [`DynTool`] / [`ToolSet`]) with a dummy [`GetWeatherTool`], and the
+//! [`Trajectory`] record. The inference models and the agent driver land in
+//! subsequent PRs (see `plans/`).
 
 mod error;
 mod provider;
 mod tool;
 pub mod tools;
+mod trajectory;
 
 pub use error::AgentError;
 pub use provider::ProviderFormat;
 pub use tool::{DynTool, Tool, ToolCallMetadata, ToolSet};
 pub use tools::weather::{GetWeatherTool, TemperatureUnit};
+pub use trajectory::{
+    Action, ActionBuilder, ActionItem, Call, Entry, Observation, ObservationBuilder,
+    ObservationItem, Reasoning, Trajectory, TrajectoryBuilder,
+};
 
 #[cfg(test)]
 mod tests {
