@@ -162,6 +162,7 @@ def test_extracts_api_key_with_mixed_case_header() -> None:
 
     assert api_key == "mixed-case-key"
 
+
 def test_multiple_clients_returns_one_key() -> None:
     """Test that multiple clients return one of the available keys."""
     mock_api_1 = create_mock_http_client(
@@ -179,6 +180,7 @@ def test_multiple_clients_returns_one_key() -> None:
 
     assert api_key in ["key-1", "key-2"]
     
+
 def test_multiple_persistent_clients_different_paths(tmp_path):
     client1 = chromadb.PersistentClient(path=str(tmp_path / "db1"))
     client2 = chromadb.PersistentClient(path=str(tmp_path / "db2"))
