@@ -29,6 +29,10 @@ pub enum AgentError {
     #[error("configuration error: {0}")]
     Config(String),
 
+    /// The driver hit its trajectory-length cap before the agent finished.
+    #[error("agent exceeded maximum trajectory length of {0}")]
+    MaxTrajectoryLengthExceeded(usize),
+
     /// A requested provider format or operation is not yet supported.
     #[error("unsupported: {0}")]
     Unsupported(String),

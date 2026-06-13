@@ -309,10 +309,11 @@ Port the base `Agent`: `reset`/`observe`/`infer`/`act`/`is_done` + the `run` aut
 The concrete dedup/pruning subclasses are NOT ported, but we DO port the composition mechanism that replaces Python's subclass + `super()` chaining. Decision: composable behavior hooks (middleware), not trait-inheritance, because Rust trait default methods have no `super`, so layering dedup + budget would otherwise require hand-merged structs or duplicated bodies.
 
 ```rust
-#[async_trait]
+// Hooks are synchronous (they mutate cloned views / observations), so no
+// `#[async_trait]` is needed; the async work lives in the driver's infer/act.
 pub trait AgentBehavior: Send + Sync {
     fn reset(&mut self) {}
-    fn prepare_for_inference(&mut self, ctx: &mut InferenceContext) {}
+    fn prepare_for_inference(&mut self, ctx: &mut InferenceContext<'_>) {}
     fn before_tool_call(&mut self, call: &Call) {} // later: returns Option<Box<dyn Any + Send>> to inject Tool::RuntimeParams
     fn after_tool_call(&mut self, call: &Call, output: &str, meta: &Option<ToolCallMetadata>) {}
     fn after_act(&mut self, obs: &mut Observation) {}
@@ -356,9 +357,9 @@ flowchart LR
 - Scope (todo: `inference`): `inference.rs` (`InferenceContext`, `AgentInferenceModel` trait, `AnthropicAgentInferenceModel` via `reqwest`).
 - Testable milestone: unit test feeds a canned Anthropic Messages response body (fixture JSON) through the content-block -> `Action` parser and asserts `thinking`->`Reasoning`, `text`->`ActionItem::SendUserText`, `tool_use`->`ActionItem::Call`. A live single-shot inference test is gated behind `ANTHROPIC_API_KEY` / `#[ignore]`.
 
-### PR 5 - `hammad/rust-agent-driver`
-- Scope (todos: `agent`, `validate`): `agent.rs` (base `Agent` driver `reset`/`observe`/`infer`/`act`/`is_done`/`run`, `AgentBehavior` hook trait, empty behaviors vec) plus `lib.rs` re-exports.
-- Testable milestone: offline end-to-end test using a `StubInferenceModel` (test-only) that scripts one `get_weather` call then a text-only terminal action — asserts the loop runs infer -> act -> observe, executes the tool, and `is_done()` terminates with the expected final `Trajectory`. The full live "What's the weather in Paris?" loop is gated behind `ANTHROPIC_API_KEY` / `#[ignore]`.
+### PR 5 - `hammad/rust-agent-driver` (DONE)
+- Scope (todos: `agent`, `validate`): `agent.rs` (base `Agent` driver `reset`/`observe`/`infer`/`act`/`is_done`/`run` with `join_all` parallel tool execution, `AgentBehavior` hook trait, empty behaviors vec) plus `lib.rs` re-exports.
+- Testable milestone: offline end-to-end test using a `StubInferenceModel` (test-only) that scripts one `get_weather` call then a text-only terminal action — asserts the loop runs infer -> act -> observe, executes the tool, and `is_done()` terminates with the expected final `Trajectory`. Implemented: `run_drives_to_completion`, `manual_driving_steps`, `behavior_hooks_fire_during_run`, `infer_errors_when_trajectory_cap_hit`. The full live "What's the weather in Paris?" loop is gated behind `ANTHROPIC_API_KEY` / `#[ignore]` (in the inference module).
 
 Notes:
 - The `StubInferenceModel` introduced in PR 5 (or earlier, behind `#[cfg(test)]`) is what makes the driver testable without network access; it implements `AgentInferenceModel` and returns pre-scripted `Action`s.

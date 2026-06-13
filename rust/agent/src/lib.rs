@@ -1,13 +1,14 @@
 //! `chroma-agent`: a provider-agnostic agent core ported from the Python
 //! search-agent research framework.
 //!
-//! So far this crate provides the [`ProviderFormat`] dispatch seam, the
-//! crate-wide [`AgentError`] type, the tool abstraction ([`Tool`] /
-//! [`DynTool`] / [`ToolSet`]) with a dummy [`GetWeatherTool`], the
-//! [`Trajectory`] record, and inference models ([`AgentInferenceModel`] /
-//! [`AnthropicAgentInferenceModel`]). The agent driver lands in a subsequent PR
-//! (see `plans/`).
+//! This crate provides the [`ProviderFormat`] dispatch seam, the crate-wide
+//! [`AgentError`] type, the tool abstraction ([`Tool`] / [`DynTool`] /
+//! [`ToolSet`]) with a dummy [`GetWeatherTool`], the [`Trajectory`] record,
+//! inference models ([`AgentInferenceModel`] / [`AnthropicAgentInferenceModel`]),
+//! and the [`Agent`] state-machine driver with composable [`AgentBehavior`]
+//! hooks.
 
+mod agent;
 mod error;
 mod inference;
 mod provider;
@@ -15,6 +16,7 @@ mod tool;
 pub mod tools;
 mod trajectory;
 
+pub use agent::{Agent, AgentBehavior, ToolErrorPolicy};
 pub use error::AgentError;
 pub use inference::{
     AgentInferenceModel, AnthropicAgentInferenceModel, AnthropicBeta, AnthropicBetas,

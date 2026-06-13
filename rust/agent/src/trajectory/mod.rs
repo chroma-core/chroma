@@ -60,11 +60,15 @@ pub struct Action {
 pub enum ObservationItem {
     /// Text from the user (e.g. the initial prompt).
     User(String),
-    /// The result of a tool call, correlated by `call_id`.
+    /// The result of a tool call, correlated by `call_id`. `is_error` marks a
+    /// failed call whose `text` carries the error message (rendered with the
+    /// provider's error flag, e.g. Anthropic's `is_error: true`), so the model
+    /// can see the failure and self-correct.
     ToolResult {
         call_id: String,
         text: String,
         metadata: Option<ToolCallMetadata>,
+        is_error: bool,
     },
 }
 
@@ -168,6 +172,7 @@ impl ObservationBuilder {
         self
     }
 
+    /// Record a successful tool result.
     pub fn push_tool_result(
         &mut self,
         call_id: impl Into<String>,
@@ -178,6 +183,23 @@ impl ObservationBuilder {
             call_id: call_id.into(),
             text: text.into(),
             metadata,
+            is_error: false,
+        });
+        self
+    }
+
+    /// Record a failed tool result whose `text` is the error message. Rendered
+    /// with the provider's error flag so the model can self-correct.
+    pub fn push_tool_error(
+        &mut self,
+        call_id: impl Into<String>,
+        text: impl Into<String>,
+    ) -> &mut Self {
+        self.items.push(ObservationItem::ToolResult {
+            call_id: call_id.into(),
+            text: text.into(),
+            metadata: None,
+            is_error: true,
         });
         self
     }
@@ -225,6 +247,15 @@ impl TrajectoryBuilder {
 
     pub fn is_empty(&self) -> bool {
         self.trajectory.entries.is_empty()
+    }
+
+    /// Borrow the trajectory accumulated so far without consuming the builder.
+    ///
+    /// The driver needs to inspect/clone the in-progress trajectory between
+    /// steps (e.g. to build a masked inference view or to return the final
+    /// record), so this complements the consuming [`Self::build`].
+    pub fn trajectory(&self) -> &Trajectory {
+        &self.trajectory
     }
 
     pub fn build(self) -> Trajectory {
@@ -322,7 +353,7 @@ mod tests {
         assert_eq!(content[1]["name"], "get_weather");
         assert_eq!(content[1]["input"]["location"], "Paris");
 
-        // Tool result -> user/tool_result.
+        // Tool result -> user/tool_result (successful -> is_error false).
         assert_eq!(messages[2]["role"], "user");
         assert_eq!(messages[2]["content"][0]["type"], "tool_result");
         assert_eq!(messages[2]["content"][0]["tool_use_id"], "call_1");
@@ -330,5 +361,31 @@ mod tests {
             messages[2]["content"][0]["content"][0]["text"],
             "It is 72F and sunny in Paris."
         );
+        assert_eq!(messages[2]["content"][0]["is_error"], false);
+    }
+
+    #[test]
+    fn tool_error_renders_with_is_error_flag() {
+        let mut builder = TrajectoryBuilder::new();
+        let mut action = ActionBuilder::new();
+        action.push_call(Call {
+            name: "get_weather".to_string(),
+            params: json!({ "location": "Paris" }),
+            id: "call_1".to_string(),
+        });
+        builder.push_action(action.build());
+
+        let mut obs = ObservationBuilder::new();
+        obs.push_tool_error("call_1", "unsupported: boom");
+        builder.push_observation(obs.build());
+
+        let messages = builder
+            .build()
+            .to_provider_format(ProviderFormat::Anthropic);
+        let block = &messages.as_array().expect("array")[1]["content"][0];
+        assert_eq!(block["type"], "tool_result");
+        assert_eq!(block["tool_use_id"], "call_1");
+        assert_eq!(block["is_error"], true);
+        assert_eq!(block["content"][0]["text"], "unsupported: boom");
     }
 }
