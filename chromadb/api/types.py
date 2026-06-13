@@ -1270,7 +1270,11 @@ def validate_where(where: Where) -> None:
                     )
                 if isinstance(operand, list) and (
                     len(operand) == 0
-                    or not all(isinstance(x, type(operand[0])) for x in operand)
+                    or not all(
+                        (bool if isinstance(x, bool) else type(x))
+                        is (bool if isinstance(operand[0], bool) else type(operand[0]))
+                        for x in operand
+                    )
                 ):
                     raise ValueError(
                         f"Expected where operand value to be a non-empty list, and all values to be of the same type "
