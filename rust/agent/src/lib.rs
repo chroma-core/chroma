@@ -3,17 +3,23 @@
 //!
 //! So far this crate provides the [`ProviderFormat`] dispatch seam, the
 //! crate-wide [`AgentError`] type, the tool abstraction ([`Tool`] /
-//! [`DynTool`] / [`ToolSet`]) with a dummy [`GetWeatherTool`], and the
-//! [`Trajectory`] record. The inference models and the agent driver land in
-//! subsequent PRs (see `plans/`).
+//! [`DynTool`] / [`ToolSet`]) with a dummy [`GetWeatherTool`], the
+//! [`Trajectory`] record, and inference models ([`AgentInferenceModel`] /
+//! [`AnthropicAgentInferenceModel`]). The agent driver lands in a subsequent PR
+//! (see `plans/`).
 
 mod error;
+mod inference;
 mod provider;
 mod tool;
 pub mod tools;
 mod trajectory;
 
 pub use error::AgentError;
+pub use inference::{
+    AgentInferenceModel, AnthropicAgentInferenceModel, AnthropicBeta, AnthropicBetas,
+    AnthropicModel, AnthropicRequestConfig, InferenceContext,
+};
 pub use provider::ProviderFormat;
 pub use tool::{DynTool, Tool, ToolCallMetadata, ToolSet};
 pub use tools::weather::{GetWeatherTool, TemperatureUnit};

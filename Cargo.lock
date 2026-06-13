@@ -1576,6 +1576,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "indexmap 2.13.0",
+ "reqwest 0.13.2",
  "schemars",
  "serde",
  "serde_json",

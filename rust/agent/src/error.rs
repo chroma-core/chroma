@@ -21,6 +21,14 @@ pub enum AgentError {
     #[error("runtime params type mismatch for tool `{tool}`")]
     ToolRuntimeParamsTypeMismatch { tool: String },
 
+    /// An HTTP/transport error talking to a provider API.
+    #[error("http error: {0}")]
+    Http(#[from] reqwest::Error),
+
+    /// Invalid or missing configuration (e.g. a required environment variable).
+    #[error("configuration error: {0}")]
+    Config(String),
+
     /// A requested provider format or operation is not yet supported.
     #[error("unsupported: {0}")]
     Unsupported(String),
