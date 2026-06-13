@@ -26,6 +26,11 @@ pub struct InferenceContext<'a> {
     pub toolset: &'a ToolSet,
     /// Per-call override for the model's default max output tokens.
     pub max_tokens: Option<u32>,
+    /// System prompt to send with this call. Owned by the agent definition
+    /// (see [`crate::Agent::with_system_prompt`]) and seeded before behaviors
+    /// run, so an [`crate::AgentBehavior::prepare_for_inference`] hook may
+    /// override it. The provider decides how to render it on the wire.
+    pub system: Option<String>,
 }
 
 /// Produces the next [`Action`] from an [`InferenceContext`], or `None` when the
