@@ -61,9 +61,7 @@ pub struct FoundationApiServer {
     #[allow(dead_code)]
     pub(crate) wiki_client: Option<WikiClient>,
     /// Process-wide HTTP client (one shared connection pool) for outbound calls
-    /// that don't go through the Chroma client: the deep-research SSE proxy and,
-    /// in a later PR, the agent's Anthropic inference model. Cloned per request;
-    /// clones share the pool (reqwest pools per host internally).
+    /// that don't go through the Chroma client
     pub(crate) shared_http_client: reqwest::Client,
 }
 
