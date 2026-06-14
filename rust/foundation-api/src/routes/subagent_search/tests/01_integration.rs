@@ -103,6 +103,84 @@ async fn upstream_error_event_ends_stream_with_error() {
 }
 
 #[tokio::test]
+async fn answer_with_no_documents_emits_empty_result_then_done() {
+    let server = MockServer::start_async().await;
+    // A terminal answer that yields no `<Document>` blocks (a legitimate
+    // "found nothing" result) followed by done.
+    let body = concat!(
+        "data: {\"type\":\"action\",\"data\":{\"tools\":[{\"name\":\"user_text\"}],\"params\":[{\"text\":\"I could not find anything relevant.\"}]}}\n\n",
+        "data: {\"type\":\"done\",\"data\":{}}\n\n",
+    );
+    let mock = server
+        .mock_async(|when, then| {
+            when.method("POST").path("/search");
+            then.status(200)
+                .header("content-type", "text/event-stream")
+                .body(body);
+        })
+        .await;
+
+    // The answer-only action is dropped; result + done are injected. No error.
+    let stream = stream_subagent_search(
+        reqwest::Client::new(),
+        server.base_url(),
+        test_creds(),
+        "rag".to_string(),
+    );
+    let events: Vec<_> = stream.collect().await;
+    assert_eq!(events.len(), 2, "empty result + done");
+    assert!(events.iter().all(|e| e.is_ok()), "no hits is not an error");
+
+    // The collect core resolves the same stream to an empty document list.
+    let documents = collect_subagent_search_final(
+        reqwest::Client::new(),
+        server.base_url(),
+        test_creds(),
+        "rag".to_string(),
+    )
+    .await
+    .expect("empty results are Ok");
+    assert!(documents.is_empty());
+    assert_eq!(mock.calls(), 2);
+}
+
+#[tokio::test]
+async fn stream_without_terminator_ends_with_synthesized_error() {
+    let server = MockServer::start_async().await;
+    // A stream that ends after an action, never sending `done` or `error`.
+    let body = concat!(
+        "data: {\"type\":\"action\",\"data\":{\"tools\":[{\"name\":\"search\"}],\"params\":[{\"query\":\"rag\"}]}}\n\n",
+        "data: {\"type\":\"observation\",\"data\":{\"sources\":[\"a\"]}}\n\n",
+    );
+    let mock = server
+        .mock_async(|when, then| {
+            when.method("POST").path("/search");
+            then.status(200)
+                .header("content-type", "text/event-stream")
+                .body(body);
+        })
+        .await;
+
+    let stream = stream_subagent_search(
+        reqwest::Client::new(),
+        server.base_url(),
+        test_creds(),
+        "rag".to_string(),
+    );
+    let events: Vec<_> = stream.collect().await;
+    // action + observation stream through, then a synthesized terminal error
+    // so the caller never sees a silent close.
+    assert_eq!(events.len(), 3);
+    assert!(events[0].is_ok());
+    assert!(events[1].is_ok());
+    assert!(
+        events[2].is_err(),
+        "a terminator-less close should surface as a stream error"
+    );
+    assert_eq!(mock.calls(), 1);
+}
+
+#[tokio::test]
 async fn upstream_error_status_ends_stream_with_error() {
     let server = MockServer::start_async().await;
     let mock = server

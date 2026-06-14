@@ -8,7 +8,8 @@
 //! - `action` / `observation` — forwarded as typed progress events.
 //! - `result` — the agent's final answer parsed into structured
 //!   [`RankedDocument`]s (so callers don't re-parse the `<Document>` block),
-//!   emitted just before the terminal `done`.
+//!   emitted just before the terminal `done`. An answer with no documents is a
+//!   valid empty `result`, not an error.
 //! - `done` — terminates the stream.
 //!
 //! An upstream `error` event ends the stream with a [`SubagentStreamError`];
@@ -140,8 +141,8 @@ fn sse_event(event: &SubagentSearchEvent) -> Result<Event, SubagentStreamError> 
 /// the terminal `done`.
 ///
 /// Ends the stream with a [`SubagentStreamError`] on a transport/upstream
-/// failure, on an upstream `error` event, or if the final answer contained no
-/// parseable documents.
+/// failure, on an upstream `error` event, or if the upstream closes without a
+/// terminal `done`. An answer with zero documents is a valid empty `result`.
 fn stream_subagent_search(
     http: reqwest::Client,
     url: String,
@@ -155,6 +156,10 @@ fn stream_subagent_search(
         // The terminal answer is the last `action`'s `user_text`; track it as
         // events stream by so we can emit it as a structured `result`.
         let mut final_answer: Option<String> = None;
+        // Whether we saw a terminal `done`. If the upstream byte stream ends
+        // without one (and without an `error`), we synthesize an error below so
+        // the caller never sees a silent, terminator-less close.
+        let mut saw_done = false;
         while let Some(item) = data.next().await {
             let raw = match item {
                 Ok(raw) => raw,
@@ -189,16 +194,14 @@ fn stream_subagent_search(
                 }
                 // Emit the structured `result` then `done` as the terminator.
                 AgentEvent::Done => {
+                    saw_done = true;
+                    // An answer that parses to zero documents is a legitimate
+                    // "no hits" result, not a failure — emit an empty `result`
+                    // so it stays distinguishable from a broken stream.
                     let documents = final_answer
                         .as_deref()
                         .map(parse_ranked_documents)
                         .unwrap_or_default();
-                    if documents.is_empty() {
-                        yield Err(SubagentStreamError(
-                            "subagent answer contained no parseable documents".to_string(),
-                        ));
-                        return;
-                    }
                     vec![
                         SubagentSearchEvent::Result { documents },
                         SubagentSearchEvent::Done,
@@ -217,6 +220,14 @@ fn stream_subagent_search(
                     }
                 }
             }
+        }
+
+        // The byte stream ended without a `done` (or `error`, which would have
+        // returned above): surface a terminal error so the close is never silent.
+        if !saw_done {
+            yield Err(SubagentStreamError(
+                "deep research stream ended without a terminal event".to_string(),
+            ));
         }
     }
 }
@@ -319,9 +330,9 @@ fn parse_sse_data_line(line: &[u8]) -> Option<String> {
 /// `user_text` from the last `action` event) and parses its
 /// `<Document>/<Justification>` blocks into structured [`RankedDocument`]s.
 ///
-/// Errors if the stream produced no terminal answer, or if the answer did not
-/// follow the documented `<Document>` format. Used by the `subagent_search`
-/// agent tool in the next PR in the stack.
+/// Errors only if the stream produced no terminal answer; an answer that parses
+/// to zero documents yields `Ok(vec![])`. Used by the `subagent_search` agent
+/// tool in the next PR in the stack.
 #[allow(dead_code)]
 pub(crate) async fn collect_subagent_search_final(
     http: reqwest::Client,
@@ -344,12 +355,10 @@ pub(crate) async fn collect_subagent_search_final(
         }
     }
 
+    // A terminal answer that parses to zero documents is a valid "no hits"
+    // result; only the genuine absence of any terminal answer is an error.
     let answer = final_answer.ok_or(SubagentResultError::NoFinalAnswer)?;
-    let documents = parse_ranked_documents(&answer);
-    if documents.is_empty() {
-        return Err(SubagentResultError::NoDocuments);
-    }
-    Ok(documents)
+    Ok(parse_ranked_documents(&answer))
 }
 
 // ---------------------------------------------------------------------------

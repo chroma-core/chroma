@@ -32,6 +32,11 @@ fn default_limit() -> u32 {
 /// modalities.
 const KNN_CANDIDATES: u32 = 100;
 
+/// Upper bound on the requested `limit`. Fusion can never surface more than the
+/// per-arm candidate pool, so clamp here to make that ceiling explicit rather
+/// than letting callers ask for an arbitrarily large page.
+const MAX_LIMIT: u32 = KNN_CANDIDATES;
+
 /// The RRF `k` smoothing constant (the conventional default).
 const RRF_K: u32 = 60;
 
@@ -49,7 +54,9 @@ pub struct SearchRequest {
     /// The search query text. Embedded client-side into dense + sparse vectors.
     #[validate(length(min = 1, message = "query must not be empty"))]
     pub query: String,
-    /// Maximum number of hits to return. Defaults to [`default_limit`].
+    /// Maximum number of hits to return. Defaults to [`default_limit`]; must be
+    /// at least 1 and is clamped down to [`MAX_LIMIT`].
+    #[validate(range(min = 1, message = "limit must be at least 1"))]
     #[serde(default = "default_limit")]
     pub limit: u32,
 }
@@ -157,21 +164,26 @@ async fn run_hybrid_search(
     query: &str,
     limit: u32,
 ) -> Result<Vec<SearchRecord>, SearchError> {
-    let dense = collection
-        .embed_query(&[query])
-        .await
-        .map_err(SearchError::DenseEmbed)?
-        .into_iter()
-        .next()
-        .ok_or(SearchError::EmptyEmbedding)?;
-    let sparse = embedder
-        .embed_sparse(token, &[query])
-        .await?
-        .into_iter()
-        .next()
-        .ok_or(SearchError::EmptyEmbedding)?;
+    let dense_fut = async {
+        collection
+            .embed_query(&[query])
+            .await
+            .map_err(SearchError::DenseEmbed)?
+            .into_iter()
+            .next()
+            .ok_or(SearchError::EmptyEmbedding)
+    };
+    let sparse_fut = async {
+        embedder
+            .embed_sparse(token, &[query])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or(SearchError::EmptyEmbedding)
+    };
+    let (dense, sparse) = tokio::try_join!(dense_fut, sparse_fut)?;
 
-    let payload = build_hybrid_search_payload(dense, sparse, limit)?;
+    let payload = build_hybrid_search_payload(dense, sparse, limit.min(MAX_LIMIT))?;
     let response = collection
         .search(vec![payload])
         .await
@@ -317,6 +329,27 @@ mod tests {
         assert_eq!(hits[1].id, "b-0");
         assert_eq!(hits[1].document, None);
         assert_eq!(hits[1].score, Some(0.4));
+    }
+
+    #[test]
+    fn request_validation_rejects_empty_query_and_zero_limit() {
+        use validator::Validate;
+
+        // Omitted limit falls back to the default and validates.
+        let defaulted: SearchRequest =
+            serde_json::from_value(serde_json::json!({ "query": "hi" })).expect("deserialize");
+        assert_eq!(defaulted.limit, default_limit());
+        assert!(defaulted.validate().is_ok());
+
+        let empty_query: SearchRequest =
+            serde_json::from_value(serde_json::json!({ "query": "", "limit": 5 }))
+                .expect("deserialize");
+        assert!(empty_query.validate().is_err());
+
+        let zero_limit: SearchRequest =
+            serde_json::from_value(serde_json::json!({ "query": "hi", "limit": 0 }))
+                .expect("deserialize");
+        assert!(zero_limit.validate().is_err());
     }
 
     #[test]

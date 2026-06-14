@@ -132,15 +132,14 @@ pub(crate) struct RankedDocument {
     pub justification: String,
 }
 
-/// Failure to turn a completed subagent stream into structured results.
+/// Failure to turn a completed subagent stream into structured results. An
+/// answer that parses to zero documents is *not* an error — it is a valid
+/// empty result — so the only failure is the absence of any terminal answer.
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub(crate) enum SubagentResultError {
     /// The stream finished without a terminal `user_text` action.
     #[error("subagent stream produced no terminal answer")]
     NoFinalAnswer,
-    /// The terminal answer didn't contain any parseable `<Document>` blocks.
-    #[error("subagent answer contained no parseable <Document> blocks")]
-    NoDocuments,
 }
 
 /// Matches one `<Document id=…><Justification>…</Justification></Document>`
@@ -151,6 +150,8 @@ static DOCUMENT_BLOCK: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r#"(?is)<Document\s+id=["']?([^"'>\s]+)["']?\s*>\s*<Justification>\s*(.*?)\s*</Justification>\s*</Document>"#,
     )
+    // SAFETY(hammadb): the pattern is a compile-time constant validated by the
+    // unit tests, so compilation cannot fail at runtime.
     .expect("DOCUMENT_BLOCK regex is valid")
 });
 
