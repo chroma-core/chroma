@@ -1228,18 +1228,66 @@ impl ChromaCollection {
             .map(Some)
     }
 
-    async fn embed_documents(
+    /// Embeds documents with the collection's schema-derived dense embedding
+    /// function, applying the *document-side* instruction.
+    ///
+    /// This is the same path [`add`](Self::add)/[`upsert`](Self::upsert) take
+    /// when embeddings are omitted; it is also exposed publicly as the
+    /// write-side counterpart of [`embed_query`](Self::embed_query) for callers
+    /// that need to embed documents explicitly.
+    ///
+    /// Returns [`ChromaHttpClientError::MissingEmbeddingFunction`] when the
+    /// collection has no dense embedding function configured.
+    pub async fn embed_documents(
         &self,
         input: &[&str],
+    ) -> Result<Vec<Vec<f32>>, ChromaHttpClientError> {
+        self.embed_with(input, false).await
+    }
+
+    /// Embeds query text with the collection's schema-derived dense embedding
+    /// function, applying the *query-side* instruction.
+    ///
+    /// This is the read-side mirror of the write path's document auto-embed
+    /// ([`add`](Self::add) with omitted embeddings): both pull the same EF off
+    /// the collection schema, but documents use the document instruction while
+    /// queries use the query instruction. It is public because — unlike writes,
+    /// which the server auto-embeds — Chroma's Search API takes pre-computed
+    /// query vectors, so search callers must embed the query themselves and
+    /// want the exact EF the collection was built with (no config drift).
+    ///
+    /// Returns [`ChromaHttpClientError::MissingEmbeddingFunction`] when the
+    /// collection has no dense embedding function configured.
+    ///
+    // TODO: when the Search API can auto-embed query text server-side
+    // (mirroring write-side auto-embed), callers could pass raw query text on
+    // the `$knn` rank and let the EF run on the FE. This explicit client-side
+    // path would stay as an option (e.g. local/precomputed embedding), not
+    // necessarily be removed.
+    pub async fn embed_query(
+        &self,
+        input: &[&str],
+    ) -> Result<Vec<Vec<f32>>, ChromaHttpClientError> {
+        self.embed_with(input, true).await
+    }
+
+    /// Shared dense-embedding helper. `query` selects the query-side instruction
+    /// (`embed_query_strs`) over the document-side one (`embed_strs`).
+    async fn embed_with(
+        &self,
+        input: &[&str],
+        query: bool,
     ) -> Result<Vec<Vec<f32>>, ChromaHttpClientError> {
         let embedding_function = self
             .embedding_function
             .as_ref()
             .ok_or(ChromaHttpClientError::MissingEmbeddingFunction)?;
-        let embeddings = embedding_function
-            .embed_strs(input)
-            .await
-            .map_err(|err| ChromaHttpClientError::EmbeddingFunctionError(err.to_string()))?;
+        let embeddings = if query {
+            embedding_function.embed_query_strs(input).await
+        } else {
+            embedding_function.embed_strs(input).await
+        }
+        .map_err(|err| ChromaHttpClientError::EmbeddingFunctionError(err.to_string()))?;
         if embeddings.len() != input.len() {
             return Err(ChromaHttpClientError::EmbeddingFunctionError(format!(
                 "Embedding function returned {} embeddings for {} inputs",

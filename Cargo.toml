@@ -6,6 +6,7 @@ members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "ru
 [workspace.dependencies]
 anyhow = "1.0"
 arrow = "55.1"
+async-stream = "0.3"
 async-trait = "0.1"
 aws-config = { version = "1.5", features = ["behavior-version-latest"] }
 aws-sdk-s3 = "1.63"

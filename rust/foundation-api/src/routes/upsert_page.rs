@@ -14,7 +14,7 @@
 //! delete-then-add below will be replaced with it to close the partial-write
 //! window and the read-then-write race on a slug.
 
-use super::whoami::whoami_and_authorize;
+use crate::routes::{caller_token, whoami::whoami_and_authorize};
 use crate::wiki::chunking::{chunk_content, chunk_id_for, title_from_content, ChunkingConfig};
 use crate::wiki::client::is_not_found;
 use crate::wiki::embed::WikiEmbedder;
@@ -35,10 +35,6 @@ use std::future::Future;
 use std::sync::LazyLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use validator::{Validate, ValidationError};
-
-/// HTTP header carrying the caller's Chroma Cloud token, forwarded to the FE on
-/// every proxied call so authz/quota/billing key off the user.
-const CHROMA_TOKEN_HEADER: &str = "x-chroma-token";
 
 /// Max records per `add` request. Chroma Cloud's embedding service rejects
 /// calls with more than this many docs, and large pages can exceed it, so adds
@@ -120,7 +116,7 @@ pub enum UpsertPageError {
     #[error("wiki record I/O is not configured")]
     RouteDisabled,
     /// The caller's request carried no usable `x-chroma-token`.
-    #[error("missing or invalid {CHROMA_TOKEN_HEADER} header")]
+    #[error("missing or invalid x-chroma-token header")]
     MissingToken,
     /// Resolving the wiki collection through the proxy failed.
     #[error(transparent)]
@@ -178,7 +174,7 @@ async fn upsert_page(
         .wiki_client
         .as_ref()
         .ok_or(UpsertPageError::RouteDisabled)?;
-    let token = chroma_token(headers)?;
+    let token = caller_token(headers).ok_or(UpsertPageError::MissingToken)?;
 
     // Resolve (cache-first) the wiki collection identity, then derive the
     // chunker from its metadata so writes match how the collection was created.
@@ -370,15 +366,6 @@ where
         }
         UpsertPageError::RecordIo(err)
     })
-}
-
-/// Extracts the caller's Chroma token from the request headers.
-fn chroma_token(headers: &HeaderMap) -> Result<&str, UpsertPageError> {
-    headers
-        .get(CHROMA_TOKEN_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .filter(|token| !token.is_empty())
-        .ok_or(UpsertPageError::MissingToken)
 }
 
 /// Validates the slug against [`SLUG_RE`].
