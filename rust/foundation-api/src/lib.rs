@@ -9,6 +9,7 @@
 
 use std::sync::Arc;
 
+pub(crate) mod agent_tools;
 pub mod config;
 pub(crate) mod routes;
 pub mod server;

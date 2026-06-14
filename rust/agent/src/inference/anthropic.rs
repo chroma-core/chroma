@@ -3,6 +3,8 @@
 //! Response parsing is split into a pure [`parse_anthropic_response`] helper so
 //! it can be tested without network access.
 
+use std::str::FromStr;
+
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
@@ -82,12 +84,38 @@ pub enum AnthropicModel {
 }
 
 impl AnthropicModel {
+    /// Every known model. Keep in sync with the enum variants; this backs
+    /// [`from_str`](Self::from_str) so parsing stays a single source of truth.
+    pub const ALL: [AnthropicModel; 2] = [AnthropicModel::Opus4_5, AnthropicModel::Sonnet4_5];
+
     /// The API model identifier sent on the wire.
     pub fn id(self) -> &'static str {
         match self {
             AnthropicModel::Opus4_5 => "claude-opus-4-5-20251101",
             AnthropicModel::Sonnet4_5 => "claude-sonnet-4-5-20250929",
         }
+    }
+}
+
+/// Error returned by [`AnthropicModel::from_str`] when a string names no known
+/// model.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unknown Anthropic model: {0}")]
+pub struct UnknownAnthropicModel(pub String);
+
+impl FromStr for AnthropicModel {
+    type Err = UnknownAnthropicModel;
+
+    /// Resolves a model from its exact wire [`id`](Self::id),
+    /// case-insensitively. Only full snapshot ids are accepted; family
+    /// shorthands like `opus` are intentionally rejected because they are
+    /// ambiguous across snapshots.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        Self::ALL
+            .into_iter()
+            .find(|model| model.id().eq_ignore_ascii_case(s))
+            .ok_or_else(|| UnknownAnthropicModel(s.to_string()))
     }
 }
 
@@ -298,6 +326,23 @@ mod tests {
         let mut toolset = ToolSet::new();
         toolset.add(GetWeatherTool);
         toolset
+    }
+
+    #[test]
+    fn model_from_str_matches_wire_id_only() {
+        // Every variant's wire id round-trips back to the variant, ignoring
+        // surrounding whitespace and case.
+        for model in AnthropicModel::ALL {
+            assert_eq!(model.id().parse::<AnthropicModel>(), Ok(model));
+            assert_eq!(
+                format!("  {}  ", model.id().to_ascii_uppercase()).parse::<AnthropicModel>(),
+                Ok(model)
+            );
+        }
+        // Ambiguous family shorthands and unknown ids are rejected.
+        for s in ["opus", "opus-4.5", "sonnet", "haiku", ""] {
+            assert!(s.parse::<AnthropicModel>().is_err());
+        }
     }
 
     #[test]

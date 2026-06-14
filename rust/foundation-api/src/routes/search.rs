@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use validator::Validate;
 
 /// Default number of hits returned when the caller omits `limit`.
-fn default_limit() -> u32 {
+pub(crate) fn default_limit() -> u32 {
     10
 }
 
@@ -157,7 +157,7 @@ async fn run_search(
 /// function (`embed_query`), so it always matches the EF the documents were
 /// embedded with — no config to keep in sync here. The sparse vector is SPLADE,
 /// which is not part of the dense EF, so it is computed separately.
-async fn run_hybrid_search(
+pub(crate) async fn run_hybrid_search(
     collection: &ChromaCollection,
     embedder: &WikiEmbedder,
     token: &str,
