@@ -8,8 +8,8 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_sysdb::SysDb;
 use chroma_types::{
     Collection, CollectionUuid, CreateDatabaseError, DatabaseName, EmbeddingFunctionConfiguration,
-    EmbeddingFunctionNewConfiguration, Include, IncludeList, IndexConfig, KnnIndex, Metadata,
-    MetadataValue, Schema, SparseIndexAlgorithm, SparseVectorIndexConfig,
+    EmbeddingFunctionNewConfiguration, IndexConfig, KnnIndex, Metadata, MetadataValue, Schema,
+    SparseIndexAlgorithm, SparseVectorIndexConfig, UpdateMetadata,
     CHROMA_GROUP_CHUNK_SIBLINGS_KEY, DOCUMENT_KEY,
 };
 use frontend_core::{
@@ -360,45 +360,30 @@ async fn ensure_currents_collection(
         .as_ref()
         .ok_or(FoundationInitError::FrontendIngressUrlMissing)?;
     let token = chroma_token(headers)?;
-    let records = mock_currents_records();
-    let desired_ids: Vec<String> = records.iter().map(|record| record.id.clone()).collect();
     let collection = wiki_client
         .get_collection_by_name(tenant, token, collection_name)
         .await?;
-    let existing = collection
-        .get(
-            Some(desired_ids.clone()),
-            None,
-            None,
-            None,
-            Some(IncludeList(vec![Include::Metadata])),
-        )
-        .await
-        .map_err(FoundationInitError::RecordIo)?;
-    let existing_ids: std::collections::HashSet<&str> =
-        existing.ids.iter().map(String::as_str).collect();
-    let missing_records: Vec<MockCurrentRecord> = records
-        .into_iter()
-        .filter(|record| !existing_ids.contains(record.id.as_str()))
-        .collect();
-    if missing_records.is_empty() {
-        return Ok(());
-    }
+    let records = mock_currents_records();
 
-    let ids: Vec<String> = missing_records
-        .iter()
-        .map(|record| record.id.clone())
-        .collect();
-    let documents: Vec<Option<String>> = missing_records
+    let ids: Vec<String> = records.iter().map(|record| record.id.clone()).collect();
+    let documents: Vec<Option<String>> = records
         .iter()
         .map(|record| Some(record.document.clone()))
         .collect();
-    let metadatas: Vec<Option<Metadata>> = missing_records
+    let metadatas: Vec<Option<UpdateMetadata>> = records
         .into_iter()
-        .map(|record| Some(record.metadata))
+        .map(|record| {
+            Some(
+                record
+                    .metadata
+                    .into_iter()
+                    .map(|(key, value)| (key, value.into()))
+                    .collect(),
+            )
+        })
         .collect();
     collection
-        .add(
+        .upsert(
             ids,
             None::<Vec<Vec<f32>>>,
             Some(documents),
