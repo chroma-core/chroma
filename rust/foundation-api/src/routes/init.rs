@@ -89,13 +89,18 @@ pub async fn foundation_init(
         CollectionEmbeddingFunctions::default(),
     )
     .await?;
+    // Currents records carry their payload in metadata and are only ever
+    // fetched by metadata (never vector-searched), so the collection has no
+    // embedding function. Pin the dense index to a single dimension to match
+    // the constant placeholder vector the seed writes (see
+    // `ensure_currents_collection`).
     let currents = ensure_collection(
         &mut sysdb,
         tenant.clone(),
         db_name.clone(),
         &foundation_cfg.currents_collection,
         None,
-        None,
+        Some(1),
         CollectionEmbeddingFunctions::default(),
     )
     .await?;
@@ -363,6 +368,11 @@ async fn ensure_currents_collection(
     let records = mock_currents_records();
 
     let ids: Vec<String> = records.iter().map(|record| record.id.clone()).collect();
+    // The currents collection has no embedding function, so passing `None`
+    // embeddings would make the client try (and fail) to embed the document
+    // text with `MissingEmbeddingFunction`. These records are never
+    // vector-searched, so write a constant 1-dim placeholder vector instead.
+    let embeddings: Vec<Vec<f32>> = vec![vec![1.0]; ids.len()];
     let documents: Vec<Option<String>> = records
         .iter()
         .map(|record| Some(record.document.clone()))
@@ -380,13 +390,7 @@ async fn ensure_currents_collection(
         })
         .collect();
     collection
-        .upsert(
-            ids,
-            None::<Vec<Vec<f32>>>,
-            Some(documents),
-            None,
-            Some(metadatas),
-        )
+        .upsert(ids, embeddings, Some(documents), None, Some(metadatas))
         .await
         .map_err(FoundationInitError::RecordIo)?;
     Ok(())
