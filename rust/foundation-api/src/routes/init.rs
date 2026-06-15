@@ -313,8 +313,8 @@ async fn ensure_revision_history_function(
 enum FoundationInitError {
     #[error("Configured foundation database name is shorter than the 3-character minimum")]
     DatabaseNameTooShort,
-    #[error("foundation frontend_ingress_url is not configured")]
-    FrontendIngressUrlMissing,
+    #[error("foundation wiki record I/O is unavailable")]
+    WikiRouteUnavailable,
     #[error("missing or invalid x-chroma-token header")]
     MissingToken,
     #[error(transparent)]
@@ -329,7 +329,7 @@ impl ChromaError for FoundationInitError {
             FoundationInitError::DatabaseNameTooShort | FoundationInitError::MissingToken => {
                 ErrorCodes::InvalidArgument
             }
-            FoundationInitError::FrontendIngressUrlMissing
+            FoundationInitError::WikiRouteUnavailable
             | FoundationInitError::WikiClient(_)
             | FoundationInitError::RecordIo(_) => ErrorCodes::Internal,
         }
@@ -355,7 +355,7 @@ async fn ensure_currents_collection(
     let wiki_client = server
         .wiki_client
         .as_ref()
-        .ok_or(FoundationInitError::FrontendIngressUrlMissing)?;
+        .ok_or(FoundationInitError::WikiRouteUnavailable)?;
     let token = chroma_token(headers)?;
     let collection = wiki_client
         .get_collection_by_name(tenant, token, collection_name)
@@ -401,7 +401,7 @@ async fn maybe_seed_currents_collection(
     if server.wiki_client.is_none() {
         tracing::info!(
             collection_name = collection_name,
-            "skipping currents mock seed because frontend_ingress_url is not configured"
+            "skipping currents mock seed because foundation wiki record I/O is unavailable"
         );
         return Ok(());
     }
