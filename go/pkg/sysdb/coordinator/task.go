@@ -551,26 +551,25 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 				return nil
 			}
 
-			if attachedFunction.IsReady {
-				existingFunction, ok := existingFunctionsByID[attachedFunction.FunctionID]
-				if !ok {
-					log.Error("AttachFunction: unknown function ID on existing attached function",
-						zap.Error(err),
-						zap.Stringer("function_id", attachedFunction.FunctionID))
-					return common.ErrFunctionNotFound
-				}
-				if existingFunction.IsAsync == function.IsAsync {
-					log.Error("AttachFunction: collection already has an attached function with the same execution mode",
-						zap.String("name", attachedFunction.Name),
-						zap.String("existing_function", existingFunction.Name),
-						zap.String("requested_function", function.Name),
-						zap.Bool("is_async", function.IsAsync))
-					return status.Errorf(codes.AlreadyExists,
-						"collection already has an attached function with the same execution mode: name=%s, function=%s, output_collection=%s",
-						attachedFunction.Name,
-						existingFunction.Name,
-						attachedFunction.OutputCollectionName)
-				}
+			existingFunction, ok := existingFunctionsByID[attachedFunction.FunctionID]
+			if !ok {
+				log.Error("AttachFunction: unknown function ID on existing attached function",
+					zap.Error(err),
+					zap.Stringer("function_id", attachedFunction.FunctionID))
+				return common.ErrFunctionNotFound
+			}
+			if existingFunction.IsAsync == function.IsAsync {
+				log.Error("AttachFunction: collection already has an attached function with the same execution mode",
+					zap.String("name", attachedFunction.Name),
+					zap.String("existing_function", existingFunction.Name),
+					zap.String("requested_function", function.Name),
+					zap.Bool("is_async", function.IsAsync),
+					zap.Bool("is_ready", attachedFunction.IsReady))
+				return status.Errorf(codes.AlreadyExists,
+					"collection already has an attached function with the same execution mode: name=%s, function=%s, output_collection=%s",
+					attachedFunction.Name,
+					existingFunction.Name,
+					attachedFunction.OutputCollectionName)
 			}
 		}
 
