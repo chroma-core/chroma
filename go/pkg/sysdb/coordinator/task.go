@@ -497,12 +497,46 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 
 	// ===== Step 1: Create attached function with is_ready = false =====
 	err := s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		// Check if there's any active (ready, non-deleted) attached function for this collection
-		// We only allow one active attached function per collection
+		// Check if there are any active (ready, non-deleted) attached functions for this collection.
+		// We allow at most one active sync function and one active async function per collection.
 		existingAttachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(nil, nil, &req.InputCollectionId, nil, nil, false)
 		if err != nil {
 			log.Error("AttachFunction: failed to check for existing attached function", zap.Error(err))
 			return err
+		}
+
+		// Look up function by name up front so we can validate coexistence with any existing
+		// attached functions on the same input collection.
+		function, err := s.catalog.metaDomain.FunctionDb(txCtx).GetByName(req.FunctionName)
+		if err != nil {
+			log.Error("AttachFunction: failed to get function", zap.Error(err))
+			return err
+		}
+		if function == nil {
+			log.Error("AttachFunction: function not found", zap.String("function_name", req.FunctionName))
+			return common.ErrFunctionNotFound
+		}
+
+		existingFunctionIDs := make([]uuid.UUID, 0, len(existingAttachedFunctions))
+		seenExistingFunctionIDs := make(map[uuid.UUID]struct{}, len(existingAttachedFunctions))
+		for _, attachedFunction := range existingAttachedFunctions {
+			if _, ok := seenExistingFunctionIDs[attachedFunction.FunctionID]; ok {
+				continue
+			}
+			seenExistingFunctionIDs[attachedFunction.FunctionID] = struct{}{}
+			existingFunctionIDs = append(existingFunctionIDs, attachedFunction.FunctionID)
+		}
+
+		existingFunctionsByID := make(map[uuid.UUID]*dbmodel.Function, len(existingFunctionIDs))
+		if len(existingFunctionIDs) > 0 {
+			existingFunctions, err := s.catalog.metaDomain.FunctionDb(txCtx).GetByIDs(existingFunctionIDs)
+			if err != nil {
+				log.Error("AttachFunction: failed to load existing functions for input collection validation", zap.Error(err))
+				return err
+			}
+			for _, existingFunction := range existingFunctions {
+				existingFunctionsByID[existingFunction.ID] = existingFunction
+			}
 		}
 
 		for _, attachedFunction := range existingAttachedFunctions {
@@ -518,17 +552,25 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 			}
 
 			if attachedFunction.IsReady {
-				log.Error("AttachFunction: collection already has an attached function", zap.String("name", attachedFunction.Name))
-				functionName, err := dbmodel.GetFunctionNameByID(attachedFunction.FunctionID)
-				if err != nil {
-					log.Error("AttachFunction: unknown function ID", zap.Error(err))
-					return err
+				existingFunction, ok := existingFunctionsByID[attachedFunction.FunctionID]
+				if !ok {
+					log.Error("AttachFunction: unknown function ID on existing attached function",
+						zap.Error(err),
+						zap.Stringer("function_id", attachedFunction.FunctionID))
+					return common.ErrFunctionNotFound
 				}
-				return status.Errorf(codes.AlreadyExists,
-					"collection already has an attached function: name=%s, function=%s, output_collection=%s",
-					attachedFunction.Name,
-					functionName,
-					attachedFunction.OutputCollectionName)
+				if existingFunction.IsAsync == function.IsAsync {
+					log.Error("AttachFunction: collection already has an attached function with the same execution mode",
+						zap.String("name", attachedFunction.Name),
+						zap.String("existing_function", existingFunction.Name),
+						zap.String("requested_function", function.Name),
+						zap.Bool("is_async", function.IsAsync))
+					return status.Errorf(codes.AlreadyExists,
+						"collection already has an attached function with the same execution mode: name=%s, function=%s, output_collection=%s",
+						attachedFunction.Name,
+						existingFunction.Name,
+						attachedFunction.OutputCollectionName)
+				}
 			}
 		}
 
@@ -543,16 +585,6 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 			return common.ErrDatabaseNotFound
 		}
 
-		// Look up function by name
-		function, err := s.catalog.metaDomain.FunctionDb(txCtx).GetByName(req.FunctionName)
-		if err != nil {
-			log.Error("AttachFunction: failed to get function", zap.Error(err))
-			return err
-		}
-		if function == nil {
-			log.Error("AttachFunction: function not found", zap.String("function_name", req.FunctionName))
-			return common.ErrFunctionNotFound
-		}
 		// Check if input collection exists
 		collections, err := s.catalog.metaDomain.CollectionDb(txCtx).GetCollections([]string{req.InputCollectionId}, nil, req.TenantId, req.Database, nil, nil, false)
 		if err != nil {

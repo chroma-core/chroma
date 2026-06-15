@@ -435,6 +435,106 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_AllowsOutputCollectionI
 	suite.mockTxImpl.AssertExpectations(suite.T())
 }
 
+func (suite *AttachFunctionTestSuite) TestAttachFunction_AllowsAsyncAndSyncFunctionsOnSameInputCollection() {
+	ctx := context.Background()
+
+	existingAttachedFunctionID := uuid.New()
+	existingAsyncFunctionID := uuid.New()
+	newSyncFunctionID := dbmodel.FunctionRecordCounter
+	attachedFunctionName := "sync-attached-function"
+	inputCollectionID := "shared-input-collection"
+	outputCollectionName := "sync-output-collection"
+	tenantID := "test-tenant"
+	databaseName := "test-database"
+	databaseID := "database-uuid"
+	minRecordsForInvocation := uint64(100)
+
+	request := &coordinatorpb.AttachFunctionRequest{
+		Name:                    attachedFunctionName,
+		InputCollectionId:       inputCollectionID,
+		OutputCollectionName:    outputCollectionName,
+		FunctionName:            "record_counter",
+		TenantId:                tenantID,
+		Database:                databaseName,
+		MinRecordsForInvocation: minRecordsForInvocation,
+	}
+
+	existingAsyncAttachedFunction := &dbmodel.AttachedFunction{
+		ID:                      existingAttachedFunctionID,
+		Name:                    "existing-async-function",
+		TenantID:                tenantID,
+		DatabaseID:              databaseID,
+		InputCollectionID:       inputCollectionID,
+		OutputCollectionName:    "async-output-collection",
+		FunctionID:              existingAsyncFunctionID,
+		MinRecordsForInvocation: int64(minRecordsForInvocation),
+		IsReady:                 true,
+		CreatedAt:               time.Now(),
+		UpdatedAt:               time.Now(),
+	}
+
+	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
+	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), matchStringPtr(inputCollectionID), (*string)(nil), []uuid.UUID(nil), false).
+		Return([]*dbmodel.AttachedFunction{existingAsyncAttachedFunction}, nil).Once()
+
+	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Twice()
+	suite.mockFunctionDb.On("GetByName", "record_counter").
+		Return(&dbmodel.Function{ID: newSyncFunctionID, Name: "record_counter", IsAsync: false}, nil).Once()
+	suite.mockFunctionDb.On("GetByIDs", []uuid.UUID{existingAsyncFunctionID}).
+		Return([]*dbmodel.Function{{ID: existingAsyncFunctionID, Name: "dummy_async", IsAsync: true}}, nil).Once()
+
+	suite.mockMetaDomain.On("DatabaseDb", mock.Anything).Return(suite.mockDatabaseDb).Once()
+	suite.mockDatabaseDb.On("GetDatabases", tenantID, databaseName).
+		Return([]*dbmodel.Database{{ID: databaseID, Name: databaseName}}, nil).Once()
+
+	suite.mockCollectionDb.On("GetCollections",
+		[]string{inputCollectionID}, (*string)(nil), tenantID, databaseName, (*int32)(nil), (*int32)(nil), false).
+		Return([]*dbmodel.CollectionAndMetadata{{Collection: &dbmodel.Collection{ID: inputCollectionID}}}, nil).Times(2)
+
+	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Times(2)
+	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), (*string)(nil), matchStringPtr(inputCollectionID), []uuid.UUID(nil), false).
+		Return([]*dbmodel.AttachedFunction{}, nil).Twice()
+
+	suite.mockMetaDomain.On("CollectionDb", mock.Anything).Return(suite.mockCollectionDb).Once()
+	suite.mockCollectionDb.On("GetCollections",
+		[]string(nil), matchStringPtr(outputCollectionName), tenantID, databaseName, (*int32)(nil), (*int32)(nil), false).
+		Return([]*dbmodel.CollectionAndMetadata{}, nil).Once()
+
+	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
+	suite.mockAttachedFunctionDb.On("Insert", mock.MatchedBy(func(attachedFunction *dbmodel.AttachedFunction) bool {
+		return attachedFunction.Name == attachedFunctionName &&
+			attachedFunction.InputCollectionID == inputCollectionID &&
+			attachedFunction.OutputCollectionName == outputCollectionName &&
+			attachedFunction.FunctionID == newSyncFunctionID &&
+			attachedFunction.TenantID == tenantID &&
+			attachedFunction.DatabaseID == databaseID &&
+			attachedFunction.MinRecordsForInvocation == int64(minRecordsForInvocation)
+	})).Return(nil).Once()
+	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Maybe()
+	suite.mockMetaDomain.On("CollectionDb", mock.Anything).Return(suite.mockCollectionDb).Maybe()
+	suite.mockCollectionDb.On("LockCollection", mock.AnythingOfType("string")).Return((*bool)(nil), nil).Maybe()
+
+	suite.mockTxImpl.On("Transaction", ctx, mock.AnythingOfType("func(context.Context) error")).
+		Run(func(args mock.Arguments) {
+			txFunc := args.Get(1).(func(context.Context) error)
+			err := txFunc(context.Background())
+			suite.NoError(err)
+		}).Return(nil).Once()
+
+	response, err := suite.coordinator.AttachFunction(ctx, request)
+
+	suite.NoError(err)
+	suite.NotNil(response)
+	suite.NotEmpty(response.AttachedFunction.Id)
+
+	suite.mockMetaDomain.AssertExpectations(suite.T())
+	suite.mockAttachedFunctionDb.AssertExpectations(suite.T())
+	suite.mockFunctionDb.AssertExpectations(suite.T())
+	suite.mockDatabaseDb.AssertExpectations(suite.T())
+	suite.mockCollectionDb.AssertExpectations(suite.T())
+	suite.mockTxImpl.AssertExpectations(suite.T())
+}
+
 func (suite *AttachFunctionTestSuite) TestAttachFunction_RejectsOutputCollectionInputWhenAnyUpstreamFunctionIsSync() {
 	ctx := context.Background()
 
@@ -657,7 +757,9 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow() {
 	suite.mockMetaDomain.AssertExpectations(suite.T())
 }
 
-// TestAttachFunction_IdempotentRequest_ParameterMismatch tests when attached function exists but with different parameters:
+// TestAttachFunction_IdempotentRequest_ParameterMismatch tests when a ready attached
+// function already exists on the same collection with the same execution mode but
+// different parameters:
 // - Attached function already exists with different function_name
 // - Should return AlreadyExists error with descriptive message
 // - Should not proceed with any initialization
@@ -711,7 +813,13 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 	}
 
 	// ===== Phase 1: Transaction checks if task exists - finds task with different params =====
-	// Mock transaction call - it will fail with validation error
+	// Mock transaction call - it will fail with validation error.
+	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Twice()
+	suite.mockFunctionDb.On("GetByName", requestedOperatorName).
+		Return(&dbmodel.Function{ID: uuid.New(), Name: requestedOperatorName, IsAsync: false}, nil).Once()
+	suite.mockFunctionDb.On("GetByIDs", []uuid.UUID{existingOperatorID}).
+		Return([]*dbmodel.Function{{ID: existingOperatorID, Name: existingOperatorName, IsAsync: false}}, nil).Once()
+
 	suite.mockTxImpl.On("Transaction", ctx, mock.AnythingOfType("func(context.Context) error")).
 		Run(func(args mock.Arguments) {
 			txFunc := args.Get(1).(func(context.Context) error)
@@ -723,12 +831,8 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 			suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &inputCollID, (*string)(nil), []uuid.UUID(nil), false).
 				Return([]*dbmodel.AttachedFunction{existingAttachedFunction}, nil).Once()
 
-			// Note: validateAttachedFunctionMatchesRequest uses dbmodel.GetFunctionNameByID (static lookup)
-			// which returns "record_counter" for FunctionRecordCounter - different from requestedOperatorName
-			// Validation returns (false, nil) early, so DatabaseDb.GetDatabases is NOT called
-
 			_ = txFunc(txCtx)
-		}).Return(status.Errorf(codes.AlreadyExists, "collection already has an attached function: name=%s, function=%s, output_collection=%s", attachedFunctionName, existingOperatorName, outputCollectionName)).Once()
+		}).Return(status.Errorf(codes.AlreadyExists, "collection already has an attached function with the same execution mode: name=%s, function=%s, output_collection=%s", attachedFunctionName, existingOperatorName, outputCollectionName)).Once()
 
 	// Execute AttachFunction
 	response, err := suite.coordinator.AttachFunction(ctx, request)
@@ -736,7 +840,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 	// Assertions - should fail with AlreadyExists error
 	suite.Error(err)
 	suite.Nil(response)
-	suite.Contains(err.Error(), "collection already has an attached function")
+	suite.Contains(err.Error(), "collection already has an attached function with the same execution mode")
 	suite.Contains(err.Error(), existingOperatorName)
 	suite.Contains(err.Error(), outputCollectionName)
 
@@ -747,6 +851,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 	// Verify read mocks were called
 	suite.mockMetaDomain.AssertExpectations(suite.T())
 	suite.mockAttachedFunctionDb.AssertExpectations(suite.T())
+	suite.mockFunctionDb.AssertExpectations(suite.T())
 }
 
 func TestAttachFunctionTestSuite(t *testing.T) {
