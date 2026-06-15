@@ -60,6 +60,9 @@ pub struct FoundationApiServer {
     // Read by the wiki record-I/O routes added later in the stack.
     #[allow(dead_code)]
     pub(crate) wiki_client: Option<WikiClient>,
+    /// Process-wide HTTP client (one shared connection pool) for outbound calls
+    /// that don't go through the Chroma client
+    pub(crate) shared_http_client: reqwest::Client,
 }
 
 impl FoundationApiServer {
@@ -102,6 +105,7 @@ impl FoundationApiServer {
             system,
             metrics,
             wiki_client,
+            shared_http_client: reqwest::Client::new(),
         }
     }
 

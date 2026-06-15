@@ -8,12 +8,14 @@ name = "foundation_service"
 path = "src/bin/foundation_service.rs"
 
 [dependencies]
+async-stream = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true }
 figment = { workspace = true }
+futures = { workspace = true }
 opentelemetry = { workspace = true }
 regex = { workspace = true }
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = ["json", "stream"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

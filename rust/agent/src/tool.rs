@@ -113,6 +113,9 @@ fn params_input_schema<P: JsonSchema>() -> Value {
         s.meta_schema = None;
     });
     let root = settings.into_generator().into_root_schema_for::<P>();
+    // SAFETY(hammadb): a schemars-generated `RootSchema` is a plain data struct
+    // with no non-string map keys or non-finite floats, so `to_value` is
+    // infallible here.
     let mut value = serde_json::to_value(root).expect("schema serializes to JSON");
     if let Some(obj) = value.as_object_mut() {
         obj.remove("title");

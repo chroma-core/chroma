@@ -68,6 +68,10 @@ pub struct FoundationConfig {
     /// attached function is invoked. Matches the chroma frontend default.
     #[serde(default = "FoundationConfig::default_min_records_for_invocation")]
     pub min_records_for_invocation: u64,
+    /// Base URL of the external "context-1" deep-research API. Optional: the
+    /// `subagent_search` route is disabled when unset.
+    #[serde(default)]
+    pub deep_research_api_url: Option<String>,
 }
 
 impl FoundationConfig {
@@ -110,6 +114,7 @@ impl Default for FoundationConfig {
             function_name: Self::default_function_name(),
             function_endpoint_url: None,
             min_records_for_invocation: Self::default_min_records_for_invocation(),
+            deep_research_api_url: None,
         }
     }
 }
