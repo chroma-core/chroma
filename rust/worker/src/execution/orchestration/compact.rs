@@ -756,21 +756,20 @@ impl CompactionContext {
             .into_inner()
             .map_err(|_| CompactionError::InvariantViolation("GetAttachedFunction task failed"))?;
 
-        // Check if we have an attached function
-        match output.attached_function {
-            Some(function) => {
-                // Check if backfill is needed by comparing offsets
-                // log_position is i64, completion_offset is u64
-                let log_position_u64 = log_position.max(0) as u64;
-                if log_position_u64 < function.completion_offset {
-                    return Err(CompactionError::InvariantViolation(
-                        "Log position is less than completion offset",
-                    ));
-                }
-                Ok(function.completion_offset < log_position_u64)
+        let log_position_u64 = log_position.max(0) as u64;
+
+        for function in &output.attached_functions {
+            if log_position_u64 < function.completion_offset {
+                return Err(CompactionError::InvariantViolation(
+                    "Log position is less than completion offset",
+                ));
             }
-            None => Ok(false), // No attached function means no backfill needed
         }
+
+        Ok(output
+            .attached_functions
+            .iter()
+            .any(|function| function.completion_offset < log_position_u64))
     }
 
     async fn run_backfill_attached_function_workflow(
