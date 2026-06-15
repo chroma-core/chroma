@@ -25,7 +25,7 @@
 //! database/collection come from foundation config.
 
 mod events;
-use crate::routes::{caller_token, whoami::whoami_and_authorize};
+use crate::routes::{caller_token, to_sse_event, whoami::whoami_and_authorize};
 use crate::{auth::AuthzAction, errors::ServerError, server::FoundationApiServer};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::{extract::State, http::HeaderMap, Json};
@@ -130,9 +130,9 @@ pub struct SubagentStreamError(String);
 /// Serializes one of our owned events into an SSE frame, surfacing a
 /// serialization failure as a stream error rather than panicking.
 fn sse_event(event: &SubagentSearchEvent) -> Result<Event, SubagentStreamError> {
-    serde_json::to_string(event)
-        .map(|json| Event::default().data(json))
-        .map_err(|err| SubagentStreamError(format!("failed to serialize event: {err}")))
+    to_sse_event(event, |err| {
+        SubagentStreamError(format!("failed to serialize event: {err}"))
+    })
 }
 
 /// Runs the deep-research agent and streams typed [`SubagentSearchEvent`]s to
@@ -325,6 +325,33 @@ fn parse_sse_data_line(line: &[u8]) -> Option<String> {
 // ---------------------------------------------------------------------------
 // Result collection: distill a finished stream into structured documents
 // ---------------------------------------------------------------------------
+
+/// Runs the deep-research agent to completion and renders its ranked documents
+/// into a plain-text block suitable for an LLM tool result.
+///
+/// This is the entry point the `subagent_search` agent tool calls: it owns the
+/// streaming + parsing so the tool stays a thin formatter. Errors propagate the
+/// same [`SubagentResultError`]s as [`collect_subagent_search_final`].
+pub(crate) async fn subagent_search_text(
+    http: reqwest::Client,
+    url: String,
+    creds: SubagentSearchCreds,
+    query: String,
+) -> Result<String, SubagentResultError> {
+    let documents = collect_subagent_search_final(http, url, creds, query).await?;
+    Ok(format_ranked_documents(&documents))
+}
+
+/// Renders ranked documents (most-relevant first) into a numbered text block of
+/// `id` + justification lines for the model to read.
+fn format_ranked_documents(documents: &[events::RankedDocument]) -> String {
+    documents
+        .iter()
+        .enumerate()
+        .map(|(i, doc)| format!("{}. {}\n   {}", i + 1, doc.id, doc.justification))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
 /// Consumes the deep-research stream, extracts the agent's final answer (the
 /// `user_text` from the last `action` event) and parses its

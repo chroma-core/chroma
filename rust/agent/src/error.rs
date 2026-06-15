@@ -36,4 +36,10 @@ pub enum AgentError {
     /// A requested provider format or operation is not yet supported.
     #[error("unsupported: {0}")]
     Unsupported(String),
+
+    /// A tool failed while executing. The message is surfaced to the model as
+    /// the tool result (under [`crate::ToolErrorPolicy::ReportToModel`]) so it
+    /// can self-correct, so keep it human-readable.
+    #[error("tool execution failed: {0}")]
+    Tool(String),
 }

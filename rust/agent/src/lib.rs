@@ -20,7 +20,7 @@ pub use agent::{Agent, AgentBehavior, ToolErrorPolicy};
 pub use error::AgentError;
 pub use inference::{
     AgentInferenceModel, AnthropicAgentInferenceModel, AnthropicBeta, AnthropicBetas,
-    AnthropicModel, AnthropicRequestConfig, InferenceContext,
+    AnthropicModel, AnthropicRequestConfig, InferenceContext, UnknownAnthropicModel,
 };
 pub use provider::ProviderFormat;
 pub use tool::{DynTool, Tool, ToolCallMetadata, ToolSet};

@@ -8,7 +8,7 @@ mod anthropic;
 
 pub use anthropic::{
     AnthropicAgentInferenceModel, AnthropicBeta, AnthropicBetas, AnthropicModel,
-    AnthropicRequestConfig,
+    AnthropicRequestConfig, UnknownAnthropicModel,
 };
 
 use async_trait::async_trait;

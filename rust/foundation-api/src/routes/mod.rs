@@ -1,5 +1,7 @@
 use crate::server::FoundationApiServer;
+use axum::response::sse::Event;
 use axum::{http::HeaderMap, routing::post, Router};
+use serde::Serialize;
 
 /// HTTP header carrying the caller's Chroma Cloud token, forwarded to the FE
 /// and the embedding service so authz/quota/billing key off the user.
@@ -19,6 +21,25 @@ pub(crate) fn caller_token(headers: &HeaderMap) -> Option<&str> {
         .filter(|token| !token.is_empty())
 }
 
+/// Serializes `event` into an SSE `data:` frame, mapping a serialization
+/// failure into a caller-supplied stream error.
+///
+/// Shared by the SSE routes (`/api/agent`, `/api/subagent_search`): they each
+/// own a distinct stream-error type and message but frame events identically,
+/// so they pass a closure that builds their own error from the serde failure.
+pub(crate) fn to_sse_event<T, E>(
+    event: &T,
+    on_error: impl FnOnce(serde_json::Error) -> E,
+) -> Result<Event, E>
+where
+    T: Serialize,
+{
+    serde_json::to_string(event)
+        .map(|json| Event::default().data(json))
+        .map_err(on_error)
+}
+
+pub(crate) mod agent;
 pub(crate) mod init;
 pub(crate) mod search;
 pub(crate) mod subagent_search;
@@ -37,4 +58,5 @@ pub(crate) fn router() -> Router<FoundationApiServer> {
             "/api/subagent_search",
             post(subagent_search::foundation_subagent_search),
         )
+        .route("/api/agent", post(agent::foundation_agent))
 }
