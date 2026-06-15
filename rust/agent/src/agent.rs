@@ -90,6 +90,7 @@ pub struct Agent {
     behaviors: Vec<Box<dyn AgentBehavior>>,
     max_trajectory_length: usize,
     tool_error_policy: ToolErrorPolicy,
+    system_prompt: Option<String>,
     builder: TrajectoryBuilder,
 }
 
@@ -102,6 +103,7 @@ impl Agent {
             behaviors: Vec::new(),
             max_trajectory_length: DEFAULT_MAX_TRAJECTORY_LENGTH,
             tool_error_policy: ToolErrorPolicy::default(),
+            system_prompt: None,
             builder: TrajectoryBuilder::new(),
         }
     }
@@ -109,6 +111,15 @@ impl Agent {
     /// Register a behavior (invoked after any already-registered behaviors).
     pub fn with_behavior(mut self, behavior: Box<dyn AgentBehavior>) -> Self {
         self.behaviors.push(behavior);
+        self
+    }
+
+    /// Set the system prompt sent on every inference call. It is seeded into
+    /// [`InferenceContext::system`] before behaviors run, so a
+    /// [`AgentBehavior::prepare_for_inference`] hook can still override it. How
+    /// the prompt is rendered on the wire is the inference model's concern.
+    pub fn with_system_prompt(mut self, system_prompt: impl Into<String>) -> Self {
+        self.system_prompt = Some(system_prompt.into());
         self
     }
 
@@ -175,6 +186,7 @@ impl Agent {
             trajectory: self.builder.trajectory().clone(),
             toolset: &self.toolset,
             max_tokens: None,
+            system: self.system_prompt.clone(),
         };
         for behavior in &mut self.behaviors {
             behavior.prepare_for_inference(&mut ctx);
@@ -293,7 +305,7 @@ mod tests {
     use async_trait::async_trait;
     use serde_json::json;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     /// Offline inference model: calls `get_weather` once, then ends with text.
     ///
@@ -527,5 +539,62 @@ mod tests {
             agent.trajectory().entries.last(),
             Some(Entry::Action(_))
         ));
+    }
+
+    /// Records the `system` it sees, then ends the run with a text action.
+    struct CaptureSystem {
+        seen: Arc<Mutex<Option<String>>>,
+    }
+
+    #[async_trait]
+    impl AgentInferenceModel for CaptureSystem {
+        async fn infer(&self, ctx: &InferenceContext<'_>) -> Result<Option<Action>, AgentError> {
+            *self.seen.lock().unwrap() = ctx.system.clone();
+            let mut action = ActionBuilder::new();
+            action.push_send_user_text("done");
+            Ok(Some(action.build()))
+        }
+    }
+
+    fn capture_agent(seen: Arc<Mutex<Option<String>>>) -> Agent {
+        Agent::new(ToolSet::new(), Box::new(CaptureSystem { seen }))
+    }
+
+    async fn infer_once(mut agent: Agent) {
+        let mut initial = ObservationBuilder::new();
+        initial.push_user("hi");
+        agent.observe(initial.build());
+        agent.infer().await.expect("infer succeeds");
+    }
+
+    #[tokio::test]
+    async fn system_prompt_reaches_inference_context() {
+        let seen = Arc::new(Mutex::new(None));
+        infer_once(capture_agent(seen.clone()).with_system_prompt("you are helpful")).await;
+        assert_eq!(seen.lock().unwrap().as_deref(), Some("you are helpful"));
+    }
+
+    #[tokio::test]
+    async fn system_prompt_defaults_to_none() {
+        let seen = Arc::new(Mutex::new(Some("sentinel".to_string())));
+        infer_once(capture_agent(seen.clone())).await;
+        assert!(seen.lock().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn behavior_can_override_system_prompt() {
+        struct OverrideSystem;
+        impl AgentBehavior for OverrideSystem {
+            fn prepare_for_inference(&mut self, ctx: &mut InferenceContext<'_>) {
+                ctx.system = Some("overridden".to_string());
+            }
+        }
+
+        let seen = Arc::new(Mutex::new(None));
+        let agent = capture_agent(seen.clone())
+            .with_system_prompt("original")
+            .with_behavior(Box::new(OverrideSystem));
+        infer_once(agent).await;
+        assert_eq!(seen.lock().unwrap().as_deref(), Some("overridden"));
     }
 }

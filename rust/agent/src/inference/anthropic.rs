@@ -142,6 +142,15 @@ impl AnthropicAgentInferenceModel {
         Ok(Self::new(api_key, model))
     }
 
+    /// Reuse a shared [`reqwest::Client`] instead of the per-instance one built
+    /// by [`new`](Self::new). Cloning a client shares its connection pool, so a
+    /// caller that builds a model per request can avoid spawning a fresh pool
+    /// each time.
+    pub fn with_client(mut self, client: reqwest::Client) -> Self {
+        self.client = client;
+        self
+    }
+
     /// Replace the request config (max tokens, temperature, thinking budget,
     /// betas).
     pub fn with_config(mut self, config: AnthropicRequestConfig) -> Self {
@@ -157,14 +166,22 @@ impl AnthropicAgentInferenceModel {
     }
 
     fn request_body(&self, ctx: &InferenceContext<'_>) -> Value {
-        json!({
+        let mut body = json!({
             "model": self.model.id(),
             "max_tokens": ctx.max_tokens.unwrap_or(self.config.max_tokens),
             "temperature": self.config.temperature,
             "thinking": { "type": "enabled", "budget_tokens": self.config.thinking_budget },
             "tools": ctx.toolset.get_formats(ProviderFormat::Anthropic),
             "messages": ctx.trajectory.to_provider_format(ProviderFormat::Anthropic),
-        })
+        });
+
+        // Anthropic takes the system prompt as a top-level field; omit it when
+        // unset rather than sending `null`.
+        if let Some(system) = &ctx.system {
+            body["system"] = json!(system);
+        }
+
+        body
     }
 }
 
@@ -302,6 +319,53 @@ mod tests {
     }
 
     #[test]
+    fn request_body_includes_system_only_when_set() {
+        let model = AnthropicAgentInferenceModel::new("test-key", AnthropicModel::Sonnet4_5);
+        let toolset = weather_toolset();
+        let trajectory = {
+            let mut builder = TrajectoryBuilder::new();
+            let mut obs = ObservationBuilder::new();
+            obs.push_user("hi");
+            builder.push_observation(obs.build());
+            builder.build()
+        };
+
+        let ctx = InferenceContext {
+            trajectory: trajectory.clone(),
+            toolset: &toolset,
+            max_tokens: None,
+            system: None,
+        };
+        assert!(model.request_body(&ctx).get("system").is_none());
+
+        let ctx = InferenceContext {
+            trajectory,
+            toolset: &toolset,
+            max_tokens: None,
+            system: Some("Be terse.".to_string()),
+        };
+        assert_eq!(model.request_body(&ctx)["system"], json!("Be terse."));
+    }
+
+    #[test]
+    fn with_client_yields_a_usable_model() {
+        let shared = reqwest::Client::new();
+        let model = AnthropicAgentInferenceModel::new("test-key", AnthropicModel::Opus4_5)
+            .with_client(shared.clone());
+        let toolset = weather_toolset();
+        let ctx = InferenceContext {
+            trajectory: TrajectoryBuilder::new().build(),
+            toolset: &toolset,
+            max_tokens: None,
+            system: None,
+        };
+        assert_eq!(
+            model.request_body(&ctx)["model"],
+            json!("claude-opus-4-5-20251101")
+        );
+    }
+
+    #[test]
     fn parses_content_blocks_into_action() {
         let toolset = weather_toolset();
         let response = json!({
@@ -375,13 +439,20 @@ mod tests {
 
         let mut builder = TrajectoryBuilder::new();
         let mut prompt = ObservationBuilder::new();
-        prompt.push_user("What's the weather in Paris? Use the get_weather tool.");
+        prompt.push_user("What's the weather in Paris?");
         builder.push_observation(prompt.build());
 
+        // Exercise the system-prompt wire path end-to-end: steer tool use via
+        // the system prompt rather than the user turn.
         let ctx = InferenceContext {
             trajectory: builder.build(),
             toolset: &toolset,
             max_tokens: None,
+            system: Some(
+                "You are a weather assistant. Always call the get_weather tool to answer \
+                 weather questions."
+                    .to_string(),
+            ),
         };
 
         let action = model
