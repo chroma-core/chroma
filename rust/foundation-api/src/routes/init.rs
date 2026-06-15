@@ -9,8 +9,8 @@ use chroma_sysdb::SysDb;
 use chroma_types::{
     Collection, CollectionUuid, CreateDatabaseError, DatabaseName, EmbeddingFunctionConfiguration,
     EmbeddingFunctionNewConfiguration, IndexConfig, KnnIndex, Metadata, MetadataValue, Schema,
-    SparseIndexAlgorithm, SparseVectorIndexConfig, UpdateMetadata,
-    CHROMA_GROUP_CHUNK_SIBLINGS_KEY, DOCUMENT_KEY,
+    SparseIndexAlgorithm, SparseVectorIndexConfig, UpdateMetadata, CHROMA_GROUP_CHUNK_SIBLINGS_KEY,
+    DOCUMENT_KEY,
 };
 use frontend_core::{
     attached_function_ops,
