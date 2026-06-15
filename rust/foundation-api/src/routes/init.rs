@@ -95,11 +95,8 @@ pub async fn foundation_init(
         db_name.clone(),
         &foundation_cfg.currents_collection,
         None,
-        Some(1024),
-        CollectionEmbeddingFunctions {
-            dense: Some(qwen_embedding_function()),
-            sparse: Some(splade_embedding_function()),
-        },
+        None,
+        CollectionEmbeddingFunctions::default(),
     )
     .await?;
 
