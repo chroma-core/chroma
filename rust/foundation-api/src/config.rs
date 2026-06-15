@@ -39,6 +39,8 @@ pub struct FoundationConfig {
     pub wiki_collection: String,
     #[serde(default = "FoundationConfig::default_wiki_revisions_collection")]
     pub wiki_revisions_collection: String,
+    #[serde(default = "FoundationConfig::default_currents_collection")]
+    pub currents_collection: String,
     /// Base name for the per-user file-uploads collection. The actual
     /// collection name is `{base}_{user_id}`, making it private to the
     /// authenticated user rather than shared tenant-wide.
@@ -84,6 +86,9 @@ impl FoundationConfig {
     fn default_wiki_revisions_collection() -> String {
         "wiki_revisions".to_string()
     }
+    fn default_currents_collection() -> String {
+        "currents".to_string()
+    }
     fn default_file_uploads_collection() -> String {
         "file_uploads".to_string()
     }
@@ -108,6 +113,7 @@ impl Default for FoundationConfig {
             frontend_ingress_url: None,
             wiki_collection: Self::default_wiki_collection(),
             wiki_revisions_collection: Self::default_wiki_revisions_collection(),
+            currents_collection: Self::default_currents_collection(),
             file_uploads_collection: Self::default_file_uploads_collection(),
             agent_sessions_collection: Self::default_agent_sessions_collection(),
             source_collections: Self::default_source_collections(),

@@ -1,6 +1,7 @@
 use super::whoami::whoami_and_authorize;
 use crate::{
     auth::AuthzAction, config::FoundationConfig, errors::ServerError, server::FoundationApiServer,
+    wiki::WikiClientError,
 };
 use axum::{extract::State, http::HeaderMap, Json};
 use chroma_error::{ChromaError, ErrorCodes};
@@ -8,7 +9,8 @@ use chroma_sysdb::SysDb;
 use chroma_types::{
     Collection, CollectionUuid, CreateDatabaseError, DatabaseName, EmbeddingFunctionConfiguration,
     EmbeddingFunctionNewConfiguration, IndexConfig, KnnIndex, Metadata, MetadataValue, Schema,
-    SparseIndexAlgorithm, SparseVectorIndexConfig, CHROMA_GROUP_CHUNK_SIBLINGS_KEY, DOCUMENT_KEY,
+    SparseIndexAlgorithm, SparseVectorIndexConfig, UpdateMetadata, CHROMA_GROUP_CHUNK_SIBLINGS_KEY,
+    DOCUMENT_KEY,
 };
 use frontend_core::{
     attached_function_ops,
@@ -17,7 +19,7 @@ use frontend_core::{
     },
     foundation::source_kind_for_collection_name,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -29,6 +31,7 @@ pub struct FoundationInitResponse {
     pub database_id: String,
     pub wiki_collection_id: String,
     pub wiki_revisions_collection_id: String,
+    pub currents_collection_id: String,
     pub file_uploads_collection_id: String,
     pub agent_sessions_collection_id: String,
     /// Source collection name -> id for each ensured source collection
@@ -84,6 +87,24 @@ pub async fn foundation_init(
         None,
         Some(1),
         CollectionEmbeddingFunctions::default(),
+    )
+    .await?;
+    let currents = ensure_collection(
+        &mut sysdb,
+        tenant.clone(),
+        db_name.clone(),
+        &foundation_cfg.currents_collection,
+        None,
+        None,
+        CollectionEmbeddingFunctions::default(),
+    )
+    .await?;
+
+    maybe_seed_currents_collection(
+        &server,
+        &headers,
+        &tenant,
+        &foundation_cfg.currents_collection,
     )
     .await?;
 
@@ -181,6 +202,7 @@ pub async fn foundation_init(
         database_id: database_id.to_string(),
         wiki_collection_id: wiki.collection_id.to_string(),
         wiki_revisions_collection_id: wiki_revisions.collection_id.to_string(),
+        currents_collection_id: currents.collection_id.to_string(),
         file_uploads_collection_id: file_uploads.collection_id.to_string(),
         agent_sessions_collection_id: agent_sessions.collection_id.to_string(),
         source_collection_ids,
@@ -291,11 +313,203 @@ async fn ensure_revision_history_function(
 enum FoundationInitError {
     #[error("Configured foundation database name is shorter than the 3-character minimum")]
     DatabaseNameTooShort,
+    #[error("foundation wiki record I/O is unavailable")]
+    WikiRouteUnavailable,
+    #[error("missing or invalid x-chroma-token header")]
+    MissingToken,
+    #[error(transparent)]
+    WikiClient(#[from] WikiClientError),
+    #[error("chroma record I/O failed: {0}")]
+    RecordIo(chroma::client::ChromaHttpClientError),
 }
 
 impl ChromaError for FoundationInitError {
     fn code(&self) -> ErrorCodes {
-        ErrorCodes::InvalidArgument
+        match self {
+            FoundationInitError::DatabaseNameTooShort | FoundationInitError::MissingToken => {
+                ErrorCodes::InvalidArgument
+            }
+            FoundationInitError::WikiRouteUnavailable
+            | FoundationInitError::WikiClient(_)
+            | FoundationInitError::RecordIo(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+const CHROMA_TOKEN_HEADER: &str = "x-chroma-token";
+
+fn chroma_token(headers: &HeaderMap) -> Result<&str, FoundationInitError> {
+    headers
+        .get(CHROMA_TOKEN_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .filter(|token| !token.is_empty())
+        .ok_or(FoundationInitError::MissingToken)
+}
+
+async fn ensure_currents_collection(
+    server: &FoundationApiServer,
+    headers: &HeaderMap,
+    tenant: &str,
+    collection_name: &str,
+) -> Result<(), ServerError> {
+    let wiki_client = server
+        .wiki_client
+        .as_ref()
+        .ok_or(FoundationInitError::WikiRouteUnavailable)?;
+    let token = chroma_token(headers)?;
+    let collection = wiki_client
+        .get_collection_by_name(tenant, token, collection_name)
+        .await?;
+    let records = mock_currents_records();
+
+    let ids: Vec<String> = records.iter().map(|record| record.id.clone()).collect();
+    let documents: Vec<Option<String>> = records
+        .iter()
+        .map(|record| Some(record.document.clone()))
+        .collect();
+    let metadatas: Vec<Option<UpdateMetadata>> = records
+        .into_iter()
+        .map(|record| {
+            Some(
+                record
+                    .metadata
+                    .into_iter()
+                    .map(|(key, value)| (key, value.into()))
+                    .collect(),
+            )
+        })
+        .collect();
+    collection
+        .upsert(
+            ids,
+            None::<Vec<Vec<f32>>>,
+            Some(documents),
+            None,
+            Some(metadatas),
+        )
+        .await
+        .map_err(FoundationInitError::RecordIo)?;
+    Ok(())
+}
+
+async fn maybe_seed_currents_collection(
+    server: &FoundationApiServer,
+    headers: &HeaderMap,
+    tenant: &str,
+    collection_name: &str,
+) -> Result<(), ServerError> {
+    if server.wiki_client.is_none() {
+        tracing::info!(
+            collection_name = collection_name,
+            "skipping currents mock seed because foundation wiki record I/O is unavailable"
+        );
+        return Ok(());
+    }
+
+    if chroma_token(headers).is_err() {
+        tracing::info!(
+            collection_name = collection_name,
+            "skipping currents mock seed because request carried no x-chroma-token"
+        );
+        return Ok(());
+    }
+
+    ensure_currents_collection(server, headers, tenant, collection_name).await
+}
+
+struct MockCurrentRecord {
+    id: String,
+    document: String,
+    metadata: Metadata,
+}
+
+#[derive(Debug, Deserialize)]
+struct MockCurrentFixture {
+    tilegroup_id: String,
+    label: String,
+    headline: String,
+    summary: String,
+    tiles: Vec<MockTileFixture>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MockTileFixture {
+    slug: String,
+    title: String,
+    role: String,
+    blurb: String,
+}
+
+fn mock_currents_records() -> Vec<MockCurrentRecord> {
+    let fixture = include_str!("mock_currents.json");
+    let tilegroups: Vec<MockCurrentFixture> =
+        serde_json::from_str(fixture).expect("mock_currents.json must be valid");
+    tilegroups.into_iter().map(mock_current_record).collect()
+}
+
+fn mock_current_record(fixture: MockCurrentFixture) -> MockCurrentRecord {
+    let MockCurrentFixture {
+        tilegroup_id,
+        label,
+        headline,
+        summary,
+        tiles,
+    } = fixture;
+    let page_slugs: Vec<String> = tiles.iter().map(|tile| tile.slug.clone()).collect();
+    let tile_roles: Vec<String> = tiles.iter().map(|tile| tile.role.clone()).collect();
+    let mut metadata = Metadata::new();
+    metadata.insert(
+        "tilegroup_id".to_string(),
+        MetadataValue::Str(tilegroup_id.clone()),
+    );
+    metadata.insert("label".to_string(), MetadataValue::Str(label.clone()));
+    metadata.insert("headline".to_string(), MetadataValue::Str(headline.clone()));
+    metadata.insert("summary".to_string(), MetadataValue::Str(summary.clone()));
+    metadata.insert(
+        "tile_count".to_string(),
+        MetadataValue::Int(tiles.len() as i64),
+    );
+    metadata.insert(
+        "page_slugs".to_string(),
+        MetadataValue::StringArray(page_slugs),
+    );
+    metadata.insert(
+        "tile_roles".to_string(),
+        MetadataValue::StringArray(tile_roles),
+    );
+    for (idx, tile) in tiles.iter().enumerate() {
+        let key = format!("tile_{:02}_json", idx + 1);
+        let value = serde_json::json!({
+            "order": idx + 1,
+            "slug": tile.slug,
+            "title": tile.title,
+            "role": tile.role,
+            "blurb": tile.blurb,
+        });
+        metadata.insert(key, MetadataValue::Str(value.to_string()));
+    }
+
+    let tiles_document = tiles
+        .iter()
+        .enumerate()
+        .map(|(idx, tile)| {
+            format!(
+                "Tile {}\nSlug: {}\nTitle: {}\nRole: {}\nBlurb: {}",
+                idx + 1,
+                tile.slug,
+                tile.title,
+                tile.role,
+                tile.blurb
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let document = format!("{}: {}. {}\n\n{}", label, headline, summary, tiles_document);
+
+    MockCurrentRecord {
+        id: format!("tilegroup:{tilegroup_id}"),
+        document,
+        metadata,
     }
 }
 
