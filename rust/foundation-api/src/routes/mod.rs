@@ -41,6 +41,7 @@ where
 
 pub(crate) mod agent;
 pub(crate) mod init;
+pub(crate) mod mock_currents;
 pub(crate) mod search;
 pub(crate) mod subagent_search;
 pub(crate) mod upsert_page;
