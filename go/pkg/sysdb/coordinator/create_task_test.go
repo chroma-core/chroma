@@ -77,13 +77,13 @@ func (suite *AttachFunctionTestSuite) setupAttachFunctionMocks(ctx context.Conte
 	// Check if any attached function exists for this collection
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
 	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), matchStringPtr(inputCollectionID), (*string)(nil), []uuid.UUID(nil), false).
-		Return([]*dbmodel.AttachedFunction{}, nil).Once()
+		Return([]*dbmodel.AttachedFunction{}, nil).Twice()
 
 	suite.mockMetaDomain.On("DatabaseDb", mock.Anything).Return(suite.mockDatabaseDb).Once()
 	suite.mockDatabaseDb.On("GetDatabases", tenantID, databaseName).
 		Return([]*dbmodel.Database{{ID: databaseID, Name: databaseName}}, nil).Once()
 
-	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Twice()
+	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Times(2)
 	suite.mockFunctionDb.On("GetByName", functionName).
 		Return(&dbmodel.Function{ID: functionID, Name: functionName, IsAsync: false}, nil).Once()
 	suite.mockFunctionDb.On("GetByID", functionID).
@@ -174,7 +174,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_SuccessfulCreation() {
 	// Check if any attached function exists for this collection
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
 	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), matchStringPtr(inputCollectionID), (*string)(nil), []uuid.UUID(nil), false).
-		Return([]*dbmodel.AttachedFunction{}, nil).Once()
+		Return([]*dbmodel.AttachedFunction{}, nil).Twice()
 
 	// Look up database
 	suite.mockMetaDomain.On("DatabaseDb", mock.Anything).Return(suite.mockDatabaseDb).Once()
@@ -182,8 +182,10 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_SuccessfulCreation() {
 		Return([]*dbmodel.Database{{ID: databaseID, Name: databaseName}}, nil).Once()
 
 	// Look up function
-	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Once()
+	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Times(2)
 	suite.mockFunctionDb.On("GetByName", functionName).
+		Return(&dbmodel.Function{ID: functionID, Name: functionName, IsAsync: false}, nil).Once()
+	suite.mockFunctionDb.On("GetByID", functionID).
 		Return(&dbmodel.Function{ID: functionID, Name: functionName, IsAsync: false}, nil).Once()
 
 	// Check input collection exists
@@ -307,9 +309,11 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Alrea
 			suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), matchStringPtr(inputCollID), (*string)(nil), []uuid.UUID(nil), false).
 				Return([]*dbmodel.AttachedFunction{existingAttachedFunction}, nil).Once()
 
-			suite.mockMetaDomain.On("FunctionDb", txCtx).Return(suite.mockFunctionDb).Once()
+			suite.mockMetaDomain.On("FunctionDb", txCtx).Return(suite.mockFunctionDb).Times(2)
 			suite.mockFunctionDb.On("GetByName", functionName).
 				Return(&dbmodel.Function{ID: functionID, Name: functionName, IsAsync: false}, nil).Once()
+			suite.mockFunctionDb.On("GetByIDs", []uuid.UUID{functionID}).
+				Return([]*dbmodel.Function{{ID: functionID, Name: functionName, IsAsync: false}}, nil).Once()
 
 			// Validate database matches
 			suite.mockMetaDomain.On("DatabaseDb", txCtx).Return(suite.mockDatabaseDb).Once()
@@ -364,13 +368,13 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_AllowsOutputCollectionI
 
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
 	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), matchStringPtr(inputCollectionID), (*string)(nil), []uuid.UUID(nil), false).
-		Return([]*dbmodel.AttachedFunction{}, nil).Once()
+		Return([]*dbmodel.AttachedFunction{}, nil).Twice()
 
 	suite.mockMetaDomain.On("DatabaseDb", mock.Anything).Return(suite.mockDatabaseDb).Once()
 	suite.mockDatabaseDb.On("GetDatabases", tenantID, databaseName).
 		Return([]*dbmodel.Database{{ID: databaseID, Name: databaseName}}, nil).Once()
 
-	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Twice()
+	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Times(2)
 	suite.mockFunctionDb.On("GetByName", functionName).
 		Return(&dbmodel.Function{ID: functionID, Name: functionName, IsAsync: false}, nil).Once()
 	suite.mockFunctionDb.On("GetByID", functionID).
@@ -480,13 +484,13 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_AllowsAsyncAndSyncFunct
 
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
 	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), matchStringPtr(inputCollectionID), (*string)(nil), []uuid.UUID(nil), false).
-		Return([]*dbmodel.AttachedFunction{existingAsyncAttachedFunction}, nil).Once()
+		Return([]*dbmodel.AttachedFunction{existingAsyncAttachedFunction}, nil).Twice()
 
-	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Thrice()
+	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Times(4)
 	suite.mockFunctionDb.On("GetByName", "record_counter").
 		Return(&dbmodel.Function{ID: newSyncFunctionID, Name: "record_counter", IsAsync: false}, nil).Once()
 	suite.mockFunctionDb.On("GetByIDs", []uuid.UUID{existingAsyncFunctionID}).
-		Return([]*dbmodel.Function{{ID: existingAsyncFunctionID, Name: "dummy_async", IsAsync: true}}, nil).Once()
+		Return([]*dbmodel.Function{{ID: existingAsyncFunctionID, Name: "dummy_async", IsAsync: true}}, nil).Twice()
 	suite.mockFunctionDb.On("GetByID", newSyncFunctionID).
 		Return(&dbmodel.Function{ID: newSyncFunctionID, Name: "record_counter", IsAsync: false}, nil).Once()
 
@@ -568,16 +572,14 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RejectsOutputCollection
 
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
 	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &inputCollectionID, (*string)(nil), []uuid.UUID(nil), false).
-		Return([]*dbmodel.AttachedFunction{}, nil).Once()
+		Return([]*dbmodel.AttachedFunction{}, nil).Twice()
 
 	suite.mockMetaDomain.On("DatabaseDb", mock.Anything).Return(suite.mockDatabaseDb).Once()
 	suite.mockDatabaseDb.On("GetDatabases", tenantID, databaseName).
 		Return([]*dbmodel.Database{{ID: databaseID, Name: databaseName}}, nil).Once()
 
-	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Twice()
+	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Once()
 	suite.mockFunctionDb.On("GetByName", functionName).
-		Return(&dbmodel.Function{ID: functionID, Name: functionName, IsAsync: false}, nil).Once()
-	suite.mockFunctionDb.On("GetByID", functionID).
 		Return(&dbmodel.Function{ID: functionID, Name: functionName, IsAsync: false}, nil).Once()
 
 	suite.mockMetaDomain.On("CollectionDb", mock.Anything).Return(suite.mockCollectionDb).Once()
@@ -670,14 +672,16 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow() {
 	// Phase 1: Create attached function in transaction
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
 	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), matchStringPtr(inputCollectionID), (*string)(nil), []uuid.UUID(nil), false).
-		Return([]*dbmodel.AttachedFunction{}, nil).Once()
+		Return([]*dbmodel.AttachedFunction{}, nil).Twice()
 
 	suite.mockMetaDomain.On("DatabaseDb", mock.Anything).Return(suite.mockDatabaseDb).Once()
 	suite.mockDatabaseDb.On("GetDatabases", tenantID, databaseName).
 		Return([]*dbmodel.Database{{ID: databaseID, Name: databaseName}}, nil).Once()
 
-	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Once()
+	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Times(2)
 	suite.mockFunctionDb.On("GetByName", functionName).
+		Return(&dbmodel.Function{ID: functionID, Name: functionName, IsAsync: false}, nil).Once()
+	suite.mockFunctionDb.On("GetByID", functionID).
 		Return(&dbmodel.Function{ID: functionID, Name: functionName, IsAsync: false}, nil).Once()
 
 	suite.mockCollectionDb.On("GetCollections",
@@ -741,11 +745,11 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow() {
 			suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), matchStringPtr(inputCollID), (*string)(nil), []uuid.UUID(nil), false).
 				Return([]*dbmodel.AttachedFunction{incompleteAttachedFunction}, nil).Once()
 
-			suite.mockMetaDomain.On("FunctionDb", txCtx).Return(suite.mockFunctionDb).Once()
+			suite.mockMetaDomain.On("FunctionDb", txCtx).Return(suite.mockFunctionDb).Times(2)
 			suite.mockFunctionDb.On("GetByName", functionName).
 				Return(&dbmodel.Function{ID: functionID, Name: functionName, IsAsync: false}, nil).Once()
-			suite.mockFunctionDb.On("GetByID", functionID).
-				Return(&dbmodel.Function{ID: functionID, Name: functionName, IsAsync: false}, nil).Once()
+			suite.mockFunctionDb.On("GetByIDs", []uuid.UUID{functionID}).
+				Return([]*dbmodel.Function{{ID: functionID, Name: functionName, IsAsync: false}}, nil).Once()
 
 			// Validate database matches
 			suite.mockMetaDomain.On("DatabaseDb", txCtx).Return(suite.mockDatabaseDb).Once()
@@ -990,7 +994,8 @@ func (suite *AttachFunctionTestSuite) TestAddAttachedFunctionInput_SuccessfulCre
 	suite.mockDatabaseDb.On("GetByID", databaseID).
 		Return(&dbmodel.Database{ID: databaseID, Name: databaseName}, nil).Once()
 
-	suite.mockMetaDomain.On("CollectionDb", mock.Anything).Return(suite.mockCollectionDb).Once()
+	suite.mockMetaDomain.On("CollectionDb", mock.Anything).Return(suite.mockCollectionDb).Twice()
+	suite.mockCollectionDb.On("LockCollection", newInputCollectionID).Return((*bool)(nil), nil).Once()
 	suite.mockCollectionDb.On("GetCollections",
 		[]string{newInputCollectionID}, (*string)(nil), tenantID, databaseName, (*int32)(nil), (*int32)(nil), false).
 		Return([]*dbmodel.CollectionAndMetadata{{Collection: &dbmodel.Collection{ID: newInputCollectionID}}}, nil).Once()
