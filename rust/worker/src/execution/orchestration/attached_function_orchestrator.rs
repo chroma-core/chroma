@@ -378,7 +378,7 @@ impl AttachedFunctionOrchestrator {
         }
     }
 
-    async fn dispatch_sync_function(
+    async fn dispatch_function_execution(
         &mut self,
         attached_function: AttachedFunction,
         ctx: &ComponentContext<Self>,
@@ -772,7 +772,7 @@ impl Handler<TaskResult<GetAttachedFunctionOutput, GetAttachedFunctionOperatorEr
         }
 
         if let Some(sync_attached_function) = self.pending_sync_attached_function.take() {
-            self.dispatch_sync_function(sync_attached_function, ctx)
+            self.dispatch_function_execution(sync_attached_function, ctx)
                 .await;
         } else if let Some(async_attached_function) = async_attached_function.take() {
             if self
@@ -789,7 +789,7 @@ impl Handler<TaskResult<GetAttachedFunctionOutput, GetAttachedFunctionOperatorEr
                 return;
             }
 
-            self.dispatch_sync_function(async_attached_function, ctx)
+            self.dispatch_function_execution(async_attached_function, ctx)
                 .await;
         }
     }
@@ -1079,7 +1079,7 @@ impl Handler<TaskResult<QueueFunctionOutput, QueueFunctionError>> for AttachedFu
         );
 
         if let Some(sync_attached_function) = self.pending_sync_attached_function.take() {
-            self.dispatch_sync_function(sync_attached_function, ctx)
+            self.dispatch_function_execution(sync_attached_function, ctx)
                 .await;
             return;
         }
