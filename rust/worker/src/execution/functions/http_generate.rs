@@ -37,7 +37,7 @@ struct GenerateRecordSet {
 
 #[derive(Debug, Serialize)]
 struct GenerateRequest {
-    record_sets: Vec<GenerateRecordSet>,
+    record_set: GenerateRecordSet,
 }
 
 #[derive(Debug, Deserialize)]
@@ -330,21 +330,24 @@ impl AttachedFunctionExecutor for HttpGenerateExecutor {
             .iter()
             .map(|record_set| record_set.records.len())
             .sum();
-        let request_body = GenerateRequest { record_sets };
 
         tracing::info!(
             "[HttpGenerateExecutor] Spawning generation for {} record sets / {} records via {}",
-            request_body.record_sets.len(),
+            record_sets.len(),
             total_records,
             self.endpoint_url,
         );
 
-        let call_id = self.spawn_generation(&request_body).await?;
-        tracing::info!(
-            "[HttpGenerateExecutor] Job spawned with call_id={call_id}, polling for completion"
-        );
-
-        self.poll_until_done(&call_id).await?;
+        for record_set in record_sets {
+            let source_collection = record_set.source_collection.clone();
+            let request_body = GenerateRequest { record_set };
+            let call_id = self.spawn_generation(&request_body).await?;
+            tracing::info!(
+                "[HttpGenerateExecutor] Job spawned with call_id={call_id} for source_collection={}, polling for completion",
+                source_collection,
+            );
+            self.poll_until_done(&call_id).await?;
+        }
 
         Ok(Chunk::new(Arc::from(Vec::<LogRecord>::new())))
     }
