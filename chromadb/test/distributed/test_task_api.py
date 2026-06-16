@@ -236,10 +236,10 @@ def test_function_multiple_collections(basic_http_client: System) -> None:
     )
 
 
-def test_functions_one_attached_function_per_collection(
+def test_functions_allow_one_sync_and_one_async_per_collection(
     basic_http_client: System,
 ) -> None:
-    """Test that only one attached function is allowed per collection"""
+    """Test that a collection can have at most one sync and one async attached function"""
     client = ClientCreator.from_system(basic_http_client)
     client.reset()
 
@@ -258,11 +258,10 @@ def test_functions_one_attached_function_per_collection(
     assert attached_fn1 is not None
     assert created is True
 
-    # Attempt to create a second task with a different name should fail
-    # (only one attached function allowed per collection)
+    # A second sync function should fail because the sync slot is already occupied.
     with pytest.raises(
         ChromaError,
-        match="collection already has an attached function: name=task_1, function=record_counter, output_collection=output_1",
+        match="collection already has an attached function with the same execution mode: name=task_1, function=record_counter, output_collection=output_1",
     ):
         collection.attach_function(
             function=RECORD_COUNTER_FUNCTION,
@@ -271,25 +270,42 @@ def test_functions_one_attached_function_per_collection(
             params=None,
         )
 
-    # Attempt to create a task with the same name but different function_id should also fail
+    # An async function should still be allowed on the same input collection.
+    attached_async_fn, async_created = collection.attach_function(
+        function=DUMMY_ASYNC_FUNCTION,
+        name="task_async",
+        output_collection="output_async",
+        params=None,
+    )
+
+    assert attached_async_fn is not None
+    assert async_created is True
+
+    # A second async function should fail because the async slot is now occupied.
     with pytest.raises(
         ChromaError,
-        match=r"collection already has an attached function: name=task_1, function=record_counter, output_collection=output_1",
+        match="collection already has an attached function with the same execution mode: name=task_async, function=dummy_async, output_collection=output_async",
     ):
         collection.attach_function(
-            function=STATISTICS_FUNCTION,
-            name="task_1",
+            function=DUMMY_ASYNC_FUNCTION,
+            name="task_async_2",
             output_collection="output_different",  # Different output collection
             params=None,
         )
 
-    # Detach the first function
+    # Detach both functions.
     assert (
         collection.detach_function(attached_fn1.name, delete_output_collection=True)
         is True
     )
+    assert (
+        collection.detach_function(
+            attached_async_fn.name, delete_output_collection=True
+        )
+        is True
+    )
 
-    # Now we should be able to attach a new function
+    # Now we should be able to attach a new sync function.
     attached_fn2, created2 = collection.attach_function(
         function=RECORD_COUNTER_FUNCTION,
         name="task_2",

@@ -418,24 +418,52 @@ func (s *Coordinator) insertAttachedFunctionForInputCollection(
 		}
 	}
 
+	requestedFunction, err := s.catalog.metaDomain.FunctionDb(ctx).GetByID(spec.FunctionID)
+	if err != nil {
+		return false, err
+	}
+	if requestedFunction == nil {
+		return false, common.ErrFunctionNotFound
+	}
+
+	existingFunctionIDs := make([]uuid.UUID, 0, len(existingAttachedFunctions))
+	seenExistingFunctionIDs := make(map[uuid.UUID]struct{}, len(existingAttachedFunctions))
+	for _, attachedFunction := range existingAttachedFunctions {
+		if _, ok := seenExistingFunctionIDs[attachedFunction.FunctionID]; ok {
+			continue
+		}
+		seenExistingFunctionIDs[attachedFunction.FunctionID] = struct{}{}
+		existingFunctionIDs = append(existingFunctionIDs, attachedFunction.FunctionID)
+	}
+
+	existingFunctionsByID := make(map[uuid.UUID]*dbmodel.Function, len(existingFunctionIDs))
+	if len(existingFunctionIDs) > 0 {
+		existingFunctions, err := s.catalog.metaDomain.FunctionDb(ctx).GetByIDs(existingFunctionIDs)
+		if err != nil {
+			return false, err
+		}
+		for _, existingFunction := range existingFunctions {
+			existingFunctionsByID[existingFunction.ID] = existingFunction
+		}
+	}
+
 	for _, attachedFunction := range existingAttachedFunctions {
 		if attachedFunction.ID == spec.AttachedFunctionID {
 			return !attachedFunction.IsReady, nil
 		}
 
-		if attachedFunction.IsReady {
-			functionName, err := dbmodel.GetFunctionNameByID(attachedFunction.FunctionID)
-			if err != nil {
-				return false, err
-			}
-			return false, status.Errorf(codes.AlreadyExists,
-				"collection already has an attached function: name=%s, function=%s, output_collection=%s",
-				attachedFunction.Name,
-				functionName,
-				attachedFunction.OutputCollectionName)
+		existingFunction, ok := existingFunctionsByID[attachedFunction.FunctionID]
+		if !ok {
+			return false, common.ErrFunctionNotFound
 		}
 
-		return false, common.ErrAttachedFunctionAlreadyExists
+		if existingFunction.IsAsync == requestedFunction.IsAsync {
+			return false, status.Errorf(codes.AlreadyExists,
+				"collection already has an attached function with the same execution mode: name=%s, function=%s, output_collection=%s",
+				attachedFunction.Name,
+				existingFunction.Name,
+				attachedFunction.OutputCollectionName)
+		}
 	}
 
 	collections, err := s.catalog.metaDomain.CollectionDb(ctx).GetCollections(
@@ -1242,14 +1270,58 @@ func (s *Coordinator) FinishCreateAttachedFunction(ctx context.Context, req *coo
 			return err
 		}
 
-		// 7. Validate that there is only one ready attached function for this collection
+		// 7. Validate that there is at most one ready sync function and one ready
+		// async function for this collection.
 		existingAttachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(nil, nil, &attachedFunction.InputCollectionID, nil, nil, true)
 		if err != nil {
 			log.Error("FinishCreateAttachedFunction: failed to get attached functions", zap.Error(err))
 			return err
 		}
-		if len(existingAttachedFunctions) > 1 {
-			log.Error("FinishCreateAttachedFunction: multiple attached functions found for collection", zap.String("collection_id", attachedFunction.InputCollectionID))
+
+		functionIDs := make([]uuid.UUID, 0, len(existingAttachedFunctions))
+		seenFunctionIDs := make(map[uuid.UUID]struct{}, len(existingAttachedFunctions))
+		for _, existingAttachedFunction := range existingAttachedFunctions {
+			if _, ok := seenFunctionIDs[existingAttachedFunction.FunctionID]; ok {
+				continue
+			}
+			seenFunctionIDs[existingAttachedFunction.FunctionID] = struct{}{}
+			functionIDs = append(functionIDs, existingAttachedFunction.FunctionID)
+		}
+
+		functionsByID := make(map[uuid.UUID]*dbmodel.Function, len(functionIDs))
+		if len(functionIDs) > 0 {
+			functions, err := s.catalog.metaDomain.FunctionDb(txCtx).GetByIDs(functionIDs)
+			if err != nil {
+				log.Error("FinishCreateAttachedFunction: failed to load functions", zap.Error(err))
+				return err
+			}
+			for _, function := range functions {
+				functionsByID[function.ID] = function
+			}
+		}
+
+		readySyncCount := 0
+		readyAsyncCount := 0
+		for _, existingAttachedFunction := range existingAttachedFunctions {
+			function, ok := functionsByID[existingAttachedFunction.FunctionID]
+			if !ok {
+				log.Error("FinishCreateAttachedFunction: unknown function on attached function",
+					zap.Stringer("function_id", existingAttachedFunction.FunctionID))
+				return common.ErrFunctionNotFound
+			}
+
+			if function.IsAsync {
+				readyAsyncCount++
+			} else {
+				readySyncCount++
+			}
+		}
+
+		if readySyncCount > 1 || readyAsyncCount > 1 {
+			log.Error("FinishCreateAttachedFunction: too many ready attached functions found for collection",
+				zap.String("collection_id", attachedFunction.InputCollectionID),
+				zap.Int("ready_sync_count", readySyncCount),
+				zap.Int("ready_async_count", readyAsyncCount))
 			return common.ErrAttachedFunctionAlreadyExists
 		}
 
