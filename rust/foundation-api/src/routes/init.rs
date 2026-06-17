@@ -141,13 +141,17 @@ pub async fn foundation_init(
     )
     .await?;
 
+    // The agent_sessions collection is wired into the sources->wiki function
+    // below, so it carries the chunk-sibling grouping flag like the other
+    // source collections (keeps a job's chunk records in one partition and
+    // surfaces the trailing end-of-job marker after every sibling chunk).
     let agent_sessions_name = format!("{}_{}", foundation_cfg.agent_sessions_collection, user_id);
     let agent_sessions = ensure_collection(
         &mut sysdb,
         tenant.clone(),
         db_name.clone(),
         &agent_sessions_name,
-        None,
+        Some(group_chunk_siblings_metadata()),
         Some(1024),
         CollectionEmbeddingFunctions {
             dense: Some(qwen_embedding_function()),
@@ -199,6 +203,18 @@ pub async fn foundation_init(
             )
             .await?;
         }
+
+        // Wire the per-user coding-agent traces collection into the same
+        // sources->wiki function so synced agent sessions flow into the
+        // shared wiki output alongside slack/notion.
+        attached_function_ops::add_attached_function_input(
+            &mut sysdb,
+            foundation_attached_function_name(),
+            *base_source_id,
+            agent_sessions.collection_id,
+            db_name.clone(),
+        )
+        .await?;
     }
 
     Ok(Json(FoundationInitResponse {
