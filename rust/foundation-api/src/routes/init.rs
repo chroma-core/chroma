@@ -338,7 +338,7 @@ async fn ensure_revision_history_function(
     Ok(())
 }
 
-/// Attach the built-in `http_currents` function to the wiki collection so
+/// Attach the configured wiki->currents function to the wiki collection so
 /// currents are refreshed whenever the wiki advances.
 async fn ensure_currents_function(
     sysdb: &mut SysDb,
@@ -357,8 +357,8 @@ async fn ensure_currents_function(
     let output_schema = Schema::new_record_only();
     attached_function_ops::create_attached_function(
         sysdb,
-        "wiki_currents".to_string(),
-        "http_currents".to_string(),
+        foundation_currents_attached_function_name(),
+        cfg.currents_function_name.clone(),
         wiki_collection_id,
         cfg.currents_collection.clone(),
         params,
@@ -369,6 +369,10 @@ async fn ensure_currents_function(
     )
     .await?;
     Ok(())
+}
+
+fn foundation_currents_attached_function_name() -> String {
+    "wiki_currents".to_string()
 }
 
 #[derive(Debug, thiserror::Error)]
