@@ -38,6 +38,10 @@ pub enum HttpCurrentsError {
     MissingParam(String),
     #[error("Missing environment variable: {0}")]
     MissingEnvVar(String),
+    #[error("Invalid params JSON: {0}")]
+    InvalidParamsJson(String),
+    #[error("http_currents expects exactly one input batch, got {0}")]
+    InvalidInputBatchCount(usize),
     #[error("HTTP error: {0}")]
     Http(String),
 }
@@ -45,7 +49,10 @@ pub enum HttpCurrentsError {
 impl ChromaError for HttpCurrentsError {
     fn code(&self) -> chroma_error::ErrorCodes {
         match self {
-            HttpCurrentsError::MissingParam(_) | HttpCurrentsError::MissingEnvVar(_) => {
+            HttpCurrentsError::MissingParam(_)
+            | HttpCurrentsError::MissingEnvVar(_)
+            | HttpCurrentsError::InvalidParamsJson(_)
+            | HttpCurrentsError::InvalidInputBatchCount(_) => {
                 chroma_error::ErrorCodes::InvalidArgument
             }
             HttpCurrentsError::Http(_) => chroma_error::ErrorCodes::Internal,
@@ -54,11 +61,18 @@ impl ChromaError for HttpCurrentsError {
 }
 
 impl HttpCurrentsExecutor {
+    fn validate_input_batch_count(batch_count: usize) -> Result<(), HttpCurrentsError> {
+        if batch_count != 1 {
+            return Err(HttpCurrentsError::InvalidInputBatchCount(batch_count));
+        }
+
+        Ok(())
+    }
+
     pub fn from_attached_function(af: &AttachedFunction) -> Result<Self, Box<dyn ChromaError>> {
         let params_json = af.params.as_deref().unwrap_or("{}");
         let params: serde_json::Value = serde_json::from_str(params_json).map_err(|e| {
-            Box::new(HttpCurrentsError::Http(format!("invalid params JSON: {e}")))
-                as Box<dyn ChromaError>
+            Box::new(HttpCurrentsError::InvalidParamsJson(e.to_string())) as Box<dyn ChromaError>
         })?;
 
         let get_str = |key: &str| -> Result<String, Box<dyn ChromaError>> {
@@ -149,31 +163,28 @@ impl AttachedFunctionExecutor for HttpCurrentsExecutor {
         input_batches: Vec<HydratedInputBatch<'_, '_>>,
         _output_reader: Option<&chroma_segment::blockfile_record::RecordSegmentReaderShard<'_>>,
     ) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>> {
-        if input_batches.is_empty() {
-            tracing::info!("[HttpCurrentsExecutor] No input batches to process");
-            return Ok(Chunk::new(Arc::from(Vec::<LogRecord>::new())));
-        }
+        Self::validate_input_batch_count(input_batches.len())
+            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
 
-        for batch in &input_batches {
-            let request_body = CurrentsRequest {
-                tenant_id: batch.tenant_id.clone(),
-                database_id: batch.database_id.clone(),
-                database_name: self.database_name.clone(),
-                wiki_collection: batch.input_collection_name.clone(),
-                currents_collection: self.output_collection.clone(),
-                wiki_write_offset: batch.completion_offset,
-            };
+        let batch = &input_batches[0];
+        let request_body = CurrentsRequest {
+            tenant_id: batch.tenant_id.clone(),
+            database_id: batch.database_id.clone(),
+            database_name: self.database_name.clone(),
+            wiki_collection: batch.input_collection_name.clone(),
+            currents_collection: self.output_collection.clone(),
+            wiki_write_offset: batch.completion_offset,
+        };
 
-            tracing::info!(
-                "[HttpCurrentsExecutor] Refreshing currents for wiki={} currents={} offset={} via {}",
-                request_body.wiki_collection,
-                request_body.currents_collection,
-                request_body.wiki_write_offset,
-                self.endpoint_url,
-            );
+        tracing::info!(
+            "[HttpCurrentsExecutor] Refreshing currents for wiki={} currents={} offset={} via {}",
+            request_body.wiki_collection,
+            request_body.currents_collection,
+            request_body.wiki_write_offset,
+            self.endpoint_url,
+        );
 
-            self.refresh_currents(&request_body).await?;
-        }
+        self.refresh_currents(&request_body).await?;
 
         Ok(Chunk::new(Arc::from(Vec::<LogRecord>::new())))
     }
@@ -181,7 +192,7 @@ impl AttachedFunctionExecutor for HttpCurrentsExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::{CurrentsRequest, DEFAULT_DATABASE_NAME};
+    use super::{CurrentsRequest, HttpCurrentsError, HttpCurrentsExecutor, DEFAULT_DATABASE_NAME};
 
     #[test]
     fn currents_request_uses_foundation_default_database_name() {
@@ -196,5 +207,16 @@ mod tests {
 
         assert_eq!(request.database_name, "FOUNDATION");
         assert_eq!(request.wiki_write_offset, 42);
+    }
+
+    #[test]
+    fn validate_input_batch_count_rejects_zero_or_many_batches() {
+        let err = HttpCurrentsExecutor::validate_input_batch_count(0).unwrap_err();
+        assert!(matches!(err, HttpCurrentsError::InvalidInputBatchCount(0)));
+
+        let err = HttpCurrentsExecutor::validate_input_batch_count(2).unwrap_err();
+        assert!(matches!(err, HttpCurrentsError::InvalidInputBatchCount(2)));
+
+        HttpCurrentsExecutor::validate_input_batch_count(1).unwrap();
     }
 }
