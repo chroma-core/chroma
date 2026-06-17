@@ -23,7 +23,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tower-http = { workspace = true }
 tracing = { workspace = true }
-tree-sitter = "0.26"
+tree-sitter = "0.25.8"
 tree-sitter-md = "0.5"
 uuid = { workspace = true }
 validator = { workspace = true }
