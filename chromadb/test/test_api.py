@@ -2276,6 +2276,17 @@ def test_where_contains_validation():
     )
 
 
+def test_where_in_nin_rejects_mixed_bool_int_lists():
+    from chromadb.api.types import validate_where
+
+    for operator in ["$in", "$nin"]:
+        with pytest.raises(ValueError, match="same type"):
+            validate_where({"field": {operator: [1, True]}})
+
+        with pytest.raises(ValueError, match="same type"):
+            validate_where({"field": {operator: [0, False]}})
+
+
 def _is_python_local_segment(client):
     """Return True when the client is backed by the Python local segment API
     (which does not yet support array metadata)."""
