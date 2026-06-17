@@ -33,6 +33,13 @@ pub const FUNCTION_HTTP_GENERATE_ID: Uuid = Uuid::from_bytes([
 /// Name of the built-in http_generate function
 pub const FUNCTION_HTTP_GENERATE_NAME: &str = "http_generate";
 
+/// UUID for the built-in http_currents function
+pub const FUNCTION_HTTP_CURRENTS_ID: Uuid = Uuid::from_bytes([
+    0x63, 0xfd, 0xf2, 0x20, 0xee, 0xfb, 0x4a, 0xd9, 0xa6, 0x86, 0x9f, 0x71, 0x96, 0x55, 0xae, 0xb3,
+]);
+/// Name of the built-in http_currents function
+pub const FUNCTION_HTTP_CURRENTS_NAME: &str = "http_currents";
+
 /// UUID for the built-in revision_history function
 pub const FUNCTION_REVISION_HISTORY_ID: Uuid = Uuid::from_bytes([
     0x2d, 0xf4, 0x34, 0x2c, 0x5b, 0x5a, 0x49, 0xaa, 0x83, 0x45, 0xc4, 0x65, 0x03, 0xe8, 0x55, 0x09,
