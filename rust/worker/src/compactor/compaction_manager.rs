@@ -76,6 +76,28 @@ struct CompactionTaskCompletion {
     result: CompactionOutput,
 }
 
+async fn work_queue_client_from_config(
+    config: &Option<crate::fn_consumer::config::GrpcWorkQueueConfig>,
+) -> Result<Option<WorkQueueClient>, Box<dyn ChromaError>> {
+    match config {
+        Some(work_queue_config) => {
+            let client = WorkQueueClient::try_from_config(work_queue_config).await?;
+            tracing::info!(
+                "WorkQueue client initialized for {}:{}",
+                work_queue_config.host,
+                work_queue_config.port
+            );
+            Ok(Some(client))
+        }
+        None => {
+            tracing::info!(
+                "WorkQueue not configured, async attached functions will not be supported"
+            );
+            Ok(None)
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct CompactionManagerContext {
     system: System,
@@ -702,31 +724,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         )
         .await?;
 
-        // Initialize WorkQueueClient if config is provided
-        let work_queue_client = match &config.work_queue {
-            Some(work_queue_config) => {
-                match WorkQueueClient::try_from_config(work_queue_config).await {
-                    Ok(client) => {
-                        tracing::info!(
-                            "WorkQueue client initialized for {}:{}",
-                            work_queue_config.host,
-                            work_queue_config.port
-                        );
-                        Some(client)
-                    }
-                    Err(err) => {
-                        tracing::warn!("Failed to initialize WorkQueue client: {:?}", err);
-                        None
-                    }
-                }
-            }
-            None => {
-                tracing::info!(
-                    "WorkQueue not configured, async attached functions will not be supported"
-                );
-                None
-            }
-        };
+        let work_queue_client = work_queue_client_from_config(&config.work_queue).await?;
 
         CompactionManager::new(
             system.clone(),
@@ -1071,6 +1069,7 @@ impl Handler<GetCollectionAssignmentMessage> for CompactionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fn_consumer::config::GrpcWorkQueueConfig;
     use chroma_blockstore::arrow::config::{BlockManagerConfig, TEST_MAX_BLOCK_SIZE_BYTES};
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
     use chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
@@ -1084,6 +1083,31 @@ mod tests {
     use chroma_types::SegmentUuid;
     use chroma_types::{Collection, LogRecord, Operation, OperationRecord, Segment};
     use std::collections::HashMap;
+
+    #[tokio::test]
+    async fn test_work_queue_client_from_config_is_optional() {
+        let client = work_queue_client_from_config(&None)
+            .await
+            .expect("missing work queue config should be allowed");
+
+        assert!(client.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_work_queue_client_from_config_errors_when_configured() {
+        let config = Some(GrpcWorkQueueConfig {
+            host: "bad host".to_string(),
+            port: 50051,
+            connect_timeout_ms: 10,
+            request_timeout_ms: 10,
+        });
+
+        let err = work_queue_client_from_config(&config)
+            .await
+            .expect_err("configured work queue should fail fast on invalid endpoint");
+
+        assert_eq!(err.code(), ErrorCodes::Unavailable);
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_compaction_manager() {
