@@ -64,6 +64,15 @@ impl ChromaError for WikiClientError {
     }
 }
 
+impl WikiClientError {
+    /// Whether this is a 404 from the FE — i.e. the `FOUNDATION` database or
+    /// the `wiki` collection does not exist, so Foundation isn't provisioned
+    /// for this tenant (as opposed to a transient or internal failure).
+    pub(crate) fn is_not_found(&self) -> bool {
+        matches!(self, WikiClientError::Client(err) if is_not_found(err))
+    }
+}
+
 /// A cheaply-cloneable factory for per-request Chroma collection handles that
 /// proxy to the FE. Holds one long-lived client (shared connection pool) plus
 /// a tenant-scoped cache of the wiki collection identity.
@@ -324,6 +333,25 @@ mod tests {
             StatusCode::INTERNAL_SERVER_ERROR,
         )));
         assert!(!is_not_found(&ChromaHttpClientError::NoBackendAvailable));
+    }
+
+    #[test]
+    fn wiki_client_error_is_not_found_only_on_client_404() {
+        use reqwest::StatusCode;
+        // A 404 from the FE (missing FOUNDATION db / wiki collection).
+        assert!(WikiClientError::Client(ChromaHttpClientError::ApiError(
+            "missing".to_string(),
+            StatusCode::NOT_FOUND,
+        ))
+        .is_not_found());
+        // Other downstream failures are not "not provisioned".
+        assert!(!WikiClientError::Client(ChromaHttpClientError::ApiError(
+            "boom".to_string(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ))
+        .is_not_found());
+        assert!(!WikiClientError::MissingIngressUrl.is_not_found());
+        assert!(!WikiClientError::InvalidToken("nope".to_string()).is_not_found());
     }
 
     #[test]

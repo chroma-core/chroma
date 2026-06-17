@@ -48,6 +48,29 @@ fn request_validation_requires_non_empty_query() {
 }
 
 #[test]
+fn not_provisioned_resolve_error_maps_to_not_found() {
+    use super::super::AgentRouteError;
+    use crate::wiki::WikiClientError;
+    use chroma::client::ChromaHttpClientError;
+    use chroma_error::{ChromaError, ErrorCodes};
+    use reqwest::StatusCode;
+
+    // A 404 resolving the wiki collection means Foundation isn't provisioned
+    // for the tenant; the route must surface NotFound (404), not a 500, so
+    // dashboard-api can render its "set up Foundation" reply.
+    let not_found = AgentRouteError::Resolve(WikiClientError::Client(
+        ChromaHttpClientError::ApiError("collection not found".to_string(), StatusCode::NOT_FOUND),
+    ));
+    assert!(matches!(not_found.code(), ErrorCodes::NotFound));
+
+    // Other downstream failures still collapse to Internal (500).
+    let server_err = AgentRouteError::Resolve(WikiClientError::Client(
+        ChromaHttpClientError::ApiError("boom".to_string(), StatusCode::INTERNAL_SERVER_ERROR),
+    ));
+    assert!(matches!(server_err.code(), ErrorCodes::Internal));
+}
+
+#[test]
 fn action_event_splits_reasoning_text_and_calls() {
     let mut builder = ActionBuilder::new();
     builder.set_reasoning(Reasoning {
