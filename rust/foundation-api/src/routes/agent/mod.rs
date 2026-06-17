@@ -106,6 +106,11 @@ impl ChromaError for AgentRouteError {
             AgentRouteError::RouteDisabled => ErrorCodes::Internal,
             AgentRouteError::MissingToken => ErrorCodes::InvalidArgument,
             AgentRouteError::UnknownModel(_) => ErrorCodes::InvalidArgument,
+            // A 404 resolving the wiki collection means Foundation isn't
+            // provisioned for this tenant — surface it as NotFound (404) so
+            // callers can tell "not set up" apart from a transient failure,
+            // rather than collapsing it into a generic 500.
+            AgentRouteError::Resolve(err) if err.is_not_found() => ErrorCodes::NotFound,
             AgentRouteError::Resolve(err) => err.code(),
             AgentRouteError::Inference(_) => ErrorCodes::Internal,
         }
