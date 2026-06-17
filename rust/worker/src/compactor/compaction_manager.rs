@@ -78,7 +78,7 @@ struct CompactionTaskCompletion {
 
 async fn work_queue_client_from_config(
     config: &Option<crate::fn_consumer::config::GrpcWorkQueueConfig>,
-) -> Result<Option<WorkQueueClient>, Box<dyn ChromaError>> {
+) -> Result<WorkQueueClient, Box<dyn ChromaError>> {
     match config {
         Some(work_queue_config) => {
             let client = WorkQueueClient::try_from_config(work_queue_config).await?;
@@ -87,14 +87,9 @@ async fn work_queue_client_from_config(
                 work_queue_config.host,
                 work_queue_config.port
             );
-            Ok(Some(client))
+            Ok(client)
         }
-        None => {
-            tracing::info!(
-                "WorkQueue not configured, async attached functions will not be supported"
-            );
-            Ok(None)
-        }
+        None => Err(Box::new(CompactionError::MissingWorkQueueConfig)),
     }
 }
 
@@ -149,6 +144,8 @@ pub(crate) enum CompactionError {
     FailedToCompact,
     #[error("Invalid collection UUID in config: {0}")]
     InvalidCollectionUuid(String),
+    #[error("Missing required compaction_service.work_queue config")]
+    MissingWorkQueueConfig,
 }
 
 impl ChromaError for CompactionError {
@@ -156,6 +153,7 @@ impl ChromaError for CompactionError {
         match self {
             CompactionError::FailedToCompact => ErrorCodes::Internal,
             CompactionError::InvalidCollectionUuid(_) => ErrorCodes::InvalidArgument,
+            CompactionError::MissingWorkQueueConfig => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -752,7 +750,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             Some(bloom_filter_manager),
             config.compactor.shard_size,
             config.compactor.sharding_enabled_tenant_patterns.clone(),
-            work_queue_client,
+            Some(work_queue_client),
         )
     }
 }
@@ -1085,12 +1083,12 @@ mod tests {
     use std::collections::HashMap;
 
     #[tokio::test]
-    async fn test_work_queue_client_from_config_is_optional() {
-        let client = work_queue_client_from_config(&None)
+    async fn test_work_queue_client_from_config_requires_config() {
+        let err = work_queue_client_from_config(&None)
             .await
-            .expect("missing work queue config should be allowed");
+            .expect_err("missing work queue config should fail fast");
 
-        assert!(client.is_none());
+        assert_eq!(err.code(), ErrorCodes::InvalidArgument);
     }
 
     #[tokio::test]
