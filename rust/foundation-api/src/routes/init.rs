@@ -1,8 +1,6 @@
-use super::mock_currents::mock_currents_records;
-use super::{caller_token, whoami::whoami_and_authorize};
+use super::whoami::whoami_and_authorize;
 use crate::{
     auth::AuthzAction, config::FoundationConfig, errors::ServerError, server::FoundationApiServer,
-    wiki::WikiClientError,
 };
 use axum::{extract::State, http::HeaderMap, Json};
 use chroma_error::{ChromaError, ErrorCodes};
@@ -10,8 +8,7 @@ use chroma_sysdb::SysDb;
 use chroma_types::{
     Collection, CollectionUuid, CreateDatabaseError, DatabaseName, EmbeddingFunctionConfiguration,
     EmbeddingFunctionNewConfiguration, IndexConfig, KnnIndex, Metadata, MetadataValue, Schema,
-    SparseIndexAlgorithm, SparseVectorIndexConfig, UpdateMetadata, CHROMA_GROUP_CHUNK_SIBLINGS_KEY,
-    DOCUMENT_KEY,
+    SparseIndexAlgorithm, SparseVectorIndexConfig, CHROMA_GROUP_CHUNK_SIBLINGS_KEY, DOCUMENT_KEY,
 };
 use frontend_core::{
     attached_function_ops,
@@ -92,9 +89,8 @@ pub async fn foundation_init(
     .await?;
     // Currents records carry their payload in metadata and are only ever
     // fetched by metadata (never vector-searched), so the collection has no
-    // embedding function. Pin the dense index to a single dimension to match
-    // the constant placeholder vector the seed writes (see
-    // `ensure_currents_collection`).
+    // embedding function. Pin the dense index to a single dimension for the
+    // derived records written by the currents function.
     let currents = ensure_collection(
         &mut sysdb,
         tenant.clone(),
@@ -103,14 +99,6 @@ pub async fn foundation_init(
         None,
         Some(1),
         CollectionEmbeddingFunctions::default(),
-    )
-    .await?;
-
-    maybe_seed_currents_collection(
-        &server,
-        &headers,
-        &tenant,
-        &foundation_cfg.currents_collection,
     )
     .await?;
 
@@ -379,97 +367,14 @@ fn foundation_currents_attached_function_name() -> String {
 enum FoundationInitError {
     #[error("Configured foundation database name is shorter than the 3-character minimum")]
     DatabaseNameTooShort,
-    #[error("foundation wiki record I/O is unavailable")]
-    WikiRouteUnavailable,
-    #[error("missing or invalid x-chroma-token header")]
-    MissingToken,
-    #[error(transparent)]
-    WikiClient(#[from] WikiClientError),
-    #[error("chroma record I/O failed: {0}")]
-    RecordIo(chroma::client::ChromaHttpClientError),
 }
 
 impl ChromaError for FoundationInitError {
     fn code(&self) -> ErrorCodes {
         match self {
-            FoundationInitError::DatabaseNameTooShort | FoundationInitError::MissingToken => {
-                ErrorCodes::InvalidArgument
-            }
-            FoundationInitError::WikiRouteUnavailable
-            | FoundationInitError::WikiClient(_)
-            | FoundationInitError::RecordIo(_) => ErrorCodes::Internal,
+            FoundationInitError::DatabaseNameTooShort => ErrorCodes::InvalidArgument,
         }
     }
-}
-
-async fn ensure_currents_collection(
-    server: &FoundationApiServer,
-    headers: &HeaderMap,
-    tenant: &str,
-    collection_name: &str,
-) -> Result<(), ServerError> {
-    let wiki_client = server
-        .wiki_client
-        .as_ref()
-        .ok_or(FoundationInitError::WikiRouteUnavailable)?;
-    let token = caller_token(headers).ok_or(FoundationInitError::MissingToken)?;
-    let collection = wiki_client
-        .get_collection_by_name(tenant, token, collection_name)
-        .await?;
-    let records = mock_currents_records();
-
-    let ids: Vec<String> = records.iter().map(|record| record.id.clone()).collect();
-    // The currents collection has no embedding function, so passing `None`
-    // embeddings would make the client try (and fail) to embed the document
-    // text with `MissingEmbeddingFunction`. These records are never
-    // vector-searched, so write a constant 1-dim placeholder vector instead.
-    let embeddings: Vec<Vec<f32>> = vec![vec![1.0]; ids.len()];
-    let documents: Vec<Option<String>> = records
-        .iter()
-        .map(|record| Some(record.document.clone()))
-        .collect();
-    let metadatas: Vec<Option<UpdateMetadata>> = records
-        .into_iter()
-        .map(|record| {
-            Some(
-                record
-                    .metadata
-                    .into_iter()
-                    .map(|(key, value)| (key, value.into()))
-                    .collect(),
-            )
-        })
-        .collect();
-    collection
-        .upsert(ids, embeddings, Some(documents), None, Some(metadatas))
-        .await
-        .map_err(FoundationInitError::RecordIo)?;
-    Ok(())
-}
-
-async fn maybe_seed_currents_collection(
-    server: &FoundationApiServer,
-    headers: &HeaderMap,
-    tenant: &str,
-    collection_name: &str,
-) -> Result<(), ServerError> {
-    if server.wiki_client.is_none() {
-        tracing::info!(
-            collection_name = collection_name,
-            "skipping currents mock seed because foundation wiki record I/O is unavailable"
-        );
-        return Ok(());
-    }
-
-    if caller_token(headers).is_none() {
-        tracing::info!(
-            collection_name = collection_name,
-            "skipping currents mock seed because request carried no x-chroma-token"
-        );
-        return Ok(());
-    }
-
-    ensure_currents_collection(server, headers, tenant, collection_name).await
 }
 
 async fn ensure_database(
