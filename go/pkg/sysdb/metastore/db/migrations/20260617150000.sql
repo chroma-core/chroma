@@ -3,5 +3,5 @@ INSERT INTO "public"."functions" ("id", "name", "is_incremental", "return_type",
   'http_currents',
   true,
   '{}',
-  false
+  true
 );
