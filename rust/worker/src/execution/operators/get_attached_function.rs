@@ -8,7 +8,7 @@ use chroma_types::{
 };
 use thiserror::Error;
 
-/// The `GetAttachedFunctionOperator` lists attached functions for a collection and selects the first one.
+/// The `GetAttachedFunctionOperator` lists attached functions for a collection.
 /// If no functions are found, it returns an empty result (not an error) to allow the orchestrator
 /// to handle the case gracefully.
 #[derive(Clone, Debug)]
@@ -34,7 +34,7 @@ pub struct GetAttachedFunctionInput {
 
 #[derive(Debug)]
 pub struct GetAttachedFunctionOutput {
-    pub attached_function: Option<AttachedFunction>,
+    pub attached_functions: Vec<AttachedFunction>,
 }
 
 #[derive(Debug, Error)]
@@ -124,7 +124,7 @@ impl Operator<GetAttachedFunctionInput, GetAttachedFunctionOutput> for GetAttach
                 input.collection_id.0
             );
             return Ok(GetAttachedFunctionOutput {
-                attached_function: None,
+                attached_functions: Vec::new(),
             });
         }
 
@@ -134,26 +134,21 @@ impl Operator<GetAttachedFunctionInput, GetAttachedFunctionOutput> for GetAttach
             .collect::<Result<Vec<_>, _>>()
             .map_err(GetAttachedFunctionOperatorError::ConversionError)?;
 
-        let attached_function = match input.attached_function_id {
-            Some(attached_function_id) => attached_functions
+        let attached_functions = match input.attached_function_id {
+            Some(attached_function_id) => vec![attached_functions
                 .into_iter()
                 .find(|attached_function| attached_function.id == attached_function_id)
-                .ok_or(GetAttachedFunctionOperatorError::NoAttachedFunctionFound)?,
-            None => attached_functions
-                .into_iter()
-                .next()
-                .ok_or(GetAttachedFunctionOperatorError::NoAttachedFunctionFound)?,
+                .ok_or(GetAttachedFunctionOperatorError::NoAttachedFunctionFound)?],
+            None => attached_functions,
         };
 
         tracing::info!(
-            "[{}]: Found attached function '{}' for collection {}",
+            "[{}]: Found {} attached function(s) for collection {}",
             self.get_name(),
-            attached_function.name,
+            attached_functions.len(),
             input.collection_id.0
         );
 
-        Ok(GetAttachedFunctionOutput {
-            attached_function: Some(attached_function),
-        })
+        Ok(GetAttachedFunctionOutput { attached_functions })
     }
 }
