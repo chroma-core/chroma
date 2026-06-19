@@ -60,6 +60,10 @@ pub struct FoundationConfig {
     /// (its output is the wiki collection). Default mirrors the POC.
     #[serde(default = "FoundationConfig::default_function_name")]
     pub function_name: String,
+    /// Server-registered function attached to the wiki collection
+    /// (its output is the currents collection).
+    #[serde(default = "FoundationConfig::default_currents_function_name")]
+    pub currents_function_name: String,
     /// Modal endpoint the attached function POSTs to. Threaded into the
     /// attach `params` as `endpoint_url`. Required — there is intentionally
     /// no default, so a deploy can't silently fall back to a hardcoded
@@ -101,6 +105,9 @@ impl FoundationConfig {
     fn default_function_name() -> String {
         "http_generate".to_string()
     }
+    fn default_currents_function_name() -> String {
+        "http_currents".to_string()
+    }
     fn default_min_records_for_invocation() -> u64 {
         100
     }
@@ -118,6 +125,7 @@ impl Default for FoundationConfig {
             agent_sessions_collection: Self::default_agent_sessions_collection(),
             source_collections: Self::default_source_collections(),
             function_name: Self::default_function_name(),
+            currents_function_name: Self::default_currents_function_name(),
             function_endpoint_url: None,
             min_records_for_invocation: Self::default_min_records_for_invocation(),
             deep_research_api_url: None,

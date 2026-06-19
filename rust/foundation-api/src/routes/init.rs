@@ -123,6 +123,13 @@ pub async fn foundation_init(
         foundation_cfg,
     )
     .await?;
+    ensure_currents_function(
+        &mut sysdb,
+        tenant.clone(),
+        wiki.collection_id,
+        foundation_cfg,
+    )
+    .await?;
 
     // Private (per-user) collections — namespaced by user_id so each team
     // member gets their own isolated collection for uploads and traces.
@@ -329,6 +336,43 @@ async fn ensure_revision_history_function(
     )
     .await?;
     Ok(())
+}
+
+/// Attach the configured wiki->currents function to the wiki collection so
+/// currents are refreshed whenever the wiki advances.
+async fn ensure_currents_function(
+    sysdb: &mut SysDb,
+    tenant: String,
+    wiki_collection_id: CollectionUuid,
+    cfg: &FoundationConfig,
+) -> Result<(), ServerError> {
+    let endpoint_url = cfg
+        .function_endpoint_url
+        .as_ref()
+        .ok_or(MissingFunctionEndpointUrl)?;
+    let params = serde_json::json!({
+        "endpoint_url": endpoint_url,
+        "database_name": cfg.database_name,
+    });
+    let output_schema = Schema::new_record_only();
+    attached_function_ops::create_attached_function(
+        sysdb,
+        foundation_currents_attached_function_name(),
+        cfg.currents_function_name.clone(),
+        wiki_collection_id,
+        cfg.currents_collection.clone(),
+        params,
+        tenant,
+        cfg.database_name.clone(),
+        cfg.min_records_for_invocation,
+        output_schema,
+    )
+    .await?;
+    Ok(())
+}
+
+fn foundation_currents_attached_function_name() -> String {
+    "wiki_currents".to_string()
 }
 
 #[derive(Debug, thiserror::Error)]
