@@ -31,6 +31,10 @@ var (
 	// Must match: rust/types/src/operators_generated.rs::FUNCTION_HTTP_GENERATE_ID
 	FunctionHttpGenerate = uuid.MustParse("9e3c7540-4ddd-40a2-bbff-ad9cb3f06efc")
 
+	// FunctionHttpCurrents is the UUID for the built-in http_currents function
+	// Must match: rust/types/src/operators_generated.rs::FUNCTION_HTTP_CURRENTS_ID
+	FunctionHttpCurrents = uuid.MustParse("63fdf220-eefb-4ad9-a686-9f719655aeb3")
+
 	// FunctionRevisionHistory is the UUID for the built-in revision_history function
 	// Must match: migration 20260525150000.sql and rust/types/src/operators_generated.rs::FUNCTION_REVISION_HISTORY_ID
 	FunctionRevisionHistory = uuid.MustParse("2df4342c-5b5a-49aa-8345-c46503e85509")
@@ -54,6 +58,9 @@ const (
 	// FunctionNameHttpGenerate must match rust/types/src/operators_generated.rs::FUNCTION_HTTP_GENERATE_NAME
 	FunctionNameHttpGenerate = "http_generate"
 
+	// FunctionNameHttpCurrents must match rust/types/src/operators_generated.rs::FUNCTION_HTTP_CURRENTS_NAME
+	FunctionNameHttpCurrents = "http_currents"
+
 	// FunctionNameRevisionHistory must match rust/types/src/operators_generated.rs::FUNCTION_REVISION_HISTORY_NAME
 	FunctionNameRevisionHistory = "revision_history"
 
@@ -68,6 +75,7 @@ var functionIDToName = map[uuid.UUID]string{
 	FunctionStatistics:       FunctionNameStatistics,
 	FunctionDummyAsync:       FunctionNameDummyAsync,
 	FunctionHttpGenerate:     FunctionNameHttpGenerate,
+	FunctionHttpCurrents:     FunctionNameHttpCurrents,
 	FunctionRevisionHistory:  FunctionNameRevisionHistory,
 	FunctionCountToFileAsync: FunctionNameCountToFileAsync,
 }
