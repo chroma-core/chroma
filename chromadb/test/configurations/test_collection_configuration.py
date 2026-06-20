@@ -26,6 +26,7 @@ from chromadb.test.conftest import ClientFactories
 from chromadb.test.conftest import is_spann_disabled_mode, skip_reason_spann_disabled
 from chromadb.types import Collection as CollectionModel
 from typing import Optional, TypedDict
+from uuid import uuid4
 
 
 class LegacyEmbeddingFunction(EmbeddingFunction[Embeddable]):
@@ -1741,3 +1742,46 @@ def test_deserializing_custom_embedding_function_with_query_config_no_query_conf
         ef.embed_query(input="How many people in Berlin?"),
         np.array([[1.0, 1.0, 1.0]], dtype=np.float32),
     )
+
+
+def _make_collection_model() -> CollectionModel:
+    return CollectionModel(
+        id=uuid4(),
+        name="test_setitem_collection",
+        configuration_json={},
+        serialized_schema=None,
+        metadata=None,
+        dimension=None,
+        tenant="default_tenant",
+        database="default_database",
+    )
+
+
+def test_collection_setitem_configuration_round_trip() -> None:
+    # "configuration" isn't a model field (configuration_json is), so without
+    # the elif, __setitem__ would call set_configuration and then still hit the
+    # KeyError branch. Reading it back should give us the config again.
+    model = _make_collection_model()
+
+    config = model["configuration"]
+    assert config is not None
+
+    model["configuration"] = config
+
+    assert model["configuration"] is not None
+    assert "embedding_function" in model.configuration_json
+
+
+def test_collection_setitem_model_field() -> None:
+    model = _make_collection_model()
+
+    model["name"] = "renamed_collection"
+    assert model.name == "renamed_collection"
+    assert model["name"] == "renamed_collection"
+
+
+def test_collection_setitem_unknown_key_raises() -> None:
+    model = _make_collection_model()
+
+    with pytest.raises(KeyError):
+        model["does_not_exist"] = "value"
