@@ -1772,6 +1772,16 @@ def test_collection_setitem_configuration_round_trip() -> None:
     assert "embedding_function" in model.configuration_json
 
 
+def test_collection_setitem_configuration_accepts_dict() -> None:
+    # set_configuration goes through collection_configuration_to_json, which
+    # accepts a CollectionConfiguration-shaped dict as well as the object form.
+    model = _make_collection_model()
+
+    model["configuration"] = {"hnsw": None, "spann": None, "embedding_function": None}
+
+    assert model.configuration_json["embedding_function"] == {"type": "legacy"}
+
+
 def test_collection_setitem_model_field() -> None:
     model = _make_collection_model()
 
@@ -1780,8 +1790,19 @@ def test_collection_setitem_model_field() -> None:
     assert model["name"] == "renamed_collection"
 
 
+def test_collection_getitem_unknown_key_returns_none() -> None:
+    # __getitem__ is intentionally lenient: unknown keys return None rather
+    # than raising (unlike __setitem__).
+    model = _make_collection_model()
+
+    assert model["does_not_exist"] is None
+
+
 def test_collection_setitem_unknown_key_raises() -> None:
     model = _make_collection_model()
 
-    with pytest.raises(KeyError):
+    with pytest.raises(KeyError) as exc_info:
         model["does_not_exist"] = "value"
+
+    # The error should advertise "configuration" as a valid key too.
+    assert "configuration" in str(exc_info.value)
