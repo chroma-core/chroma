@@ -874,7 +874,7 @@ class EmbeddingFunction(Protocol[D]):
         return cast(Embeddings, retry(**retry_kwargs)(self.__call__)(input))  # type: ignore[call-overload]
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        """Initialize the embedding function. This method should be overriden."""
+        """Initialize the embedding function. This method should be overridden."""
 
         warnings.warn(
             f"The class {self.__class__.__name__} does not implement __init__. "
@@ -885,7 +885,7 @@ class EmbeddingFunction(Protocol[D]):
 
     @staticmethod
     def name() -> str:
-        """Return the embedding function name. This method should be overriden."""
+        """Return the embedding function name. This method should be overridden."""
 
         warnings.warn(
             "The EmbeddingFunction class does not implement name(). "
@@ -905,7 +905,7 @@ class EmbeddingFunction(Protocol[D]):
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[D]":
-        """Build an embedding function from a serialized config. This method should be overriden."""
+        """Build an embedding function from a serialized config. This method should be overridden."""
 
         warnings.warn(
             "The EmbeddingFunction class does not implement build_from_config(). "
@@ -917,7 +917,7 @@ class EmbeddingFunction(Protocol[D]):
 
     def get_config(self) -> Dict[str, Any]:
         """Return a serializable configuration for the embedding function.
-        This method should be overriden.
+        This method should be overridden.
         """
 
         warnings.warn(
