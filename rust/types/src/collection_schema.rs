@@ -434,6 +434,45 @@ impl Schema {
                 .any(|vt| vt.sparse_vector.as_ref().is_some_and(check))
     }
 
+    /// Metadata keys that have an enabled sparse vector index, in sorted order
+    /// for deterministic iteration. Each key owns one independent sparse index.
+    pub fn enabled_sparse_keys(&self) -> Vec<String> {
+        let mut keys: Vec<String> = self
+            .keys
+            .iter()
+            .filter(|(_, value_types)| {
+                value_types
+                    .sparse_vector
+                    .as_ref()
+                    .and_then(|sv| sv.sparse_vector_index.as_ref())
+                    .is_some_and(|idx| idx.enabled)
+            })
+            .map(|(key, _)| key.clone())
+            .collect();
+        keys.sort();
+        keys
+    }
+
+    /// Whether the sparse index on a specific metadata key uses MaxScore.
+    /// Falls back to the schema defaults when the key has no explicit config.
+    /// Defaults to WAND (false) when nothing is configured.
+    pub fn is_key_maxscore_enabled(&self, key: &str) -> bool {
+        let algorithm = self
+            .keys
+            .get(key)
+            .and_then(|vt| vt.sparse_vector.as_ref())
+            .and_then(|sv| sv.sparse_vector_index.as_ref())
+            .map(|idx| &idx.config.algorithm)
+            .or_else(|| {
+                self.defaults
+                    .sparse_vector
+                    .as_ref()
+                    .and_then(|sv| sv.sparse_vector_index.as_ref())
+                    .map(|idx| &idx.config.algorithm)
+            });
+        matches!(algorithm, Some(SparseIndexAlgorithm::MaxScore))
+    }
+
     /// Set the sparse index algorithm on all sparse index configs
     /// (defaults and every key-specific config).
     pub fn set_sparse_algorithm(&mut self, algorithm: SparseIndexAlgorithm) {
@@ -4432,6 +4471,64 @@ mod tests {
             .unwrap()
             .enabled = false;
         assert!(!schema.is_maxscore_enabled());
+    }
+
+    fn enable_sparse_key(schema: &mut Schema, key: &str, algorithm: SparseIndexAlgorithm) {
+        schema
+            .keys
+            .entry(key.to_string())
+            .or_default()
+            .sparse_vector = Some(SparseVectorValueType {
+            sparse_vector_index: Some(SparseVectorIndexType {
+                enabled: true,
+                config: SparseVectorIndexConfig {
+                    embedding_function: None,
+                    source_key: None,
+                    bm25: None,
+                    algorithm,
+                },
+            }),
+        });
+    }
+
+    #[test]
+    fn test_enabled_sparse_keys() {
+        let mut schema = Schema::new_default(KnnIndex::Hnsw);
+        assert!(schema.enabled_sparse_keys().is_empty());
+
+        enable_sparse_key(&mut schema, "beta", SparseIndexAlgorithm::Wand);
+        enable_sparse_key(&mut schema, "alpha", SparseIndexAlgorithm::MaxScore);
+        // A disabled sparse key must not be reported.
+        enable_sparse_key(&mut schema, "gamma", SparseIndexAlgorithm::Wand);
+        schema
+            .keys
+            .get_mut("gamma")
+            .unwrap()
+            .sparse_vector
+            .as_mut()
+            .unwrap()
+            .sparse_vector_index
+            .as_mut()
+            .unwrap()
+            .enabled = false;
+
+        // Returned sorted and excludes disabled keys.
+        assert_eq!(
+            schema.enabled_sparse_keys(),
+            vec!["alpha".to_string(), "beta".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_is_key_maxscore_enabled() {
+        let mut schema = Schema::new_default(KnnIndex::Hnsw);
+        enable_sparse_key(&mut schema, "ms", SparseIndexAlgorithm::MaxScore);
+        enable_sparse_key(&mut schema, "wand", SparseIndexAlgorithm::Wand);
+
+        assert!(schema.is_key_maxscore_enabled("ms"));
+        assert!(!schema.is_key_maxscore_enabled("wand"));
+        // Unknown key with no default sparse config -> WAND (false).
+        assert!(!schema.is_key_maxscore_enabled("unknown"));
     }
 
     #[test]

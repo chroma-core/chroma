@@ -138,7 +138,13 @@ impl Operator<IdfInput, IdfOutput> for Idf {
         let logs =
             materialize_logs(&record_segment_reader, input.logs.clone(), None, &plan).await?;
 
-        if let Some(reader) = metadata_segment_reader.sparse_index_reader.as_ref() {
+        // Use the per-key index for document frequencies, falling back to the
+        // legacy anonymous index for not-yet-migrated collections.
+        if let Some(reader) = metadata_segment_reader
+            .sparse_index_readers
+            .get(&self.key)
+            .or(metadata_segment_reader.legacy_sparse_index_reader.as_ref())
+        {
             nts = reader.dimension_counts(&self.query.indices).await?;
         }
 
