@@ -83,8 +83,6 @@ pub enum SchemaBuilderError {
     SpecialKeyModificationNotAllowed { key: String },
     #[error("Sparse vector index requires a specific key. Use create_index(Some(\"key_name\"), config) instead of create_index(None, config)")]
     SparseVectorRequiresKey,
-    #[error("Only one sparse vector index allowed per collection. Key '{existing_key}' already has a sparse vector index. Remove it first or use that key.")]
-    MultipleSparseVectorIndexes { existing_key: String },
     #[error("Vector index deletion not supported. The vector index is always enabled on #embedding. To disable vector search, disable the collection instead.")]
     VectorIndexDeletionNotSupported,
     #[error("Sparse vector index deletion not supported yet. Sparse vector indexes cannot be removed once created.")]
@@ -2804,27 +2802,6 @@ impl Schema {
         config: IndexConfig,
         enabled: bool,
     ) -> Result<(), SchemaBuilderError> {
-        // Check for multiple sparse vector indexes BEFORE getting mutable reference
-        if enabled && matches!(config, IndexConfig::SparseVector(_)) {
-            // Find existing sparse vector index
-            let existing_key = self
-                .keys
-                .iter()
-                .find(|(k, v)| {
-                    k.as_str() != key
-                        && v.sparse_vector
-                            .as_ref()
-                            .and_then(|sv| sv.sparse_vector_index.as_ref())
-                            .map(|idx| idx.enabled)
-                            .unwrap_or(false)
-                })
-                .map(|(k, _)| k.clone());
-
-            if let Some(existing_key) = existing_key {
-                return Err(SchemaBuilderError::MultipleSparseVectorIndexes { existing_key });
-            }
-        }
-
         // Get or create ValueTypes for this key
         let value_types = self.keys.entry(key.to_string()).or_default();
 
@@ -6443,8 +6420,8 @@ mod tests {
             SchemaBuilderError::SparseVectorRequiresKey
         ));
 
-        // Error: Multiple sparse vector indexes (only one allowed per collection)
-        let result = Schema::new_default(KnnIndex::Hnsw)
+        // Multiple sparse vector indexes are now allowed per collection.
+        let schema = Schema::new_default(KnnIndex::Hnsw)
             .create_index(
                 Some("sparse1"),
                 IndexConfig::SparseVector(SparseVectorIndexConfig {
@@ -6461,14 +6438,14 @@ mod tests {
                     embedding_function: None,
                     source_key: None,
                     bm25: None,
-                    algorithm: SparseIndexAlgorithm::Wand,
+                    algorithm: SparseIndexAlgorithm::MaxScore,
                 }),
-            );
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            SchemaBuilderError::MultipleSparseVectorIndexes { existing_key } if existing_key == "sparse1"
-        ));
+            )
+            .expect("second sparse should succeed");
+        assert_eq!(
+            schema.enabled_sparse_keys(),
+            vec!["sparse1".to_string(), "sparse2".to_string()]
+        );
     }
 
     #[test]
