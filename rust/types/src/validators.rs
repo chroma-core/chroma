@@ -245,7 +245,6 @@ pub fn validate_search_payload(payload: &SearchPayload) -> Result<(), Validation
 
 /// Validate schema
 pub fn validate_schema(schema: &Schema) -> Result<(), ValidationError> {
-    let mut sparse_index_keys = Vec::new();
     if schema
         .defaults
         .float_list
@@ -269,7 +268,7 @@ pub fn validate_schema(schema: &Schema) -> Result<(), ValidationError> {
         .as_ref()
         .is_some_and(|vt| vt.sparse_vector_index.as_ref().is_some_and(|it| it.enabled))
     {
-        return Err(ValidationError::new("schema").with_message("Sparse vector index cannot be enabled by default. Please enable sparse vector index on specific keys. At most one sparse vector index is allowed for the collection.".into()));
+        return Err(ValidationError::new("schema").with_message("Sparse vector index cannot be enabled by default. Please enable sparse vector index on specific keys.".into()));
     }
     if schema
         .defaults
@@ -338,13 +337,6 @@ pub fn validate_schema(schema: &Schema) -> Result<(), ValidationError> {
             .and_then(|vt| vt.sparse_vector_index.as_ref())
         {
             if svit.enabled {
-                sparse_index_keys.push(key);
-                if sparse_index_keys.len() > 1 {
-                    return Err(ValidationError::new("schema").with_message(
-                        format!("At most one sparse vector index is allowed for the collection: {sparse_index_keys:?}")
-                            .into(),
-                    ));
-                }
                 if svit.config.source_key.is_some() && svit.config.embedding_function.is_none() {
                     return Err(ValidationError::new("schema").with_message(
                         "If source_key is provided then embedding_function must also be provided since there is no default embedding function.".into(),
@@ -668,5 +660,52 @@ mod tests {
             ..Default::default()
         };
         assert!(validate_search_payload(&payload).is_err());
+    }
+
+    fn schema_with_sparse_key(
+        schema: &mut Schema,
+        key: &str,
+        algorithm: crate::SparseIndexAlgorithm,
+    ) {
+        use crate::{SparseVectorIndexConfig, SparseVectorIndexType, SparseVectorValueType};
+        schema.keys.entry(key.to_string()).or_default().sparse_vector =
+            Some(SparseVectorValueType {
+                sparse_vector_index: Some(SparseVectorIndexType {
+                    enabled: true,
+                    config: SparseVectorIndexConfig {
+                        embedding_function: None,
+                        source_key: None,
+                        bm25: None,
+                        algorithm,
+                    },
+                }),
+            });
+    }
+
+    #[test]
+    fn test_validate_schema_allows_multiple_sparse_keys() {
+        use crate::{KnnIndex, SparseIndexAlgorithm};
+        let mut schema = Schema::new_default(KnnIndex::Hnsw);
+        schema_with_sparse_key(&mut schema, "sparse_a", SparseIndexAlgorithm::Wand);
+        schema_with_sparse_key(&mut schema, "sparse_b", SparseIndexAlgorithm::MaxScore);
+        assert!(validate_schema(&schema).is_ok());
+    }
+
+    #[test]
+    fn test_validate_schema_rejects_default_sparse_index() {
+        use crate::{KnnIndex, SparseIndexAlgorithm, SparseVectorIndexConfig, SparseVectorIndexType, SparseVectorValueType};
+        let mut schema = Schema::new_default(KnnIndex::Hnsw);
+        schema.defaults.sparse_vector = Some(SparseVectorValueType {
+            sparse_vector_index: Some(SparseVectorIndexType {
+                enabled: true,
+                config: SparseVectorIndexConfig {
+                    embedding_function: None,
+                    source_key: None,
+                    bm25: None,
+                    algorithm: SparseIndexAlgorithm::Wand,
+                },
+            }),
+        });
+        assert!(validate_schema(&schema).is_err());
     }
 }
