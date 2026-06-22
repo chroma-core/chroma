@@ -155,25 +155,6 @@ impl WikiClient {
         Ok(collection)
     }
 
-    /// Resolves an arbitrary foundation collection by name for this request.
-    ///
-    /// Unlike [`Self::wiki_collection`], this does not cache by name because
-    /// the main hot path only needs the wiki collection. Callers that need a
-    /// different collection during bootstrapping can still reuse the shared FE
-    /// connection pool and auth scoping through this helper.
-    pub async fn get_collection_by_name(
-        &self,
-        tenant: &str,
-        token: &str,
-        collection_name: &str,
-    ) -> Result<ChromaCollection, WikiClientError> {
-        let client = self.scoped_client(tenant, token)?;
-        client
-            .get_collection(collection_name)
-            .await
-            .map_err(Into::into)
-    }
-
     /// Drops the cached wiki collection identity for `tenant`. Call this after
     /// a `NotFound` from the FE, since the collection may have been recreated
     /// with a new id.
