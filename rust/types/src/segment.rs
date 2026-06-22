@@ -28,6 +28,66 @@ pub const SPARSE_MAX: &str = "sparse_max";
 pub const SPARSE_OFFSET_VALUE: &str = "sparse_offset_value";
 pub const SPARSE_POSTING: &str = "sparse_posting";
 
+/// Delimiter separating the sparse-index file_path family (one of the
+/// `SPARSE_*` constants) from the metadata key it indexes, e.g.
+/// `sparse_posting::my_field`. The `file_path` map key is internal to Chroma
+/// (never used as a storage path component), so this delimiter only needs to
+/// be unambiguous when parsing the family back out.
+pub const SPARSE_FILE_PATH_DELIMITER: &str = "::";
+
+/// Which sparse-index blockfile family a `file_path` map key refers to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SparseFilePathKind {
+    /// MaxScore posting blockfile (`SPARSE_POSTING`).
+    Posting,
+    /// WAND block-max blockfile (`SPARSE_MAX`).
+    Max,
+    /// WAND offset-value blockfile (`SPARSE_OFFSET_VALUE`).
+    OffsetValue,
+}
+
+/// Per-key `file_path` map key for the MaxScore posting blockfile.
+pub fn sparse_posting_key(metadata_key: &str) -> String {
+    format!("{SPARSE_POSTING}{SPARSE_FILE_PATH_DELIMITER}{metadata_key}")
+}
+
+/// Per-key `file_path` map key for the WAND block-max blockfile.
+pub fn sparse_max_key(metadata_key: &str) -> String {
+    format!("{SPARSE_MAX}{SPARSE_FILE_PATH_DELIMITER}{metadata_key}")
+}
+
+/// Per-key `file_path` map key for the WAND offset-value blockfile.
+pub fn sparse_offset_value_key(metadata_key: &str) -> String {
+    format!("{SPARSE_OFFSET_VALUE}{SPARSE_FILE_PATH_DELIMITER}{metadata_key}")
+}
+
+/// Classify a `file_path` map key as a sparse-index entry, returning its
+/// family and the metadata key it indexes. Returns `None` for non-sparse
+/// keys. The metadata key is `None` for the legacy/global anonymous layout
+/// (bare `SPARSE_*` constants written before per-key indexing existed) and
+/// `Some(key)` for the per-key layout (`SPARSE_*::key`).
+pub fn parse_sparse_file_path_key(name: &str) -> Option<(SparseFilePathKind, Option<String>)> {
+    match name {
+        SPARSE_POSTING => return Some((SparseFilePathKind::Posting, None)),
+        SPARSE_MAX => return Some((SparseFilePathKind::Max, None)),
+        SPARSE_OFFSET_VALUE => return Some((SparseFilePathKind::OffsetValue, None)),
+        _ => {}
+    }
+    // Order is irrelevant: none of the `SPARSE_*` constants (with the
+    // trailing delimiter) is a prefix of another.
+    for (family, kind) in [
+        (SPARSE_POSTING, SparseFilePathKind::Posting),
+        (SPARSE_OFFSET_VALUE, SparseFilePathKind::OffsetValue),
+        (SPARSE_MAX, SparseFilePathKind::Max),
+    ] {
+        let with_delimiter = format!("{family}{SPARSE_FILE_PATH_DELIMITER}");
+        if let Some(metadata_key) = name.strip_prefix(&with_delimiter) {
+            return Some((kind, Some(metadata_key.to_string())));
+        }
+    }
+    None
+}
+
 pub const HNSW_PATH: &str = "hnsw_path";
 pub const VERSION_MAP_PATH: &str = "version_map_path";
 pub const POSTING_LIST_PATH: &str = "posting_list_path";
@@ -388,18 +448,60 @@ impl Segment {
             }
         }
 
-        if schema.is_sparse_index_enabled() {
-            let wand_keys: &[&str] = &[SPARSE_MAX, SPARSE_OFFSET_VALUE];
-            let maxscore_keys: &[&str] = &[SPARSE_POSTING];
+        self.check_sparse_consistency(schema)
+    }
 
-            if schema.is_maxscore_enabled() {
-                self.require_keys(maxscore_keys, wand_keys)
-            } else {
-                self.require_keys(wand_keys, maxscore_keys)
+    /// Validate the sparse-index `file_path` layout against the schema.
+    ///
+    /// Two layouts are accepted:
+    /// - Legacy/global (`SPARSE_*` constants): a single anonymous index written
+    ///   before per-key indexing existed. Its on-disk algorithm must match the
+    ///   schema (mismatch triggers a rebuild), preserving prior behavior.
+    /// - Per-key (`SPARSE_*::key`): one index per enabled sparse metadata key.
+    ///   Each present group must form a complete WAND pair or a MaxScore
+    ///   posting, matching that key's algorithm.
+    ///
+    /// Segments with no sparse entries (uninitialized or not yet compacted)
+    /// pass, so a legacy collection can lazily rewrite to per-key layout on its
+    /// next normal compaction without an explicit rebuild.
+    fn check_sparse_consistency(&self, schema: &Schema) -> Result<(), SchemaMismatchError> {
+        if schema.is_sparse_index_enabled() {
+            let has_legacy = self.file_path.contains_key(SPARSE_MAX)
+                || self.file_path.contains_key(SPARSE_OFFSET_VALUE)
+                || self.file_path.contains_key(SPARSE_POSTING);
+            if has_legacy {
+                let wand_keys: &[&str] = &[SPARSE_MAX, SPARSE_OFFSET_VALUE];
+                let maxscore_keys: &[&str] = &[SPARSE_POSTING];
+                if schema.is_maxscore_enabled() {
+                    self.require_keys(maxscore_keys, wand_keys)?;
+                } else {
+                    self.require_keys(wand_keys, maxscore_keys)?;
+                }
             }
-        } else {
-            Ok(())
         }
+
+        for key in schema.enabled_sparse_keys() {
+            let max_key = sparse_max_key(&key);
+            let offset_value_key = sparse_offset_value_key(&key);
+            let posting_key = sparse_posting_key(&key);
+
+            let has_per_key = self.file_path.contains_key(&max_key)
+                || self.file_path.contains_key(&offset_value_key)
+                || self.file_path.contains_key(&posting_key);
+            if !has_per_key {
+                continue;
+            }
+
+            let wand_keys: &[&str] = &[max_key.as_str(), offset_value_key.as_str()];
+            let maxscore_keys: &[&str] = &[posting_key.as_str()];
+            if schema.is_key_maxscore_enabled(&key) {
+                self.require_keys(maxscore_keys, wand_keys)?;
+            } else {
+                self.require_keys(wand_keys, maxscore_keys)?;
+            }
+        }
+
+        Ok(())
     }
 
     fn check_record_consistency(&self) -> Result<(), SchemaMismatchError> {
@@ -1180,6 +1282,50 @@ mod tests {
         fp.insert(SPARSE_OFFSET_VALUE.to_string(), vec!["path/c".to_string()]);
         let seg = make_metadata_segment(fp);
         let err = seg.matches_schema(&sparse_maxscore_schema()).unwrap_err();
+        assert!(matches!(err, SchemaMismatchError::Mismatch { .. }));
+    }
+
+    #[test]
+    fn test_matches_schema_sparse_per_key_wand_matches_wand() {
+        let mut fp = HashMap::new();
+        fp.insert(sparse_max_key("sparse_key"), vec!["path/a".to_string()]);
+        fp.insert(
+            sparse_offset_value_key("sparse_key"),
+            vec!["path/b".to_string()],
+        );
+        let seg = make_metadata_segment(fp);
+        assert!(seg.matches_schema(&sparse_wand_schema()).is_ok());
+    }
+
+    #[test]
+    fn test_matches_schema_sparse_per_key_maxscore_matches_maxscore() {
+        let mut fp = HashMap::new();
+        fp.insert(sparse_posting_key("sparse_key"), vec!["path/a".to_string()]);
+        let seg = make_metadata_segment(fp);
+        assert!(seg.matches_schema(&sparse_maxscore_schema()).is_ok());
+    }
+
+    #[test]
+    fn test_matches_schema_sparse_per_key_algorithm_mismatch() {
+        // On-disk per-key WAND pair but schema declares MaxScore for the key.
+        let mut fp = HashMap::new();
+        fp.insert(sparse_max_key("sparse_key"), vec!["path/a".to_string()]);
+        fp.insert(
+            sparse_offset_value_key("sparse_key"),
+            vec!["path/b".to_string()],
+        );
+        let seg = make_metadata_segment(fp);
+        let err = seg.matches_schema(&sparse_maxscore_schema()).unwrap_err();
+        assert!(matches!(err, SchemaMismatchError::Mismatch { .. }));
+    }
+
+    #[test]
+    fn test_matches_schema_sparse_per_key_incomplete_wand_pair() {
+        // Only one half of a WAND pair present — incomplete, must mismatch.
+        let mut fp = HashMap::new();
+        fp.insert(sparse_max_key("sparse_key"), vec!["path/a".to_string()]);
+        let seg = make_metadata_segment(fp);
+        let err = seg.matches_schema(&sparse_wand_schema()).unwrap_err();
         assert!(matches!(err, SchemaMismatchError::Mismatch { .. }));
     }
 }
