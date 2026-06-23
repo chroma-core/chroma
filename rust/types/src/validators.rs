@@ -758,7 +758,10 @@ mod tests {
             return_rank: false,
         };
         let rank = Rank {
-            expr: Some(RankExpr::Summation(vec![sparse_rank_leaf(0, "sparse_a"), bad])),
+            expr: Some(RankExpr::Summation(vec![
+                sparse_rank_leaf(0, "sparse_a"),
+                bad,
+            ])),
         };
         assert!(validate_rank(&rank).is_err());
     }
