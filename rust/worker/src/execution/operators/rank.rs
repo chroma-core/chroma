@@ -473,10 +473,8 @@ mod tests {
     /// independently — each consumes its own result slot rather than collapsing.
     #[tokio::test]
     async fn test_same_key_sparse_leaves_run_independently() {
-        let expr = RankExpr::Summation(vec![
-            sparse_leaf(0, "sparse_x"),
-            sparse_leaf(1, "sparse_x"),
-        ]);
+        let expr =
+            RankExpr::Summation(vec![sparse_leaf(0, "sparse_x"), sparse_leaf(1, "sparse_x")]);
 
         // Distinct result sets prove the leaves did not collapse into one.
         let knn_results = vec![
