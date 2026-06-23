@@ -36,14 +36,14 @@ use chroma_types::BOOL_METADATA;
 use chroma_types::F32_METADATA;
 use chroma_types::FULL_TEXT_PLS;
 use chroma_types::FULL_TEXT_TOKEN;
-use chroma_types::{
-    parse_sparse_file_path_key, sparse_max_key, sparse_offset_value_key, sparse_posting_key,
-};
 use chroma_types::SPARSE_MAX;
 use chroma_types::SPARSE_OFFSET_VALUE;
 use chroma_types::SPARSE_POSTING;
 use chroma_types::STRING_METADATA;
 use chroma_types::U32_METADATA;
+use chroma_types::{
+    parse_sparse_file_path_key, sparse_max_key, sparse_offset_value_key, sparse_posting_key,
+};
 use chroma_types::{
     MaterializedLogOperation, MetadataValue, Segment, SegmentShard, SegmentShardError, SegmentUuid,
 };
@@ -838,151 +838,152 @@ impl<'me> MetadataSegmentWriterShard<'me> {
         for sparse_key in &enabled_sparse_keys {
             let per_key_posting = segment.file_path.get(&sparse_posting_key(sparse_key));
             let per_key_max = segment.file_path.get(&sparse_max_key(sparse_key));
-            let per_key_offset_value =
-                segment.file_path.get(&sparse_offset_value_key(sparse_key));
+            let per_key_offset_value = segment.file_path.get(&sparse_offset_value_key(sparse_key));
 
             // Prefer an already-migrated per-key entry; otherwise fall back to
             // the legacy anonymous entry if this key owns it; otherwise fresh.
-            let (posting_file_path, max_file_path, offset_value_file_path) =
-                if per_key_posting.is_some()
-                    || (per_key_max.is_some() && per_key_offset_value.is_some())
-                {
-                    (per_key_posting, per_key_max, per_key_offset_value)
-                } else if legacy_owner_key.as_deref() == Some(sparse_key.as_str()) {
-                    (
-                        legacy_posting_file_path,
-                        legacy_max_file_path,
-                        legacy_offset_value_file_path,
-                    )
-                } else {
-                    (None, None, None)
-                };
+            let (posting_file_path, max_file_path, offset_value_file_path) = if per_key_posting
+                .is_some()
+                || (per_key_max.is_some() && per_key_offset_value.is_some())
+            {
+                (per_key_posting, per_key_max, per_key_offset_value)
+            } else if legacy_owner_key.as_deref() == Some(sparse_key.as_str()) {
+                (
+                    legacy_posting_file_path,
+                    legacy_max_file_path,
+                    legacy_offset_value_file_path,
+                )
+            } else {
+                (None, None, None)
+            };
 
-        let sparse_index_writer = if let Some(posting_file_path) = posting_file_path {
-            // ── Fork path: MaxScore index ──────────────────────────
-            let (posting_prefix, posting_uuid) = Segment::extract_prefix_and_id(posting_file_path)
-                .map_err(|_| MetadataSegmentError::UuidParseError(posting_file_path.to_string()))?;
-            let posting_reader = blockfile_provider
-                .read::<u32, SparsePostingBlock>(BlockfileReaderOptions::new(
-                    posting_uuid,
-                    posting_prefix.to_string(),
+            let sparse_index_writer = if let Some(posting_file_path) = posting_file_path {
+                // ── Fork path: MaxScore index ──────────────────────────
+                let (posting_prefix, posting_uuid) =
+                    Segment::extract_prefix_and_id(posting_file_path).map_err(|_| {
+                        MetadataSegmentError::UuidParseError(posting_file_path.to_string())
+                    })?;
+                let posting_reader = blockfile_provider
+                    .read::<u32, SparsePostingBlock>(BlockfileReaderOptions::new(
+                        posting_uuid,
+                        posting_prefix.to_string(),
+                    ))
+                    .await
+                    .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
+                let posting_writer = {
+                    let mut options = BlockfileWriterOptions::new(posting_prefix.to_string())
+                        .fork(posting_uuid)
+                        .ordered_mutations()
+                        .max_block_size_bytes(SPARSE_POSTING_BLOCK_SIZE_BYTES);
+                    if let Some(cmek) = &cmek {
+                        options = options.with_cmek(cmek.clone());
+                    }
+                    blockfile_provider
+                        .write::<u32, SparsePostingBlock>(options)
+                        .await
+                        .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
+                };
+                let old_reader = MaxScoreReader::new(posting_reader);
+                SparseIndexWriter::MaxScore(MaxScoreWriter::new(posting_writer, Some(old_reader)))
+            } else if let (Some(max_file_path), Some(offset_value_file_path)) =
+                (max_file_path, offset_value_file_path)
+            {
+                // ── Fork path: existing WAND index (unchanged) ─────────
+                let (max_prefix, max_uuid) = Segment::extract_prefix_and_id(max_file_path)
+                    .map_err(|_| MetadataSegmentError::UuidParseError(max_file_path.to_string()))?;
+                let max_reader = blockfile_provider
+                    .read::<u32, f32>(BlockfileReaderOptions::new(
+                        max_uuid,
+                        max_prefix.to_string(),
+                    ))
+                    .await
+                    .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
+                let max_writer = {
+                    let mut options =
+                        BlockfileWriterOptions::new(max_prefix.to_string()).ordered_mutations();
+                    if let Some(cmek) = &cmek {
+                        options = options.with_cmek(cmek.clone());
+                    }
+                    blockfile_provider
+                        .write::<u32, f32>(options)
+                        .await
+                        .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
+                };
+                let (offset_value_prefix, offset_value_uuid) =
+                    Segment::extract_prefix_and_id(offset_value_file_path).map_err(|_| {
+                        MetadataSegmentError::UuidParseError(offset_value_file_path.to_string())
+                    })?;
+                let offset_value_reader = blockfile_provider
+                    .read::<u32, f32>(BlockfileReaderOptions::new(
+                        offset_value_uuid,
+                        offset_value_prefix.to_string(),
+                    ))
+                    .await
+                    .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
+                let offset_value_writer = {
+                    let mut options = BlockfileWriterOptions::new(offset_value_prefix.to_string())
+                        .fork(offset_value_uuid)
+                        .ordered_mutations();
+                    if let Some(cmek) = &cmek {
+                        options = options.with_cmek(cmek.clone());
+                    }
+                    blockfile_provider
+                        .write::<u32, f32>(options)
+                        .await
+                        .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
+                };
+                SparseIndexWriter::Wand(SparseWriter::new(
+                    DEFAULT_BLOCK_SIZE,
+                    max_writer,
+                    offset_value_writer,
+                    Some(SparseReader::new(max_reader, offset_value_reader)),
                 ))
-                .await
-                .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
-            let posting_writer = {
-                let mut options = BlockfileWriterOptions::new(posting_prefix.to_string())
-                    .fork(posting_uuid)
-                    .ordered_mutations()
-                    .max_block_size_bytes(SPARSE_POSTING_BLOCK_SIZE_BYTES);
-                if let Some(cmek) = &cmek {
-                    options = options.with_cmek(cmek.clone());
-                }
-                blockfile_provider
-                    .write::<u32, SparsePostingBlock>(options)
-                    .await
-                    .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
-            };
-            let old_reader = MaxScoreReader::new(posting_reader);
-            SparseIndexWriter::MaxScore(MaxScoreWriter::new(posting_writer, Some(old_reader)))
-        } else if let (Some(max_file_path), Some(offset_value_file_path)) =
-            (max_file_path, offset_value_file_path)
-        {
-            // ── Fork path: existing WAND index (unchanged) ─────────
-            let (max_prefix, max_uuid) = Segment::extract_prefix_and_id(max_file_path)
-                .map_err(|_| MetadataSegmentError::UuidParseError(max_file_path.to_string()))?;
-            let max_reader = blockfile_provider
-                .read::<u32, f32>(BlockfileReaderOptions::new(
-                    max_uuid,
-                    max_prefix.to_string(),
+            } else if schema.is_some_and(|s| s.is_key_maxscore_enabled(sparse_key)) {
+                // ── Fresh: MaxScore index ──────────────────────────────
+                let posting_writer = {
+                    let mut options = BlockfileWriterOptions::new(prefix_path.clone())
+                        .ordered_mutations()
+                        .max_block_size_bytes(SPARSE_POSTING_BLOCK_SIZE_BYTES);
+                    if let Some(cmek) = &cmek {
+                        options = options.with_cmek(cmek.clone());
+                    }
+                    blockfile_provider
+                        .write::<u32, SparsePostingBlock>(options)
+                        .await
+                        .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
+                };
+                SparseIndexWriter::MaxScore(MaxScoreWriter::new(posting_writer, None))
+            } else {
+                // ── Fresh collection: WAND index (default) ─────────────
+                let max_writer = {
+                    let mut options =
+                        BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations();
+                    if let Some(cmek) = &cmek {
+                        options = options.with_cmek(cmek.clone());
+                    }
+                    blockfile_provider
+                        .write::<u32, f32>(options)
+                        .await
+                        .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
+                };
+                let offset_value_writer = {
+                    let mut options =
+                        BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations();
+                    if let Some(cmek) = &cmek {
+                        options = options.with_cmek(cmek.clone());
+                    }
+                    blockfile_provider
+                        .write::<u32, f32>(options)
+                        .await
+                        .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
+                };
+                SparseIndexWriter::Wand(SparseWriter::new(
+                    DEFAULT_BLOCK_SIZE,
+                    max_writer,
+                    offset_value_writer,
+                    None,
                 ))
-                .await
-                .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
-            let max_writer = {
-                let mut options =
-                    BlockfileWriterOptions::new(max_prefix.to_string()).ordered_mutations();
-                if let Some(cmek) = &cmek {
-                    options = options.with_cmek(cmek.clone());
-                }
-                blockfile_provider
-                    .write::<u32, f32>(options)
-                    .await
-                    .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
             };
-            let (offset_value_prefix, offset_value_uuid) =
-                Segment::extract_prefix_and_id(offset_value_file_path).map_err(|_| {
-                    MetadataSegmentError::UuidParseError(offset_value_file_path.to_string())
-                })?;
-            let offset_value_reader = blockfile_provider
-                .read::<u32, f32>(BlockfileReaderOptions::new(
-                    offset_value_uuid,
-                    offset_value_prefix.to_string(),
-                ))
-                .await
-                .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
-            let offset_value_writer = {
-                let mut options = BlockfileWriterOptions::new(offset_value_prefix.to_string())
-                    .fork(offset_value_uuid)
-                    .ordered_mutations();
-                if let Some(cmek) = &cmek {
-                    options = options.with_cmek(cmek.clone());
-                }
-                blockfile_provider
-                    .write::<u32, f32>(options)
-                    .await
-                    .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
-            };
-            SparseIndexWriter::Wand(SparseWriter::new(
-                DEFAULT_BLOCK_SIZE,
-                max_writer,
-                offset_value_writer,
-                Some(SparseReader::new(max_reader, offset_value_reader)),
-            ))
-        } else if schema.is_some_and(|s| s.is_key_maxscore_enabled(sparse_key)) {
-            // ── Fresh: MaxScore index ──────────────────────────────
-            let posting_writer = {
-                let mut options = BlockfileWriterOptions::new(prefix_path.clone())
-                    .ordered_mutations()
-                    .max_block_size_bytes(SPARSE_POSTING_BLOCK_SIZE_BYTES);
-                if let Some(cmek) = &cmek {
-                    options = options.with_cmek(cmek.clone());
-                }
-                blockfile_provider
-                    .write::<u32, SparsePostingBlock>(options)
-                    .await
-                    .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
-            };
-            SparseIndexWriter::MaxScore(MaxScoreWriter::new(posting_writer, None))
-        } else {
-            // ── Fresh collection: WAND index (default) ─────────────
-            let max_writer = {
-                let mut options =
-                    BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations();
-                if let Some(cmek) = &cmek {
-                    options = options.with_cmek(cmek.clone());
-                }
-                blockfile_provider
-                    .write::<u32, f32>(options)
-                    .await
-                    .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
-            };
-            let offset_value_writer = {
-                let mut options =
-                    BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations();
-                if let Some(cmek) = &cmek {
-                    options = options.with_cmek(cmek.clone());
-                }
-                blockfile_provider
-                    .write::<u32, f32>(options)
-                    .await
-                    .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
-            };
-            SparseIndexWriter::Wand(SparseWriter::new(
-                DEFAULT_BLOCK_SIZE,
-                max_writer,
-                offset_value_writer,
-                None,
-            ))
-        };
             sparse_index_writers.insert(sparse_key.clone(), sparse_index_writer);
         }
 
@@ -1896,9 +1897,7 @@ impl MetadataSegmentFlusherShard {
         );
 
         for (metadata_key, sparse_flusher) in self.sparse_index_flushers {
-            for (file_path_key, paths) in
-                sparse_flusher.flush(&prefix_path, &metadata_key).await?
-            {
+            for (file_path_key, paths) in sparse_flusher.flush(&prefix_path, &metadata_key).await? {
                 flushed.insert(file_path_key, paths);
             }
         }
@@ -3817,7 +3816,9 @@ mod test {
 
             // Verify that a sparse index writer is created for the enabled key
             assert!(
-                metadata_writer.sparse_index_writers.contains_key("sparse_vec"),
+                metadata_writer
+                    .sparse_index_writers
+                    .contains_key("sparse_vec"),
                 "Sparse index writer should be created for the enabled sparse key"
             );
 
@@ -3972,8 +3973,7 @@ mod test {
         // to the bare legacy names to emulate a pre-per-key collection. The
         // underlying blockfiles are identical; only the logical names differ.
         {
-            let shard =
-                SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
+            let shard = SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
             let writer = MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
@@ -4013,8 +4013,7 @@ mod test {
         // Reopen with the schema: the enabled key owns the legacy anonymous
         // index and forks it, rewriting to per-key layout on this compaction.
         {
-            let shard =
-                SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
+            let shard = SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
             let writer = MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
@@ -4048,8 +4047,7 @@ mod test {
         assert!(!metadata_segment.file_path.contains_key(SPARSE_OFFSET_VALUE));
 
         {
-            let shard =
-                SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
+            let shard = SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
             let reader = Box::pin(MetadataSegmentReaderShard::from_segment(
                 &shard,
                 &blockfile_provider,
@@ -4118,8 +4116,7 @@ mod test {
         };
 
         {
-            let shard =
-                SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
+            let shard = SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
             let writer = MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
@@ -4177,8 +4174,7 @@ mod test {
             .contains_key(&sparse_max_key("sparse_b")));
 
         {
-            let shard =
-                SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
+            let shard = SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
             let reader = Box::pin(MetadataSegmentReaderShard::from_segment(
                 &shard,
                 &blockfile_provider,
@@ -4269,7 +4265,9 @@ mod test {
 
         // Verify sparse index files were created
         assert!(metadata_segment.file_path.contains_key(&sparse_max));
-        assert!(metadata_segment.file_path.contains_key(&sparse_offset_value));
+        assert!(metadata_segment
+            .file_path
+            .contains_key(&sparse_offset_value));
 
         // Extract the original prefix
         let original_prefix = {
@@ -4325,7 +4323,9 @@ mod test {
             "Sparse max should be recreated"
         );
         assert!(
-            metadata_segment.file_path.contains_key(&sparse_offset_value),
+            metadata_segment
+                .file_path
+                .contains_key(&sparse_offset_value),
             "Sparse offset value should be recreated"
         );
 
@@ -4363,7 +4363,9 @@ mod test {
             .expect("Should be able to read from segment with recreated sparse indices");
 
             assert!(
-                metadata_reader.sparse_index_readers.contains_key("sparse_vec"),
+                metadata_reader
+                    .sparse_index_readers
+                    .contains_key("sparse_vec"),
                 "Sparse index reader should be created, verifying files exist and are readable"
             );
         }
@@ -4410,7 +4412,9 @@ mod test {
             "Sparse max should be recreated"
         );
         assert!(
-            metadata_segment.file_path.contains_key(&sparse_offset_value),
+            metadata_segment
+                .file_path
+                .contains_key(&sparse_offset_value),
             "Sparse offset value should be recreated"
         );
 
@@ -4440,7 +4444,9 @@ mod test {
             .expect("Should be able to read from segment with recreated sparse indices");
 
             assert!(
-                metadata_reader.sparse_index_readers.contains_key("sparse_vec"),
+                metadata_reader
+                    .sparse_index_readers
+                    .contains_key("sparse_vec"),
                 "Sparse index reader should be created, verifying files exist and are readable"
             );
         }
