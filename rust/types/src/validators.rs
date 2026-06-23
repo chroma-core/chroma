@@ -336,12 +336,13 @@ pub fn validate_schema(schema: &Schema) -> Result<(), ValidationError> {
             .as_ref()
             .and_then(|vt| vt.sparse_vector_index.as_ref())
         {
-            if svit.enabled {
-                if svit.config.source_key.is_some() && svit.config.embedding_function.is_none() {
-                    return Err(ValidationError::new("schema").with_message(
-                        "If source_key is provided then embedding_function must also be provided since there is no default embedding function.".into(),
-                    ));
-                }
+            if svit.enabled
+                && svit.config.source_key.is_some()
+                && svit.config.embedding_function.is_none()
+            {
+                return Err(ValidationError::new("schema").with_message(
+                    "If source_key is provided then embedding_function must also be provided since there is no default embedding function.".into(),
+                ));
             }
             // Validate source_key for sparse vector index
             if let Some(source_key) = &svit.config.source_key {
@@ -668,18 +669,21 @@ mod tests {
         algorithm: crate::SparseIndexAlgorithm,
     ) {
         use crate::{SparseVectorIndexConfig, SparseVectorIndexType, SparseVectorValueType};
-        schema.keys.entry(key.to_string()).or_default().sparse_vector =
-            Some(SparseVectorValueType {
-                sparse_vector_index: Some(SparseVectorIndexType {
-                    enabled: true,
-                    config: SparseVectorIndexConfig {
-                        embedding_function: None,
-                        source_key: None,
-                        bm25: None,
-                        algorithm,
-                    },
-                }),
-            });
+        schema
+            .keys
+            .entry(key.to_string())
+            .or_default()
+            .sparse_vector = Some(SparseVectorValueType {
+            sparse_vector_index: Some(SparseVectorIndexType {
+                enabled: true,
+                config: SparseVectorIndexConfig {
+                    embedding_function: None,
+                    source_key: None,
+                    bm25: None,
+                    algorithm,
+                },
+            }),
+        });
     }
 
     #[test]
@@ -693,7 +697,10 @@ mod tests {
 
     #[test]
     fn test_validate_schema_rejects_default_sparse_index() {
-        use crate::{KnnIndex, SparseIndexAlgorithm, SparseVectorIndexConfig, SparseVectorIndexType, SparseVectorValueType};
+        use crate::{
+            KnnIndex, SparseIndexAlgorithm, SparseVectorIndexConfig, SparseVectorIndexType,
+            SparseVectorValueType,
+        };
         let mut schema = Schema::new_default(KnnIndex::Hnsw);
         schema.defaults.sparse_vector = Some(SparseVectorValueType {
             sparse_vector_index: Some(SparseVectorIndexType {
