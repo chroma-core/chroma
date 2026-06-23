@@ -100,7 +100,17 @@ impl FoundationConfig {
         "agent_sessions".to_string()
     }
     fn default_source_collections() -> Vec<String> {
-        vec!["slack".to_string(), "notion".to_string()]
+        vec![
+            "slack".to_string(),
+            "notion".to_string(),
+            // Lands as part of hosted-chroma's GDrive sync stack
+            // (chroma-core/hosted-chroma#7675…#7702). /init flags
+            // `CHROMA_GROUP_CHUNK_SIBLINGS_KEY` on this collection
+            // so chroma's end-of-job marker orders correctly across
+            // the multi-chunk-per-file outputs that the gdrive
+            // worker produces via process_bytes.
+            "gdrive".to_string(),
+        ]
     }
     fn default_function_name() -> String {
         "http_generate".to_string()
