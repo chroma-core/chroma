@@ -133,7 +133,7 @@ pub async fn foundation_search(
 }
 
 /// Resolves the wiki collection then runs the hybrid search core.
-async fn run_search(
+pub(crate) async fn run_search(
     server: &FoundationApiServer,
     headers: &HeaderMap,
     tenant: &str,

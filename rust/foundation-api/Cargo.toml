@@ -16,11 +16,13 @@ futures = { workspace = true }
 opentelemetry = { workspace = true }
 regex = { workspace = true }
 reqwest = { workspace = true, features = ["json", "stream"] }
+rmcp = { version = "1.8.0", features = ["transport-streamable-http-server"] }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tower = { workspace = true }
 tower-http = { workspace = true }
 tracing = { workspace = true }
 tree-sitter = "0.26"

@@ -41,6 +41,7 @@ where
 
 pub(crate) mod agent;
 pub(crate) mod init;
+pub(crate) mod mcp;
 pub(crate) mod search;
 pub(crate) mod subagent_search;
 pub(crate) mod upsert_page;
@@ -59,4 +60,5 @@ pub(crate) fn router() -> Router<FoundationApiServer> {
             post(subagent_search::foundation_subagent_search),
         )
         .route("/api/agent", post(agent::foundation_agent))
+        .merge(mcp::router())
 }
