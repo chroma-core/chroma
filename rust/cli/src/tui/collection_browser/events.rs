@@ -112,22 +112,19 @@ impl EventsHandler {
                 0
             });
 
-            let search = SearchPayload::default()
-                .limit(Some(limit), offset)
-                .select([Key::Document, Key::Metadata]);
-
-            let records_response = collection.search(vec![search]).await;
+            let records_response = collection
+                .get(None, None, Some(limit), Some(offset), None)
+                .await;
 
             match records_response {
                 Ok(response) => {
-                    let ids = response.ids.into_iter().next().unwrap_or_default();
-                    let documents = response.documents.into_iter().next().flatten();
-                    let metadatas = response.metadatas.into_iter().next().flatten();
-                    let records = Self::search_response_to_records(ids, documents, metadatas);
+                    let documents = response.documents;
+                    let metadatas = response.metadatas;
+                    let records = Self::search_response_to_records(response.ids, documents, metadatas);
                     let _ = tx.send(Action::Main(MainAction::RecordsLoaded(records, count)));
                 }
-                Err(_) => {
-                    let _ = tx.send(Action::Error(String::from("Failed to load records")));
+                Err(e) => {
+                    let _ = tx.send(Action::Error(format!("Failed to load records: {}", e)));
                 }
             }
         });
