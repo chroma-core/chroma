@@ -41,6 +41,7 @@ where
 
 pub(crate) mod agent;
 pub(crate) mod init;
+pub(crate) mod init_schema;
 pub(crate) mod search;
 pub(crate) mod subagent_search;
 pub(crate) mod upsert_page;
