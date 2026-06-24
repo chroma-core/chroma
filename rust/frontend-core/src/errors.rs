@@ -40,7 +40,7 @@ impl IntoResponse for ServerError {
         let status_code: StatusCode = self.0.code().into();
 
         let error = ErrorResponse {
-            error: self.0.code().name().to_string(),
+            error: self.0.name().to_string(),
             message: self.0.to_string(),
         };
 
