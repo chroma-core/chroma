@@ -54,6 +54,16 @@ pub struct AddAttachedFunctionInputResult {
 /// Idempotent: if the function already exists (`created = false`), the
 /// finish step is skipped and the existing ID is returned.
 #[allow(clippy::too_many_arguments)]
+#[tracing::instrument(
+    skip_all,
+    fields(
+        attached_function = %name,
+        operator = %operator_name,
+        input_collection_id = %input_collection_id,
+        tenant = %tenant,
+        database_name = %database_name,
+    )
+)]
 pub async fn create_attached_function(
     sysdb: &mut SysDb,
     name: String,
@@ -68,7 +78,7 @@ pub async fn create_attached_function(
 ) -> Result<(AttachedFunctionUuid, bool), CreateAttachedFunctionError> {
     let (id, created) = sysdb
         .create_attached_function(
-            name,
+            name.clone(),
             operator_name,
             input_collection_id,
             output_collection_name,
@@ -80,6 +90,7 @@ pub async fn create_attached_function(
         .await?;
 
     if !created {
+        tracing::info!(attached_function = %name, "attached function already exists");
         return Ok((id, false));
     }
 
@@ -88,11 +99,20 @@ pub async fn create_attached_function(
         .finish_create_attached_function(id, schema_str)
         .await?;
 
+    tracing::info!(attached_function = %name, "created attached function");
     Ok((id, true))
 }
 
 /// Add an input collection to an existing async attached function and mark
 /// the new input ready when it is newly created.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        attached_function = %name,
+        new_input_collection_id = %new_input_collection_id,
+        database_name = %database_name.as_ref(),
+    )
+)]
 pub async fn add_attached_function_input(
     sysdb: &mut SysDb,
     name: String,
