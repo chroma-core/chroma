@@ -17,11 +17,18 @@ message PushLogsRequest {
   string database_name = 5;
   repeated OperationRecord records = 2;
   optional Cmek cmek = 3;  // Encryption key for log fragments
+  optional PushLogsCondition condition = 4;
+}
+
+message PushLogsCondition {
+  int64 observed_log_offset = 1;
+  repeated string read_ids = 2;
 }
 
 message PushLogsResponse {
   int32 record_count = 1;
   bool log_is_sealed = 2;
+  optional int64 first_inserted_record_offset = 3;
 }
 
 message ScoutLogsRequest {
