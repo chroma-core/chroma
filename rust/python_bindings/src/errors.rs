@@ -10,6 +10,7 @@ pyo3::import_exception!(chromadb.errors, NotFoundError);
 pyo3::import_exception!(chromadb.errors, UniqueConstraintError);
 pyo3::import_exception!(chromadb.errors, InternalError);
 pyo3::import_exception!(chromadb.errors, RateLimitError);
+pyo3::import_exception!(chromadb.errors, BackoffError);
 pyo3::import_exception!(chromadb.errors, StaleReadError);
 
 #[derive(Error, Debug)]
@@ -21,6 +22,9 @@ impl From<ChromaPyError> for PyErr {
         let message = value.to_string();
         if value.0.code().name() == STALE_READ_ERROR_NAME {
             return StaleReadError::new_err(message);
+        }
+        if value.0.name() == "Backoff" {
+            return BackoffError::new_err(message);
         }
         match value.0.code() {
             ErrorCodes::InvalidArgument => InvalidArgumentError::new_err(message),
