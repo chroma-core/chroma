@@ -1333,7 +1333,7 @@ impl AddCollectionRecordsPayload {
 }
 
 #[non_exhaustive]
-#[derive(Debug, Clone, Validate, Serialize)]
+#[derive(Debug, Clone, PartialEq, Validate, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct AddCollectionRecordsRequest {
     pub tenant_id: String,
@@ -1457,7 +1457,7 @@ pub struct UpdateCollectionRecordsPayload {
 }
 
 #[non_exhaustive]
-#[derive(Debug, Clone, Validate, Serialize)]
+#[derive(Debug, Clone, PartialEq, Validate, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UpdateCollectionRecordsRequest {
     pub tenant_id: String,
@@ -1553,7 +1553,7 @@ pub struct UpsertCollectionRecordsPayload {
 }
 
 #[non_exhaustive]
-#[derive(Debug, Clone, Validate, Serialize)]
+#[derive(Debug, Clone, PartialEq, Validate, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UpsertCollectionRecordsRequest {
     pub tenant_id: String,
@@ -1646,7 +1646,7 @@ pub struct DeleteCollectionRecordsPayload {
 }
 
 #[non_exhaustive]
-#[derive(Debug, Clone, Validate, Serialize)]
+#[derive(Debug, Clone, PartialEq, Validate, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DeleteCollectionRecordsRequest {
     pub tenant_id: String,
