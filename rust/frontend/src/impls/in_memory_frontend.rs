@@ -6,8 +6,8 @@ use chroma_types::operator::{Filter, KnnBatch, KnnProjection, Limit, Projection,
 use chroma_types::plan::{Count, Get, Knn};
 use chroma_types::{
     test_segment, Collection, CollectionAndSegments, CreateCollectionError, Database, Include,
-    IncludeList, InternalCollectionConfiguration, KnnIndex, Schema, SchemaError, Segment,
-    VectorIndexConfiguration,
+    IncludeList, InternalCollectionConfiguration, KnnIndex, OccReadMode, Schema, SchemaError,
+    Segment, StaleReadError, VectorIndexConfiguration,
 };
 use std::collections::HashSet;
 
@@ -556,6 +556,10 @@ impl InMemoryFrontend {
         &self,
         request: chroma_types::GetRequest,
     ) -> Result<chroma_types::GetResponse, chroma_types::QueryError> {
+        if request.occ_read_mode() != OccReadMode::None {
+            return Err(StaleReadError::ReadTokenGenerationDisabled.into());
+        }
+
         let collection = self
             .inner
             .collections

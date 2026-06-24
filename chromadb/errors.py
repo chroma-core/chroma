@@ -173,6 +173,17 @@ class QuotaError(ChromaError):
         return "QuotaError"
 
 
+class StaleReadError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 412
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "StaleReadError"
+
+
 error_types: Dict[str, Type[ChromaError]] = {
     "InvalidDimension": InvalidDimensionException,
     "InvalidArgumentError": InvalidArgumentError,
@@ -188,6 +199,7 @@ error_types: Dict[str, Type[ChromaError]] = {
     "AuthError": ChromaAuthError,
     "UniqueConstraintError": UniqueConstraintError,
     "QuotaError": QuotaError,
+    "StaleReadError": StaleReadError,
     "InternalError": InternalError,
     # Catch-all for any other errors
     "ChromaError": ChromaError,

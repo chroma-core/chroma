@@ -138,6 +138,9 @@ impl From<http::StatusCode> for ErrorCodes {
 
 pub trait ChromaError: Error + Send {
     fn code(&self) -> ErrorCodes;
+    fn name(&self) -> &'static str {
+        self.code().name()
+    }
     fn boxed(self) -> Box<dyn ChromaError>
     where
         Self: Sized + 'static,
@@ -154,6 +157,10 @@ impl Error for Box<dyn ChromaError> {}
 impl ChromaError for Box<dyn ChromaError> {
     fn code(&self) -> ErrorCodes {
         self.as_ref().code()
+    }
+
+    fn name(&self) -> &'static str {
+        self.as_ref().name()
     }
 }
 

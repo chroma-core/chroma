@@ -43,13 +43,13 @@ use chroma_types::{
     GetDatabaseResponse, GetRequest, GetResponse, GetTenantError, GetTenantRequest,
     GetTenantResponse, HealthCheckResponse, HeartbeatError, Include, IndexStatusError,
     IndexStatusResponse, KnnIndex, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord,
-    QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse, Schema, SearchRequest,
-    SearchResponse, SegmentType, UpdateCollectionError, UpdateCollectionRecordsError,
-    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
-    UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse,
-    UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse,
-    Where,
+    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, OccReadMode, OccReadToken,
+    Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
+    Schema, SearchRequest, SearchResponse, SegmentType, StaleReadError, UpdateCollectionError,
+    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
+    UpdateCollectionRequest, UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest,
+    UpdateTenantResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
+    UpsertCollectionRecordsResponse, Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -68,6 +68,22 @@ struct Metrics {
     metering_read_counter: Counter<u64>,
     metering_write_counter: Counter<u64>,
     metering_external_read_counter: Counter<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct GetReadPlan {
+    /// Exclusive upper bound passed to the read executor. A value of 0 is only
+    /// used for non-OCC reads on the legacy worker-scouting path.
+    log_upper_bound_offset: i64,
+    /// Token to attach to this response when the caller asked us to capture a
+    /// new OCC read position. This is `None` when consuming an existing token:
+    /// reading at a token should not mint or return a replacement token.
+    response_read_token: Option<OccReadToken>,
+    /// Token whose snapshot must remain materializable for this read. This is
+    /// present both when capturing a new token and when reading at an existing
+    /// token, because both paths must fail as stale instead of falling forward
+    /// to newer data after compaction or log GC.
+    stale_read_token: Option<OccReadToken>,
 }
 
 #[derive(Clone, Debug)]
@@ -155,6 +171,113 @@ impl ServiceBasedFrontend {
             tenants_with_maxscore_enabled,
             tenants_with_token_bitmap_fts_enabled,
             enable_log_scouting,
+        }
+    }
+
+    fn log_upper_bound_offset_to_i64(log_upper_bound_offset: u64) -> Result<i64, QueryError> {
+        i64::try_from(log_upper_bound_offset).map_err(|_| {
+            QueryError::Other(Box::new(ValidationError::InvalidArgument(format!(
+                "log upper bound offset {log_upper_bound_offset} exceeds i64 range"
+            ))) as Box<dyn ChromaError>)
+        })
+    }
+
+    fn get_read_plan(
+        enable_log_scouting: bool,
+        occ_read_mode: OccReadMode,
+        scouted_log_upper_bound_offset: Option<u64>,
+    ) -> Result<GetReadPlan, QueryError> {
+        match occ_read_mode {
+            OccReadMode::None => {
+                let log_upper_bound_offset = if enable_log_scouting {
+                    Self::log_upper_bound_offset_to_i64(
+                        scouted_log_upper_bound_offset.ok_or_else(|| {
+                            QueryError::Other(Box::new(ValidationError::InvalidArgument(
+                                "missing scouted log upper bound offset".to_string(),
+                            ))
+                                as Box<dyn ChromaError>)
+                        })?,
+                    )?
+                } else {
+                    0
+                };
+                Ok(GetReadPlan {
+                    log_upper_bound_offset,
+                    response_read_token: None,
+                    stale_read_token: None,
+                })
+            }
+            OccReadMode::Capture => {
+                if !enable_log_scouting {
+                    return Err(StaleReadError::ReadTokenGenerationDisabled.into());
+                }
+                let log_upper_bound_offset = scouted_log_upper_bound_offset.ok_or_else(|| {
+                    QueryError::Other(Box::new(ValidationError::InvalidArgument(
+                        "missing scouted log upper bound offset".to_string(),
+                    )) as Box<dyn ChromaError>)
+                })?;
+                let read_token = OccReadToken::try_new(log_upper_bound_offset)?;
+                Ok(GetReadPlan {
+                    log_upper_bound_offset: Self::log_upper_bound_offset_to_i64(
+                        log_upper_bound_offset,
+                    )?,
+                    // Capturing both executes at this exact offset and returns
+                    // the token so later transaction state can remember it.
+                    response_read_token: Some(read_token),
+                    stale_read_token: Some(read_token),
+                })
+            }
+            OccReadMode::AtToken(read_token) => Ok(GetReadPlan {
+                log_upper_bound_offset: Self::log_upper_bound_offset_to_i64(
+                    read_token.log_upper_bound_offset(),
+                )?,
+                // Consuming a token pins execution and stale detection, but
+                // intentionally does not expose a new token to the caller.
+                response_read_token: None,
+                stale_read_token: Some(read_token),
+            }),
+        }
+    }
+
+    fn validate_occ_read_snapshot(
+        collection_log_position: i64,
+        read_token: OccReadToken,
+    ) -> Result<(), QueryError> {
+        let compacted_past_read_token = match u64::try_from(collection_log_position) {
+            Ok(position) => position >= read_token.log_upper_bound_offset(),
+            Err(_) => false,
+        };
+        if compacted_past_read_token {
+            return Err(StaleReadError::version_too_old(
+                read_token.log_upper_bound_offset(),
+                collection_log_position,
+            )
+            .into());
+        }
+        Ok(())
+    }
+
+    fn map_occ_read_executor_error(
+        error: ExecutorError,
+        read_token: Option<OccReadToken>,
+    ) -> QueryError {
+        let Some(read_token) = read_token else {
+            return QueryError::Executor(error);
+        };
+        match &error {
+            ExecutorError::Grpc(status)
+                if matches!(
+                    status.code(),
+                    tonic::Code::NotFound | tonic::Code::FailedPrecondition
+                ) =>
+            {
+                StaleReadError::version_purged(
+                    read_token.log_upper_bound_offset(),
+                    status.message(),
+                )
+                .into()
+            }
+            _ => QueryError::Executor(error),
         }
     }
 
@@ -264,7 +387,11 @@ impl ServiceBasedFrontend {
         })
     }
 
-    async fn fan_out_get(&self, plan: Get) -> Result<GetResult, ExecutorError> {
+    async fn fan_out_get(
+        &self,
+        plan: Get,
+        stale_read_token: Option<OccReadToken>,
+    ) -> Result<GetResult, ExecutorError> {
         let num_shards = plan
             .scan
             .collection_and_segments
@@ -288,7 +415,17 @@ impl ServiceBasedFrontend {
                         let mut provider = provider.clone();
                         let mut replan = plan.clone();
                         let database_name = database_name.clone();
+                        let stale_read_token = stale_read_token;
                         async move {
+                            if code == tonic::Code::NotFound {
+                                if let Some(read_token) = stale_read_token {
+                                    return Err(StaleReadError::version_purged(
+                                        read_token.log_upper_bound_offset(),
+                                        "log records needed for the read token were purged",
+                                    )
+                                    .boxed());
+                                }
+                            }
                             if code == tonic::Code::NotFound {
                                 provider
                                     .collections_with_segments_cache
@@ -330,13 +467,24 @@ impl ServiceBasedFrontend {
                 let provider = self.collections_with_segments_provider.clone();
                 let database_name = database_name.clone();
                 let original_limit = original_limit.clone();
+                let stale_read_token = stale_read_token;
                 async move {
                     Box::pin(executor.get(shard_plan.clone(), move |code: tonic::Code| {
                         let mut provider = provider.clone();
                         let mut replan = shard_plan.clone();
                         let database_name = database_name.clone();
                         let original_limit = original_limit.clone();
+                        let stale_read_token = stale_read_token;
                         async move {
+                            if code == tonic::Code::NotFound {
+                                if let Some(read_token) = stale_read_token {
+                                    return Err(StaleReadError::version_purged(
+                                        read_token.log_upper_bound_offset(),
+                                        "log records needed for the read token were purged",
+                                    )
+                                    .boxed());
+                                }
+                            }
                             if code == tonic::Code::NotFound {
                                 provider
                                     .collections_with_segments_cache
@@ -1791,21 +1939,24 @@ impl ServiceBasedFrontend {
                 where_clause: Some(where_clause),
             };
 
-            let get_result = Box::pin(self.fan_out_get(Get {
-                scan: Scan {
-                    collection_and_segments,
-                    shard_index: 0,
-                    num_shards: 1,
-                    log_upper_bound_offset,
+            let get_result = Box::pin(self.fan_out_get(
+                Get {
+                    scan: Scan {
+                        collection_and_segments,
+                        shard_index: 0,
+                        num_shards: 1,
+                        log_upper_bound_offset,
+                    },
+                    filter,
+                    limit: Limit { offset: 0, limit },
+                    proj: Projection {
+                        document: false,
+                        embedding: false,
+                        metadata: false,
+                    },
                 },
-                filter,
-                limit: Limit { offset: 0, limit },
-                proj: Projection {
-                    document: false,
-                    embedding: false,
-                    metadata: false,
-                },
-            }))
+                None,
+            ))
             .await?;
 
             let return_bytes = get_result.size_bytes();
@@ -2113,9 +2264,9 @@ impl ServiceBasedFrontend {
         })
     }
 
-    pub async fn get(
-        &mut self,
-        GetRequest {
+    pub async fn get(&mut self, request: GetRequest) -> Result<GetResponse, QueryError> {
+        let occ_read_mode = request.occ_read_mode();
+        let GetRequest {
             database_name,
             collection_id,
             ids,
@@ -2124,8 +2275,7 @@ impl ServiceBasedFrontend {
             offset,
             include,
             ..
-        }: GetRequest,
-    ) -> Result<GetResponse, QueryError> {
+        } = request;
         let database_name_typed = DatabaseName::new(&database_name).ok_or_else(|| {
             QueryError::Other(Box::new(ValidationError::InvalidArgument(
                 "database name must be at least 3 characters".to_string(),
@@ -2156,47 +2306,70 @@ impl ServiceBasedFrontend {
             .as_ref()
             .map(Where::fts_query_length)
             .unwrap_or_default();
-        let log_upper_bound_offset = if self.enable_log_scouting {
-            self.log_client
-                .scout_logs(
-                    &collection_and_segments.collection.tenant,
-                    database_name_typed,
-                    collection_id,
-                    0,
+        let scouted_log_upper_bound_offset =
+            if self.enable_log_scouting && !matches!(occ_read_mode, OccReadMode::AtToken(_)) {
+                Some(
+                    self.log_client
+                        .scout_logs(
+                            &collection_and_segments.collection.tenant,
+                            database_name_typed,
+                            collection_id,
+                            0,
+                        )
+                        .await?,
                 )
-                .await? as i64
-        } else {
-            0
-        };
-        let get_result = Box::pin(self.fan_out_get(Get {
-            scan: Scan {
-                collection_and_segments,
-                shard_index: 0,
-                num_shards: 1,
-                log_upper_bound_offset,
+            } else {
+                None
+            };
+        let read_plan = Self::get_read_plan(
+            self.enable_log_scouting,
+            occ_read_mode,
+            scouted_log_upper_bound_offset,
+        )?;
+        if let Some(read_token) = read_plan.stale_read_token {
+            Self::validate_occ_read_snapshot(
+                collection_and_segments.collection.log_position,
+                read_token,
+            )?;
+        }
+        let get_result = Box::pin(self.fan_out_get(
+            Get {
+                scan: Scan {
+                    collection_and_segments,
+                    shard_index: 0,
+                    num_shards: 1,
+                    log_upper_bound_offset: read_plan.log_upper_bound_offset,
+                },
+                filter: Filter {
+                    query_ids: ids,
+                    where_clause: r#where,
+                },
+                limit: Limit { offset, limit },
+                proj: Projection {
+                    document: include.0.contains(&Include::Document),
+                    embedding: include.0.contains(&Include::Embedding),
+                    // If URI is requested, metadata is also requested so we can extract the URI.
+                    metadata: (include.0.contains(&Include::Metadata)
+                        || include.0.contains(&Include::Uri)),
+                },
             },
-            filter: Filter {
-                query_ids: ids,
-                where_clause: r#where,
-            },
-            limit: Limit { offset, limit },
-            proj: Projection {
-                document: include.0.contains(&Include::Document),
-                embedding: include.0.contains(&Include::Embedding),
-                // If URI is requested, metadata is also requested so we can extract the URI.
-                metadata: (include.0.contains(&Include::Metadata)
-                    || include.0.contains(&Include::Uri)),
-            },
-        }))
-        .await?;
+            read_plan.stale_read_token,
+        ))
+        .await
+        .map_err(|err| Self::map_occ_read_executor_error(err, read_plan.stale_read_token))?;
         let return_bytes = get_result.size_bytes();
+        let pulled_log_bytes = get_result.pulled_log_bytes;
+        let mut get_response: GetResponse = (get_result, include).into();
+        if let Some(read_token) = read_plan.response_read_token {
+            get_response.set_occ_read_token(read_token);
+        }
 
         // Attach metadata to the metering context
         chroma_metering::with_current(|context| {
             context.fts_query_length(fts_query_length);
             context.metadata_predicate_count(metadata_predicate_count);
             context.query_embedding_count(0);
-            context.pulled_log_size_bytes(get_result.pulled_log_bytes);
+            context.pulled_log_size_bytes(pulled_log_bytes);
             context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
             context.return_bytes(return_bytes);
             context.finish_request(Instant::now());
@@ -2228,7 +2401,7 @@ impl ServiceBasedFrontend {
             },
         }
 
-        Ok((get_result, include).into())
+        Ok(get_response)
     }
 
     pub async fn query(
@@ -2849,6 +3022,56 @@ mod tests {
     use chroma_types::CreateCollectionPayload;
 
     use super::*;
+
+    #[test]
+    fn occ_read_capture_plan_uses_exact_scouted_offset() {
+        let plan = ServiceBasedFrontend::get_read_plan(true, OccReadMode::Capture, Some(42))
+            .expect("capture should succeed with scouting enabled");
+        let token = OccReadToken::try_new(42).unwrap();
+        assert_eq!(plan.log_upper_bound_offset, 42);
+        assert_eq!(plan.response_read_token, Some(token));
+        assert_eq!(plan.stale_read_token, Some(token));
+    }
+
+    #[test]
+    fn occ_read_capture_fails_when_scouting_disabled() {
+        let err = ServiceBasedFrontend::get_read_plan(false, OccReadMode::Capture, None)
+            .expect_err("capture should fail without scouting");
+        assert!(matches!(
+            err,
+            QueryError::StaleRead(StaleReadError::ReadTokenGenerationDisabled)
+        ));
+    }
+
+    #[test]
+    fn occ_read_snapshot_stale_when_compaction_reaches_token() {
+        let token = OccReadToken::try_new(42).unwrap();
+        let err = ServiceBasedFrontend::validate_occ_read_snapshot(42, token)
+            .expect_err("snapshot compacted through the token is stale");
+        assert!(matches!(
+            err,
+            QueryError::StaleRead(StaleReadError::VersionTooOld {
+                log_upper_bound_offset: 42,
+                collection_log_position: 42,
+            })
+        ));
+    }
+
+    #[test]
+    fn occ_read_purged_log_maps_to_stale_read_error() {
+        let token = OccReadToken::try_new(42).unwrap();
+        let err = ServiceBasedFrontend::map_occ_read_executor_error(
+            ExecutorError::Grpc(tonic::Status::not_found("Some entries have been purged")),
+            Some(token),
+        );
+        assert!(matches!(
+            err,
+            QueryError::StaleRead(StaleReadError::VersionPurged {
+                log_upper_bound_offset: 42,
+                ..
+            })
+        ));
+    }
 
     #[tokio::test]
     async fn test_default_sqlite_segments() {

@@ -1877,6 +1877,88 @@ pub enum WhereError {
 
 /// Records can be retrieved by their IDs or by a metadata filter. At least one of `ids` or `where`
 /// must be provided. Use `include` to specify which fields to return in the response.
+pub const STALE_READ_ERROR_NAME: &str = "StaleReadError";
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct OccReadToken {
+    log_upper_bound_offset: u64,
+}
+
+impl OccReadToken {
+    pub fn try_new(log_upper_bound_offset: u64) -> Result<Self, StaleReadError> {
+        if log_upper_bound_offset == 0 {
+            return Err(StaleReadError::InvalidReadToken {
+                log_upper_bound_offset,
+            });
+        }
+        Ok(Self {
+            log_upper_bound_offset,
+        })
+    }
+
+    pub fn log_upper_bound_offset(self) -> u64 {
+        self.log_upper_bound_offset
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum OccReadMode {
+    #[default]
+    None,
+    Capture,
+    AtToken(OccReadToken),
+}
+
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
+pub enum StaleReadError {
+    #[error("transactional reads require log scouting/read-token generation to be enabled")]
+    ReadTokenGenerationDisabled,
+    #[error(
+        "transactional read token generation returned invalid log upper bound offset {log_upper_bound_offset}"
+    )]
+    InvalidReadToken { log_upper_bound_offset: u64 },
+    #[error(
+        "read token at log upper bound offset {log_upper_bound_offset} is too old to materialize because the collection is compacted through log position {collection_log_position}"
+    )]
+    VersionTooOld {
+        log_upper_bound_offset: u64,
+        collection_log_position: i64,
+    },
+    #[error(
+        "read token at log upper bound offset {log_upper_bound_offset} can no longer be materialized: {reason}"
+    )]
+    VersionPurged {
+        log_upper_bound_offset: u64,
+        reason: String,
+    },
+}
+
+impl StaleReadError {
+    pub fn version_too_old(log_upper_bound_offset: u64, collection_log_position: i64) -> Self {
+        Self::VersionTooOld {
+            log_upper_bound_offset,
+            collection_log_position,
+        }
+    }
+
+    pub fn version_purged(log_upper_bound_offset: u64, reason: impl Into<String>) -> Self {
+        Self::VersionPurged {
+            log_upper_bound_offset,
+            reason: reason.into(),
+        }
+    }
+}
+
+impl ChromaError for StaleReadError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::FailedPrecondition
+    }
+
+    fn name(&self) -> &'static str {
+        STALE_READ_ERROR_NAME
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetRequestPayload {
@@ -1901,6 +1983,9 @@ pub struct GetRequest {
     pub limit: Option<u32>,
     pub offset: u32,
     pub include: IncludeList,
+    #[doc(hidden)]
+    #[serde(skip)]
+    pub occ_read_mode: OccReadMode,
 }
 
 impl GetRequest {
@@ -1924,9 +2009,27 @@ impl GetRequest {
             limit,
             offset,
             include,
+            occ_read_mode: OccReadMode::None,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
+    }
+
+    #[doc(hidden)]
+    pub fn with_occ_read_token_generation(mut self) -> Self {
+        self.occ_read_mode = OccReadMode::Capture;
+        self
+    }
+
+    #[doc(hidden)]
+    pub fn with_occ_read_token(mut self, read_token: OccReadToken) -> Self {
+        self.occ_read_mode = OccReadMode::AtToken(read_token);
+        self
+    }
+
+    #[doc(hidden)]
+    pub fn occ_read_mode(&self) -> OccReadMode {
+        self.occ_read_mode
     }
 
     pub fn into_payload(self) -> Result<GetRequestPayload, WhereError> {
@@ -1958,9 +2061,35 @@ pub struct GetResponse {
     pub metadatas: Option<Vec<Option<Metadata>>>,
     /// List of fields that were included in this response.
     pub include: Vec<Include>,
+    /// Internal OCC read token captured by transactional read plumbing.
+    ///
+    /// This is intentionally skipped during serialization so normal public
+    /// `collection.get(...)` response payloads stay unchanged. Transaction code
+    /// in the frontend can inspect the token directly before the response
+    /// crosses an API boundary; exposing a serialized token belongs with the
+    /// eventual transaction API rather than the stable `GetResponse` shape.
+    #[doc(hidden)]
+    #[serde(skip)]
+    pub occ_read_token: Option<OccReadToken>,
 }
 
 impl GetResponse {
+    #[doc(hidden)]
+    pub fn occ_read_token(&self) -> Option<OccReadToken> {
+        self.occ_read_token
+    }
+
+    #[doc(hidden)]
+    pub fn set_occ_read_token(&mut self, token: OccReadToken) {
+        self.occ_read_token = Some(token);
+    }
+
+    #[doc(hidden)]
+    pub fn with_occ_read_token(mut self, token: OccReadToken) -> Self {
+        self.set_occ_read_token(token);
+        self
+    }
+
     pub fn sort_by_ids(&mut self) {
         let mut indices: Vec<usize> = (0..self.ids.len()).collect();
         indices.sort_by(|&a, &b| self.ids[a].cmp(&self.ids[b]));
@@ -2034,6 +2163,7 @@ impl From<(GetResult, IncludeList)> for GetResponse {
                 .contains(&Include::Metadata)
                 .then_some(Vec::new()),
             include: include_vec,
+            occ_read_token: None,
         };
         for ProjectionRecord {
             id,
@@ -2451,6 +2581,8 @@ pub enum QueryError {
     #[error("Error executing plan: {0}")]
     Executor(#[from] ExecutorError),
     #[error(transparent)]
+    StaleRead(#[from] StaleReadError),
+    #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
 }
 
@@ -2458,7 +2590,16 @@ impl ChromaError for QueryError {
     fn code(&self) -> ErrorCodes {
         match self {
             QueryError::Executor(e) => e.code(),
+            QueryError::StaleRead(e) => e.code(),
             QueryError::Other(err) => err.code(),
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        match self {
+            QueryError::Executor(e) => e.name(),
+            QueryError::StaleRead(e) => e.name(),
+            QueryError::Other(err) => err.name(),
         }
     }
 }
@@ -2788,6 +2929,26 @@ mod test {
     fn test_create_tenant_min_length() {
         let request = CreateTenantRequest::try_new("a".to_string());
         assert!(request.is_err());
+    }
+
+    #[test]
+    fn test_occ_read_token_rejects_zero_offset() {
+        let err = OccReadToken::try_new(0).expect_err("zero is not a valid OCC read token");
+        assert_eq!(
+            err,
+            StaleReadError::InvalidReadToken {
+                log_upper_bound_offset: 0
+            }
+        );
+    }
+
+    #[test]
+    fn test_get_response_occ_read_token_is_not_serialized() {
+        let token = OccReadToken::try_new(42).unwrap();
+        let response = GetResponse::default().with_occ_read_token(token);
+        let serialized = serde_json::to_value(&response).unwrap();
+        assert_eq!(response.occ_read_token(), Some(token));
+        assert!(serialized.get("occ_read_token").is_none());
     }
 
     #[test]
