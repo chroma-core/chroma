@@ -29,7 +29,7 @@ use tower::ServiceBuilder;
 use tracing::Level;
 use uuid::Uuid;
 
-use crate::GarbageCollectError;
+use crate::{GarbageCollectError, PushLogsResult};
 
 /// The gRPC metadata key carrying the backoff reason.
 const BACKOFF_REASON_MD_KEY: &str = "backoff-reason";
@@ -473,7 +473,7 @@ impl GrpcLog {
         records: Vec<OperationRecord>,
         cmek: Option<Cmek>,
         condition: Option<PushLogsCondition>,
-    ) -> Result<(), GrpcPushLogsError> {
+    ) -> Result<PushLogsResult, GrpcPushLogsError> {
         let num_records = records.len();
 
         // Convert Cmek to protobuf format
@@ -513,7 +513,10 @@ impl GrpcLog {
         } else {
             self.metrics.total_logs_pushed.add(num_records as u64, &[]);
 
-            Ok(())
+            Ok(PushLogsResult {
+                record_count: resp.record_count,
+                first_inserted_record_offset: resp.first_inserted_record_offset,
+            })
         }
     }
 
