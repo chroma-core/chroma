@@ -19,6 +19,7 @@ use frontend_core::{
         plan_create_collection, supported_segment_types, ExecutorKind, TenantFeatureFlags,
     },
     foundation::source_kind_for_collection_name,
+    retry::retry_transient,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -429,18 +430,34 @@ async fn ensure_database(
     database_name: DatabaseName,
     tenant: String,
 ) -> Result<Uuid, ServerError> {
-    // Idempotent: an `AlreadyExists` from a previous/concurrent init is the
-    // success path.
-    let created = match sysdb
-        .create_database(Uuid::new_v4(), database_name.clone(), tenant.clone())
-        .await
+    // Generate the id once so retries don't churn through fresh UUIDs; the
+    // create is keyed on the (tenant, name) pair and is idempotent — an
+    // `AlreadyExists` from a previous/concurrent init is the success path.
+    let database_id = Uuid::new_v4();
+    let created = match retry_transient(|| {
+        let mut sysdb = sysdb.clone();
+        let database_name = database_name.clone();
+        let tenant = tenant.clone();
+        async move {
+            sysdb
+                .create_database(database_id, database_name, tenant)
+                .await
+        }
+    })
+    .await
     {
         Ok(_) => true,
         Err(CreateDatabaseError::AlreadyExists(_)) => false,
         Err(e) => return Err(e.into()),
     };
 
-    let db = sysdb.get_database(database_name.clone(), tenant).await?;
+    let db = retry_transient(|| {
+        let mut sysdb = sysdb.clone();
+        let database_name = database_name.clone();
+        let tenant = tenant.clone();
+        async move { sysdb.get_database(database_name, tenant).await }
+    })
+    .await?;
 
     tracing::info!(database = %database_name.as_ref(), database_id = %db.id, created, "ensured foundation database");
     Ok(db.id)
@@ -482,20 +499,37 @@ async fn ensure_collection(
         KnnIndex::Spann,
         TenantFeatureFlags::default(),
     )?;
-    let collection = sysdb
-        .create_collection(
-            tenant,
-            database_name,
-            plan.collection_id,
-            collection_name.to_string(),
-            plan.segments,
-            plan.configuration,
-            plan.schema,
-            metadata,
-            dimension,
-            GET_OR_CREATE,
-        )
-        .await?;
+    // `GET_OR_CREATE` makes this idempotent in a single round trip, so a
+    // transient sysdb failure is safe to retry. The plan (collection id +
+    // segments + config) is fixed up front and reused across attempts.
+    let collection_id = plan.collection_id;
+    let collection = retry_transient(|| {
+        let mut sysdb = sysdb.clone();
+        let tenant = tenant.clone();
+        let database_name = database_name.clone();
+        let collection_name = collection_name.to_string();
+        let segments = plan.segments.clone();
+        let configuration = plan.configuration.clone();
+        let schema = plan.schema.clone();
+        let metadata = metadata.clone();
+        async move {
+            sysdb
+                .create_collection(
+                    tenant,
+                    database_name,
+                    collection_id,
+                    collection_name,
+                    segments,
+                    configuration,
+                    schema,
+                    metadata,
+                    dimension,
+                    GET_OR_CREATE,
+                )
+                .await
+        }
+    })
+    .await?;
 
     tracing::info!(
         collection = %collection_name,

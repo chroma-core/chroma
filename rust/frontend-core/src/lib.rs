@@ -16,6 +16,7 @@ pub mod config;
 pub mod errors;
 pub mod foundation;
 pub mod middleware;
+pub mod retry;
 pub mod routes;
 pub mod traced_json;
 pub mod tracing;

@@ -3803,6 +3803,7 @@ version = "1.0.0"
 dependencies = [
  "async-trait",
  "axum 0.8.8",
+ "backon",
  "chroma-api-types",
  "chroma-error",
  "chroma-log",

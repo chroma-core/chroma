@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 async-trait = { workspace = true }
 axum = { workspace = true }
+backon = { workspace = true }
 figment = { workspace = true }
 http-body-util = { workspace = true }
 mdac = { workspace = true }
