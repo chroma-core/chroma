@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use backon::{ExponentialBuilder, Retryable};
+use chroma_api_types::CONDITIONAL_WRITE_CONFLICT_MESSAGE;
 use chroma_cache::CacheConfig;
 use chroma_config::helpers::{deserialize_duration_from_seconds, serialize_duration_to_seconds};
 use chroma_config::spanner::{SpannerChannelConfig, SpannerConfig, SpannerSessionPoolConfig};
@@ -81,9 +82,6 @@ use crate::state_hash_table::StateHashTable;
 
 /// The gRPC metadata key for the backoff reason.
 const BACKOFF_REASON_MD_KEY: &str = "backoff-reason";
-
-/// A stable message clients can use to identify conditional write conflicts.
-const CONDITIONAL_WRITE_CONFLICT_MESSAGE: &str = "conditional write conflict";
 
 /// Default bound for conditional push retry loop attempts.
 const DEFAULT_CONDITIONAL_PUSH_MAX_RETRIES: usize = 3;

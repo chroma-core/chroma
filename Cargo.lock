@@ -1936,6 +1936,7 @@ dependencies = [
  "async-trait",
  "backon",
  "bytes",
+ "chroma-api-types",
  "chroma-cache",
  "chroma-config",
  "chroma-error",
@@ -2242,6 +2243,7 @@ dependencies = [
 name = "chromadb_rust_bindings"
 version = "0.1.0"
 dependencies = [
+ "chroma-api-types",
  "chroma-cache",
  "chroma-cli",
  "chroma-config",

@@ -1,11 +1,11 @@
 use super::utils::to_records;
 use crate::{
-    config::FrontendConfig, executor::Executor, types::errors::ValidationError,
-    CollectionsWithSegmentsProvider,
+    CollectionsWithSegmentsProvider, config::FrontendConfig, executor::Executor,
+    types::errors::ValidationError,
 };
 use backon::{ExponentialBuilder, Retryable};
-use chroma_api_types::HeartbeatResponse;
-use chroma_config::{registry, Configurable};
+use chroma_api_types::{HeartbeatResponse, OccReadMode, OccReadToken, StaleReadError};
+use chroma_config::{Configurable, registry};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log, PushLogsError};
 use chroma_metering::{
@@ -20,45 +20,44 @@ use chroma_sysdb::{DatabaseOrTopology, GetCollectionsOptions, SysDb};
 use chroma_system::System;
 use chroma_types::chroma_proto::PushLogsCondition;
 use chroma_types::{
-    buffered_write_to_records,
+    AddAttachedFunctionInputRequest, AddAttachedFunctionInputResponse, AddCollectionRecordsError,
+    AddCollectionRecordsRequest, AddCollectionRecordsResponse, AttachFunctionRequest,
+    AttachFunctionResponse, AttachedFunctionApiResponse, Cmek, Collection, CollectionAndSegments,
+    CollectionUuid, ConditionalBufferedWrite, ConditionalCommitAction, ConditionalCommitError,
+    ConditionalCommitRequest, ConditionalCommitResult, ConditionalTransactionState,
+    CountCollectionsError, CountCollectionsRequest, CountCollectionsResponse, CountRequest,
+    CountResponse, CreateCollectionError, CreateCollectionRequest, CreateCollectionResponse,
+    CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError,
+    CreateTenantRequest, CreateTenantResponse, DatabaseName, DeleteCollectionError,
+    DeleteCollectionRecordsError, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse,
+    DeleteCollectionRequest, DeleteCollectionResponse, DeleteDatabaseError, DeleteDatabaseRequest,
+    DeleteDatabaseResponse, DetachFunctionError, DetachFunctionRequest, DetachFunctionResponse,
+    ExecutorError, ForkCollectionError, ForkCollectionRequest, ForkCollectionResponse,
+    GetCollectionByCrnError, GetCollectionByCrnRequest, GetCollectionByCrnResponse,
+    GetCollectionByIdError, GetCollectionByIdRequest, GetCollectionByIdResponse,
+    GetCollectionError, GetCollectionRequest, GetCollectionResponse, GetCollectionsError,
+    GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
+    GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError,
+    Include, IndexStatusError, IndexStatusResponse, KnnIndex, ListCollectionsRequest,
+    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
+    Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
+    Schema, SearchRequest, SearchResponse, SegmentType, UpdateCollectionError,
+    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
+    UpdateCollectionRequest, UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest,
+    UpdateTenantResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
+    UpsertCollectionRecordsResponse, Where, buffered_write_to_records,
     operator::{
         Aggregate, CountResult, Filter, GetResult, GroupBy, Key, KnnBatch, KnnBatchResult,
         KnnProjection, KnnProjectionOutput, Limit, Projection, ProjectionOutput, Scan,
         SearchPayloadResult, SearchRecord, SearchResult, Select,
     },
     plan::{Count, Get, Knn, Search, SearchPayload},
-    validate_conditional_commit_scope, AddAttachedFunctionInputRequest,
-    AddAttachedFunctionInputResponse, AddCollectionRecordsError, AddCollectionRecordsRequest,
-    AddCollectionRecordsResponse, AttachFunctionRequest, AttachFunctionResponse,
-    AttachedFunctionApiResponse, Cmek, Collection, CollectionAndSegments, CollectionUuid,
-    ConditionalBufferedWrite, ConditionalCommitAction, ConditionalCommitError,
-    ConditionalCommitResult, ConditionalTransactionState, CountCollectionsError,
-    CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
-    CreateCollectionError, CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError,
-    CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError, CreateTenantRequest,
-    CreateTenantResponse, DatabaseName, DeleteCollectionError, DeleteCollectionRecordsError,
-    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, DeleteCollectionRequest,
-    DeleteCollectionResponse, DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse,
-    DetachFunctionError, DetachFunctionRequest, DetachFunctionResponse, ExecutorError,
-    ForkCollectionError, ForkCollectionRequest, ForkCollectionResponse, GetCollectionByCrnError,
-    GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionByIdError,
-    GetCollectionByIdRequest, GetCollectionByIdResponse, GetCollectionError, GetCollectionRequest,
-    GetCollectionResponse, GetCollectionsError, GetDatabaseError, GetDatabaseRequest,
-    GetDatabaseResponse, GetRequest, GetResponse, GetTenantError, GetTenantRequest,
-    GetTenantResponse, HealthCheckResponse, HeartbeatError, Include, IndexStatusError,
-    IndexStatusResponse, KnnIndex, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, OccReadMode, OccReadToken,
-    Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
-    Schema, SearchRequest, SearchResponse, SegmentType, StaleReadError, UpdateCollectionError,
-    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
-    UpdateCollectionRequest, UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest,
-    UpdateTenantResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
-    UpsertCollectionRecordsResponse, Where,
+    validate_conditional_commit_scope,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug)]
@@ -3385,9 +3384,11 @@ mod tests {
             .unwrap();
 
         assert_eq!(segments.len(), 2);
-        assert!(segments
-            .iter()
-            .any(|s| s.r#type == SegmentType::Sqlite && s.scope == SegmentScope::METADATA));
+        assert!(
+            segments
+                .iter()
+                .any(|s| s.r#type == SegmentType::Sqlite && s.scope == SegmentScope::METADATA)
+        );
         assert!(segments.iter().any(
             |s| s.r#type == SegmentType::HnswLocalPersisted && s.scope == SegmentScope::VECTOR
         ));
@@ -3435,9 +3436,11 @@ mod tests {
                 .iter()
                 .any(|s| s.r#type == SegmentType::Spann && s.scope == SegmentScope::VECTOR)
         );
-        assert!(segments
-            .iter()
-            .any(|s| s.r#type == SegmentType::BlockfileRecord && s.scope == SegmentScope::RECORD));
+        assert!(
+            segments.iter().any(
+                |s| s.r#type == SegmentType::BlockfileRecord && s.scope == SegmentScope::RECORD
+            )
+        );
     }
 
     #[tokio::test]

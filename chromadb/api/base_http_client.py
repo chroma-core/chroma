@@ -9,6 +9,11 @@ from chromadb.config import Component, Settings, System
 
 logger = logging.getLogger(__name__)
 
+try:
+    from chromadb_rust_bindings import CONDITIONAL_WRITE_CONFLICT_MESSAGE
+except ImportError:
+    CONDITIONAL_WRITE_CONFLICT_MESSAGE = None
+
 
 # inherits from Component so that it can create an init function to use system
 # this way it can build limits from the settings in System
@@ -115,9 +120,17 @@ class BaseHTTPClient(Component):
         try:
             body = json.loads(resp.text)
             if "error" in body:
-                if body["error"] in errors.error_types:
-                    chroma_error = errors.error_types[body["error"]](body["message"])
+                error_name = body["error"]
+                message = body.get("message", "")
+                if error_name == errors.ConditionalWriteConflictError.name() or (
+                    CONDITIONAL_WRITE_CONFLICT_MESSAGE is not None
+                    and CONDITIONAL_WRITE_CONFLICT_MESSAGE in message
+                ):
+                    chroma_error = errors.ConditionalWriteConflictError(message)
+                elif error_name in errors.error_types:
+                    chroma_error = errors.error_types[error_name](message)
 
+                if chroma_error is not None:
                     trace_id = resp.headers.get("chroma-trace-id")
                     if trace_id:
                         chroma_error.trace_id = trace_id
