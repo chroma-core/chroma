@@ -522,6 +522,15 @@ impl AppendWork {
     pub fn byte_count(&self) -> usize {
         self.messages.iter().map(|r| r.len()).sum()
     }
+
+    /// Return the admission metadata for this append, using empty metadata for appends without
+    /// explicit options.
+    pub fn admission_metadata(&self) -> Arc<[u8]> {
+        self.options
+            .as_ref()
+            .map(|options| Arc::clone(&options.admission_metadata))
+            .unwrap_or_else(|| Arc::<[u8]>::from([]))
+    }
 }
 
 impl std::fmt::Debug for AppendWork {
