@@ -14,7 +14,7 @@ use axum::{
 };
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{CallToolResult, Content, ServerCapabilities, ServerInfo},
+    model::{CallToolResult, Content, Implementation, ServerCapabilities, ServerInfo},
     schemars,
     service::RequestContext,
     tool, tool_handler, tool_router,
@@ -43,6 +43,8 @@ const MCP_PATH: &str = "/mcp/foundation";
 const PROTECTED_RESOURCE_METADATA_PATH: &str =
     "/.well-known/oauth-protected-resource/mcp/foundation";
 const FOUNDATION_SCOPE: &str = "foundation";
+const MCP_SERVER_NAME: &str = "Foundation MCP";
+const MCP_SERVER_VERSION: &str = "0.1.0";
 
 pub(crate) fn router() -> Router<FoundationApiServer> {
     Router::new()
@@ -256,6 +258,7 @@ impl FoundationMcpServer {
 impl ServerHandler for FoundationMcpServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(Implementation::new(MCP_SERVER_NAME, MCP_SERVER_VERSION))
             .with_instructions("Search and ask questions over Chroma Foundation.")
     }
 }
