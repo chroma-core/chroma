@@ -163,7 +163,7 @@ pub async fn foundation_init(
             db_name.clone(),
             source_name,
             Some(group_chunk_siblings_metadata()),
-            Some(1024),
+            source_dimension(source_name),
             CollectionEmbeddingFunctions::default(),
         )
         .await?;
@@ -217,6 +217,20 @@ pub async fn foundation_init(
         agent_sessions_collection_id: agent_sessions.collection_id.to_string(),
         source_collection_ids,
     }))
+}
+
+/// Dense-index dimensionality to pin a source collection to.
+///
+/// Most sources (slack, notion) carry 1024-dim vectors supplied by the
+/// writer. The Google Drive source instead carries no vectors of its own —
+/// the caller upserts records without embeddings — so it is pinned to a
+/// single dimension (with no embedding function, like currents /
+/// wiki_revisions) to keep the dense index trivially small.
+fn source_dimension(source_name: &str) -> Option<i32> {
+    match source_kind_for_collection_name(source_name) {
+        Ok("google_drive") => Some(1),
+        _ => Some(1024),
+    }
 }
 
 /// Collection metadata that opts a source collection into chunk-sibling
@@ -534,6 +548,16 @@ async fn ensure_collection(
 mod tests {
     use super::*;
     use chroma_types::SegmentType;
+
+    #[test]
+    fn gdrive_source_is_single_dimension_others_are_1024() {
+        assert_eq!(source_dimension("gdrive"), Some(1));
+        assert_eq!(source_dimension("gdrive_master"), Some(1));
+        assert_eq!(source_dimension("slack"), Some(1024));
+        assert_eq!(source_dimension("notion"), Some(1024));
+        // Unknown sources fall back to the default 1024 dims.
+        assert_eq!(source_dimension("unknown_source"), Some(1024));
+    }
 
     #[test]
     fn foundation_schema_has_sparse_vector_index() {
