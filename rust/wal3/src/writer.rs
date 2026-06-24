@@ -12,7 +12,7 @@ use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use setsum::Setsum;
-use tracing::{Instrument, Level, Span};
+use tracing::{Instrument, Level};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::interfaces::s3::fragment_uploader::S3FragmentUploader;
@@ -21,10 +21,10 @@ use crate::interfaces::{
     ManifestPublisher,
 };
 use crate::{
-    parse_fragment_path, BatchManager, CursorStore, CursorStoreOptions, Error, ExponentialBackoff,
-    Fragment, FragmentSeqNo, FragmentUuid, Garbage, GarbageCollectionOptions,
-    GarbageCollectionState, LogPosition, LogReader, LogReaderOptions, LogWriterOptions, Manifest,
-    ManifestAndWitness, ManifestManager,
+    parse_fragment_path, AppendOptions, AppendWork, BatchManager, CursorStore, CursorStoreOptions,
+    Error, ExponentialBackoff, Fragment, FragmentSeqNo, FragmentUuid, Garbage,
+    GarbageCollectionOptions, GarbageCollectionState, LogPosition, LogReader, LogReaderOptions,
+    LogWriterOptions, Manifest, ManifestAndWitness, ManifestManager,
 };
 
 /// The epoch writer is a counting writer.  Every epoch exists.  An epoch goes
@@ -255,16 +255,35 @@ impl<
 
     /// Append a message to a log.
     pub async fn append(&self, message: Vec<u8>) -> Result<LogPosition, Error> {
-        self.append_many(vec![message]).await
+        self.append_with_options(message, None).await
+    }
+
+    /// Append a message to a log with options.
+    pub async fn append_with_options(
+        &self,
+        message: Vec<u8>,
+        options: Option<AppendOptions>,
+    ) -> Result<LogPosition, Error> {
+        self.append_many_with_options(vec![message], options).await
     }
 
     #[tracing::instrument(skip(self, messages))]
     pub async fn append_many(&self, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error> {
+        self.append_many_with_options(messages, None).await
+    }
+
+    #[tracing::instrument(skip(self, messages, options))]
+    pub async fn append_many_with_options(
+        &self,
+        messages: Vec<Vec<u8>>,
+        options: Option<AppendOptions>,
+    ) -> Result<LogPosition, Error> {
         let once_log_append_many =
             move |log: &Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>| {
                 let messages = messages.clone();
+                let options = options.clone();
                 let log = Arc::clone(log);
-                async move { log.append(messages).await }
+                async move { log.append(messages, options).await }
             };
         self.handle_errors_and_contention(once_log_append_many)
             .await
@@ -616,7 +635,11 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
         Ok(())
     }
 
-    async fn append(self: &Arc<Self>, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error> {
+    async fn append(
+        self: &Arc<Self>,
+        messages: Vec<Vec<u8>>,
+        options: Option<AppendOptions>,
+    ) -> Result<LogPosition, Error> {
         if messages.is_empty() {
             return Err(Error::EmptyBatch);
         }
@@ -625,7 +648,7 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
         async move {
             let (tx, rx) = tokio::sync::oneshot::channel();
             self.batch_manager
-                .push_work(messages, tx, append_span)
+                .push_work(AppendWork::new(messages, options, tx, append_span))
                 .await;
             match self.batch_manager.take_work(&self.manifest_manager).await {
                 Ok(Some(work)) => {
@@ -648,27 +671,23 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
         .await
     }
 
-    #[allow(clippy::type_complexity)]
-    async fn append_batch(
-        self: Arc<Self>,
-        pointer: P,
-        work: Vec<(
-            Vec<Vec<u8>>,
-            tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
-            Span,
-        )>,
-    ) {
+    async fn append_batch(self: Arc<Self>, pointer: P, work: Vec<AppendWork>) {
         let append_batch_span = tracing::info_span!("append_batch");
         let mut messages = Vec::with_capacity(work.len());
         let mut notifies = Vec::with_capacity(work.len());
         for work in work.into_iter() {
-            notifies.push((work.0.len(), work.1));
-            messages.extend(work.0);
+            let AppendWork {
+                messages: work_messages,
+                options: _,
+                tx,
+                span,
+            } = work;
+            notifies.push((work_messages.len(), tx));
+            messages.extend(work_messages);
             // NOTE(rescrv):  This returns a context that returns a reference to the span, from
             // which we get a span context that we clone.  My initial read of this was to interpret
             // it as creating a span and that is not the case.
-            work.2
-                .add_link(append_batch_span.context().span().span_context().clone());
+            span.add_link(append_batch_span.context().span().span_context().clone());
         }
         async move {
             if notifies.is_empty() {
@@ -1648,29 +1667,14 @@ mod tests {
     impl crate::FragmentPublisher for TestFragmentPublisher {
         type FragmentPointer = (FragmentSeqNo, LogPosition);
 
-        async fn push_work(
-            &self,
-            _messages: Vec<Vec<u8>>,
-            _tx: tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
-            _span: Span,
-        ) {
+        async fn push_work(&self, _work: crate::AppendWork) {
             unreachable!("push_work is not used in this test")
         }
 
         async fn take_work(
             &self,
             _manifest_manager: &(dyn crate::ManifestPublisher<Self::FragmentPointer> + Sync),
-        ) -> Result<
-            Option<(
-                Self::FragmentPointer,
-                Vec<(
-                    Vec<Vec<u8>>,
-                    tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
-                    Span,
-                )>,
-            )>,
-            Error,
-        > {
+        ) -> Result<Option<(Self::FragmentPointer, Vec<crate::AppendWork>)>, Error> {
             unreachable!("take_work is not used in this test")
         }
 
