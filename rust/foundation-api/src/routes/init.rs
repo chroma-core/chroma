@@ -45,6 +45,7 @@ pub struct FoundationInitResponse {
 /// wiki_revisions collections (names overridable via
 /// `CHROMA_FOUNDATION__*` env vars) exist in the tenant resolved from the
 /// auth context. Safe to call repeatedly.
+#[tracing::instrument(name = "foundation_init", skip_all, err(Display))]
 pub async fn foundation_init(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
@@ -53,6 +54,12 @@ pub async fn foundation_init(
         whoami_and_authorize(&*server.auth, &headers, AuthzAction::InitFoundation).await?;
     let tenant = identity.tenant;
     let user_id = identity.user_id;
+    tracing::info!(
+        tenant = %tenant,
+        user_id = %user_id,
+        database = %server.config.foundation.database_name,
+        "foundation init starting"
+    );
 
     let _guard =
         server.scorecard_request(&["op:foundation_init", &format!("tenant:{}", tenant)])?;
@@ -207,6 +214,12 @@ pub async fn foundation_init(
         )
         .await?;
     }
+
+    tracing::info!(
+        tenant = %tenant,
+        num_source_collections = source_collection_ids.len(),
+        "foundation init complete"
+    );
 
     Ok(Json(FoundationInitResponse {
         tenant,
@@ -405,19 +418,31 @@ async fn ensure_currents_collection(
     .await
 }
 
+#[tracing::instrument(
+    name = "ensure_database",
+    skip_all,
+    fields(database = %database_name.as_ref(), tenant = %tenant),
+    err(Display)
+)]
 async fn ensure_database(
     sysdb: &mut SysDb,
     database_name: DatabaseName,
     tenant: String,
 ) -> Result<Uuid, ServerError> {
-    match sysdb
+    // Idempotent: an `AlreadyExists` from a previous/concurrent init is the
+    // success path.
+    let created = match sysdb
         .create_database(Uuid::new_v4(), database_name.clone(), tenant.clone())
         .await
     {
-        Ok(_) | Err(CreateDatabaseError::AlreadyExists(_)) => {}
+        Ok(_) => true,
+        Err(CreateDatabaseError::AlreadyExists(_)) => false,
         Err(e) => return Err(e.into()),
-    }
-    let db = sysdb.get_database(database_name, tenant).await?;
+    };
+
+    let db = sysdb.get_database(database_name.clone(), tenant).await?;
+
+    tracing::info!(database = %database_name.as_ref(), database_id = %db.id, created, "ensured foundation database");
     Ok(db.id)
 }
 
@@ -432,6 +457,12 @@ const GET_OR_CREATE: bool = true;
 /// planner reconciles the Foundation schema (sparse vector index for
 /// SPLADE) with the default config, picks the right segment types for
 /// distributed mode, and emits everything sysdb needs.
+#[tracing::instrument(
+    name = "ensure_collection",
+    skip_all,
+    fields(collection = %collection_name, database = %database_name.as_ref()),
+    err(Display)
+)]
 async fn ensure_collection(
     sysdb: &mut SysDb,
     tenant: String,
@@ -465,6 +496,12 @@ async fn ensure_collection(
             GET_OR_CREATE,
         )
         .await?;
+
+    tracing::info!(
+        collection = %collection_name,
+        collection_id = %collection.collection_id,
+        "ensured foundation collection"
+    );
     Ok(collection)
 }
 
