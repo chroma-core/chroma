@@ -1876,6 +1876,7 @@ pub enum WhereError {
 ////////////////////////// Get //////////////////////////
 
 pub const STALE_READ_ERROR_NAME: &str = "StaleReadError";
+pub const CONDITIONAL_WRITE_CONFLICT_MESSAGE: &str = "conditional write conflict";
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct OccReadToken {

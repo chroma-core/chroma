@@ -14,6 +14,8 @@ from chromadb.types import Tenant, Collection as CollectionModel
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from enum import Enum
 
+CONDITIONAL_WRITE_CONFLICT_MESSAGE: str
+
 class DatabaseFromBindings:
     id: UUID
     name: str
@@ -37,6 +39,14 @@ class QueryResponse:
     metadatas: Optional[List[Metadatas]]
     distances: Optional[List[List[float]]]
     include: Include
+
+class ConditionalTransaction:
+    def __init__(self) -> None: ...
+    def is_closed(self) -> bool: ...
+
+class ConditionalCommitResult:
+    first_inserted_record_offset: Optional[int]
+    record_count: int
 
 class GetTenantResponse:
     name: str
@@ -169,6 +179,68 @@ class Bindings:
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None: ...
+    def begin_conditional_transaction(self) -> ConditionalTransaction: ...
+    def conditional_get(
+        self,
+        transaction: ConditionalTransaction,
+        collection_id: str,
+        ids: Optional[IDs] = None,
+        where: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        where_document: Optional[str] = None,
+        include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResponse: ...
+    def conditional_add(
+        self,
+        transaction: ConditionalTransaction,
+        ids: IDs,
+        collection_id: str,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool: ...
+    def conditional_update(
+        self,
+        transaction: ConditionalTransaction,
+        collection_id: str,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool: ...
+    def conditional_upsert(
+        self,
+        transaction: ConditionalTransaction,
+        collection_id: str,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool: ...
+    def conditional_delete(
+        self,
+        transaction: ConditionalTransaction,
+        collection_id: str,
+        ids: IDs,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool: ...
+    def conditional_commit(
+        self,
+        transaction: ConditionalTransaction,
+    ) -> ConditionalCommitResult: ...
     def count(
         self,
         collection_id: str,

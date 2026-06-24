@@ -10,6 +10,7 @@ pyo3::import_exception!(chromadb.errors, UniqueConstraintError);
 pyo3::import_exception!(chromadb.errors, InternalError);
 pyo3::import_exception!(chromadb.errors, RateLimitError);
 pyo3::import_exception!(chromadb.errors, StaleReadError);
+pyo3::import_exception!(chromadb.errors, ConditionalWriteConflictError);
 
 #[derive(Error, Debug)]
 #[error(transparent)]
@@ -17,16 +18,22 @@ pub(crate) struct ChromaPyError(Box<dyn ChromaError>);
 
 impl From<ChromaPyError> for PyErr {
     fn from(value: ChromaPyError) -> Self {
+        let message = value.to_string();
+        if value.0.code() == ErrorCodes::Aborted
+            && message.contains(chroma_types::CONDITIONAL_WRITE_CONFLICT_MESSAGE)
+        {
+            return ConditionalWriteConflictError::new_err(message);
+        }
         if value.0.name() == chroma_types::STALE_READ_ERROR_NAME {
-            return StaleReadError::new_err(value.to_string());
+            return StaleReadError::new_err(message);
         }
         match value.0.code() {
-            ErrorCodes::InvalidArgument => InvalidArgumentError::new_err(value.to_string()),
-            ErrorCodes::Unauthenticated => ChromaAuthError::new_err(value.to_string()),
-            ErrorCodes::PermissionDenied => AuthorizationError::new_err(value.to_string()),
-            ErrorCodes::NotFound => NotFoundError::new_err(value.to_string()),
-            ErrorCodes::Internal => InternalError::new_err(value.to_string()),
-            _ => InternalError::new_err(value.to_string()),
+            ErrorCodes::InvalidArgument => InvalidArgumentError::new_err(message),
+            ErrorCodes::Unauthenticated => ChromaAuthError::new_err(message),
+            ErrorCodes::PermissionDenied => AuthorizationError::new_err(message),
+            ErrorCodes::NotFound => NotFoundError::new_err(message),
+            ErrorCodes::Internal => InternalError::new_err(message),
+            _ => InternalError::new_err(message),
         }
     }
 }
