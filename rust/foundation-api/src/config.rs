@@ -100,7 +100,11 @@ impl FoundationConfig {
         "agent_sessions".to_string()
     }
     fn default_source_collections() -> Vec<String> {
-        vec!["slack".to_string(), "notion".to_string()]
+        vec![
+            "slack".to_string(),
+            "notion".to_string(),
+            "gdrive".to_string(),
+        ]
     }
     fn default_function_name() -> String {
         "http_generate".to_string()

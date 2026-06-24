@@ -22,6 +22,9 @@ pub fn source_kind_for_collection_name(
     if collection_name.contains("notion") {
         return Ok("notion");
     }
+    if collection_name.contains("gdrive") || collection_name.contains("google_drive") {
+        return Ok("google_drive");
+    }
     if collection_name.contains("coding") || collection_name.contains("agent_sessions") {
         return Ok("coding_agent_session");
     }
@@ -49,6 +52,22 @@ mod tests {
         assert_eq!(
             source_kind_for_collection_name("notion_master").unwrap(),
             "notion"
+        );
+    }
+
+    #[test]
+    fn detects_gdrive_source_kind() {
+        assert_eq!(
+            source_kind_for_collection_name("gdrive").unwrap(),
+            "google_drive"
+        );
+        assert_eq!(
+            source_kind_for_collection_name("gdrive_master").unwrap(),
+            "google_drive"
+        );
+        assert_eq!(
+            source_kind_for_collection_name("google_drive").unwrap(),
+            "google_drive"
         );
     }
 
