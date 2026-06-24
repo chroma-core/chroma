@@ -25,7 +25,7 @@ struct ManagerState {
     next_write: Instant,
     writers_active: usize,
     enqueued: Vec<AppendWork>,
-    admission_metadata: Vec<Arc<[u8]>>,
+    admission_metadata: Vec<Vec<Arc<[u8]>>>,
     tearing_down: bool,
 }
 
@@ -595,6 +595,17 @@ mod tests {
         BatchManager::new(LogWriterOptions::default(), NoopUploader).unwrap()
     }
 
+    fn admission_metadata(metadata: &[&str]) -> Vec<Arc<[u8]>> {
+        metadata
+            .iter()
+            .map(|metadata| Arc::<[u8]>::from(metadata.as_bytes()))
+            .collect()
+    }
+
+    fn append_options(metadata: &[&str]) -> AppendOptions {
+        AppendOptions::new(admission_metadata(metadata))
+    }
+
     struct NoopS3Uploader;
 
     #[async_trait::async_trait]
@@ -822,42 +833,51 @@ mod tests {
         let _first_rx = enqueue(
             &batch_manager,
             Vec::from("first"),
-            Some(AppendOptions::new(Vec::from("metadata-1"))),
+            Some(append_options(&["metadata-1", "metadata-1b"])),
         )
         .await;
 
-        let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let observed = Arc::new(std::sync::Mutex::new(Vec::<Vec<Vec<u8>>>::new()));
         let observed_clone = Arc::clone(&observed);
-        let predicate = Arc::new(move |earlier_metadata: &[Arc<[u8]>]| {
+        let predicate = Arc::new(move |earlier_metadata: &[Vec<Arc<[u8]>>]| {
             *observed_clone.lock().unwrap() = earlier_metadata
                 .iter()
-                .map(|metadata| metadata.as_ref().to_vec())
+                .map(|entry_metadata| {
+                    entry_metadata
+                        .iter()
+                        .map(|metadata| metadata.as_ref().to_vec())
+                        .collect()
+                })
                 .collect();
             true
         });
         let _second_rx = enqueue(
             &batch_manager,
             Vec::from("second"),
-            Some(AppendOptions::new(Vec::from("metadata-2")).with_admission_predicate(predicate)),
+            Some(append_options(&["metadata-2"]).with_admission_predicate(predicate)),
         )
         .await;
 
-        assert_eq!(*observed.lock().unwrap(), vec![Vec::from("metadata-1")]);
+        assert_eq!(
+            *observed.lock().unwrap(),
+            vec![vec![Vec::from("metadata-1"), Vec::from("metadata-1b")]]
+        );
         assert_eq!(2, batch_manager.count_waiters());
     }
 
     #[tokio::test]
     async fn admission_predicate_does_not_see_candidate_metadata() {
         let batch_manager = admission_batch_manager();
-        let predicate = Arc::new(move |earlier_metadata: &[Arc<[u8]>]| {
+        let predicate = Arc::new(move |earlier_metadata: &[Vec<Arc<[u8]>>]| {
             !earlier_metadata
                 .iter()
+                .flatten()
                 .any(|metadata| metadata.as_ref() == b"candidate")
         });
         let mut rx = enqueue(
             &batch_manager,
             Vec::from("candidate"),
-            Some(AppendOptions::new(Vec::from("candidate")).with_admission_predicate(predicate)),
+            Some(append_options(&["candidate"]).with_admission_predicate(predicate)),
         )
         .await;
 
@@ -874,23 +894,20 @@ mod tests {
         let mut first_rx = enqueue(
             &batch_manager,
             Vec::from("first"),
-            Some(AppendOptions::new(Vec::from("first"))),
+            Some(append_options(&["first"])),
         )
         .await;
-        let rejecting_predicate = Arc::new(|_earlier_metadata: &[Arc<[u8]>]| false);
+        let rejecting_predicate = Arc::new(|_earlier_metadata: &[Vec<Arc<[u8]>>]| false);
         let rejected_rx = enqueue(
             &batch_manager,
             Vec::from("reject"),
-            Some(
-                AppendOptions::new(Vec::from("reject"))
-                    .with_admission_predicate(rejecting_predicate),
-            ),
+            Some(append_options(&["reject"]).with_admission_predicate(rejecting_predicate)),
         )
         .await;
         let mut third_rx = enqueue(
             &batch_manager,
             Vec::from("third"),
-            Some(AppendOptions::new(Vec::from("third"))),
+            Some(append_options(&["third"])),
         )
         .await;
 
@@ -912,23 +929,28 @@ mod tests {
         let batch_manager = admission_batch_manager();
         let _first_rx = enqueue(&batch_manager, Vec::from("normal"), None).await;
 
-        let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let observed = Arc::new(std::sync::Mutex::new(Vec::<Vec<Vec<u8>>>::new()));
         let observed_clone = Arc::clone(&observed);
-        let predicate = Arc::new(move |earlier_metadata: &[Arc<[u8]>]| {
+        let predicate = Arc::new(move |earlier_metadata: &[Vec<Arc<[u8]>>]| {
             *observed_clone.lock().unwrap() = earlier_metadata
                 .iter()
-                .map(|metadata| metadata.as_ref().to_vec())
+                .map(|entry_metadata| {
+                    entry_metadata
+                        .iter()
+                        .map(|metadata| metadata.as_ref().to_vec())
+                        .collect()
+                })
                 .collect();
             true
         });
         let _second_rx = enqueue(
             &batch_manager,
             Vec::from("conditional"),
-            Some(AppendOptions::new(Vec::from("conditional")).with_admission_predicate(predicate)),
+            Some(append_options(&["conditional"]).with_admission_predicate(predicate)),
         )
         .await;
 
-        assert_eq!(*observed.lock().unwrap(), vec![Vec::<u8>::new()]);
+        assert_eq!(*observed.lock().unwrap(), vec![Vec::<Vec<u8>>::new()]);
         assert_eq!(2, batch_manager.count_waiters());
     }
 
@@ -939,7 +961,7 @@ mod tests {
             &batch_manager,
             Vec::from("first"),
             Some(
-                AppendOptions::new(Vec::from("first"))
+                append_options(&["first"])
                     .with_required_fragment_start(LogPosition::from_offset(10)),
             ),
         )
@@ -948,7 +970,7 @@ mod tests {
             &batch_manager,
             Vec::from("second"),
             Some(
-                AppendOptions::new(Vec::from("second"))
+                append_options(&["second"])
                     .with_required_fragment_start(LogPosition::from_offset(11)),
             ),
         )
@@ -982,7 +1004,7 @@ mod tests {
             &batch_manager,
             Vec::from("record"),
             Some(
-                AppendOptions::new(Vec::from("record"))
+                append_options(&["record"])
                     .with_required_fragment_start(LogPosition::from_offset(42)),
             ),
         )
@@ -1081,7 +1103,7 @@ mod tests {
         .await
         .unwrap();
         let (tx, _rx1) = tokio::sync::oneshot::channel();
-        let options1 = AppendOptions::new(Vec::from("metadata-1"));
+        let options1 = append_options(&["metadata-1"]);
         batch_manager
             .push_work(AppendWork::new(
                 vec![vec![1]],
@@ -1120,11 +1142,11 @@ mod tests {
         // Check batch 1
         assert_eq!(vec![vec![1]], work[0].messages);
         assert_eq!(
-            Some(options1.admission_metadata.as_ref()),
+            Some(options1.admission_metadata.as_slice()),
             work[0]
                 .options
                 .as_ref()
-                .map(|options| options.admission_metadata.as_ref())
+                .map(|options| options.admission_metadata.as_slice())
         );
         // Check batch 2
         assert_eq!(vec![vec![2, 3]], work[1].messages);
