@@ -1420,7 +1420,7 @@ impl ServiceBasedFrontend {
         cmek: Option<Cmek>,
     ) -> Result<(), PushLogsError> {
         self.log_client
-            .push_logs(tenant_id, database_name, collection_id, records, cmek)
+            .push_logs(tenant_id, database_name, collection_id, records, cmek, None)
             .await
     }
 
@@ -2705,6 +2705,7 @@ impl ServiceBasedFrontend {
                 input_collection_id,
                 records,
                 cmek,
+                None,
             )
             .await
             .map_err(|e| chroma_types::AttachFunctionError::Internal(Box::new(e)))?;
