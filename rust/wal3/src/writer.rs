@@ -570,8 +570,10 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                 if !that.done.load(std::sync::atomic::Ordering::Relaxed) {
                     that.batch_manager.wait_for_writable().await;
                     match that.batch_manager.take_work(&that.manifest_manager).await {
-                        Ok(Some((pointer, work))) => {
-                            Arc::clone(&that).append_batch(pointer, work).await;
+                        Ok(Some((pointer, required_fragment_start, work))) => {
+                            Arc::clone(&that)
+                                .append_batch(pointer, required_fragment_start, work)
+                                .await;
                         }
                         Ok(None) => {
                             let sleep_for = that.batch_manager.until_next_time();
@@ -652,9 +654,13 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                 .await;
             match self.batch_manager.take_work(&self.manifest_manager).await {
                 Ok(Some(work)) => {
-                    let (pointer, work) = work;
+                    let (pointer, required_fragment_start, work) = work;
                     {
-                        tokio::task::spawn(Arc::clone(self).append_batch(pointer, work));
+                        tokio::task::spawn(Arc::clone(self).append_batch(
+                            pointer,
+                            required_fragment_start,
+                            work,
+                        ));
                     }
                 }
                 Ok(None) => {}
@@ -671,7 +677,12 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
         .await
     }
 
-    async fn append_batch(self: Arc<Self>, pointer: P, work: Vec<AppendWork>) {
+    async fn append_batch(
+        self: Arc<Self>,
+        pointer: P,
+        required_fragment_start: Option<LogPosition>,
+        work: Vec<AppendWork>,
+    ) {
         let append_batch_span = tracing::info_span!("append_batch");
         let mut messages = Vec::with_capacity(work.len());
         let mut notifies = Vec::with_capacity(work.len());
@@ -694,7 +705,10 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                 tracing::error!("somehow got empty messages");
                 return;
             }
-            match self.append_batch_internal(pointer, messages).await {
+            match self
+                .append_batch_internal(pointer, required_fragment_start, messages)
+                .await
+            {
                 Ok(mut log_position) => {
                     for (num_messages, notify) in notifies.into_iter() {
                         if notify.send(Ok(log_position)).is_err() {
@@ -720,6 +734,7 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
     async fn append_batch_internal(
         &self,
         pointer: P,
+        required_fragment_start: Option<LogPosition>,
         messages: Vec<Vec<u8>>,
     ) -> Result<LogPosition, Error> {
         assert!(!messages.is_empty());
@@ -740,6 +755,7 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                 messages_len as u64,
                 upload_result.num_bytes as u64,
                 upload_result.setsum,
+                required_fragment_start,
                 &upload_result.successful_regions,
             )
             .await
@@ -1674,7 +1690,14 @@ mod tests {
         async fn take_work(
             &self,
             _manifest_manager: &(dyn crate::ManifestPublisher<Self::FragmentPointer> + Sync),
-        ) -> Result<Option<(Self::FragmentPointer, Vec<crate::AppendWork>)>, Error> {
+        ) -> Result<
+            Option<(
+                Self::FragmentPointer,
+                Option<LogPosition>,
+                Vec<crate::AppendWork>,
+            )>,
+            Error,
+        > {
             unreachable!("take_work is not used in this test")
         }
 
@@ -1839,6 +1862,7 @@ mod tests {
             _messages_len: u64,
             _num_bytes: u64,
             _setsum: Setsum,
+            _required_fragment_start: Option<LogPosition>,
             _successful_regions: &[String],
         ) -> Result<LogPosition, Error> {
             unreachable!("publish_fragment is not used in this test")

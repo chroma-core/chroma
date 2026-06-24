@@ -872,6 +872,7 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
         messages_len: u64,
         num_bytes: u64,
         setsum: Setsum,
+        required_fragment_start: Option<LogPosition>,
         successful_regions: &[String],
     ) -> Result<LogPosition, Error> {
         if messages_len > i64::MAX as u64 {
@@ -897,6 +898,7 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                     let pointer = pointer.clone();
                     let path = path.clone();
                     let regions = regions.clone();
+                    let required_fragment_start = required_fragment_start;
                     Box::pin(async move {
                         let row = tx
                             .read_row(
@@ -936,6 +938,17 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                             return Ok(Err(Error::CorruptManifest(format!(
                             "negative enumeration_offset {enumeration_offset} for manifest {log_id}"
                         ))));
+                        }
+                        let fragment_start = LogPosition::from_offset(enumeration_offset as u64);
+                        if let Some(required_fragment_start) = required_fragment_start {
+                            if required_fragment_start != fragment_start {
+                                tracing::info!(
+                                    ?required_fragment_start,
+                                    ?fragment_start,
+                                    "repl publish_fragment missed required_fragment_start"
+                                );
+                                return Ok(Err(Error::LogContentionRetry));
+                            }
                         }
                         let enumeration_limit =
                             match enumeration_offset.checked_add(messages_len_i64) {
@@ -1011,7 +1024,7 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                         }
                         tx.buffer_write(mutations);
                         Ok::<Result<LogPosition, Error>, google_cloud_spanner::client::Error>(Ok(
-                            LogPosition::from_offset(enumeration_offset as u64),
+                            fragment_start,
                         ))
                     })
                 })
@@ -2008,6 +2021,7 @@ mod tests {
                 messages_len,
                 num_bytes,
                 setsum,
+                None,
                 &["dummy".to_string()],
             )
             .await;
@@ -2043,6 +2057,45 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_publish_fragment_required_start_mismatch() {
+        let Some(client) = setup_spanner_client().await else {
+            panic!("Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let log_id = Uuid::new_v4();
+        let manifest = make_empty_manifest();
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
+            .await
+            .expect("init failed");
+
+        let manager = ManifestManager::new(Arc::new(client.clone()), "dummy".to_string(), log_id);
+        let pointer = FragmentUuid::generate();
+        let result = manager
+            .publish_fragment(
+                &pointer,
+                "test/path/fragment.parquet",
+                10,
+                1024,
+                make_setsum(1),
+                Some(LogPosition::from_offset(1)),
+                &["dummy".to_string()],
+            )
+            .await;
+
+        assert!(
+            matches!(result, Err(Error::LogContentionRetry)),
+            "expected LogContentionRetry, got {result:?}"
+        );
+        let Some((loaded_manifest, _)) = ManifestManager::load(&client, log_id, "dummy")
+            .await
+            .expect("load failed")
+        else {
+            panic!("manifest should exist after required-start rejection");
+        };
+        assert_eq!(make_empty_manifest(), loaded_manifest);
+    }
+
     // Test publishing multiple fragments in sequence.
     #[tokio::test]
     async fn test_k8s_mcmr_integration_publish_multiple_fragments() {
@@ -2067,6 +2120,7 @@ mod tests {
                 10,
                 100,
                 make_setsum(1),
+                None,
                 &["dummy".to_string()],
             )
             .await
@@ -2082,6 +2136,7 @@ mod tests {
                 20,
                 200,
                 make_setsum(2),
+                None,
                 &["dummy".to_string()],
             )
             .await
@@ -2097,6 +2152,7 @@ mod tests {
                 30,
                 300,
                 make_setsum(3),
+                None,
                 &["dummy".to_string()],
             )
             .await
@@ -2141,6 +2197,7 @@ mod tests {
                 10,
                 100,
                 make_setsum(1),
+                None,
                 &["dummy".to_string()],
             )
             .await
@@ -2153,6 +2210,7 @@ mod tests {
                 20,
                 200,
                 make_setsum(2),
+                None,
                 &["dummy".to_string()],
             )
             .await
@@ -2219,6 +2277,7 @@ mod tests {
                 10,
                 100,
                 make_setsum(1),
+                None,
                 &["region-b".to_string()],
             )
             .await
@@ -2282,6 +2341,7 @@ mod tests {
                 20,
                 100,
                 make_setsum(1),
+                None,
                 &["region-b".to_string()],
             )
             .await
@@ -2353,6 +2413,7 @@ mod tests {
                     messages_len,
                     num_bytes,
                     setsum,
+                    None,
                     &["dummy".to_string()],
                 )
                 .await
@@ -2402,6 +2463,7 @@ mod tests {
                 messages_len,
                 100,
                 Setsum::default(),
+                None,
                 &["dummy".to_string()],
             )
             .await;
@@ -2441,6 +2503,7 @@ mod tests {
                 5,
                 500,
                 setsum1,
+                None,
                 &["dummy".to_string()],
             )
             .await
@@ -2455,6 +2518,7 @@ mod tests {
                 10,
                 1000,
                 setsum2,
+                None,
                 &["dummy".to_string()],
             )
             .await
@@ -2590,6 +2654,7 @@ mod tests {
                         10,
                         100,
                         make_setsum((i + 1) as u8),
+                        None,
                         &["dummy".to_string()],
                     )
                     .await
@@ -2686,6 +2751,7 @@ mod tests {
                 100,
                 100,
                 Setsum::default(),
+                None,
                 &["dummy".to_string()],
             )
             .await;
@@ -2869,14 +2935,30 @@ mod tests {
         let setsum1 = make_setsum(1);
         let pointer1 = FragmentUuid::generate();
         manager
-            .publish_fragment(&pointer1, "path1", 10, 100, setsum1, &["dummy".to_string()])
+            .publish_fragment(
+                &pointer1,
+                "path1",
+                10,
+                100,
+                setsum1,
+                None,
+                &["dummy".to_string()],
+            )
             .await
             .expect("first publish failed");
 
         let setsum2 = make_setsum(2);
         let pointer2 = FragmentUuid::generate();
         manager
-            .publish_fragment(&pointer2, "path2", 10, 100, setsum2, &["dummy".to_string()])
+            .publish_fragment(
+                &pointer2,
+                "path2",
+                10,
+                100,
+                setsum2,
+                None,
+                &["dummy".to_string()],
+            )
             .await
             .expect("second publish failed");
 
@@ -3276,6 +3358,7 @@ mod tests {
                 10,
                 100,
                 make_setsum(1),
+                None,
                 &["dummy".to_string()],
             )
             .await
@@ -3346,6 +3429,7 @@ mod tests {
                 20,
                 100,
                 make_setsum(1),
+                None,
                 &["region-b".to_string()],
             )
             .await
@@ -3385,6 +3469,7 @@ mod tests {
                 10,
                 100,
                 make_setsum(1),
+                None,
                 &["dummy".to_string()],
             )
             .await
@@ -3426,6 +3511,7 @@ mod tests {
                 10,
                 100,
                 make_setsum(1),
+                None,
                 &["dummy".to_string()],
             )
             .await
@@ -3498,6 +3584,7 @@ mod tests {
                 10,
                 100,
                 make_setsum(1),
+                None,
                 &["dummy".to_string()],
             )
             .await
@@ -3560,6 +3647,7 @@ mod tests {
                 10,
                 100,
                 make_setsum(1),
+                None,
                 &["dummy".to_string()],
             )
             .await
@@ -3627,6 +3715,7 @@ mod tests {
                 10,
                 100,
                 make_setsum(1),
+                None,
                 &["dummy".to_string()],
             )
             .await
@@ -3678,7 +3767,15 @@ mod tests {
         let setsum1 = make_setsum(1);
         let pointer1 = FragmentUuid::generate();
         manager
-            .publish_fragment(&pointer1, "path1", 5, 100, setsum1, &["dummy".to_string()])
+            .publish_fragment(
+                &pointer1,
+                "path1",
+                5,
+                100,
+                setsum1,
+                None,
+                &["dummy".to_string()],
+            )
             .await
             .expect("first publish failed");
 
@@ -3696,7 +3793,15 @@ mod tests {
         let setsum2 = make_setsum(2);
         let pointer2 = FragmentUuid::generate();
         manager
-            .publish_fragment(&pointer2, "path2", 5, 100, setsum2, &["dummy".to_string()])
+            .publish_fragment(
+                &pointer2,
+                "path2",
+                5,
+                100,
+                setsum2,
+                None,
+                &["dummy".to_string()],
+            )
             .await
             .expect("second publish failed");
 
