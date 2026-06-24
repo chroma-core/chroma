@@ -898,6 +898,7 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                     let pointer = pointer.clone();
                     let path = path.clone();
                     let regions = regions.clone();
+                    let required_fragment_start = required_fragment_start;
                     Box::pin(async move {
                         let row = tx
                             .read_row(
