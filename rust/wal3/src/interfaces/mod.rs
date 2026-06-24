@@ -532,11 +532,11 @@ impl AppendWork {
 
     /// Return the admission metadata for this append, using empty metadata for appends without
     /// explicit options.
-    pub fn admission_metadata(&self) -> Arc<[u8]> {
+    pub fn admission_metadata(&self) -> Vec<Arc<[u8]>> {
         self.options
             .as_ref()
-            .map(|options| Arc::clone(&options.admission_metadata))
-            .unwrap_or_else(|| Arc::<[u8]>::from([]))
+            .map(|options| options.admission_metadata.clone())
+            .unwrap_or_default()
     }
 
     /// Return the required fragment start, if this append has one.
