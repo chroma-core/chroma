@@ -3,7 +3,11 @@ use std::collections::BTreeSet;
 use chroma_error::{ChromaError, ErrorCodes};
 use thiserror::Error;
 
-use crate::{GetRequest, GetResponse, OccReadMode, OccReadToken, Operation};
+use crate::{
+    AddCollectionRecordsRequest, DeleteCollectionRecordsRequest, GetRequest, GetResponse,
+    OccReadMode, OccReadToken, Operation, UpdateCollectionRecordsRequest,
+    UpsertCollectionRecordsRequest,
+};
 
 /// One buffered write operation in transaction call order.
 ///
@@ -12,22 +16,30 @@ use crate::{GetRequest, GetResponse, OccReadMode, OccReadToken, Operation};
 /// separate membership index used for fast validation such as read-after-write
 /// and duplicate-write checks; it does not replace this ordered payload state.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ConditionalBufferedWrite {
-    operation: Operation,
-    ids: Vec<String>,
+pub enum ConditionalBufferedWrite {
+    Add(AddCollectionRecordsRequest),
+    Update(UpdateCollectionRecordsRequest),
+    Upsert(UpsertCollectionRecordsRequest),
+    Delete(DeleteCollectionRecordsRequest),
 }
 
 impl ConditionalBufferedWrite {
-    pub fn new(operation: Operation, ids: Vec<String>) -> Self {
-        Self { operation, ids }
-    }
-
     pub fn operation(&self) -> Operation {
-        self.operation
+        match self {
+            Self::Add(_) => Operation::Add,
+            Self::Update(_) => Operation::Update,
+            Self::Upsert(_) => Operation::Upsert,
+            Self::Delete(_) => Operation::Delete,
+        }
     }
 
     pub fn ids(&self) -> &[String] {
-        &self.ids
+        match self {
+            Self::Add(request) => &request.ids,
+            Self::Update(request) => &request.ids,
+            Self::Upsert(request) => &request.ids,
+            Self::Delete(request) => request.ids.as_deref().unwrap_or_default(),
+        }
     }
 }
 
@@ -84,6 +96,43 @@ impl ConditionalTransactionState {
 
     pub fn close(&mut self) {
         self.closed = true;
+    }
+
+    /// Buffers an already-normalized add request.
+    ///
+    /// Callers should build this request through the normal write preparation
+    /// path, including validation and embedding preparation, before handing it
+    /// to transaction state. The transaction layer then enforces only local
+    /// transaction preconditions and preserves the prepared payload for commit.
+    pub fn buffer_add(
+        &mut self,
+        request: AddCollectionRecordsRequest,
+    ) -> Result<(), ConditionalTransactionError> {
+        self.buffer_write(ConditionalBufferedWrite::Add(request))
+    }
+
+    /// Buffers an already-normalized update request.
+    pub fn buffer_update(
+        &mut self,
+        request: UpdateCollectionRecordsRequest,
+    ) -> Result<(), ConditionalTransactionError> {
+        self.buffer_write(ConditionalBufferedWrite::Update(request))
+    }
+
+    /// Buffers an already-normalized upsert request.
+    pub fn buffer_upsert(
+        &mut self,
+        request: UpsertCollectionRecordsRequest,
+    ) -> Result<(), ConditionalTransactionError> {
+        self.buffer_write(ConditionalBufferedWrite::Upsert(request))
+    }
+
+    /// Buffers an already-normalized explicit-id delete request.
+    pub fn buffer_delete(
+        &mut self,
+        request: DeleteCollectionRecordsRequest,
+    ) -> Result<(), ConditionalTransactionError> {
+        self.buffer_write(ConditionalBufferedWrite::Delete(request))
     }
 
     pub fn prepare_get_request(
@@ -176,6 +225,68 @@ impl ConditionalTransactionState {
         Ok(())
     }
 
+    fn buffer_write(
+        &mut self,
+        write: ConditionalBufferedWrite,
+    ) -> Result<(), ConditionalTransactionError> {
+        self.validate_buffered_write(&write)?;
+        for id in write.ids() {
+            self.buffered_write_ids.insert(id.clone());
+        }
+        self.buffered_writes.push(write);
+        Ok(())
+    }
+
+    fn validate_buffered_write(
+        &self,
+        write: &ConditionalBufferedWrite,
+    ) -> Result<(), ConditionalTransactionError> {
+        if self.closed {
+            return Err(ConditionalTransactionError::Closed);
+        }
+        if let ConditionalBufferedWrite::Delete(request) = write {
+            if request.r#where.is_some() || request.limit.is_some() || write.ids().is_empty() {
+                return Err(ConditionalTransactionError::PredicateDeleteUnsupported);
+            }
+        }
+
+        let mut call_ids = BTreeSet::new();
+        for id in write.ids() {
+            if !call_ids.insert(id.clone()) {
+                return Err(ConditionalTransactionError::DuplicateWriteIdInRequest {
+                    id: id.clone(),
+                });
+            }
+            if self.buffered_write_ids.contains(id) {
+                return Err(ConditionalTransactionError::DuplicateBufferedWrite { id: id.clone() });
+            }
+            self.validate_write_precondition(write.operation(), id)?;
+        }
+        Ok(())
+    }
+
+    fn validate_write_precondition(
+        &self,
+        operation: Operation,
+        id: &str,
+    ) -> Result<(), ConditionalTransactionError> {
+        match operation {
+            Operation::Add if !self.known_absent.contains(id) => {
+                Err(ConditionalTransactionError::AddRequiresKnownAbsent { id: id.to_string() })
+            }
+            Operation::Update if !self.known_present.contains(id) => {
+                Err(ConditionalTransactionError::UpdateRequiresKnownPresent { id: id.to_string() })
+            }
+            Operation::Delete if !self.known_present.contains(id) => {
+                Err(ConditionalTransactionError::DeleteRequiresKnownPresent { id: id.to_string() })
+            }
+            Operation::Add | Operation::Update | Operation::Upsert | Operation::Delete => Ok(()),
+            Operation::BackfillFn => {
+                Err(ConditionalTransactionError::UnsupportedWriteOperation { operation })
+            }
+        }
+    }
+
     fn validate_get_request(
         &self,
         request: &GetRequest,
@@ -221,6 +332,20 @@ pub enum ConditionalTransactionError {
     FilterReadRequiresPositiveLimit,
     #[error("cannot transactionally read id {id:?} after buffering a write for it")]
     ReadAfterBufferedWrite { id: String },
+    #[error("transactional predicate deletes are not supported")]
+    PredicateDeleteUnsupported,
+    #[error("transactional add for id {id:?} requires a prior read proving the id is absent")]
+    AddRequiresKnownAbsent { id: String },
+    #[error("transactional update for id {id:?} requires a prior read proving the id is present")]
+    UpdateRequiresKnownPresent { id: String },
+    #[error("transactional delete for id {id:?} requires a prior read proving the id is present")]
+    DeleteRequiresKnownPresent { id: String },
+    #[error("transactional write request contains duplicate id {id:?}")]
+    DuplicateWriteIdInRequest { id: String },
+    #[error("transaction already has a buffered write for id {id:?}")]
+    DuplicateBufferedWrite { id: String },
+    #[error("transactional writes do not support operation {operation:?}")]
+    UnsupportedWriteOperation { operation: Operation },
     #[error("transactional get response did not include an OCC read token")]
     MissingReadToken,
     #[error(
@@ -239,7 +364,14 @@ impl ChromaError for ConditionalTransactionError {
         match self {
             ConditionalTransactionError::Closed
             | ConditionalTransactionError::FilterReadRequiresPositiveLimit
-            | ConditionalTransactionError::ReadAfterBufferedWrite { .. } => {
+            | ConditionalTransactionError::ReadAfterBufferedWrite { .. }
+            | ConditionalTransactionError::PredicateDeleteUnsupported
+            | ConditionalTransactionError::AddRequiresKnownAbsent { .. }
+            | ConditionalTransactionError::UpdateRequiresKnownPresent { .. }
+            | ConditionalTransactionError::DeleteRequiresKnownPresent { .. }
+            | ConditionalTransactionError::DuplicateWriteIdInRequest { .. }
+            | ConditionalTransactionError::DuplicateBufferedWrite { .. }
+            | ConditionalTransactionError::UnsupportedWriteOperation { .. } => {
                 ErrorCodes::InvalidArgument
             }
             ConditionalTransactionError::MissingReadToken
@@ -309,6 +441,85 @@ mod tests {
                 MetadataValue::Str("ready".to_string()),
             ),
         })
+    }
+
+    fn add_request(ids: &[&str]) -> AddCollectionRecordsRequest {
+        AddCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            CollectionUuid::default(),
+            ids.iter().map(|id| (*id).to_string()).collect(),
+            vec![vec![1.0]; ids.len()],
+            None,
+            None,
+            None,
+        )
+        .unwrap()
+    }
+
+    fn update_request(ids: &[&str]) -> UpdateCollectionRecordsRequest {
+        UpdateCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            CollectionUuid::default(),
+            ids.iter().map(|id| (*id).to_string()).collect(),
+            None,
+            Some(vec![Some("updated".to_string()); ids.len()]),
+            None,
+            None,
+        )
+        .unwrap()
+    }
+
+    fn upsert_request(ids: &[&str]) -> UpsertCollectionRecordsRequest {
+        UpsertCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            CollectionUuid::default(),
+            ids.iter().map(|id| (*id).to_string()).collect(),
+            vec![vec![2.0]; ids.len()],
+            None,
+            None,
+            None,
+        )
+        .unwrap()
+    }
+
+    fn delete_request(ids: &[&str]) -> DeleteCollectionRecordsRequest {
+        DeleteCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            CollectionUuid::default(),
+            Some(ids.iter().map(|id| (*id).to_string()).collect()),
+            None,
+            None,
+        )
+        .unwrap()
+    }
+
+    fn predicate_delete_request() -> DeleteCollectionRecordsRequest {
+        DeleteCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            CollectionUuid::default(),
+            None,
+            Some(metadata_where()),
+            Some(1),
+        )
+        .unwrap()
+    }
+
+    fn record_point_read(
+        state: &mut ConditionalTransactionState,
+        requested_ids: &[&str],
+        returned_ids: &[&str],
+    ) {
+        let request = state
+            .prepare_get_request(request(Some(requested_ids.to_vec()), None, None))
+            .unwrap();
+        state
+            .record_get_response(&request, &response(returned_ids, 42))
+            .unwrap();
     }
 
     #[test]
@@ -468,7 +679,8 @@ mod tests {
     #[test]
     fn reading_buffered_write_id_fails_but_other_ids_can_be_read() {
         let mut state = ConditionalTransactionState::new();
-        state.buffered_write_ids.insert("written".to_string());
+        let upsert = upsert_request(&["written"]);
+        state.buffer_upsert(upsert.clone()).unwrap();
 
         assert!(matches!(
             state.prepare_get_request(request(Some(vec!["written"]), None, None)),
@@ -482,7 +694,19 @@ mod tests {
         state
             .record_get_response(&prepared, &response(&["other"], 90))
             .unwrap();
-        assert_eq!(state.read_ids(), &string_set(&["other"]));
+        assert_eq!(
+            state,
+            ConditionalTransactionState {
+                read_ids: string_set(&["other"]),
+                read_token: Some(OccReadToken::try_new(90).unwrap()),
+                observed_log_offset: Some(90),
+                known_present: string_set(&["other"]),
+                known_absent: BTreeSet::new(),
+                buffered_writes: vec![ConditionalBufferedWrite::Upsert(upsert)],
+                buffered_write_ids: string_set(&["written"]),
+                closed: false,
+            }
+        );
     }
 
     #[test]
@@ -518,5 +742,212 @@ mod tests {
             state.prepare_get_request(request(Some(vec!["doc"]), None, None)),
             Err(ConditionalTransactionError::Closed)
         ));
+    }
+
+    #[test]
+    fn add_requires_known_absent_and_buffers_all_ids_in_order() {
+        let mut state = ConditionalTransactionState::new();
+        record_point_read(&mut state, &["absent-a", "absent-b"], &[]);
+        let add = add_request(&["absent-a", "absent-b"]);
+
+        state.buffer_add(add.clone()).unwrap();
+
+        assert_eq!(
+            state,
+            ConditionalTransactionState {
+                read_ids: string_set(&["absent-a", "absent-b"]),
+                read_token: Some(OccReadToken::try_new(42).unwrap()),
+                observed_log_offset: Some(42),
+                known_present: BTreeSet::new(),
+                known_absent: string_set(&["absent-a", "absent-b"]),
+                buffered_writes: vec![ConditionalBufferedWrite::Add(add)],
+                buffered_write_ids: string_set(&["absent-a", "absent-b"]),
+                closed: false,
+            }
+        );
+    }
+
+    #[test]
+    fn add_without_known_absent_fails_without_mutating_state() {
+        let mut state = ConditionalTransactionState::new();
+        record_point_read(&mut state, &["present"], &["present"]);
+        let before = state.clone();
+
+        assert_eq!(
+            state.buffer_add(add_request(&["present"])),
+            Err(ConditionalTransactionError::AddRequiresKnownAbsent {
+                id: "present".to_string(),
+            })
+        );
+        assert_eq!(state, before);
+    }
+
+    #[test]
+    fn update_and_delete_require_known_present() {
+        let mut state = ConditionalTransactionState::new();
+        record_point_read(
+            &mut state,
+            &["present-update", "present-delete", "absent"],
+            &["present-update", "present-delete"],
+        );
+        let update = update_request(&["present-update"]);
+        let delete = delete_request(&["present-delete"]);
+
+        state.buffer_update(update.clone()).unwrap();
+        state.buffer_delete(delete.clone()).unwrap();
+
+        assert_eq!(
+            state,
+            ConditionalTransactionState {
+                read_ids: string_set(&["present-update", "present-delete", "absent"]),
+                read_token: Some(OccReadToken::try_new(42).unwrap()),
+                observed_log_offset: Some(42),
+                known_present: string_set(&["present-update", "present-delete"]),
+                known_absent: string_set(&["absent"]),
+                buffered_writes: vec![
+                    ConditionalBufferedWrite::Update(update),
+                    ConditionalBufferedWrite::Delete(delete),
+                ],
+                buffered_write_ids: string_set(&["present-update", "present-delete"]),
+                closed: false,
+            }
+        );
+    }
+
+    #[test]
+    fn update_or_delete_without_known_present_fails_without_mutating_state() {
+        let mut state = ConditionalTransactionState::new();
+        record_point_read(&mut state, &["absent"], &[]);
+        let before = state.clone();
+
+        assert_eq!(
+            state.buffer_update(update_request(&["absent"])),
+            Err(ConditionalTransactionError::UpdateRequiresKnownPresent {
+                id: "absent".to_string(),
+            })
+        );
+        assert_eq!(state, before);
+
+        assert_eq!(
+            state.buffer_delete(delete_request(&["absent"])),
+            Err(ConditionalTransactionError::DeleteRequiresKnownPresent {
+                id: "absent".to_string(),
+            })
+        );
+        assert_eq!(state, before);
+    }
+
+    #[test]
+    fn upsert_requires_no_prior_presence_knowledge() {
+        let mut state = ConditionalTransactionState::new();
+        let upsert = upsert_request(&["unknown"]);
+
+        state.buffer_upsert(upsert.clone()).unwrap();
+
+        assert_eq!(
+            state,
+            ConditionalTransactionState {
+                read_ids: BTreeSet::new(),
+                read_token: None,
+                observed_log_offset: None,
+                known_present: BTreeSet::new(),
+                known_absent: BTreeSet::new(),
+                buffered_writes: vec![ConditionalBufferedWrite::Upsert(upsert)],
+                buffered_write_ids: string_set(&["unknown"]),
+                closed: false,
+            }
+        );
+    }
+
+    #[test]
+    fn predicate_delete_is_rejected_without_mutating_state() {
+        let mut state = ConditionalTransactionState::new();
+        let before = state.clone();
+
+        assert_eq!(
+            state.buffer_delete(predicate_delete_request()),
+            Err(ConditionalTransactionError::PredicateDeleteUnsupported)
+        );
+        assert_eq!(state, before);
+    }
+
+    #[test]
+    fn duplicate_write_ids_fail_all_or_nothing() {
+        let mut state = ConditionalTransactionState::new();
+        let upsert = upsert_request(&["first"]);
+        state.buffer_upsert(upsert.clone()).unwrap();
+        let before = state.clone();
+
+        assert_eq!(
+            state.buffer_upsert(upsert_request(&["second", "second"])),
+            Err(ConditionalTransactionError::DuplicateWriteIdInRequest {
+                id: "second".to_string(),
+            })
+        );
+        assert_eq!(state, before);
+
+        assert_eq!(
+            state.buffer_upsert(upsert_request(&["first"])),
+            Err(ConditionalTransactionError::DuplicateBufferedWrite {
+                id: "first".to_string(),
+            })
+        );
+        assert_eq!(state, before);
+    }
+
+    #[test]
+    fn failed_multi_id_write_does_not_partially_buffer_valid_ids() {
+        let mut state = ConditionalTransactionState::new();
+        record_point_read(&mut state, &["absent-a"], &[]);
+        let before = state.clone();
+
+        assert_eq!(
+            state.buffer_add(add_request(&["absent-a", "unknown"])),
+            Err(ConditionalTransactionError::AddRequiresKnownAbsent {
+                id: "unknown".to_string(),
+            })
+        );
+        assert_eq!(state, before);
+    }
+
+    #[test]
+    fn buffered_writes_preserve_call_order_and_per_method_id_order() {
+        let mut state = ConditionalTransactionState::new();
+        record_point_read(
+            &mut state,
+            &["present", "absent-a", "absent-b"],
+            &["present"],
+        );
+        let add = add_request(&["absent-a", "absent-b"]);
+        let upsert = upsert_request(&["unknown-a", "unknown-b"]);
+        let update = update_request(&["present"]);
+
+        state.buffer_add(add.clone()).unwrap();
+        state.buffer_upsert(upsert.clone()).unwrap();
+        state.buffer_update(update.clone()).unwrap();
+
+        assert_eq!(
+            state,
+            ConditionalTransactionState {
+                read_ids: string_set(&["present", "absent-a", "absent-b"]),
+                read_token: Some(OccReadToken::try_new(42).unwrap()),
+                observed_log_offset: Some(42),
+                known_present: string_set(&["present"]),
+                known_absent: string_set(&["absent-a", "absent-b"]),
+                buffered_writes: vec![
+                    ConditionalBufferedWrite::Add(add),
+                    ConditionalBufferedWrite::Upsert(upsert),
+                    ConditionalBufferedWrite::Update(update),
+                ],
+                buffered_write_ids: string_set(&[
+                    "absent-a",
+                    "absent-b",
+                    "unknown-a",
+                    "unknown-b",
+                    "present",
+                ]),
+                closed: false,
+            }
+        );
     }
 }
