@@ -43,6 +43,34 @@ impl ConditionalBufferedWrite {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConditionalCommitRequest {
+    pub buffered_writes: Vec<ConditionalBufferedWrite>,
+    pub observed_log_offset: Option<i64>,
+    pub read_ids: Vec<String>,
+}
+
+impl ConditionalCommitRequest {
+    pub fn record_count(&self) -> usize {
+        self.buffered_writes
+            .iter()
+            .map(|write| write.ids().len())
+            .sum()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConditionalCommitResult {
+    pub first_inserted_record_offset: Option<i64>,
+    pub record_count: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConditionalCommitAction {
+    NoOp(ConditionalCommitResult),
+    Append(ConditionalCommitRequest),
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ConditionalTransactionState {
     read_ids: BTreeSet<String>,
@@ -96,6 +124,48 @@ impl ConditionalTransactionState {
 
     pub fn close(&mut self) {
         self.closed = true;
+    }
+
+    pub fn prepare_commit(
+        &mut self,
+    ) -> Result<ConditionalCommitAction, ConditionalTransactionError> {
+        if self.closed {
+            return Err(ConditionalTransactionError::Closed);
+        }
+
+        if self.buffered_writes.is_empty() {
+            self.closed = true;
+            return Ok(ConditionalCommitAction::NoOp(ConditionalCommitResult {
+                first_inserted_record_offset: None,
+                record_count: 0,
+            }));
+        }
+
+        Ok(ConditionalCommitAction::Append(ConditionalCommitRequest {
+            buffered_writes: self.buffered_writes.clone(),
+            observed_log_offset: self.observed_log_offset,
+            read_ids: self.read_ids.iter().cloned().collect(),
+        }))
+    }
+
+    pub fn finish_commit(
+        &mut self,
+        first_inserted_record_offset: Option<i64>,
+    ) -> Result<ConditionalCommitResult, ConditionalTransactionError> {
+        if self.closed {
+            return Err(ConditionalTransactionError::Closed);
+        }
+
+        let result = ConditionalCommitResult {
+            first_inserted_record_offset,
+            record_count: self
+                .buffered_writes
+                .iter()
+                .map(|write| write.ids().len())
+                .sum(),
+        };
+        self.closed = true;
+        Ok(result)
     }
 
     /// Buffers an already-normalized add request.
@@ -220,7 +290,10 @@ impl ConditionalTransactionState {
         self.known_present = next_known_present;
         self.known_absent = next_known_absent;
         self.read_token.get_or_insert(read_token);
-        self.observed_log_offset.get_or_insert(observed_log_offset);
+        self.observed_log_offset = Some(match self.observed_log_offset {
+            Some(current) => current.min(observed_log_offset),
+            None => observed_log_offset,
+        });
 
         Ok(())
     }
@@ -379,6 +452,38 @@ impl ChromaError for ConditionalTransactionError {
             | ConditionalTransactionError::ReadTokenOutOfRange { .. } => {
                 ErrorCodes::FailedPrecondition
             }
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum ConditionalCommitError {
+    #[error(transparent)]
+    Transaction(#[from] ConditionalTransactionError),
+    #[error("Backoff and retry")]
+    Backoff,
+    #[error("Invalid database name")]
+    InvalidDatabaseName,
+    #[error(transparent)]
+    Other(#[from] Box<dyn ChromaError>),
+}
+
+impl ChromaError for ConditionalCommitError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ConditionalCommitError::Transaction(err) => err.code(),
+            ConditionalCommitError::Backoff => ErrorCodes::ResourceExhausted,
+            ConditionalCommitError::InvalidDatabaseName => ErrorCodes::InvalidArgument,
+            ConditionalCommitError::Other(err) => err.code(),
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        match self {
+            ConditionalCommitError::Transaction(err) => err.name(),
+            ConditionalCommitError::Backoff => "Backoff",
+            ConditionalCommitError::InvalidDatabaseName => "InvalidDatabaseName",
+            ConditionalCommitError::Other(err) => err.name(),
         }
     }
 }
@@ -948,6 +1053,103 @@ mod tests {
                 ]),
                 closed: false,
             }
+        );
+    }
+
+    #[test]
+    fn no_pending_writes_commit_is_successful_noop_and_closes() {
+        let mut state = ConditionalTransactionState::new();
+        record_point_read(&mut state, &["present"], &["present"]);
+
+        let action = state.prepare_commit().unwrap();
+
+        assert_eq!(
+            action,
+            ConditionalCommitAction::NoOp(ConditionalCommitResult {
+                first_inserted_record_offset: None,
+                record_count: 0,
+            })
+        );
+        assert!(state.is_closed());
+    }
+
+    #[test]
+    fn prepare_commit_carries_buffered_writes_condition_inputs_and_record_count() {
+        let mut state = ConditionalTransactionState::new();
+        record_point_read(
+            &mut state,
+            &["present", "absent-a", "absent-b"],
+            &["present"],
+        );
+        let add = add_request(&["absent-a", "absent-b"]);
+        let update = update_request(&["present"]);
+        state.buffer_add(add.clone()).unwrap();
+        state.buffer_update(update.clone()).unwrap();
+
+        let action = state.prepare_commit().unwrap();
+
+        assert_eq!(
+            action,
+            ConditionalCommitAction::Append(ConditionalCommitRequest {
+                buffered_writes: vec![
+                    ConditionalBufferedWrite::Add(add),
+                    ConditionalBufferedWrite::Update(update),
+                ],
+                observed_log_offset: Some(42),
+                read_ids: vec![
+                    "absent-a".to_string(),
+                    "absent-b".to_string(),
+                    "present".to_string(),
+                ],
+            })
+        );
+        match action {
+            ConditionalCommitAction::Append(request) => assert_eq!(request.record_count(), 3),
+            ConditionalCommitAction::NoOp(_) => panic!("pending writes should require append"),
+        }
+        assert!(!state.is_closed());
+    }
+
+    #[test]
+    fn finish_commit_returns_result_and_closes_transaction() {
+        let mut state = ConditionalTransactionState::new();
+        state
+            .buffer_upsert(upsert_request(&["first", "second"]))
+            .unwrap();
+
+        let result = state.finish_commit(Some(123)).unwrap();
+
+        assert_eq!(
+            result,
+            ConditionalCommitResult {
+                first_inserted_record_offset: Some(123),
+                record_count: 2,
+            }
+        );
+        assert!(state.is_closed());
+    }
+
+    #[test]
+    fn operations_after_successful_commit_fail_as_closed() {
+        let mut state = ConditionalTransactionState::new();
+        state.buffer_upsert(upsert_request(&["written"])).unwrap();
+        state.finish_commit(None).unwrap();
+
+        assert!(matches!(
+            state.prepare_get_request(request(Some(vec!["other"]), None, None)),
+            Err(ConditionalTransactionError::Closed)
+        ));
+        assert_eq!(
+            state.buffer_upsert(upsert_request(&["other"])),
+            Err(ConditionalTransactionError::Closed)
+        );
+        assert_eq!(
+            state.prepare_commit(),
+            Err(ConditionalTransactionError::Closed)
+        );
+        assert_eq!(
+            state.finish_commit(None),
+            Err(ConditionalTransactionError::Closed)
         );
     }
 }
