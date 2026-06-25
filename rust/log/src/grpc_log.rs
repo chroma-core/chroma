@@ -488,6 +488,7 @@ impl GrpcLog {
                     RecordConversionError,
                 >>()?,
             cmek: cmek_proto,
+            condition: None,
         };
 
         let resp = self

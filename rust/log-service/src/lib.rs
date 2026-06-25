@@ -2344,6 +2344,7 @@ impl LogServer {
         Ok(Response::new(PushLogsResponse {
             record_count,
             log_is_sealed: false,
+            first_inserted_record_offset: None,
         }))
     }
 
@@ -5329,6 +5330,7 @@ mod tests {
                     .expect("Logs should be valid"),
                 cmek: None,
                 database_name: db_name.to_string(),
+                condition: None,
             });
             if let Err(err) = server.push_logs(proto_push_log_req).await {
                 if err.code() == Code::Unavailable {
@@ -5366,6 +5368,7 @@ mod tests {
             .expect("operation record should convert to proto")],
             cmek: None,
             database_name: "default_database".to_string(),
+            condition: None,
         };
 
         log_server.faults.inject(
