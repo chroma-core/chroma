@@ -1,0 +1,10 @@
+[package]
+name = "foundation-slack-render"
+version = "0.1.0"
+edition = "2021"
+description = "Shared Slack-message → Markdown rendering primitives for Foundation Slack ingestion (realtime + backfill)."
+license = "Apache-2.0"
+repository = "https://github.com/chroma-core/chroma"
+
+[dependencies]
+chrono = { workspace = true }
