@@ -254,6 +254,10 @@ impl ChromaCollection {
     /// Reads execute immediately and capture a stable OCC read token. Writes are
     /// buffered locally until [`commit`](ConditionalCollectionTransaction::commit)
     /// is awaited. Dropping the returned transaction discards uncommitted writes.
+    ///
+    /// Current conditional transactions are limited to this collection, reject
+    /// reads for IDs with buffered writes, and do not support queries or
+    /// predicate deletes.
     pub fn conditional(&self) -> ConditionalCollectionTransaction {
         ConditionalCollectionTransaction::new(self.clone())
     }
