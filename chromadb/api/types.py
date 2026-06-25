@@ -1235,7 +1235,7 @@ def validate_where(where: Where) -> None:
                 if operator in ["$in", "$nin"]:
                     if not isinstance(operand, list):
                         raise ValueError(
-                            f"Expected operand value to be an list for operator {operator}, got {operand}"
+                            f"Expected operand value to be a list for operator {operator}, got {operand}"
                         )
                 # $contains/$not_contains: scalar operand (checks if array field contains value)
                 if operator in ["$contains", "$not_contains"]:
@@ -1266,7 +1266,7 @@ def validate_where(where: Where) -> None:
 
                 if not isinstance(operand, (str, int, float, bool, list)):
                     raise ValueError(
-                        f"Expected where operand value to be a str, int, float, bool, or list of those type, got {operand}"
+                        f"Expected where operand value to be a str, int, float, bool, or list of those types, got {operand}"
                     )
                 if isinstance(operand, list) and (
                     len(operand) == 0
@@ -1353,7 +1353,7 @@ def validate_n_results(n_results: int) -> int:
     # Check Number of requested results
     if not isinstance(n_results, int):
         raise ValueError(
-            f"Expected requested number of results to be a int, got {n_results}"
+            f"Expected requested number of results to be an int, got {n_results}"
         )
     if n_results <= 0:
         raise TypeError(
@@ -1395,7 +1395,7 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
             np.int64,
         ]:
             raise ValueError(
-                "Expected each value in the embedding to be a int or float, got an embedding with "
+                "Expected each value in the embedding to be an int or float, got an embedding with "
                 f"{embedding.dtype} - {embedding}"
             )
     return embeddings

@@ -578,10 +578,10 @@ class Limit:
         if limit is not None:
             if not isinstance(limit, int):
                 raise TypeError(
-                    f"Limit limit must be an integer, got {type(limit).__name__}"
+                    f"limit must be a positive integer, got {type(limit).__name__}"
                 )
             if limit <= 0:
-                raise ValueError(f"Limit limit must be positive, got {limit}")
+                raise ValueError(f"limit must be positive, got {limit}")
 
         # Check for unexpected keys
         allowed_keys = {"offset", "limit"}
