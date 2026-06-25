@@ -1,16 +1,16 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use setsum::Setsum;
-use tracing::Span;
-
 use chroma_storage::{
     admissioncontrolleds3::StorageRequestPriority, ETag, PutMode, PutOptions, Storage, StorageError,
 };
 use chroma_types::Cmek;
+use setsum::Setsum;
 
 use crate::backoff::ExponentialBackoff;
-use crate::interfaces::{FragmentPointer, FragmentPublisher, ManifestPublisher, UploadResult};
+use crate::interfaces::{
+    AppendWork, FragmentPointer, FragmentPublisher, ManifestPublisher, UploadResult,
+};
 use crate::{Error, FragmentIdentifier, Garbage, LogPosition, LogWriterOptions, ThrottleOptions};
 
 use super::FragmentUploader;
@@ -24,11 +24,7 @@ struct ManagerState {
     backoff: bool,
     next_write: Instant,
     writers_active: usize,
-    enqueued: Vec<(
-        Vec<Vec<u8>>,
-        tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
-        Span,
-    )>,
+    enqueued: Vec<AppendWork>,
     tearing_down: bool,
 }
 
@@ -74,8 +70,8 @@ impl ManagerState {
 
 impl Drop for ManagerState {
     fn drop(&mut self) {
-        for (_, notify, _) in std::mem::take(&mut self.enqueued).into_iter() {
-            let _ = notify.send(Err(Error::LogContentionRetry));
+        for work in std::mem::take(&mut self.enqueued).into_iter() {
+            let _ = work.tx.send(Err(Error::LogContentionRetry));
         }
     }
 }
@@ -137,22 +133,17 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
     type FragmentPointer = FP;
 
     /// Enqueue work to be published.
-    async fn push_work(
-        &self,
-        messages: Vec<Vec<u8>>,
-        tx: tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
-        span: Span,
-    ) {
+    async fn push_work(&self, work: AppendWork) {
         // SAFETY(rescrv): Mutex poisoning.
         let mut state = self.state.lock().unwrap();
         if state.tearing_down {
-            let _ = tx.send(Err(Error::LogContentionRetry));
+            let _ = work.tx.send(Err(Error::LogContentionRetry));
             self.write_finished.notify_one();
         } else if state.backoff {
-            let _ = tx.send(Err(Error::Backoff));
+            let _ = work.tx.send(Err(Error::Backoff));
             self.write_finished.notify_one();
         } else {
-            state.enqueued.push((messages, tx, span));
+            state.enqueued.push(work);
         }
     }
 
@@ -160,17 +151,7 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
     async fn take_work(
         &self,
         manifest_manager: &(dyn ManifestPublisher<Self::FragmentPointer> + Sync),
-    ) -> Result<
-        Option<(
-            Self::FragmentPointer,
-            Vec<(
-                Vec<Vec<u8>>,
-                tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
-                Span,
-            )>,
-        )>,
-        Error,
-    > {
+    ) -> Result<Option<(Self::FragmentPointer, Vec<AppendWork>)>, Error> {
         // SAFETY(rescrv): Mutex poisoning.
         let mut state = self.state.lock().unwrap();
 
@@ -192,9 +173,9 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
         let mut did_split = false;
         // This loop has two sets of exit conditions that are identical, but switched on
         // `short_read`.
-        for (batch, _, _) in state.enqueued.iter() {
-            let cur_count = batch.len();
-            let cur_bytes = batch.iter().map(|r| r.len()).sum::<usize>();
+        for work in state.enqueued.iter() {
+            let cur_count = work.record_count();
+            let cur_bytes = work.byte_count();
             if split_off > 0
                 && acc_bytes + cur_bytes >= self.options.throttle_fragment.batch_size_bytes
             {
@@ -229,7 +210,7 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
             state.backoff = state
                 .enqueued
                 .iter()
-                .map(|(recs, _, _)| recs.iter().map(|r| r.len()).sum::<usize>())
+                .map(AppendWork::byte_count)
                 .sum::<usize>()
                 >= self.options.throttle_fragment.batch_size_bytes;
             self.write_finished.notify_one();
@@ -307,8 +288,8 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
             state.tearing_down = true;
             std::mem::take(&mut state.enqueued)
         };
-        for (_, tx, _) in enqueued {
-            let _ = tx.send(Err(Error::LogContentionRetry));
+        for work in enqueued {
+            let _ = work.tx.send(Err(Error::LogContentionRetry));
         }
     }
 
@@ -477,8 +458,8 @@ mod tests {
     use crate::interfaces::s3::manifest_manager::ManifestManager;
     use crate::interfaces::s3::S3FragmentUploader;
     use crate::{
-        FragmentSeqNo, FragmentUuid, LogWriterOptions, SnapshotOptions, StorageWrapper,
-        ThrottleOptions,
+        AppendOptions, FragmentSeqNo, FragmentUuid, LogWriterOptions, SnapshotOptions,
+        StorageWrapper, ThrottleOptions,
     };
 
     #[tokio::test]
@@ -558,16 +539,32 @@ mod tests {
         .await
         .unwrap();
         let (tx, _rx1) = tokio::sync::oneshot::channel();
+        let options1 = AppendOptions::new(Vec::from("metadata-1"));
         batch_manager
-            .push_work(vec![vec![1]], tx, tracing::Span::current())
+            .push_work(AppendWork::new(
+                vec![vec![1]],
+                Some(options1.clone()),
+                tx,
+                tracing::Span::current(),
+            ))
             .await;
         let (tx, _rx2) = tokio::sync::oneshot::channel();
         batch_manager
-            .push_work(vec![vec![2, 3]], tx, tracing::Span::current())
+            .push_work(AppendWork::new(
+                vec![vec![2, 3]],
+                None,
+                tx,
+                tracing::Span::current(),
+            ))
             .await;
         let (tx, _rx3) = tokio::sync::oneshot::channel();
         batch_manager
-            .push_work(vec![vec![4, 5, 6]], tx, tracing::Span::current())
+            .push_work(AppendWork::new(
+                vec![vec![4, 5, 6]],
+                None,
+                tx,
+                tracing::Span::current(),
+            ))
             .await;
         let ((seq_no, log_position), work) = batch_manager
             .take_work(&manifest_manager)
@@ -578,9 +575,17 @@ mod tests {
         assert_eq!(log_position.offset(), 1);
         assert_eq!(2, work.len());
         // Check batch 1
-        assert_eq!(vec![vec![1]], work[0].0);
+        assert_eq!(vec![vec![1]], work[0].messages);
+        assert_eq!(
+            Some(options1.admission_metadata.as_ref()),
+            work[0]
+                .options
+                .as_ref()
+                .map(|options| options.admission_metadata.as_ref())
+        );
         // Check batch 2
-        assert_eq!(vec![vec![2, 3]], work[1].0);
+        assert_eq!(vec![vec![2, 3]], work[1].messages);
+        assert!(work[1].options.is_none());
     }
 
     struct DualStorageUploader {
