@@ -246,8 +246,15 @@ pub async fn create_attached_function_with_backfill(
         };
         num_backfill_records
     ];
-    log.push_logs(&tenant, database_name, input_collection_id, records, cmek)
-        .await?;
+    log.push_logs(
+        &tenant,
+        database_name,
+        input_collection_id,
+        records,
+        cmek,
+        None,
+    )
+    .await?;
 
     let schema_str = serde_json::to_string(&output_schema)?;
     sysdb

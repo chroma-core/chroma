@@ -5,8 +5,8 @@ use crate::types::CollectionInfo;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_memberlist::client_manager::ClientAssignmentError;
 use chroma_types::{
-    Cmek, CollectionUuid, DatabaseName, ForkCollectionError, ForkLogsResponse, LogRecord,
-    OperationRecord, ResetError, ResetResponse, TopologyName,
+    chroma_proto::PushLogsCondition, Cmek, CollectionUuid, DatabaseName, ForkCollectionError,
+    ForkLogsResponse, LogRecord, OperationRecord, ResetError, ResetResponse, TopologyName,
 };
 use std::fmt::Debug;
 
@@ -48,6 +48,9 @@ pub enum PushLogsError {
         "log needs compaction before accepting more writes; please backoff exponentially and retry"
     )]
     BackoffCompaction,
+    /// Conditional writes are not supported by this log implementation.
+    #[error("conditional writes are not supported by {0} log")]
+    ConditionalWritesUnsupported(&'static str),
     /// Any other push failure.
     #[error(transparent)]
     Other(Box<dyn ChromaError>),
@@ -58,6 +61,7 @@ impl ChromaError for PushLogsError {
         match self {
             PushLogsError::Backoff => ErrorCodes::ResourceExhausted,
             PushLogsError::BackoffCompaction => ErrorCodes::ResourceExhausted,
+            PushLogsError::ConditionalWritesUnsupported(_) => ErrorCodes::Unimplemented,
             PushLogsError::Other(e) => e.code(),
         }
     }
@@ -178,17 +182,28 @@ impl Log {
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
         cmek: Option<Cmek>,
+        condition: Option<PushLogsCondition>,
     ) -> Result<(), PushLogsError> {
         match self {
-            Log::Sqlite(log) => log
-                .push_logs(collection_id, records)
-                .await
-                .map_err(|e| PushLogsError::Other(Box::new(e))),
+            Log::Sqlite(log) => {
+                if condition.is_some() {
+                    return Err(PushLogsError::ConditionalWritesUnsupported("sqlite"));
+                }
+                log.push_logs(collection_id, records)
+                    .await
+                    .map_err(|e| PushLogsError::Other(Box::new(e)))
+            }
             Log::Grpc(log) => log
-                .push_logs(database_name, collection_id, records, cmek)
+                .push_logs(database_name, collection_id, records, cmek, condition)
                 .await
                 .map_err(PushLogsError::from),
-            Log::InMemory(_) => unimplemented!(),
+            Log::InMemory(_) => {
+                if condition.is_some() {
+                    Err(PushLogsError::ConditionalWritesUnsupported("in-memory"))
+                } else {
+                    unimplemented!()
+                }
+            }
         }
     }
 
@@ -374,5 +389,43 @@ impl Log {
             Log::Sqlite(_) => Err(GarbageCollectError::Unimplemented),
             Log::InMemory(_) => Ok(()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chroma_types::Operation;
+
+    #[tokio::test]
+    async fn in_memory_push_logs_rejects_conditional_writes() {
+        let mut log = Log::InMemory(InMemoryLog::new());
+        let err = log
+            .push_logs(
+                "tenant",
+                DatabaseName::new("database").expect("valid database name"),
+                CollectionUuid::new(),
+                vec![OperationRecord {
+                    id: "doc-1".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                }],
+                None,
+                Some(PushLogsCondition {
+                    observed_log_offset: 1,
+                    read_ids: vec![],
+                }),
+            )
+            .await
+            .expect_err("in-memory log should reject conditional writes");
+
+        assert!(matches!(
+            err,
+            PushLogsError::ConditionalWritesUnsupported("in-memory")
+        ));
+        assert_eq!(ErrorCodes::Unimplemented, err.code());
     }
 }

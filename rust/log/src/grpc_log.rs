@@ -16,7 +16,7 @@ use chroma_memberlist::memberlist_provider::{
 };
 use chroma_system::System;
 use chroma_types::chroma_proto::log_service_client::LogServiceClient;
-use chroma_types::chroma_proto::{self, GetAllCollectionInfoToCompactResponse};
+use chroma_types::chroma_proto::{self, GetAllCollectionInfoToCompactResponse, PushLogsCondition};
 use chroma_types::{
     Cmek, CollectionUuid, DatabaseName, ForkLogsResponse, LogRecord, OperationRecord,
     RecordConversionError, TopologyName,
@@ -472,6 +472,7 @@ impl GrpcLog {
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
         cmek: Option<Cmek>,
+        condition: Option<PushLogsCondition>,
     ) -> Result<(), GrpcPushLogsError> {
         let num_records = records.len();
 
@@ -488,7 +489,7 @@ impl GrpcLog {
                     RecordConversionError,
                 >>()?,
             cmek: cmek_proto,
-            condition: None,
+            condition,
         };
 
         let resp = self
