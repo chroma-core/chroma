@@ -33,7 +33,7 @@ from chromadb.utils.embedding_functions import (
 from chromadb.api.models.Collection import Collection
 from chromadb.api.models.CollectionCommon import CollectionCommon
 from chromadb.errors import InvalidArgumentError
-from chromadb.execution.expression import Knn, Search
+from chromadb.execution.expression import Knn, Rrf, Search
 from chromadb.types import Collection as CollectionModel
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, cast
 from uuid import uuid4
@@ -519,7 +519,7 @@ def test_sparse_vector_not_allowed_locally(
 def test_sparse_vector_source_key_and_index_constraints(
     client_factories: "ClientFactories",
 ) -> None:
-    """Sparse vector configs honor source key embedding and single-index enforcement."""
+    """Sparse vector configs honor source key embedding; multiple indices allowed."""
     sparse_ef = DeterministicSparseEmbeddingFunction(label="source-test")
 
     schema = Schema()
@@ -563,11 +563,22 @@ def test_sparse_vector_source_key_and_index_constraints(
     assert len(search_result["ids"]) == 1
     assert "sparse-1" in search_result["ids"][0]
 
+    # source_key without an embedding function is still rejected.
     with pytest.raises(ValueError):
         collection.schema.create_index(
-            key="another_sparse",
+            key="invalid_sparse",
             config=SparseVectorIndexConfig(source_key="raw_text"),
         )
+
+    # A second sparse vector index is now allowed (multiple sparse indices).
+    collection.schema.create_index(
+        key="another_sparse",
+        config=SparseVectorIndexConfig(
+            source_key="raw_text",
+            embedding_function=sparse_ef,
+        ),
+    )
+    assert "another_sparse" in collection.schema.keys
 
     string_filter = collection.get(where={"tag_b": "fruit"})
     assert set(string_filter["ids"]) == {"sparse-1"}
@@ -1139,6 +1150,139 @@ def test_schema_embedding_configuration_enforced(
     numeric_metadata = numeric_meta["metadatas"][0]
     assert numeric_metadata is not None
     assert "sparse_auto" not in numeric_metadata
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_multiple_sparse_vector_indices_e2e(
+    client_factories: "ClientFactories",
+) -> None:
+    """Two sparse indices coexist, index independently, and fuse via arithmetic/RRF."""
+    schema = Schema()
+    schema.create_index(key="sparse_a", config=SparseVectorIndexConfig())
+    schema.create_index(key="sparse_b", config=SparseVectorIndexConfig())
+
+    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+
+    assert collection.schema is not None
+    assert "sparse_a" in collection.schema.keys
+    assert "sparse_b" in collection.schema.keys
+
+    # doc-1 is the strong match on sparse_a and weak on sparse_b; doc-2 is the
+    # inverse. The query vector is identical for both keys, so any difference in
+    # ranking proves each key is backed by an independent sparse index.
+    collection.add(
+        ids=["doc-1", "doc-2"],
+        documents=["first", "second"],
+        metadatas=[
+            {
+                "sparse_a": SparseVector(indices=[0], values=[5.0]),
+                "sparse_b": SparseVector(indices=[0], values=[1.0]),
+            },
+            {
+                "sparse_a": SparseVector(indices=[0], values=[1.0]),
+                "sparse_b": SparseVector(indices=[0], values=[5.0]),
+            },
+        ],
+    )
+
+    # Both records should carry both sparse vectors.
+    stored = collection.get(ids=["doc-1"], include=["metadatas"])
+    assert stored["metadatas"] is not None
+    stored_meta = stored["metadatas"][0]
+    assert stored_meta is not None
+    assert "sparse_a" in stored_meta
+    assert "sparse_b" in stored_meta
+
+    query = SparseVector(indices=[0], values=[1.0])
+
+    result_a = collection.search(
+        Search().rank(Knn(key="sparse_a", query=cast(Any, query))).limit(10)
+    )
+    ids_a = result_a["ids"][0]
+    assert set(ids_a) == {"doc-1", "doc-2"}
+    assert ids_a.index("doc-1") < ids_a.index("doc-2")
+
+    result_b = collection.search(
+        Search().rank(Knn(key="sparse_b", query=cast(Any, query))).limit(10)
+    )
+    ids_b = result_b["ids"][0]
+    assert set(ids_b) == {"doc-1", "doc-2"}
+    assert ids_b.index("doc-2") < ids_b.index("doc-1")
+
+    # Arithmetic fusion across both sparse indices returns both records.
+    fused = collection.search(
+        Search()
+        .rank(
+            Knn(key="sparse_a", query=cast(Any, query)) * 0.7
+            + Knn(key="sparse_b", query=cast(Any, query)) * 0.3
+        )
+        .limit(10)
+    )
+    assert set(fused["ids"][0]) == {"doc-1", "doc-2"}
+
+    # RRF fusion across both sparse indices also returns both records.
+    rrf_result = collection.search(
+        Search()
+        .rank(
+            Rrf(
+                ranks=[
+                    Knn(key="sparse_a", query=cast(Any, query), return_rank=True),
+                    Knn(key="sparse_b", query=cast(Any, query), return_rank=True),
+                ]
+            )
+        )
+        .limit(10)
+    )
+    assert set(rrf_result["ids"][0]) == {"doc-1", "doc-2"}
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_combined_sparse_knn_rejects_unindexed_key(
+    client_factories: "ClientFactories",
+) -> None:
+    """A rank combining an indexed sparse key with an unindexed key is rejected."""
+    schema = Schema()
+    schema.create_index(key="sparse_indexed", config=SparseVectorIndexConfig())
+
+    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+
+    assert collection.schema is not None
+    assert "sparse_indexed" in collection.schema.keys
+    assert "sparse_unindexed" not in collection.schema.keys
+
+    collection.add(
+        ids=["doc-1"],
+        documents=["first"],
+        metadatas=[{"sparse_indexed": SparseVector(indices=[0], values=[1.0])}],
+    )
+
+    query = SparseVector(indices=[0], values=[1.0])
+
+    # The indexed key alone is queryable.
+    indexed_only = collection.search(
+        Search().rank(Knn(key="sparse_indexed", query=cast(Any, query))).limit(10)
+    )
+    assert "doc-1" in indexed_only["ids"][0]
+
+    # Combining the indexed key with an unindexed key rejects the whole search,
+    # naming the unindexed key.
+    with pytest.raises(InvalidArgumentError) as combined_exc:
+        collection.search(
+            Search()
+            .rank(
+                Knn(key="sparse_indexed", query=cast(Any, query))
+                + Knn(key="sparse_unindexed", query=cast(Any, query))
+            )
+            .limit(10)
+        )
+    assert "sparse_unindexed" in str(combined_exc.value)
+
+    # Querying the unindexed key on its own is rejected as well.
+    with pytest.raises(InvalidArgumentError) as single_exc:
+        collection.search(
+            Search().rank(Knn(key="sparse_unindexed", query=cast(Any, query))).limit(10)
+        )
+    assert "sparse_unindexed" in str(single_exc.value)
 
 
 def test_schema_precedence_for_overrides_discoverables_and_defaults(
@@ -2837,7 +2981,5 @@ def test_fts_disabled_search_api_blocks_document_filter(
     )
 
     with pytest.raises(InvalidArgumentError) as exc_info:
-        collection.search(
-            Search(where=Key.DOCUMENT.contains("alpha"))
-        )
+        collection.search(Search(where=Key.DOCUMENT.contains("alpha")))
     assert "fts" in str(exc_info.value).lower()
