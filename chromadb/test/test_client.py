@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Callable, Generator, cast, Dict, Tuple
+from typing import Any, Awaitable, Callable, Generator, cast, Dict, Tuple
 from unittest.mock import MagicMock, patch
 import chromadb
 from chromadb.config import Settings, System
@@ -34,6 +34,20 @@ def persistent_api() -> Generator[ClientAPI, None, None]:
 HttpAPIFactory = Callable[..., ClientAPI]
 
 
+def _run_async(coro: Awaitable[Any]) -> Any:
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    if loop.is_closed():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    return loop.run_until_complete(coro)
+
+
 @pytest.fixture(params=["sync_client", "async_client"])
 def http_api_factory(
     request: pytest.FixtureRequest,
@@ -47,9 +61,7 @@ def http_api_factory(
             with patch("chromadb.api.async_client.AsyncClient.get_user_identity"):
 
                 def factory(*args: Any, **kwargs: Any) -> Any:
-                    cls = asyncio.get_event_loop().run_until_complete(
-                        chromadb.AsyncHttpClient(*args, **kwargs)
-                    )
+                    cls = _run_async(chromadb.AsyncHttpClient(*args, **kwargs))
                     return cls
 
                 yield cast(HttpAPIFactory, factory)
@@ -87,30 +99,33 @@ def test_http_client(http_api: ClientAPI) -> None:
 def test_http_client_with_inconsistent_host_settings(
     http_api_factory: HttpAPIFactory,
 ) -> None:
-    try:
+    # asyncio.run() leaves Python 3.9 without a current event loop.
+    asyncio.run(asyncio.sleep(0))
+
+    with pytest.raises(ValueError) as e:
         http_api_factory(settings=Settings(chroma_server_host="127.0.0.1"))
-    except ValueError as e:
-        assert (
-            str(e)
-            == "Chroma server host provided in settings[127.0.0.1] is different to the one provided in HttpClient: [localhost]"
-        )
+
+    assert (
+        str(e.value)
+        == "Chroma server host provided in settings[127.0.0.1] is different to the one provided in HttpClient: [localhost]"
+    )
 
 
 def test_http_client_with_inconsistent_port_settings(
     http_api_factory: HttpAPIFactory,
 ) -> None:
-    try:
+    with pytest.raises(ValueError) as e:
         http_api_factory(
             port=8002,
             settings=Settings(
                 chroma_server_http_port=8001,
             ),
         )
-    except ValueError as e:
-        assert (
-            str(e)
-            == "Chroma server http port provided in settings[8001] is different to the one provided in HttpClient: [8002]"
-        )
+
+    assert (
+        str(e.value)
+        == "Chroma server http port provided in settings[8001] is different to the one provided in HttpClient: [8002]"
+    )
 
 
 def make_sync_client_factory() -> Tuple[Callable[..., Any], Dict[str, Any]]:
