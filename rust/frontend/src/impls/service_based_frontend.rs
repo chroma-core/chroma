@@ -467,7 +467,6 @@ impl ServiceBasedFrontend {
                 let provider = self.collections_with_segments_provider.clone();
                 let database_name = database_name.clone();
                 let original_limit = original_limit.clone();
-                let stale_read_token = stale_read_token;
                 async move {
                     Box::pin(executor.get(shard_plan.clone(), move |code: tonic::Code| {
                         let mut provider = provider.clone();
