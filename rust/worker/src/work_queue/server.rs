@@ -1,10 +1,11 @@
 use crate::config::RootConfig;
-use crate::work_queue::work_queue_manager::WorkQueueManager;
+use crate::work_queue::work_queue_manager::{WorkQueueManager, WorkQueueReadyMessage};
 use crate::work_queue::work_queue_server::WorkQueueServer;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
+use chroma_types::chroma_proto::work_queue_service_server::WorkQueueServiceServer;
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
@@ -63,7 +64,28 @@ pub async fn service_entrypoint() {
     let port = service_config.my_port;
 
     // Create health service for readiness probe
-    let (_health_reporter, health_service) = tonic_health::server::health_reporter();
+    let (health_reporter, health_service) = tonic_health::server::health_reporter();
+    health_reporter
+        .set_service_status("", tonic_health::ServingStatus::NotServing)
+        .await;
+    health_reporter
+        .set_not_serving::<WorkQueueServiceServer<WorkQueueServer>>()
+        .await;
+    tokio::spawn(async move {
+        match work_queue_handle.request(WorkQueueReadyMessage, None).await {
+            Ok(()) => {
+                health_reporter
+                    .set_service_status("", tonic_health::ServingStatus::Serving)
+                    .await;
+                health_reporter
+                    .set_serving::<WorkQueueServiceServer<WorkQueueServer>>()
+                    .await;
+            }
+            Err(err) => {
+                tracing::error!("Work queue manager failed readiness check: {:?}", err);
+            }
+        }
+    });
 
     let addr = format!("0.0.0.0:{}", port).parse().unwrap();
 
