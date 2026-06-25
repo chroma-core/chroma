@@ -3,15 +3,12 @@ description: Set up Tilt prereqs and pre-build/pull images
 runs:
   using: "composite"
   steps:
-    - name: Start minikube
-      uses: medyagh/setup-minikube@latest
-      with:
-        driver: none # uses Docker engine on host instead of Docker-in-Docker
     # tilt ci can automatically build images while bringing up the cluster. However, this results in flaky runs for our usage so we split up image building and pod deployment into separate steps. See https://github.com/chroma-core/chroma/pull/4720.
     - name: Install Tilt, bake images, pre-pull external images
       shell: bash
       env:
         TILT_VERSION: "0.34.2"
+        IMAGE_BUILD_PARALLELISM: "4"
       run: |
         install_tilt() (
           set -euo pipefail
@@ -32,8 +29,44 @@ runs:
         )
         export -f install_tilt
 
+        bake_images() (
+          set -euo pipefail
+
+          local targets=(
+            rust-log-service
+            rust-sysdb-service
+            sysdb
+            sysdb-migration
+            rust-sysdb-migration
+            rust-frontend-service
+            query-service
+            compactor-service
+            garbage-collector
+            load-service
+            work-queue-service
+            fn-consumer
+          )
+
+          if ! [[ "${IMAGE_BUILD_PARALLELISM}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "IMAGE_BUILD_PARALLELISM must be a positive integer, got '${IMAGE_BUILD_PARALLELISM}'" >&2
+            exit 1
+          fi
+
+          local total="${#targets[@]}"
+          for ((i = 0; i < total; i += IMAGE_BUILD_PARALLELISM)); do
+            local batch=("${targets[@]:i:IMAGE_BUILD_PARALLELISM}")
+            echo "Building image batch: ${batch[*]}"
+            docker buildx bake -f "${{ github.action_path }}/docker-bake.hcl" --load "${batch[@]}"
+          done
+        )
+        export -f bake_images
+
         parallel --tag --linebuffer ::: \
           "bash -c install_tilt" \
-          "docker buildx bake -f ${{ github.action_path }}/docker-bake.hcl --load" \
+          "bash -c bake_images" \
           "bash ${{ github.action_path }}/pull_external_images.sh"
       working-directory: ${{ github.action_path }}/../../../ # this allows other repos to reuse this workflow when this repo may not be the current working directory
+    - name: Start minikube
+      uses: medyagh/setup-minikube@latest
+      with:
+        driver: none # uses Docker engine on host instead of Docker-in-Docker

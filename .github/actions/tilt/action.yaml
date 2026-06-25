@@ -5,6 +5,24 @@ runs:
   steps:
     - name: Tilt Setup & Pre-Build
       uses: ./.github/actions/tilt-setup-prebuild
+    - name: Check minikube status
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        dump_status() {
+          echo "::group::minikube diagnostics"
+          minikube status || true
+          kubectl cluster-info || true
+          kubectl get nodes -o wide || true
+          kubectl get pods --all-namespaces || true
+          echo "::endgroup::"
+        }
+        trap dump_status ERR
+
+        minikube status
+        kubectl version --request-timeout=30s
+        kubectl wait --for=condition=Ready node --all --timeout=120s
     - name: Start Tilt
       shell: bash
       run: tilt ci --timeout 10m
