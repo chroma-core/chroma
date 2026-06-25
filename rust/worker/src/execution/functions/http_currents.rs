@@ -6,6 +6,7 @@ use chroma_types::{AttachedFunction, Chunk, LogRecord};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::execution::functions::trace_headers::current_trace_headers;
 use crate::execution::operators::execute_task::{AttachedFunctionExecutor, HydratedInputBatch};
 
 const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
@@ -143,6 +144,7 @@ impl HttpCurrentsExecutor {
         let response = self
             .client
             .post(&currents_url)
+            .headers(current_trace_headers())
             .header("Modal-Key", &self.modal_key)
             .header("Modal-Secret", &self.modal_secret)
             .json(request_body)
