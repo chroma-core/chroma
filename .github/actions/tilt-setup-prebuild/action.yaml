@@ -4,6 +4,12 @@ runs:
   using: "composite"
   steps:
     # tilt ci can automatically build images while bringing up the cluster. However, this results in flaky runs for our usage so we split up image building and pod deployment into separate steps. See https://github.com/chroma-core/chroma/pull/4720.
+    # NOTE(rescrv):  This breaks up the build into chunks of IMAGE_BUILD_PARALLELISM images at a
+    # time.  Empirically it makes a difference to the reliability of the start tilt.  Prior to this
+    # change a 16 PR stack would fail to bring up tilt on at least one test for most PRs in the
+    # stack, with some PRs having multiple flakes.  With this change I've restacked the same PRs
+    # several times and have had just one flake.  A 10-20x reduction for making bake_images below
+    # invoke docker buildx bake in chunks.
     - name: Install Tilt, bake images, pre-pull external images
       shell: bash
       env:
