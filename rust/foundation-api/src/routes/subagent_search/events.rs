@@ -132,6 +132,23 @@ pub(crate) struct RankedDocument {
     pub justification: String,
 }
 
+impl RankedDocument {
+    /// The source page slug, derived from the chunk id (`{slug}-{chunk_id}`) by
+    /// dropping the trailing numeric chunk suffix — this is what a citation link
+    /// resolves against, not the per-chunk id. Falls back to the full id when it
+    /// carries no numeric suffix.
+    pub(crate) fn slug(&self) -> &str {
+        match self.id.rsplit_once('-') {
+            Some((slug, chunk))
+                if !chunk.is_empty() && chunk.bytes().all(|b| b.is_ascii_digit()) =>
+            {
+                slug
+            }
+            _ => &self.id,
+        }
+    }
+}
+
 /// Failure to turn a completed subagent stream into structured results. An
 /// answer that parses to zero documents is *not* an error — it is a valid
 /// empty result — so the only failure is the absence of any terminal answer.
