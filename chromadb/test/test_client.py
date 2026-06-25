@@ -68,6 +68,38 @@ def http_api_factory(
 
 
 @pytest.fixture()
+def no_current_event_loop() -> Generator[None, None, None]:
+    """Exercise async-client construction when no event loop is installed.
+
+    These tests are parameterized over sync and async HTTP clients. The async
+    factory uses _run_async(), which intentionally creates and installs an
+    event loop when asyncio.get_event_loop() raises RuntimeError. Apply this
+    state consistently to both inconsistent-settings tests so they exercise the
+    same setup and do not depend on whichever event-loop state a previous test
+    happened to leave behind.
+    """
+    try:
+        previous_loop = asyncio.get_event_loop()
+    except RuntimeError:
+        previous_loop = None
+
+    asyncio.set_event_loop(None)
+    try:
+        yield
+    finally:
+        # _run_async() may have installed a new loop; close it before restoring
+        # the loop that was present before the fixture ran.
+        try:
+            current_loop = asyncio.get_event_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if current_loop is not None and current_loop is not previous_loop:
+            current_loop.close()
+        asyncio.set_event_loop(previous_loop)
+
+
+@pytest.fixture()
 def http_api(http_api_factory: HttpAPIFactory) -> Generator[ClientAPI, None, None]:
     if os.environ.get("CHROMA_SERVER_HTTP_PORT") is not None:
         port = int(os.environ.get("CHROMA_SERVER_HTTP_PORT"))  # type: ignore
@@ -96,12 +128,10 @@ def test_http_client(http_api: ClientAPI) -> None:
     )
 
 
+@pytest.mark.usefixtures("no_current_event_loop")
 def test_http_client_with_inconsistent_host_settings(
     http_api_factory: HttpAPIFactory,
 ) -> None:
-    # asyncio.run() leaves Python 3.9 without a current event loop.
-    asyncio.run(asyncio.sleep(0))
-
     with pytest.raises(ValueError) as e:
         http_api_factory(settings=Settings(chroma_server_host="127.0.0.1"))
 
@@ -111,6 +141,7 @@ def test_http_client_with_inconsistent_host_settings(
     )
 
 
+@pytest.mark.usefixtures("no_current_event_loop")
 def test_http_client_with_inconsistent_port_settings(
     http_api_factory: HttpAPIFactory,
 ) -> None:
