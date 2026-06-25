@@ -96,6 +96,18 @@ pub enum Log {
 }
 
 impl Log {
+    pub fn implementation_name(&self) -> &'static str {
+        match self {
+            Log::Sqlite(_) => "sqlite",
+            Log::Grpc(_) => "grpc",
+            Log::InMemory(_) => "in-memory",
+        }
+    }
+
+    pub fn supports_conditional_transactions(&self) -> bool {
+        matches!(self, Log::Grpc(_))
+    }
+
     #[tracing::instrument(skip(self))]
     pub async fn read(
         &mut self,
