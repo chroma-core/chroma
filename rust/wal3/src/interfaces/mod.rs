@@ -732,6 +732,7 @@ pub trait ManifestPublisher<FP: FragmentPointer>: Send + Sync + 'static {
     /// the fragment during upload. For single-region deployments, this is empty (all regions
     /// are implied). For multi-region deployments, only these regions should be recorded as
     /// having the fragment.
+    #[allow(clippy::too_many_arguments)]
     async fn publish_fragment(
         &self,
         pointer: &FP,
