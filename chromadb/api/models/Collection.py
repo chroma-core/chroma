@@ -32,6 +32,9 @@ from chromadb.api.functions import Function
 
 if TYPE_CHECKING:
     from chromadb.api.models.AttachedFunction import AttachedFunction
+    from chromadb.api.models.ConditionalCollectionTransaction import (
+        ConditionalCollectionTransaction,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +43,13 @@ if TYPE_CHECKING:
 
 
 class Collection(CollectionCommon["ServerAPI"]):
+    def conditional(self) -> "ConditionalCollectionTransaction":
+        from chromadb.api.models.ConditionalCollectionTransaction import (
+            ConditionalCollectionTransaction,
+        )
+
+        return ConditionalCollectionTransaction(self)
+
     def count(self, read_level: ReadLevel = ReadLevel.INDEX_AND_WAL) -> int:
         """Return the number of records in the collection.
 

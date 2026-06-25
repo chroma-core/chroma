@@ -12,6 +12,7 @@ from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from chromadb.api.types import (
     CollectionMetadata,
+    ConditionalCommitResult,
     DeleteResult,
     Documents,
     Embeddable,
@@ -267,6 +268,96 @@ class AsyncBaseAPI(ABC):
             DeleteResult: A dict containing the number of records deleted.
         """
         pass
+
+    async def _begin_conditional_transaction(self) -> object:
+        raise NotImplementedError(
+            "Conditional transactions are not supported by this Chroma API"
+        )
+
+    async def _conditional_get(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocuments,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
+        raise NotImplementedError(
+            "Conditional transactions are not supported by this Chroma API"
+        )
+
+    async def _conditional_add(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        raise NotImplementedError(
+            "Conditional transactions are not supported by this Chroma API"
+        )
+
+    async def _conditional_update(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        raise NotImplementedError(
+            "Conditional transactions are not supported by this Chroma API"
+        )
+
+    async def _conditional_upsert(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        raise NotImplementedError(
+            "Conditional transactions are not supported by this Chroma API"
+        )
+
+    async def _conditional_delete(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        raise NotImplementedError(
+            "Conditional transactions are not supported by this Chroma API"
+        )
+
+    async def _conditional_commit(
+        self,
+        transaction: object,
+    ) -> ConditionalCommitResult:
+        raise NotImplementedError(
+            "Conditional transactions are not supported by this Chroma API"
+        )
 
     @abstractmethod
     async def _query(

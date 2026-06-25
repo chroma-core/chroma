@@ -36,6 +36,7 @@ from chromadb.telemetry.product.events import (
 )
 
 from chromadb.api.types import (
+    ConditionalCommitResult,
     DeleteResult,
     IncludeMetadataDocuments,
     IncludeMetadataDocumentsDistances,
@@ -636,6 +637,150 @@ class RustBindingsAPI(ServerAPI):
         )
 
         return DeleteResult(deleted=deleted)
+
+    @override
+    def _begin_conditional_transaction(self) -> object:
+        return self.bindings.begin_conditional_transaction()
+
+    @override
+    def _conditional_get(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocuments,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
+        rust_response = self.bindings.conditional_get(
+            transaction,
+            str(collection_id),
+            ids,
+            json.dumps(where) if where else None,
+            limit,
+            offset or 0,
+            json.dumps(where_document) if where_document else None,
+            include,
+            tenant,
+            database,
+        )
+
+        return GetResult(
+            ids=rust_response.ids,
+            embeddings=rust_response.embeddings,
+            documents=rust_response.documents,
+            uris=rust_response.uris,
+            included=include,
+            data=None,
+            metadatas=rust_response.metadatas,
+        )
+
+    @override
+    def _conditional_add(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        return self.bindings.conditional_add(
+            transaction,
+            ids,
+            str(collection_id),
+            embeddings,
+            metadatas,
+            documents,
+            uris,
+            tenant,
+            database,
+        )
+
+    @override
+    def _conditional_update(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        return self.bindings.conditional_update(
+            transaction,
+            str(collection_id),
+            ids,
+            embeddings,
+            metadatas,
+            documents,
+            uris,
+            tenant,
+            database,
+        )
+
+    @override
+    def _conditional_upsert(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        return self.bindings.conditional_upsert(
+            transaction,
+            str(collection_id),
+            ids,
+            embeddings,
+            metadatas,
+            documents,
+            uris,
+            tenant,
+            database,
+        )
+
+    @override
+    def _conditional_delete(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        return self.bindings.conditional_delete(
+            transaction,
+            str(collection_id),
+            ids,
+            tenant,
+            database,
+        )
+
+    @override
+    def _conditional_commit(
+        self,
+        transaction: object,
+    ) -> ConditionalCommitResult:
+        result = self.bindings.conditional_commit(transaction)
+        return ConditionalCommitResult(
+            first_inserted_record_offset=result.first_inserted_record_offset,
+            record_count=result.record_count,
+        )
 
     @override
     def reset(self) -> bool:

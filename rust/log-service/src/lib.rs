@@ -36,7 +36,7 @@ use chroma_types::chroma_proto::{
 };
 use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
 use chroma_types::dirty_log_path_from_hostname;
-use chroma_types::Cmek;
+use chroma_types::{Cmek, CONDITIONAL_WRITE_CONFLICT_MESSAGE};
 use chroma_types::{CollectionUuid, DatabaseName, DirtyMarker, Topology};
 use chroma_types::{MultiCloudMultiRegionConfiguration, ProviderRegion, RegionName, TopologyName};
 use figment::providers::{Env, Format, Yaml};
@@ -81,9 +81,6 @@ use crate::state_hash_table::StateHashTable;
 
 /// The gRPC metadata key for the backoff reason.
 const BACKOFF_REASON_MD_KEY: &str = "backoff-reason";
-
-/// A stable message clients can use to identify conditional write conflicts.
-const CONDITIONAL_WRITE_CONFLICT_MESSAGE: &str = "conditional write conflict";
 
 /// Bound conditional push retries after a stale required fragment start.
 const CONDITIONAL_PUSH_MAX_RETRIES: usize = 3;
