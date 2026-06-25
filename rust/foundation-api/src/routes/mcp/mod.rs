@@ -41,6 +41,9 @@ const PROTECTED_RESOURCE_METADATA_PATH: &str =
 const FOUNDATION_SCOPE: &str = "foundation";
 const MCP_SERVER_NAME: &str = "Foundation MCP";
 const MCP_SERVER_VERSION: &str = "0.1.0";
+/// Icon advertised to MCP clients, served as raw bytes from the public repo.
+const MCP_SERVER_ICON_URL: &str =
+    "https://raw.githubusercontent.com/chroma-core/chroma/main/rust/foundation-api/assets/mcp-logo.png";
 
 /// Builds the MCP routes. Unlike the JSON routes this needs the server value up
 /// front: the rmcp [`StreamableHttpService`] is constructed once here (it is

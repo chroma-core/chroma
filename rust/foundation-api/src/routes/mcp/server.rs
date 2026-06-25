@@ -6,7 +6,7 @@ use axum::http::{request::Parts, HeaderMap};
 use mdac::ScorecardGuard;
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{CallToolResult, Content, Implementation, ServerCapabilities, ServerInfo},
+    model::{CallToolResult, Content, Icon, Implementation, ServerCapabilities, ServerInfo},
     schemars,
     service::RequestContext,
     tool, tool_handler, tool_router, RoleServer, ServerHandler,
@@ -26,7 +26,7 @@ use crate::{
     server::FoundationApiServer,
 };
 
-use super::{MCP_SERVER_NAME, MCP_SERVER_VERSION};
+use super::{MCP_SERVER_ICON_URL, MCP_SERVER_NAME, MCP_SERVER_VERSION};
 
 #[derive(Clone)]
 pub(super) struct FoundationMcpServer {
@@ -230,8 +230,13 @@ impl FoundationMcpServer {
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for FoundationMcpServer {
     fn get_info(&self) -> ServerInfo {
+        let implementation = Implementation::new(MCP_SERVER_NAME, MCP_SERVER_VERSION).with_icons(
+            vec![Icon::new(MCP_SERVER_ICON_URL)
+                .with_mime_type("image/png")
+                .with_sizes(vec!["256x256".to_string()])],
+        );
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(Implementation::new(MCP_SERVER_NAME, MCP_SERVER_VERSION))
+            .with_server_info(implementation)
             .with_instructions(
                 "Foundation is an organization-wide wiki built by synthesizing a \
                  company's own data — its documentation, Slack chats, GitHub code, \
