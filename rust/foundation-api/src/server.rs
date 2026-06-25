@@ -141,6 +141,7 @@ impl FoundationApiServer {
         let app = Router::new()
             .merge(system_router::<FoundationApiServer>())
             .merge(routes::router())
+            .merge(routes::mcp::router(self.clone()))
             .with_state(self)
             .layer(DefaultBodyLimit::max(max_payload_size_bytes))
             .layer(axum::middleware::from_fn(

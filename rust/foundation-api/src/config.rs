@@ -78,6 +78,14 @@ pub struct FoundationConfig {
     /// `subagent_search` route is disabled when unset.
     #[serde(default)]
     pub deep_research_api_url: Option<String>,
+    /// Public origin for this service as seen by browser-based clients.
+    /// MCP resource metadata derives route URLs from this origin.
+    #[serde(default)]
+    pub api_public_origin: Option<String>,
+    /// Public dashboard-api issuer URL that hosts the OAuth authorization
+    /// server metadata and token endpoints for the Foundation MCP resource.
+    #[serde(default)]
+    pub mcp_authorization_server_url: Option<String>,
 }
 
 impl FoundationConfig {
@@ -133,6 +141,8 @@ impl Default for FoundationConfig {
             function_endpoint_url: None,
             min_records_for_invocation: Self::default_min_records_for_invocation(),
             deep_research_api_url: None,
+            api_public_origin: None,
+            mcp_authorization_server_url: None,
         }
     }
 }

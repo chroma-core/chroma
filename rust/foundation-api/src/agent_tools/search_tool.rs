@@ -7,6 +7,7 @@
 //! the toolset; the model only supplies the query and an optional limit.
 
 use async_trait::async_trait;
+use chroma::types::GroupBy;
 use chroma::ChromaCollection;
 use chroma_types::operator::SearchRecord;
 use schemars::JsonSchema;
@@ -72,6 +73,7 @@ impl Tool for SearchTool {
             &self.token,
             &params.query,
             limit,
+            GroupBy::default(),
         )
         .await
         .map_err(|err| AgentError::Tool(err.to_string()))?;
