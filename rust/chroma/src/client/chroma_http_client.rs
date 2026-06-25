@@ -75,6 +75,15 @@ pub enum ChromaHttpClientError {
     /// The configured embedding function failed.
     #[error("Embedding function error: {0}")]
     EmbeddingFunctionError(String),
+    /// Conditional transaction state validation failed before a request was sent.
+    #[error("Conditional transaction error: {0}")]
+    ConditionalTransactionError(#[from] chroma_types::ConditionalTransactionError),
+    /// A transactional read token was stale or invalid.
+    #[error("Stale read error: {0}")]
+    StaleReadError(#[from] chroma_types::StaleReadError),
+    /// Manual commit was attempted inside a `run` callback.
+    #[error("txn.commit() cannot be called inside run()")]
+    ConditionalCommitInsideRun,
 }
 
 impl From<WhereError> for ChromaHttpClientError {
@@ -139,7 +148,10 @@ impl FailurePredicate<ChromaHttpClientError> for BackendFailurePredicate {
             | ChromaHttpClientError::InvalidWhere
             | ChromaHttpClientError::MissingEmbeddingFunction
             | ChromaHttpClientError::MissingDocumentsForEmbedding
-            | ChromaHttpClientError::EmbeddingFunctionError(_) => false,
+            | ChromaHttpClientError::EmbeddingFunctionError(_)
+            | ChromaHttpClientError::ConditionalTransactionError(_)
+            | ChromaHttpClientError::StaleReadError(_)
+            | ChromaHttpClientError::ConditionalCommitInsideRun => false,
         }
     }
 }
