@@ -1,14 +1,22 @@
 import asyncio
+import os
 from typing import Any, Dict, List, Union
 from uuid import uuid4
 
 import pytest
+
+from chromadb.api import ClientAPI
 from chromadb.api.client import Client as ClientCreator
 from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import ConditionalCommitResult, GetResult
 from chromadb.config import System
-from chromadb.errors import BackoffError, ConditionalWriteConflictError, StaleReadError
+from chromadb.errors import (
+    BackoffError,
+    ConditionalWriteConflictError,
+    InvalidArgumentError,
+    StaleReadError,
+)
 from chromadb.types import Collection as CollectionModel
 
 
@@ -143,6 +151,22 @@ def test_sync_conditional_transaction_routes_to_internal_hooks() -> None:
         "commit",
     ]
     assert client.calls[-1] == ("commit", {"transaction": client.transaction})
+
+
+@pytest.mark.skipif(
+    os.getenv("CHROMA_RUST_BINDINGS_TEST_ONLY") != "1",
+    reason="Rust bindings support check only runs in rust-bindings test mode",
+)
+def test_rust_bindings_conditional_transactions_require_grpc_log(
+    client: ClientAPI,
+) -> None:
+    collection = client.create_collection(
+        name=f"conditional_unsupported_{uuid4().hex}",
+        embedding_function=None,
+    )
+
+    with pytest.raises(InvalidArgumentError, match="gRPC log implementation"):
+        collection.conditional()
 
 
 def test_async_conditional_transaction_routes_to_internal_hooks() -> None:

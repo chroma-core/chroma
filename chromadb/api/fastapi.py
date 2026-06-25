@@ -1,6 +1,6 @@
 import orjson
 import logging
-from typing import Any, Dict, Mapping, Optional, cast, Tuple, List, NoReturn
+from typing import Any, Dict, Mapping, Optional, cast, Tuple, List
 from typing import Sequence
 from uuid import UUID
 import httpx
@@ -15,6 +15,10 @@ from chromadb.api.collection_configuration import (
     update_collection_configuration_to_json,
     create_collection_configuration_to_json,
 )
+from chromadb.api.conditional_http import (
+    ConditionalHttpTransaction,
+    require_conditional_http_transaction,
+)
 from chromadb import __version__
 from chromadb.api.base_http_client import BaseHTTPClient
 from chromadb.types import Database, Tenant, Collection as CollectionModel
@@ -22,7 +26,6 @@ from chromadb.api import ServerAPI
 from chromadb.execution.expression.plan import Search
 
 from chromadb.api.types import (
-    ConditionalCommitResult,
     DeleteResult,
     Documents,
     Embeddings,
@@ -39,6 +42,7 @@ from chromadb.api.types import (
     QueryResult,
     SearchResult,
     CollectionMetadata,
+    ConditionalCommitResult,
     validate_batch,
     convert_np_embeddings_to_list,
     IncludeMetadataDocuments,
@@ -554,6 +558,11 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             },
         )
 
+        return self._get_result_from_json(resp_json, include)
+
+    def _get_result_from_json(
+        self, resp_json: Dict[str, Any], include: Include
+    ) -> GetResult:
         # Deserialize metadatas: convert transport format to SparseVector instances
         metadatas = resp_json.get("metadatas", None)
         if metadatas is not None:
@@ -571,6 +580,50 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             uris=resp_json.get("uris", None),
             included=include,
         )
+
+    @override
+    def _begin_conditional_transaction(self) -> object:
+        return ConditionalHttpTransaction()
+
+    @trace_method("FastAPI._conditional_get", OpenTelemetryGranularity.OPERATION)
+    @override
+    def _conditional_get(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocuments,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
+        transaction = require_conditional_http_transaction(transaction)
+        filtered_include = [i for i in include if i != "data"]
+        payload = {
+            "ids": ids,
+            "where": where,
+            "limit": limit,
+            "offset": offset,
+            "where_document": where_document,
+            "include": filtered_include,
+        }
+        request_payload = transaction.prepare_get(
+            collection_id, tenant, database, payload
+        )
+        resp_json = self._make_request(
+            "post",
+            f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/conditional/get",
+            json=request_payload,
+        )
+        transaction.record_get(
+            request_payload,
+            resp_json["ids"],
+            int(resp_json["read_token"]),
+        )
+        return self._get_result_from_json(resp_json, include)
 
     @trace_method("FastAPI._delete", OpenTelemetryGranularity.OPERATION)
     @override
@@ -614,6 +667,18 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         """
         Submits a batch of embeddings to the database
         """
+        self._make_request("post", url, json=self._batch_payload(batch))
+
+    def _batch_payload(
+        self,
+        batch: Tuple[
+            IDs,
+            Optional[Embeddings],
+            Optional[Metadatas],
+            Optional[Documents],
+            Optional[URIs],
+        ],
+    ) -> Dict[str, Any]:
         # Serialize metadatas: convert SparseVector instances to transport format
         serialized_metadatas = None
         if batch[2] is not None:
@@ -631,8 +696,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             "documents": batch[3],
             "uris": batch[4],
         }
-
-        self._make_request("post", url, json=data)
+        return data
 
     @trace_method("FastAPI._add", OpenTelemetryGranularity.ALL)
     @override
@@ -727,31 +791,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         )
         return True
 
-    def _unsupported_conditional_transactions(self) -> NoReturn:
-        raise NotImplementedError(
-            "Conditional transactions are not supported by this Chroma API"
-        )
-
-    @override
-    def _begin_conditional_transaction(self) -> object:
-        self._unsupported_conditional_transactions()
-
-    @override
-    def _conditional_get(
-        self,
-        transaction: object,
-        collection_id: UUID,
-        ids: Optional[IDs] = None,
-        where: Optional[Where] = None,
-        limit: Optional[int] = None,
-        offset: Optional[int] = None,
-        where_document: Optional[WhereDocument] = None,
-        include: Include = IncludeMetadataDocuments,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
-    ) -> GetResult:
-        self._unsupported_conditional_transactions()
-
+    @trace_method("FastAPI._conditional_add", OpenTelemetryGranularity.ALL)
     @override
     def _conditional_add(
         self,
@@ -765,8 +805,15 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        self._unsupported_conditional_transactions()
+        transaction = require_conditional_http_transaction(transaction)
+        batch = (ids, embeddings, metadatas, documents, uris)
+        validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
+        transaction.buffer_write(
+            collection_id, tenant, database, "add", self._batch_payload(batch)
+        )
+        return True
 
+    @trace_method("FastAPI._conditional_update", OpenTelemetryGranularity.ALL)
     @override
     def _conditional_update(
         self,
@@ -780,8 +827,21 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        self._unsupported_conditional_transactions()
+        transaction = require_conditional_http_transaction(transaction)
+        batch = (
+            ids,
+            embeddings if embeddings is not None else None,
+            metadatas,
+            documents,
+            uris,
+        )
+        validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
+        transaction.buffer_write(
+            collection_id, tenant, database, "update", self._batch_payload(batch)
+        )
+        return True
 
+    @trace_method("FastAPI._conditional_upsert", OpenTelemetryGranularity.ALL)
     @override
     def _conditional_upsert(
         self,
@@ -795,8 +855,15 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        self._unsupported_conditional_transactions()
+        transaction = require_conditional_http_transaction(transaction)
+        batch = (ids, embeddings, metadatas, documents, uris)
+        validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
+        transaction.buffer_write(
+            collection_id, tenant, database, "upsert", self._batch_payload(batch)
+        )
+        return True
 
+    @trace_method("FastAPI._conditional_delete", OpenTelemetryGranularity.ALL)
     @override
     def _conditional_delete(
         self,
@@ -806,14 +873,46 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        self._unsupported_conditional_transactions()
+        transaction = require_conditional_http_transaction(transaction)
+        transaction.buffer_write(
+            collection_id,
+            tenant,
+            database,
+            "delete",
+            {
+                "ids": ids,
+                "where": None,
+                "where_document": None,
+                "limit": None,
+            },
+        )
+        return True
 
+    @trace_method("FastAPI._conditional_commit", OpenTelemetryGranularity.OPERATION)
     @override
     def _conditional_commit(
         self,
         transaction: object,
     ) -> ConditionalCommitResult:
-        self._unsupported_conditional_transactions()
+        transaction = require_conditional_http_transaction(transaction)
+        prepared_commit = transaction.prepare_commit_payload()
+        if prepared_commit is None:
+            return ConditionalCommitResult(
+                first_inserted_record_offset=None,
+                record_count=0,
+            )
+
+        scope, payload = prepared_commit
+        resp_json = self._make_request(
+            "post",
+            f"/tenants/{scope.tenant}/databases/{scope.database}/collections/{scope.collection_id}/conditional/commit",
+            json=payload,
+        )
+        transaction.close()
+        return ConditionalCommitResult(
+            first_inserted_record_offset=resp_json.get("first_inserted_record_offset"),
+            record_count=resp_json["record_count"],
+        )
 
     @trace_method("FastAPI._query", OpenTelemetryGranularity.ALL)
     @override

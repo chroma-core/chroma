@@ -32,11 +32,12 @@ use chroma_types::{
     AddCollectionRecordsResponse, AttachFunctionRequest, AttachFunctionResponse,
     AttachedFunctionApiResponse, Cmek, Collection, CollectionAndSegments, CollectionUuid,
     ConditionalBufferedWrite, ConditionalCommitAction, ConditionalCommitError,
-    ConditionalCommitResult, ConditionalTransactionState, CountCollectionsError,
-    CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
-    CreateCollectionError, CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError,
-    CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError, CreateTenantRequest,
-    CreateTenantResponse, DatabaseName, DeleteCollectionError, DeleteCollectionRecordsError,
+    ConditionalCommitRequest, ConditionalCommitResult, ConditionalTransactionError,
+    ConditionalTransactionState, CountCollectionsError, CountCollectionsRequest,
+    CountCollectionsResponse, CountRequest, CountResponse, CreateCollectionError,
+    CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError, CreateDatabaseRequest,
+    CreateDatabaseResponse, CreateTenantError, CreateTenantRequest, CreateTenantResponse,
+    DatabaseName, DeleteCollectionError, DeleteCollectionRecordsError,
     DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, DeleteCollectionRequest,
     DeleteCollectionResponse, DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse,
     DetachFunctionError, DetachFunctionRequest, DetachFunctionResponse, ExecutorError,
@@ -110,6 +111,22 @@ pub struct ServiceBasedFrontend {
 }
 
 impl ServiceBasedFrontend {
+    pub fn supports_conditional_transactions(&self) -> bool {
+        self.log_client.supports_conditional_transactions()
+    }
+
+    pub fn ensure_conditional_transactions_supported(
+        &self,
+    ) -> Result<(), ConditionalTransactionError> {
+        if self.supports_conditional_transactions() {
+            return Ok(());
+        }
+
+        Err(ConditionalTransactionError::UnsupportedLogImplementation {
+            implementation: self.log_client.implementation_name().to_string(),
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         allow_reset: bool,
@@ -1643,14 +1660,10 @@ impl ServiceBasedFrontend {
         })
     }
 
-    pub async fn conditional_commit(
+    async fn conditional_commit_append(
         &mut self,
-        state: &mut ConditionalTransactionState,
-    ) -> Result<ConditionalCommitResult, ConditionalCommitError> {
-        let request = match state.prepare_commit()? {
-            ConditionalCommitAction::NoOp(result) => return Ok(result),
-            ConditionalCommitAction::Append(request) => request,
-        };
+        request: ConditionalCommitRequest,
+    ) -> Result<Option<i64>, ConditionalCommitError> {
         let (tenant_id, database_name, collection_id) =
             validate_conditional_commit_scope(&request)?;
         let collection = self
@@ -1742,15 +1755,49 @@ impl ServiceBasedFrontend {
                         "Log service reported a different conditional commit record count than requested"
                     );
                 }
-                state
-                    .finish_commit(push_result.first_inserted_record_offset)
-                    .map_err(ConditionalCommitError::from)
+                Ok(push_result.first_inserted_record_offset)
             }
             Err(PushLogsError::Backoff | PushLogsError::BackoffCompaction) => {
                 Err(ConditionalCommitError::Backoff)
             }
             Err(other) => Err(ConditionalCommitError::Other(Box::new(other))),
         }
+    }
+
+    pub async fn conditional_commit_request(
+        &mut self,
+        request: ConditionalCommitRequest,
+    ) -> Result<ConditionalCommitResult, ConditionalCommitError> {
+        self.ensure_conditional_transactions_supported()
+            .map_err(ConditionalCommitError::Transaction)?;
+        if request.buffered_writes.is_empty() {
+            return Ok(ConditionalCommitResult {
+                first_inserted_record_offset: None,
+                record_count: 0,
+            });
+        }
+        let record_count = request.record_count();
+        let first_inserted_record_offset = self.conditional_commit_append(request).await?;
+        Ok(ConditionalCommitResult {
+            first_inserted_record_offset,
+            record_count,
+        })
+    }
+
+    pub async fn conditional_commit(
+        &mut self,
+        state: &mut ConditionalTransactionState,
+    ) -> Result<ConditionalCommitResult, ConditionalCommitError> {
+        self.ensure_conditional_transactions_supported()
+            .map_err(ConditionalCommitError::Transaction)?;
+        let request = match state.prepare_commit()? {
+            ConditionalCommitAction::NoOp(result) => return Ok(result),
+            ConditionalCommitAction::Append(request) => request,
+        };
+        let first_inserted_record_offset = self.conditional_commit_append(request).await?;
+        state
+            .finish_commit(first_inserted_record_offset)
+            .map_err(ConditionalCommitError::from)
     }
 
     pub async fn add(
