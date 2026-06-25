@@ -149,6 +149,24 @@ fn parses_no_documents_from_unstructured_text() {
 }
 
 #[test]
+fn ranked_document_slug_drops_chunk_suffix() {
+    let slug_of = |id: &str| {
+        RankedDocument {
+            id: id.to_string(),
+            justification: String::new(),
+        }
+        .slug()
+        .to_string()
+    };
+    // The `{slug}-{chunk_id}` chunk suffix is dropped...
+    assert_eq!(slug_of("getting-started-3"), "getting-started");
+    assert_eq!(slug_of("compactor-1"), "compactor");
+    // ...but a non-numeric trailing segment is part of the slug, not a chunk.
+    assert_eq!(slug_of("release-notes-v2"), "release-notes-v2");
+    assert_eq!(slug_of("overview"), "overview");
+}
+
+#[test]
 fn parses_only_sse_data_lines() {
     assert_eq!(
         parse_sse_data_line(b"data: {\"type\":\"done\"}\n").as_deref(),

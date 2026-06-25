@@ -48,8 +48,12 @@ use crate::{auth::AuthzAction, errors::ServerError, server::FoundationApiServer}
 const DEFAULT_SYSTEM_PROMPT: &str = "You are a research assistant for an internal \
 knowledge base. Use the `search` tool for targeted lookups and the \
 `subagent_search` tool for broad, multi-part research questions. Ground every \
-claim in retrieved documents and cite the document ids you relied on. If the \
-tools surface nothing relevant, say so plainly rather than guessing.";
+claim in retrieved documents. Each result includes a `slug:` line naming its \
+source page (search results also include the page title). When you state a \
+fact, cite its source inline at that point as a Markdown link of the form \
+`[Page Title](slug)`, using the result's slug as the link target — do not \
+append a separate list of ids or sources at the end. If the tools surface \
+nothing relevant, say so plainly rather than guessing.";
 
 /// Request body for `POST /api/agent`.
 #[derive(Debug, Deserialize, Validate)]

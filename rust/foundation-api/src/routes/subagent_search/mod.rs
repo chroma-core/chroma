@@ -343,12 +343,14 @@ pub(crate) async fn subagent_search_text(
 }
 
 /// Renders ranked documents (most-relevant first) into a numbered text block of
-/// `id` + justification lines for the model to read.
+/// `slug:` + justification lines for the model to read. The slug (not the raw
+/// chunk id) is what citation links resolve against, matching the `search`
+/// tool's output so the agent can cite both tools' results the same way.
 fn format_ranked_documents(documents: &[events::RankedDocument]) -> String {
     documents
         .iter()
         .enumerate()
-        .map(|(i, doc)| format!("{}. {}\n   {}", i + 1, doc.id, doc.justification))
+        .map(|(i, doc)| format!("{}. slug: {}\n   {}", i + 1, doc.slug(), doc.justification))
         .collect::<Vec<_>>()
         .join("\n")
 }
