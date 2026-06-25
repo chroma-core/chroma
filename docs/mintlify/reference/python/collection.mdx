@@ -157,6 +157,80 @@ to all queries.
 - ValueError: If multiple query input types are provided.
 
 
+### max_marginal_relevance_query
+
+Query using Maximal Marginal Relevance (MMR) to diversify results.
+
+MMR over-fetches `fetch_k` nearest-neighbor candidates, then greedily selects
+`n_results` records that balance relevance to the query against diversity among
+the selected records. This helps retrieval workflows avoid returning several
+near-duplicate chunks for the same query.
+
+```python
+results = collection.max_marginal_relevance_query(
+    query_texts=["how do I configure retries?"],
+    n_results=5,
+    fetch_k=40,
+    lambda_mult=0.5,
+)
+```
+
+<ParamField path="query_embeddings" type="Optional[Embeddings]">
+  Raw embeddings to query for.
+</ParamField>
+
+<ParamField path="query_texts" type="Union[str, IDs, None]">
+  Documents to embed and query against.
+</ParamField>
+
+<ParamField path="query_images" type="Optional[Embeddings]">
+  Images to embed and query against.
+</ParamField>
+
+<ParamField path="query_uris" type="Union[str, IDs, None]">
+  URIs to be loaded and embedded.
+</ParamField>
+
+<ParamField path="ids" type="Union[str, IDs, None]">
+  Optional subset of IDs to search within.
+</ParamField>
+
+<ParamField path="n_results" type="int">
+  Number of diversified neighbors to return per query.
+</ParamField>
+
+<ParamField path="fetch_k" type="int">
+  Number of nearest-neighbor candidates to fetch before applying MMR. Chroma
+  clamps this to at least `n_results`.
+</ParamField>
+
+<ParamField path="lambda_mult" type="float">
+  Relevance/diversity trade-off in `[0, 1]`. `1.0` is pure relevance, while
+  `0.0` applies the strongest diversity after the first pick.
+</ParamField>
+
+<ParamField path="where" type="Optional[Dict[Union[str, Literal[$and], Literal[$or]], Where]]">
+  Metadata filter.
+</ParamField>
+
+<ParamField path="where_document" type="Optional[Dict[Where, Union[str, List[Dict[Where, Union[str, List[WhereDocument]]]]]]]">
+  Document content filter.
+</ParamField>
+
+<ParamField path="include" type="List[Literal[documents, embeddings, metadatas, distances, uris, data]]">
+  Fields to include in results. If embeddings are not requested, Chroma still
+  fetches them internally for reranking and removes them from the returned
+  payload.
+</ParamField>
+
+**Returns:** Diversified nearest-neighbor results.
+
+**Raises:**
+
+- ValueError: If `lambda_mult` is outside `[0, 1]`.
+- ValueError: If `n_results` is not positive.
+
+
 ### modify
 
 Update collection name, metadata, or configuration.
