@@ -32,20 +32,13 @@ runs:
         bake_images() (
           set -euo pipefail
 
-          local targets=(
-            rust-log-service
-            rust-sysdb-service
-            sysdb
-            sysdb-migration
-            rust-sysdb-migration
-            rust-frontend-service
-            query-service
-            compactor-service
-            garbage-collector
-            load-service
-            work-queue-service
-            fn-consumer
-          )
+          local bake_file="${{ github.action_path }}/docker-bake.hcl"
+          mapfile -t targets < <(grep '^target' "${bake_file}" | awk '{ gsub(/"/, "", $2); print $2 }')
+
+          if [[ "${#targets[@]}" -eq 0 ]]; then
+            echo "No docker bake targets found in ${bake_file}" >&2
+            exit 1
+          fi
 
           if ! [[ "${IMAGE_BUILD_PARALLELISM}" =~ ^[1-9][0-9]*$ ]]; then
             echo "IMAGE_BUILD_PARALLELISM must be a positive integer, got '${IMAGE_BUILD_PARALLELISM}'" >&2
@@ -56,7 +49,7 @@ runs:
           for ((i = 0; i < total; i += IMAGE_BUILD_PARALLELISM)); do
             local batch=("${targets[@]:i:IMAGE_BUILD_PARALLELISM}")
             echo "Building image batch: ${batch[*]}"
-            docker buildx bake -f "${{ github.action_path }}/docker-bake.hcl" --load "${batch[@]}"
+            docker buildx bake -f "${bake_file}" --load "${batch[@]}"
           done
         )
         export -f bake_images
