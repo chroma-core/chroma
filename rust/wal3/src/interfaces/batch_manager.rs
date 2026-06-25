@@ -25,6 +25,7 @@ struct ManagerState {
     next_write: Instant,
     writers_active: usize,
     enqueued: Vec<AppendWork>,
+    admission_metadata: Vec<Arc<[u8]>>,
     tearing_down: bool,
 }
 
@@ -73,6 +74,7 @@ impl Drop for ManagerState {
         for work in std::mem::take(&mut self.enqueued).into_iter() {
             let _ = work.tx.send(Err(Error::LogContentionRetry));
         }
+        self.admission_metadata.clear();
     }
 }
 
@@ -98,6 +100,7 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> BatchManager<FP, U> {
                 next_write,
                 writers_active: 0,
                 enqueued: Vec::new(),
+                admission_metadata: Vec::new(),
                 tearing_down: false,
             }),
             write_finished: tokio::sync::Notify::new(),
@@ -143,6 +146,18 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
             let _ = work.tx.send(Err(Error::Backoff));
             self.write_finished.notify_one();
         } else {
+            if let Some(admission_predicate) = work
+                .options
+                .as_ref()
+                .and_then(|options| options.admission_predicate.as_ref())
+            {
+                if !admission_predicate(&state.admission_metadata) {
+                    let _ = work.tx.send(Err(Error::AdmissionRejected));
+                    self.write_finished.notify_one();
+                    return;
+                }
+            }
+            state.admission_metadata.push(work.admission_metadata());
             state.enqueued.push(work);
         }
     }
@@ -157,6 +172,8 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
 
         // We're shutting down.  Throw the work away.
         if state.tearing_down {
+            state.enqueued.clear();
+            state.admission_metadata.clear();
             self.write_finished.notify_one();
             return Ok(None);
         }
@@ -166,6 +183,7 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
             // No work, no notify.
             return Ok(None);
         }
+        debug_assert_eq!(state.enqueued.len(), state.admission_metadata.len());
 
         let mut split_off = 0usize;
         let mut acc_count = 0usize;
@@ -206,6 +224,10 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
         };
         let mut work = std::mem::take(&mut state.enqueued);
         state.enqueued = work.split_off(split_off);
+        let mut admission_metadata = std::mem::take(&mut state.admission_metadata);
+        state.admission_metadata = admission_metadata.split_off(split_off);
+        debug_assert_eq!(work.len(), admission_metadata.len());
+        debug_assert_eq!(state.enqueued.len(), state.admission_metadata.len());
         if !state.enqueued.is_empty() {
             state.backoff = state
                 .enqueued
@@ -286,6 +308,7 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
         let enqueued = {
             let mut state = self.state.lock().unwrap();
             state.tearing_down = true;
+            state.admission_metadata.clear();
             std::mem::take(&mut state.enqueued)
         };
         for work in enqueued {
@@ -461,6 +484,174 @@ mod tests {
         AppendOptions, FragmentSeqNo, FragmentUuid, LogWriterOptions, SnapshotOptions,
         StorageWrapper, ThrottleOptions,
     };
+
+    struct NoopUploader;
+
+    #[async_trait::async_trait]
+    impl FragmentUploader<FragmentUuid> for NoopUploader {
+        async fn upload_parquet(
+            &self,
+            _pointer: &FragmentUuid,
+            _messages: Vec<Vec<u8>>,
+            _cmek: Option<Cmek>,
+            _epoch_micros: u64,
+        ) -> Result<UploadResult, Error> {
+            unreachable!("upload_parquet is not used in admission tests")
+        }
+
+        async fn preferred_storage(&self) -> Storage {
+            unreachable!("preferred_storage is not used in admission tests")
+        }
+
+        async fn preferred_prefix(&self) -> String {
+            unreachable!("preferred_prefix is not used in admission tests")
+        }
+
+        async fn preferred_storage_wrapper(&self) -> &StorageWrapper {
+            unreachable!("preferred_storage_wrapper is not used in admission tests")
+        }
+
+        async fn storages(&self) -> &[StorageWrapper] {
+            unreachable!("storages is not used in admission tests")
+        }
+    }
+
+    fn admission_batch_manager() -> BatchManager<FragmentUuid, NoopUploader> {
+        BatchManager::new(LogWriterOptions::default(), NoopUploader).unwrap()
+    }
+
+    async fn enqueue(
+        batch_manager: &BatchManager<FragmentUuid, NoopUploader>,
+        message: Vec<u8>,
+        options: Option<AppendOptions>,
+    ) -> tokio::sync::oneshot::Receiver<Result<LogPosition, Error>> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        batch_manager
+            .push_work(AppendWork::new(
+                vec![message],
+                options,
+                tx,
+                tracing::Span::current(),
+            ))
+            .await;
+        rx
+    }
+
+    #[tokio::test]
+    async fn admission_predicate_sees_earlier_metadata() {
+        let batch_manager = admission_batch_manager();
+        let _first_rx = enqueue(
+            &batch_manager,
+            Vec::from("first"),
+            Some(AppendOptions::new(Vec::from("metadata-1"))),
+        )
+        .await;
+
+        let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let observed_clone = Arc::clone(&observed);
+        let predicate = Arc::new(move |earlier_metadata: &[Arc<[u8]>]| {
+            *observed_clone.lock().unwrap() = earlier_metadata
+                .iter()
+                .map(|metadata| metadata.as_ref().to_vec())
+                .collect();
+            true
+        });
+        let _second_rx = enqueue(
+            &batch_manager,
+            Vec::from("second"),
+            Some(AppendOptions::new(Vec::from("metadata-2")).with_admission_predicate(predicate)),
+        )
+        .await;
+
+        assert_eq!(*observed.lock().unwrap(), vec![Vec::from("metadata-1")]);
+        assert_eq!(2, batch_manager.count_waiters());
+    }
+
+    #[tokio::test]
+    async fn admission_predicate_does_not_see_candidate_metadata() {
+        let batch_manager = admission_batch_manager();
+        let predicate = Arc::new(move |earlier_metadata: &[Arc<[u8]>]| {
+            !earlier_metadata
+                .iter()
+                .any(|metadata| metadata.as_ref() == b"candidate")
+        });
+        let mut rx = enqueue(
+            &batch_manager,
+            Vec::from("candidate"),
+            Some(AppendOptions::new(Vec::from("candidate")).with_admission_predicate(predicate)),
+        )
+        .await;
+
+        assert!(matches!(
+            rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        assert_eq!(1, batch_manager.count_waiters());
+    }
+
+    #[tokio::test]
+    async fn admission_rejection_is_non_fatal() {
+        let batch_manager = admission_batch_manager();
+        let mut first_rx = enqueue(
+            &batch_manager,
+            Vec::from("first"),
+            Some(AppendOptions::new(Vec::from("first"))),
+        )
+        .await;
+        let rejecting_predicate = Arc::new(|_earlier_metadata: &[Arc<[u8]>]| false);
+        let rejected_rx = enqueue(
+            &batch_manager,
+            Vec::from("reject"),
+            Some(
+                AppendOptions::new(Vec::from("reject"))
+                    .with_admission_predicate(rejecting_predicate),
+            ),
+        )
+        .await;
+        let mut third_rx = enqueue(
+            &batch_manager,
+            Vec::from("third"),
+            Some(AppendOptions::new(Vec::from("third"))),
+        )
+        .await;
+
+        let rejected = rejected_rx.await.unwrap();
+        assert!(matches!(rejected, Err(Error::AdmissionRejected)));
+        assert!(matches!(
+            first_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        assert!(matches!(
+            third_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        assert_eq!(2, batch_manager.count_waiters());
+    }
+
+    #[tokio::test]
+    async fn normal_writes_contribute_empty_admission_metadata() {
+        let batch_manager = admission_batch_manager();
+        let _first_rx = enqueue(&batch_manager, Vec::from("normal"), None).await;
+
+        let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let observed_clone = Arc::clone(&observed);
+        let predicate = Arc::new(move |earlier_metadata: &[Arc<[u8]>]| {
+            *observed_clone.lock().unwrap() = earlier_metadata
+                .iter()
+                .map(|metadata| metadata.as_ref().to_vec())
+                .collect();
+            true
+        });
+        let _second_rx = enqueue(
+            &batch_manager,
+            Vec::from("conditional"),
+            Some(AppendOptions::new(Vec::from("conditional")).with_admission_predicate(predicate)),
+        )
+        .await;
+
+        assert_eq!(*observed.lock().unwrap(), vec![Vec::<u8>::new()]);
+        assert_eq!(2, batch_manager.count_waiters());
+    }
 
     #[tokio::test]
     async fn test_k8s_integration_upload_parquet_returns_retry_on_already_exists() {
