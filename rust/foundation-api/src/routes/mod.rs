@@ -42,6 +42,8 @@ where
 pub(crate) mod agent;
 pub(crate) mod init;
 pub(crate) mod init_schema;
+pub(crate) mod mcp;
+pub(crate) mod read_page;
 pub(crate) mod search;
 pub(crate) mod subagent_search;
 pub(crate) mod upsert_page;
@@ -55,6 +57,7 @@ pub(crate) fn router() -> Router<FoundationApiServer> {
             post(upsert_page::foundation_upsert_page),
         )
         .route("/api/search", post(search::foundation_search))
+        .route("/api/read-page", post(read_page::foundation_read_page))
         .route(
             "/api/subagent_search",
             post(subagent_search::foundation_subagent_search),
