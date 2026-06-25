@@ -3,6 +3,7 @@ pub mod http_currents;
 pub mod http_generate;
 pub mod revision_history;
 mod statistics;
+mod trace_headers;
 
 pub use count_to_file_async::CountToFileAsyncExecutor;
 pub use http_currents::HttpCurrentsExecutor;
