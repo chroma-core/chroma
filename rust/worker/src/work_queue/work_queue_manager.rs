@@ -50,6 +50,9 @@ pub struct GetWorkMessage {
     pub response_tx: oneshot::Sender<Result<Vec<WorkQueueRecord>, WorkQueueError>>,
 }
 
+#[derive(Debug)]
+pub(crate) struct WorkQueueReadyMessage;
+
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct PeriodicPersistMessage;
@@ -632,6 +635,18 @@ impl Handler<GetWorkMessage> for WorkQueueManager {
         if msg.response_tx.send(Ok(filtered)).is_err() {
             tracing::warn!("Failed to send get work response - receiver dropped");
         }
+    }
+}
+
+#[async_trait]
+impl Handler<WorkQueueReadyMessage> for WorkQueueManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        _msg: WorkQueueReadyMessage,
+        _ctx: &ComponentContext<WorkQueueManager>,
+    ) {
     }
 }
 
