@@ -1875,8 +1875,6 @@ pub enum WhereError {
 
 ////////////////////////// Get //////////////////////////
 
-/// Records can be retrieved by their IDs or by a metadata filter. At least one of `ids` or `where`
-/// must be provided. Use `include` to specify which fields to return in the response.
 pub const STALE_READ_ERROR_NAME: &str = "StaleReadError";
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -1959,6 +1957,8 @@ impl ChromaError for StaleReadError {
     }
 }
 
+/// Records can be retrieved by their IDs or by a metadata filter. At least one of `ids` or `where`
+/// must be provided. Use `include` to specify which fields to return in the response.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetRequestPayload {
