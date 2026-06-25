@@ -638,9 +638,11 @@ class RustBindingsAPI(ServerAPI):
 
         return DeleteResult(deleted=deleted)
 
+    @override
     def _begin_conditional_transaction(self) -> object:
         return self.bindings.begin_conditional_transaction()
 
+    @override
     def _conditional_get(
         self,
         transaction: object,
@@ -677,6 +679,7 @@ class RustBindingsAPI(ServerAPI):
             metadatas=rust_response.metadatas,
         )
 
+    @override
     def _conditional_add(
         self,
         transaction: object,
@@ -701,6 +704,7 @@ class RustBindingsAPI(ServerAPI):
             database,
         )
 
+    @override
     def _conditional_update(
         self,
         transaction: object,
@@ -725,6 +729,7 @@ class RustBindingsAPI(ServerAPI):
             database,
         )
 
+    @override
     def _conditional_upsert(
         self,
         transaction: object,
@@ -749,6 +754,7 @@ class RustBindingsAPI(ServerAPI):
             database,
         )
 
+    @override
     def _conditional_delete(
         self,
         transaction: object,
@@ -765,6 +771,7 @@ class RustBindingsAPI(ServerAPI):
             database,
         )
 
+    @override
     def _conditional_commit(
         self,
         transaction: object,
