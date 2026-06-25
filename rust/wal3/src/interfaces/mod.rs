@@ -249,7 +249,7 @@ pub enum MaybeFaultInjectingFragmentPublisher<
     U: FragmentUploader<FP>,
 > {
     Plain(P),
-    FaultInjecting(BatchManager<FP, FaultInjectingFragmentUploader<FP, U>>),
+    FaultInjecting(Box<BatchManager<FP, FaultInjectingFragmentUploader<FP, U>>>),
 }
 
 #[async_trait::async_trait]
@@ -411,7 +411,7 @@ where
             let publisher = BatchManager::new(self.inner.write_options(), fragment_uploader)
                 .ok_or_else(|| Error::internal(file!(), line!()))?;
             Ok(MaybeFaultInjectingFragmentPublisher::FaultInjecting(
-                publisher,
+                Box::new(publisher),
             ))
         } else {
             Ok(MaybeFaultInjectingFragmentPublisher::Plain(
