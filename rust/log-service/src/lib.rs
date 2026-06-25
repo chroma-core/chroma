@@ -7045,7 +7045,7 @@ mod tests {
         let (ctor, dtor) = setup_log_server();
         let log_server = ctor.await;
         let collection_id = CollectionUuid::new();
-        let records = vec![
+        let records = [
             test_operation_record("conditionless-doc-1"),
             test_operation_record("conditionless-doc-2"),
         ];
