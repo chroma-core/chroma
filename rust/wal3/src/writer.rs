@@ -278,6 +278,10 @@ impl<
         messages: Vec<Vec<u8>>,
         options: Option<AppendOptions>,
     ) -> Result<LogPosition, Error> {
+        let retry_contention_internally = match options.as_ref() {
+            Some(options) => options.required_fragment_start.is_none(),
+            None => true,
+        };
         let once_log_append_many =
             move |log: &Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>| {
                 let messages = messages.clone();
@@ -285,7 +289,7 @@ impl<
                 let log = Arc::clone(log);
                 async move { log.append(messages, options).await }
             };
-        self.handle_errors_and_contention(once_log_append_many)
+        self.handle_errors_and_contention(once_log_append_many, retry_contention_internally)
             .await
     }
 
@@ -325,7 +329,7 @@ impl<
                         .await
                 }
             };
-        self.handle_errors_and_contention(once_log_garbage_collect)
+        self.handle_errors_and_contention(once_log_garbage_collect, true)
             .await
     }
 
@@ -339,7 +343,7 @@ impl<
                 let log = Arc::clone(log);
                 async move { log.garbage_collect_phase2_update_manifest(&options).await }
             };
-        self.handle_errors_and_contention(once_log_garbage_collect)
+        self.handle_errors_and_contention(once_log_garbage_collect, true)
             .await
     }
 
@@ -359,7 +363,7 @@ impl<
                         .await
                 }
             };
-        self.handle_errors_and_contention(once_log_garbage_collect)
+        self.handle_errors_and_contention(once_log_garbage_collect, true)
             .await
     }
 
@@ -374,13 +378,14 @@ impl<
                 let log = Arc::clone(log);
                 async move { log.garbage_collect(&options, keep_at_least).await }
             };
-        self.handle_errors_and_contention(once_log_garbage_collect)
+        self.handle_errors_and_contention(once_log_garbage_collect, true)
             .await
     }
 
     async fn handle_errors_and_contention<O, F: Future<Output = Result<O, Error>>>(
         &self,
         f: impl Fn(&Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>) -> F,
+        retry_contention_internally: bool,
     ) -> Result<O, Error> {
         for _ in 0..3 {
             let (writer, epoch) = self.ensure_open().await?;
@@ -422,6 +427,9 @@ impl<
                         if let Some(writer) = inner.writer.take() {
                             writer.shutdown();
                         }
+                    }
+                    if !retry_contention_internally {
+                        return Err(Error::LogContentionRetry);
                     }
                 }
                 Err(Error::Backoff) => {
