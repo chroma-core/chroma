@@ -4252,16 +4252,13 @@ mod tests {
             write_ids: string_set(&["write-1"]),
             conflict_ids: string_set(&["read-1", "write-1"]),
         };
-        let expected = ();
 
-        let got = validate_conditional_log_bounds(
+        validate_conditional_log_bounds(
             &request,
             LogPosition::from_offset(5),
             LogPosition::from_offset(8),
         )
         .expect("observed offset at lower bound should be valid");
-
-        assert_eq!(expected, got);
     }
 
     #[test]
