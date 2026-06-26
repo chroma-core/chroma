@@ -106,7 +106,7 @@ impl FoundationMcpServer {
         annotations(
             read_only_hint = true,
             destructive_hint = false,
-            idempotent_hint = true,
+            idempotent_hint = false,
             open_world_hint = true
         )
     )]
