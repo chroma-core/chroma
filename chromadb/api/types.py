@@ -2912,11 +2912,15 @@ class Schema:
                 else:
                     try:
                         from chromadb.utils.embedding_functions import (
+                            config_validation,
                             known_embedding_functions,
                         )
 
                         ef_name = ef_config["name"]
                         ef = known_embedding_functions[ef_name]
+                        config_validation.validate_embedding_function_config_is_safe(
+                            ef_name, ef_config["config"]
+                        )
                         config_data["embedding_function"] = ef.build_from_config(
                             ef_config["config"]
                         )
@@ -2962,11 +2966,15 @@ class Schema:
                 else:
                     try:
                         from chromadb.utils.embedding_functions import (
+                            config_validation,
                             sparse_known_embedding_functions,
                         )
 
                         ef_name = ef_config["name"]
                         ef = sparse_known_embedding_functions[ef_name]
+                        config_validation.validate_embedding_function_config_is_safe(
+                            ef_name, ef_config["config"]
+                        )
                         config_data["embedding_function"] = ef.build_from_config(
                             ef_config["config"]
                         )

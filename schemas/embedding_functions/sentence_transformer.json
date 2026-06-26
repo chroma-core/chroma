@@ -20,16 +20,7 @@
         "kwargs": {
             "type": "object",
             "description": "Additional arguments to pass to the SentenceTransformer model",
-            "additionalProperties": {
-                "type": [
-                    "string",
-                    "integer",
-                    "number",
-                    "boolean",
-                    "array",
-                    "object"
-                ]
-            }
+            "additionalProperties": false
         }
     },
     "required": [

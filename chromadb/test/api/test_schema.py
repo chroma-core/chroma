@@ -20,6 +20,10 @@ from chromadb.execution.expression.operator import Key
 from typing import List, Dict, Any
 from pydantic import ValidationError
 import pytest
+from chromadb.utils.embedding_functions import (
+    known_embedding_functions,
+    sparse_known_embedding_functions,
+)
 
 
 class MockSparseEmbeddingFunction(SparseEmbeddingFunction[List[str]]):
@@ -73,8 +77,128 @@ class MockEmbeddingFunction(EmbeddingFunction[List[str]]):
         return ["cosine", "l2", "ip"]
 
 
+class ExplodingVectorEmbeddingFunction(EmbeddingFunction[List[str]]):
+    build_calls = 0
+
+    def __call__(self, input: List[str]) -> Embeddings:
+        raise AssertionError("unsafe embedding function should not be called")
+
+    @staticmethod
+    def name() -> str:
+        return "sentence_transformer"
+
+    @staticmethod
+    def build_from_config(
+        config: Dict[str, Any]
+    ) -> "ExplodingVectorEmbeddingFunction":
+        ExplodingVectorEmbeddingFunction.build_calls += 1
+        raise AssertionError("unsafe embedding function should not be built")
+
+
+class ExplodingSparseEmbeddingFunction(SparseEmbeddingFunction[List[str]]):
+    build_calls = 0
+
+    def __call__(self, input: List[str]) -> List[SparseVector]:
+        raise AssertionError("unsafe sparse embedding function should not be called")
+
+    @staticmethod
+    def name() -> str:
+        return "huggingface_sparse"
+
+    @staticmethod
+    def build_from_config(
+        config: Dict[str, Any]
+    ) -> "ExplodingSparseEmbeddingFunction":
+        ExplodingSparseEmbeddingFunction.build_calls += 1
+        raise AssertionError("unsafe sparse embedding function should not be built")
+
+
 class TestNewSchema:
     """Test cases for the new Schema class."""
+
+    def test_unsafe_vector_embedding_kwargs_are_not_deserialized(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ExplodingVectorEmbeddingFunction.build_calls = 0
+        monkeypatch.setitem(
+            known_embedding_functions,
+            "sentence_transformer",
+            ExplodingVectorEmbeddingFunction,
+        )
+
+        schema = Schema.deserialize_from_json(
+            {
+                "defaults": {
+                    "float_list": {
+                        "vector_index": {
+                            "enabled": True,
+                            "config": {
+                                "embedding_function": {
+                                    "name": "sentence_transformer",
+                                    "type": "known",
+                                    "config": {
+                                        "model_name": "attacker/model",
+                                        "device": "cpu",
+                                        "normalize_embeddings": False,
+                                        "kwargs": {"trust_remote_code": True},
+                                    },
+                                }
+                            },
+                        }
+                    }
+                },
+                "keys": {},
+            }
+        )
+
+        assert ExplodingVectorEmbeddingFunction.build_calls == 0
+        assert schema.defaults.float_list is not None
+        assert schema.defaults.float_list.vector_index is not None
+        assert (
+            schema.defaults.float_list.vector_index.config.embedding_function is None
+        )
+
+    def test_unsafe_sparse_embedding_kwargs_are_not_deserialized(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ExplodingSparseEmbeddingFunction.build_calls = 0
+        monkeypatch.setitem(
+            sparse_known_embedding_functions,
+            "huggingface_sparse",
+            ExplodingSparseEmbeddingFunction,
+        )
+
+        schema = Schema.deserialize_from_json(
+            {
+                "defaults": {
+                    "sparse_vector": {
+                        "sparse_vector_index": {
+                            "enabled": True,
+                            "config": {
+                                "embedding_function": {
+                                    "name": "huggingface_sparse",
+                                    "type": "known",
+                                    "config": {
+                                        "model_name": "attacker/model",
+                                        "device": "cpu",
+                                        "kwargs": {"trust_remote_code": True},
+                                    },
+                                }
+                            },
+                        }
+                    }
+                },
+                "keys": {},
+            }
+        )
+
+        assert ExplodingSparseEmbeddingFunction.build_calls == 0
+        assert schema.defaults.sparse_vector is not None
+        assert schema.defaults.sparse_vector.sparse_vector_index is not None
+        assert (
+            schema.defaults.sparse_vector.sparse_vector_index.config.embedding_function
+            is None
+        )
 
     def test_default_schema_initialization(self) -> None:
         """Test that Schema() initializes with correct defaults."""

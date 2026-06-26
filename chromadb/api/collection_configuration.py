@@ -10,6 +10,9 @@ from chromadb.utils.embedding_functions import (
     known_embedding_functions,
     register_embedding_function,
 )
+from chromadb.utils.embedding_functions.config_validation import (
+    validate_embedding_function_config_is_safe,
+)
 from multiprocessing import cpu_count
 import warnings
 
@@ -96,6 +99,7 @@ def load_collection_configuration_from_json(
                     f"Embedding function {ef_name} not found. Add @register_embedding_function decorator to the class definition."
                 )
             try:
+                validate_embedding_function_config_is_safe(ef_name, ef_config["config"])
                 ef = ef.build_from_config(ef_config["config"])  # type: ignore
             except Exception as e:
                 raise ValueError(
@@ -314,6 +318,9 @@ def load_create_collection_configuration_from_json(
             )
         else:
             ef = known_embedding_functions[ef_config["name"]]
+            validate_embedding_function_config_is_safe(
+                ef_config["name"], ef_config["config"]
+            )
             result["embedding_function"] = ef.build_from_config(ef_config["config"])
 
     return result
@@ -628,6 +635,10 @@ def load_update_collection_configuration_from_json(
             )
         else:
             ef = known_embedding_functions[json_map["embedding_function"]["name"]]
+            validate_embedding_function_config_is_safe(
+                json_map["embedding_function"]["name"],
+                json_map["embedding_function"]["config"],
+            )
             result["embedding_function"] = ef.build_from_config(
                 json_map["embedding_function"]["config"]
             )

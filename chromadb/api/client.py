@@ -219,6 +219,16 @@ class Client(SharedSystemClient, ClientAPI):
         if embedding_function is not None and configuration_ef is None:
             configuration["embedding_function"] = embedding_function
 
+        collection_embedding_function = embedding_function
+        if (
+            configuration_ef is not None
+            and (
+                embedding_function is None
+                or isinstance(embedding_function, DefaultEmbeddingFunction)
+            )
+        ):
+            collection_embedding_function = configuration_ef
+
         model = self._server.create_collection(
             name=name,
             schema=schema,
@@ -231,7 +241,7 @@ class Client(SharedSystemClient, ClientAPI):
         return Collection(
             client=self._server,
             model=model,
-            embedding_function=embedding_function,
+            embedding_function=collection_embedding_function,
             data_loader=data_loader,
         )
 
@@ -358,6 +368,17 @@ class Client(SharedSystemClient, ClientAPI):
 
         if embedding_function is not None and configuration_ef is None:
             configuration["embedding_function"] = embedding_function
+
+        collection_embedding_function = embedding_function
+        if (
+            configuration_ef is not None
+            and (
+                embedding_function is None
+                or isinstance(embedding_function, DefaultEmbeddingFunction)
+            )
+        ):
+            collection_embedding_function = configuration_ef
+
         model = self._server.get_or_create_collection(
             name=name,
             schema=schema,
@@ -370,13 +391,13 @@ class Client(SharedSystemClient, ClientAPI):
         persisted_ef_config = model.configuration_json.get("embedding_function")
 
         validate_embedding_function_conflict_on_get(
-            embedding_function, persisted_ef_config
+            collection_embedding_function, persisted_ef_config
         )
 
         return Collection(
             client=self._server,
             model=model,
-            embedding_function=embedding_function,
+            embedding_function=collection_embedding_function,
             data_loader=data_loader,
         )
 

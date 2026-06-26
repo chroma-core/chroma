@@ -7,6 +7,7 @@ from chromadb.api.types import (
     Embeddings,
     Space,
     Embeddable,
+    DefaultEmbeddingFunction,
 )
 from chromadb.api import ClientAPI
 from chromadb.api.collection_configuration import (
@@ -19,13 +20,20 @@ from chromadb.api.collection_configuration import (
     UpdateSpannConfiguration,
     SpannConfiguration,
     overwrite_spann_configuration,
+    load_create_collection_configuration_from_json,
+    load_update_collection_configuration_from_json,
 )
 import json
-from chromadb.utils.embedding_functions import register_embedding_function
+from chromadb.utils.embedding_functions import (
+    known_embedding_functions,
+    register_embedding_function,
+)
 from chromadb.test.conftest import ClientFactories
 from chromadb.test.conftest import is_spann_disabled_mode, skip_reason_spann_disabled
 from chromadb.types import Collection as CollectionModel
+from chromadb.api.models.Collection import Collection
 from typing import Optional, TypedDict
+from uuid import uuid4
 
 
 class LegacyEmbeddingFunction(EmbeddingFunction[Embeddable]):
@@ -92,6 +100,94 @@ class CustomEmbeddingFunction2(EmbeddingFunction[Embeddable]):
 
     def default_space(self) -> Space:
         return "l2"
+
+
+class ExplodingEmbeddingFunction(EmbeddingFunction[Embeddable]):
+    build_calls = 0
+
+    def __call__(self, input: Embeddable) -> Embeddings:
+        raise AssertionError("unsafe embedding function should not be called")
+
+    @staticmethod
+    def name() -> str:
+        return "sentence_transformer"
+
+    @staticmethod
+    def build_from_config(config: Dict[str, Any]) -> "ExplodingEmbeddingFunction":
+        ExplodingEmbeddingFunction.build_calls += 1
+        raise AssertionError("unsafe embedding function should not be built")
+
+
+def malicious_sentence_transformer_config() -> Dict[str, Any]:
+    return {
+        "embedding_function": {
+            "name": "sentence_transformer",
+            "type": "known",
+            "config": {
+                "model_name": "attacker/model",
+                "device": "cpu",
+                "normalize_embeddings": False,
+                "kwargs": {"trust_remote_code": True},
+            },
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    "loader",
+    [
+        load_create_collection_configuration_from_json,
+        load_update_collection_configuration_from_json,
+        load_collection_configuration_from_json,
+    ],
+)
+def test_unsafe_embedding_function_kwargs_are_rejected_before_build(
+    monkeypatch: pytest.MonkeyPatch, loader: Any
+) -> None:
+    ExplodingEmbeddingFunction.build_calls = 0
+    monkeypatch.setitem(
+        known_embedding_functions,
+        "sentence_transformer",
+        ExplodingEmbeddingFunction,
+    )
+
+    with pytest.raises(ValueError, match="kwargs"):
+        loader(malicious_sentence_transformer_config())
+
+    assert ExplodingEmbeddingFunction.build_calls == 0
+
+
+def test_default_client_embedding_does_not_execute_persisted_non_default_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ExplodingEmbeddingFunction.build_calls = 0
+    monkeypatch.setitem(
+        known_embedding_functions,
+        "sentence_transformer",
+        ExplodingEmbeddingFunction,
+    )
+
+    model = CollectionModel(
+        id=uuid4(),
+        name="poisoned_collection",
+        configuration_json=malicious_sentence_transformer_config(),
+        serialized_schema=None,
+        metadata=None,
+        dimension=None,
+        tenant="default_tenant",
+        database="default_database",
+    )
+    collection = Collection(
+        client=cast(Any, object()),
+        model=model,
+        embedding_function=DefaultEmbeddingFunction(),
+        data_loader=None,
+    )
+
+    with pytest.raises(ValueError, match="explicit embedding function"):
+        collection._embed(["test"])
+
+    assert ExplodingEmbeddingFunction.build_calls == 0
 
 
 def test_legacy_embedding_function(client: ClientAPI) -> None:
