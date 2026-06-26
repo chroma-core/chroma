@@ -3688,6 +3688,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "foundation-slack-render"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+]
+
+[[package]]
 name = "foyer"
 version = "0.17.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
