@@ -537,8 +537,7 @@ export const validateWhere = (where: Where) => {
 
   if (Object.keys(where).length != 1) {
     throw new ChromaValueError(
-      `Expected 'where' to have exactly one operator, but got ${
-        Object.keys(where).length
+      `Expected 'where' to have exactly one operator, but got ${Object.keys(where).length
       }`,
     );
   }
@@ -778,23 +777,96 @@ export const parseConnectionPath = (path: string) => {
     throw new ChromaValueError(`Invalid URL: ${path}`);
   }
 };
-const packEmbedding = (embedding: number[]): ArrayBuffer => {
-  const buffer = new ArrayBuffer(embedding.length * 4);
-  const view = new Float32Array(buffer);
-  for (let i = 0; i < embedding.length; i++) {
-    view[i] = embedding[i];
+
+/**
+ * base64ArrayBuffer
+ * Original work © 2011 Jon Leighton
+ * Licensed under the MIT License.
+ * Source: https://gist.github.com/jonleighton/958841
+ * Modified by Kyle Diaz, 2026
+ */
+function base64ArrayBuffer(arrayBuffer: ArrayBuffer): string {
+  let base64 = ''
+  const encodings = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+
+  const bytes = new Uint8Array(arrayBuffer)
+  const byteLength = bytes.byteLength
+  const byteRemainder = byteLength % 3
+  const mainLength = byteLength - byteRemainder
+
+  let a, b, c, d
+  let chunk
+
+  // Main loop deals with bytes in chunks of 3
+  for (let i = 0; i < mainLength; i = i + 3) {
+    // Combine the three bytes into a single integer
+    chunk = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2]
+
+    // Use bitmasks to extract 6-bit segments from the triplet
+    a = (chunk & 0xfc0000) >> 18 // 0xfc0000 = (2^6 - 1) << 18
+    b = (chunk & 0x3f000) >> 12 // 0x3f000   = (2^6 - 1) << 12
+    c = (chunk & 0xfc0) >> 6 // 0xfc0     = (2^6 - 1) << 6
+    d = chunk & 0x3f               // 0x3f       = 2^6 - 1
+
+    // Convert the raw binary segments to the appropriate ASCII encoding
+    base64 += encodings[a] + encodings[b] + encodings[c] + encodings[d]
   }
-  return buffer;
-};
+
+  // Deal with the remaining bytes and padding
+  if (byteRemainder == 1) {
+    chunk = bytes[mainLength]
+
+    a = (chunk & 0xfc) >> 2 // 0xfc = (2^6 - 1) << 2
+
+    // Set the 4 least significant bits to zero
+    b = (chunk & 0x3) << 4 // 0x3   = 2^2 - 1
+
+    base64 += encodings[a] + encodings[b] + '=='
+  } else if (byteRemainder == 2) {
+    chunk = (bytes[mainLength] << 8) | bytes[mainLength + 1]
+
+    a = (chunk & 0xfc00) >> 10 // 0xfc00 = (2^6 - 1) << 10
+    b = (chunk & 0x3f0) >> 4 // 0x3f0  = (2^6 - 1) << 4
+
+    // Set the 2 least significant bits to zero
+    c = (chunk & 0xf) << 2 // 0xf    = 2^4 - 1
+
+    base64 += encodings[a] + encodings[b] + encodings[c] + '='
+  }
+
+  return base64
+}
+
+function portableEmbeddingsToBase64Bytes(embeddings: number[][]): string[] {
+  return embeddings.map((embedding) => {
+    const arrayBuffer = new ArrayBuffer(embedding.length * 4);
+    const float32Array = new Float32Array(arrayBuffer);
+    for (let i = 0; i < embedding.length; i++) {
+      float32Array[i] = embedding[i]!;
+    }
+    return base64ArrayBuffer(arrayBuffer);
+  });
+}
+
+function bufferEmbeddingsToBase64Bytes(embeddings: number[][]): string[] {
+  return embeddings.map((embedding) => {
+    const buffer = Buffer.alloc(embedding.length * 4);
+    for (let i = 0; i < embedding.length; i++) {
+      buffer.writeFloatLE(embedding[i]!, i * 4);
+    }
+    return buffer.toString("base64");
+  });
+}
 
 export const embeddingsToBase64Bytes = (embeddings: number[][]) => {
-  return embeddings.map((embedding) => {
-    const buffer = packEmbedding(embedding);
-
-    const uint8Array = new Uint8Array(buffer);
-    const binaryString = Array.from(uint8Array, (byte) =>
-      String.fromCharCode(byte),
-    ).join("");
-    return btoa(binaryString);
-  });
+  /*
+   * This function is on the hot path for writing embeddings to Chroma.
+   * Depending on the number of documents and the size of the embeddings, this
+   * function can be a significant bottleneck.
+   *
+   * We benchmarked each implementation of this function and found that the
+   * Buffer implementation is 4-6x faster than the portable implementation.
+   */
+  const useBuffer = typeof Buffer !== "undefined" && typeof Buffer.alloc === "function" && typeof Buffer.prototype.writeFloatLE === "function";
+  return useBuffer ? bufferEmbeddingsToBase64Bytes(embeddings) : portableEmbeddingsToBase64Bytes(embeddings);
 };
