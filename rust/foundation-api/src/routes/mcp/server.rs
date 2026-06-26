@@ -18,6 +18,7 @@ use crate::{
     auth::AuthzAction,
     routes::{
         agent::{default_model, default_system_prompt, run_agent_to_final_text, AgentRequest},
+        links::page_link_instructions,
         read_page::{run_read_page, ReadPageRequest},
         search::{run_page_search, PageSearchResponseBody, SearchRequest},
         whoami::whoami_and_authorize,
@@ -116,10 +117,17 @@ impl FoundationMcpServer {
             Err(result) => return result,
         };
 
+        // When the ui origin is configured, instruct the agent how to build
+        // web page links so its cited pages become references the user
+        // can follow; otherwise fall back to the link-free default prompt.
+        let system = match &self.server.config.foundation.foundation_ui_origin {
+            Some(origin) => default_system_prompt() + &page_link_instructions(origin, &tenant),
+            None => default_system_prompt(),
+        };
         let request = AgentRequest {
             input: params.query,
             model: default_model(),
-            system: default_system_prompt(),
+            system,
         };
         if let Err(err) = request.validate() {
             return CallToolResult::error(vec![Content::text(err.to_string())]);

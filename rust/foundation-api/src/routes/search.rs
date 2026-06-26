@@ -11,6 +11,7 @@
 //! supplies the dense and sparse query vectors, which is why both embedders run
 //! client-side here before the query is issued.
 
+use crate::routes::links::page_redirect_url;
 use crate::routes::{caller_token, whoami::whoami_and_authorize};
 use crate::wiki::embed::{WikiEmbedder, SPARSE_KEY};
 use crate::wiki::page::{meta_str, meta_str_array};
@@ -278,6 +279,10 @@ pub struct PageSearchHit {
     pub snippet: String,
     /// Fused relevance score of that best-matched chunk.
     pub score: Option<f32>,
+    /// Absolute web URL to view this page on the web. `None` when
+    /// `foundation_ui_origin` is unset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
 }
 
 /// Response body for `POST /api/search` and the MCP `search` tool: the unique
@@ -291,6 +296,8 @@ pub struct PageSearchResponseBody {
 /// a slim, one-per-page result list (best chunk per page) in fused-rank order.
 /// Does not reconstruct full pages — that is the job of [`run_read_page`].
 /// `limit` caps the number of unique pages (clamped to [`MAX_PAGE_LIMIT`]).
+/// Each hit's `url` is stamped from the configured `foundation_ui_origin` (left
+/// `None` when the origin is unset).
 pub(crate) async fn run_page_search(
     server: &FoundationApiServer,
     headers: &HeaderMap,
@@ -318,13 +325,20 @@ pub(crate) async fn run_page_search(
     )
     .await?;
 
-    Ok(hits_to_page_hits(hits))
+    Ok(hits_to_page_hits(
+        hits,
+        server.config.foundation.foundation_ui_origin.as_deref(),
+        tenant,
+    ))
 }
 
-/// Maps the (already grouped-by-slug) search records into slim per-page hits,
-/// skipping any record that somehow lacks a `slug`. Pure (no I/O) so the field
-/// mapping is unit-testable.
-fn hits_to_page_hits(hits: Vec<SearchRecord>) -> Vec<PageSearchHit> {
+/// Maps the (already grouped-by-slug) search records into slim per-page hits.
+/// When `origin` is set, each hit's `url` is built from it plus the tenant and slug.
+fn hits_to_page_hits(
+    hits: Vec<SearchRecord>,
+    origin: Option<&str>,
+    tenant: &str,
+) -> Vec<PageSearchHit> {
     hits.into_iter()
         .filter_map(|hit| {
             let slug = hit
@@ -341,12 +355,14 @@ fn hits_to_page_hits(hits: Vec<SearchRecord>) -> Vec<PageSearchHit> {
                 .as_ref()
                 .map(|meta| meta_str_array(meta, "categories"))
                 .unwrap_or_default();
+            let url = origin.and_then(|origin| page_redirect_url(origin, tenant, &slug));
             Some(PageSearchHit {
                 slug,
                 title,
                 categories,
                 snippet: hit.document.unwrap_or_default().trim().to_string(),
                 score: hit.score,
+                url,
             })
         })
         .collect()
@@ -517,7 +533,7 @@ mod tests {
 
     #[test]
     fn hits_to_page_hits_maps_record_fields() {
-        let pages = hits_to_page_hits(vec![hit("alpha", 0, "  alpha snippet\n\n", 0.9)]);
+        let pages = hits_to_page_hits(vec![hit("alpha", 0, "  alpha snippet\n\n", 0.9)], None, "t");
 
         assert_eq!(pages.len(), 1);
         assert_eq!(pages[0].slug, "alpha");
@@ -526,6 +542,21 @@ mod tests {
         // Leading/trailing whitespace from the chunk document is trimmed.
         assert_eq!(pages[0].snippet, "alpha snippet");
         assert_eq!(pages[0].score, Some(0.9));
+        assert_eq!(pages[0].url, None);
+    }
+
+    #[test]
+    fn hits_to_page_hits_builds_url_when_origin_set() {
+        let pages = hits_to_page_hits(
+            vec![hit("alpha", 0, "a", 0.9)],
+            Some("https://wiki.example.com"),
+            "tenant-1",
+        );
+
+        assert_eq!(
+            pages[0].url.as_deref(),
+            Some("https://wiki.example.com/~/page-redirect?tenant_uuid=tenant-1&slug=alpha")
+        );
     }
 
     #[test]
@@ -533,7 +564,7 @@ mod tests {
         let mut slugless = hit("x", 0, "no slug", 0.5);
         slugless.metadata.as_mut().unwrap().remove("slug");
 
-        let pages = hits_to_page_hits(vec![slugless, hit("alpha", 0, "a", 0.9)]);
+        let pages = hits_to_page_hits(vec![slugless, hit("alpha", 0, "a", 0.9)], None, "t");
 
         assert_eq!(pages.len(), 1);
         assert_eq!(pages[0].slug, "alpha");

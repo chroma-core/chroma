@@ -86,6 +86,10 @@ pub struct FoundationConfig {
     /// server metadata and token endpoints for the Foundation MCP resource.
     #[serde(default)]
     pub mcp_authorization_server_url: Option<String>,
+    /// Public origin for wiki page redirect links. When unset, MCP results
+    /// omit `url`.
+    #[serde(default)]
+    pub foundation_ui_origin: Option<String>,
 }
 
 impl FoundationConfig {
@@ -143,6 +147,7 @@ impl Default for FoundationConfig {
             deep_research_api_url: None,
             api_public_origin: None,
             mcp_authorization_server_url: None,
+            foundation_ui_origin: None,
         }
     }
 }

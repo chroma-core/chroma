@@ -42,6 +42,7 @@ where
 pub(crate) mod agent;
 pub(crate) mod init;
 pub(crate) mod init_schema;
+pub(crate) mod links;
 pub(crate) mod mcp;
 pub(crate) mod read_page;
 pub(crate) mod search;
