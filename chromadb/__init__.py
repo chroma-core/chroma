@@ -216,6 +216,14 @@ def PersistentClient(
     Returns:
         ClientAPI: A configured client instance.
     """
+    if not isinstance(path, (str, Path)):
+        raise TypeError(
+            f"PersistentClient(path=...) expects a str or pathlib.Path, "
+            f"got {type(path).__name__}. "
+            f"Hint: if you passed a config dict, pass the path string explicitly, "
+            f"e.g. PersistentClient(path=config['chroma_dir'])."
+        )
+
     if settings is None:
         settings = Settings()
     settings.persist_directory = str(path)
