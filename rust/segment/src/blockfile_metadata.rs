@@ -477,6 +477,8 @@ pub enum MetadataSegmentError {
     LimitOffsetNotSupported,
     #[error("Metadata index error: {0}")]
     MetadataIndexQueryError(#[from] MetadataIndexError),
+    #[error("Legacy sparse index present on disk but no enabled sparse key owns it")]
+    LegacySparseWithoutEnabledKey,
 }
 
 impl ChromaError for MetadataSegmentError {
@@ -497,6 +499,7 @@ impl ChromaError for MetadataSegmentError {
             MetadataSegmentError::BlockfileWriteError => ErrorCodes::Internal,
             MetadataSegmentError::LimitOffsetNotSupported => ErrorCodes::Internal,
             MetadataSegmentError::MetadataIndexQueryError(_) => ErrorCodes::Internal,
+            MetadataSegmentError::LegacySparseWithoutEnabledKey => ErrorCodes::Internal,
         }
     }
 }
@@ -829,7 +832,15 @@ impl<'me> MetadataSegmentWriterShard<'me> {
         let has_legacy_sparse = legacy_posting_file_path.is_some()
             || (legacy_max_file_path.is_some() && legacy_offset_value_file_path.is_some());
         let legacy_owner_key = if has_legacy_sparse {
-            enabled_sparse_keys.first().cloned()
+            // A legacy anonymous sparse index exists on disk. With immutable
+            // schemas exactly one enabled sparse key should own (and migrate)
+            // it. If there is none, refuse rather than silently dropping the
+            // index on the next flush — this should never happen, but guarding
+            // it guarantees we surface the bug instead of losing data.
+            match enabled_sparse_keys.first() {
+                Some(key) => Some(key.clone()),
+                None => return Err(MetadataSegmentError::LegacySparseWithoutEnabledKey),
+            }
         } else {
             None
         };
@@ -1062,13 +1073,19 @@ impl<'me> MetadataSegmentWriterShard<'me> {
                 }
             }
             MetadataValue::SparseVector(offset_value) => {
-                // Route to the writer for this metadata key. If the key has no
-                // enabled sparse index, skip silently — apply_materialized_log_chunk
-                // already gates on schema.is_metadata_type_index_enabled.
-                if let Some(w) = self.sparse_index_writers.get(prefix) {
-                    w.set(offset_id, offset_value.iter()).await;
+                // Route to the writer for this metadata key. The caller gates
+                // on schema.is_metadata_type_index_enabled and the sysdb always
+                // persists a schema, so an enabled sparse key must have a writer
+                // here. A missing writer is an invariant violation; surface it
+                // as an error (like the other arms, but without panicking)
+                // rather than silently dropping the value.
+                match self.sparse_index_writers.get(prefix) {
+                    Some(w) => {
+                        w.set(offset_id, offset_value.iter()).await;
+                        Ok(())
+                    }
+                    None => Err(MetadataIndexError::MissingSparseWriter(prefix.to_string())),
                 }
-                Ok(())
             }
             // Array types: explode the array and index each element separately
             // This enables efficient CONTAINS queries via the inverted index
@@ -1195,11 +1212,16 @@ impl<'me> MetadataSegmentWriterShard<'me> {
                 }
             }
             MetadataValue::SparseVector(offset_value) => {
-                if let Some(w) = self.sparse_index_writers.get(prefix) {
-                    w.delete(offset_id, offset_value.indices.iter().cloned())
-                        .await;
+                // See set_metadata: a missing writer for an enabled sparse key
+                // is an invariant violation, so error instead of swallowing it.
+                match self.sparse_index_writers.get(prefix) {
+                    Some(w) => {
+                        w.delete(offset_id, offset_value.indices.iter().cloned())
+                            .await;
+                        Ok(())
+                    }
+                    None => Err(MetadataIndexError::MissingSparseWriter(prefix.to_string())),
                 }
-                Ok(())
             }
             // Array types: delete each element from the inverted index
             MetadataValue::StringArray(values) => {
