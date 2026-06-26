@@ -29,7 +29,9 @@ use chroma_types::{
     Metadata, QueryResponse, UpdateCollectionConfiguration, UpdateCollectionRequest,
     UpdateMetadata, WrappedSerdeJsonError,
 };
-use pyo3::{exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, Python};
+use pyo3::{pyclass, pyfunction, pymethods, types::PyAnyMethods, Python};
+
+pyo3::import_exception!(chromadb.errors, InvalidArgumentError);
 use std::time::SystemTime;
 const DEFAULT_DATABASE: &str = "default_database";
 const DEFAULT_TENANT: &str = "default_tenant";
@@ -465,7 +467,7 @@ impl Bindings {
         database: String,
     ) -> ChromaPyResult<bool> {
         if self.get_max_batch_size() < ids.len() as u32 {
-            return Err(WrappedPyErr::from(PyValueError::new_err(format!(
+            return Err(WrappedPyErr::from(InvalidArgumentError::new_err(format!(
                 "Batch size of {} is greater than max batch size of {}",
                 ids.len(),
                 self.get_max_batch_size()
@@ -510,7 +512,7 @@ impl Bindings {
         database: String,
     ) -> ChromaPyResult<bool> {
         if self.get_max_batch_size() < ids.len() as u32 {
-            return Err(WrappedPyErr::from(PyValueError::new_err(format!(
+            return Err(WrappedPyErr::from(InvalidArgumentError::new_err(format!(
                 "Batch size of {} is greater than max batch size of {}",
                 ids.len(),
                 self.get_max_batch_size()
@@ -557,7 +559,7 @@ impl Bindings {
         database: String,
     ) -> ChromaPyResult<bool> {
         if self.get_max_batch_size() < ids.len() as u32 {
-            return Err(WrappedPyErr::from(PyValueError::new_err(format!(
+            return Err(WrappedPyErr::from(InvalidArgumentError::new_err(format!(
                 "Batch size of {} is greater than max batch size of {}",
                 ids.len(),
                 self.get_max_batch_size()
