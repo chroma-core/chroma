@@ -29,3 +29,20 @@ def test_raise_chroma_error_requires_response_message() -> None:
         BaseHTTPClient._raise_chroma_error(response)
 
     assert isinstance(error.value.__cause__, KeyError)
+
+
+def test_raise_chroma_error_maps_conditional_write_conflict() -> None:
+    request = httpx.Request("POST", "http://localhost/conditional/commit")
+    response = httpx.Response(
+        409,
+        request=request,
+        json={
+            "error": "ConditionalWriteConflictError",
+            "message": "conditional write conflict",
+        },
+    )
+
+    with pytest.raises(
+        errors.ConditionalWriteConflictError, match="conditional write conflict"
+    ):
+        BaseHTTPClient._raise_chroma_error(response)
