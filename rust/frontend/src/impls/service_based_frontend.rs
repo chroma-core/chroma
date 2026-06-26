@@ -1087,9 +1087,10 @@ impl ServiceBasedFrontend {
                     .map_err(GetCollectionError::InvalidSchema)?;
             }
         }
-        collections
-            .pop()
-            .ok_or(GetCollectionError::NotFound(collection_name))
+       match collections.pop() {
+            Some(collection) if collection.name == collection_name => Ok(collection),
+            _ => Err(GetCollectionError::NotFound(collection_name)),
+        }
     }
 
     pub async fn get_collection_by_crn(
