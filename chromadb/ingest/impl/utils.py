@@ -12,7 +12,7 @@ def parse_topic_name(topic_name: str) -> Tuple[str, str, str]:
     """Parse the topic name into the tenant, namespace and topic name"""
     match = re.match(topic_regex, topic_name)
     if not match:
-        raise ValueError(f"Invalid topic name: {topic_name}")
+        raise InvalidArgumentError(f"Invalid topic name: {topic_name}")
     return match.group("tenant"), match.group("namespace"), match.group("topic")
 
 
@@ -39,6 +39,7 @@ def trigger_vector_segments_max_seq_id_migration(
                   "type" = 'urn:chroma:segment/vector/hnsw-local-persisted'
         """
         )
+from chromadb.errors import InvalidArgumentError
         collection_ids_with_unmigrated_segments = [row[0] for row in cur.fetchall()]
 
     if len(collection_ids_with_unmigrated_segments) == 0:

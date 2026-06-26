@@ -43,12 +43,12 @@ class ChromaLangchainEmbeddingFunction(EmbeddingFunction[Embeddable]):
 
             LangchainEmbeddings = langchain_core.embeddings.Embeddings
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The langchain_core python package is not installed. Please install it with `pip install langchain-core`"
             )
 
         if not isinstance(embedding_function, LangchainEmbeddings):
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The embedding_function must implement the Embeddings interface from langchain_core."
             )
 
@@ -96,7 +96,7 @@ class ChromaLangchainEmbeddingFunction(EmbeddingFunction[Embeddable]):
         if hasattr(self.embedding_function, "embed_image"):
             return cast(List[List[float]], self.embedding_function.embed_image(uris))
         else:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The provided embedding function does not support image embeddings."
             )
 
@@ -156,6 +156,7 @@ class ChromaLangchainEmbeddingFunction(EmbeddingFunction[Embeddable]):
             "Updating a ChromaLangchainEmbeddingFunction config is not supported. "
             "Please recreate the langchain embedding function and pass it to create_langchain_embedding."
         )
+from chromadb.errors import InvalidArgumentError
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:

@@ -34,7 +34,7 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         try:
             import httpx
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The httpx python package is not installed. Please install it with `pip install httpx`"
             )
         self.api_key_env_var = api_key_env_var
@@ -46,7 +46,7 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
             self.api_key = SharedSystemClient.get_chroma_cloud_api_key_from_clients()
         # Raise error if still no API key found
         if not self.api_key:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"API key not found in environment variable {self.api_key_env_var} "
                 f"or in any existing client instances"
             )
@@ -150,9 +150,9 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         api_key_env_var = config.get("api_key_env_var")
         model = config.get("model")
         if model is None:
-            raise ValueError("model must be provided in config")
+            raise InvalidArgumentError("model must be provided in config")
         if not api_key_env_var:
-            raise ValueError("api_key_env_var must be provided in config")
+            raise InvalidArgumentError("api_key_env_var must be provided in config")
         return ChromaCloudSpladeEmbeddingFunction(
             api_key_env_var=api_key_env_var,
             model=ChromaCloudSpladeEmbeddingModel(model),
@@ -172,9 +172,10 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         immutable_keys = {"include_tokens", "model"}
         for key in immutable_keys:
             if key in new_config and new_config[key] != old_config.get(key):
-                raise ValueError(
+                raise InvalidArgumentError(
                     f"Updating '{key}' is not supported for chroma-cloud-splade"
                 )
+from chromadb.errors import InvalidArgumentError
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:

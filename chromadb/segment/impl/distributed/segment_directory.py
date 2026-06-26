@@ -80,7 +80,7 @@ class CustomResourceMemberlistProvider(MemberlistProvider, EnforceOverrides):
     @override
     def start(self) -> None:
         if self._memberlist_name is None:
-            raise ValueError("Memberlist name must be set before starting")
+            raise InvalidArgumentError("Memberlist name must be set before starting")
         self.get_memberlist()
         self._done_waiting_for_reset.clear()
         self._watch_worker_memberlist()
@@ -106,7 +106,7 @@ class CustomResourceMemberlistProvider(MemberlistProvider, EnforceOverrides):
         # get propagated back again
         # Note that the component must be running in order to reset the state
         if not self._system.settings.require("allow_reset"):
-            raise ValueError(
+            raise InvalidArgumentError(
                 "Resetting the database is not allowed. Set `allow_reset` to true in the config in tests or other non-production environments where reset should be permitted."
             )
         if self._memberlist_name:
@@ -255,7 +255,7 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
     @override
     def get_segment_endpoints(self, segment: Segment, n: int) -> List[str]:
         if self._curr_memberlist is None or len(self._curr_memberlist) == 0:
-            raise ValueError("Memberlist is not initialized")
+            raise InvalidArgumentError("Memberlist is not initialized")
 
         # assign() will throw an error if n is greater than the number of members
         # clamp n to the number of members to align with the contract of this method
@@ -326,6 +326,7 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
             add_attributes_to_current_span(
                 {"new_memberlist": [m.id for m in memberlist]}
             )
+from chromadb.errors import InvalidArgumentError
             self._curr_memberlist = memberlist
 
     def extract_service_name(self, pod_name: str) -> Optional[str]:

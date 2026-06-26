@@ -64,13 +64,13 @@ class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
         try:
             import httpx
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The httpx python package is not installed. Please install it with `pip install httpx`"
             )
         try:
             self._PILImage = importlib.import_module("PIL.Image")
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The PIL python package is not installed. Please install it with `pip install pillow`"
             )
 
@@ -88,7 +88,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
 
         self.api_key = api_key or os.getenv(self.api_key_env_var)
         if not self.api_key:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"The {self.api_key_env_var} environment variable is not set."
             )
 
@@ -132,7 +132,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
                         base64_string = base64.b64encode(img_bytes).decode("utf-8")
 
                     except Exception as e:
-                        raise ValueError(
+                        raise InvalidArgumentError(
                             f"Failed to convert image numpy array to base64 data URI: {e}"
                         ) from e
                     payload["input"].append({"image": base64_string})
@@ -265,9 +265,10 @@ class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
         if "model_name" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The model name cannot be changed after the embedding function has been initialized."
             )
+from chromadb.errors import InvalidArgumentError
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:

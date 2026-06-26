@@ -36,7 +36,7 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
         # check kwargs are primitives only
         for key, value in kwargs.items():
             if not isinstance(value, (str, int, float, bool, list, dict, tuple)):
-                raise ValueError(f"Keyword argument {key} is not a primitive type")
+                raise InvalidArgumentError(f"Keyword argument {key} is not a primitive type")
         self.kwargs = kwargs
 
         # Store the session for serialization
@@ -90,7 +90,7 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
         try:
             import boto3
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The boto3 python package is not installed. Please install it with `pip install boto3`"
             )
 
@@ -120,9 +120,10 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
         if "model_name" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The model name cannot be changed after the embedding function has been initialized."
             )
+from chromadb.errors import InvalidArgumentError
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:

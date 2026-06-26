@@ -99,7 +99,7 @@ class Search:
         elif isinstance(where, dict):
             self._where = Where.from_dict(where)
         else:
-            raise TypeError(
+            raise InvalidArgumentError(
                 f"where must be a Where object, dict, or None, got {type(where).__name__}"
             )
 
@@ -111,7 +111,7 @@ class Search:
         elif isinstance(rank, dict):
             self._rank = Rank.from_dict(rank)
         else:
-            raise TypeError(
+            raise InvalidArgumentError(
                 f"rank must be a Rank object, dict, or None, got {type(rank).__name__}"
             )
 
@@ -123,7 +123,7 @@ class Search:
         elif isinstance(group_by, dict):
             self._group_by = GroupBy.from_dict(group_by)
         else:
-            raise TypeError(
+            raise InvalidArgumentError(
                 f"group_by must be a GroupBy object, dict, or None, got {type(group_by).__name__}"
             )
 
@@ -137,7 +137,7 @@ class Search:
         elif isinstance(limit, dict):
             self._limit = Limit.from_dict(limit)
         else:
-            raise TypeError(
+            raise InvalidArgumentError(
                 f"limit must be a Limit object, dict, int, or None, got {type(limit).__name__}"
             )
 
@@ -152,7 +152,7 @@ class Search:
             # Convert list/set of strings to Select object
             self._select = Select.from_dict({"keys": list(select)})
         else:
-            raise TypeError(
+            raise InvalidArgumentError(
                 f"select must be a Select object, dict, list, set, or None, got {type(select).__name__}"
             )
 
@@ -279,3 +279,4 @@ class Search:
             limit=new_limit,
             select=self._select,
         )
+from chromadb.errors import InvalidArgumentError

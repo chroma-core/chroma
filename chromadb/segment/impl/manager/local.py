@@ -206,7 +206,7 @@ class LocalSegmentManager(SegmentManager):
         elif type == VectorReader:
             scope = SegmentScope.VECTOR
         else:
-            raise ValueError(f"Invalid segment type: {type}")
+            raise InvalidArgumentError(f"Invalid segment type: {type}")
 
         segment = self.segment_cache[scope].get(collection_id)
         if segment is None:
@@ -267,3 +267,4 @@ def _segment(type: SegmentType, scope: SegmentScope, collection: Collection) -> 
         metadata=metadata,
         file_paths={},
     )
+from chromadb.errors import InvalidArgumentError

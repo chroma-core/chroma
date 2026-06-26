@@ -202,7 +202,7 @@ class _SnowballStemmerAdapter:
         try:
             import snowballstemmer
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The snowballstemmer python package is not installed. Please install it with `pip install snowballstemmer`"
             )
 
@@ -262,7 +262,7 @@ class Murmur3AbsHasher:
         try:
             import mmh3
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The murmurhash3 python package is not installed. Please install it with `pip install murmurhash3`"
             )
         self.hasher = mmh3.hash
@@ -279,4 +279,5 @@ __all__ = [
     "SnowballStemmer",
     "get_english_stemmer",
     "Murmur3AbsHasher",
+from chromadb.errors import InvalidArgumentError
 ]

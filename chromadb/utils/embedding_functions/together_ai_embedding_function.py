@@ -36,7 +36,7 @@ class TogetherAIEmbeddingFunction(EmbeddingFunction[Documents]):
         try:
             import httpx
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The httpx python package is not installed. Please install it with `pip install httpx`"
             )
 
@@ -56,7 +56,7 @@ class TogetherAIEmbeddingFunction(EmbeddingFunction[Documents]):
 
         self.api_key = api_key or os.getenv(self.api_key_env_var)
         if not self.api_key:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"The {self.api_key_env_var} environment variable is not set."
             )
 
@@ -78,13 +78,13 @@ class TogetherAIEmbeddingFunction(EmbeddingFunction[Documents]):
         """
 
         if not input:
-            raise ValueError("Input is required")
+            raise InvalidArgumentError("Input is required")
 
         if not isinstance(input, list):
-            raise ValueError("Input must be a list")
+            raise InvalidArgumentError("Input must be a list")
 
         if not all(isinstance(item, str) for item in input):
-            raise ValueError("All items in input must be strings")
+            raise InvalidArgumentError("All items in input must be strings")
 
         response = self._session.post(
             ENDPOINT,
@@ -115,7 +115,7 @@ class TogetherAIEmbeddingFunction(EmbeddingFunction[Documents]):
         model_name = config.get("model_name")
 
         if api_key_env_var is None or model_name is None:
-            raise ValueError("api_key_env_var and model_name must be provided")
+            raise InvalidArgumentError("api_key_env_var and model_name must be provided")
 
         return TogetherAIEmbeddingFunction(
             model_name=model_name, api_key_env_var=api_key_env_var
@@ -131,9 +131,10 @@ class TogetherAIEmbeddingFunction(EmbeddingFunction[Documents]):
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
         if "model_name" in new_config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The model name cannot be changed after the embedding function has been initialized."
             )
+from chromadb.errors import InvalidArgumentError
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:

@@ -169,9 +169,10 @@ class ChromaBm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
             "stopwords",
             "include_tokens",
         }
+from chromadb.errors import InvalidArgumentError
         for key in new_config:
             if key not in mutable_keys:
-                raise ValueError(f"Updating '{key}' is not supported for {NAME}")
+                raise InvalidArgumentError(f"Updating '{key}' is not supported for {NAME}")
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:
