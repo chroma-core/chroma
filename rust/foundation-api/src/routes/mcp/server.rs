@@ -117,11 +117,18 @@ impl FoundationMcpServer {
             Err(result) => return result,
         };
 
-        // When the ui origin is configured, instruct the agent how to build
-        // web page links so its cited pages become references the user
-        // can follow; otherwise fall back to the link-free default prompt.
-        let system = match &self.server.config.foundation.foundation_ui_origin {
-            Some(origin) => default_system_prompt() + &page_link_instructions(origin, &tenant),
+        // When a valid ui origin is configured, instruct the agent how to build
+        // web page links so its cited pages become references the user can
+        // follow; otherwise fall back to the link-free default prompt.
+        let link_instructions = self
+            .server
+            .config
+            .foundation
+            .foundation_ui_origin
+            .as_deref()
+            .and_then(|origin| page_link_instructions(origin, &tenant));
+        let system = match link_instructions {
+            Some(instructions) => default_system_prompt() + &instructions,
             None => default_system_prompt(),
         };
         let request = AgentRequest {

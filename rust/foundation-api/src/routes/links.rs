@@ -12,6 +12,14 @@ use reqwest::Url;
 /// page slug to the page URL.
 const PAGE_REDIRECT_PATH: &str = "/~/page-redirect";
 
+/// The `{origin}/~/page-redirect` base URL, or `None` when `origin` does not
+/// parse as a valid URL (e.g. a deploy that forgot the scheme).
+fn page_redirect_base(origin: &str) -> Option<String> {
+    let base = format!("{}{}", origin.trim_end_matches('/'), PAGE_REDIRECT_PATH);
+    Url::parse(&base).ok()?;
+    Some(base)
+}
+
 /// Builds the absolute redirect URL for a wiki page:
 /// `{origin}/~/page-redirect?tenant_uuid=<tenant_uuid>&slug=<slug>`.
 ///
@@ -21,20 +29,17 @@ const PAGE_REDIRECT_PATH: &str = "/~/page-redirect";
 /// optional. Returns `None` only when the configured origin fails to parse as a
 /// URL.
 pub(crate) fn page_redirect_url(origin: &str, tenant: &str, slug: &str) -> Option<String> {
-    let base = format!("{}{}", origin.trim_end_matches('/'), PAGE_REDIRECT_PATH);
+    let base = page_redirect_base(origin)?;
     Url::parse_with_params(&base, &[("tenant_uuid", tenant), ("slug", slug)])
         .ok()
         .map(String::from)
 }
 
 /// Guidance appended to the `ask_foundation` agent's system prompt so the
-/// synthesized answer can link the pages it cites. Only used when
-/// `foundation_ui_origin` is configured; the origin and tenant are baked in so
-/// the model only substitutes each page's slug. Mirrors [`page_redirect_url`]'s
-/// URL shape.
-pub(crate) fn page_link_instructions(origin: &str, tenant: &str) -> String {
-    let base = format!("{}{}", origin.trim_end_matches('/'), PAGE_REDIRECT_PATH);
-    format!(
+/// synthesized answer can link the pages it cites.
+pub(crate) fn page_link_instructions(origin: &str, tenant: &str) -> Option<String> {
+    let base = page_redirect_base(origin)?;
+    Some(format!(
         "\n\nWhen you cite a Foundation page, link to it for the user as a \
          markdown link using this URL template:\n\
          {base}?tenant_uuid={tenant}&slug=<slug>\n\
@@ -42,7 +47,7 @@ pub(crate) fn page_link_instructions(origin: &str, tenant: &str) -> String {
          reports its `slug=`). Use the `tenant_uuid` value above verbatim; do \
          not change it. For example, cite a page as \
          `[Onboarding]({base}?tenant_uuid={tenant}&slug=onboarding)`."
-    )
+    ))
 }
 
 #[cfg(test)]
@@ -81,9 +86,22 @@ mod tests {
     }
 
     #[test]
+    fn redirect_url_none_for_unparseable_origin() {
+        // A scheme-less origin (a plausible deploy misconfiguration) is not a valid URL.
+        assert_eq!(page_redirect_url("wiki.example.com", "t-1", "p"), None);
+    }
+
+    #[test]
     fn link_instructions_embed_origin_and_tenant() {
-        let text = page_link_instructions("https://wiki.example.com", "tenant-9");
+        let text = page_link_instructions("https://wiki.example.com", "tenant-9").expect("text");
         assert!(text.contains("https://wiki.example.com/~/page-redirect?tenant_uuid=tenant-9"));
         assert!(text.contains("<slug>"));
+    }
+
+    #[test]
+    fn link_instructions_none_for_unparseable_origin() {
+        // Mirrors `page_redirect_url`: a bad origin emits no link guidance, so
+        // the agent is never told to build links the other tools can't.
+        assert_eq!(page_link_instructions("wiki.example.com", "t-1"), None);
     }
 }
