@@ -127,15 +127,16 @@ class Collection(
     # TODO: This doesn't check types.
     def __setitem__(self, key: str, value: Any) -> None:
         """Allows the collection to be treated as a dictionary"""
-        # For the model attributes we allow the user to access them directly
         if key == "configuration":
             self.set_configuration(value)
-        if key in self.get_model_fields():
+        # For the other model attributes we allow the user to set them directly
+        elif key in self.get_model_fields():
             setattr(self, key, value)
         else:
-            raise KeyError(
-                f"No such key: {key}, valid keys are: {self.get_model_fields()}"
-            )
+            # "configuration" is a valid key too, but it's backed by
+            # configuration_json rather than being a model field of its own.
+            valid_keys = ["configuration", *self.get_model_fields().keys()]
+            raise KeyError(f"No such key: {key}, valid keys are: {valid_keys}")
 
     def __eq__(self, __value: object) -> bool:
         # Check that all the model fields are equal
