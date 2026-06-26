@@ -102,7 +102,13 @@ impl FoundationMcpServer {
         description = "Ask a question and get a synthesized, cited answer grounded \
             in Foundation, the organization-wide wiki of the company's data. Use \
             this for questions that may be answered by internal company knowledge \
-            rather than general knowledge."
+            rather than general knowledge.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
     )]
     async fn ask_foundation(
         &self,
@@ -158,7 +164,13 @@ impl FoundationMcpServer {
             processes, architecture, conventions, team knowledge) that would not \
             be in the current codebase or public sources. Use `ask_foundation` \
             instead when you just want a synthesized answer rather than the \
-            source pages."
+            source pages.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     async fn search_pages(
         &self,
@@ -208,7 +220,13 @@ impl FoundationMcpServer {
         description = "Read a single Foundation wiki page in full by its slug \
             (as returned by `search_pages`), including its complete markdown \
             content, title, and categories. Use this to pull the source material \
-            behind a search hit so you can read and cite it directly."
+            behind a search hit so you can read and cite it directly.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     async fn read_page(
         &self,
