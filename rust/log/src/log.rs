@@ -7,6 +7,7 @@ use chroma_memberlist::client_manager::ClientAssignmentError;
 use chroma_types::{
     chroma_proto::PushLogsCondition, Cmek, CollectionUuid, DatabaseName, ForkCollectionError,
     ForkLogsResponse, LogRecord, OperationRecord, ResetError, ResetResponse, TopologyName,
+    CONDITIONAL_WRITE_CONFLICT_MESSAGE,
 };
 use std::fmt::Debug;
 
@@ -57,6 +58,9 @@ pub enum PushLogsError {
     /// Conditional writes are not supported by this log implementation.
     #[error("conditional writes are not supported by {0} log")]
     ConditionalWritesUnsupported(&'static str),
+    /// The conditional write was rejected because the observed log state changed.
+    #[error("conditional write conflict")]
+    ConditionalWriteConflict,
     /// The record count cannot be represented by the log-service API.
     #[error("too many records in push_logs request: {0}")]
     RecordCountOutOfRange(usize),
@@ -71,8 +75,16 @@ impl ChromaError for PushLogsError {
             PushLogsError::Backoff => ErrorCodes::ResourceExhausted,
             PushLogsError::BackoffCompaction => ErrorCodes::ResourceExhausted,
             PushLogsError::ConditionalWritesUnsupported(_) => ErrorCodes::Unimplemented,
+            PushLogsError::ConditionalWriteConflict => ErrorCodes::AlreadyExists,
             PushLogsError::RecordCountOutOfRange(_) => ErrorCodes::InvalidArgument,
             PushLogsError::Other(e) => e.code(),
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        match self {
+            PushLogsError::ConditionalWriteConflict => "ConditionalWriteConflictError",
+            _ => self.code().name(),
         }
     }
 }
@@ -82,6 +94,12 @@ impl From<GrpcPushLogsError> for PushLogsError {
         match err {
             GrpcPushLogsError::Backoff => PushLogsError::Backoff,
             GrpcPushLogsError::BackoffCompaction => PushLogsError::BackoffCompaction,
+            GrpcPushLogsError::FailedToPushLogs(status)
+                if status.code() == tonic::Code::Aborted
+                    && status.message() == CONDITIONAL_WRITE_CONFLICT_MESSAGE =>
+            {
+                PushLogsError::ConditionalWriteConflict
+            }
             other => PushLogsError::Other(Box::new(other)),
         }
     }
@@ -477,5 +495,15 @@ mod tests {
             PushLogsError::ConditionalWritesUnsupported("in-memory")
         ));
         assert_eq!(ErrorCodes::Unimplemented, err.code());
+    }
+
+    #[test]
+    fn grpc_conditional_write_conflict_maps_to_typed_error() {
+        let status = tonic::Status::aborted(CONDITIONAL_WRITE_CONFLICT_MESSAGE);
+        let err = PushLogsError::from(GrpcPushLogsError::FailedToPushLogs(status));
+
+        assert!(matches!(err, PushLogsError::ConditionalWriteConflict));
+        assert_eq!(ErrorCodes::AlreadyExists, err.code());
+        assert_eq!("ConditionalWriteConflictError", err.name());
     }
 }
