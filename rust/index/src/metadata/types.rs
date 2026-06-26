@@ -23,11 +23,16 @@ pub enum MetadataIndexError {
     BlockfileError(#[from] Box<dyn ChromaError>),
     #[error("Full text index error: {0}")]
     FullTextError(#[from] FullTextIndexError),
+    #[error("Invariant violation: no sparse index writer for key '{0}'")]
+    MissingSparseWriter(String),
 }
 
 impl ChromaError for MetadataIndexError {
     fn code(&self) -> chroma_error::ErrorCodes {
-        ErrorCodes::InvalidArgument
+        match self {
+            MetadataIndexError::MissingSparseWriter(_) => ErrorCodes::Internal,
+            _ => ErrorCodes::InvalidArgument,
+        }
     }
 }
 
