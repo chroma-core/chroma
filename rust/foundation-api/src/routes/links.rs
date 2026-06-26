@@ -39,10 +39,8 @@ pub(crate) fn page_link_instructions(origin: &str, tenant: &str) -> String {
          markdown link using this URL template:\n\
          {base}?tenant_uuid={tenant}&slug=<slug>\n\
          Substitute <slug> with the page's exact slug (each search result \
-         reports its `slug=`) and percent-encode it, since slugs can contain \
-         characters like `:` — e.g. the slug `category:eng` becomes \
-         `category%3Aeng`. Use the `tenant_uuid` value above verbatim; do not \
-         change it. For example, cite a page as \
+         reports its `slug=`). Use the `tenant_uuid` value above verbatim; do \
+         not change it. For example, cite a page as \
          `[Onboarding]({base}?tenant_uuid={tenant}&slug=onboarding)`."
     )
 }
