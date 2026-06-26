@@ -21,6 +21,28 @@ We will aim to provide:
 
 ## Migration Log
 
+### v1.6.0 - Upcoming Release
+
+**Breaking Change: Default Persistence**
+
+Starting from this version, ChromaDB defaults to persistent storage (`is_persistent=True`). Previously, Chroma defaulted to ephemeral storage (`is_persistent=False`).
+
+This is a **breaking change** that may affect your existing code if you relied on the default ephemeral behavior. If you need to maintain ephemeral storage behavior, you must now explicitly set `is_persistent=False`:
+
+```python
+from chromadb.config import Settings
+
+# For ephemeral storage (old default behavior)
+client = chromadb.Client(Settings(is_persistent=False))
+```
+
+Or via environment variable:
+```bash
+export IS_PERSISTENT=FALSE
+```
+
+A warning will be logged when persistent storage is initialized to alert you of this change.
+
 ### v1.0.0 - March 1, 2025
 
 In this release, we've rewritten much of Chroma in Rust. Performance has significantly improved across the board.
