@@ -1714,6 +1714,7 @@ dependencies = [
  "strum 0.27.2",
  "strum_macros 0.27.2",
  "supports-color",
+ "tempfile",
  "textwrap",
  "thiserror 1.0.69",
  "tokio",
