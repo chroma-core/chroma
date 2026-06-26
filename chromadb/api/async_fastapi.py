@@ -70,10 +70,9 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     # Mixing asyncio and threading in this manner usually discouraged, but
     # this gives a better user experience with practically no downsides.
     # https://github.com/encode/httpx/issues/2058
-    _clients: Dict[int, httpx.AsyncClient] = {}
-
     def __init__(self, system: System):
         super().__init__(system)
+        self._clients: Dict[int, httpx.AsyncClient] = {}
 
         system.settings.require("chroma_server_host")
         system.settings.require("chroma_server_http_port")
@@ -617,7 +616,11 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> DeleteResult:
-        body: dict = {"where": where, "ids": ids, "where_document": where_document}
+        body: Dict[str, Any] = {
+            "where": where,
+            "ids": ids,
+            "where_document": where_document,
+        }
         if limit is not None:
             body["limit"] = limit
         resp = await self._make_request(
