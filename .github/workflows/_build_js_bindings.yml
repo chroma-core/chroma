@@ -34,10 +34,7 @@ jobs:
         uses: ./.github/actions/rust
         with:
           github-token: ${{ github.token }}
-      - name: Add targets
-        run: |
-          rustup target add x86_64-apple-darwin
-          rustup target add aarch64-apple-darwin
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
       - name: Cache cargo
         uses: actions/cache@v5
         with:
@@ -92,9 +89,7 @@ jobs:
         uses: ./.github/actions/rust
         with:
           github-token: ${{ github.token }}
-      - name: Add target
-        run: rustup target add x86_64-pc-windows-msvc
-        shell: bash
+          targets: x86_64-pc-windows-msvc
       - name: Cache cargo
         uses: actions/cache@v5
         with:
@@ -140,10 +135,7 @@ jobs:
         uses: ./.github/actions/rust
         with:
           github-token: ${{ github.token }}
-      - name: Add targets
-        run: |
-          rustup target add x86_64-unknown-linux-gnu
-          rustup target add aarch64-unknown-linux-gnu
+          targets: x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu
       - name: Install ARM64 cross-compilation tools
         run: |
           sudo apt-get update
