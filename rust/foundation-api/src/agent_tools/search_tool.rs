@@ -17,6 +17,7 @@ use chroma_agent::{AgentError, Tool, ToolCallMetadata};
 
 use crate::routes::search::{default_limit, run_hybrid_search};
 use crate::wiki::embed::WikiEmbedder;
+use crate::wiki::page::meta_str;
 
 /// Model-supplied parameters for [`SearchTool`].
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -58,7 +59,7 @@ impl Tool for SearchTool {
     fn description(&self) -> &str {
         "Search the knowledge base for documents relevant to a query. Runs a \
          hybrid dense+sparse retrieval and returns the most relevant documents \
-         with their ids and scores."
+         with their ids, page slugs, and scores."
     }
 
     async fn call(
@@ -83,7 +84,8 @@ impl Tool for SearchTool {
 }
 
 /// Renders search hits into a numbered text block the model can read: each hit
-/// is its id (+ score) followed by the document text.
+/// is its id, page slug (when present), and score, followed by the document
+/// text.
 fn format_hits(hits: &[SearchRecord]) -> String {
     if hits.is_empty() {
         return "No results found.".to_string();
@@ -91,12 +93,18 @@ fn format_hits(hits: &[SearchRecord]) -> String {
     hits.iter()
         .enumerate()
         .map(|(i, hit)| {
+            let slug = hit
+                .metadata
+                .as_ref()
+                .and_then(|meta| meta_str(meta, "slug"))
+                .map(|slug| format!(" slug={slug}"))
+                .unwrap_or_default();
             let score = hit
                 .score
                 .map(|s| format!(" (score {s:.4})"))
                 .unwrap_or_default();
             let document = hit.document.as_deref().unwrap_or("");
-            format!("[{}] {}{}\n{}", i + 1, hit.id, score, document)
+            format!("[{}] {}{}{}\n{}", i + 1, hit.id, slug, score, document)
         })
         .collect::<Vec<_>>()
         .join("\n\n")
@@ -127,6 +135,21 @@ mod tests {
         assert!(text.contains("alpha body"));
         assert!(text.contains("[2] doc-b"));
         assert!(text.contains("beta body"));
+    }
+
+    #[test]
+    fn formats_hits_surfaces_slug_when_present() {
+        use chroma_types::{Metadata, MetadataValue};
+        let mut record = hit("onboarding-0", Some("body"), Some(0.5));
+        let mut meta = Metadata::new();
+        meta.insert(
+            "slug".to_string(),
+            MetadataValue::Str("onboarding".to_string()),
+        );
+        record.metadata = Some(meta);
+
+        let text = format_hits(&[record]);
+        assert!(text.contains("slug=onboarding"), "got: {text}");
     }
 
     #[test]
