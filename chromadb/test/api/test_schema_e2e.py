@@ -563,22 +563,36 @@ def test_sparse_vector_source_key_and_index_constraints(
     assert len(search_result["ids"]) == 1
     assert "sparse-1" in search_result["ids"][0]
 
+    # The following exercise client-side Schema *builder* validation. Indexes
+    # cannot be added to an existing collection (schemas are fixed at creation),
+    # so these operate on a fresh Schema rather than mutating collection.schema.
+
     # source_key without an embedding function is still rejected.
     with pytest.raises(ValueError):
-        collection.schema.create_index(
+        Schema().create_index(
             key="invalid_sparse",
             config=SparseVectorIndexConfig(source_key="raw_text"),
         )
 
-    # A second sparse vector index is now allowed (multiple sparse indices).
-    collection.schema.create_index(
+    # Multiple sparse vector indices are allowed in a single schema (the old
+    # "one sparse index per collection" restriction has been removed).
+    multi_sparse_schema = Schema()
+    multi_sparse_schema.create_index(
+        key="sparse_metadata",
+        config=SparseVectorIndexConfig(
+            source_key="raw_text",
+            embedding_function=sparse_ef,
+        ),
+    )
+    multi_sparse_schema.create_index(
         key="another_sparse",
         config=SparseVectorIndexConfig(
             source_key="raw_text",
             embedding_function=sparse_ef,
         ),
     )
-    assert "another_sparse" in collection.schema.keys
+    assert "sparse_metadata" in multi_sparse_schema.keys
+    assert "another_sparse" in multi_sparse_schema.keys
 
     string_filter = collection.get(where={"tag_b": "fruit"})
     assert set(string_filter["ids"]) == {"sparse-1"}
