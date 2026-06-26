@@ -467,6 +467,7 @@ jobs:
           - "chromadb/test/property/test_collections_with_database_tenant_overwrite.py"
           - "chromadb/test/distributed/test_sanity.py"
           - "chromadb/test/distributed/test_log_backpressure.py"
+          - "chromadb/test/distributed/test_conditional_transaction.py"
           - "chromadb/test/distributed/test_repair_collection_log_offset.py"
           - "chromadb/test/distributed/test_task_api.py"
           - "chromadb/test/distributed/test_statistics_wrapper.py"

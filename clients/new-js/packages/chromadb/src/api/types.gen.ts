@@ -158,6 +158,61 @@ export type CollectionConfiguration = {
 
 export type CollectionUuid = string;
 
+export type ConditionalCommitPayload = {
+    operations: Array<ConditionalTransactionOperationPayload>;
+    read_token?: number | null;
+};
+
+export type ConditionalCommitResult = {
+    first_inserted_record_offset?: number | null;
+    record_count: number;
+};
+
+export type ConditionalGetRequestPayload = RawWhereFields & {
+    ids?: Array<string> | null;
+    include?: IncludeList;
+    limit?: number | null;
+    offset?: number | null;
+    read_token?: number | null;
+};
+
+/**
+ * Response for a transactional get.
+ *
+ * This mirrors `GetResponse`, but includes the OCC read token that pins all
+ * later reads and the eventual commit to the same log snapshot.
+ */
+export type ConditionalGetResponse = {
+    documents?: Array<string | null> | null;
+    embeddings?: Array<Array<number>> | null;
+    ids: Array<string>;
+    include: Array<Include>;
+    metadatas?: Array<null | HashMap> | null;
+    read_token: number;
+    uris?: Array<string | null> | null;
+};
+
+export type ConditionalTransactionOperationPayload = {
+    operation: 'get';
+    payload: ConditionalTransactionReadPayload;
+} | {
+    operation: 'add';
+    payload: AddCollectionRecordsPayload;
+} | {
+    operation: 'update';
+    payload: UpdateCollectionRecordsPayload;
+} | {
+    operation: 'upsert';
+    payload: UpsertCollectionRecordsPayload;
+} | {
+    operation: 'delete';
+    payload: DeleteCollectionRecordsPayload;
+};
+
+export type ConditionalTransactionReadPayload = GetRequestPayload & {
+    expected_ids: Array<string>;
+};
+
 export type CreateCollectionPayload = {
     configuration?: null | CollectionConfiguration;
     get_or_create?: boolean;
@@ -1655,6 +1710,110 @@ export type DetachFunctionResponses = {
 };
 
 export type DetachFunctionResponse2 = DetachFunctionResponses[keyof DetachFunctionResponses];
+
+export type CollectionConditionalCommitData = {
+    body: ConditionalCommitPayload;
+    path: {
+        /**
+         * Tenant UUID
+         */
+        tenant: string;
+        /**
+         * Database name
+         */
+        database: string;
+        /**
+         * Collection UUID
+         */
+        collection_id: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/conditional/commit';
+};
+
+export type CollectionConditionalCommitErrors = {
+    /**
+     * Invalid request
+     */
+    400: ErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Collection not found
+     */
+    404: ErrorResponse;
+    /**
+     * Conditional write conflict
+     */
+    409: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type CollectionConditionalCommitError = CollectionConditionalCommitErrors[keyof CollectionConditionalCommitErrors];
+
+export type CollectionConditionalCommitResponses = {
+    /**
+     * Conditional transaction committed
+     */
+    200: ConditionalCommitResult;
+};
+
+export type CollectionConditionalCommitResponse = CollectionConditionalCommitResponses[keyof CollectionConditionalCommitResponses];
+
+export type CollectionConditionalGetData = {
+    body: ConditionalGetRequestPayload;
+    path: {
+        /**
+         * Tenant UUID
+         */
+        tenant: string;
+        /**
+         * Database name
+         */
+        database: string;
+        /**
+         * Collection UUID
+         */
+        collection_id: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/conditional/get';
+};
+
+export type CollectionConditionalGetErrors = {
+    /**
+     * Invalid request
+     */
+    400: ErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Collection not found
+     */
+    404: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type CollectionConditionalGetError = CollectionConditionalGetErrors[keyof CollectionConditionalGetErrors];
+
+export type CollectionConditionalGetResponses = {
+    /**
+     * Records retrieved from the collection
+     */
+    200: ConditionalGetResponse;
+};
+
+export type CollectionConditionalGetResponse = CollectionConditionalGetResponses[keyof CollectionConditionalGetResponses];
 
 export type CollectionCountData = {
     body?: never;

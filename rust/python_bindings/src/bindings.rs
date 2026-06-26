@@ -656,10 +656,11 @@ impl Bindings {
         Ok(response.deleted)
     }
 
-    fn begin_conditional_transaction(&self) -> ConditionalTransaction {
-        ConditionalTransaction {
+    fn begin_conditional_transaction(&self) -> ChromaPyResult<ConditionalTransaction> {
+        self.frontend.ensure_conditional_transactions_supported()?;
+        Ok(ConditionalTransaction {
             state: chroma_types::ConditionalTransactionState::new(),
-        }
+        })
     }
 
     #[pyo3(
