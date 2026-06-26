@@ -2276,6 +2276,19 @@ def test_where_contains_validation():
     )
 
 
+def test_where_in_operand_bool_int_ordering():
+    """$in/$nin with mixed bool/int must raise regardless of element order (bool is subclass of int)."""
+    from chromadb.api.types import validate_where
+
+    with pytest.raises(ValueError, match="same type"):
+        validate_where({"field": {"$in": [True, 1]}})
+    with pytest.raises(ValueError, match="same type"):
+        validate_where({"field": {"$in": [1, True]}})
+    # Homogeneous lists must still pass
+    validate_where({"field": {"$in": [True, False]}})
+    validate_where({"field": {"$in": [1, 2, 3]}})
+
+
 def _is_python_local_segment(client):
     """Return True when the client is backed by the Python local segment API
     (which does not yet support array metadata)."""
