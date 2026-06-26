@@ -267,6 +267,9 @@ jobs:
           pre-commit run --all-files prettier
           pre-commit run --all-files check-yaml
         continue-on-error: true
+      - name: Run mypy
+        shell: bash
+        run: pre-commit run --all-files mypy
       - name: Cargo fmt check
         shell: bash
         run: cargo fmt -- --check
