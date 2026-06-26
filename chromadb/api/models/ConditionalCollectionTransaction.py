@@ -41,6 +41,19 @@ def _validate_max_retries(max_retries: int) -> None:
 
 
 class ConditionalCollectionTransaction:
+    """Collection-scoped optimistic transaction.
+
+    Reads execute immediately and capture the transaction snapshot. Writes are
+    buffered locally until ``commit()`` or until ``run(...)`` commits after a
+    successful callback.
+
+    Current limitations: transactions cannot span collections, nested
+    transaction guarantees are not provided, ``txn.query(...)`` and predicate
+    deletes are not supported, reading an ID after buffering a write for that
+    ID is an explicit transaction error, only one write per ID can be buffered,
+    and filter reads protect only returned IDs.
+    """
+
     def __init__(self, collection: "Collection") -> None:
         self._collection = collection
         self._transaction = collection._client._begin_conditional_transaction()
@@ -264,6 +277,19 @@ class ConditionalCollectionTransaction:
 
 
 class AsyncConditionalCollectionTransaction:
+    """Collection-scoped optimistic transaction.
+
+    Reads execute immediately and capture the transaction snapshot. Writes are
+    buffered locally until ``commit()`` or until ``run(...)`` commits after a
+    successful callback.
+
+    Current limitations: transactions cannot span collections, nested
+    transaction guarantees are not provided, ``txn.query(...)`` and predicate
+    deletes are not supported, reading an ID after buffering a write for that
+    ID is an explicit transaction error, only one write per ID can be buffered,
+    and filter reads protect only returned IDs.
+    """
+
     def __init__(self, collection: "AsyncCollection", transaction: object) -> None:
         self._collection = collection
         self._transaction = transaction
