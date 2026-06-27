@@ -40,6 +40,7 @@
     "@chroma-core/cohere": "workspace:^",
     "@chroma-core/default-embed": "workspace:^",
     "@chroma-core/google-gemini": "workspace:^",
+    "@chroma-core/huggingface": "workspace:^",
     "@chroma-core/huggingface-server": "workspace:^",
     "@chroma-core/jina": "workspace:^",
     "@chroma-core/mistral": "workspace:^",
