@@ -35,6 +35,10 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         self.model_name = model_name
         self.device = device
         self.normalize_embeddings = normalize_embeddings
+        if "trust_remote_code" in kwargs:
+            raise ValueError(
+                "trust_remote_code is not allowed as a kwarg to prevent arbitrary remote code execution"
+            )
         for key, value in kwargs.items():
             if not isinstance(value, (str, int, float, bool, list, dict, tuple)):
                 raise ValueError(f"Keyword argument {key} is not a primitive type")

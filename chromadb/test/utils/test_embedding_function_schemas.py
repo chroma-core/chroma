@@ -11,6 +11,12 @@ from chromadb.utils.embedding_functions import (
     known_embedding_functions,
     sparse_known_embedding_functions,
 )
+from chromadb.utils.embedding_functions.huggingface_sparse_embedding_function import (
+    HuggingFaceSparseEmbeddingFunction,
+)
+from chromadb.utils.embedding_functions.sentence_transformer_embedding_function import (
+    SentenceTransformerEmbeddingFunction,
+)
 from chromadb.api.types import Documents, Embeddings
 from pytest import MonkeyPatch
 
@@ -63,18 +69,15 @@ class TestEmbeddingFunctionSchemas:
                 "instructions": CHROMA_CLOUD_QWEN_DEFAULT_INSTRUCTIONS,
             }
 
-        # Mock the class constructor to return our mock instance
+        # Use the mock instance directly to avoid mutating __new__, which leaves
+        # constructor slots in a bad state for later tests.
+        ef_instance = mock_ef
         mock_common_deps.setattr(
-            ef_class, "__new__", lambda cls, *args, **kwargs: mock_ef
+            ef_class, "build_from_config", MagicMock(return_value=mock_ef)
         )
 
-        # Create instance with minimal args (constructor will be mocked)
-        ef_instance = ef_class()
-
-        # Get the config (this will use the real method)
+        # Keep this mock-based roundtrip test isolated from real constructors.
         config = ef_instance.get_config()
-
-        # Test recreation from config
         new_instance = ef_class.build_from_config(config)
         new_config = new_instance.get_config()
 
@@ -146,6 +149,97 @@ class TestEmbeddingFunctionSchemas:
             if schema.get("additionalProperties", True) is False:
                 with pytest.raises(ValidationError):
                     validate_config_schema(test_config, schema_name)
+
+    @pytest.mark.parametrize(
+        "ef_class,config",
+        [
+            (
+                SentenceTransformerEmbeddingFunction,
+                {
+                    "model_name": "all-MiniLM-L6-v2",
+                    "device": "cpu",
+                    "normalize_embeddings": False,
+                    "kwargs": {"trust_remote_code": True},
+                },
+            ),
+            (
+                HuggingFaceSparseEmbeddingFunction,
+                {
+                    "model_name": "naver/splade-v3",
+                    "device": "cpu",
+                    "kwargs": {"trust_remote_code": True},
+                },
+            ),
+        ],
+    )
+    def test_trust_remote_code_rejected_by_schema(
+        self, ef_class: Any, config: Dict[str, Any]
+    ) -> None:
+        """Test that schemas reject kwargs that enable arbitrary remote code."""
+        with pytest.raises(ValidationError):
+            ef_class.validate_config(config)
+
+    @pytest.mark.parametrize(
+        "ef_class,config",
+        [
+            (
+                SentenceTransformerEmbeddingFunction,
+                {
+                    "model_name": "all-MiniLM-L6-v2",
+                    "device": "cpu",
+                    "normalize_embeddings": False,
+                    "kwargs": {"trust_remote_code": True},
+                },
+            ),
+            (
+                HuggingFaceSparseEmbeddingFunction,
+                {
+                    "model_name": "naver/splade-v3",
+                    "device": "cpu",
+                    "kwargs": {"trust_remote_code": True},
+                },
+            ),
+        ],
+    )
+    def test_trust_remote_code_rejected_by_build_from_config(
+        self,
+        ef_class: Any,
+        config: Dict[str, Any],
+        mock_common_deps: MonkeyPatch,
+    ) -> None:
+        """Test config construction if schema validation is bypassed."""
+        with pytest.raises(ValueError, match="trust_remote_code is not allowed"):
+            ef_class.build_from_config(config)
+
+    def test_sentence_transformer_trust_remote_code_rejected_by_constructor(
+        self, mock_common_deps: MonkeyPatch
+    ) -> None:
+        """Test direct construction rejects trust_remote_code before model creation."""
+        import sentence_transformers
+
+        sentence_transformers.SentenceTransformer.reset_mock()
+
+        with pytest.raises(ValueError, match="trust_remote_code is not allowed"):
+            SentenceTransformerEmbeddingFunction(trust_remote_code=True)
+
+        sentence_transformers.SentenceTransformer.assert_not_called()
+
+    def test_huggingface_sparse_trust_remote_code_rejected_by_constructor(
+        self, mock_common_deps: MonkeyPatch
+    ) -> None:
+        """Test sparse construction rejects trust_remote_code before model creation."""
+        import sentence_transformers
+
+        sentence_transformers.SparseEncoder.reset_mock()
+
+        with pytest.raises(ValueError, match="trust_remote_code is not allowed"):
+            HuggingFaceSparseEmbeddingFunction(
+                model_name="naver/splade-v3",
+                device="cpu",
+                trust_remote_code=True,
+            )
+
+        sentence_transformers.SparseEncoder.assert_not_called()
 
     def _create_valid_config_from_schema(
         self, schema: Dict[str, Any]
