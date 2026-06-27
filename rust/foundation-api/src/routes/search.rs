@@ -108,6 +108,10 @@ impl ChromaError for SearchError {
         match self {
             SearchError::RouteDisabled => ErrorCodes::Internal,
             SearchError::MissingToken => ErrorCodes::InvalidArgument,
+            // A 404 resolving the wiki collection means Foundation isn't
+            // provisioned for this tenant. Match the agent route so callers
+            // can distinguish "not set up" from transient FE failures.
+            SearchError::Resolve(err) if err.is_not_found() => ErrorCodes::NotFound,
             SearchError::Resolve(err) => err.code(),
             SearchError::Embed(err) => err.code(),
             SearchError::DenseEmbed(_) => ErrorCodes::Internal,
@@ -427,6 +431,26 @@ mod tests {
                 .any(|k| *k == &Value::String(SPARSE_KEY.to_string())),
             "expected a $knn over the sparse key, got keys: {keys:?}"
         );
+    }
+
+    #[test]
+    fn not_provisioned_resolve_error_maps_to_not_found() {
+        use crate::wiki::WikiClientError;
+        use chroma::client::ChromaHttpClientError;
+        use chroma_error::ChromaError;
+        use reqwest::StatusCode;
+
+        let not_found =
+            SearchError::Resolve(WikiClientError::Client(ChromaHttpClientError::ApiError(
+                "collection not found".to_string(),
+                StatusCode::NOT_FOUND,
+            )));
+        assert!(matches!(not_found.code(), ErrorCodes::NotFound));
+
+        let server_err = SearchError::Resolve(WikiClientError::Client(
+            ChromaHttpClientError::ApiError("boom".to_string(), StatusCode::INTERNAL_SERVER_ERROR),
+        ));
+        assert!(matches!(server_err.code(), ErrorCodes::Internal));
     }
 
     #[test]
