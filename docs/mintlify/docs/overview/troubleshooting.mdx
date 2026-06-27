@@ -26,7 +26,7 @@ export default withChroma(nextConfig);
 
 ## Cannot return the results in a contiguous 2D array. Probably ef or M is too small
 
-This error happens when the HNSW index fails to retrieve the requested number of results for a query, given its structure and your data. he way to resolve this is to either decrease the number of results you request from a query (n_result), or increase the HNSW parameters `M`, `ef_construction`, and `ef_search`. You can read more about HNSW configurations [here](/docs/collections/configure).
+This error happens when the HNSW index fails to retrieve the requested number of results for a query, given its structure and your data. The way to resolve this is to either decrease the number of results you request from a query (n_result), or increase the HNSW parameters `M`, `ef_construction`, and `ef_search`. You can read more about HNSW configurations [here](/docs/collections/configure).
 
 ## Using .get or .query, embeddings say `None`
 
