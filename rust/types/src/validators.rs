@@ -715,4 +715,54 @@ mod tests {
         });
         assert!(validate_schema(&schema).is_err());
     }
+
+    fn sparse_rank_leaf(index: u32, key: &str) -> crate::operator::RankExpr {
+        crate::operator::RankExpr::Knn {
+            query: crate::operator::QueryVector::Sparse(
+                SparseVector::new(vec![index], vec![1.0]).unwrap(),
+            ),
+            key: Key::field(key),
+            limit: 10,
+            default: None,
+            return_rank: false,
+        }
+    }
+
+    #[test]
+    fn test_validate_rank_admits_multiple_sparse_leaves() {
+        use crate::operator::RankExpr;
+        // Distinct sparse keys plus a repeat of the first key — all valid.
+        let rank = Rank {
+            expr: Some(RankExpr::Summation(vec![
+                sparse_rank_leaf(0, "sparse_a"),
+                sparse_rank_leaf(1, "sparse_b"),
+                sparse_rank_leaf(2, "sparse_a"),
+            ])),
+        };
+        assert!(validate_rank(&rank).is_ok());
+    }
+
+    #[test]
+    fn test_validate_rank_rejects_invalid_sparse_leaf() {
+        use crate::operator::RankExpr;
+        // One valid leaf, one with mismatched indices/values lengths.
+        let bad = RankExpr::Knn {
+            query: crate::operator::QueryVector::Sparse(SparseVector {
+                indices: vec![0, 1],
+                values: vec![1.0],
+                tokens: None,
+            }),
+            key: Key::field("sparse_b"),
+            limit: 10,
+            default: None,
+            return_rank: false,
+        };
+        let rank = Rank {
+            expr: Some(RankExpr::Summation(vec![
+                sparse_rank_leaf(0, "sparse_a"),
+                bad,
+            ])),
+        };
+        assert!(validate_rank(&rank).is_err());
+    }
 }
