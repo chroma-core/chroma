@@ -3988,6 +3988,77 @@ mod tests {
     }
 
     #[test]
+    fn test_combined_knn_rejects_unindexed_sparse_key() {
+        // A rank expression may target an indexed sparse key and an unindexed key
+        // in the same search. The frontend validates every $knn leaf
+        // independently (see service_based_frontend.rs), so the indexed leaf must
+        // be accepted while the unindexed leaf is rejected.
+        use crate::operator::{Key, RankExpr};
+
+        let mut schema = Schema::new_default(KnnIndex::Spann);
+        schema.keys.insert(
+            "sparse_indexed".to_string(),
+            ValueTypes {
+                sparse_vector: Some(SparseVectorValueType {
+                    sparse_vector_index: Some(SparseVectorIndexType {
+                        enabled: true,
+                        config: SparseVectorIndexConfig {
+                            embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
+                            source_key: None,
+                            bm25: None,
+                            algorithm: SparseIndexAlgorithm::Wand,
+                        },
+                    }),
+                }),
+                ..Default::default()
+            },
+        );
+
+        let sparse_leaf = |key: &str| RankExpr::Knn {
+            query: QueryVector::Sparse(SparseVector::new(vec![0_u32], vec![1.0_f32]).unwrap()),
+            key: Key::field(key),
+            limit: 10,
+            default: None,
+            return_rank: false,
+        };
+
+        // Combined rank: one indexed sparse leaf + one unindexed leaf.
+        let expr = RankExpr::Summation(vec![
+            sparse_leaf("sparse_indexed"),
+            sparse_leaf("sparse_unindexed"),
+        ]);
+
+        // Mirror the frontend's per-leaf validation loop.
+        let mut results: Vec<(String, Result<(), FilterValidationError>)> = expr
+            .knn_queries()
+            .into_iter()
+            .map(|knn| {
+                let key = knn.key.to_string();
+                let result = schema.is_knn_key_indexing_enabled(&key, &knn.query);
+                (key, result)
+            })
+            .collect();
+
+        assert_eq!(results.len(), 2);
+
+        // The indexed leaf is accepted.
+        let (indexed_key, indexed_result) = results.remove(0);
+        assert_eq!(indexed_key, "sparse_indexed");
+        assert!(indexed_result.is_ok());
+
+        // The unindexed leaf is rejected with an indexing-disabled error.
+        let (unindexed_key, unindexed_result) = results.remove(0);
+        assert_eq!(unindexed_key, "sparse_unindexed");
+        match unindexed_result.expect_err("expected unindexed sparse leaf to be rejected") {
+            FilterValidationError::IndexingDisabled { key, value_type } => {
+                assert_eq!(key, "sparse_unindexed");
+                assert_eq!(value_type, crate::metadata::MetadataValueType::SparseVector);
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+    }
+
+    #[test]
     fn test_merge_hnsw_configs_field_level() {
         // Test field-level merging for HNSW configurations
         let default_hnsw = HnswIndexConfig {
