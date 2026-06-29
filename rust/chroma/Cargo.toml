@@ -1,6 +1,6 @@
 [package]
 name = "chroma"
-version = { workspace = true }
+version = "0.15.0"
 edition = "2021"
 description = "Client for Chroma, the AI-native cloud database."
 license = "Apache-2.0"
