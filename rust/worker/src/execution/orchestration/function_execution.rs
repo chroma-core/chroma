@@ -2,7 +2,6 @@ use std::cell::OnceCell;
 
 use chroma_system::System;
 use chroma_types::{AttachedFunction, AttachedFunctionUuid, CollectionUuid, DatabaseName};
-use tracing::info_span;
 use uuid::Uuid;
 
 use crate::execution::operators::materialize_logs::MaterializeLogOutput;
@@ -155,19 +154,13 @@ impl FunctionExecutionContext {
         )
     }
 
+    #[tracing::instrument(skip(system))]
     pub async fn run(
         self,
         attached_function_id: AttachedFunctionUuid,
         fn_inputs: Vec<(CollectionUuid, i64)>,
         system: System,
     ) -> Result<CompactionResponse, CompactionError> {
-        let span = info_span!(
-            "FunctionExecutionContext::run",
-            attached_function_id = %attached_function_id,
-            batch_size = fn_inputs.len()
-        );
-        let _guard = span.enter();
-
         if fn_inputs.is_empty() {
             return Err(CompactionError::InvariantViolation(
                 "Function execution requires at least one input collection",
