@@ -1692,14 +1692,14 @@ mod tests {
             .expect("Error creating segment writer");
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 None,
-            )
+            ))
             .await
             .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
@@ -1873,14 +1873,14 @@ mod tests {
         .expect("Error creating segment writer");
         let metadata_segment_shard =
             SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+        let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &metadata_segment_shard,
             &blockfile_provider,
             None,
             None,
-        )
+        ))
         .await
         .expect("Error creating segment writer");
         segment_writer
@@ -2036,14 +2036,14 @@ mod tests {
             .expect("Error creating segment writer");
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 None,
-            )
+            ))
             .await
             .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
@@ -2208,14 +2208,14 @@ mod tests {
         .expect("Error creating segment writer");
         let metadata_segment_shard =
             SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+        let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &metadata_segment_shard,
             &blockfile_provider,
             None,
             None,
-        )
+        ))
         .await
         .expect("Error creating segment writer");
         segment_writer
@@ -2372,14 +2372,14 @@ mod tests {
             .expect("Error creating segment writer");
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 None,
-            )
+            ))
             .await
             .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
@@ -2564,14 +2564,14 @@ mod tests {
         .expect("Error creating segment writer");
         let metadata_segment_shard =
             SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+        let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &metadata_segment_shard,
             &blockfile_provider,
             None,
             None,
-        )
+        ))
         .await
         .expect("Error creating segment writer");
         segment_writer

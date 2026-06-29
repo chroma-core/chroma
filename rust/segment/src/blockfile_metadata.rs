@@ -423,14 +423,14 @@ impl<'me> MetadataSegmentWriter<'me> {
         let futures: Vec<_> = segment_shards
             .iter()
             .map(|shard| {
-                MetadataSegmentWriterShard::from_segment(
+                Box::pin(MetadataSegmentWriterShard::from_segment(
                     tenant,
                     database_id,
                     shard,
                     blockfile_provider,
                     cmek.clone(),
                     schema,
-                )
+                ))
             })
             .collect();
 
@@ -464,14 +464,14 @@ impl<'me> MetadataSegmentWriter<'me> {
         let cmek = collection.schema.as_ref().and_then(|s| s.cmek.clone());
 
         // Create the new writer shard
-        let new_writer_shard = MetadataSegmentWriterShard::from_segment(
+        let new_writer_shard = Box::pin(MetadataSegmentWriterShard::from_segment(
             &collection.tenant,
             &collection.database_id,
             &new_shard_segment,
             blockfile_provider,
             cmek,
             collection.schema.as_ref(),
-        )
+        ))
         .await?;
 
         // Add to our shards vector
@@ -2341,14 +2341,14 @@ mod test {
             .expect("Error creating segment writer");
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 None,
-            )
+            ))
             .await
             .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
@@ -2499,14 +2499,14 @@ mod test {
         .expect("Error creating segment writer");
         let metadata_segment_shard =
             SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+        let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &metadata_segment_shard,
             &blockfile_provider,
             None,
             None,
-        )
+        ))
         .await
         .expect("Error creating segment writer");
         let some_reader = Some(record_segment_reader);
@@ -2608,14 +2608,14 @@ mod test {
         .expect("Error creating segment writer");
         let metadata_segment_shard =
             SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+        let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &metadata_segment_shard,
             &blockfile_provider,
             None,
             None,
-        )
+        ))
         .await
         .expect("Error creating segment writer");
         let some_reader = Some(record_segment_reader);
@@ -2722,14 +2722,14 @@ mod test {
             .expect("Error creating segment writer");
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 None,
-            )
+            ))
             .await
             .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
@@ -2883,14 +2883,14 @@ mod test {
         .expect("Error creating segment writer");
         let metadata_segment_shard =
             SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+        let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &metadata_segment_shard,
             &blockfile_provider,
             None,
             None,
-        )
+        ))
         .await
         .expect("Error creating segment writer");
         let some_reader = Some(record_segment_reader);
@@ -3032,14 +3032,14 @@ mod test {
             .expect("Error creating segment writer");
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 None,
-            )
+            ))
             .await
             .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
@@ -3166,14 +3166,14 @@ mod test {
         .expect("Error creating segment writer");
         let metadata_segment_shard =
             SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+        let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &metadata_segment_shard,
             &blockfile_provider,
             None,
             None,
-        )
+        ))
         .await
         .expect("Error creating segment writer");
         let some_reader = Some(record_segment_reader);
@@ -3311,14 +3311,14 @@ mod test {
             .expect("Error creating segment writer");
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 None,
-            )
+            ))
             .await
             .expect("Error creating segment writer");
             let data = vec![LogRecord {
@@ -3434,14 +3434,14 @@ mod test {
         .expect("Error creating segment writer");
         let metadata_segment_shard =
             SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+        let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &metadata_segment_shard,
             &blockfile_provider,
             None,
             None,
-        )
+        ))
         .await
         .expect("Error creating segment writer");
         let some_reader = Some(record_segment_reader);
@@ -3582,14 +3582,14 @@ mod test {
             .expect("Error creating segment writer");
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 None,
-            )
+            ))
             .await
             .expect("Error creating segment writer");
             let data = vec![
@@ -3904,14 +3904,14 @@ mod test {
                 sparse_schema_for_key("sparse_vec", chroma_types::SparseIndexAlgorithm::Wand);
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 Some(&sparse_schema),
-            )
+            ))
             .await
             .expect("Error creating segment writer");
 
@@ -4075,14 +4075,14 @@ mod test {
         // underlying blockfiles are identical; only the logical names differ.
         {
             let shard = SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let writer = MetadataSegmentWriterShard::from_segment(
+            let writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &shard,
                 &blockfile_provider,
                 None,
                 Some(&schema),
-            )
+            ))
             .await
             .expect("create writer");
             for offset in 0u32..8 {
@@ -4115,14 +4115,14 @@ mod test {
         // index and forks it, rewriting to per-key layout on this compaction.
         {
             let shard = SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let writer = MetadataSegmentWriterShard::from_segment(
+            let writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &shard,
                 &blockfile_provider,
                 None,
                 Some(&schema),
-            )
+            ))
             .await
             .expect("create migration writer");
             assert!(
@@ -4208,14 +4208,14 @@ mod test {
         let owned_schema = sparse_schema_for_key("sparse_a", SparseIndexAlgorithm::Wand);
         {
             let shard = SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let writer = MetadataSegmentWriterShard::from_segment(
+            let writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &shard,
                 &blockfile_provider,
                 None,
                 Some(&owned_schema),
-            )
+            ))
             .await
             .expect("create writer");
             for offset in 0u32..8 {
@@ -4251,14 +4251,14 @@ mod test {
         let orphan_schema = Schema::new_default(KnnIndex::Hnsw);
         for round in 0..2 {
             let shard = SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let writer = MetadataSegmentWriterShard::from_segment(
+            let writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &shard,
                 &blockfile_provider,
                 None,
                 Some(&orphan_schema),
-            )
+            ))
             .await
             .unwrap_or_else(|e| {
                 panic!(
@@ -4345,14 +4345,14 @@ mod test {
         let owned_schema = sparse_schema_for_key("sparse_a", SparseIndexAlgorithm::MaxScore);
         {
             let shard = SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let writer = MetadataSegmentWriterShard::from_segment(
+            let writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &shard,
                 &blockfile_provider,
                 None,
                 Some(&owned_schema),
-            )
+            ))
             .await
             .expect("create writer");
             for offset in 0u32..8 {
@@ -4376,14 +4376,14 @@ mod test {
         let orphan_schema = Schema::new_default(KnnIndex::Hnsw);
         {
             let shard = SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let writer = MetadataSegmentWriterShard::from_segment(
+            let writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &shard,
                 &blockfile_provider,
                 None,
                 Some(&orphan_schema),
-            )
+            ))
             .await
             .expect("from_segment must not fail on an orphaned legacy MaxScore index");
             assert!(writer.sparse_index_writers.is_empty());
@@ -4477,14 +4477,14 @@ mod test {
 
         {
             let shard = SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let writer = MetadataSegmentWriterShard::from_segment(
+            let writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &shard,
                 &blockfile_provider,
                 None,
                 Some(&schema),
-            )
+            ))
             .await
             .expect("create writer");
 
@@ -4603,14 +4603,14 @@ mod test {
         {
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 Some(&sparse_schema),
-            )
+            ))
             .await
             .expect("Error creating metadata writer");
 
@@ -4657,14 +4657,14 @@ mod test {
         {
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 Some(&sparse_schema),
-            )
+            ))
             .await
             .expect("Error creating metadata writer");
 
@@ -4746,14 +4746,14 @@ mod test {
         {
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 Some(&sparse_schema),
-            )
+            ))
             .await
             .expect("Error creating metadata writer");
 
@@ -4874,14 +4874,14 @@ mod test {
             .expect("Error creating segment writer");
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 None,
-            )
+            ))
             .await
             .expect("Error creating segment writer");
 
@@ -5100,14 +5100,14 @@ mod test {
             .expect("Error creating segment writer");
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 None,
-            )
+            ))
             .await
             .expect("Error creating segment writer");
 
@@ -5309,14 +5309,14 @@ mod test {
         {
             let shard =
                 SegmentShard::try_from((&metadata_segment, 0u32)).expect("valid shard index");
-            let writer = MetadataSegmentWriterShard::from_segment(
+            let writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 tenant,
                 &database_id,
                 &shard,
                 &blockfile_provider,
                 None,
                 Some(&schema),
-            )
+            ))
             .await
             .expect("iter1: create writer");
 
@@ -5402,14 +5402,14 @@ mod test {
         {
             let shard =
                 SegmentShard::try_from((&metadata_segment, 0u32)).expect("valid shard index");
-            let writer = MetadataSegmentWriterShard::from_segment(
+            let writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 tenant,
                 &database_id,
                 &shard,
                 &blockfile_provider,
                 None,
                 Some(&schema),
-            )
+            ))
             .await
             .expect("iter2: create writer (fork)");
 
@@ -5500,14 +5500,14 @@ mod test {
         {
             let shard =
                 SegmentShard::try_from((&metadata_segment, 0u32)).expect("valid shard index");
-            let writer = MetadataSegmentWriterShard::from_segment(
+            let writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 tenant,
                 &database_id,
                 &shard,
                 &blockfile_provider,
                 None,
                 Some(&schema),
-            )
+            ))
             .await
             .expect("iter3: create writer (fork)");
 
