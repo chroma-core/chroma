@@ -24,7 +24,7 @@ pub struct QueueFunctionInput {
     pub attached_function_id: AttachedFunctionUuid,
     pub input_collection_id: CollectionUuid,
     pub completion_offset: i64,
-    pub compaction_offset: Option<i64>,
+    pub compaction_offset: i64,
 }
 
 impl QueueFunctionInput {
@@ -32,7 +32,7 @@ impl QueueFunctionInput {
         attached_function_id: AttachedFunctionUuid,
         input_collection_id: CollectionUuid,
         completion_offset: i64,
-        compaction_offset: Option<i64>,
+        compaction_offset: i64,
     ) -> Self {
         Self {
             attached_function_id,

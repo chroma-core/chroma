@@ -1,5 +1,5 @@
 use crate::work_queue::types::{WorkQueueError, WorkQueueRecord};
-use arrow::array::{Array, Int64Array, StringArray, UInt64Array};
+use arrow::array::{Int64Array, StringArray, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use bytes::Bytes;
@@ -15,12 +15,12 @@ use chroma_storage::ETag;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct QueueOffsets {
     completion_offset: i64,
-    compaction_offset: Option<i64>,
+    compaction_offset: i64,
 }
 
 impl QueueOffsets {
     fn dedup_frontier(self) -> i64 {
-        self.compaction_offset.unwrap_or(self.completion_offset)
+        self.compaction_offset
     }
 }
 
@@ -57,8 +57,7 @@ impl QueueState {
         let schema = Arc::new(Schema::new(vec![
             Field::new("fn_id", DataType::Utf8, false),
             Field::new("input_coll_id", DataType::Utf8, false),
-            Field::new("completion_offset", DataType::Int64, false),
-            Field::new("compaction_offset", DataType::Int64, true),
+            Field::new("compaction_offset", DataType::Int64, false),
             Field::new("insertion_order", DataType::UInt64, false),
         ]));
 
@@ -77,11 +76,6 @@ impl QueueState {
                 .iter()
                 .map(|r| r.input_coll_id.to_string())
                 .collect();
-            let offsets: Vec<_> = self
-                .pending_work
-                .iter()
-                .map(|r| r.completion_offset)
-                .collect();
             let orders: Vec<_> = self
                 .pending_work
                 .iter()
@@ -98,7 +92,6 @@ impl QueueState {
                 vec![
                     Arc::new(StringArray::from(fn_ids)),
                     Arc::new(StringArray::from(coll_ids)),
-                    Arc::new(Int64Array::from(offsets)),
                     Arc::new(Int64Array::from(compaction_offsets)),
                     Arc::new(UInt64Array::from(orders)),
                 ],
@@ -150,12 +143,7 @@ impl QueueState {
                 .0;
             let offsets_idx = schema
                 .column_with_name("completion_offset")
-                .ok_or_else(|| {
-                    WorkQueueError::Serialization(
-                        "Missing required field: completion_offset".to_string(),
-                    )
-                })?
-                .0;
+                .map(|(idx, _)| idx);
             let orders_idx = schema
                 .column_with_name("insertion_order")
                 .ok_or_else(|| {
@@ -166,7 +154,12 @@ impl QueueState {
                 .0;
             let compaction_offsets_idx = schema
                 .column_with_name("compaction_offset")
-                .map(|(idx, _)| idx);
+                .ok_or_else(|| {
+                    WorkQueueError::Serialization(
+                        "Missing required field: compaction_offset".to_string(),
+                    )
+                })?
+                .0;
 
             let fn_ids = batch
                 .column(fn_ids_idx)
@@ -182,13 +175,17 @@ impl QueueState {
                 .ok_or_else(|| {
                     WorkQueueError::Serialization("Failed to downcast coll_ids".to_string())
                 })?;
-            let offsets = batch
-                .column(offsets_idx)
-                .as_any()
-                .downcast_ref::<Int64Array>()
-                .ok_or_else(|| {
-                    WorkQueueError::Serialization("Failed to downcast offsets".to_string())
-                })?;
+            let offsets = offsets_idx
+                .map(|idx| {
+                    batch
+                        .column(idx)
+                        .as_any()
+                        .downcast_ref::<Int64Array>()
+                        .ok_or_else(|| {
+                            WorkQueueError::Serialization("Failed to downcast offsets".to_string())
+                        })
+                })
+                .transpose()?;
             let orders = batch
                 .column(orders_idx)
                 .as_any()
@@ -196,20 +193,15 @@ impl QueueState {
                 .ok_or_else(|| {
                     WorkQueueError::Serialization("Failed to downcast orders".to_string())
                 })?;
-            let compaction_offsets = match compaction_offsets_idx {
-                Some(idx) => Some(
-                    batch
-                        .column(idx)
-                        .as_any()
-                        .downcast_ref::<Int64Array>()
-                        .ok_or_else(|| {
-                            WorkQueueError::Serialization(
-                                "Failed to downcast compaction offsets".to_string(),
-                            )
-                        })?,
-                ),
-                None => None,
-            };
+            let compaction_offsets = batch
+                .column(compaction_offsets_idx)
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .ok_or_else(|| {
+                    WorkQueueError::Serialization(
+                        "Failed to downcast compaction offsets".to_string(),
+                    )
+                })?;
 
             for i in 0..batch.num_rows() {
                 let fn_id = AttachedFunctionUuid::from_str(fn_ids.value(i))
@@ -221,9 +213,10 @@ impl QueueState {
                 let record = WorkQueueRecord {
                     fn_id,
                     input_coll_id,
-                    completion_offset: offsets.value(i),
-                    compaction_offset: compaction_offsets
-                        .and_then(|offsets| offsets.is_valid(i).then_some(offsets.value(i))),
+                    completion_offset: offsets
+                        .map(|offsets| offsets.value(i))
+                        .unwrap_or_else(|| compaction_offsets.value(i)),
+                    compaction_offset: compaction_offsets.value(i),
                     insertion_order: orders.value(i),
                 };
 
@@ -266,7 +259,7 @@ impl QueueState {
         fn_id: AttachedFunctionUuid,
         input_coll_id: CollectionUuid,
         completion_offset: i64,
-        compaction_offset: Option<i64>,
+        compaction_offset: i64,
     ) -> bool {
         let key = (fn_id, input_coll_id);
 
@@ -300,52 +293,30 @@ impl QueueState {
         true
     }
 
-    pub fn count_entries_missing_compaction_offset(&self) -> usize {
-        self.pending_work
-            .iter()
-            .filter(|record| record.compaction_offset.is_none())
-            .count()
-    }
-
-    #[cfg(test)]
-    pub fn get_compaction_offset(
-        &self,
-        fn_id: &AttachedFunctionUuid,
-        input_coll_id: &CollectionUuid,
-    ) -> Option<i64> {
-        self.dedup_index
-            .get(&(*fn_id, *input_coll_id))
-            .and_then(|offsets| offsets.compaction_offset)
-    }
-
-    pub fn set_compaction_offset_if_missing(
+    /// Update the in-memory completion offset for a queued work item.
+    /// This is reconstructed from sysdb on load and is not persisted.
+    pub fn set_completion_offset(
         &mut self,
         fn_id: &AttachedFunctionUuid,
         input_coll_id: &CollectionUuid,
-        compaction_offset: i64,
+        completion_offset: i64,
     ) -> bool {
         let key = (*fn_id, *input_coll_id);
-
         let Some(existing_offsets) = self.dedup_index.get_mut(&key) else {
             return false;
         };
 
-        if existing_offsets.compaction_offset.is_some() {
-            return false;
-        }
-
         let mut updated = false;
         for record in self.pending_work.iter_mut() {
             if record.fn_id == *fn_id && record.input_coll_id == *input_coll_id {
-                record.compaction_offset = Some(compaction_offset);
+                record.completion_offset = completion_offset;
                 updated = true;
                 break;
             }
         }
 
         if updated {
-            existing_offsets.compaction_offset = Some(compaction_offset);
-            self.dirty = true;
+            existing_offsets.completion_offset = completion_offset;
         }
 
         updated
@@ -389,7 +360,7 @@ mod tests {
             fn_id: AttachedFunctionUuid(Uuid::new_v4()),
             input_coll_id: CollectionUuid(Uuid::new_v4()),
             completion_offset: 100,
-            compaction_offset: Some(140),
+            compaction_offset: 140,
             insertion_order: 0,
         };
 
@@ -397,7 +368,7 @@ mod tests {
             fn_id: AttachedFunctionUuid(Uuid::new_v4()),
             input_coll_id: CollectionUuid(Uuid::new_v4()),
             completion_offset: 200,
-            compaction_offset: None,
+            compaction_offset: 240,
             insertion_order: 1,
         };
 
@@ -405,7 +376,7 @@ mod tests {
             fn_id: AttachedFunctionUuid(Uuid::new_v4()),
             input_coll_id: CollectionUuid(Uuid::new_v4()),
             completion_offset: 300,
-            compaction_offset: Some(360),
+            compaction_offset: 360,
             insertion_order: 2,
         };
 
@@ -440,49 +411,52 @@ mod tests {
         let restored = QueueState::from_parquet_bytes(&bytes).expect("Failed to deserialize");
 
         assert_eq!(restored.pending_work.len(), 3);
-        assert_eq!(restored.pending_work[0].completion_offset, 100);
-        assert_eq!(restored.pending_work[0].compaction_offset, Some(140));
-        assert_eq!(restored.pending_work[1].completion_offset, 200);
-        assert_eq!(restored.pending_work[1].compaction_offset, None);
-        assert_eq!(restored.pending_work[2].completion_offset, 300);
-        assert_eq!(restored.pending_work[2].compaction_offset, Some(360));
+        assert_eq!(restored.pending_work[0].completion_offset, 140);
+        assert_eq!(restored.pending_work[0].compaction_offset, 140);
+        assert_eq!(restored.pending_work[1].completion_offset, 240);
+        assert_eq!(restored.pending_work[1].compaction_offset, 240);
+        assert_eq!(restored.pending_work[2].completion_offset, 360);
+        assert_eq!(restored.pending_work[2].compaction_offset, 360);
         assert_eq!(restored.dedup_index.len(), 3);
     }
 
     #[test]
-    fn test_queue_state_backwards_compatible_without_compaction_offset() {
+    fn test_queue_state_deserializes_legacy_completion_offset_schema() {
         let schema = Arc::new(Schema::new(vec![
             Field::new("fn_id", DataType::Utf8, false),
             Field::new("input_coll_id", DataType::Utf8, false),
             Field::new("completion_offset", DataType::Int64, false),
+            Field::new("compaction_offset", DataType::Int64, false),
             Field::new("insertion_order", DataType::UInt64, false),
         ]));
 
         let fn_id = AttachedFunctionUuid(Uuid::new_v4());
         let coll_id = CollectionUuid(Uuid::new_v4());
+
         let batch = RecordBatch::try_new(
             schema.clone(),
             vec![
                 Arc::new(StringArray::from(vec![fn_id.to_string()])),
                 Arc::new(StringArray::from(vec![coll_id.to_string()])),
                 Arc::new(Int64Array::from(vec![100])),
+                Arc::new(Int64Array::from(vec![140])),
                 Arc::new(UInt64Array::from(vec![0])),
             ],
         )
-        .expect("Failed to create legacy batch");
+        .expect("Failed to build legacy batch");
 
         let mut buffer = Vec::new();
         let mut writer =
             ArrowWriter::try_new(&mut buffer, schema, None).expect("Failed to create writer");
-        writer.write(&batch).expect("Failed to write legacy batch");
-        writer.close().expect("Failed to close legacy writer");
+        writer.write(&batch).expect("Failed to write batch");
+        writer.close().expect("Failed to close writer");
 
         let restored =
-            QueueState::from_parquet_bytes(&buffer).expect("Failed to deserialize legacy bytes");
+            QueueState::from_parquet_bytes(&buffer).expect("Failed to deserialize legacy schema");
 
         assert_eq!(restored.pending_work.len(), 1);
         assert_eq!(restored.pending_work[0].completion_offset, 100);
-        assert_eq!(restored.pending_work[0].compaction_offset, None);
+        assert_eq!(restored.pending_work[0].compaction_offset, 140);
     }
 
     #[test]
@@ -492,15 +466,15 @@ mod tests {
         let fn_id = AttachedFunctionUuid(Uuid::new_v4());
         let coll_id = CollectionUuid(Uuid::new_v4());
 
-        state.push_work(fn_id, coll_id, 20, Some(40));
+        state.push_work(fn_id, coll_id, 20, 40);
         assert_eq!(state.pending_work.len(), 1);
         assert_eq!(state.pending_work[0].completion_offset, 20);
-        assert_eq!(state.pending_work[0].compaction_offset, Some(40));
+        assert_eq!(state.pending_work[0].compaction_offset, 40);
 
-        state.push_work(fn_id, coll_id, 20, Some(60));
+        state.push_work(fn_id, coll_id, 20, 60);
         assert_eq!(state.pending_work.len(), 1);
         assert_eq!(state.pending_work[0].completion_offset, 20);
-        assert_eq!(state.pending_work[0].compaction_offset, Some(60));
+        assert_eq!(state.pending_work[0].compaction_offset, 60);
     }
 
     #[test]
@@ -510,13 +484,13 @@ mod tests {
         let fn_id = AttachedFunctionUuid(Uuid::new_v4());
         let coll_id = CollectionUuid(Uuid::new_v4());
 
-        state.push_work(fn_id, coll_id, 20, Some(60));
+        state.push_work(fn_id, coll_id, 20, 60);
         assert_eq!(state.pending_work.len(), 1);
 
         state.finish_work_success(&fn_id, &coll_id, 40);
         assert_eq!(state.pending_work.len(), 1);
         assert_eq!(state.pending_work[0].completion_offset, 20);
-        assert_eq!(state.pending_work[0].compaction_offset, Some(60));
+        assert_eq!(state.pending_work[0].compaction_offset, 60);
 
         state.finish_work_success(&fn_id, &coll_id, 60);
         assert_eq!(state.pending_work.len(), 0);

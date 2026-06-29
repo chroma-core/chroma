@@ -16,6 +16,7 @@ use thiserror::Error;
 
 use super::sysdb::json_to_prost_value;
 use super::sysdb::FlushCompactionError;
+use super::sysdb::GetAttachedFunctionError;
 use super::sysdb::GetLastCompactionTimeError;
 use crate::sysdb::VERSION_FILE_S3_PREFIX;
 use crate::{DatabaseOrTopology, GetCollectionsOptions};
@@ -769,6 +770,35 @@ impl TestSysDb {
             .map(attached_function_to_proto)
             .collect();
         Ok(functions)
+    }
+
+    pub(crate) async fn get_attached_functions(
+        &mut self,
+        name: Option<String>,
+        input_collection_id: Option<CollectionUuid>,
+        ids: Vec<chroma_types::AttachedFunctionUuid>,
+        _only_ready: bool,
+    ) -> Result<Vec<chroma_types::AttachedFunction>, GetAttachedFunctionError> {
+        let inner = self.inner.lock();
+        let id_filter = (!ids.is_empty()).then(|| ids.into_iter().collect::<HashSet<_>>());
+
+        let attached_functions = inner
+            .tasks
+            .values()
+            .filter(|attached_function| {
+                name.as_ref()
+                    .is_none_or(|name| attached_function.name == *name)
+                    && input_collection_id.as_ref().is_none_or(|collection_id| {
+                        attached_function.input_collection_id == *collection_id
+                    })
+                    && id_filter
+                        .as_ref()
+                        .is_none_or(|ids| ids.contains(&attached_function.id))
+            })
+            .cloned()
+            .collect();
+
+        Ok(attached_functions)
     }
 
     pub(crate) async fn try_finish_async_attached_function_invocation(

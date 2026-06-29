@@ -11,7 +11,7 @@ enum WorkResponse {
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_storage::{GetOptions, PutMode, PutOptions, Storage};
-use chroma_sysdb::{GetCollectionsOptions, SysDb};
+use chroma_sysdb::SysDb;
 use chroma_system::{Component, ComponentContext, ComponentRuntime, Handler};
 use chroma_types::chroma_proto::{
     CheckInvocationStatusRequest, InvocationCheckItem, InvocationStatus, InvocationStatusResult,
@@ -29,7 +29,7 @@ pub struct PushWorkMessage {
     pub fn_id: AttachedFunctionUuid,
     pub input_coll_id: CollectionUuid,
     pub completion_offset: i64,
-    pub compaction_offset: Option<i64>,
+    pub compaction_offset: i64,
     pub response_tx: oneshot::Sender<Result<(), WorkQueueError>>,
 }
 
@@ -134,6 +134,7 @@ impl WorkQueueManager {
         {
             Ok((bytes, Some(etag))) => {
                 self.state = QueueState::from_parquet_bytes(&bytes)?;
+                self.hydrate_completion_offsets_from_sysdb().await?;
                 self.state.current_etag = Some(etag);
                 tracing::info!(
                     "Loaded work queue state with {} items",
@@ -143,6 +144,7 @@ impl WorkQueueManager {
             }
             Ok((bytes, None)) => {
                 self.state = QueueState::from_parquet_bytes(&bytes)?;
+                self.hydrate_completion_offsets_from_sysdb().await?;
                 self.state.current_etag = None;
                 tracing::info!(
                     "Loaded work queue state with {} items (no ETag support)",
@@ -248,35 +250,66 @@ impl WorkQueueManager {
         total_pending_responses >= self.config.persistence.pending_threshold
     }
 
-    async fn resolve_compaction_offset(
-        &mut self,
-        input_coll_id: CollectionUuid,
-        compaction_offset: Option<i64>,
-    ) -> Option<i64> {
-        if compaction_offset.is_some() {
-            return compaction_offset;
+    async fn hydrate_completion_offsets_from_sysdb(&mut self) -> Result<(), WorkQueueError> {
+        if self.state.pending_work.is_empty() {
+            return Ok(());
         }
 
-        match self
-            .sysdb
-            .get_collections(GetCollectionsOptions {
-                collection_id: Some(input_coll_id),
-                ..Default::default()
-            })
-            .await
-        {
-            Ok(collections) => collections
-                .first()
-                .map(|collection| collection.log_position),
-            Err(e) => {
-                tracing::warn!(
-                    collection_id = %input_coll_id,
-                    error = %e,
-                    "Failed to hydrate missing compaction offset for pushed work item"
+        let fn_ids: Vec<_> = self
+            .state
+            .pending_work
+            .iter()
+            .map(|record| record.fn_id)
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+
+        let mut completion_offsets = HashMap::new();
+        for chunk in fn_ids.chunks(100) {
+            let attached_functions = self
+                .sysdb
+                .get_attached_functions(None, None, chunk.to_vec(), false)
+                .await
+                .map_err(|e| WorkQueueError::SysDb(e.to_string()))?;
+
+            for attached_function in attached_functions {
+                completion_offsets.insert(
+                    (attached_function.id, attached_function.input_collection_id),
+                    attached_function.completion_offset as i64,
                 );
-                None
             }
         }
+
+        let pending_keys: Vec<_> = self
+            .state
+            .pending_work
+            .iter()
+            .map(|record| (record.fn_id, record.input_coll_id))
+            .collect();
+        let mut missing_items = Vec::new();
+
+        for (fn_id, input_coll_id) in pending_keys {
+            let Some(completion_offset) = completion_offsets.get(&(fn_id, input_coll_id)) else {
+                missing_items.push((fn_id, input_coll_id));
+                continue;
+            };
+
+            self.state
+                .set_completion_offset(&fn_id, &input_coll_id, *completion_offset);
+        }
+
+        if !missing_items.is_empty() {
+            tracing::error!(
+                missing_items = ?missing_items,
+                "Failed to hydrate completion offsets for persisted work queue items"
+            );
+            return Err(WorkQueueError::InvalidState(format!(
+                "Missing completion offsets for {} persisted work queue items",
+                missing_items.len()
+            )));
+        }
+
+        Ok(())
     }
 
     async fn push_work_and_queue_response(
@@ -284,13 +317,9 @@ impl WorkQueueManager {
         fn_id: AttachedFunctionUuid,
         input_coll_id: CollectionUuid,
         completion_offset: i64,
-        compaction_offset: Option<i64>,
+        compaction_offset: i64,
         response: WorkResponse,
     ) {
-        let compaction_offset = self
-            .resolve_compaction_offset(input_coll_id, compaction_offset)
-            .await;
-
         let _ = self
             .state
             .push_work(fn_id, input_coll_id, completion_offset, compaction_offset);
@@ -392,103 +421,6 @@ impl WorkQueueManager {
 
         Ok(statuses)
     }
-
-    #[tracing::instrument(
-        name = "WorkQueueManager::hydrate_missing_compaction_offsets",
-        skip(self)
-    )]
-    async fn hydrate_missing_compaction_offsets(&mut self) {
-        let missing_entries = self.state.count_entries_missing_compaction_offset();
-        if missing_entries == 0 {
-            tracing::info!("No pending work items missing compaction offsets");
-            return;
-        }
-
-        tracing::info!(
-            missing_entries,
-            "Hydrating compaction offsets for work queue entries missing a frontier"
-        );
-
-        let entries_missing_compaction_offset: Vec<_> = self
-            .state
-            .pending_work
-            .iter()
-            .filter(|item| item.compaction_offset.is_none())
-            .map(|item| (item.fn_id, item.input_coll_id))
-            .collect();
-
-        let collection_ids: Vec<_> = entries_missing_compaction_offset
-            .iter()
-            .map(|(_, input_coll_id)| *input_coll_id)
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect();
-
-        let collections = match self
-            .sysdb
-            .get_collections(GetCollectionsOptions {
-                collection_ids: Some(collection_ids),
-                ..Default::default()
-            })
-            .await
-        {
-            Ok(collections) => collections,
-            Err(e) => {
-                tracing::error!(
-                    "Failed to fetch collection frontiers for work queue repair: {}",
-                    e
-                );
-                return;
-            }
-        };
-
-        let compaction_offsets_by_collection: HashMap<_, _> = collections
-            .into_iter()
-            .map(|collection| (collection.collection_id, collection.log_position))
-            .collect();
-
-        let mut repaired_entries = 0;
-        for (fn_id, input_coll_id) in entries_missing_compaction_offset {
-            let Some(compaction_offset) = compaction_offsets_by_collection.get(&input_coll_id)
-            else {
-                continue;
-            };
-
-            if self.state.set_compaction_offset_if_missing(
-                &fn_id,
-                &input_coll_id,
-                *compaction_offset,
-            ) {
-                repaired_entries += 1;
-            }
-        }
-
-        let remaining_missing_entries = self.state.count_entries_missing_compaction_offset();
-        if repaired_entries == 0 && remaining_missing_entries == missing_entries {
-            tracing::warn!(
-                missing_entries = remaining_missing_entries,
-                "Failed to repair any missing work queue compaction offsets from sysdb"
-            );
-            return;
-        }
-
-        tracing::info!(
-            repaired_entries,
-            remaining_missing_entries,
-            "Hydrated missing work queue compaction offsets from sysdb"
-        );
-
-        if remaining_missing_entries > 0 {
-            tracing::warn!(
-                remaining_missing_entries,
-                "Some work queue entries are still missing compaction offsets after sysdb repair"
-            );
-        }
-
-        if let Err(e) = self.persist().await {
-            tracing::error!("Failed to persist repaired work queue state: {}", e);
-        }
-    }
 }
 
 #[async_trait]
@@ -513,9 +445,6 @@ impl Component for WorkQueueManager {
             tracing::error!("Failed to load work queue state: {}", e);
             panic!("Cannot start without valid state");
         }
-
-        // Backfill optional compaction offsets for pre-rollout queue entries.
-        self.hydrate_missing_compaction_offsets().await;
 
         // Schedule periodic persistence
         ctx.scheduler.schedule(
@@ -549,7 +478,7 @@ impl Handler<PushWorkMessage> for WorkQueueManager {
 
     async fn handle(&mut self, msg: PushWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
         tracing::info!(
-            "Received PushWorkMessage for fn_id: {}, input_coll_id: {}, completion_offset: {}, compaction_offset: {:?}",
+            "Received PushWorkMessage for fn_id: {}, input_coll_id: {}, completion_offset: {}, compaction_offset: {}",
             msg.fn_id,
             msg.input_coll_id,
             msg.completion_offset,
@@ -683,7 +612,7 @@ mod tests {
     use super::*;
     use crate::work_queue::state::QueueState;
     use chroma_storage::local::LocalStorage;
-    use chroma_types::Collection;
+    use chroma_types::AttachedFunction;
     use tempfile::TempDir;
     use uuid::Uuid;
 
@@ -713,15 +642,44 @@ mod tests {
         (WorkQueueManager::new(storage, config, sysdb), temp_dir)
     }
 
-    fn add_test_collection(sysdb: &mut SysDb, collection_id: CollectionUuid, log_position: i64) {
+    fn set_test_attached_functions(sysdb: &mut SysDb, attached_functions: Vec<AttachedFunction>) {
         match sysdb {
-            SysDb::Test(test_sysdb) => test_sysdb.add_collection(Collection {
-                collection_id,
-                name: format!("collection-{collection_id}"),
-                log_position,
-                ..Default::default()
-            }),
+            SysDb::Test(test_sysdb) => {
+                let mut by_collection = HashMap::new();
+                for attached_function in attached_functions {
+                    by_collection
+                        .entry(attached_function.input_collection_id)
+                        .or_insert_with(Vec::new)
+                        .push(attached_function);
+                }
+                test_sysdb.set_attached_functions(by_collection);
+            }
             _ => panic!("Invalid sysdb type"),
+        }
+    }
+
+    fn create_test_attached_function(
+        fn_id: AttachedFunctionUuid,
+        coll_id: CollectionUuid,
+        completion_offset: u64,
+    ) -> AttachedFunction {
+        AttachedFunction {
+            id: fn_id,
+            name: format!("fn-{fn_id}"),
+            function_id: Uuid::new_v4(),
+            input_collection_id: coll_id,
+            output_collection_name: "output".to_string(),
+            output_collection_id: None,
+            params: None,
+            tenant_id: "tenant".to_string(),
+            database_id: "database".to_string(),
+            last_run: None,
+            completion_offset,
+            min_records_for_invocation: 0,
+            is_deleted: false,
+            is_async: true,
+            created_at: std::time::SystemTime::UNIX_EPOCH,
+            updated_at: std::time::SystemTime::UNIX_EPOCH,
         }
     }
 
@@ -733,17 +691,17 @@ mod tests {
         let coll_id = CollectionUuid(Uuid::new_v4());
 
         // Test direct state manipulation to verify deduplication logic
-        state.push_work(fn_id, coll_id, 100, None);
+        state.push_work(fn_id, coll_id, 100, 100);
         assert_eq!(state.pending_work.len(), 1);
         assert_eq!(state.pending_work[0].completion_offset, 100);
 
         // Push with lower offset should be ignored
-        state.push_work(fn_id, coll_id, 50, None);
+        state.push_work(fn_id, coll_id, 50, 50);
         assert_eq!(state.pending_work.len(), 1);
         assert_eq!(state.pending_work[0].completion_offset, 100);
 
         // Push with higher offset should replace
-        state.push_work(fn_id, coll_id, 200, None);
+        state.push_work(fn_id, coll_id, 200, 200);
         assert_eq!(state.pending_work.len(), 1);
         assert_eq!(state.pending_work[0].completion_offset, 200);
 
@@ -758,7 +716,7 @@ mod tests {
         let coll_id = CollectionUuid(Uuid::new_v4());
 
         // Push work
-        state.push_work(fn_id, coll_id, 100, None);
+        state.push_work(fn_id, coll_id, 100, 100);
         assert_eq!(state.pending_work.len(), 1);
 
         // Finish work
@@ -777,7 +735,7 @@ mod tests {
                 AttachedFunctionUuid(Uuid::new_v4()),
                 CollectionUuid(Uuid::new_v4()),
                 i * 100,
-                None,
+                i * 100,
             );
         }
 
@@ -799,36 +757,37 @@ mod tests {
     async fn test_load_state() {
         let temp_dir = TempDir::new().unwrap();
         let config = create_test_config();
+        let fn_id_1 = AttachedFunctionUuid(Uuid::new_v4());
+        let coll_id_1 = CollectionUuid(Uuid::new_v4());
+        let fn_id_2 = AttachedFunctionUuid(Uuid::new_v4());
+        let coll_id_2 = CollectionUuid(Uuid::new_v4());
 
         // Create and persist state
         {
             let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
             let sysdb = create_test_sysdb();
             let mut manager = WorkQueueManager::new(storage, config.clone(), sysdb);
-            manager.state.push_work(
-                AttachedFunctionUuid(Uuid::new_v4()),
-                CollectionUuid(Uuid::new_v4()),
-                100,
-                None,
-            );
-            manager.state.push_work(
-                AttachedFunctionUuid(Uuid::new_v4()),
-                CollectionUuid(Uuid::new_v4()),
-                200,
-                None,
-            );
+            manager.state.push_work(fn_id_1, coll_id_1, 100, 100);
+            manager.state.push_work(fn_id_2, coll_id_2, 200, 200);
             manager.persist().await.unwrap();
         }
 
         // Load state in new manager
         {
             let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
-            let sysdb = create_test_sysdb();
+            let mut sysdb = create_test_sysdb();
+            set_test_attached_functions(
+                &mut sysdb,
+                vec![
+                    create_test_attached_function(fn_id_1, coll_id_1, 15),
+                    create_test_attached_function(fn_id_2, coll_id_2, 25),
+                ],
+            );
             let mut manager = WorkQueueManager::new(storage, config, sysdb);
             manager.load_state().await.unwrap();
             assert_eq!(manager.state.pending_work.len(), 2);
-            assert_eq!(manager.state.pending_work[0].completion_offset, 100);
-            assert_eq!(manager.state.pending_work[1].completion_offset, 200);
+            assert_eq!(manager.state.pending_work[0].completion_offset, 15);
+            assert_eq!(manager.state.pending_work[1].completion_offset, 25);
         }
     }
 
@@ -888,61 +847,6 @@ mod tests {
         assert!(manager.pending_finish_responses.is_empty());
     }
 
-    #[tokio::test]
-    async fn test_hydrate_missing_compaction_offsets_from_sysdb() {
-        let (mut manager, _temp_dir) = create_test_manager().await;
-        let fn_id = AttachedFunctionUuid(Uuid::new_v4());
-        let coll_id = CollectionUuid(Uuid::new_v4());
-        add_test_collection(&mut manager.sysdb, coll_id, 140);
-        manager.state.push_work(fn_id, coll_id, 100, None);
-
-        manager.hydrate_missing_compaction_offsets().await;
-
-        assert_eq!(manager.state.count_entries_missing_compaction_offset(), 0);
-        assert_eq!(
-            manager.state.get_compaction_offset(&fn_id, &coll_id),
-            Some(140)
-        );
-        assert_eq!(manager.state.pending_work[0].compaction_offset, Some(140));
-    }
-
-    #[tokio::test]
-    async fn test_hydrate_missing_compaction_offsets_preserves_existing_values() {
-        let (mut manager, _temp_dir) = create_test_manager().await;
-        let fn_id = AttachedFunctionUuid(Uuid::new_v4());
-        let coll_id = CollectionUuid(Uuid::new_v4());
-        add_test_collection(&mut manager.sysdb, coll_id, 200);
-        manager.state.push_work(fn_id, coll_id, 100, Some(140));
-
-        manager.hydrate_missing_compaction_offsets().await;
-
-        assert_eq!(
-            manager.state.get_compaction_offset(&fn_id, &coll_id),
-            Some(140)
-        );
-        assert_eq!(manager.state.pending_work[0].compaction_offset, Some(140));
-    }
-
-    #[tokio::test]
-    async fn test_push_work_hydrates_missing_compaction_offset_from_sysdb() {
-        let (mut manager, _temp_dir) = create_test_manager().await;
-        let fn_id = AttachedFunctionUuid(Uuid::new_v4());
-        let coll_id = CollectionUuid(Uuid::new_v4());
-        let (tx, _rx) = oneshot::channel();
-
-        add_test_collection(&mut manager.sysdb, coll_id, 250);
-
-        manager
-            .push_work_and_queue_response(fn_id, coll_id, 100, None, WorkResponse::Push(tx))
-            .await;
-
-        assert_eq!(
-            manager.state.get_compaction_offset(&fn_id, &coll_id),
-            Some(250)
-        );
-        assert_eq!(manager.state.pending_work[0].compaction_offset, Some(250));
-    }
-
     // Note: ETag mismatch testing requires storage that supports conditional puts
     // LocalStorage may not enforce ETag conditions like S3 does
     // This test would be more appropriate with S3Storage or mocked storage
@@ -960,9 +864,9 @@ mod tests {
         let coll_id = CollectionUuid(Uuid::new_v4());
 
         // Push multiple work items with different offsets
-        state.push_work(fn_id, coll_id, 100, None);
-        state.push_work(fn_id, coll_id, 200, None);
-        state.push_work(fn_id, coll_id, 300, None);
+        state.push_work(fn_id, coll_id, 100, 100);
+        state.push_work(fn_id, coll_id, 200, 200);
+        state.push_work(fn_id, coll_id, 300, 300);
         assert_eq!(state.pending_work.len(), 1);
         assert_eq!(state.pending_work[0].completion_offset, 300);
 
