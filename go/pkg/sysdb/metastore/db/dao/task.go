@@ -62,42 +62,26 @@ func (s *attachedFunctionDb) Update(attachedFunction *dbmodel.AttachedFunction) 
 	return nil
 }
 
-// UpdateCompletionOffsetAndHeapEntry updates both completion offset and heap_entry_pending flag atomically
-// Only updates if the new offset is greater than or equal to the current offset (prevents moving backwards)
-// The heap_entry_pending flag is computed atomically based on the collection's log_position at update time
-func (s *attachedFunctionDb) UpdateCompletionOffsetAndHeapEntry(id uuid.UUID, collectionID string, newOffset int64) error {
-	result := s.db.Exec(`
-		UPDATE attached_functions af
-		SET
-			completion_offset = ?,
-			heap_entry_pending = (CASE WHEN ? >= c.log_position THEN false ELSE true END),
-			updated_at = ?
-		FROM collections c
-		WHERE
-			af.id = ?
-			AND af.is_deleted = false
-			AND af.completion_offset <= ?
-			AND af.input_collection_id = c.id
-			AND c.id = ?`,
-		newOffset,
-		newOffset,
-		time.Now(),
-		id,
-		newOffset,
-		collectionID,
-	)
+// UpdateCompletionOffset updates only the completion offset.
+// Only updates if the new offset is greater than or equal to the current offset.
+func (s *attachedFunctionDb) UpdateCompletionOffset(id uuid.UUID, collectionID string, newOffset int64) error {
+	result := s.db.Model(&dbmodel.AttachedFunction{}).
+		Where("id = ?", id).
+		Where("input_collection_id = ?", collectionID).
+		Where("is_deleted = ?", false).
+		Where("completion_offset <= ?", newOffset).
+		Updates(map[string]interface{}{
+			"completion_offset": newOffset,
+			"updated_at":        time.Now(),
+		})
 
 	if result.Error != nil {
-		log.Error("update completion offset and heap_entry_pending failed", zap.Error(result.Error))
+		log.Error("update completion offset failed", zap.Error(result.Error))
 		return result.Error
 	}
 
 	if result.RowsAffected == 0 {
-		// Could be due to:
-		// 1. Attached function not found or deleted
-		// 2. Collection not found
-		// 3. Offset would move backwards
-		log.Warn("update completion offset and heap_entry_pending: no rows affected",
+		log.Warn("update completion offset: no rows affected",
 			zap.String("id", id.String()),
 			zap.String("collection_id", collectionID),
 			zap.Int64("new_offset", newOffset))

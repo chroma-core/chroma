@@ -1447,8 +1447,6 @@ func (s *Coordinator) TryFinishAsyncAttachedFunctionInvocation(ctx context.Conte
 		return nil, status.Errorf(codes.InvalidArgument, "invalid collection_id: %v", err)
 	}
 
-	var witnessedLogOffset int64
-
 	err = s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		attachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(&attachedFunctionID, nil, nil, nil, nil, true)
 		if err != nil {
@@ -1486,17 +1484,6 @@ func (s *Coordinator) TryFinishAsyncAttachedFunctionInvocation(ctx context.Conte
 			return status.Errorf(codes.InvalidArgument, "attached function is not async")
 		}
 
-		collectionIDs := []string{collectionID.String()}
-		collections, err := s.catalog.metaDomain.CollectionDb(txCtx).GetCollections(collectionIDs, nil, "", "", nil, nil, false)
-		if err != nil {
-			log.Error("Failed to get collection", zap.Error(err))
-			return err
-		}
-		if len(collections) == 0 {
-			log.Error("Collection not found", zap.String("collection_id", collectionID.String()))
-			return status.Errorf(codes.NotFound, "collection not found")
-		}
-
 		if attachedFunction.InputCollectionID != req.CollectionId {
 			log.Error("Collection ID mismatch",
 				zap.String("expected", attachedFunction.InputCollectionID),
@@ -1504,14 +1491,10 @@ func (s *Coordinator) TryFinishAsyncAttachedFunctionInvocation(ctx context.Conte
 			return status.Errorf(codes.InvalidArgument, "collection_id does not match attached function's input_collection_id")
 		}
 
-		witnessedLogOffset = collections[0].Collection.LogPosition
-
-		// UpdateCompletionOffsetAndHeapEntry now atomically computes heap_entry_pending based on the
-		// collection's log position at update time, avoiding TOCTOU race condition
-		err = s.catalog.metaDomain.AttachedFunctionDb(txCtx).UpdateCompletionOffsetAndHeapEntry(
+		err = s.catalog.metaDomain.AttachedFunctionDb(txCtx).UpdateCompletionOffset(
 			attachedFunctionID, collectionID.String(), int64(req.NewCompletionOffset))
 		if err != nil {
-			log.Error("Failed to update completion offset and heap_entry_pending", zap.Error(err))
+			log.Error("Failed to update completion offset", zap.Error(err))
 			return err
 		}
 
@@ -1522,25 +1505,8 @@ func (s *Coordinator) TryFinishAsyncAttachedFunctionInvocation(ctx context.Conte
 		return nil, err
 	}
 
-	if int64(req.NewCompletionOffset) < witnessedLogOffset {
-		log.Warn("Completion offset is behind collection log position - repair needed",
-			zap.Uint64("new_completion_offset", req.NewCompletionOffset),
-			zap.Int64("collection_log_position", witnessedLogOffset))
-		return &coordinatorpb.TryFinishAsyncAttachedFunctionInvocationResponse{
-			Result: &coordinatorpb.TryFinishAsyncAttachedFunctionInvocationResponse_NeedsRepair{
-				NeedsRepair: &coordinatorpb.FinishAsyncNeedsRepair{
-					CurrentCollectionLogOffset: uint64(witnessedLogOffset),
-				},
-			},
-		}, nil
-	}
-
 	return &coordinatorpb.TryFinishAsyncAttachedFunctionInvocationResponse{
-		Result: &coordinatorpb.TryFinishAsyncAttachedFunctionInvocationResponse_Success{
-			Success: &coordinatorpb.FinishAsyncSuccess{
-				UpdatedCompletionOffset: req.NewCompletionOffset,
-			},
-		},
+		UpdatedCompletionOffset: req.NewCompletionOffset,
 	}, nil
 }
 

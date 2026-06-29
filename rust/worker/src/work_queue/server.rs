@@ -59,7 +59,7 @@ pub async fn service_entrypoint() {
     let work_queue_handle = system.start_component(work_queue_manager);
 
     // Create and start gRPC server
-    let work_queue_server = WorkQueueServer::new(work_queue_handle.clone(), sysdb);
+    let work_queue_server = WorkQueueServer::new(work_queue_handle.clone());
     let server = work_queue_server.into_service();
     let port = service_config.my_port;
 

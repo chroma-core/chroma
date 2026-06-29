@@ -1,8 +1,7 @@
 // V1: WorkDistributor import commented out
 // use crate::work_queue::distribution::WorkDistributor;
 use crate::work_queue::state::QueueState;
-use crate::work_queue::types::{FinishResult, WorkQueueError, WorkQueueRecord};
-
+use crate::work_queue::types::{WorkQueueError, WorkQueueRecord};
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_storage::{GetOptions, PutMode, PutOptions, Storage};
@@ -30,7 +29,7 @@ pub struct FinishWorkMessage {
     pub fn_id: AttachedFunctionUuid,
     pub input_coll_id: CollectionUuid,
     pub new_completion_offset: i64,
-    pub response_tx: oneshot::Sender<Result<FinishResult, WorkQueueError>>,
+    pub response_tx: oneshot::Sender<Result<(), WorkQueueError>>,
 }
 
 #[derive(Debug)]
@@ -59,11 +58,6 @@ pub(crate) struct WorkQueueManager {
     config: crate::work_queue::config::WorkQueueConfig,
     // Pending responses waiting for persistence (push work responses)
     pending_push_responses: Vec<oneshot::Sender<Result<(), WorkQueueError>>>,
-    // Pending responses for finish work
-    pending_finish_responses: Vec<(
-        FinishResult,
-        oneshot::Sender<Result<FinishResult, WorkQueueError>>,
-    )>,
 }
 
 impl WorkQueueManager {
@@ -79,7 +73,6 @@ impl WorkQueueManager {
             sysdb,
             config,
             pending_push_responses: Vec::new(),
-            pending_finish_responses: Vec::new(),
         }
     }
 
@@ -147,8 +140,7 @@ impl WorkQueueManager {
                 self.state.dirty = false;
 
                 let etag_msg = if has_etag { "" } else { " (no ETag)" };
-                let total_pending =
-                    self.pending_push_responses.len() + self.pending_finish_responses.len();
+                let total_pending = self.pending_push_responses.len();
                 tracing::debug!(
                     "Persisted work queue state{}, responding to {} pending requests",
                     etag_msg,
@@ -178,24 +170,12 @@ impl WorkQueueManager {
                 tracing::error!("Failed to send push work response - receiver dropped");
             }
         }
-
-        for (result, tx) in self.pending_finish_responses.drain(..) {
-            if tx.send(Ok(result)).is_err() {
-                tracing::error!("Failed to send finish work response - receiver dropped");
-            }
-        }
     }
 
     fn notify_pending_responses_error(&mut self, error: &WorkQueueError) {
         for tx in self.pending_push_responses.drain(..) {
             if tx.send(Err(error.clone())).is_err() {
                 tracing::error!("Failed to send push work error response - receiver dropped");
-            }
-        }
-
-        for (_, tx) in self.pending_finish_responses.drain(..) {
-            if tx.send(Err(error.clone())).is_err() {
-                tracing::error!("Failed to send finish work error response - receiver dropped");
             }
         }
     }
@@ -205,8 +185,7 @@ impl WorkQueueManager {
             return false;
         }
 
-        let total_pending_responses =
-            self.pending_push_responses.len() + self.pending_finish_responses.len();
+        let total_pending_responses = self.pending_push_responses.len();
 
         total_pending_responses >= self.config.persistence.pending_threshold
     }
@@ -297,10 +276,7 @@ impl Component for WorkQueueManager {
         tracing::info!("Stopping WorkQueueManager");
 
         // Final persist if dirty or if we have pending responses
-        if self.state.dirty
-            || !self.pending_push_responses.is_empty()
-            || !self.pending_finish_responses.is_empty()
-        {
+        if self.state.dirty || !self.pending_push_responses.is_empty() {
             self.persist()
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
@@ -347,7 +323,7 @@ impl Handler<FinishWorkMessage> for WorkQueueManager {
             .finish_work_success(&msg.fn_id, &msg.input_coll_id, msg.new_completion_offset);
 
         // Send immediate success response
-        if msg.response_tx.send(Ok(FinishResult::Success)).is_err() {
+        if msg.response_tx.send(Ok(())).is_err() {
             tracing::error!("Failed to send finish work success response - receiver dropped");
         }
 
@@ -570,23 +546,16 @@ mod tests {
 
         // Add pending responses
         let (tx1, rx1) = oneshot::channel();
-        let (tx2, rx2) = oneshot::channel();
         manager.pending_push_responses.push(tx1);
-        manager
-            .pending_finish_responses
-            .push((FinishResult::NeedsRepair, tx2));
 
         // Notify success
         manager.notify_pending_responses();
 
         // Check responses
         assert!(rx1.await.unwrap().is_ok());
-        let finish_result = rx2.await.unwrap().unwrap();
-        assert!(matches!(finish_result, FinishResult::NeedsRepair));
 
         // Queues should be empty
         assert!(manager.pending_push_responses.is_empty());
-        assert!(manager.pending_finish_responses.is_empty());
     }
 
     #[tokio::test]
@@ -595,11 +564,7 @@ mod tests {
 
         // Add pending responses
         let (tx1, rx1) = oneshot::channel();
-        let (tx2, rx2) = oneshot::channel();
         manager.pending_push_responses.push(tx1);
-        manager
-            .pending_finish_responses
-            .push((FinishResult::NeedsRepair, tx2));
 
         // Notify error
         let error = WorkQueueError::Storage("test error".to_string());
@@ -610,14 +575,9 @@ mod tests {
             rx1.await.unwrap(),
             Err(WorkQueueError::Storage(_))
         ));
-        assert!(matches!(
-            rx2.await.unwrap(),
-            Err(WorkQueueError::Storage(_))
-        ));
 
         // Queues should be empty
         assert!(manager.pending_push_responses.is_empty());
-        assert!(manager.pending_finish_responses.is_empty());
     }
 
     // Note: ETag mismatch testing requires storage that supports conditional puts

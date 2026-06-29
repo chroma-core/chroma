@@ -780,10 +780,7 @@ impl TestSysDb {
         >,
         tonic::Status,
     > {
-        use chroma_types::chroma_proto::{
-            FinishAsyncNeedsRepair, FinishAsyncSuccess,
-            TryFinishAsyncAttachedFunctionInvocationResponse,
-        };
+        use chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationResponse;
         use chroma_types::AttachedFunctionUuid;
         use uuid::Uuid;
 
@@ -801,33 +798,11 @@ impl TestSysDb {
             .get_mut(&attached_function_uuid)
             .ok_or_else(|| tonic::Status::not_found("Attached function not found"))?;
 
-        // For test purposes, we'll simulate success if the new offset is greater than the current
-        // and needs repair if it's less than or equal
-        let response = if request.new_completion_offset > attached_function.completion_offset {
-            // Update the completion offset
+        if request.new_completion_offset > attached_function.completion_offset {
             attached_function.completion_offset = request.new_completion_offset;
-
-            TryFinishAsyncAttachedFunctionInvocationResponse {
-                result: Some(
-                    chroma_types::chroma_proto::try_finish_async_attached_function_invocation_response::Result::Success(
-                        FinishAsyncSuccess {
-                            updated_completion_offset: request.new_completion_offset,
-                        },
-                    ),
-                ),
-            }
-        } else {
-            // Simulate needs repair - return a mock current collection log offset
-            TryFinishAsyncAttachedFunctionInvocationResponse {
-                result: Some(
-                    chroma_types::chroma_proto::try_finish_async_attached_function_invocation_response::Result::NeedsRepair(
-                        FinishAsyncNeedsRepair {
-                            // For testing, we'll just return the current completion offset + 100
-                            current_collection_log_offset: attached_function.completion_offset + 100,
-                        },
-                    ),
-                ),
-            }
+        }
+        let response = TryFinishAsyncAttachedFunctionInvocationResponse {
+            updated_completion_offset: attached_function.completion_offset,
         };
 
         Ok(tonic::Response::new(response))
