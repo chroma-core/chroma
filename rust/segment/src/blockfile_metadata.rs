@@ -109,15 +109,28 @@ impl<'me> SparseIndexWriter<'me> {
 }
 
 impl SparseIndexFlusher {
-    /// Flush the sparse index, returning `(file_path_key, paths)` entries that
-    /// should be registered on the segment. The entries are namespaced by the
-    /// `metadata_key` this index belongs to (`sparse_*::<metadata_key>`), so a
-    /// collection can hold one independent sparse index per metadata field.
+    /// Flush the sparse index, returning `(file_path_key, paths)` entries to
+    /// register on the segment. When `metadata_key` is `Some`, entries are
+    /// namespaced (`sparse_*::<metadata_key>`) so a collection can hold one
+    /// independent index per metadata field. When `None`, the bare `SPARSE_*`
+    /// names are used to carry forward an orphaned legacy anonymous index.
     pub async fn flush(
         self,
         prefix_path: &str,
-        metadata_key: &str,
+        metadata_key: Option<&str>,
     ) -> Result<Vec<(String, Vec<String>)>, Box<dyn ChromaError>> {
+        let (max_key, offset_value_key, posting_key) = match metadata_key {
+            Some(key) => (
+                sparse_max_key(key),
+                sparse_offset_value_key(key),
+                sparse_posting_key(key),
+            ),
+            None => (
+                SPARSE_MAX.to_string(),
+                SPARSE_OFFSET_VALUE.to_string(),
+                SPARSE_POSTING.to_string(),
+            ),
+        };
         match self {
             Self::Wand(f) => {
                 let max_id = f.max_id();
@@ -125,11 +138,11 @@ impl SparseIndexFlusher {
                 Box::pin(f.flush()).await.map_err(ChromaError::boxed)?;
                 Ok(vec![
                     (
-                        sparse_max_key(metadata_key),
+                        max_key,
                         vec![ChromaSegmentFlusher::flush_key(prefix_path, &max_id)],
                     ),
                     (
-                        sparse_offset_value_key(metadata_key),
+                        offset_value_key,
                         vec![ChromaSegmentFlusher::flush_key(
                             prefix_path,
                             &offset_value_id,
@@ -141,7 +154,7 @@ impl SparseIndexFlusher {
                 let posting_id = f.id();
                 Box::pin(f.flush()).await.map_err(ChromaError::boxed)?;
                 Ok(vec![(
-                    sparse_posting_key(metadata_key),
+                    posting_key,
                     vec![ChromaSegmentFlusher::flush_key(prefix_path, &posting_id)],
                 )])
             }
@@ -256,6 +269,11 @@ pub struct MetadataSegmentWriterShard<'me> {
     /// One sparse vector index per enabled sparse metadata key. The map key is
     /// the metadata field name; writes are routed by metadata key.
     pub(crate) sparse_index_writers: HashMap<String, SparseIndexWriter<'me>>,
+    /// An orphaned legacy anonymous sparse index (stored under the bare
+    /// SPARSE_* keys) that no enabled sparse key owns. Carried forward verbatim
+    /// under the bare names so legacy collections keep compacting; receives no
+    /// new writes.
+    pub(crate) legacy_sparse_index_writer: Option<SparseIndexWriter<'me>>,
     pub id: SegmentUuid,
 }
 
@@ -284,6 +302,104 @@ pub struct MetadataSegmentWriter<'me> {
     segment: Segment,
 }
 
+/// Fork an on-disk sparse index from the given blockfile paths into a writer,
+/// preserving its algorithm: MaxScore when a posting blockfile is present,
+/// otherwise WAND from the max + offset-value blockfiles. Returns `None` when
+/// no sparse blockfiles are present (nothing to fork).
+async fn fork_sparse_index_writer<'me>(
+    blockfile_provider: &BlockfileProvider,
+    cmek: &Option<Cmek>,
+    posting_file_path: Option<&String>,
+    max_file_path: Option<&String>,
+    offset_value_file_path: Option<&String>,
+) -> Result<Option<SparseIndexWriter<'me>>, MetadataSegmentError> {
+    if let Some(posting_file_path) = posting_file_path {
+        // ── Fork path: MaxScore index ──────────────────────────────────
+        let (posting_prefix, posting_uuid) = Segment::extract_prefix_and_id(posting_file_path)
+            .map_err(|_| MetadataSegmentError::UuidParseError(posting_file_path.to_string()))?;
+        let posting_reader = blockfile_provider
+            .read::<u32, SparsePostingBlock>(BlockfileReaderOptions::new(
+                posting_uuid,
+                posting_prefix.to_string(),
+            ))
+            .await
+            .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
+        let posting_writer = {
+            let mut options = BlockfileWriterOptions::new(posting_prefix.to_string())
+                .fork(posting_uuid)
+                .ordered_mutations()
+                .max_block_size_bytes(SPARSE_POSTING_BLOCK_SIZE_BYTES);
+            if let Some(cmek) = cmek {
+                options = options.with_cmek(cmek.clone());
+            }
+            blockfile_provider
+                .write::<u32, SparsePostingBlock>(options)
+                .await
+                .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
+        };
+        let old_reader = MaxScoreReader::new(posting_reader);
+        Ok(Some(SparseIndexWriter::MaxScore(MaxScoreWriter::new(
+            posting_writer,
+            Some(old_reader),
+        ))))
+    } else if let (Some(max_file_path), Some(offset_value_file_path)) =
+        (max_file_path, offset_value_file_path)
+    {
+        // ── Fork path: existing WAND index ─────────────────────────────
+        let (max_prefix, max_uuid) = Segment::extract_prefix_and_id(max_file_path)
+            .map_err(|_| MetadataSegmentError::UuidParseError(max_file_path.to_string()))?;
+        let max_reader = blockfile_provider
+            .read::<u32, f32>(BlockfileReaderOptions::new(
+                max_uuid,
+                max_prefix.to_string(),
+            ))
+            .await
+            .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
+        let max_writer = {
+            let mut options =
+                BlockfileWriterOptions::new(max_prefix.to_string()).ordered_mutations();
+            if let Some(cmek) = cmek {
+                options = options.with_cmek(cmek.clone());
+            }
+            blockfile_provider
+                .write::<u32, f32>(options)
+                .await
+                .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
+        };
+        let (offset_value_prefix, offset_value_uuid) =
+            Segment::extract_prefix_and_id(offset_value_file_path).map_err(|_| {
+                MetadataSegmentError::UuidParseError(offset_value_file_path.to_string())
+            })?;
+        let offset_value_reader = blockfile_provider
+            .read::<u32, f32>(BlockfileReaderOptions::new(
+                offset_value_uuid,
+                offset_value_prefix.to_string(),
+            ))
+            .await
+            .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
+        let offset_value_writer = {
+            let mut options = BlockfileWriterOptions::new(offset_value_prefix.to_string())
+                .fork(offset_value_uuid)
+                .ordered_mutations();
+            if let Some(cmek) = cmek {
+                options = options.with_cmek(cmek.clone());
+            }
+            blockfile_provider
+                .write::<u32, f32>(options)
+                .await
+                .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
+        };
+        Ok(Some(SparseIndexWriter::Wand(SparseWriter::new(
+            DEFAULT_BLOCK_SIZE,
+            max_writer,
+            offset_value_writer,
+            Some(SparseReader::new(max_reader, offset_value_reader)),
+        ))))
+    } else {
+        Ok(None)
+    }
+}
+
 impl<'me> MetadataSegmentWriter<'me> {
     pub async fn from_segment(
         tenant: &str,
@@ -307,14 +423,14 @@ impl<'me> MetadataSegmentWriter<'me> {
         let futures: Vec<_> = segment_shards
             .iter()
             .map(|shard| {
-                MetadataSegmentWriterShard::from_segment(
+                Box::pin(MetadataSegmentWriterShard::from_segment(
                     tenant,
                     database_id,
                     shard,
                     blockfile_provider,
                     cmek.clone(),
                     schema,
-                )
+                ))
             })
             .collect();
 
@@ -348,14 +464,14 @@ impl<'me> MetadataSegmentWriter<'me> {
         let cmek = collection.schema.as_ref().and_then(|s| s.cmek.clone());
 
         // Create the new writer shard
-        let new_writer_shard = MetadataSegmentWriterShard::from_segment(
+        let new_writer_shard = Box::pin(MetadataSegmentWriterShard::from_segment(
             &collection.tenant,
             &collection.database_id,
             &new_shard_segment,
             blockfile_provider,
             cmek,
             collection.schema.as_ref(),
-        )
+        ))
         .await?;
 
         // Add to our shards vector
@@ -477,8 +593,6 @@ pub enum MetadataSegmentError {
     LimitOffsetNotSupported,
     #[error("Metadata index error: {0}")]
     MetadataIndexQueryError(#[from] MetadataIndexError),
-    #[error("Legacy sparse index present on disk but no enabled sparse key owns it")]
-    LegacySparseWithoutEnabledKey,
 }
 
 impl ChromaError for MetadataSegmentError {
@@ -499,7 +613,6 @@ impl ChromaError for MetadataSegmentError {
             MetadataSegmentError::BlockfileWriteError => ErrorCodes::Internal,
             MetadataSegmentError::LimitOffsetNotSupported => ErrorCodes::Internal,
             MetadataSegmentError::MetadataIndexQueryError(_) => ErrorCodes::Internal,
-            MetadataSegmentError::LegacySparseWithoutEnabledKey => ErrorCodes::Internal,
         }
     }
 }
@@ -831,16 +944,13 @@ impl<'me> MetadataSegmentWriterShard<'me> {
         let legacy_offset_value_file_path = segment.file_path.get(SPARSE_OFFSET_VALUE);
         let has_legacy_sparse = legacy_posting_file_path.is_some()
             || (legacy_max_file_path.is_some() && legacy_offset_value_file_path.is_some());
+        // A legacy anonymous sparse index exists on disk under the bare
+        // SPARSE_* keys. With immutable schemas, at most one enabled sparse key
+        // can own (and migrate) it to the per-key layout. When such a key
+        // exists it forks the legacy blockfiles below; the bare entries are not
+        // re-emitted, completing the migration this compaction.
         let legacy_owner_key = if has_legacy_sparse {
-            // A legacy anonymous sparse index exists on disk. With immutable
-            // schemas exactly one enabled sparse key should own (and migrate)
-            // it. If there is none, refuse rather than silently dropping the
-            // index on the next flush — this should never happen, but guarding
-            // it guarantees we surface the bug instead of losing data.
-            match enabled_sparse_keys.first() {
-                Some(key) => Some(key.clone()),
-                None => return Err(MetadataSegmentError::LegacySparseWithoutEnabledKey),
-            }
+            enabled_sparse_keys.first().cloned()
         } else {
             None
         };
@@ -868,87 +978,16 @@ impl<'me> MetadataSegmentWriterShard<'me> {
                 (None, None, None)
             };
 
-            let sparse_index_writer = if let Some(posting_file_path) = posting_file_path {
-                // ── Fork path: MaxScore index ──────────────────────────
-                let (posting_prefix, posting_uuid) =
-                    Segment::extract_prefix_and_id(posting_file_path).map_err(|_| {
-                        MetadataSegmentError::UuidParseError(posting_file_path.to_string())
-                    })?;
-                let posting_reader = blockfile_provider
-                    .read::<u32, SparsePostingBlock>(BlockfileReaderOptions::new(
-                        posting_uuid,
-                        posting_prefix.to_string(),
-                    ))
-                    .await
-                    .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
-                let posting_writer = {
-                    let mut options = BlockfileWriterOptions::new(posting_prefix.to_string())
-                        .fork(posting_uuid)
-                        .ordered_mutations()
-                        .max_block_size_bytes(SPARSE_POSTING_BLOCK_SIZE_BYTES);
-                    if let Some(cmek) = &cmek {
-                        options = options.with_cmek(cmek.clone());
-                    }
-                    blockfile_provider
-                        .write::<u32, SparsePostingBlock>(options)
-                        .await
-                        .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
-                };
-                let old_reader = MaxScoreReader::new(posting_reader);
-                SparseIndexWriter::MaxScore(MaxScoreWriter::new(posting_writer, Some(old_reader)))
-            } else if let (Some(max_file_path), Some(offset_value_file_path)) =
-                (max_file_path, offset_value_file_path)
+            let sparse_index_writer = if let Some(forked) = fork_sparse_index_writer(
+                blockfile_provider,
+                &cmek,
+                posting_file_path,
+                max_file_path,
+                offset_value_file_path,
+            )
+            .await?
             {
-                // ── Fork path: existing WAND index (unchanged) ─────────
-                let (max_prefix, max_uuid) = Segment::extract_prefix_and_id(max_file_path)
-                    .map_err(|_| MetadataSegmentError::UuidParseError(max_file_path.to_string()))?;
-                let max_reader = blockfile_provider
-                    .read::<u32, f32>(BlockfileReaderOptions::new(
-                        max_uuid,
-                        max_prefix.to_string(),
-                    ))
-                    .await
-                    .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
-                let max_writer = {
-                    let mut options =
-                        BlockfileWriterOptions::new(max_prefix.to_string()).ordered_mutations();
-                    if let Some(cmek) = &cmek {
-                        options = options.with_cmek(cmek.clone());
-                    }
-                    blockfile_provider
-                        .write::<u32, f32>(options)
-                        .await
-                        .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
-                };
-                let (offset_value_prefix, offset_value_uuid) =
-                    Segment::extract_prefix_and_id(offset_value_file_path).map_err(|_| {
-                        MetadataSegmentError::UuidParseError(offset_value_file_path.to_string())
-                    })?;
-                let offset_value_reader = blockfile_provider
-                    .read::<u32, f32>(BlockfileReaderOptions::new(
-                        offset_value_uuid,
-                        offset_value_prefix.to_string(),
-                    ))
-                    .await
-                    .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
-                let offset_value_writer = {
-                    let mut options = BlockfileWriterOptions::new(offset_value_prefix.to_string())
-                        .fork(offset_value_uuid)
-                        .ordered_mutations();
-                    if let Some(cmek) = &cmek {
-                        options = options.with_cmek(cmek.clone());
-                    }
-                    blockfile_provider
-                        .write::<u32, f32>(options)
-                        .await
-                        .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
-                };
-                SparseIndexWriter::Wand(SparseWriter::new(
-                    DEFAULT_BLOCK_SIZE,
-                    max_writer,
-                    offset_value_writer,
-                    Some(SparseReader::new(max_reader, offset_value_reader)),
-                ))
+                forked
             } else if schema.is_some_and(|s| s.is_key_maxscore_enabled(sparse_key)) {
                 // ── Fresh: MaxScore index ──────────────────────────────
                 let posting_writer = {
@@ -998,6 +1037,27 @@ impl<'me> MetadataSegmentWriterShard<'me> {
             sparse_index_writers.insert(sparse_key.clone(), sparse_index_writer);
         }
 
+        // Orphaned legacy sparse index: a bare SPARSE_* index exists on disk
+        // but no enabled sparse key owns it. This is the common case for
+        // collections that predate per-key indexing — older compactions always
+        // flushed a sparse index (an empty WAND index for collections that
+        // never used sparse vectors) under the bare names. Fork it forward
+        // under the bare names so we neither drop the index nor fail
+        // compaction; an owning key (if ever enabled) migrates it to per-key
+        // layout via the loop above.
+        let legacy_sparse_index_writer = if has_legacy_sparse && legacy_owner_key.is_none() {
+            fork_sparse_index_writer(
+                blockfile_provider,
+                &cmek,
+                legacy_posting_file_path,
+                legacy_max_file_path,
+                legacy_offset_value_file_path,
+            )
+            .await?
+        } else {
+            None
+        };
+
         Ok(MetadataSegmentWriterShard {
             fts_index_writer: Some(fts_index_writer),
             string_metadata_index_writer: Some(string_metadata_index_writer),
@@ -1005,6 +1065,7 @@ impl<'me> MetadataSegmentWriterShard<'me> {
             f32_metadata_index_writer: Some(f32_metadata_index_writer),
             u32_metadata_index_writer: Some(u32_metadata_index_writer),
             sparse_index_writers,
+            legacy_sparse_index_writer,
             id: segment.id,
         })
     }
@@ -1778,6 +1839,11 @@ impl<'me> MetadataSegmentWriterShard<'me> {
             sparse_index_flushers.insert(key, writer.commit().await?);
         }
 
+        let legacy_sparse_index_flusher = match self.legacy_sparse_index_writer {
+            Some(writer) => Some(writer.commit().await?),
+            None => None,
+        };
+
         Ok(MetadataSegmentFlusherShard {
             id: self.id,
             fts_index_flusher: fts_flusher,
@@ -1786,6 +1852,7 @@ impl<'me> MetadataSegmentWriterShard<'me> {
             f32_metadata_index_flusher: f32_metadata_flusher,
             u32_metadata_index_flusher: u32_metadata_flusher,
             sparse_index_flushers,
+            legacy_sparse_index_flusher,
         })
     }
 }
@@ -1824,6 +1891,9 @@ pub struct MetadataSegmentFlusherShard {
     pub(crate) u32_metadata_index_flusher: MetadataIndexFlusher,
     /// One sparse index flusher per enabled sparse metadata key.
     pub(crate) sparse_index_flushers: HashMap<String, SparseIndexFlusher>,
+    /// Flusher for an orphaned legacy anonymous sparse index, re-emitted under
+    /// the bare `SPARSE_*` names.
+    pub(crate) legacy_sparse_index_flusher: Option<SparseIndexFlusher>,
 }
 
 impl Debug for MetadataSegmentFlusherShard {
@@ -1919,7 +1989,16 @@ impl MetadataSegmentFlusherShard {
         );
 
         for (metadata_key, sparse_flusher) in self.sparse_index_flushers {
-            for (file_path_key, paths) in sparse_flusher.flush(&prefix_path, &metadata_key).await? {
+            for (file_path_key, paths) in sparse_flusher
+                .flush(&prefix_path, Some(&metadata_key))
+                .await?
+            {
+                flushed.insert(file_path_key, paths);
+            }
+        }
+
+        if let Some(legacy_flusher) = self.legacy_sparse_index_flusher {
+            for (file_path_key, paths) in legacy_flusher.flush(&prefix_path, None).await? {
                 flushed.insert(file_path_key, paths);
             }
         }
@@ -2262,14 +2341,14 @@ mod test {
             .expect("Error creating segment writer");
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 None,
-            )
+            ))
             .await
             .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
@@ -2420,14 +2499,14 @@ mod test {
         .expect("Error creating segment writer");
         let metadata_segment_shard =
             SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+        let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &metadata_segment_shard,
             &blockfile_provider,
             None,
             None,
-        )
+        ))
         .await
         .expect("Error creating segment writer");
         let some_reader = Some(record_segment_reader);
@@ -2529,14 +2608,14 @@ mod test {
         .expect("Error creating segment writer");
         let metadata_segment_shard =
             SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+        let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &metadata_segment_shard,
             &blockfile_provider,
             None,
             None,
-        )
+        ))
         .await
         .expect("Error creating segment writer");
         let some_reader = Some(record_segment_reader);
@@ -2643,14 +2722,14 @@ mod test {
             .expect("Error creating segment writer");
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 None,
-            )
+            ))
             .await
             .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
@@ -2804,14 +2883,14 @@ mod test {
         .expect("Error creating segment writer");
         let metadata_segment_shard =
             SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+        let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &metadata_segment_shard,
             &blockfile_provider,
             None,
             None,
-        )
+        ))
         .await
         .expect("Error creating segment writer");
         let some_reader = Some(record_segment_reader);
@@ -2953,14 +3032,14 @@ mod test {
             .expect("Error creating segment writer");
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 None,
-            )
+            ))
             .await
             .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
@@ -3087,14 +3166,14 @@ mod test {
         .expect("Error creating segment writer");
         let metadata_segment_shard =
             SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+        let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &metadata_segment_shard,
             &blockfile_provider,
             None,
             None,
-        )
+        ))
         .await
         .expect("Error creating segment writer");
         let some_reader = Some(record_segment_reader);
@@ -3232,14 +3311,14 @@ mod test {
             .expect("Error creating segment writer");
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 None,
-            )
+            ))
             .await
             .expect("Error creating segment writer");
             let data = vec![LogRecord {
@@ -3355,14 +3434,14 @@ mod test {
         .expect("Error creating segment writer");
         let metadata_segment_shard =
             SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+        let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &metadata_segment_shard,
             &blockfile_provider,
             None,
             None,
-        )
+        ))
         .await
         .expect("Error creating segment writer");
         let some_reader = Some(record_segment_reader);
@@ -3503,14 +3582,14 @@ mod test {
             .expect("Error creating segment writer");
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 None,
-            )
+            ))
             .await
             .expect("Error creating segment writer");
             let data = vec![
@@ -3825,14 +3904,14 @@ mod test {
                 sparse_schema_for_key("sparse_vec", chroma_types::SparseIndexAlgorithm::Wand);
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 Some(&sparse_schema),
-            )
+            ))
             .await
             .expect("Error creating segment writer");
 
@@ -3996,14 +4075,14 @@ mod test {
         // underlying blockfiles are identical; only the logical names differ.
         {
             let shard = SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let writer = MetadataSegmentWriterShard::from_segment(
+            let writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &shard,
                 &blockfile_provider,
                 None,
                 Some(&schema),
-            )
+            ))
             .await
             .expect("create writer");
             for offset in 0u32..8 {
@@ -4036,14 +4115,14 @@ mod test {
         // index and forks it, rewriting to per-key layout on this compaction.
         {
             let shard = SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let writer = MetadataSegmentWriterShard::from_segment(
+            let writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &shard,
                 &blockfile_provider,
                 None,
                 Some(&schema),
-            )
+            ))
             .await
             .expect("create migration writer");
             assert!(
@@ -4081,6 +4160,265 @@ mod test {
                 Some(SparseIndexReader::Wand(_))
             ));
             assert!(reader.legacy_sparse_index_reader.is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_legacy_sparse_without_owner_is_preserved() {
+        // Regression: collections compacted before per-key indexing always
+        // flushed a sparse index under the bare SPARSE_* names — even ones that
+        // never used sparse vectors (an empty WAND index). Their current schema
+        // has no enabled sparse key, so nothing owns the legacy index. We must
+        // carry it forward under the bare names rather than dropping it or
+        // failing compaction.
+        use chroma_types::{
+            sparse_max_key, sparse_offset_value_key, MetadataValue, SparseIndexAlgorithm,
+            SparseVector, SPARSE_MAX, SPARSE_OFFSET_VALUE,
+        };
+
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
+        );
+        let blockfile_provider =
+            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let tenant = String::from("test_tenant");
+        let database_id = DatabaseUuid::new();
+
+        let mut metadata_segment = chroma_types::Segment {
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000031").expect("parse error"),
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
+            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        // Build a real WAND index, then rename the per-key entries to the bare
+        // legacy names to emulate a pre-per-key collection.
+        let owned_schema = sparse_schema_for_key("sparse_a", SparseIndexAlgorithm::Wand);
+        {
+            let shard = SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
+            let writer = Box::pin(MetadataSegmentWriterShard::from_segment(
+                &tenant,
+                &database_id,
+                &shard,
+                &blockfile_provider,
+                None,
+                Some(&owned_schema),
+            ))
+            .await
+            .expect("create writer");
+            for offset in 0u32..8 {
+                let v = SparseVector::new(vec![0, offset % 3 + 1], vec![1.0, 0.5]).unwrap();
+                writer
+                    .set_metadata("sparse_a", &MetadataValue::SparseVector(v), offset)
+                    .await
+                    .expect("set sparse_a");
+            }
+            let flusher = Box::pin(writer.commit()).await.expect("commit");
+            metadata_segment.file_path = Box::pin(flusher.flush()).await.expect("flush");
+        }
+        let max_paths = metadata_segment
+            .file_path
+            .remove(&sparse_max_key("sparse_a"))
+            .expect("per-key max present");
+        let offset_value_paths = metadata_segment
+            .file_path
+            .remove(&sparse_offset_value_key("sparse_a"))
+            .expect("per-key offset_value present");
+        metadata_segment
+            .file_path
+            .insert(SPARSE_MAX.to_string(), max_paths);
+        metadata_segment
+            .file_path
+            .insert(SPARSE_OFFSET_VALUE.to_string(), offset_value_paths);
+
+        // Reopen with a default schema that enables no sparse key — exactly the
+        // production case. The legacy index has no owner, so it is carried
+        // forward as a legacy writer rather than migrated or dropped. Repeat to
+        // prove it is stable across successive compactions (these collections
+        // compact repeatedly and must never silently lose the index).
+        let orphan_schema = Schema::new_default(KnnIndex::Hnsw);
+        for round in 0..2 {
+            let shard = SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
+            let writer = Box::pin(MetadataSegmentWriterShard::from_segment(
+                &tenant,
+                &database_id,
+                &shard,
+                &blockfile_provider,
+                None,
+                Some(&orphan_schema),
+            ))
+            .await
+            .unwrap_or_else(|e| {
+                panic!(
+                    "from_segment must not fail on orphaned legacy sparse (round {round}): {e:?}"
+                )
+            });
+            assert!(
+                writer.sparse_index_writers.is_empty(),
+                "no enabled key, so no per-key writers"
+            );
+            assert!(
+                matches!(
+                    writer.legacy_sparse_index_writer,
+                    Some(SparseIndexWriter::Wand(_))
+                ),
+                "orphaned legacy WAND index should be carried forward"
+            );
+            let flusher = Box::pin(writer.commit()).await.expect("commit");
+            metadata_segment.file_path = Box::pin(flusher.flush()).await.expect("flush");
+
+            // The bare legacy entries survive; no per-key entries are introduced.
+            assert!(metadata_segment.file_path.contains_key(SPARSE_MAX));
+            assert!(metadata_segment.file_path.contains_key(SPARSE_OFFSET_VALUE));
+            assert!(!metadata_segment
+                .file_path
+                .contains_key(&sparse_max_key("sparse_a")));
+        }
+
+        // The index data is intact: dimension 0 appears in all 8 records.
+        {
+            let shard = SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
+            let reader = Box::pin(MetadataSegmentReaderShard::from_segment(
+                &shard,
+                &blockfile_provider,
+            ))
+            .await
+            .expect("open reader");
+            assert!(reader.sparse_index_readers.is_empty());
+            let legacy = reader
+                .legacy_sparse_index_reader
+                .as_ref()
+                .expect("legacy reader present");
+            let counts = legacy.dimension_counts(&[0]).await.expect("counts");
+            assert_eq!(counts.get(&0).copied(), Some(8));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_legacy_maxscore_sparse_without_owner_is_preserved() {
+        // Same regression as the WAND case, but for the MaxScore on-disk layout
+        // (a single bare SPARSE_POSTING entry) which forks and re-flushes via a
+        // different branch.
+        use chroma_types::{
+            sparse_posting_key, MetadataValue, SparseIndexAlgorithm, SparseVector, SPARSE_POSTING,
+        };
+
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
+        );
+        let blockfile_provider =
+            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let tenant = String::from("test_tenant");
+        let database_id = DatabaseUuid::new();
+
+        let mut metadata_segment = chroma_types::Segment {
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000041").expect("parse error"),
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
+            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        let owned_schema = sparse_schema_for_key("sparse_a", SparseIndexAlgorithm::MaxScore);
+        {
+            let shard = SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
+            let writer = Box::pin(MetadataSegmentWriterShard::from_segment(
+                &tenant,
+                &database_id,
+                &shard,
+                &blockfile_provider,
+                None,
+                Some(&owned_schema),
+            ))
+            .await
+            .expect("create writer");
+            for offset in 0u32..8 {
+                let v = SparseVector::new(vec![0, offset % 3 + 1], vec![1.0, 0.5]).unwrap();
+                writer
+                    .set_metadata("sparse_a", &MetadataValue::SparseVector(v), offset)
+                    .await
+                    .expect("set sparse_a");
+            }
+            let flusher = Box::pin(writer.commit()).await.expect("commit");
+            metadata_segment.file_path = Box::pin(flusher.flush()).await.expect("flush");
+        }
+        let posting_paths = metadata_segment
+            .file_path
+            .remove(&sparse_posting_key("sparse_a"))
+            .expect("per-key posting present");
+        metadata_segment
+            .file_path
+            .insert(SPARSE_POSTING.to_string(), posting_paths);
+
+        let orphan_schema = Schema::new_default(KnnIndex::Hnsw);
+        {
+            let shard = SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
+            let writer = Box::pin(MetadataSegmentWriterShard::from_segment(
+                &tenant,
+                &database_id,
+                &shard,
+                &blockfile_provider,
+                None,
+                Some(&orphan_schema),
+            ))
+            .await
+            .expect("from_segment must not fail on an orphaned legacy MaxScore index");
+            assert!(writer.sparse_index_writers.is_empty());
+            assert!(
+                matches!(
+                    writer.legacy_sparse_index_writer,
+                    Some(SparseIndexWriter::MaxScore(_))
+                ),
+                "orphaned legacy MaxScore index should be carried forward"
+            );
+            let flusher = Box::pin(writer.commit()).await.expect("commit");
+            metadata_segment.file_path = Box::pin(flusher.flush()).await.expect("flush");
+        }
+
+        assert!(metadata_segment.file_path.contains_key(SPARSE_POSTING));
+        assert!(!metadata_segment
+            .file_path
+            .contains_key(&sparse_posting_key("sparse_a")));
+
+        {
+            let shard = SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
+            let reader = Box::pin(MetadataSegmentReaderShard::from_segment(
+                &shard,
+                &blockfile_provider,
+            ))
+            .await
+            .expect("open reader");
+            assert!(reader.sparse_index_readers.is_empty());
+            let legacy = reader
+                .legacy_sparse_index_reader
+                .as_ref()
+                .expect("legacy reader present");
+            assert!(matches!(legacy, SparseIndexReader::MaxScore(_)));
+            let counts = legacy.dimension_counts(&[0]).await.expect("counts");
+            assert_eq!(counts.get(&0).copied(), Some(8));
         }
     }
 
@@ -4139,14 +4477,14 @@ mod test {
 
         {
             let shard = SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let writer = MetadataSegmentWriterShard::from_segment(
+            let writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &shard,
                 &blockfile_provider,
                 None,
                 Some(&schema),
-            )
+            ))
             .await
             .expect("create writer");
 
@@ -4265,14 +4603,14 @@ mod test {
         {
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 Some(&sparse_schema),
-            )
+            ))
             .await
             .expect("Error creating metadata writer");
 
@@ -4319,14 +4657,14 @@ mod test {
         {
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 Some(&sparse_schema),
-            )
+            ))
             .await
             .expect("Error creating metadata writer");
 
@@ -4408,14 +4746,14 @@ mod test {
         {
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 Some(&sparse_schema),
-            )
+            ))
             .await
             .expect("Error creating metadata writer");
 
@@ -4536,14 +4874,14 @@ mod test {
             .expect("Error creating segment writer");
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 None,
-            )
+            ))
             .await
             .expect("Error creating segment writer");
 
@@ -4762,14 +5100,14 @@ mod test {
             .expect("Error creating segment writer");
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 None,
-            )
+            ))
             .await
             .expect("Error creating segment writer");
 
@@ -4971,14 +5309,14 @@ mod test {
         {
             let shard =
                 SegmentShard::try_from((&metadata_segment, 0u32)).expect("valid shard index");
-            let writer = MetadataSegmentWriterShard::from_segment(
+            let writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 tenant,
                 &database_id,
                 &shard,
                 &blockfile_provider,
                 None,
                 Some(&schema),
-            )
+            ))
             .await
             .expect("iter1: create writer");
 
@@ -5064,14 +5402,14 @@ mod test {
         {
             let shard =
                 SegmentShard::try_from((&metadata_segment, 0u32)).expect("valid shard index");
-            let writer = MetadataSegmentWriterShard::from_segment(
+            let writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 tenant,
                 &database_id,
                 &shard,
                 &blockfile_provider,
                 None,
                 Some(&schema),
-            )
+            ))
             .await
             .expect("iter2: create writer (fork)");
 
@@ -5162,14 +5500,14 @@ mod test {
         {
             let shard =
                 SegmentShard::try_from((&metadata_segment, 0u32)).expect("valid shard index");
-            let writer = MetadataSegmentWriterShard::from_segment(
+            let writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 tenant,
                 &database_id,
                 &shard,
                 &blockfile_provider,
                 None,
                 Some(&schema),
-            )
+            ))
             .await
             .expect("iter3: create writer (fork)");
 
