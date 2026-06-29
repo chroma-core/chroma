@@ -300,6 +300,57 @@ impl QueueState {
         true
     }
 
+    pub fn count_entries_missing_compaction_offset(&self) -> usize {
+        self.pending_work
+            .iter()
+            .filter(|record| record.compaction_offset.is_none())
+            .count()
+    }
+
+    #[cfg(test)]
+    pub fn get_compaction_offset(
+        &self,
+        fn_id: &AttachedFunctionUuid,
+        input_coll_id: &CollectionUuid,
+    ) -> Option<i64> {
+        self.dedup_index
+            .get(&(*fn_id, *input_coll_id))
+            .and_then(|offsets| offsets.compaction_offset)
+    }
+
+    pub fn set_compaction_offset_if_missing(
+        &mut self,
+        fn_id: &AttachedFunctionUuid,
+        input_coll_id: &CollectionUuid,
+        compaction_offset: i64,
+    ) -> bool {
+        let key = (*fn_id, *input_coll_id);
+
+        let Some(existing_offsets) = self.dedup_index.get_mut(&key) else {
+            return false;
+        };
+
+        if existing_offsets.compaction_offset.is_some() {
+            return false;
+        }
+
+        let mut updated = false;
+        for record in self.pending_work.iter_mut() {
+            if record.fn_id == *fn_id && record.input_coll_id == *input_coll_id {
+                record.compaction_offset = Some(compaction_offset);
+                updated = true;
+                break;
+            }
+        }
+
+        if updated {
+            existing_offsets.compaction_offset = Some(compaction_offset);
+            self.dirty = true;
+        }
+
+        updated
+    }
+
     /// Mark work as successfully completed.
     /// Removes the queue entry once completion reaches the queued frontier;
     /// otherwise leaves the queued entry unchanged.
