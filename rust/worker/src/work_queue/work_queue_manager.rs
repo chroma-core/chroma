@@ -29,6 +29,7 @@ pub struct PushWorkMessage {
     pub fn_id: AttachedFunctionUuid,
     pub input_coll_id: CollectionUuid,
     pub completion_offset: i64,
+    pub compaction_offset: Option<i64>,
     pub response_tx: oneshot::Sender<Result<(), WorkQueueError>>,
 }
 
@@ -254,11 +255,12 @@ impl WorkQueueManager {
         fn_id: AttachedFunctionUuid,
         input_coll_id: CollectionUuid,
         completion_offset: i64,
+        compaction_offset: Option<i64>,
         response: WorkResponse,
     ) {
         let _ = self
             .state
-            .push_work(fn_id, input_coll_id, completion_offset);
+            .push_work(fn_id, input_coll_id, completion_offset, compaction_offset);
 
         // TODO(tanujnay112): Can optimize the case where we push work
         // that gets deduplicated. That would require epoch tracking
@@ -423,7 +425,7 @@ impl WorkQueueManager {
             );
 
             self.state
-                .push_work(item.fn_id, item.input_coll_id, *current_completion_offset);
+                .push_work(item.fn_id, item.input_coll_id, *current_completion_offset, None);
         }
 
         if let Err(e) = self.persist().await {
@@ -522,15 +524,17 @@ impl Handler<PushWorkMessage> for WorkQueueManager {
 
     async fn handle(&mut self, msg: PushWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
         tracing::info!(
-            "Received PushWorkMessage for fn_id: {}, input_coll_id: {}, completion_offset: {}",
+            "Received PushWorkMessage for fn_id: {}, input_coll_id: {}, completion_offset: {}, compaction_offset: {:?}",
             msg.fn_id,
             msg.input_coll_id,
-            msg.completion_offset
+            msg.completion_offset,
+            msg.compaction_offset
         );
         self.push_work_and_queue_response(
             msg.fn_id,
             msg.input_coll_id,
             msg.completion_offset,
+            msg.compaction_offset,
             WorkResponse::Push(msg.response_tx),
         )
         .await;
@@ -579,6 +583,7 @@ impl Handler<FinishWorkMessage> for WorkQueueManager {
                     msg.fn_id,
                     msg.input_coll_id,
                     msg.new_completion_offset,
+                    None,
                     WorkResponse::Repair(msg.response_tx),
                 )
                 .await;
@@ -714,17 +719,17 @@ mod tests {
         let coll_id = CollectionUuid(Uuid::new_v4());
 
         // Test direct state manipulation to verify deduplication logic
-        state.push_work(fn_id, coll_id, 100);
+        state.push_work(fn_id, coll_id, 100, None);
         assert_eq!(state.pending_work.len(), 1);
         assert_eq!(state.pending_work[0].completion_offset, 100);
 
         // Push with lower offset should be ignored
-        state.push_work(fn_id, coll_id, 50);
+        state.push_work(fn_id, coll_id, 50, None);
         assert_eq!(state.pending_work.len(), 1);
         assert_eq!(state.pending_work[0].completion_offset, 100);
 
         // Push with higher offset should replace
-        state.push_work(fn_id, coll_id, 200);
+        state.push_work(fn_id, coll_id, 200, None);
         assert_eq!(state.pending_work.len(), 1);
         assert_eq!(state.pending_work[0].completion_offset, 200);
 
@@ -739,7 +744,7 @@ mod tests {
         let coll_id = CollectionUuid(Uuid::new_v4());
 
         // Push work
-        state.push_work(fn_id, coll_id, 100);
+        state.push_work(fn_id, coll_id, 100, None);
         assert_eq!(state.pending_work.len(), 1);
 
         // Finish work
@@ -758,6 +763,7 @@ mod tests {
                 AttachedFunctionUuid(Uuid::new_v4()),
                 CollectionUuid(Uuid::new_v4()),
                 i * 100,
+                None,
             );
         }
 
@@ -789,11 +795,13 @@ mod tests {
                 AttachedFunctionUuid(Uuid::new_v4()),
                 CollectionUuid(Uuid::new_v4()),
                 100,
+                None,
             );
             manager.state.push_work(
                 AttachedFunctionUuid(Uuid::new_v4()),
                 CollectionUuid(Uuid::new_v4()),
                 200,
+                None,
             );
             manager.persist().await.unwrap();
         }
@@ -883,9 +891,9 @@ mod tests {
         let coll_id = CollectionUuid(Uuid::new_v4());
 
         // Push multiple work items with different offsets
-        state.push_work(fn_id, coll_id, 100);
-        state.push_work(fn_id, coll_id, 200);
-        state.push_work(fn_id, coll_id, 300);
+        state.push_work(fn_id, coll_id, 100, None);
+        state.push_work(fn_id, coll_id, 200, None);
+        state.push_work(fn_id, coll_id, 300, None);
         assert_eq!(state.pending_work.len(), 1);
         assert_eq!(state.pending_work[0].completion_offset, 300);
 

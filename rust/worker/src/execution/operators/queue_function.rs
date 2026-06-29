@@ -24,6 +24,7 @@ pub struct QueueFunctionInput {
     pub attached_function_id: AttachedFunctionUuid,
     pub input_collection_id: CollectionUuid,
     pub completion_offset: i64,
+    pub compaction_offset: Option<i64>,
 }
 
 impl QueueFunctionInput {
@@ -31,11 +32,13 @@ impl QueueFunctionInput {
         attached_function_id: AttachedFunctionUuid,
         input_collection_id: CollectionUuid,
         completion_offset: i64,
+        compaction_offset: Option<i64>,
     ) -> Self {
         Self {
             attached_function_id,
             input_collection_id,
             completion_offset,
+            compaction_offset,
         }
     }
 }
@@ -68,10 +71,11 @@ impl Operator<QueueFunctionInput, QueueFunctionOutput> for QueueFunctionOperator
 
     async fn run(&self, input: &QueueFunctionInput) -> Result<QueueFunctionOutput, Self::Error> {
         tracing::info!(
-            "Queuing async attached function - function_id: {}, collection_id: {}, offset: {}",
+            "Queuing async attached function - function_id: {}, collection_id: {}, offset: {}, compaction_offset: {:?}",
             input.attached_function_id,
             input.input_collection_id,
-            input.completion_offset
+            input.completion_offset,
+            input.compaction_offset
         );
 
         let mut client = self.work_queue_client.clone();
@@ -80,6 +84,7 @@ impl Operator<QueueFunctionInput, QueueFunctionOutput> for QueueFunctionOperator
                 input.attached_function_id.to_string(),
                 input.input_collection_id.to_string(),
                 input.completion_offset,
+                input.compaction_offset,
             )
             .await
             .map_err(QueueFunctionError::QueueError)?;

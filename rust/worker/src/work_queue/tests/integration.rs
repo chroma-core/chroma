@@ -169,7 +169,7 @@ mod tests {
 
             // Push work
             ctx.work_queue_client
-                .push_work(fn_id.to_string(), coll_id.to_string(), offset)
+                .push_work(fn_id.to_string(), coll_id.to_string(), offset, None)
                 .await
                 .expect("Failed to push work");
 
@@ -244,7 +244,7 @@ mod tests {
                     .expect("Failed to create async attached function");
 
                 ctx.work_queue_client
-                    .push_work(fn_id.to_string(), coll_id.to_string(), i * 100)
+                    .push_work(fn_id.to_string(), coll_id.to_string(), i * 100, None)
                     .await
                     .expect("Failed to push work");
 
@@ -379,7 +379,7 @@ mod tests {
 
             // Push work
             ctx.work_queue_client
-                .push_work(fn_id.to_string(), coll_id.to_string(), initial_offset)
+                .push_work(fn_id.to_string(), coll_id.to_string(), initial_offset, None)
                 .await
                 .expect("Failed to push work");
 

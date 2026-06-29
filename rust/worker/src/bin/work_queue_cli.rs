@@ -28,6 +28,10 @@ enum Commands {
         /// Completion offset
         #[arg(short, long)]
         offset: i64,
+
+        /// Compaction offset
+        #[arg(long)]
+        compaction_offset: Option<i64>,
     },
 
     /// Get work from the queue
@@ -68,8 +72,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             function_id,
             collection_id,
             offset,
+            compaction_offset,
         } => {
-            client.push_work(function_id, collection_id, offset).await?;
+            client
+                .push_work(function_id, collection_id, offset, compaction_offset)
+                .await?;
             println!("✓ Work pushed successfully");
         }
 

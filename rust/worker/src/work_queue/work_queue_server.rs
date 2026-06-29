@@ -71,6 +71,7 @@ impl WorkQueueService for WorkQueueServer {
             fn_id,
             input_coll_id,
             completion_offset: req.completion_offset,
+            compaction_offset: req.compaction_offset,
             response_tx,
         };
 
