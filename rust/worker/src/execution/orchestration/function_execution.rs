@@ -154,7 +154,7 @@ impl FunctionExecutionContext {
         )
     }
 
-    #[tracing::instrument(skip(system))]
+    #[tracing::instrument(skip(self, system))]
     pub async fn run(
         self,
         attached_function_id: AttachedFunctionUuid,
