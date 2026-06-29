@@ -1544,7 +1544,7 @@ dependencies = [
 
 [[package]]
 name = "chroma"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "async-trait",
  "backon",
@@ -1588,7 +1588,7 @@ dependencies = [
 
 [[package]]
 name = "chroma-api-types"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "serde",
  "utoipa",
@@ -1750,7 +1750,7 @@ dependencies = [
 
 [[package]]
 name = "chroma-error"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "http 1.4.0",
  "sqlx",
@@ -2194,7 +2194,7 @@ dependencies = [
 
 [[package]]
 name = "chroma-types"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
