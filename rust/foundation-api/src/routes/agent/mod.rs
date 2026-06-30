@@ -51,8 +51,10 @@ knowledge base. Use the `search` tool for targeted lookups and the \
 `subagent_search` tool for broad, multi-part research questions. When a search \
 hit looks relevant, use the `read_page` tool with its `slug` to read the full \
 page before relying on it. Ground every claim in retrieved documents and cite \
-the document ids you relied on. If the tools surface nothing relevant, say so \
-plainly rather than guessing.";
+each source page inline where you use it — as a Markdown link (titled by the \
+page, targeting the result's `url=`/`URL:` when reported, otherwise its slug) \
+— rather than appending a list of sources at the end. If the tools surface \
+nothing relevant, say so plainly rather than guessing.";
 
 /// Request body for `POST /api/agent`.
 #[derive(Debug, Deserialize, Validate)]
@@ -160,7 +162,9 @@ pub async fn foundation_agent(
 /// `subagent_search` tool, which is registered only when the dependency is
 /// configured. The Anthropic model reuses the shared HTTP pool, and the system
 /// prompt is taken from the request (which defaults to [`DEFAULT_SYSTEM_PROMPT`]
-/// when the caller omits it).
+/// when the caller omits it). The configured `foundation_ui_origin` is handed
+/// to each tool so retrieved documents carry resolvable page URLs the agent
+/// can cite (mirroring the MCP tools' deterministic link stamping).
 async fn build_agent(
     server: &FoundationApiServer,
     headers: &HeaderMap,
@@ -177,16 +181,20 @@ async fn build_agent(
         .to_string();
     let collection = wiki_client.wiki_collection(tenant, &token).await?;
 
+    let ui_origin = server.config.foundation.foundation_ui_origin.clone();
+
     let mut toolset = ToolSet::new();
     toolset.add(SearchTool::new(
         collection.clone(),
         WikiEmbedder::new(None),
         token.clone(),
+        tenant.to_string(),
+        ui_origin.clone(),
     ));
     toolset.add(ReadPageTool::new(
         collection,
         tenant.to_string(),
-        server.config.foundation.foundation_ui_origin.clone(),
+        ui_origin.clone(),
     ));
 
     // The deep-research tool is optional: register it only when the dependency
@@ -197,6 +205,7 @@ async fn build_agent(
             server.shared_http_client.clone(),
             url,
             creds,
+            ui_origin,
         ));
     }
 

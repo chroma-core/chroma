@@ -4,7 +4,9 @@
 use super::super::events::{
     parse_ranked_documents, ActionData, AgentEvent, ErrorData, RankedDocument, SubagentSearchEvent,
 };
-use super::super::{parse_sse_data_line, subagent_search_payload, SubagentSearchCreds};
+use super::super::{
+    format_ranked_documents, parse_sse_data_line, subagent_search_payload, SubagentSearchCreds,
+};
 use serde_json::{json, Value};
 
 fn test_creds() -> SubagentSearchCreds {
@@ -141,6 +143,42 @@ into the index.
             },
         ]
     );
+}
+
+#[test]
+fn format_ranked_documents_stamps_slug_and_url() {
+    let doc = |id: &str, justification: &str| RankedDocument {
+        id: id.to_string(),
+        justification: justification.to_string(),
+    };
+    let docs = vec![
+        // A hyphenated slug keeps everything before the numeric chunk suffix.
+        doc("getting-started-12", "Covers the setup flow."),
+        // A non-chunk id has no page to link, so it gets neither slug nor url.
+        doc("plainid", "Odd one out."),
+    ];
+
+    let text = format_ranked_documents(&docs, Some("https://wiki.example.com"), "t-1");
+    assert!(
+        text.contains(
+            "1. getting-started-12 slug=getting-started \
+             url=https://wiki.example.com/~/page-redirect?tenant_uuid=t-1&slug=getting-started"
+        ),
+        "got: {text}"
+    );
+    assert!(text.contains("Covers the setup flow."));
+    assert!(text.contains("2. plainid\n   Odd one out."), "got: {text}");
+}
+
+#[test]
+fn format_ranked_documents_omits_url_without_origin() {
+    let docs = vec![RankedDocument {
+        id: "onboarding-0".to_string(),
+        justification: "J.".to_string(),
+    }];
+    let text = format_ranked_documents(&docs, None, "t-1");
+    assert!(text.contains("slug=onboarding"), "got: {text}");
+    assert!(!text.contains("url="), "got: {text}");
 }
 
 #[test]
