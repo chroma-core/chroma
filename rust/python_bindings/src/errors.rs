@@ -17,7 +17,7 @@ pub(crate) struct ChromaPyError(Box<dyn ChromaError>);
 
 impl From<ChromaPyError> for PyErr {
     fn from(value: ChromaPyError) -> Self {
-        if value.0.name() == chroma_types::STALE_READ_ERROR_NAME {
+        if value.0.code().name() == chroma_types::STALE_READ_ERROR_NAME {
             return StaleReadError::new_err(value.to_string());
         }
         match value.0.code() {

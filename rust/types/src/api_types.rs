@@ -1951,10 +1951,6 @@ impl ChromaError for StaleReadError {
     fn code(&self) -> ErrorCodes {
         ErrorCodes::FailedPrecondition
     }
-
-    fn name(&self) -> &'static str {
-        STALE_READ_ERROR_NAME
-    }
 }
 
 /// Records can be retrieved by their IDs or by a metadata filter. At least one of `ids` or `where`
@@ -2592,14 +2588,6 @@ impl ChromaError for QueryError {
             QueryError::Executor(e) => e.code(),
             QueryError::StaleRead(e) => e.code(),
             QueryError::Other(err) => err.code(),
-        }
-    }
-
-    fn name(&self) -> &'static str {
-        match self {
-            QueryError::Executor(e) => e.name(),
-            QueryError::StaleRead(e) => e.name(),
-            QueryError::Other(err) => err.name(),
         }
     }
 }
