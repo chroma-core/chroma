@@ -124,7 +124,11 @@ impl FoundationConfig {
         // collection (metadata-indexed, text/vector deferred), which `/init`
         // creates and wires in as the attached-function base (see the field
         // docs above). The collections listed here stay fully indexed.
-        vec!["notion".to_string(), "gdrive".to_string()]
+        vec![
+            "notion".to_string(),
+            "gdrive".to_string(),
+            "granola".to_string(),
+        ]
     }
     fn default_function_name() -> String {
         "http_generate".to_string()
