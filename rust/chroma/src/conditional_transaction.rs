@@ -5,12 +5,11 @@ use std::ops::AsyncFn;
 use chroma_types::{
     AddCollectionRecordsRequest, AddCollectionRecordsResponse, ConditionalCommitAction,
     ConditionalCommitPayload, ConditionalCommitResult, ConditionalGetRequestPayload,
-    ConditionalGetResponse, ConditionalTransactionOperationPayload,
-    ConditionalTransactionReadPayload, ConditionalTransactionState, DeleteCollectionRecordsRequest,
-    DeleteCollectionRecordsResponse, GetRequest, GetResponse, IncludeList, Metadata, OccReadMode,
-    OccReadToken, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateMetadata,
-    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where,
-    CONDITIONAL_WRITE_CONFLICT_MESSAGE,
+    ConditionalGetResponse, ConditionalTransactionOperationPayload, ConditionalTransactionState,
+    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, GetRequest, GetResponse,
+    IncludeList, Metadata, OccReadMode, OccReadToken, UpdateCollectionRecordsRequest,
+    UpdateCollectionRecordsResponse, UpdateMetadata, UpsertCollectionRecordsRequest,
+    UpsertCollectionRecordsResponse, Where, CONDITIONAL_WRITE_CONFLICT_MESSAGE,
 };
 use reqwest::{Method, StatusCode};
 
@@ -147,16 +146,8 @@ impl ConditionalCollectionTransaction {
             include: response.include,
             occ_read_token: Some(read_token),
         };
-        let returned_ids = get_response.ids.clone();
         let get_response = self.state.finish_get(&prepared_request, get_response)?;
         self.read_token = Some(read_token.log_upper_bound_offset());
-        self.operations
-            .push(ConditionalTransactionOperationPayload::Get(
-                ConditionalTransactionReadPayload {
-                    request: request_payload,
-                    expected_ids: returned_ids,
-                },
-            ));
         Ok(get_response)
     }
 
@@ -284,10 +275,10 @@ impl ConditionalCollectionTransaction {
             return Err(ChromaHttpClientError::ConditionalCommitInsideRun);
         }
 
-        match self.state.prepare_commit()? {
+        let read_ids = match self.state.prepare_commit()? {
             ConditionalCommitAction::NoOp(result) => return Ok(result),
-            ConditionalCommitAction::Append(_) => {}
-        }
+            ConditionalCommitAction::Append(request) => request.read_ids,
+        };
 
         let result: ConditionalCommitResult = self
             .send_and_track_retryable(
@@ -297,6 +288,7 @@ impl ConditionalCollectionTransaction {
                 Method::POST,
                 Some(ConditionalCommitPayload {
                     read_token: self.read_token,
+                    read_ids,
                     operations: self.operations.clone(),
                 }),
             )
@@ -422,19 +414,8 @@ mod tests {
             .mock_async(|when, then| {
                 when.method("POST").path(commit_path).json_body(json!({
                     "read_token": 42,
+                    "read_ids": ["id1"],
                     "operations": [
-                        {
-                            "operation": "get",
-                            "payload": {
-                                "ids": ["id1"],
-                                "where": null,
-                                "where_document": null,
-                                "limit": null,
-                                "offset": 0,
-                                "include": ["documents", "metadatas"],
-                                "expected_ids": [],
-                            },
-                        },
                         {
                             "operation": "add",
                             "payload": {
