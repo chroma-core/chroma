@@ -85,8 +85,8 @@ const BACKOFF_REASON_MD_KEY: &str = "backoff-reason";
 /// A stable message clients can use to identify conditional write conflicts.
 const CONDITIONAL_WRITE_CONFLICT_MESSAGE: &str = "conditional write conflict";
 
-/// Bound conditional push retries after a stale required fragment start.
-const CONDITIONAL_PUSH_MAX_RETRIES: usize = 3;
+/// Default bound for conditional push retry loop attempts.
+const DEFAULT_CONDITIONAL_PUSH_MAX_RETRIES: usize = 3;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ConditionalWriteRequest {
@@ -2522,7 +2522,8 @@ impl LogServer {
             if let Some(conditional_write) = conditional_write.as_ref() {
                 let admission_predicate = conditional_admission_predicate(conditional_write);
                 let mut append_result = None;
-                for attempt in 0..CONDITIONAL_PUSH_MAX_RETRIES {
+                let conditional_push_max_retries = self.config.conditional_push_retry_attempts();
+                for attempt in 0..conditional_push_max_retries {
                     let validated_tail = self
                         .validate_committed_log_for_conditional_write(
                             topology_name.as_ref(),
@@ -2574,7 +2575,7 @@ impl LogServer {
                             return Err(Status::aborted(CONDITIONAL_WRITE_CONFLICT_MESSAGE));
                         }
                         Err(wal3::Error::LogContentionRetry)
-                            if attempt + 1 < CONDITIONAL_PUSH_MAX_RETRIES =>
+                            if attempt + 1 < conditional_push_max_retries =>
                         {
                             self.metrics
                                 .conditional_write_required_start_retries
@@ -3999,6 +4000,8 @@ pub struct LogServerConfig {
     pub dirty: Option<LogWriterOptions>,
     #[serde(default)]
     pub cache: Option<CacheConfig>,
+    #[serde(default = "LogServerConfig::default_conditional_push_max_retries")]
+    pub conditional_push_max_retries: usize,
     #[serde(default = "LogServerConfig::default_record_count_threshold")]
     pub record_count_threshold: u64,
     #[serde(default = "LogServerConfig::default_num_records_before_backpressure")]
@@ -4066,6 +4069,16 @@ impl LogServerConfig {
 
     fn default_my_member_id() -> String {
         "rust-log-service-0".to_string()
+    }
+
+    /// Default bound for conditional push retry loop attempts.
+    fn default_conditional_push_max_retries() -> usize {
+        DEFAULT_CONDITIONAL_PUSH_MAX_RETRIES
+    }
+
+    /// Bound conditional pushes to at least one append attempt.
+    fn conditional_push_retry_attempts(&self) -> usize {
+        self.conditional_push_max_retries.max(1)
     }
 
     /// one million records on the log.
@@ -4139,6 +4152,7 @@ impl Default for LogServerConfig {
             repl: ReplicatedFragmentOptions::default(),
             dirty: None,
             cache: None,
+            conditional_push_max_retries: Self::default_conditional_push_max_retries(),
             record_count_threshold: Self::default_record_count_threshold(),
             num_records_before_backpressure: Self::default_num_records_before_backpressure(),
             reinsert_threshold: Self::default_reinsert_threshold(),
@@ -5331,6 +5345,10 @@ mod tests {
         let config = LogServerConfig::default();
         assert_eq!(50051, config.port);
         assert_eq!("rust-log-service-0", config.my_member_id);
+        assert_eq!(
+            DEFAULT_CONDITIONAL_PUSH_MAX_RETRIES,
+            config.conditional_push_max_retries
+        );
         assert_eq!(100, config.record_count_threshold);
         assert_eq!(1_000_000, config.num_records_before_backpressure);
         assert_eq!(10, config.reinsert_threshold);
@@ -5620,6 +5638,38 @@ mod tests {
             config.record_count_threshold,
             deserialized.record_count_threshold
         );
+        assert_eq!(
+            config.conditional_push_max_retries,
+            deserialized.conditional_push_max_retries
+        );
+    }
+
+    #[test]
+    fn config_deserialization_defaults_conditional_push_max_retries() {
+        let config: LogServerConfig = serde_json::from_str("{}").unwrap();
+
+        assert_eq!(
+            DEFAULT_CONDITIONAL_PUSH_MAX_RETRIES,
+            config.conditional_push_max_retries
+        );
+    }
+
+    #[test]
+    fn config_deserialization_accepts_conditional_push_max_retries() {
+        let config: LogServerConfig =
+            serde_json::from_str(r#"{"conditional_push_max_retries":7}"#).unwrap();
+
+        assert_eq!(7, config.conditional_push_max_retries);
+    }
+
+    #[test]
+    fn conditional_push_retry_attempts_clamps_zero_to_one() {
+        let config = LogServerConfig {
+            conditional_push_max_retries: 0,
+            ..Default::default()
+        };
+
+        assert_eq!(1, config.conditional_push_retry_attempts());
     }
 
     #[test]
