@@ -293,10 +293,12 @@ initialize_metering! {
     #[context(
         capabilities = [
             LogSizeBytes,
+            StartRequest,
             FinishRequest,
-            ],
+        ],
         handlers = [
             __handler_collection_write_log_size_bytes,
+            __handler_collection_write_start_request,
             __handler_collection_write_finish_request,
         ]
     )]
@@ -543,8 +545,13 @@ pub enum MeterEvent {
 
 #[cfg(test)]
 mod tests {
-    use super::{CollectionWriteContext, MeterEvent, WriteAction};
+    use super::{
+        close, create, with_current, CollectionWriteContext, Enterable, FinishRequest, MeterEvent,
+        StartRequest, WriteAction,
+    };
     use crate::types::{MeteringAtomicU64, MeteringInstant};
+    use std::sync::atomic::Ordering;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn test_event_serialization() {
@@ -579,5 +586,65 @@ mod tests {
             }
         }
         assert_eq!(json_event, event);
+    }
+
+    /// Mirrors the real write path in `server.rs`: a context is constructed, a
+    /// setup gap elapses, then `start_request` is dispatched via `with_current`
+    /// (the `dyn MeteringContext` path), the request executes, and
+    /// `finish_request` records the window. The recorded
+    /// `request_execution_time_ms` must reflect only the post-`start_request`
+    /// execution window, excluding the pre-execution setup gap.
+    ///
+    /// Before StartRequest was registered on `CollectionWriteContext`, the
+    /// `start_request` dispatch silently no-op'd, leaving `request_received_at`
+    /// pinned at construction time and over-reporting execution time by the
+    /// full setup gap.
+    #[test]
+    fn test_write_start_request_excludes_setup_gap() {
+        const SETUP_GAP: Duration = Duration::from_millis(150);
+        const EXECUTION: Duration = Duration::from_millis(10);
+
+        let container = create(CollectionWriteContext::new(
+            "test_tenant".to_string(),
+            "test_database".to_string(),
+            "test_collection".to_string(),
+            WriteAction::Add,
+            "aws-us-east-1".to_string(),
+        ));
+        container.enter();
+        // Marker for "context construction" — the buggy code measures the
+        // execution window from here, since start_request never moved it.
+        let constructed_at = Instant::now();
+
+        // Pre-execution setup (e.g. auth, validation) happens after the context
+        // is constructed but before the request execution window opens.
+        std::thread::sleep(SETUP_GAP);
+
+        let started_at = Instant::now();
+        with_current(|ctx| ctx.start_request(started_at));
+
+        std::thread::sleep(EXECUTION);
+
+        let finished_at = Instant::now();
+        with_current(|ctx| ctx.finish_request(finished_at));
+
+        let context = close::<CollectionWriteContext>().expect("context should be the write ctx");
+        let reported_ms = context.request_execution_time_ms.load(Ordering::SeqCst);
+
+        // Wall-clock total from construction to finish. Compared relatively so
+        // the check is immune to `sleep` overshoot under load (both totals
+        // overshoot together). With the fix, the reported window starts at
+        // `started_at`, so `total - reported ~= SETUP_GAP`. On the buggy code
+        // start_request no-ops, the window starts at construction, so
+        // `total - reported ~= 0`.
+        let total_ms = finished_at.duration_since(constructed_at).as_millis() as u64;
+        let excluded_ms = total_ms.saturating_sub(reported_ms);
+        assert!(
+            excluded_ms >= (SETUP_GAP.as_millis() as u64) / 2,
+            "request_execution_time_ms ({reported_ms}ms) should exclude the ~{}ms setup gap \
+             (total {total_ms}ms, only {excluded_ms}ms excluded); \
+             start_request did not move request_received_at",
+            SETUP_GAP.as_millis(),
+        );
     }
 }
