@@ -123,7 +123,7 @@ fn normalize_conditional_ids<'a>(
     Ok(normalized)
 }
 
-fn validate_conditional_write_request(
+fn create_conditional_write_request(
     condition: Option<&PushLogsCondition>,
     records: &[OperationRecord],
 ) -> Result<Option<ConditionalWriteRequest>, Status> {
@@ -2343,7 +2343,7 @@ impl LogServer {
             return Err(Status::invalid_argument("Too few records"));
         }
         let conditional_write =
-            validate_conditional_write_request(push_logs.condition.as_ref(), &push_logs.records)?;
+            create_conditional_write_request(push_logs.condition.as_ref(), &push_logs.records)?;
         self.check_for_backpressure(collection_id).await?;
 
         // Extract CMEK from request
@@ -4158,7 +4158,7 @@ mod tests {
             conflict_ids: string_set(&["read-1", "read-2", "write-1"]),
         });
 
-        let got = validate_conditional_write_request(Some(&condition), &records)
+        let got = create_conditional_write_request(Some(&condition), &records)
             .expect("conditional request should validate");
 
         assert_eq!(expected, got);
@@ -4169,7 +4169,7 @@ mod tests {
         let records = vec![proto_operation_record("write-1")];
         let expected = None;
 
-        let got = validate_conditional_write_request(None, &records)
+        let got = create_conditional_write_request(None, &records)
             .expect("conditionless request should validate");
 
         assert_eq!(expected, got);
@@ -4183,7 +4183,7 @@ mod tests {
         };
         let records = vec![proto_operation_record("write-1")];
 
-        let err = validate_conditional_write_request(Some(&condition), &records)
+        let err = create_conditional_write_request(Some(&condition), &records)
             .expect_err("empty read id should be invalid");
 
         assert_eq!(Code::InvalidArgument, err.code());
@@ -4198,7 +4198,7 @@ mod tests {
         };
         let records = vec![proto_operation_record("")];
 
-        let err = validate_conditional_write_request(Some(&condition), &records)
+        let err = create_conditional_write_request(Some(&condition), &records)
             .expect_err("empty write id should be invalid");
 
         assert_eq!(Code::InvalidArgument, err.code());
@@ -4213,7 +4213,7 @@ mod tests {
         };
         let records = vec![proto_operation_record("write-1")];
 
-        let err = validate_conditional_write_request(Some(&condition), &records)
+        let err = create_conditional_write_request(Some(&condition), &records)
             .expect_err("negative observed offset should be invalid");
 
         assert_eq!(Code::InvalidArgument, err.code());
@@ -4238,7 +4238,7 @@ mod tests {
             conflict_ids: string_set(&["write-1", "write-2"]),
         });
 
-        let got = validate_conditional_write_request(Some(&condition), &records)
+        let got = create_conditional_write_request(Some(&condition), &records)
             .expect("conditional request should validate");
 
         assert_eq!(expected, got);
