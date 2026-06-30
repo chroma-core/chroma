@@ -15,6 +15,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         model_name: str = "all-MiniLM-L6-v2",
         device: str = "cpu",
         normalize_embeddings: bool = False,
+        show_progress_bar: bool = False,
         **kwargs: Any,
     ):
         """Initialize SentenceTransformerEmbeddingFunction.
@@ -23,6 +24,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
             model_name (str, optional): Identifier of the SentenceTransformer model, defaults to "all-MiniLM-L6-v2"
             device (str, optional): Device used for computation, defaults to "cpu"
             normalize_embeddings (bool, optional): Whether to normalize returned vectors, defaults to False
+            show_progress_bar (bool, optional): Whether to show progress bar during embedding, defaults to False
             **kwargs: Additional arguments to pass to the SentenceTransformer model.
         """
         try:
@@ -35,6 +37,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         self.model_name = model_name
         self.device = device
         self.normalize_embeddings = normalize_embeddings
+        self.show_progress_bar = show_progress_bar
         for key, value in kwargs.items():
             if not isinstance(value, (str, int, float, bool, list, dict, tuple)):
                 raise ValueError(f"Keyword argument {key} is not a primitive type")
@@ -59,6 +62,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
             list(input),
             convert_to_numpy=True,
             normalize_embeddings=self.normalize_embeddings,
+            show_progress_bar=self.show_progress_bar
         )
 
         return [np.array(embedding, dtype=np.float32) for embedding in embeddings]
