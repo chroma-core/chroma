@@ -20,8 +20,8 @@ use chroma_types::{
     AddAttachedFunctionInputRequest, AddAttachedFunctionInputResponse, AddCollectionRecordsPayload,
     AddCollectionRecordsResponse, AttachFunctionRequest, AttachFunctionResponse, Collection,
     CollectionConfiguration, CollectionMetadataUpdate, CollectionUuid, ConditionalBufferedWrite,
-    ConditionalCommitPayload, ConditionalCommitResult, ConditionalGetRequestPayload,
-    ConditionalGetResponse, ConditionalTransactionOperationPayload, ConditionalTransactionState,
+    ConditionalCommitPayload, ConditionalCommitRequest, ConditionalCommitResult,
+    ConditionalGetRequestPayload, ConditionalGetResponse, ConditionalTransactionOperationPayload,
     CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
     CreateCollectionPayload, CreateCollectionRequest, CreateDatabaseRequest,
     CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, DatabaseName,
@@ -2835,7 +2835,6 @@ fn conditional_operation_authz_action(
     operation: &ConditionalTransactionOperationPayload,
 ) -> AuthzAction {
     match operation {
-        ConditionalTransactionOperationPayload::Get(_) => AuthzAction::Get,
         ConditionalTransactionOperationPayload::Add(_) => AuthzAction::Add,
         ConditionalTransactionOperationPayload::Update(_) => AuthzAction::Update,
         ConditionalTransactionOperationPayload::Upsert(_) => AuthzAction::Upsert,
@@ -2907,10 +2906,6 @@ fn conditional_operation_to_buffered_write(
             )?;
             Ok(ConditionalBufferedWrite::Delete(request))
         }
-        ConditionalTransactionOperationPayload::Get(_) => Err(ValidationError::InvalidArgument(
-            "conditional read operation cannot be buffered as a write".to_string(),
-        )
-        .into()),
     }
 }
 
@@ -2992,69 +2987,6 @@ async fn enforce_conditional_write_quota(
         quota_payload = quota_payload.with_schema(schema);
     }
     let _ = server.quota_enforcer.enforce(&quota_payload).await?;
-    Ok(())
-}
-
-async fn replay_conditional_read(
-    server: &mut FrontendServer,
-    tenant: &str,
-    database: &str,
-    collection_id: CollectionUuid,
-    read_token: OccReadToken,
-    state: &mut ConditionalTransactionState,
-    read_payload: chroma_types::ConditionalTransactionReadPayload,
-) -> Result<(), ServerError> {
-    let chroma_types::ConditionalTransactionReadPayload {
-        request,
-        expected_ids,
-    } = read_payload;
-    let GetRequestPayload {
-        ids,
-        where_fields,
-        limit,
-        offset,
-        include,
-    } = request;
-    let parsed_where = where_fields.parse()?;
-    let request = GetRequest::try_new(
-        tenant.to_string(),
-        database.to_string(),
-        collection_id,
-        ids,
-        parsed_where,
-        limit,
-        offset.unwrap_or(0),
-        include,
-    )?;
-    let request = state.prepare_get_request_with_read_token(request, read_token)?;
-    let request_for_finish = request.clone();
-
-    let metering_context_container =
-        chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
-            tenant.to_string(),
-            database.to_string(),
-            collection_id.0.to_string(),
-            ReadAction::Get,
-            server.config.region.clone(),
-        ));
-    metering_context_container.enter();
-    chroma_metering::with_current(|context| {
-        context.start_request(Instant::now());
-    });
-
-    let response = server
-        .frontend
-        .get(request)
-        .meter(metering_context_container)
-        .await?;
-    if response.ids != expected_ids {
-        return Err(ValidationError::InvalidArgument(format!(
-            "conditional transaction read replay returned ids {:?}, expected {:?}",
-            response.ids, expected_ids
-        ))
-        .into());
-    }
-    state.finish_get(&request_for_finish, response)?;
     Ok(())
 }
 
@@ -3200,12 +3132,12 @@ async fn collection_conditional_get(
 }
 
 /// Conditional commit
-/// Replays a conditional transaction operation log and commits buffered writes.
+/// Commits buffered writes with the transaction's OCC read token and read set.
 #[utoipa::path(
     post,
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/conditional/commit",
     summary = "Conditional commit",
-    description = "Replays conditional transaction reads at their OCC token, validates buffered writes, and commits all writes as one conditional append.",
+    description = "Commits buffered writes as one conditional append using the transaction's OCC read token and read set.",
     tag = "Record",
     security(
         ("ApiKeyAuth" = [])
@@ -3276,55 +3208,43 @@ async fn collection_conditional_commit(
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
         .map(|val| val.to_string());
-    let read_token = payload.read_token.map(OccReadToken::try_new).transpose()?;
-    let mut state = ConditionalTransactionState::new();
+    let observed_log_offset = payload
+        .read_token
+        .map(|read_token| -> Result<i64, ServerError> {
+            let read_token = OccReadToken::try_new(read_token)?;
+            i64::try_from(read_token.log_upper_bound_offset()).map_err(|_| {
+                ValidationError::InvalidArgument(format!(
+                    "conditional read token {} exceeds i64 range",
+                    read_token.log_upper_bound_offset()
+                ))
+                .into()
+            })
+        })
+        .transpose()?;
+    if observed_log_offset.is_none() && !payload.read_ids.is_empty() {
+        return Err(ValidationError::InvalidArgument(
+            "conditional commit with read_ids requires read_token".to_string(),
+        )
+        .into());
+    }
+    let mut buffered_writes = Vec::with_capacity(payload.operations.len());
 
     for operation in payload.operations {
-        match operation {
-            ConditionalTransactionOperationPayload::Get(read_payload) => {
-                let read_token = read_token.ok_or_else(|| {
-                    ValidationError::InvalidArgument(
-                        "conditional commit read replay requires read_token".to_string(),
-                    )
-                })?;
-                replay_conditional_read(
-                    &mut server,
-                    &tenant,
-                    &database,
-                    collection_id,
-                    read_token,
-                    &mut state,
-                    read_payload,
-                )
-                .await?;
-            }
-            write_operation => {
-                let write = conditional_operation_to_buffered_write(
-                    &tenant,
-                    &database,
-                    collection_id,
-                    write_operation,
-                )?;
-                enforce_conditional_write_quota(
-                    &server,
-                    &tenant,
-                    api_token.clone(),
-                    collection_id,
-                    collection.schema.as_ref(),
-                    &write,
-                )
-                .await?;
-                match write {
-                    ConditionalBufferedWrite::Add(request) => state.buffer_add(request)?,
-                    ConditionalBufferedWrite::Update(request) => state.buffer_update(request)?,
-                    ConditionalBufferedWrite::Upsert(request) => state.buffer_upsert(request)?,
-                    ConditionalBufferedWrite::Delete(request) => state.buffer_delete(request)?,
-                }
-            }
-        }
+        let write =
+            conditional_operation_to_buffered_write(&tenant, &database, collection_id, operation)?;
+        enforce_conditional_write_quota(
+            &server,
+            &tenant,
+            api_token.clone(),
+            collection_id,
+            collection.schema.as_ref(),
+            &write,
+        )
+        .await?;
+        buffered_writes.push(write);
     }
 
-    if state.buffered_writes().is_empty() {
+    if buffered_writes.is_empty() {
         return Ok(Json(ConditionalCommitResult {
             first_inserted_record_offset: None,
             record_count: 0,
@@ -3346,7 +3266,11 @@ async fn collection_conditional_commit(
 
     let result = server
         .frontend
-        .conditional_commit(&mut state)
+        .conditional_commit_request(ConditionalCommitRequest {
+            buffered_writes,
+            observed_log_offset,
+            read_ids: payload.read_ids,
+        })
         .meter(metering_context_container)
         .await?;
     Ok(Json(result))

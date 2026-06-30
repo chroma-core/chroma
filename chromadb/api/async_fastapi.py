@@ -832,12 +832,15 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         transaction = require_conditional_http_transaction(transaction)
         batch = (ids, embeddings, metadatas, documents, uris)
         validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
-        transaction.buffer_write(
+        transaction.buffer_add(
             collection_id,
             tenant,
             database,
-            "add",
-            await self._batch_payload(batch),
+            ids,
+            embeddings,
+            metadatas,
+            documents,
+            uris,
         )
         return True
 
@@ -864,12 +867,15 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             uris,
         )
         validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
-        transaction.buffer_write(
+        transaction.buffer_update(
             collection_id,
             tenant,
             database,
-            "update",
-            await self._batch_payload(batch),
+            ids,
+            embeddings if embeddings is not None else None,
+            metadatas,
+            documents,
+            uris,
         )
         return True
 
@@ -890,12 +896,15 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         transaction = require_conditional_http_transaction(transaction)
         batch = (ids, embeddings, metadatas, documents, uris)
         validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
-        transaction.buffer_write(
+        transaction.buffer_upsert(
             collection_id,
             tenant,
             database,
-            "upsert",
-            await self._batch_payload(batch),
+            ids,
+            embeddings,
+            metadatas,
+            documents,
+            uris,
         )
         return True
 
@@ -910,18 +919,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> bool:
         transaction = require_conditional_http_transaction(transaction)
-        transaction.buffer_write(
-            collection_id,
-            tenant,
-            database,
-            "delete",
-            {
-                "ids": ids,
-                "where": None,
-                "where_document": None,
-                "limit": None,
-            },
-        )
+        transaction.buffer_delete(collection_id, tenant, database, ids)
         return True
 
     @trace_method(
@@ -946,7 +944,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             f"/tenants/{scope.tenant}/databases/{scope.database}/collections/{scope.collection_id}/conditional/commit",
             json=payload,
         )
-        transaction.close()
+        transaction.close(resp_json.get("first_inserted_record_offset"))
         return ConditionalCommitResult(
             first_inserted_record_offset=resp_json.get("first_inserted_record_offset"),
             record_count=resp_json["record_count"],

@@ -3358,6 +3358,16 @@ mod tests {
     }
 
     #[test]
+    fn occ_read_at_token_plan_uses_token_offset() {
+        let token = OccReadToken::try_new(42).unwrap();
+        let plan = ServiceBasedFrontend::get_read_plan(true, OccReadMode::AtToken(token), Some(99))
+            .expect("read at token should use the supplied token");
+        assert_eq!(plan.log_upper_bound_offset, 42);
+        assert_eq!(plan.response_read_token, None);
+        assert_eq!(plan.stale_read_token, Some(token));
+    }
+
+    #[test]
     fn occ_read_capture_fails_when_scouting_disabled() {
         let err = ServiceBasedFrontend::get_read_plan(false, OccReadMode::Capture, None)
             .expect_err("capture should fail without scouting");

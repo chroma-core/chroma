@@ -3,10 +3,12 @@ import os
 from typing import Any, Dict, List, Union
 from uuid import uuid4
 
+import numpy as np
 import pytest
 
 from chromadb.api import ClientAPI
 from chromadb.api.client import Client as ClientCreator
+from chromadb.api.conditional_http import ConditionalHttpTransaction
 from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import ConditionalCommitResult, GetResult
@@ -213,6 +215,143 @@ def test_embedded_conditional_transaction_reports_unsupported(
             collection.conditional()
     finally:
         client.clear_system_cache()
+
+
+def test_http_conditional_transaction_reuses_read_token_for_reads() -> None:
+    transaction = ConditionalHttpTransaction()
+    collection_id = uuid4()
+
+    first_payload = transaction.prepare_get(
+        collection_id,
+        "tenant",
+        "database",
+        {
+            "ids": ["id-1"],
+            "where": None,
+            "where_document": None,
+            "limit": None,
+            "offset": None,
+            "include": ["documents"],
+        },
+    )
+    assert first_payload["read_token"] is None
+
+    transaction.record_get(first_payload, ["id-1"], 42)
+
+    second_payload = transaction.prepare_get(
+        collection_id,
+        "tenant",
+        "database",
+        {
+            "ids": ["id-2"],
+            "where": None,
+            "where_document": None,
+            "limit": None,
+            "offset": None,
+            "include": ["documents"],
+        },
+    )
+    assert second_payload["read_token"] == 42
+
+
+def test_http_conditional_commit_sends_read_set_without_replay() -> None:
+    transaction = ConditionalHttpTransaction()
+    collection_id = uuid4()
+    get_payload = transaction.prepare_get(
+        collection_id,
+        "tenant",
+        "database",
+        {
+            "ids": ["present", "absent"],
+            "where": None,
+            "where_document": None,
+            "limit": None,
+            "offset": None,
+            "include": ["documents"],
+        },
+    )
+    transaction.record_get(get_payload, ["present"], 42)
+    transaction.buffer_add(
+        collection_id,
+        "tenant",
+        "database",
+        ["absent"],
+        [np.array([1.0], dtype=np.float32)],
+        None,
+        None,
+        None,
+    )
+
+    payload = transaction.prepare_commit()
+    assert payload is not None
+
+    assert payload["read_token"] == 42
+    assert payload["read_ids"] == ["absent", "present"]
+    assert [operation["operation"] for operation in payload["operations"]] == ["add"]
+
+
+def test_http_conditional_commit_sends_write_only_upsert_without_reads() -> None:
+    transaction = ConditionalHttpTransaction()
+    collection_id = uuid4()
+
+    transaction.buffer_upsert(
+        collection_id,
+        "tenant",
+        "database",
+        ["unknown"],
+        [np.array([1.0], dtype=np.float32)],
+        None,
+        None,
+        None,
+    )
+
+    payload = transaction.prepare_commit()
+    assert payload is not None
+    assert payload["read_token"] is None
+    assert payload["read_ids"] == []
+    assert [operation["operation"] for operation in payload["operations"]] == ["upsert"]
+
+
+def test_http_conditional_commit_accepts_numpy_embeddings() -> None:
+    transaction = ConditionalHttpTransaction()
+    collection_id = uuid4()
+
+    transaction.buffer_upsert(
+        collection_id,
+        "tenant",
+        "database",
+        ["unknown"],
+        [np.array([1.0], dtype=np.float32)],
+        None,
+        None,
+        None,
+    )
+
+    payload = transaction.prepare_commit()
+    assert payload is not None
+    assert payload["operations"][0]["payload"]["embeddings"] == [[1.0]]
+
+
+def test_http_conditional_commit_preserves_metadata_payload() -> None:
+    transaction = ConditionalHttpTransaction()
+    collection_id = uuid4()
+
+    transaction.buffer_upsert(
+        collection_id,
+        "tenant",
+        "database",
+        ["unknown"],
+        [np.array([1.0], dtype=np.float32)],
+        [{"tag": "value", "deleted": None}],
+        None,
+        None,
+    )
+
+    payload = transaction.prepare_commit()
+    assert payload is not None
+    assert payload["operations"][0]["payload"]["metadatas"] == [
+        {"tag": "value", "deleted": None}
+    ]
 
 
 def test_sync_conditional_run_does_not_retry_callback_errors() -> None:

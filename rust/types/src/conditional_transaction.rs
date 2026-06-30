@@ -243,15 +243,6 @@ impl ConditionalTransactionState {
         })
     }
 
-    pub fn prepare_get_request_with_read_token(
-        &self,
-        request: GetRequest,
-        read_token: OccReadToken,
-    ) -> Result<GetRequest, ConditionalTransactionError> {
-        self.validate_get_request(&request)?;
-        Ok(request.with_occ_read_token(read_token))
-    }
-
     pub fn finish_get(
         &mut self,
         request: &GetRequest,
@@ -325,7 +316,10 @@ impl ConditionalTransactionState {
         self.read_ids = next_read_ids;
         self.known_present = next_known_present;
         self.known_absent = next_known_absent;
-        self.read_token.get_or_insert(read_token);
+        if self.read_token.is_none() {
+            self.read_token = Some(read_token);
+            self.observed_log_offset = Some(observed_log_offset);
+        }
 
         Ok(())
     }

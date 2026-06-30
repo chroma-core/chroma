@@ -160,6 +160,7 @@ export type CollectionUuid = string;
 
 export type ConditionalCommitPayload = {
     operations: Array<ConditionalTransactionOperationPayload>;
+    read_ids?: Array<string>;
     read_token?: number | null;
 };
 
@@ -193,9 +194,6 @@ export type ConditionalGetResponse = {
 };
 
 export type ConditionalTransactionOperationPayload = {
-    operation: 'get';
-    payload: ConditionalTransactionReadPayload;
-} | {
     operation: 'add';
     payload: AddCollectionRecordsPayload;
 } | {
@@ -207,10 +205,6 @@ export type ConditionalTransactionOperationPayload = {
 } | {
     operation: 'delete';
     payload: DeleteCollectionRecordsPayload;
-};
-
-export type ConditionalTransactionReadPayload = GetRequestPayload & {
-    expected_ids: Array<string>;
 };
 
 export type CreateCollectionPayload = {

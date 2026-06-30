@@ -2183,17 +2183,8 @@ impl ConditionalGetResponse {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct ConditionalTransactionReadPayload {
-    #[serde(flatten)]
-    pub request: GetRequestPayload,
-    pub expected_ids: Vec<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(tag = "operation", content = "payload", rename_all = "snake_case")]
 pub enum ConditionalTransactionOperationPayload {
-    Get(ConditionalTransactionReadPayload),
     Add(AddCollectionRecordsPayload),
     Update(UpdateCollectionRecordsPayload),
     Upsert(UpsertCollectionRecordsPayload),
@@ -2204,6 +2195,8 @@ pub enum ConditionalTransactionOperationPayload {
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ConditionalCommitPayload {
     pub read_token: Option<u64>,
+    #[serde(default)]
+    pub read_ids: Vec<String>,
     pub operations: Vec<ConditionalTransactionOperationPayload>,
 }
 
