@@ -1,4 +1,5 @@
 use crate::errors::{ChromaPyResult, InvalidDatabaseNameError, WrappedPyErr, WrappedUuidError};
+use chroma_api_types::{OccReadMode, OccReadToken};
 use chroma_cache::FoyerCacheConfig;
 use chroma_cli::chroma_cli;
 use chroma_config::{registry::Registry, Configurable};
@@ -26,9 +27,8 @@ use chroma_types::{
     GetCollectionByIdRequest, GetCollectionRequest, GetDatabaseRequest, GetResponse,
     GetTenantRequest, GetTenantResponse, HeartbeatError, IncludeList,
     InternalCollectionConfiguration, InternalUpdateCollectionConfiguration, KnnIndex,
-    ListCollectionsRequest, ListDatabasesRequest, Metadata, OccReadMode, OccReadToken,
-    QueryResponse, UpdateCollectionConfiguration, UpdateCollectionRequest, UpdateMetadata,
-    WrappedSerdeJsonError,
+    ListCollectionsRequest, ListDatabasesRequest, Metadata, QueryResponse,
+    UpdateCollectionConfiguration, UpdateCollectionRequest, UpdateMetadata, WrappedSerdeJsonError,
 };
 use pyo3::{
     exceptions::PyValueError,
@@ -383,13 +383,13 @@ impl ConditionalTransaction {
     fn prepare_commit(&mut self) -> ChromaPyResult<Option<ConditionalCommitPayload>> {
         match self.state.prepare_commit()? {
             chroma_types::ConditionalCommitAction::NoOp(_) => Ok(None),
-            chroma_types::ConditionalCommitAction::Append(request) => Ok(Some(
-                ConditionalCommitPayload {
+            chroma_types::ConditionalCommitAction::Append(request) => {
+                Ok(Some(ConditionalCommitPayload {
                     read_token: request.observed_log_offset.map(|offset| offset as u64),
                     read_ids: request.read_ids,
                     buffered_writes: request.buffered_writes,
-                },
-            )),
+                }))
+            }
         }
     }
 
