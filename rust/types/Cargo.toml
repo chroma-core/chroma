@@ -37,6 +37,7 @@ proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 
 chroma-error = { workspace = true, features = ["tonic", "validator"] }
+chroma-api-types = { workspace = true }
 itertools.workspace = true
 
 [build-dependencies]
