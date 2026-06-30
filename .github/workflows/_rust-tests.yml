@@ -117,6 +117,9 @@ jobs:
         with:
           dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
           dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
+          # Shared warm CI cache: the build-images job in pr.yml populates this
+          # key and the downstream single-arch test jobs clone it.
+          cache-key: chroma-ci-amd64
       - name: Start services in Tilt
         uses: ./.github/actions/tilt
       - name: Build CLI

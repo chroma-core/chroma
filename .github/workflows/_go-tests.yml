@@ -23,6 +23,9 @@ jobs:
         with:
           dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
           dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
+          # Shared warm CI cache: the build-images job in pr.yml populates this
+          # key and the downstream single-arch test jobs clone it.
+          cache-key: chroma-ci-amd64
       - name: Start Tilt services
         uses: ./.github/actions/tilt
       - run: bin/cluster-test.sh bash -c 'cd go && make test'

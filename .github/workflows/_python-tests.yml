@@ -501,6 +501,9 @@ jobs:
         with:
           dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
           dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
+          # Shared warm CI cache: the build-images job in pr.yml populates this
+          # key and the downstream single-arch test jobs clone it.
+          cache-key: chroma-ci-amd64
       - name: Preload default ONNX model
         uses: ./.github/actions/preload-default-onnx-model
       - name: Start Tilt services

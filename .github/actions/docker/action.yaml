@@ -13,6 +13,13 @@ inputs:
   dockerhub-password:
     description: "DockerHub password"
     required: false
+  cache-key:
+    description: >-
+      Unique identifier for this build's Docker layer cache (sticky disk).
+      Builds with the same cache-key share cached layers; builds that should
+      not contend for the same warm cache (e.g. different architectures or
+      different Dockerfiles) must use different keys.
+    required: true
 
 runs:
   using: "composite"
@@ -31,4 +38,6 @@ runs:
         username: ${{ inputs.dockerhub-username }}
         password: ${{ inputs.dockerhub-password }}
     - name: Set up Blacksmith builder
-      uses: useblacksmith/setup-docker-builder@v1
+      uses: useblacksmith/setup-docker-builder@v2
+      with:
+        cache-key: ${{ inputs.cache-key }}

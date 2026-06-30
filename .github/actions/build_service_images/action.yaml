@@ -61,7 +61,11 @@ runs:
   using: "composite"
   steps:
     - name: Setup Blacksmith Docker cache
-      uses: useblacksmith/setup-docker-builder@v1
+      uses: useblacksmith/setup-docker-builder@v2
+      with:
+        # Release service-images bake runs single-arch; its own key keeps it
+        # from contending with the PR/CI warm cache or the release-cli builds.
+        cache-key: chroma-service-images-amd64
 
     - name: Resolve commit SHA
       shell: bash

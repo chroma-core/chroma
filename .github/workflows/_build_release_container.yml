@@ -73,6 +73,10 @@ jobs:
           ghcr-password: ${{ secrets.GITHUB_TOKEN }}
           dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
           dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
+          # Per-arch cache key: amd64 and arm64 each get their own sticky-disk
+          # lineage so the two architectures never overwrite or discard each
+          # other's (architecture-specific) compile cache.
+          cache-key: chroma-release-cli-${{ matrix.platform }}
 
       - name: Compute arch-specific tags
         id: tags
@@ -99,8 +103,12 @@ jobs:
           docker pull --platform ${{ matrix.docker_platform }} rust:1.92.0
           docker pull --platform ${{ matrix.docker_platform }} debian:stable-slim
 
+      # Uses the per-arch-keyed Blacksmith builder configured (and set as the
+      # default buildx builder) by the "Set up Docker" step above. The
+      # cache-key is owned by setup-docker-builder@v2, so we use the standard
+      # build-push action here rather than one that re-derives its own key.
       - name: Build and push image
-        uses: useblacksmith/build-push-action@v2
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: rust/Dockerfile
@@ -132,6 +140,9 @@ jobs:
           ghcr-password: ${{ secrets.GITHUB_TOKEN }}
           dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
           dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
+          # This job only assembles a multi-arch manifest (no image build), so
+          # it gets its own key and never contends with the per-arch builds.
+          cache-key: chroma-release-cli-manifest
 
       - name: Create and push manifest
         shell: bash

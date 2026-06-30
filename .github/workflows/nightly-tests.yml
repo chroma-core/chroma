@@ -26,7 +26,10 @@ jobs:
       - uses: ./.github/actions/python
         with:
           python-version: "3.12"
-      - uses: useblacksmith/setup-docker-builder@v1
+      - uses: useblacksmith/setup-docker-builder@v2
+        with:
+          # Shares the warm single-arch CI cache used by the PR test jobs.
+          cache-key: chroma-ci-amd64
       - uses: ./.github/actions/preload-default-onnx-model
       - uses: ./.github/actions/tilt
       - name: Test
