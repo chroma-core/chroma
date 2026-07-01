@@ -33,6 +33,7 @@ use oauth::{mcp_resource_origin, protected_resource_metadata};
 use server::FoundationMcpServer;
 
 mod oauth;
+mod page_metadata;
 mod server;
 
 const MCP_PATH: &str = "/mcp/foundation";

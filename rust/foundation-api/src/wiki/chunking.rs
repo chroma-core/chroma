@@ -104,6 +104,20 @@ pub fn chunk_id_for(slug: &str, chunk_id: usize) -> String {
     format!("{slug}-{chunk_id}")
 }
 
+/// Recovers the page slug from a chunk record id (`{slug}-{chunk_id}`, the
+/// inverse of [`chunk_id_for`]), returning `None` if `id` is not in that shape.
+///
+/// Slugs may themselves contain hyphens (e.g. `gc-hard-delete`), so we split on
+/// the *last* hyphen and require the suffix to be a non-empty run of digits.
+/// The wiki root has the empty slug, so `-0` correctly yields `Some("")`.
+pub fn slug_from_chunk_id(id: &str) -> Option<String> {
+    let (slug, chunk_id) = id.rsplit_once('-')?;
+    if chunk_id.is_empty() || !chunk_id.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some(slug.to_string())
+}
+
 /// Chunks `content` for the wiki collection described by `config`.
 pub fn chunk_content(slug: &str, content: &str, config: &ChunkingConfig) -> Vec<Chunk> {
     chunk_treesitter_markdown(slug, content, config.max_bytes)
@@ -396,6 +410,26 @@ mod tests {
 
     fn concat(chunks: &[Chunk]) -> String {
         chunks.iter().map(|c| c.text.as_str()).collect()
+    }
+
+    #[test]
+    fn slug_from_chunk_id_round_trips_and_rejects_non_chunk_ids() {
+        // Inverts chunk_id_for, including hyphenated slugs and the empty root.
+        assert_eq!(slug_from_chunk_id("onboarding-0").as_deref(), Some("onboarding"));
+        assert_eq!(
+            slug_from_chunk_id("gc-hard-delete-12").as_deref(),
+            Some("gc-hard-delete")
+        );
+        assert_eq!(slug_from_chunk_id(&chunk_id_for("", 0)).as_deref(), Some(""));
+        assert_eq!(
+            slug_from_chunk_id(&chunk_id_for("gc-hard-delete", 3)).as_deref(),
+            Some("gc-hard-delete")
+        );
+
+        // Non-numeric or missing suffixes are not chunk ids.
+        assert_eq!(slug_from_chunk_id("no-number-x"), None);
+        assert_eq!(slug_from_chunk_id("trailing-"), None);
+        assert_eq!(slug_from_chunk_id("noseparator"), None);
     }
 
     // --- treesitter: round-trip ---

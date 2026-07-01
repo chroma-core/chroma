@@ -1,7 +1,7 @@
 //! Integration tests: drive the SSE stream against a mocked deep-research
 //! dependency (`httpmock`) and assert the events we emit end-to-end.
 
-use super::super::events::RankedDocument;
+use super::super::events::{RankedDocument, SubagentResultError};
 use super::super::{collect_subagent_search_final, stream_subagent_search, SubagentSearchCreds};
 use futures::StreamExt;
 use httpmock::MockServer;
@@ -103,6 +103,38 @@ async fn upstream_error_event_ends_stream_with_error() {
 }
 
 #[tokio::test]
+async fn collect_final_propagates_upstream_error_event() {
+    let server = MockServer::start_async().await;
+    let body = concat!(
+        "data: {\"type\":\"action\",\"data\":{\"tools\":[{\"name\":\"user_text\"}],\"params\":[{\"text\":\"<Document id=doc-1><Justification>Relevant.</Justification></Document>\"}]}}\n\n",
+        "data: {\"type\":\"error\",\"data\":{\"message\":\"agent exploded\"}}\n\n",
+    );
+    let mock = server
+        .mock_async(|when, then| {
+            when.method("POST").path("/search");
+            then.status(200)
+                .header("content-type", "text/event-stream")
+                .body(body);
+        })
+        .await;
+
+    let err = collect_subagent_search_final(
+        reqwest::Client::new(),
+        server.base_url(),
+        test_creds(),
+        "rag".to_string(),
+    )
+    .await
+    .expect_err("upstream error should fail collection");
+
+    assert_eq!(
+        err,
+        SubagentResultError::Upstream("agent exploded".to_string())
+    );
+    assert_eq!(mock.calls(), 1);
+}
+
+#[tokio::test]
 async fn answer_with_no_documents_emits_empty_result_then_done() {
     let server = MockServer::start_async().await;
     // A terminal answer that yields no `<Document>` blocks (a legitimate
@@ -181,6 +213,32 @@ async fn stream_without_terminator_ends_with_synthesized_error() {
 }
 
 #[tokio::test]
+async fn collect_final_requires_done_after_user_text() {
+    let server = MockServer::start_async().await;
+    let body = "data: {\"type\":\"action\",\"data\":{\"tools\":[{\"name\":\"user_text\"}],\"params\":[{\"text\":\"<Document id=doc-1><Justification>Relevant.</Justification></Document>\"}]}}\n\n";
+    let mock = server
+        .mock_async(|when, then| {
+            when.method("POST").path("/search");
+            then.status(200)
+                .header("content-type", "text/event-stream")
+                .body(body);
+        })
+        .await;
+
+    let err = collect_subagent_search_final(
+        reqwest::Client::new(),
+        server.base_url(),
+        test_creds(),
+        "rag".to_string(),
+    )
+    .await
+    .expect_err("a partial answer without done should fail collection");
+
+    assert_eq!(err, SubagentResultError::MissingTerminalEvent);
+    assert_eq!(mock.calls(), 1);
+}
+
+#[tokio::test]
 async fn upstream_error_status_ends_stream_with_error() {
     let server = MockServer::start_async().await;
     let mock = server
@@ -202,5 +260,28 @@ async fn upstream_error_status_ends_stream_with_error() {
         events[0].is_err(),
         "the failure should surface as a stream error, not an event"
     );
+    assert_eq!(mock.calls(), 1);
+}
+
+#[tokio::test]
+async fn collect_final_propagates_request_failure() {
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method("POST").path("/search");
+            then.status(500).body("boom");
+        })
+        .await;
+
+    let err = collect_subagent_search_final(
+        reqwest::Client::new(),
+        server.base_url(),
+        test_creds(),
+        "rag".to_string(),
+    )
+    .await
+    .expect_err("request failure should fail collection");
+
+    assert!(matches!(err, SubagentResultError::Stream(_)));
     assert_eq!(mock.calls(), 1);
 }

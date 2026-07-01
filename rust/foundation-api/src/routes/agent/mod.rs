@@ -212,38 +212,6 @@ async fn build_agent(
     Ok(Agent::new(toolset, Box::new(inference)).with_system_prompt(request.system.clone()))
 }
 
-/// Runs the same agent loop as `/api/agent` and returns the terminal answer.
-/// Used by the MCP `ask_foundation` tool, which needs one request/response
-/// value rather than an SSE event stream.
-///
-/// The caller is responsible for validating `request` (via
-/// [`AgentRequest::validate`]) beforehand; validation is not repeated here so
-/// that a bad request surfaces as a validation error at the call site rather
-/// than being mislabeled as an inference failure.
-pub(crate) async fn run_agent_to_final_text(
-    server: &FoundationApiServer,
-    headers: &HeaderMap,
-    tenant: &str,
-    request: &AgentRequest,
-) -> Result<String, AgentRouteError> {
-    let model = request
-        .model
-        .parse::<AnthropicModel>()
-        .map_err(|_| AgentRouteError::UnknownModel(request.model.clone()))?;
-    let agent = build_agent(server, headers, tenant, request, model).await?;
-    let mut stream = Box::pin(drive_agent(agent, request.input.clone()));
-
-    while let Some(event) = stream.next().await {
-        match event {
-            AgentSseEvent::Done { final_text } => return Ok(final_text),
-            AgentSseEvent::Error { message } => return Err(AgentRouteError::Inference(message)),
-            AgentSseEvent::Action { .. } | AgentSseEvent::Observation { .. } => {}
-        }
-    }
-
-    Ok(String::new())
-}
-
 // ---------------------------------------------------------------------------
 // SSE stream: drive the agent loop, emitting action/observation/done events
 // ---------------------------------------------------------------------------
