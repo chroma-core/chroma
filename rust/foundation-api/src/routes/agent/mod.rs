@@ -7,12 +7,13 @@
 //! `action`/`observation`/`done` schema. Inference is non-streaming
 //! (Anthropic), so events are step-level, not token-level.
 //!
-//! The two tools (`search`, `subagent_search`) reuse the same cores as the
-//! standalone `/api/search` and `/api/subagent_search` routes; per-request
-//! state (collection, token, deep-research creds) is resolved once in the
-//! handler and captured by the tools. The shared `reqwest::Client` is cloned
-//! into both the Anthropic model and the deep-research tool so connection pools
-//! are reused rather than rebuilt per request.
+//! The tools (`search`, `read_page`, `subagent_search`) reuse the same cores as
+//! the standalone `/api/search`, `/api/read-page`, and `/api/subagent_search`
+//! routes; per-request state (collection, token, deep-research creds) is
+//! resolved once in the handler and captured by the tools. The shared
+//! `reqwest::Client` is cloned into both the Anthropic model and the
+//! deep-research tool so connection pools are reused rather than rebuilt per
+//! request.
 //!
 //! Clients may seed the agent's system prompt via the request body (`system`);
 //! when omitted, a built-in default steers the agent to answer from the
@@ -36,7 +37,7 @@ use chroma_agent::{
 };
 use events::{action_event, action_text, observation_event, AgentSseEvent};
 
-use crate::agent_tools::{SearchTool, SubagentSearchTool};
+use crate::agent_tools::{ReadPageTool, SearchTool, SubagentSearchTool};
 use crate::routes::subagent_search::SubagentSearchCreds;
 use crate::routes::{caller_token, to_sse_event, whoami::whoami_and_authorize};
 use crate::wiki::embed::WikiEmbedder;
@@ -47,9 +48,11 @@ use crate::{auth::AuthzAction, errors::ServerError, server::FoundationApiServer}
 /// to ground its answer in the knowledge base via the available tools.
 const DEFAULT_SYSTEM_PROMPT: &str = "You are a research assistant for an internal \
 knowledge base. Use the `search` tool for targeted lookups and the \
-`subagent_search` tool for broad, multi-part research questions. Ground every \
-claim in retrieved documents and cite the document ids you relied on. If the \
-tools surface nothing relevant, say so plainly rather than guessing.";
+`subagent_search` tool for broad, multi-part research questions. When a search \
+hit looks relevant, use the `read_page` tool with its `slug` to read the full \
+page before relying on it. Ground every claim in retrieved documents and cite \
+the document ids you relied on. If the tools surface nothing relevant, say so \
+plainly rather than guessing.";
 
 /// Request body for `POST /api/agent`.
 #[derive(Debug, Deserialize, Validate)]
@@ -176,9 +179,14 @@ async fn build_agent(
 
     let mut toolset = ToolSet::new();
     toolset.add(SearchTool::new(
-        collection,
+        collection.clone(),
         WikiEmbedder::new(None),
         token.clone(),
+    ));
+    toolset.add(ReadPageTool::new(
+        collection,
+        tenant.to_string(),
+        server.config.foundation.foundation_ui_origin.clone(),
     ));
 
     // The deep-research tool is optional: register it only when the dependency
