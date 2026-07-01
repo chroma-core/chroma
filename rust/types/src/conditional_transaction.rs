@@ -37,7 +37,6 @@ pub struct ConditionalTransactionState {
     // First captured read token. All later reads reuse this token so the whole
     // transaction reads from one stable log snapshot.
     read_token: Option<OccReadToken>,
-    observed_log_offset: Option<i64>,
     known_present: BTreeSet<String>,
     known_absent: BTreeSet<String>,
     buffered_writes: Vec<ConditionalBufferedWrite>,
@@ -52,10 +51,6 @@ impl ConditionalTransactionState {
 
     pub fn read_ids(&self) -> &BTreeSet<String> {
         &self.read_ids
-    }
-
-    pub fn observed_log_offset(&self) -> Option<i64> {
-        self.observed_log_offset
     }
 
     pub fn read_token(&self) -> Option<OccReadToken> {
@@ -119,7 +114,7 @@ impl ConditionalTransactionState {
             OccReadMode::AtToken(read_token) => read_token,
             OccReadMode::None => return Err(ConditionalTransactionError::MissingReadToken),
         };
-        let observed_log_offset = observed_log_offset(read_token)?;
+        observed_log_offset(read_token)?;
         if let Some(existing_read_token) = self.read_token {
             if existing_read_token != read_token {
                 return Err(ConditionalTransactionError::ReadTokenMismatch {
@@ -171,7 +166,6 @@ impl ConditionalTransactionState {
         self.known_present = next_known_present;
         self.known_absent = next_known_absent;
         self.read_token.get_or_insert(read_token);
-        self.observed_log_offset.get_or_insert(observed_log_offset);
 
         Ok(())
     }
@@ -326,7 +320,6 @@ mod tests {
         assert_eq!(finished.ids, response.ids);
         assert_eq!(finished.include, response.include);
         assert_eq!(state.read_token(), Some(OccReadToken::try_new(42).unwrap()));
-        assert_eq!(state.observed_log_offset(), Some(42));
     }
 
     #[test]
@@ -369,7 +362,6 @@ mod tests {
             state.read_token(),
             Some(OccReadToken::try_new(100).unwrap())
         );
-        assert_eq!(state.observed_log_offset(), Some(100));
         assert_eq!(state.read_ids(), &string_set(&["first", "second"]));
     }
 
@@ -501,6 +493,22 @@ mod tests {
             state.record_get_response(&request, &response),
             Err(ConditionalTransactionError::MissingReadToken)
         ));
+    }
+
+    #[test]
+    fn out_of_range_read_token_fails_transactional_get() {
+        let mut state = ConditionalTransactionState::new();
+        let request = state
+            .prepare_get_request(request(Some(vec!["doc"]), None, None))
+            .unwrap();
+        let response = response(&["doc"], i64::MAX as u64 + 1);
+
+        assert_eq!(
+            state.record_get_response(&request, &response),
+            Err(ConditionalTransactionError::ReadTokenOutOfRange {
+                log_upper_bound_offset: i64::MAX as u64 + 1
+            })
+        );
     }
 
     #[test]
