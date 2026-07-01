@@ -363,7 +363,7 @@ impl AttachedFunctionOrchestrator {
                 ctx.receiver(),
                 self.context().task_cancellation_token.clone(),
             );
-            let res = self.dispatcher().send(task, None).await;
+            let res = self.dispatcher().send(task, Some(Span::current())).await;
             self.ok_or_terminate(res, ctx).await.is_some()
         } else {
             tracing::error!("Async attached function found but no WorkQueue client configured");
@@ -430,7 +430,7 @@ impl AttachedFunctionOrchestrator {
             ctx.receiver(),
             self.context().task_cancellation_token.clone(),
         );
-        let res = self.dispatcher().send(task, None).await;
+        let res = self.dispatcher().send(task, Some(Span::current())).await;
         self.ok_or_terminate(res, ctx).await;
     }
 
@@ -1030,7 +1030,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
             ctx.receiver(),
             self.context().task_cancellation_token.clone(),
         );
-        let res = self.dispatcher().send(task, None).await;
+        let res = self.dispatcher().send(task, Some(Span::current())).await;
         self.ok_or_terminate(res, ctx).await;
     }
 }
