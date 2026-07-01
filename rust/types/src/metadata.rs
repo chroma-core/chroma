@@ -414,15 +414,11 @@ impl<'py> pyo3::IntoPyObject<'py> for UpdateMetadataValue {
             UpdateMetadataValue::Bool(value) => {
                 Ok(value.into_pyobject(py)?.into_bound().into_any())
             }
-            UpdateMetadataValue::Int(value) => {
-                Ok(value.into_pyobject(py)?.into_bound().into_any())
-            }
+            UpdateMetadataValue::Int(value) => Ok(value.into_pyobject(py)?.into_bound().into_any()),
             UpdateMetadataValue::Float(value) => {
                 Ok(value.into_pyobject(py)?.into_bound().into_any())
             }
-            UpdateMetadataValue::Str(value) => {
-                Ok(value.into_pyobject(py)?.into_bound().into_any())
-            }
+            UpdateMetadataValue::Str(value) => Ok(value.into_pyobject(py)?.into_bound().into_any()),
             UpdateMetadataValue::SparseVector(value) => value.into_pyobject(py),
             UpdateMetadataValue::BoolArray(value) => {
                 Ok(value.into_pyobject(py)?.into_bound().into_any())

@@ -16,7 +16,6 @@ from chromadb.config import System
 from chromadb.errors import (
     BackoffError,
     ConditionalWriteConflictError,
-    InvalidArgumentError,
     StaleReadError,
 )
 from chromadb.types import Collection as CollectionModel
@@ -167,7 +166,7 @@ def test_rust_bindings_conditional_transactions_require_grpc_log(
         embedding_function=None,
     )
 
-    with pytest.raises(InvalidArgumentError, match="gRPC log implementation"):
+    with pytest.raises(NotImplementedError, match="only supported.*HttpClient"):
         collection.conditional()
 
 
@@ -282,8 +281,9 @@ def test_http_conditional_commit_sends_read_set_without_replay() -> None:
         None,
     )
 
-    payload = transaction.prepare_commit()
-    assert payload is not None
+    prepared = transaction.prepare_commit_payload()
+    assert prepared is not None
+    _, payload = prepared
 
     assert payload["read_token"] == 42
     assert payload["read_ids"] == ["absent", "present"]
@@ -305,8 +305,9 @@ def test_http_conditional_commit_sends_write_only_upsert_without_reads() -> None
         None,
     )
 
-    payload = transaction.prepare_commit()
-    assert payload is not None
+    prepared = transaction.prepare_commit_payload()
+    assert prepared is not None
+    _, payload = prepared
     assert payload["read_token"] is None
     assert payload["read_ids"] == []
     assert [operation["operation"] for operation in payload["operations"]] == ["upsert"]
@@ -327,8 +328,9 @@ def test_http_conditional_commit_accepts_numpy_embeddings() -> None:
         None,
     )
 
-    payload = transaction.prepare_commit()
-    assert payload is not None
+    prepared = transaction.prepare_commit_payload()
+    assert prepared is not None
+    _, payload = prepared
     assert payload["operations"][0]["payload"]["embeddings"] == [[1.0]]
 
 
@@ -347,8 +349,9 @@ def test_http_conditional_commit_preserves_metadata_payload() -> None:
         None,
     )
 
-    payload = transaction.prepare_commit()
-    assert payload is not None
+    prepared = transaction.prepare_commit_payload()
+    assert prepared is not None
+    _, payload = prepared
     assert payload["operations"][0]["payload"]["metadatas"] == [
         {"tag": "value", "deleted": None}
     ]

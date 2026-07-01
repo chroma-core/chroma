@@ -282,6 +282,7 @@ impl ConditionalTransaction {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn buffer_add(
         &mut self,
         collection_id: String,
@@ -308,6 +309,7 @@ impl ConditionalTransaction {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn buffer_update(
         &mut self,
         collection_id: String,
@@ -334,6 +336,7 @@ impl ConditionalTransaction {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn buffer_upsert(
         &mut self,
         collection_id: String,

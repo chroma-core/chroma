@@ -318,7 +318,6 @@ impl ConditionalTransactionState {
         self.known_absent = next_known_absent;
         if self.read_token.is_none() {
             self.read_token = Some(read_token);
-            self.observed_log_offset = Some(observed_log_offset);
         }
 
         Ok(())
