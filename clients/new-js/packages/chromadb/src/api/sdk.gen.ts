@@ -448,7 +448,7 @@ export class RecordService {
     
     /**
      * Conditional commit
-     * Replays conditional transaction reads at their OCC token, validates buffered writes, and commits all writes as one conditional append.
+     * Commits buffered writes as one conditional append using the transaction's OCC read token and read set.
      */
     public static collectionConditionalCommit<ThrowOnError extends boolean = true>(options: Options<CollectionConditionalCommitData, ThrowOnError>) {
         return (options.client ?? _heyApiClient).post<CollectionConditionalCommitResponse, CollectionConditionalCommitError, ThrowOnError>({
