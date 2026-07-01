@@ -120,9 +120,28 @@ pub(crate) async fn run_read_page(
     let token = caller_token(headers).ok_or(ReadPageError::MissingToken)?;
     let collection = wiki_client.wiki_collection(tenant, token).await?;
 
-    let mut page = read_full_page(&collection, slug).await?;
-    if let (Some(page), Some(origin)) = (&mut page, &server.config.foundation.foundation_ui_origin)
-    {
+    read_page_from_collection(
+        &collection,
+        tenant,
+        server.config.foundation.foundation_ui_origin.as_deref(),
+        slug,
+    )
+    .await
+}
+
+/// Reconstructs the full page for `slug` from an already-resolved wiki
+/// `collection`, stamping the page's `url` from `ui_origin` (left `None` when
+/// the origin is unset). Callers that resolve the collection once and reuse it
+/// across many reads (e.g. the agent's `read_page` tool) go through this;
+/// [`run_read_page`] resolves the collection per call and then delegates here.
+pub(crate) async fn read_page_from_collection(
+    collection: &ChromaCollection,
+    tenant: &str,
+    ui_origin: Option<&str>,
+    slug: &str,
+) -> Result<Option<FoundationPage>, ReadPageError> {
+    let mut page = read_full_page(collection, slug).await?;
+    if let (Some(page), Some(origin)) = (&mut page, ui_origin) {
         page.url = page_redirect_url(origin, tenant, &page.slug);
     }
     Ok(page)

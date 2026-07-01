@@ -49,7 +49,7 @@ impl FoundationMcpServer {
     /// resolved tenant, and the scorecard guard — which the caller must hold
     /// for the duration of the tool run. On failure the `Err` is the
     /// `CallToolResult` to return verbatim.
-    async fn authorize_and_meter(
+    async fn authorize_and_scorecard(
         &self,
         ctx: &RequestContext<RoleServer>,
         op: &str,
@@ -116,7 +116,7 @@ impl FoundationMcpServer {
         Parameters(params): Parameters<AskFoundationParams>,
     ) -> CallToolResult {
         let (headers, tenant, _guard) = match self
-            .authorize_and_meter(&ctx, "op:foundation_mcp_ask")
+            .authorize_and_scorecard(&ctx, "op:foundation_mcp_ask")
             .await
         {
             Ok(prelude) => prelude,
@@ -178,7 +178,7 @@ impl FoundationMcpServer {
         Parameters(params): Parameters<SearchParams>,
     ) -> CallToolResult {
         let (headers, tenant, _guard) = match self
-            .authorize_and_meter(&ctx, "op:foundation_mcp_search")
+            .authorize_and_scorecard(&ctx, "op:foundation_mcp_search")
             .await
         {
             Ok(prelude) => prelude,
@@ -234,7 +234,7 @@ impl FoundationMcpServer {
         Parameters(params): Parameters<ReadPageParams>,
     ) -> CallToolResult {
         let (headers, tenant, _guard) = match self
-            .authorize_and_meter(&ctx, "op:foundation_mcp_read_page")
+            .authorize_and_scorecard(&ctx, "op:foundation_mcp_read_page")
             .await
         {
             Ok(prelude) => prelude,
