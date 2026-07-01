@@ -33,14 +33,41 @@ impl ConditionalBufferedWrite {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ConditionalTransactionState {
+    /// Ids whose values have contributed to the transaction's read snapshot.
+    ///
+    /// Point reads add their requested ids, while filter reads add only ids
+    /// returned by the query. This set becomes the conditional read set checked
+    /// against writes appended after the captured read token.
     read_ids: BTreeSet<String>,
-    // First captured read token. All later reads reuse this token so the whole
-    // transaction reads from one stable log snapshot.
+    /// First OCC read token observed by the transaction.
+    ///
+    /// Later reads must reuse this token so every read observes one stable log
+    /// snapshot. Its log upper-bound offset is the observed log position for
+    /// conditional write validation.
     read_token: Option<OccReadToken>,
+    /// Ids known to exist in the captured read snapshot.
+    ///
+    /// Returned ids are marked present for both point and filter reads. A later
+    /// unfiltered point read can remove an id from this set by proving absence.
     known_present: BTreeSet<String>,
+    /// Ids known not to exist in the captured read snapshot.
+    ///
+    /// Only unfiltered point reads can prove absence, because filtered reads can
+    /// omit ids for reasons other than nonexistence.
     known_absent: BTreeSet<String>,
+    /// Buffered write calls waiting to be emitted at commit time.
+    ///
+    /// The vector preserves transaction call order, and each entry preserves
+    /// the id order from the write call that produced it.
     buffered_writes: Vec<ConditionalBufferedWrite>,
+    /// Membership index for ids affected by buffered writes.
+    ///
+    /// This mirrors the union of ids in `buffered_writes` so validation can
+    /// cheaply reject read-after-write and duplicate buffered-write ids.
     buffered_write_ids: BTreeSet<String>,
+    /// Whether this state has been closed against further transactional work.
+    ///
+    /// Once set, new reads are rejected and the state is not reopened.
     closed: bool,
 }
 
