@@ -18,6 +18,7 @@ use crate::{
     auth::AuthzAction,
     routes::{
         caller_token,
+        links::page_redirect_url,
         read_page::{run_read_page, ReadPageRequest},
         search::{run_page_search, PageSearchResponseBody, SearchRequest},
         subagent_search::{collect_subagent_search_final, RankedDocument, SubagentSearchCreds},
@@ -28,7 +29,6 @@ use crate::{
     wiki::chunking::slug_from_chunk_id,
 };
 
-use super::page_metadata::{run_read_pages_metadata, PageMetadata};
 use super::{MCP_SERVER_ICON_URL, MCP_SERVER_NAME, MCP_SERVER_VERSION};
 
 #[derive(Clone)]
@@ -74,56 +74,27 @@ impl FoundationMcpServer {
     }
 
     /// Turns the subagent's ranked chunk documents into client-facing pages:
-    /// resolve each chunk id to its page slug, dedupe by slug (keeping the
-    /// best-ranked chunk's justification), then look up every page's metadata
-    /// (title, categories, url) in a single search.
+    /// resolve each chunk id to its page slug and stamp each page's web `url`
+    /// from the configured `foundation_ui_origin` (buildable from the slug
+    /// alone, so no per-page lookup is needed).
     ///
-    /// Rank order is preserved. A document whose id is not a chunk id is skipped
-    /// (there is no page the caller could open); if the metadata lookup fails,
-    /// each row still carries its slug and justification.
-    async fn enrich_ranked_documents(
+    /// Rank order is preserved, and duplicate slugs are kept (the subagent may
+    /// rank several chunks of the same page). A document whose id is not a chunk
+    /// id is skipped (there is no page the caller could open).
+    fn enrich_ranked_documents(
         &self,
-        headers: &HeaderMap,
         tenant: &str,
         documents: Vec<RankedDocument>,
     ) -> AskFoundationResponseBody {
-        let ordered = dedupe_documents_by_slug(documents);
-
-        // Resolve every page's metadata in a single filtered search (one call
-        // for all slugs), rather than one `read_page` per slug.
-        let slugs: Vec<String> = ordered.iter().map(|(slug, _)| slug.clone()).collect();
-        let by_slug: std::collections::HashMap<String, PageMetadata> =
-            match run_read_pages_metadata(&self.server, headers, tenant, &slugs).await {
-                Ok(pages) => pages
-                    .into_iter()
-                    .map(|page| (page.slug.clone(), page))
-                    .collect(),
-                // The metadata fetch is best-effort: on failure we still return
-                // the ranked slugs and justifications, just without titles/urls.
-                Err(err) => {
-                    tracing::warn!(
-                        error = %err,
-                        "failed to resolve page metadata for ask_foundation; returning slugs only"
-                    );
-                    std::collections::HashMap::new()
-                }
-            };
-
-        let documents = ordered
-            .into_iter()
-            .map(|(slug, justification)| {
-                let page = by_slug.get(&slug);
-                AskFoundationDocument {
-                    title: page.map(|page| page.title.clone()),
-                    categories: page.map(|page| page.categories.clone()).unwrap_or_default(),
-                    url: page.and_then(|page| page.url.clone()),
-                    slug,
-                    justification,
-                }
-            })
-            .collect();
-
-        AskFoundationResponseBody { documents }
+        let origin = self
+            .server
+            .config
+            .foundation
+            .foundation_ui_origin
+            .as_deref();
+        AskFoundationResponseBody {
+            documents: pages_from_ranked_documents(documents, origin, tenant),
+        }
     }
 }
 
@@ -136,18 +107,15 @@ struct AskFoundationParams {
 /// One page the deep-research subagent surfaced for an `ask_foundation` query,
 /// in rank order (most relevant first). The raw chunk id the subagent returns
 /// is deliberately dropped — it points at a chunk the caller cannot fetch — and
-/// resolved to the page `slug` (usable with `read_page`) and `url` instead.
+/// resolved to the page `slug` (usable with `read_page`) and `url` instead. To
+/// read the page's title and content, pass the slug to `read_page`.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AskFoundationDocument {
     /// Page slug, as accepted by `read_page`.
     slug: String,
-    /// Page title. `None` if the page metadata could not be resolved.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    title: Option<String>,
-    categories: Vec<String>,
     /// Absolute web URL to view the page. `None` when `foundation_ui_origin`
-    /// is unset or the page could not be resolved.
+    /// is unset.
     #[serde(skip_serializing_if = "Option::is_none")]
     url: Option<String>,
     /// The subagent's justification for ranking this page.
@@ -160,27 +128,36 @@ struct AskFoundationResponseBody {
     documents: Vec<AskFoundationDocument>,
 }
 
-/// Resolves each ranked chunk document to its page slug and dedupes by slug,
-/// preserving rank order and keeping the best-ranked chunk's justification for
-/// each page. Documents whose id is not a chunk id (`{slug}-{chunk_id}`) carry
-/// no page the caller could open, so they are dropped. Returns `(slug,
-/// justification)` pairs in rank order. Pure (no I/O) so it is unit-testable.
-fn dedupe_documents_by_slug(documents: Vec<RankedDocument>) -> Vec<(String, String)> {
-    let mut seen = std::collections::HashSet::new();
-    let mut ordered: Vec<(String, String)> = Vec::new();
-    for doc in documents {
-        match slug_from_chunk_id(&doc.id) {
-            // `seen` guards against a page whose chunks were ranked more than
-            // once collapsing to a single row.
-            Some(slug) if seen.insert(slug.clone()) => ordered.push((slug, doc.justification)),
-            Some(_) => {}
-            None => tracing::debug!(
-                id = %doc.id,
-                "subagent returned a non-chunk document id; skipping"
-            ),
-        }
-    }
-    ordered
+/// Resolves each ranked chunk document into a client-facing
+/// [`AskFoundationDocument`] in a single pass, preserving rank order and
+/// stamping each `url` from `origin`. Duplicate slugs are kept: the subagent may
+/// rank several chunks of the same page, and each is a distinct justified hit
+/// the caller can surface. A document whose id is not a chunk id
+/// (`{slug}-{chunk_id}`) carries no page the caller could open, so it is
+/// dropped. Pure (no I/O) so it is unit-testable.
+fn pages_from_ranked_documents(
+    documents: Vec<RankedDocument>,
+    origin: Option<&str>,
+    tenant: &str,
+) -> Vec<AskFoundationDocument> {
+    documents
+        .into_iter()
+        .filter_map(|doc| {
+            let Some(slug) = slug_from_chunk_id(&doc.id) else {
+                tracing::debug!(
+                    id = %doc.id,
+                    "subagent returned a non-chunk document id; skipping"
+                );
+                return None;
+            };
+            let url = origin.and_then(|origin| page_redirect_url(origin, tenant, &slug));
+            Some(AskFoundationDocument {
+                slug,
+                url,
+                justification: doc.justification,
+            })
+        })
+        .collect()
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -206,8 +183,8 @@ impl FoundationMcpServer {
         name = "ask_foundation",
         description = "Ask an open-ended question and get back a ranked, justified \
             set of Foundation wiki pages, gathered by a deep-research subagent \
-            that explores the company's Foundation — the organization-wide wiki \
-            of the company's data — over multiple steps. Each result carries the \
+            that explores the company's Foundation - the organization-wide wiki \
+            of the company's data - over multiple steps. Each result carries the \
             page's slug (pass it to `read_page` to read the page in full) and a \
             justification for why it is relevant. Use this for questions that may \
             be answered by internal company knowledge rather than general \
@@ -260,9 +237,7 @@ impl FoundationMcpServer {
             Err(err) => return CallToolResult::error(vec![Content::text(err.to_string())]),
         };
 
-        let body = self
-            .enrich_ranked_documents(&headers, &tenant, documents)
-            .await;
+        let body = self.enrich_ranked_documents(&tenant, documents);
         match serde_json::to_value(body) {
             Ok(value) => CallToolResult::structured(value),
             Err(err) => CallToolResult::error(vec![Content::text(err.to_string())]),
@@ -438,42 +413,61 @@ mod tests {
     }
 
     #[test]
-    fn dedupe_keeps_first_justification_per_slug_in_rank_order() {
-        // Two pages, with the first page's chunks ranked 1st and 3rd. The 3rd
-        // (a later chunk of the same page) must not add a second row, and the
-        // surviving justification is the best-ranked one ("first").
-        let ordered = dedupe_documents_by_slug(vec![
-            doc("onboarding-0", "first"),
-            doc("gc-hard-delete-2", "second"),
-            doc("onboarding-4", "dup"),
-        ]);
-
-        assert_eq!(
-            ordered,
+    fn pages_keep_every_chunk_including_duplicate_slugs_in_rank_order() {
+        // The first page's chunks are ranked 1st and 3rd. Both are kept as
+        // separate rows, each with its own justification, in rank order — a
+        // page may be surfaced more than once when several of its chunks rank.
+        let pages = pages_from_ranked_documents(
             vec![
-                ("onboarding".to_string(), "first".to_string()),
-                ("gc-hard-delete".to_string(), "second".to_string()),
+                doc("onboarding-0", "first"),
+                doc("gc-hard-delete-2", "second"),
+                doc("onboarding-4", "third"),
+            ],
+            None,
+            "t-1",
+        );
+
+        let rows: Vec<(&str, &str)> = pages
+            .iter()
+            .map(|p| (p.slug.as_str(), p.justification.as_str()))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                ("onboarding", "first"),
+                ("gc-hard-delete", "second"),
+                ("onboarding", "third"),
             ]
         );
+        // No origin configured, so no page carries a url.
+        assert!(pages.iter().all(|p| p.url.is_none()));
     }
 
     #[test]
-    fn dedupe_skips_documents_whose_id_is_not_a_chunk_id() {
+    fn pages_skip_non_chunk_ids_and_stamp_url_from_origin() {
         // An id without a numeric chunk suffix can't be resolved to a page, so
-        // it is dropped rather than surfaced with no locator.
-        let ordered = dedupe_documents_by_slug(vec![
-            doc("not-a-chunk-id", "dropped"),
-            doc("onboarding-0", "kept"),
-        ]);
+        // it is dropped rather than surfaced with no locator. The surviving page
+        // gets a url built from the configured origin.
+        let pages = pages_from_ranked_documents(
+            vec![
+                doc("not-a-chunk-id", "dropped"),
+                doc("onboarding-0", "kept"),
+            ],
+            Some("https://wiki.example.com"),
+            "t-1",
+        );
 
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].slug, "onboarding");
+        assert_eq!(pages[0].justification, "kept");
         assert_eq!(
-            ordered,
-            vec![("onboarding".to_string(), "kept".to_string())]
+            pages[0].url.as_deref(),
+            Some("https://wiki.example.com/~/page-redirect?tenant_uuid=t-1&slug=onboarding")
         );
     }
 
     #[test]
-    fn dedupe_of_empty_documents_is_empty() {
-        assert!(dedupe_documents_by_slug(vec![]).is_empty());
+    fn pages_from_empty_documents_is_empty() {
+        assert!(pages_from_ranked_documents(vec![], None, "t-1").is_empty());
     }
 }
