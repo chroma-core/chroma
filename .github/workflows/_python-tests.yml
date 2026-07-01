@@ -221,7 +221,7 @@ jobs:
           if-no-files-found: warn
 
   test-rust-single-node-integration:
-    needs: [build-rust-cli, build-rust-bindings]
+    needs: build-rust-cli
     strategy:
       fail-fast: false
       matrix:
@@ -342,14 +342,6 @@ jobs:
       uses: ./.github/actions/python
       with:
         python-version: ${{ matrix.python }}
-    - name: Download wheel
-      uses: actions/download-artifact@v7
-      with:
-        name: rust-bindings-${{ runner.os }}-py${{ matrix.python }}
-        path: target/wheels
-    - name: Install built wheel
-      shell: bash
-      run: pip install --no-index --find-links target/wheels/ chromadb
     - name: Download CLI
       uses: actions/download-artifact@v7
       with:
