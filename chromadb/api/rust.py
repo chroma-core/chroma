@@ -52,7 +52,7 @@ from chromadb.execution.expression.plan import Search
 import chromadb_rust_bindings
 
 
-from typing import Optional, Sequence, List, Dict, Any, Tuple
+from typing import Optional, Sequence, List, Dict, Any, Tuple, NoReturn
 from overrides import override
 from uuid import UUID
 import json
@@ -640,7 +640,14 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def _begin_conditional_transaction(self) -> object:
-        return self.bindings.begin_conditional_transaction()
+        self._unsupported_conditional_transactions()
+
+    def _unsupported_conditional_transactions(self) -> NoReturn:
+        raise NotImplementedError(
+            "Conditional transactions are only supported when connecting "
+            "to a Chroma server via HttpClient. The Rust bindings "
+            "(embedded mode) do not support conditional transaction operations."
+        )
 
     @override
     def _conditional_get(
@@ -656,28 +663,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
-        rust_response = self.bindings.conditional_get(
-            transaction,
-            str(collection_id),
-            ids,
-            json.dumps(where) if where else None,
-            limit,
-            offset or 0,
-            json.dumps(where_document) if where_document else None,
-            include,
-            tenant,
-            database,
-        )
-
-        return GetResult(
-            ids=rust_response.ids,
-            embeddings=rust_response.embeddings,
-            documents=rust_response.documents,
-            uris=rust_response.uris,
-            included=include,
-            data=None,
-            metadatas=rust_response.metadatas,
-        )
+        self._unsupported_conditional_transactions()
 
     @override
     def _conditional_add(
@@ -692,17 +678,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        return self.bindings.conditional_add(
-            transaction,
-            ids,
-            str(collection_id),
-            embeddings,
-            metadatas,
-            documents,
-            uris,
-            tenant,
-            database,
-        )
+        self._unsupported_conditional_transactions()
 
     @override
     def _conditional_update(
@@ -717,17 +693,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        return self.bindings.conditional_update(
-            transaction,
-            str(collection_id),
-            ids,
-            embeddings,
-            metadatas,
-            documents,
-            uris,
-            tenant,
-            database,
-        )
+        self._unsupported_conditional_transactions()
 
     @override
     def _conditional_upsert(
@@ -742,17 +708,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        return self.bindings.conditional_upsert(
-            transaction,
-            str(collection_id),
-            ids,
-            embeddings,
-            metadatas,
-            documents,
-            uris,
-            tenant,
-            database,
-        )
+        self._unsupported_conditional_transactions()
 
     @override
     def _conditional_delete(
@@ -763,24 +719,14 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        return self.bindings.conditional_delete(
-            transaction,
-            str(collection_id),
-            ids,
-            tenant,
-            database,
-        )
+        self._unsupported_conditional_transactions()
 
     @override
     def _conditional_commit(
         self,
         transaction: object,
     ) -> ConditionalCommitResult:
-        result = self.bindings.conditional_commit(transaction)
-        return ConditionalCommitResult(
-            first_inserted_record_offset=result.first_inserted_record_offset,
-            record_count=result.record_count,
-        )
+        self._unsupported_conditional_transactions()
 
     @override
     def reset(self) -> bool:

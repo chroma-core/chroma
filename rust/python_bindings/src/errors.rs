@@ -1,4 +1,4 @@
-use chroma_api_types::{CONDITIONAL_WRITE_CONFLICT_MESSAGE, STALE_READ_ERROR_NAME};
+use chroma_api_types::STALE_READ_ERROR_NAME;
 use chroma_error::{ChromaError, ErrorCodes};
 use pyo3::PyErr;
 use thiserror::Error;
@@ -11,7 +11,6 @@ pyo3::import_exception!(chromadb.errors, UniqueConstraintError);
 pyo3::import_exception!(chromadb.errors, InternalError);
 pyo3::import_exception!(chromadb.errors, RateLimitError);
 pyo3::import_exception!(chromadb.errors, StaleReadError);
-pyo3::import_exception!(chromadb.errors, ConditionalWriteConflictError);
 
 #[derive(Error, Debug)]
 #[error(transparent)]
@@ -20,11 +19,6 @@ pub(crate) struct ChromaPyError(Box<dyn ChromaError>);
 impl From<ChromaPyError> for PyErr {
     fn from(value: ChromaPyError) -> Self {
         let message = value.to_string();
-        if value.0.code() == ErrorCodes::Aborted
-            && message.contains(CONDITIONAL_WRITE_CONFLICT_MESSAGE)
-        {
-            return ConditionalWriteConflictError::new_err(message);
-        }
         if value.0.code().name() == STALE_READ_ERROR_NAME {
             return StaleReadError::new_err(message);
         }

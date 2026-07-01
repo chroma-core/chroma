@@ -29,17 +29,14 @@ from chromadb.execution.expression.plan import Search
 
 if TYPE_CHECKING:
     from chromadb.api import AsyncServerAPI  # noqa: F401
-    from chromadb.api.models.ConditionalCollectionTransaction import (
-        AsyncConditionalCollectionTransaction,
-    )
+
+from chromadb.api.models.AsyncConditionalCollectionTransaction import (
+    AsyncConditionalCollectionTransaction,
+)
 
 
 class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
     async def conditional(self) -> "AsyncConditionalCollectionTransaction":
-        from chromadb.api.models.ConditionalCollectionTransaction import (
-            AsyncConditionalCollectionTransaction,
-        )
-
         transaction = await self._client._begin_conditional_transaction()
         return AsyncConditionalCollectionTransaction(self, transaction)
 

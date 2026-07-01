@@ -2,9 +2,12 @@ import asyncio
 from typing import Any, Dict, List
 from uuid import uuid4
 
+import pytest
+from chromadb.api.client import Client as ClientCreator
 from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import ConditionalCommitResult, GetResult
+from chromadb.config import System
 from chromadb.types import Collection as CollectionModel
 
 
@@ -154,3 +157,19 @@ def test_async_conditional_transaction_routes_to_internal_hooks() -> None:
         assert client.calls[-1] == ("commit", {"transaction": client.transaction})
 
     asyncio.run(run())
+
+
+def test_rust_bindings_conditional_transaction_reports_unsupported(
+    rust_sqlite_ephemeral: System,
+) -> None:
+    client = ClientCreator.from_system(rust_sqlite_ephemeral)
+    try:
+        collection = client.create_collection(
+            name=f"conditional-{uuid4()}",
+            embedding_function=None,
+        )
+
+        with pytest.raises(NotImplementedError, match="Conditional transactions"):
+            collection.conditional()
+    finally:
+        client.clear_system_cache()

@@ -17,15 +17,15 @@ from chromadb.api.types import (
 )
 
 if TYPE_CHECKING:
-    from chromadb.api.models.Collection import Collection
+    from chromadb.api.models.AsyncCollection import AsyncCollection
 
 
-class ConditionalCollectionTransaction:
-    def __init__(self, collection: "Collection") -> None:
+class AsyncConditionalCollectionTransaction:
+    def __init__(self, collection: "AsyncCollection", transaction: object) -> None:
         self._collection = collection
-        self._transaction = collection._client._begin_conditional_transaction()
+        self._transaction = transaction
 
-    def get(
+    async def get(
         self,
         ids: Optional[OneOrMany[ID]] = None,
         where: Optional[Where] = None,
@@ -41,7 +41,7 @@ class ConditionalCollectionTransaction:
             include=include,
         )
 
-        get_results = self._collection._client._conditional_get(
+        get_results = await self._collection._client._conditional_get(
             transaction=self._transaction,
             collection_id=self._collection.id,
             ids=get_request["ids"],
@@ -57,7 +57,7 @@ class ConditionalCollectionTransaction:
             response=get_results, include=get_request["include"]
         )
 
-    def add(
+    async def add(
         self,
         ids: OneOrMany[ID],
         embeddings: Optional[
@@ -80,7 +80,7 @@ class ConditionalCollectionTransaction:
             uris=uris,
         )
 
-        self._collection._client._conditional_add(
+        await self._collection._client._conditional_add(
             transaction=self._transaction,
             collection_id=self._collection.id,
             ids=add_request["ids"],
@@ -92,7 +92,7 @@ class ConditionalCollectionTransaction:
             database=self._collection.database,
         )
 
-    def update(
+    async def update(
         self,
         ids: OneOrMany[ID],
         embeddings: Optional[
@@ -115,7 +115,7 @@ class ConditionalCollectionTransaction:
             uris=uris,
         )
 
-        self._collection._client._conditional_update(
+        await self._collection._client._conditional_update(
             transaction=self._transaction,
             collection_id=self._collection.id,
             ids=update_request["ids"],
@@ -127,7 +127,7 @@ class ConditionalCollectionTransaction:
             database=self._collection.database,
         )
 
-    def upsert(
+    async def upsert(
         self,
         ids: OneOrMany[ID],
         embeddings: Optional[
@@ -150,7 +150,7 @@ class ConditionalCollectionTransaction:
             uris=uris,
         )
 
-        self._collection._client._conditional_upsert(
+        await self._collection._client._conditional_upsert(
             transaction=self._transaction,
             collection_id=self._collection.id,
             ids=upsert_request["ids"],
@@ -162,14 +162,14 @@ class ConditionalCollectionTransaction:
             database=self._collection.database,
         )
 
-    def delete(self, ids: OneOrMany[ID]) -> None:
+    async def delete(self, ids: OneOrMany[ID]) -> None:
         delete_request = self._collection._validate_and_prepare_delete_request(
             ids, None, None
         )
         if delete_request["ids"] is None:
             raise ValueError("ids must be provided for transactional delete")
 
-        self._collection._client._conditional_delete(
+        await self._collection._client._conditional_delete(
             transaction=self._transaction,
             collection_id=self._collection.id,
             ids=delete_request["ids"],
@@ -177,7 +177,7 @@ class ConditionalCollectionTransaction:
             database=self._collection.database,
         )
 
-    def commit(self) -> ConditionalCommitResult:
-        return self._collection._client._conditional_commit(
+    async def commit(self) -> ConditionalCommitResult:
+        return await self._collection._client._conditional_commit(
             transaction=self._transaction
         )

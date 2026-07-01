@@ -269,11 +269,17 @@ class AsyncBaseAPI(ABC):
         """
         pass
 
+    @abstractmethod
     async def _begin_conditional_transaction(self) -> object:
-        raise NotImplementedError(
-            "Conditional transactions are not supported by this Chroma API"
-        )
+        """[Internal] Begin a conditional collection transaction.
 
+        Returns:
+            object: An opaque transaction handle to pass to subsequent
+                conditional transaction operations.
+        """
+        pass
+
+    @abstractmethod
     async def _conditional_get(
         self,
         transaction: object,
@@ -287,10 +293,27 @@ class AsyncBaseAPI(ABC):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
-        raise NotImplementedError(
-            "Conditional transactions are not supported by this Chroma API"
-        )
+        """[Internal] Perform a read inside a conditional collection transaction.
 
+        Args:
+            transaction: Opaque transaction handle returned by
+                `_begin_conditional_transaction`.
+            collection_id: The UUID of the collection to read from.
+            ids: Optional IDs to read.
+            where: Optional metadata filter.
+            limit: Optional result limit.
+            offset: Optional result offset.
+            where_document: Optional document filter.
+            include: Fields to include in the response.
+            tenant: Tenant containing the collection.
+            database: Database containing the collection.
+
+        Returns:
+            GetResult: The matching records.
+        """
+        pass
+
+    @abstractmethod
     async def _conditional_add(
         self,
         transaction: object,
@@ -303,10 +326,14 @@ class AsyncBaseAPI(ABC):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        raise NotImplementedError(
-            "Conditional transactions are not supported by this Chroma API"
-        )
+        """[Internal] Buffer an add operation in a conditional transaction.
 
+        Returns:
+            bool: True if the operation was buffered.
+        """
+        pass
+
+    @abstractmethod
     async def _conditional_update(
         self,
         transaction: object,
@@ -319,10 +346,14 @@ class AsyncBaseAPI(ABC):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        raise NotImplementedError(
-            "Conditional transactions are not supported by this Chroma API"
-        )
+        """[Internal] Buffer an update operation in a conditional transaction.
 
+        Returns:
+            bool: True if the operation was buffered.
+        """
+        pass
+
+    @abstractmethod
     async def _conditional_upsert(
         self,
         transaction: object,
@@ -335,10 +366,14 @@ class AsyncBaseAPI(ABC):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        raise NotImplementedError(
-            "Conditional transactions are not supported by this Chroma API"
-        )
+        """[Internal] Buffer an upsert operation in a conditional transaction.
 
+        Returns:
+            bool: True if the operation was buffered.
+        """
+        pass
+
+    @abstractmethod
     async def _conditional_delete(
         self,
         transaction: object,
@@ -347,17 +382,24 @@ class AsyncBaseAPI(ABC):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        raise NotImplementedError(
-            "Conditional transactions are not supported by this Chroma API"
-        )
+        """[Internal] Buffer a delete operation in a conditional transaction.
 
+        Returns:
+            bool: True if the operation was buffered.
+        """
+        pass
+
+    @abstractmethod
     async def _conditional_commit(
         self,
         transaction: object,
     ) -> ConditionalCommitResult:
-        raise NotImplementedError(
-            "Conditional transactions are not supported by this Chroma API"
-        )
+        """[Internal] Commit a conditional collection transaction.
+
+        Returns:
+            ConditionalCommitResult: Commit metadata for the buffered writes.
+        """
+        pass
 
     @abstractmethod
     async def _query(
