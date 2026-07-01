@@ -415,12 +415,18 @@ mod tests {
     #[test]
     fn slug_from_chunk_id_round_trips_and_rejects_non_chunk_ids() {
         // Inverts chunk_id_for, including hyphenated slugs and the empty root.
-        assert_eq!(slug_from_chunk_id("onboarding-0").as_deref(), Some("onboarding"));
+        assert_eq!(
+            slug_from_chunk_id("onboarding-0").as_deref(),
+            Some("onboarding")
+        );
         assert_eq!(
             slug_from_chunk_id("gc-hard-delete-12").as_deref(),
             Some("gc-hard-delete")
         );
-        assert_eq!(slug_from_chunk_id(&chunk_id_for("", 0)).as_deref(), Some(""));
+        assert_eq!(
+            slug_from_chunk_id(&chunk_id_for("", 0)).as_deref(),
+            Some("")
+        );
         assert_eq!(
             slug_from_chunk_id(&chunk_id_for("gc-hard-delete", 3)).as_deref(),
             Some("gc-hard-delete")

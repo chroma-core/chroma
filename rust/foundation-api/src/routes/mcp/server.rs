@@ -94,7 +94,10 @@ impl FoundationMcpServer {
         let slugs: Vec<String> = ordered.iter().map(|(slug, _)| slug.clone()).collect();
         let by_slug: std::collections::HashMap<String, PageMetadata> =
             match run_read_pages_metadata(&self.server, headers, tenant, &slugs).await {
-                Ok(pages) => pages.into_iter().map(|page| (page.slug.clone(), page)).collect(),
+                Ok(pages) => pages
+                    .into_iter()
+                    .map(|page| (page.slug.clone(), page))
+                    .collect(),
                 // The metadata fetch is best-effort: on failure we still return
                 // the ranked slugs and justifications, just without titles/urls.
                 Err(err) => {
@@ -257,7 +260,9 @@ impl FoundationMcpServer {
             Err(err) => return CallToolResult::error(vec![Content::text(err.to_string())]),
         };
 
-        let body = self.enrich_ranked_documents(&headers, &tenant, documents).await;
+        let body = self
+            .enrich_ranked_documents(&headers, &tenant, documents)
+            .await;
         match serde_json::to_value(body) {
             Ok(value) => CallToolResult::structured(value),
             Err(err) => CallToolResult::error(vec![Content::text(err.to_string())]),
