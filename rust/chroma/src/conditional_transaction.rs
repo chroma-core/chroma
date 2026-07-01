@@ -2,14 +2,14 @@
 
 use std::ops::AsyncFn;
 
+use chroma_api_types::{OccReadMode, OccReadToken, CONDITIONAL_WRITE_CONFLICT_MESSAGE};
 use chroma_types::{
     AddCollectionRecordsRequest, AddCollectionRecordsResponse, ConditionalCommitAction,
     ConditionalCommitPayload, ConditionalCommitResult, ConditionalGetRequestPayload,
     ConditionalGetResponse, ConditionalTransactionOperationPayload, ConditionalTransactionState,
     DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, GetRequest, GetResponse,
-    IncludeList, Metadata, OccReadMode, OccReadToken, UpdateCollectionRecordsRequest,
-    UpdateCollectionRecordsResponse, UpdateMetadata, UpsertCollectionRecordsRequest,
-    UpsertCollectionRecordsResponse, Where, CONDITIONAL_WRITE_CONFLICT_MESSAGE,
+    IncludeList, Metadata, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
+    UpdateMetadata, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where,
 };
 use reqwest::{Method, StatusCode};
 

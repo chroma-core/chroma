@@ -1,6 +1,6 @@
 use backon::ExponentialBuilder;
 use backon::Retryable;
-use chroma_api_types::ErrorResponse;
+use chroma_api_types::{ErrorResponse, StaleReadError};
 use chroma_error::ChromaValidationError;
 use chroma_types::Collection;
 use chroma_types::Metadata;
@@ -80,7 +80,7 @@ pub enum ChromaHttpClientError {
     ConditionalTransactionError(#[from] chroma_types::ConditionalTransactionError),
     /// A transactional read token was stale or invalid.
     #[error("Stale read error: {0}")]
-    StaleReadError(#[from] chroma_types::StaleReadError),
+    StaleReadError(#[from] StaleReadError),
     /// Manual commit was attempted inside a `run` callback.
     #[error("txn.commit() cannot be called inside run()")]
     ConditionalCommitInsideRun,
