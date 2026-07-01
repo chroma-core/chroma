@@ -1218,15 +1218,46 @@ impl Bindings {
         py: Python<'_>,
     ) -> ChromaPyResult<ConditionalCommitResult> {
         let mut state = std::mem::take(&mut transaction.state);
+        let action = match state.prepare_commit() {
+            Ok(action) => action,
+            Err(err) => {
+                transaction.state = state;
+                return Err(err.into());
+            }
+        };
+        let request = match action {
+            chroma_types::ConditionalCommitAction::NoOp(result) => {
+                transaction.state = state;
+                return Ok(ConditionalCommitResult {
+                    first_inserted_record_offset: result.first_inserted_record_offset,
+                    record_count: result.record_count,
+                });
+            }
+            chroma_types::ConditionalCommitAction::Append(request) => request,
+        };
+
         let mut frontend_clone = self.frontend.clone();
-        let (result, state) = py.allow_threads(move || {
-            let result = self
-                .runtime
-                .block_on(async { frontend_clone.conditional_commit(&mut state).await });
-            (result, state)
+        let result = py.allow_threads(move || {
+            self.runtime.block_on(async {
+                frontend_clone
+                    .conditional_commit(request, String::new())
+                    .await
+            })
         });
+        let result = match result {
+            Ok(result) => match state.finish_commit(result.first_inserted_record_offset) {
+                Ok(result) => result,
+                Err(err) => {
+                    transaction.state = state;
+                    return Err(err.into());
+                }
+            },
+            Err(err) => {
+                transaction.state = state;
+                return Err(err.into());
+            }
+        };
         transaction.state = state;
-        let result = result?;
         Ok(ConditionalCommitResult {
             first_inserted_record_offset: result.first_inserted_record_offset,
             record_count: result.record_count,

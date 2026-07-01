@@ -3251,27 +3251,16 @@ async fn collection_conditional_commit(
         }));
     }
 
-    let metering_context_container =
-        chroma_metering::create::<CollectionWriteContext>(CollectionWriteContext::new(
-            tenant,
-            database,
-            collection_id.0.to_string(),
-            WriteAction::Conditional,
-            server.config.region.clone(),
-        ));
-    metering_context_container.enter();
-    chroma_metering::with_current(|context| {
-        context.start_request(Instant::now());
-    });
-
     let result = server
         .frontend
-        .conditional_commit_request(ConditionalCommitRequest {
-            buffered_writes,
-            observed_log_offset,
-            read_ids: payload.read_ids,
-        })
-        .meter(metering_context_container)
+        .conditional_commit(
+            ConditionalCommitRequest {
+                buffered_writes,
+                observed_log_offset,
+                read_ids: payload.read_ids,
+            },
+            server.config.region.clone(),
+        )
         .await?;
     Ok(Json(result))
 }

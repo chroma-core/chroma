@@ -22,7 +22,6 @@ pub enum ReadAction {
 #[serde(rename_all = "snake_case", tag = "write_action")]
 pub enum WriteAction {
     Add,
-    Conditional,
     Delete,
     Update,
     Upsert,
