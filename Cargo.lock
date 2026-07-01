@@ -1559,6 +1559,7 @@ dependencies = [
  "murmur3",
  "opentelemetry",
  "parking_lot",
+ "proptest",
  "reqwest 0.13.2",
  "rust-stemmers",
  "serde",
