@@ -11,7 +11,7 @@ use futures::future::join_all;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 use thiserror::Error;
-use tracing::span;
+use tracing::{instrument, span};
 
 use crate::execution::orchestration::compact::CompactionContext;
 use crate::execution::orchestration::function_execution::FunctionExecutionContext;
@@ -149,6 +149,7 @@ impl FnConsumerManager {
     }
 
     /// Runs the attached function workflow for the given function across a batch of input collections.
+    #[instrument(name = "FnConsumerManager::dispatch_batch", skip(self), err)]
     async fn dispatch_batch(
         &self,
         fn_id: AttachedFunctionUuid,
