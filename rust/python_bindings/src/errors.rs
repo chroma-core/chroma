@@ -1,5 +1,7 @@
-use chroma_api_types::STALE_READ_ERROR_NAME;
-use chroma_error::{ChromaError, ErrorCodes};
+use chroma_api_types::{StaleReadError as ApiStaleReadError, CONDITIONAL_WRITE_CONFLICT_MESSAGE};
+use chroma_error::{source_chain_contains, ChromaError, ErrorCodes};
+use chroma_log::PushLogsError;
+use chroma_types::ConditionalCommitError;
 use pyo3::PyErr;
 use thiserror::Error;
 
@@ -11,6 +13,7 @@ pyo3::import_exception!(chromadb.errors, UniqueConstraintError);
 pyo3::import_exception!(chromadb.errors, InternalError);
 pyo3::import_exception!(chromadb.errors, RateLimitError);
 pyo3::import_exception!(chromadb.errors, BackoffError);
+pyo3::import_exception!(chromadb.errors, ConditionalWriteConflictError);
 pyo3::import_exception!(chromadb.errors, StaleReadError);
 
 #[derive(Error, Debug)]
@@ -20,13 +23,30 @@ pub(crate) struct ChromaPyError(Box<dyn ChromaError>);
 impl From<ChromaPyError> for PyErr {
     fn from(value: ChromaPyError) -> Self {
         let message = value.to_string();
-        if value.0.code().name() == STALE_READ_ERROR_NAME {
+        let chroma_error = value.0.as_ref();
+        if (chroma_error.code() == ErrorCodes::Aborted
+            && message.contains(CONDITIONAL_WRITE_CONFLICT_MESSAGE))
+            || source_chain_contains(chroma_error, |err| {
+                matches!(
+                    err.downcast_ref::<PushLogsError>(),
+                    Some(PushLogsError::ConditionalWriteConflict)
+                )
+            })
+        {
+            return ConditionalWriteConflictError::new_err(message);
+        }
+        if source_chain_contains(chroma_error, |err| err.is::<ApiStaleReadError>()) {
             return StaleReadError::new_err(message);
         }
-        if value.0.name() == "Backoff" {
+        if source_chain_contains(chroma_error, |err| {
+            matches!(
+                err.downcast_ref::<ConditionalCommitError>(),
+                Some(ConditionalCommitError::Backoff)
+            )
+        }) {
             return BackoffError::new_err(message);
         }
-        match value.0.code() {
+        match chroma_error.code() {
             ErrorCodes::InvalidArgument => InvalidArgumentError::new_err(message),
             ErrorCodes::Unauthenticated => ChromaAuthError::new_err(message),
             ErrorCodes::PermissionDenied => AuthorizationError::new_err(message),
