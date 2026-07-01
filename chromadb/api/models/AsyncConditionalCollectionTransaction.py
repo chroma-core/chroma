@@ -32,6 +32,7 @@ class AsyncConditionalCollectionTransaction:
     def __init__(self, collection: "AsyncCollection", transaction: object) -> None:
         self._collection = collection
         self._transaction = transaction
+        # True iff within a `run` block and therefore explicit commit shall be disallowed.
         self._commit_blocked_by_run = False
         self._retryable_operation_exception: Optional[Exception] = None
 

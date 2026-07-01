@@ -42,6 +42,7 @@ class ConditionalCollectionTransaction:
     def __init__(self, collection: "Collection") -> None:
         self._collection = collection
         self._transaction = collection._client._begin_conditional_transaction()
+        # True iff within a `run` block and therefore explicit commit shall be disallowed.
         self._commit_blocked_by_run = False
         self._retryable_operation_exception: Optional[Exception] = None
 
