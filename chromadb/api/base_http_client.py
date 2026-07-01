@@ -117,7 +117,13 @@ class BaseHTTPClient(Component):
             error_name = body.get("error")
             if error_name is not None:
                 message = body["message"]
-                if error_name in errors.error_types:
+                if (
+                    error_name == "ChromaError"
+                    and resp.status_code == 409
+                    and message == "conditional write conflict"
+                ):
+                    chroma_error = errors.ConditionalWriteConflictError(message)
+                elif error_name in errors.error_types:
                     chroma_error = errors.error_types[error_name](message)
 
                 if chroma_error is not None:
