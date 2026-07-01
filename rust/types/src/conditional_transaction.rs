@@ -718,7 +718,6 @@ mod tests {
             ConditionalTransactionState {
                 read_ids: string_set(&["other"]),
                 read_token: Some(OccReadToken::try_new(90).unwrap()),
-                observed_log_offset: Some(90),
                 known_present: string_set(&["other"]),
                 known_absent: BTreeSet::new(),
                 buffered_writes: vec![ConditionalBufferedWrite::Upsert(upsert)],
@@ -792,7 +791,6 @@ mod tests {
             ConditionalTransactionState {
                 read_ids: string_set(&["absent-a", "absent-b"]),
                 read_token: Some(OccReadToken::try_new(42).unwrap()),
-                observed_log_offset: Some(42),
                 known_present: BTreeSet::new(),
                 known_absent: string_set(&["absent-a", "absent-b"]),
                 buffered_writes: vec![ConditionalBufferedWrite::Add(add)],
@@ -836,7 +834,6 @@ mod tests {
             ConditionalTransactionState {
                 read_ids: string_set(&["present-update", "present-delete", "absent"]),
                 read_token: Some(OccReadToken::try_new(42).unwrap()),
-                observed_log_offset: Some(42),
                 known_present: string_set(&["present-update", "present-delete"]),
                 known_absent: string_set(&["absent"]),
                 buffered_writes: vec![
@@ -884,7 +881,6 @@ mod tests {
             ConditionalTransactionState {
                 read_ids: BTreeSet::new(),
                 read_token: None,
-                observed_log_offset: None,
                 known_present: BTreeSet::new(),
                 known_absent: BTreeSet::new(),
                 buffered_writes: vec![ConditionalBufferedWrite::Upsert(upsert)],
@@ -966,7 +962,6 @@ mod tests {
             ConditionalTransactionState {
                 read_ids: string_set(&["present", "absent-a", "absent-b"]),
                 read_token: Some(OccReadToken::try_new(42).unwrap()),
-                observed_log_offset: Some(42),
                 known_present: string_set(&["present"]),
                 known_absent: string_set(&["absent-a", "absent-b"]),
                 buffered_writes: vec![
