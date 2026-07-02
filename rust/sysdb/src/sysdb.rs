@@ -2840,9 +2840,9 @@ impl SysDb {
                 // TODO: Implement for Sqlite
                 Ok(vec![])
             }
-            SysDb::Test(test) => {
-                test.get_attached_functions(name, input_collection_id, ids, only_ready)
-                    .await
+            SysDb::Test(_) => {
+                // TODO: Implement for TestSysDb
+                Ok(vec![])
             }
         }
     }
