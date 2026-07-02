@@ -173,7 +173,7 @@ async fn build_agent(
     model: AnthropicModel,
 ) -> Result<Agent, AgentRouteError> {
     let wiki_client = server
-        .wiki_client
+        .foundation_chroma_client
         .as_ref()
         .ok_or(AgentRouteError::RouteDisabled)?;
     let token = caller_token(headers)

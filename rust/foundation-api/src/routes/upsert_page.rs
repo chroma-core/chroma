@@ -1,7 +1,7 @@
 //! `POST /api/upsert-page` — replace a wiki page's chunks.
 //!
 //! Acts as a Chroma *client*: it resolves the tenant's `wiki` collection through
-//! the proxying [`WikiClient`], reads the `{slug}-0` chunk to learn whether the
+//! the proxying Foundation Chroma client, reads the `{slug}-0` chunk to learn whether the
 //! page exists (and to preserve `created_at` / bump `version`), deletes every
 //! chunk for the slug on update, re-chunks the new content, computes SPLADE
 //! sparse vectors with the caller's token, and re-adds the chunks in batches —
@@ -14,12 +14,12 @@
 //! delete-then-add below will be replaced with it to close the partial-write
 //! window and the read-then-write race on a slug.
 
+use crate::foundation_chroma::{is_not_found, FoundationChromaClient};
 use crate::routes::{caller_token, whoami::whoami_and_authorize};
 use crate::wiki::chunking::{chunk_content, title_from_content, ChunkRecordId, ChunkingConfig};
-use crate::wiki::client::is_not_found;
 use crate::wiki::embed::WikiEmbedder;
 use crate::wiki::page::{build_metadatas, kind_for};
-use crate::wiki::{WikiClient, WikiClientError};
+use crate::wiki::WikiClientError;
 use crate::{auth::AuthzAction, errors::ServerError, server::FoundationApiServer};
 use axum::{extract::State, http::HeaderMap, Json};
 use chroma::client::ChromaHttpClientError;
@@ -171,7 +171,7 @@ async fn upsert_page(
 ) -> Result<UpsertPageResponse, UpsertPageError> {
     let slug = request.slug.as_str();
     let wiki_client = server
-        .wiki_client
+        .foundation_chroma_client
         .as_ref()
         .ok_or(UpsertPageError::RouteDisabled)?;
     let token = caller_token(headers).ok_or(UpsertPageError::MissingToken)?;
@@ -353,7 +353,7 @@ async fn upsert_page(
 /// live collection — a client retry is cheaper than an in-request re-resolve +
 /// re-embed.
 async fn record_op<T, F>(
-    wiki_client: &WikiClient,
+    wiki_client: &FoundationChromaClient,
     tenant: &str,
     fut: F,
 ) -> Result<T, UpsertPageError>
@@ -362,7 +362,7 @@ where
 {
     fut.await.map_err(|err| {
         if is_not_found(&err) {
-            wiki_client.invalidate(tenant);
+            wiki_client.invalidate_wiki(tenant);
         }
         UpsertPageError::RecordIo(err)
     })

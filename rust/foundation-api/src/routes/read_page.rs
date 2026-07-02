@@ -6,7 +6,7 @@
 //! documents. The per-page metadata (title, categories, …) is stamped
 //! identically on every chunk, so it is read off the head chunk. Like the other
 //! wiki routes it proxies to the FE through
-//! [`WikiClient`](crate::wiki::WikiClient), which enforces auth, quota,
+//! the Foundation Chroma client, which enforces auth, quota,
 //! metering, and billing.
 
 use crate::routes::links::page_url;
@@ -114,7 +114,7 @@ pub(crate) async fn run_read_page(
     slug: &str,
 ) -> Result<Option<FoundationPage>, ReadPageError> {
     let wiki_client = server
-        .wiki_client
+        .foundation_chroma_client
         .as_ref()
         .ok_or(ReadPageError::RouteDisabled)?;
     let token = caller_token(headers).ok_or(ReadPageError::MissingToken)?;
