@@ -1,6 +1,8 @@
-from chromadb.api.types import EmbeddingFunction, Space, Embeddings, Documents
-from typing import List, Dict, Any
+from typing import Any, Dict, List, Optional
+
 import numpy as np
+
+from chromadb.api.types import Documents, EmbeddingFunction, Embeddings, Space
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 
 
@@ -13,7 +15,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(
         self,
         model_name: str = "all-MiniLM-L6-v2",
-        device: str = "cpu",
+        device: Optional[str] = None,
         normalize_embeddings: bool = False,
         **kwargs: Any,
     ):
@@ -21,7 +23,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
 
         Args:
             model_name (str, optional): Identifier of the SentenceTransformer model, defaults to "all-MiniLM-L6-v2"
-            device (str, optional): Device used for computation, defaults to "cpu"
+            device (str, optional): Device to use for computation (e.g. "cpu", "cuda", "mps"). If None, `sentence-transformers` will select the best available device.
             normalize_embeddings (bool, optional): Whether to normalize returned vectors, defaults to False
             **kwargs: Additional arguments to pass to the SentenceTransformer model.
         """
@@ -77,11 +79,11 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         model_name = config.get("model_name")
-        device = config.get("device")
+        device = config.get("device", None) # If None, delegate to SentenceTransformer to determine the device
         normalize_embeddings = config.get("normalize_embeddings")
         kwargs = config.get("kwargs", {})
 
-        if model_name is None or device is None or normalize_embeddings is None:
+        if model_name is None or normalize_embeddings is None:
             assert False, "This code should not be reached"
 
         return SentenceTransformerEmbeddingFunction(
