@@ -11,7 +11,7 @@
 //! supplies the dense and sparse query vectors, which is why both embedders run
 //! client-side here before the query is issued.
 
-use crate::routes::links::page_redirect_url;
+use crate::routes::links::page_url;
 use crate::routes::{caller_token, whoami::whoami_and_authorize};
 use crate::wiki::embed::{WikiEmbedder, SPARSE_KEY};
 use crate::wiki::page::{meta_str, meta_str_array};
@@ -355,7 +355,7 @@ fn hits_to_page_hits(
                 .as_ref()
                 .map(|meta| meta_str_array(meta, "categories"))
                 .unwrap_or_default();
-            let url = origin.and_then(|origin| page_redirect_url(origin, tenant, &slug));
+            let url = page_url(origin, tenant, &slug);
             Some(PageSearchHit {
                 slug,
                 title,
@@ -371,6 +371,7 @@ fn hits_to_page_hits(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::wiki::chunking::ChunkRecordId;
     use chroma::types::SearchResponse;
     use chroma_types::{Metadata, MetadataValue};
     use serde_json::Value;
@@ -503,7 +504,7 @@ mod tests {
         let mut meta = chunk_meta(chunk_id);
         meta.insert("slug".to_string(), MetadataValue::Str(slug.to_string()));
         SearchRecord {
-            id: format!("{slug}-{chunk_id}"),
+            id: ChunkRecordId::new(slug, chunk_id as usize).to_string(),
             document: Some(document.to_string()),
             embedding: None,
             score: Some(score),

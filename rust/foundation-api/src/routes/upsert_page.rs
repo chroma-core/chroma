@@ -15,7 +15,7 @@
 //! window and the read-then-write race on a slug.
 
 use crate::routes::{caller_token, whoami::whoami_and_authorize};
-use crate::wiki::chunking::{chunk_content, chunk_id_for, title_from_content, ChunkingConfig};
+use crate::wiki::chunking::{chunk_content, title_from_content, ChunkRecordId, ChunkingConfig};
 use crate::wiki::client::is_not_found;
 use crate::wiki::embed::WikiEmbedder;
 use crate::wiki::page::{build_metadatas, kind_for};
@@ -182,7 +182,7 @@ async fn upsert_page(
     let chunking = ChunkingConfig::from_collection_metadata(collection.metadata().as_ref());
 
     // Read chunk-0 to learn page existence + preserve created_at / bump version.
-    let chunk0 = chunk_id_for(slug, 0);
+    let chunk0 = ChunkRecordId::new(slug, 0).to_string();
     let existing = record_op(
         wiki_client,
         tenant,

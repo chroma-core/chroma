@@ -2,9 +2,7 @@
 //!
 //! `foundation-api` resolves only the tenant UUID from the caller's token, so a
 //! page link is keyed by that UUID plus the page slug; the configured web
-//! origin resolves it to the page. [`page_redirect_url`] builds the link;
-//! [`page_link_instructions`] is the prompt guidance that teaches the
-//! `ask_foundation` agent to build the same links for the pages it cites.
+//! origin resolves it to the page. [`page_redirect_url`] builds the link.
 
 use reqwest::Url;
 
@@ -35,19 +33,13 @@ pub(crate) fn page_redirect_url(origin: &str, tenant: &str, slug: &str) -> Optio
         .map(String::from)
 }
 
-/// Guidance appended to the `ask_foundation` agent's system prompt so the
-/// synthesized answer can link the pages it cites.
-pub(crate) fn page_link_instructions(origin: &str, tenant: &str) -> Option<String> {
-    let base = page_redirect_base(origin)?;
-    Some(format!(
-        "\n\nWhen you cite a Foundation page, link to it for the user as a \
-         markdown link using this URL template:\n\
-         {base}?tenant_uuid={tenant}&slug=<slug>\n\
-         Substitute <slug> with the page's exact slug (each search result \
-         reports its `slug=`). Use the `tenant_uuid` value above verbatim; do \
-         not change it. For example, cite a page as \
-         `[Onboarding]({base}?tenant_uuid={tenant}&slug=onboarding)`."
-    ))
+/// Stamps a page's optional web `url` from an optional origin: the shared
+/// helper behind every result shape that carries a `url` (search hits,
+/// `read_page`, and `subagent_search` documents). Returns `None` when no origin
+/// is configured or the origin fails to parse, so the null-url behavior can't
+/// diverge between those call sites.
+pub(crate) fn page_url(origin: Option<&str>, tenant: &str, slug: &str) -> Option<String> {
+    origin.and_then(|origin| page_redirect_url(origin, tenant, slug))
 }
 
 #[cfg(test)]
@@ -89,19 +81,5 @@ mod tests {
     fn redirect_url_none_for_unparseable_origin() {
         // A scheme-less origin (a plausible deploy misconfiguration) is not a valid URL.
         assert_eq!(page_redirect_url("wiki.example.com", "t-1", "p"), None);
-    }
-
-    #[test]
-    fn link_instructions_embed_origin_and_tenant() {
-        let text = page_link_instructions("https://wiki.example.com", "tenant-9").expect("text");
-        assert!(text.contains("https://wiki.example.com/~/page-redirect?tenant_uuid=tenant-9"));
-        assert!(text.contains("<slug>"));
-    }
-
-    #[test]
-    fn link_instructions_none_for_unparseable_origin() {
-        // Mirrors `page_redirect_url`: a bad origin emits no link guidance, so
-        // the agent is never told to build links the other tools can't.
-        assert_eq!(page_link_instructions("wiki.example.com", "t-1"), None);
     }
 }

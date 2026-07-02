@@ -30,6 +30,7 @@ use crate::{auth::AuthzAction, errors::ServerError, server::FoundationApiServer}
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::{extract::State, http::HeaderMap, Json};
 use chroma_error::{ChromaError, ErrorCodes};
+pub(crate) use events::RankedDocument;
 use events::{parse_ranked_documents, AgentEvent, SubagentResultError, SubagentSearchEvent};
 use futures::{Stream, StreamExt};
 use serde::Deserialize;
@@ -54,6 +55,25 @@ pub struct SubagentSearchCreds {
     pub chroma_tenant: String,
     pub chroma_database: String,
     pub collection_name: String,
+}
+
+impl SubagentSearchCreds {
+    /// Builds the deep-research credentials from Foundation config, the resolved
+    /// tenant, and the caller's Chroma token. The single place that maps config
+    /// onto the forwarded creds, shared by the REST route, the agent tool, and
+    /// the MCP tool so the three entry points can't send divergent payloads.
+    pub fn from_config(
+        config: &crate::config::FoundationConfig,
+        tenant: impl Into<String>,
+        token: impl Into<String>,
+    ) -> Self {
+        Self {
+            chroma_api_key: token.into(),
+            chroma_tenant: tenant.into(),
+            chroma_database: config.database_name.clone(),
+            collection_name: config.wiki_collection.clone(),
+        }
+    }
 }
 
 /// Errors raised before the SSE stream starts. Once streaming begins,
@@ -104,12 +124,7 @@ pub async fn foundation_subagent_search(
         .ok_or(SubagentSearchError::MissingToken)?
         .to_string();
 
-    let creds = SubagentSearchCreds {
-        chroma_api_key: token,
-        chroma_tenant: tenant,
-        chroma_database: server.config.foundation.database_name.clone(),
-        collection_name: server.config.foundation.wiki_collection.clone(),
-    };
+    let creds = SubagentSearchCreds::from_config(&server.config.foundation, tenant, token);
 
     let stream =
         stream_subagent_search(server.shared_http_client.clone(), url, creds, request.query);
@@ -353,14 +368,14 @@ fn format_ranked_documents(documents: &[events::RankedDocument]) -> String {
         .join("\n")
 }
 
-/// Consumes the deep-research stream, extracts the agent's final answer (the
-/// `user_text` from the last `action` event) and parses its
+/// Consumes the deep-research stream to a terminal `done`, extracts the agent's
+/// final answer (the `user_text` from the last `action` event), and parses its
 /// `<Document>/<Justification>` blocks into structured [`RankedDocument`]s.
 ///
-/// Errors only if the stream produced no terminal answer; an answer that parses
-/// to zero documents yields `Ok(vec![])`. Used by the `subagent_search` agent
-/// tool in the next PR in the stack.
-#[allow(dead_code)]
+/// Stream failures, upstream `error` events, and streams that end without a
+/// terminal event are errors. A completed stream whose answer parses to zero
+/// documents yields `Ok(vec![])`. Used by the `subagent_search` agent tool and
+/// by the MCP `subagent_search` tool.
 pub(crate) async fn collect_subagent_search_final(
     http: reqwest::Client,
     url: String,
@@ -372,20 +387,36 @@ pub(crate) async fn collect_subagent_search_final(
 
     // Keep the last action's `user_text` — the agent's final answer.
     let mut final_answer: Option<String> = None;
+    let mut saw_done = false;
     while let Some(item) = stream.next().await {
-        if let Ok(raw) = item {
-            if let AgentEvent::Action(action) = AgentEvent::parse(&raw) {
+        let raw = item.map_err(SubagentResultError::Stream)?;
+        match AgentEvent::parse(&raw) {
+            AgentEvent::Action(action) => {
                 if let Some(text) = action.user_text() {
                     final_answer = Some(text.to_string());
                 }
             }
+            AgentEvent::Error(error) => {
+                return Err(SubagentResultError::Upstream(error.message));
+            }
+            AgentEvent::Done => {
+                saw_done = true;
+                break;
+            }
+            AgentEvent::Observation(_) | AgentEvent::Unknown => {}
         }
     }
 
-    // A terminal answer that parses to zero documents is a valid "no hits"
-    // result; only the genuine absence of any terminal answer is an error.
-    let answer = final_answer.ok_or(SubagentResultError::NoFinalAnswer)?;
-    Ok(parse_ranked_documents(&answer))
+    if !saw_done {
+        return Err(SubagentResultError::MissingTerminalEvent);
+    }
+
+    // A completed stream whose answer parses to zero documents is a valid "no
+    // hits" result.
+    Ok(final_answer
+        .as_deref()
+        .map(parse_ranked_documents)
+        .unwrap_or_default())
 }
 
 // ---------------------------------------------------------------------------
