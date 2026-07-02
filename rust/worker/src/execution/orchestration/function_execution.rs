@@ -47,6 +47,10 @@ pub struct FunctionExecutionContext {
     compaction_context: CompactionContext,
 }
 
+fn has_reached_queue_frontier(completion_offset: i64, queue_compaction_offset: i64) -> bool {
+    queue_compaction_offset > 0 && completion_offset >= queue_compaction_offset
+}
+
 impl FunctionExecutionContext {
     pub fn new(compaction_context: &CompactionContext) -> Self {
         Self {
@@ -238,7 +242,7 @@ impl FunctionExecutionContext {
                     "Missing resolved attached function state for fn-consumer input collection",
                 ))?;
 
-            if completion_offset >= input.queue_compaction_offset {
+            if has_reached_queue_frontier(completion_offset, input.queue_compaction_offset) {
                 tracing::info!(
                     collection_id = %input.collection_id,
                     completion_offset,
@@ -285,6 +289,7 @@ impl FunctionExecutionContext {
 
 #[cfg(test)]
 mod tests {
+<<<<<<< HEAD
     use super::FunctionExecutionContext;
     use crate::execution::{
         operators::fetch_log::FetchLogError,
@@ -317,5 +322,17 @@ mod tests {
         assert!(!FunctionExecutionContext::should_backfill_on_fetch_error(
             &err
         ));
+=======
+    use super::has_reached_queue_frontier;
+
+    #[test]
+    fn zero_queue_frontier_is_not_treated_as_completed_work() {
+        assert!(!has_reached_queue_frontier(0, 0));
+    }
+
+    #[test]
+    fn positive_queue_frontier_still_treats_equality_as_complete() {
+        assert!(has_reached_queue_frontier(40, 40));
+>>>>>>> 2f78f7180 ([BUG](fn-consumer): handle zero queue frontier)
     }
 }
