@@ -517,6 +517,42 @@ impl CompactionContext {
         system: System,
         is_getting_compacted_logs: bool,
     ) -> Result<LogFetchOrchestratorResponse, LogFetchOrchestratorError> {
+        self.run_get_logs_with_attached_function(
+            collection_id,
+            database_name,
+            system,
+            is_getting_compacted_logs,
+            None,
+        )
+        .await
+    }
+
+    pub(crate) async fn run_get_logs_for_attached_function(
+        &mut self,
+        collection_id: CollectionUuid,
+        database_name: chroma_types::DatabaseName,
+        system: System,
+        is_getting_compacted_logs: bool,
+        attached_function_id: chroma_types::AttachedFunctionUuid,
+    ) -> Result<LogFetchOrchestratorResponse, LogFetchOrchestratorError> {
+        self.run_get_logs_with_attached_function(
+            collection_id,
+            database_name,
+            system,
+            is_getting_compacted_logs,
+            Some(attached_function_id),
+        )
+        .await
+    }
+
+    async fn run_get_logs_with_attached_function(
+        &mut self,
+        collection_id: CollectionUuid,
+        database_name: chroma_types::DatabaseName,
+        system: System,
+        is_getting_compacted_logs: bool,
+        attached_function_id_filter: Option<chroma_types::AttachedFunctionUuid>,
+    ) -> Result<LogFetchOrchestratorResponse, LogFetchOrchestratorError> {
         // TODO(tanujnay112): This is awful, we need to find a better way to pass
         // the active collection info around.
         self.collection_info = OnceCell::new();
@@ -547,6 +583,7 @@ impl CompactionContext {
             self.work_queue_client.clone(),
             self.is_fn_consumer,
             self.log_start_offset,
+            attached_function_id_filter,
         );
 
         let log_fetch_response = match log_fetch_orchestrator.run(system.clone()).await {
@@ -563,6 +600,7 @@ impl CompactionContext {
             LogFetchOrchestratorResponse::Success(success) => {
                 let materialized = success.materialized;
                 let collection_info = success.collection_info;
+                let resolved_attached_functions = success.resolved_attached_functions;
 
                 self.collection_info
                     .set(collection_info.clone())
@@ -570,7 +608,12 @@ impl CompactionContext {
                         CompactionContextError::InvariantViolation("Collection info already set")
                     })?;
 
-                Ok(Success::new(materialized, collection_info.clone()).into())
+                Ok(Success::new(
+                    materialized,
+                    collection_info.clone(),
+                    resolved_attached_functions,
+                )
+                .into())
             }
             LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(repair) => {
                 Ok(RequireCompactionOffsetRepair::new(
@@ -819,6 +862,7 @@ impl CompactionContext {
                 .map_err(CompactionError::CompactionContextError)?
                 .clone(),
             materialized_log_data: log_fetch_records,
+            resolved_attached_functions: Vec::new(),
         };
 
         let mut ran_backfill = false;
@@ -987,6 +1031,7 @@ impl CompactionContext {
         let function_input_collection_data = FunctionInputCollectionData {
             collection_info: collection_info.clone(),
             materialized_log_data: log_fetch_records.clone(),
+            resolved_attached_functions: Vec::new(),
         };
 
         let mut self_clone_fn = self.clone();
