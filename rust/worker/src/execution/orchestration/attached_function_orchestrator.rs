@@ -305,37 +305,6 @@ impl AttachedFunctionOrchestrator {
         }
     }
 
-    fn make_async_queue_task(
-        &self,
-        attached_function: &AttachedFunction,
-        ctx: &ComponentContext<Self>,
-    ) -> Result<TaskMessage, AttachedFunctionOrchestratorError> {
-        let work_queue_client = self
-            .output_context
-            .work_queue_client
-            .clone()
-            .ok_or_else(|| {
-                AttachedFunctionOrchestratorError::InvariantViolation(
-                    "Async function requires WorkQueue configuration".to_string(),
-                )
-            })?;
-        let operator = Box::new(QueueFunctionOperator::new(work_queue_client));
-        let compaction_offset = self.get_input_collection_info().collection.log_position;
-        let input = QueueFunctionInput::new(
-            attached_function.id,
-            self.get_input_collection_info().collection_id,
-            attached_function.completion_offset as i64,
-            compaction_offset,
-        );
-
-        Ok(wrap(
-            operator,
-            input,
-            ctx.receiver(),
-            self.context().task_cancellation_token.clone(),
-        ))
-    }
-
     fn make_function_execution_task(
         &self,
         attached_function: &AttachedFunction,
@@ -364,98 +333,6 @@ impl AttachedFunctionOrchestrator {
             ctx.receiver(),
             self.context().task_cancellation_token.clone(),
         ))
-    }
-
-    fn plan_attached_function_tasks(
-        &mut self,
-        attached_functions: Vec<AttachedFunction>,
-        ctx: &ComponentContext<Self>,
-    ) -> Result<Vec<(TaskMessage, Option<Span>)>, AttachedFunctionOrchestratorError> {
-        let mut tasks = Vec::new();
-
-        let mut sync_attached_functions = Vec::new();
-        let mut async_attached_functions = Vec::new();
-        for attached_function in attached_functions {
-            if attached_function.is_async {
-                async_attached_functions.push(attached_function);
-            } else {
-                sync_attached_functions.push(attached_function);
-            }
-        }
-
-        if self.output_context.is_fn_consumer
-            && (sync_attached_functions.len() + async_attached_functions.len() != 1)
-        {
-            return Err(AttachedFunctionOrchestratorError::InvariantViolation(
-                "Function consumer execution expects exactly one attached function".to_string(),
-            ));
-        }
-
-        if sync_attached_functions.len() > 1 || async_attached_functions.len() > 1 {
-            return Err(AttachedFunctionOrchestratorError::InvariantViolation(
-                "At most one sync and one async attached function are supported per collection"
-                    .to_string(),
-            ));
-        }
-
-        let sync_attached_function = sync_attached_functions.pop();
-        let mut async_attached_function = async_attached_functions.pop();
-
-        if let Some(sync_attached_function) = sync_attached_function {
-            tracing::info!(
-                "[AttachedFunctionOrchestrator]: Prepared sync attached function '{}' for collection",
-                sync_attached_function.name
-            );
-
-            if self
-                .set_function_context(self.make_function_context(&sync_attached_function))
-                .is_err()
-            {
-                return Err(AttachedFunctionOrchestratorError::InvariantViolation(
-                    "Failed to set function context for attached function".to_string(),
-                ));
-            }
-
-            self.pending_sync_attached_function = Some(sync_attached_function);
-        }
-
-        if let Some(async_attached_function) = async_attached_function.as_ref() {
-            tracing::info!(
-                "[AttachedFunctionOrchestrator]: Queueing async attached function '{}' for collection",
-                async_attached_function.name
-            );
-
-            if !self.output_context.is_fn_consumer {
-                tasks.push((
-                    self.make_async_queue_task(async_attached_function, ctx)?,
-                    Some(Span::current()),
-                ));
-                return Ok(tasks);
-            }
-        }
-
-        if let Some(sync_attached_function) = self.pending_sync_attached_function.take() {
-            tasks.push((
-                self.make_function_execution_task(&sync_attached_function, ctx)?,
-                Some(Span::current()),
-            ));
-        } else if let Some(async_attached_function) = async_attached_function.take() {
-            if self
-                .set_function_context(self.make_function_context(&async_attached_function))
-                .is_err()
-            {
-                return Err(AttachedFunctionOrchestratorError::InvariantViolation(
-                    "Failed to set function context for attached function".to_string(),
-                ));
-            }
-
-            tasks.push((
-                self.make_function_execution_task(&async_attached_function, ctx)?,
-                Some(Span::current()),
-            ));
-        }
-
-        Ok(tasks)
     }
 
     /// Get the input collection info, following the same pattern as CompactionContext
@@ -538,22 +415,53 @@ impl AttachedFunctionOrchestrator {
         attached_function: AttachedFunction,
         ctx: &ComponentContext<Self>,
     ) {
-        let task = match self.make_function_execution_task(&attached_function, ctx) {
-            Ok(task) => task,
-            Err(err) => {
-                if matches!(
-                    err,
-                    AttachedFunctionOrchestratorError::OutputCollectionIdNotSet
-                ) {
-                    tracing::error!(
-                        "[AttachedFunctionOrchestrator]: Output collection ID not set for attached function '{}'",
-                        attached_function.name
-                    );
-                }
-                self.terminate_with_result(Err(err), ctx).await;
+        let output_collection_id = match attached_function.output_collection_id {
+            Some(id) => id,
+            None => {
+                tracing::error!(
+                    "[AttachedFunctionOrchestrator]: Output collection ID not set for attached function '{}'",
+                    attached_function.name
+                );
+                self.terminate_with_result(
+                    Err(AttachedFunctionOrchestratorError::OutputCollectionIdNotSet),
+                    ctx,
+                )
+                .await;
                 return;
             }
         };
+
+        let database_name = match chroma_types::DatabaseName::new(
+            self.get_input_collection_info().collection.database.clone(),
+        ) {
+            Some(name) => name,
+            None => {
+                tracing::error!(
+                    "Invalid database name in input collection: {}",
+                    self.get_input_collection_info().collection.database
+                );
+                self.terminate_with_result(
+                    Err(AttachedFunctionOrchestratorError::InvariantViolation(
+                        "Invalid database name".to_string(),
+                    )),
+                    ctx,
+                )
+                .await;
+                return;
+            }
+        };
+
+        let operator = Box::new(GetCollectionAndSegmentsOperator::new(
+            self.output_context.sysdb.clone(),
+            output_collection_id,
+            database_name,
+        ));
+        let task = wrap(
+            operator,
+            (),
+            ctx.receiver(),
+            self.context().task_cancellation_token.clone(),
+        );
         let res = self.dispatcher().send(task, None).await;
         self.ok_or_terminate(res, ctx).await;
     }
@@ -744,11 +652,45 @@ impl Orchestrator for AttachedFunctionOrchestrator {
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
         if !self.resolved_attached_functions.is_empty() {
-            return match self
-                .plan_attached_function_tasks(self.resolved_attached_functions.clone(), ctx)
+            if self.resolved_attached_functions.len() != 1 {
+                self.terminate_with_result(
+                    Err(AttachedFunctionOrchestratorError::InvariantViolation(
+                        "Function consumer execution expects exactly one attached function"
+                            .to_string(),
+                    )),
+                    ctx,
+                )
+                .await;
+                return Vec::new();
+            }
+
+            let attached_function = self.resolved_attached_functions[0].clone();
+            if self
+                .set_function_context(self.make_function_context(&attached_function))
+                .is_err()
             {
-                Ok(tasks) => tasks,
+                self.terminate_with_result(
+                    Err(AttachedFunctionOrchestratorError::InvariantViolation(
+                        "Failed to set function context for attached function".to_string(),
+                    )),
+                    ctx,
+                )
+                .await;
+                return Vec::new();
+            }
+
+            return match self.make_function_execution_task(&attached_function, ctx) {
+                Ok(task) => vec![(task, Some(Span::current()))],
                 Err(err) => {
+                    if matches!(
+                        err,
+                        AttachedFunctionOrchestratorError::OutputCollectionIdNotSet
+                    ) {
+                        tracing::error!(
+                            "[AttachedFunctionOrchestrator]: Output collection ID not set for attached function '{}'",
+                            attached_function.name
+                        );
+                    }
                     self.terminate_with_result(Err(err), ctx).await;
                     Vec::new()
                 }
@@ -833,16 +775,129 @@ impl Handler<TaskResult<GetAttachedFunctionOutput, GetAttachedFunctionOperatorEr
             self.finish_no_attached_function(ctx).await;
             return;
         }
-        let tasks = match self.plan_attached_function_tasks(message.attached_functions, ctx) {
-            Ok(tasks) => tasks,
-            Err(err) => {
-                self.terminate_with_result(Err(err), ctx).await;
+
+        let mut sync_attached_functions = Vec::new();
+        let mut async_attached_functions = Vec::new();
+        for attached_function in message.attached_functions {
+            if attached_function.is_async {
+                async_attached_functions.push(attached_function);
+            } else {
+                sync_attached_functions.push(attached_function);
+            }
+        }
+
+        if self.output_context.is_fn_consumer
+            && (sync_attached_functions.len() + async_attached_functions.len() != 1)
+        {
+            self.terminate_with_result(
+                Err(AttachedFunctionOrchestratorError::InvariantViolation(
+                    "Function consumer execution expects exactly one attached function".to_string(),
+                )),
+                ctx,
+            )
+            .await;
+            return;
+        }
+
+        if sync_attached_functions.len() > 1 || async_attached_functions.len() > 1 {
+            self.terminate_with_result(
+                Err(AttachedFunctionOrchestratorError::InvariantViolation(
+                    "At most one sync and one async attached function are supported per collection"
+                        .to_string(),
+                )),
+                ctx,
+            )
+            .await;
+            return;
+        }
+
+        let sync_attached_function = sync_attached_functions.pop();
+        let mut async_attached_function = async_attached_functions.pop();
+
+        if let Some(sync_attached_function) = sync_attached_function {
+            tracing::info!(
+                "[AttachedFunctionOrchestrator]: Prepared sync attached function '{}' for collection",
+                sync_attached_function.name
+            );
+
+            if self
+                .set_function_context(self.make_function_context(&sync_attached_function))
+                .is_err()
+            {
+                self.terminate_with_result(
+                    Err(AttachedFunctionOrchestratorError::InvariantViolation(
+                        "Failed to set function context for attached function".to_string(),
+                    )),
+                    ctx,
+                )
+                .await;
                 return;
             }
-        };
 
-        for (task, span) in tasks {
-            self.send(task, ctx, span).await;
+            self.pending_sync_attached_function = Some(sync_attached_function);
+        }
+
+        if let Some(async_attached_function) = async_attached_function.as_ref() {
+            tracing::info!(
+                    "[AttachedFunctionOrchestrator]: Queueing async attached function '{}' for collection",
+                    async_attached_function.name
+                );
+
+            if !self.output_context.is_fn_consumer {
+                if let Some(work_queue_client) = &self.output_context.work_queue_client {
+                    let operator = Box::new(QueueFunctionOperator::new(work_queue_client.clone()));
+                    let compaction_offset = self.get_input_collection_info().collection.log_position;
+                    let input = QueueFunctionInput::new(
+                        async_attached_function.id,
+                        self.get_input_collection_info().collection_id,
+                        async_attached_function.completion_offset as i64,
+                        compaction_offset,
+                    );
+                    let task = wrap(
+                        operator,
+                        input,
+                        ctx.receiver(),
+                        self.context().task_cancellation_token.clone(),
+                    );
+                    let res = self.dispatcher().send(task, None).await;
+                    if self.ok_or_terminate(res, ctx).await.is_none() {
+                        return;
+                    }
+                } else {
+                    tracing::error!("Async attached function found but no WorkQueue client configured");
+                    self.terminate_with_result(
+                        Err(AttachedFunctionOrchestratorError::InvariantViolation(
+                            "Async function requires WorkQueue configuration".to_string(),
+                        )),
+                        ctx,
+                    )
+                    .await;
+                    return;
+                }
+                return;
+            }
+        }
+
+        if let Some(sync_attached_function) = self.pending_sync_attached_function.take() {
+            self.dispatch_function_execution(sync_attached_function, ctx)
+                .await;
+        } else if let Some(async_attached_function) = async_attached_function.take() {
+            if self
+                .set_function_context(self.make_function_context(&async_attached_function))
+                .is_err()
+            {
+                self.terminate_with_result(
+                    Err(AttachedFunctionOrchestratorError::InvariantViolation(
+                        "Failed to set function context for attached function".to_string(),
+                    )),
+                    ctx,
+                )
+                .await;
+                return;
+            }
+
+            self.dispatch_function_execution(async_attached_function, ctx)
+                .await;
         }
     }
 }
