@@ -361,7 +361,7 @@ fn format_ranked_documents(documents: &[events::RankedDocument]) -> String {
 /// Stream failures, upstream `error` events, and streams that end without a
 /// terminal event are errors. A completed stream whose answer parses to zero
 /// documents yields `Ok(vec![])`. Used by the `subagent_search` agent tool and
-/// by the MCP `ask_foundation` tool.
+/// by the MCP `subagent_search` tool.
 pub(crate) async fn collect_subagent_search_final(
     http: reqwest::Client,
     url: String,

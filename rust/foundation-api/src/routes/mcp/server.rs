@@ -1,5 +1,5 @@
 //! The Foundation MCP server: the [`FoundationMcpServer`] handler plus its
-//! `ask_foundation` / `search_pages` / `read_page` tools and server
+//! `subagent_search` / `search` / `read_page` tools and server
 //! instructions.
 
 use axum::http::{request::Parts, HeaderMap};
@@ -85,33 +85,33 @@ impl FoundationMcpServer {
         &self,
         tenant: &str,
         documents: Vec<RankedDocument>,
-    ) -> AskFoundationResponseBody {
+    ) -> SubagentSearchResponseBody {
         let origin = self
             .server
             .config
             .foundation
             .foundation_ui_origin
             .as_deref();
-        AskFoundationResponseBody {
+        SubagentSearchResponseBody {
             documents: pages_from_ranked_documents(documents, origin, tenant),
         }
     }
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-struct AskFoundationParams {
+struct SubagentSearchParams {
     #[schemars(description = "Question to ask the company's Foundation wiki.")]
     query: String,
 }
 
-/// One page the deep-research subagent surfaced for an `ask_foundation` query,
+/// One page the deep-research subagent surfaced for a `subagent_search` query,
 /// in rank order (most relevant first). The raw chunk id the subagent returns
 /// is deliberately dropped — it points at a chunk the caller cannot fetch — and
 /// resolved to the page `slug` (usable with `read_page`) and `url` instead. To
 /// read the page's title and content, pass the slug to `read_page`.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AskFoundationDocument {
+struct SubagentSearchDocument {
     /// Page slug, as accepted by `read_page`.
     slug: String,
     /// Absolute web URL to view the page. `None` when `foundation_ui_origin`
@@ -122,14 +122,14 @@ struct AskFoundationDocument {
     justification: String,
 }
 
-/// Structured `ask_foundation` result: the subagent's ranked, justified pages.
+/// Structured `subagent_search` result: the subagent's ranked, justified pages.
 #[derive(Debug, Serialize)]
-struct AskFoundationResponseBody {
-    documents: Vec<AskFoundationDocument>,
+struct SubagentSearchResponseBody {
+    documents: Vec<SubagentSearchDocument>,
 }
 
 /// Resolves each ranked chunk document into a client-facing
-/// [`AskFoundationDocument`] in a single pass, preserving rank order and
+/// [`SubagentSearchDocument`] in a single pass, preserving rank order and
 /// stamping each `url` from `origin`. Duplicate slugs are kept: the subagent may
 /// rank several chunks of the same page, and each is a distinct justified hit
 /// the caller can surface. A document whose id is not a chunk id
@@ -139,7 +139,7 @@ fn pages_from_ranked_documents(
     documents: Vec<RankedDocument>,
     origin: Option<&str>,
     tenant: &str,
-) -> Vec<AskFoundationDocument> {
+) -> Vec<SubagentSearchDocument> {
     documents
         .into_iter()
         .filter_map(|doc| {
@@ -151,7 +151,7 @@ fn pages_from_ranked_documents(
                 return None;
             };
             let url = origin.and_then(|origin| page_redirect_url(origin, tenant, &slug));
-            Some(AskFoundationDocument {
+            Some(SubagentSearchDocument {
                 slug,
                 url,
                 justification: doc.justification,
@@ -172,7 +172,7 @@ struct SearchParams {
 struct ReadPageParams {
     #[schemars(
         description = "Slug of the Foundation wiki page to read in full, taken \
-            from a `search_pages` result."
+            from a `search` result."
     )]
     slug: String,
 }
@@ -180,7 +180,7 @@ struct ReadPageParams {
 #[tool_router]
 impl FoundationMcpServer {
     #[tool(
-        name = "ask_foundation",
+        name = "subagent_search",
         description = "Ask an open-ended question and get back a ranked, justified \
             set of Foundation wiki pages, gathered by a deep-research subagent \
             that explores the company's Foundation - the organization-wide wiki \
@@ -196,10 +196,10 @@ impl FoundationMcpServer {
             open_world_hint = true
         )
     )]
-    async fn ask_foundation(
+    async fn subagent_search(
         &self,
         ctx: RequestContext<RoleServer>,
-        Parameters(params): Parameters<AskFoundationParams>,
+        Parameters(params): Parameters<SubagentSearchParams>,
     ) -> CallToolResult {
         let (headers, tenant, _guard) = match self
             .authorize_and_scorecard(&ctx, "op:foundation_mcp_ask")
@@ -209,7 +209,7 @@ impl FoundationMcpServer {
             Err(result) => return result,
         };
 
-        // `ask_foundation` is backed by the deep-research subagent, so it is only
+        // `subagent_search` is backed by the deep-research subagent, so it is only
         // available when the deep-research dependency is configured.
         let Some(url) = self.server.config.foundation.deep_research_api_url.clone() else {
             return CallToolResult::error(vec![Content::text("deep research is not configured")]);
@@ -245,7 +245,7 @@ impl FoundationMcpServer {
     }
 
     #[tool(
-        name = "search_pages",
+        name = "search",
         description = "Search the company's Foundation wiki and return a ranked \
             list of pages relevant to the query, each with its slug, title, \
             categories, and a snippet of the best-matching text; then call \
@@ -254,7 +254,7 @@ impl FoundationMcpServer {
             GitHub, and AI sessions. Use this whenever a request touches \
             company-specific or internal information (projects, decisions, \
             processes, architecture, conventions, team knowledge) that would not \
-            be in the current codebase or public sources. Use `ask_foundation` \
+            be in the current codebase or public sources. Use `subagent_search` \
             instead when you want a deep-researched ranked set of source pages \
             rather than a targeted search result list.",
         annotations(
@@ -264,7 +264,7 @@ impl FoundationMcpServer {
             open_world_hint = false
         )
     )]
-    async fn search_pages(
+    async fn search(
         &self,
         ctx: RequestContext<RoleServer>,
         Parameters(params): Parameters<SearchParams>,
@@ -310,7 +310,7 @@ impl FoundationMcpServer {
     #[tool(
         name = "read_page",
         description = "Read a single Foundation wiki page in full by its slug \
-            (as returned by `search_pages`), including its complete markdown \
+            (as returned by `search`), including its complete markdown \
             content, title, and categories. Use this to pull the source material \
             behind a search hit so you can read and cite it directly.",
         annotations(
@@ -372,10 +372,10 @@ impl ServerHandler for FoundationMcpServer {
                  public internet.\n\n\
                  Use these tools whenever a question might be answered by the \
                  company's own knowledge instead of general world knowledge. Use \
-                 `ask_foundation` to hand an open-ended question to a \
+                 `subagent_search` to hand an open-ended question to a \
                  deep-research subagent and get back the most relevant pages, \
                  each with its slug and a justification. To search and read the \
-                 source material yourself, use `search_pages` to find the most \
+                 source material yourself, use `search` to find the most \
                  relevant pages (each result has a slug, title, and snippet), \
                  then `read_page` with a slug to fetch that page's full content. \
                  Prefer Foundation over guessing when a query concerns internal \
