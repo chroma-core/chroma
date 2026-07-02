@@ -164,8 +164,9 @@ impl QueueState {
                     )
                 })?
                 .0;
-            let compaction_offsets_idx =
-                schema.column_with_name("compaction_offset").map(|(idx, _)| idx);
+            let compaction_offsets_idx = schema
+                .column_with_name("compaction_offset")
+                .map(|(idx, _)| idx);
 
             let fn_ids = batch
                 .column(fn_ids_idx)
@@ -221,9 +222,8 @@ impl QueueState {
                     fn_id,
                     input_coll_id,
                     completion_offset: offsets.value(i),
-                    compaction_offset: compaction_offsets.and_then(|offsets| {
-                        offsets.is_valid(i).then_some(offsets.value(i))
-                    }),
+                    compaction_offset: compaction_offsets
+                        .and_then(|offsets| offsets.is_valid(i).then_some(offsets.value(i))),
                     insertion_order: orders.value(i),
                 };
 
