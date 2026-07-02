@@ -100,7 +100,7 @@ impl FoundationMcpServer {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct SubagentSearchParams {
-    #[schemars(description = "Question to ask the company's Foundation wiki.")]
+    #[schemars(description = "Question to ask the company's Foundation knowledge base.")]
     query: String,
 }
 
@@ -162,7 +162,7 @@ fn pages_from_ranked_documents(
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct SearchParams {
-    #[schemars(description = "Search query for the company's Foundation wiki.")]
+    #[schemars(description = "Search query for the company's Foundation knowledge base.")]
     query: String,
     #[schemars(description = "Maximum number of unique pages to return. Defaults to 10.")]
     limit: Option<u32>,
@@ -171,7 +171,7 @@ struct SearchParams {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct ReadPageParams {
     #[schemars(
-        description = "Slug of the Foundation wiki page to read in full, taken \
+        description = "Slug of the Foundation knowledge base page to read in full, taken \
             from a `search` result."
     )]
     slug: String,
@@ -182,9 +182,10 @@ impl FoundationMcpServer {
     #[tool(
         name = "subagent_search",
         description = "Ask an open-ended question and get back a ranked, justified \
-            set of Foundation wiki pages, gathered by a deep-research subagent \
-            that explores the company's Foundation - the organization-wide wiki \
-            of the company's data - over multiple steps. Each result carries the \
+            set of Foundation knowledge base pages, gathered by a deep-research \
+            subagent that explores the company's Foundation - the organization-wide \
+            knowledge base of the company's data - over multiple steps. Each result \
+            carries the \
             page's slug (pass it to `read_page` to read the page in full) and a \
             justification for why it is relevant. Use this for questions that may \
             be answered by internal company knowledge rather than general \
@@ -246,7 +247,7 @@ impl FoundationMcpServer {
 
     #[tool(
         name = "search",
-        description = "Search the company's Foundation wiki and return a ranked \
+        description = "Search the company's Foundation knowledge base and return a ranked \
             list of pages relevant to the query, each with its slug, title, \
             categories, and a snippet of the best-matching text; then call \
             `read_page` with a slug to read a page in full. Foundation is the \
@@ -309,7 +310,7 @@ impl FoundationMcpServer {
 
     #[tool(
         name = "read_page",
-        description = "Read a single Foundation wiki page in full by its slug \
+        description = "Read a single Foundation knowledge base page in full by its slug \
             (as returned by `search`), including its complete markdown \
             content, title, and categories. Use this to pull the source material \
             behind a search hit so you can read and cite it directly.",
@@ -363,7 +364,7 @@ impl ServerHandler for FoundationMcpServer {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(implementation)
             .with_instructions(
-                "Foundation is an organization-wide wiki built by synthesizing a \
+                "Foundation is an organization-wide knowledge base built by synthesizing a \
                  company's own data — its documentation, Slack chats, GitHub code, \
                  and AI session traces. It is the place to look up shared \
                  institutional knowledge: \
