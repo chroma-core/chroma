@@ -424,8 +424,12 @@ impl WorkQueueManager {
                 current_completion_offset
             );
 
-            self.state
-                .push_work(item.fn_id, item.input_coll_id, *current_completion_offset, None);
+            self.state.push_work(
+                item.fn_id,
+                item.input_coll_id,
+                *current_completion_offset,
+                None,
+            );
         }
 
         if let Err(e) = self.persist().await {
