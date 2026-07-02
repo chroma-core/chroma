@@ -261,9 +261,7 @@ impl QueueState {
     ) -> bool {
         let key = (fn_id, input_coll_id);
 
-        let new_offsets = QueueOffsets {
-            compaction_offset,
-        };
+        let new_offsets = QueueOffsets { compaction_offset };
 
         if let Some(&existing_offsets) = self.dedup_index.get(&key) {
             if new_offsets.dedup_frontier() <= existing_offsets.dedup_frontier() {
