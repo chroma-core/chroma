@@ -18,10 +18,12 @@ use crate::{
     auth::AuthzAction,
     routes::{
         caller_token,
-        links::page_redirect_url,
+        links::page_url,
         read_page::{run_read_page, ReadPageRequest},
         search::{run_page_search, PageSearchResponseBody, SearchRequest},
-        subagent_search::{collect_subagent_search_final, RankedDocument, SubagentSearchCreds},
+        subagent_search::{
+            collect_subagent_search_final, RankedDocument, SubagentSearchCreds, SubagentSearchError,
+        },
         whoami::whoami_and_authorize,
         CHROMA_TOKEN_HEADER,
     },
@@ -93,7 +95,7 @@ impl FoundationMcpServer {
             .foundation_ui_origin
             .as_deref();
         SubagentSearchResponseBody {
-            documents: pages_from_ranked_documents(documents, origin, tenant),
+            hits: pages_from_ranked_documents(documents, origin, tenant),
         }
     }
 }
@@ -111,7 +113,7 @@ struct SubagentSearchParams {
 /// read the page's title and content, pass the slug to `read_page`.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SubagentSearchDocument {
+struct SubagentSearchHit {
     /// Page slug, as accepted by `read_page`.
     slug: String,
     /// Absolute web URL to view the page. `None` when `foundation_ui_origin`
@@ -122,14 +124,15 @@ struct SubagentSearchDocument {
     justification: String,
 }
 
-/// Structured `subagent_search` result: the subagent's ranked, justified pages.
+/// Structured `subagent_search` result: the subagent's ranked, justified pages,
+/// keyed `hits` to match the `search` tool's result shape.
 #[derive(Debug, Serialize)]
 struct SubagentSearchResponseBody {
-    documents: Vec<SubagentSearchDocument>,
+    hits: Vec<SubagentSearchHit>,
 }
 
 /// Resolves each ranked chunk document into a client-facing
-/// [`SubagentSearchDocument`] in a single pass, preserving rank order and
+/// [`SubagentSearchHit`] in a single pass, preserving rank order and
 /// stamping each `url` from `origin`. Duplicate slugs are kept: the subagent may
 /// rank several chunks of the same page, and each is a distinct justified hit
 /// the caller can surface. A document whose id is not a chunk id
@@ -139,20 +142,19 @@ fn pages_from_ranked_documents(
     documents: Vec<RankedDocument>,
     origin: Option<&str>,
     tenant: &str,
-) -> Vec<SubagentSearchDocument> {
+) -> Vec<SubagentSearchHit> {
     documents
         .into_iter()
         .filter_map(|doc| {
-            let Some(record_id) = ChunkRecordId::parse(&doc.id) else {
+            let Some(slug) = ChunkRecordId::slug_from_id(&doc.id) else {
                 tracing::debug!(
                     id = %doc.id,
                     "subagent returned a non-chunk document id; skipping"
                 );
                 return None;
             };
-            let slug = record_id.slug();
-            let url = origin.and_then(|origin| page_redirect_url(origin, tenant, slug));
-            Some(SubagentSearchDocument {
+            let url = page_url(origin, tenant, slug);
+            Some(SubagentSearchHit {
                 slug: slug.to_string(),
                 url,
                 justification: doc.justification,
@@ -204,7 +206,7 @@ impl FoundationMcpServer {
         Parameters(params): Parameters<SubagentSearchParams>,
     ) -> CallToolResult {
         let (headers, tenant, _guard) = match self
-            .authorize_and_scorecard(&ctx, "op:foundation_mcp_ask")
+            .authorize_and_scorecard(&ctx, "op:foundation_mcp_subagent_search")
             .await
         {
             Ok(prelude) => prelude,
@@ -212,20 +214,21 @@ impl FoundationMcpServer {
         };
 
         // `subagent_search` is backed by the deep-research subagent, so it is only
-        // available when the deep-research dependency is configured.
+        // available when the deep-research dependency is configured. Reuse the
+        // route's typed preconditions so the messages can't drift from it.
         let Some(url) = self.server.config.foundation.deep_research_api_url.clone() else {
-            return CallToolResult::error(vec![Content::text("deep research is not configured")]);
+            return CallToolResult::error(vec![Content::text(
+                SubagentSearchError::RouteDisabled.to_string(),
+            )]);
         };
         let Some(token) = caller_token(&headers).map(str::to_string) else {
-            return CallToolResult::error(vec![Content::text("missing bearer token")]);
+            return CallToolResult::error(vec![Content::text(
+                SubagentSearchError::MissingToken.to_string(),
+            )]);
         };
 
-        let creds = SubagentSearchCreds {
-            chroma_api_key: token,
-            chroma_tenant: tenant.clone(),
-            chroma_database: self.server.config.foundation.database_name.clone(),
-            collection_name: self.server.config.foundation.wiki_collection.clone(),
-        };
+        let creds =
+            SubagentSearchCreds::from_config(&self.server.config.foundation, tenant.clone(), token);
 
         let documents = match collect_subagent_search_final(
             self.server.shared_http_client.clone(),

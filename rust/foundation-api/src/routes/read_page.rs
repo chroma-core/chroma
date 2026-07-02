@@ -9,7 +9,7 @@
 //! [`WikiClient`](crate::wiki::WikiClient), which enforces auth, quota,
 //! metering, and billing.
 
-use crate::routes::links::page_redirect_url;
+use crate::routes::links::page_url;
 use crate::routes::{caller_token, whoami::whoami_and_authorize};
 use crate::wiki::page::{meta_int, meta_str, meta_str_array};
 use crate::wiki::WikiClientError;
@@ -141,8 +141,8 @@ pub(crate) async fn read_page_from_collection(
     slug: &str,
 ) -> Result<Option<FoundationPage>, ReadPageError> {
     let mut page = read_full_page(collection, slug).await?;
-    if let (Some(page), Some(origin)) = (&mut page, ui_origin) {
-        page.url = page_redirect_url(origin, tenant, &page.slug);
+    if let Some(page) = &mut page {
+        page.url = page_url(ui_origin, tenant, &page.slug);
     }
     Ok(page)
 }

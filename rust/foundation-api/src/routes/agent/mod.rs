@@ -192,12 +192,7 @@ async fn build_agent(
     // The deep-research tool is optional: register it only when the dependency
     // is configured, so the agent still runs (search-only) without it.
     if let Some(url) = server.config.foundation.deep_research_api_url.clone() {
-        let creds = SubagentSearchCreds {
-            chroma_api_key: token,
-            chroma_tenant: tenant.to_string(),
-            chroma_database: server.config.foundation.database_name.clone(),
-            collection_name: server.config.foundation.wiki_collection.clone(),
-        };
+        let creds = SubagentSearchCreds::from_config(&server.config.foundation, tenant, token);
         toolset.add(SubagentSearchTool::new(
             server.shared_http_client.clone(),
             url,

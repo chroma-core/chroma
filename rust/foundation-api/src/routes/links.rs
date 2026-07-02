@@ -33,6 +33,15 @@ pub(crate) fn page_redirect_url(origin: &str, tenant: &str, slug: &str) -> Optio
         .map(String::from)
 }
 
+/// Stamps a page's optional web `url` from an optional origin: the shared
+/// helper behind every result shape that carries a `url` (search hits,
+/// `read_page`, and `subagent_search` documents). Returns `None` when no origin
+/// is configured or the origin fails to parse, so the null-url behavior can't
+/// diverge between those call sites.
+pub(crate) fn page_url(origin: Option<&str>, tenant: &str, slug: &str) -> Option<String> {
+    origin.and_then(|origin| page_redirect_url(origin, tenant, slug))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

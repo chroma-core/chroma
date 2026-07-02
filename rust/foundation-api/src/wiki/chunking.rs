@@ -104,14 +104,9 @@ impl ChunkingConfig {
 /// shape.
 ///
 /// This is the single place that knows the record-id format: build one from its
-/// parts with [`ChunkRecordId::new`], recover one from a stored id with
-/// [`ChunkRecordId::parse`], and render it back to the stored string via its
-/// [`Display`] impl (i.e. `.to_string()`).
-///
-/// Parsing is the delicate part. Slugs may themselves contain hyphens (e.g.
-/// `gc-hard-delete`), so [`parse`](ChunkRecordId::parse) splits on the *last*
-/// hyphen and requires the suffix to be a non-empty run of ASCII digits. The
-/// wiki root has the empty slug, so `-0` correctly parses to slug `""`, chunk 0.
+/// parts with [`ChunkRecordId::new`] and render it to the stored string via its
+/// [`Display`] impl (i.e. `.to_string()`); recover the page slug from a stored
+/// id with [`ChunkRecordId::slug_from_id`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChunkRecordId {
     slug: String,
@@ -127,34 +122,25 @@ impl ChunkRecordId {
         }
     }
 
-    /// Recovers a record id from its stored string form.
+    /// Recovers the page slug from a stored record id, or `None` when `id` is
+    /// not in the `{slug}-{chunk_id}` shape (no hyphen, an empty suffix, or a
+    /// non-numeric suffix).
     ///
     /// The split point is the *last* hyphen, so a slug that itself contains
     /// hyphens is preserved intact and only the final segment is read as the
-    /// chunk id: `gc-hard-delete-12` parses to slug `gc-hard-delete`, chunk 12.
+    /// chunk id: `gc-hard-delete-12` yields slug `gc-hard-delete`. The wiki root
+    /// has the empty slug, so `-0` yields `Some("")`.
     ///
-    /// Returns `None` when `id` is not in the `{slug}-{chunk_id}` shape: no
-    /// hyphen, an empty suffix, a non-numeric suffix, or a numeric suffix too
-    /// large to be a `usize` (larger than any chunk id we write).
-    pub fn parse(id: &str) -> Option<Self> {
+    /// Only the slug is recovered — the numeric chunk id is never read back — so
+    /// the suffix is validated as digits but not parsed, and the borrowed slug
+    /// is returned directly. A digit suffix of any magnitude still identifies a
+    /// recoverable page.
+    pub fn slug_from_id(id: &str) -> Option<&str> {
         let (slug, chunk_id) = id.rsplit_once('-')?;
         if chunk_id.is_empty() || !chunk_id.bytes().all(|b| b.is_ascii_digit()) {
             return None;
         }
-        Some(Self {
-            slug: slug.to_string(),
-            chunk_id: chunk_id.parse().ok()?,
-        })
-    }
-
-    /// The page slug this chunk belongs to.
-    pub fn slug(&self) -> &str {
-        &self.slug
-    }
-
-    /// The dense sequential chunk index within the page.
-    pub fn chunk_id(&self) -> usize {
-        self.chunk_id
+        Some(slug)
     }
 }
 
@@ -459,30 +445,45 @@ mod tests {
     }
 
     #[test]
-    fn chunk_record_id_round_trips_and_rejects_non_chunk_ids() {
-        // parse() inverts Display, including hyphenated slugs and the empty root.
-        let cases = [
-            ("onboarding-0", "onboarding", 0),
-            ("gc-hard-delete-12", "gc-hard-delete", 12),
-            ("-0", "", 0),
-        ];
-        for (id, slug, chunk_id) in cases {
-            let parsed = ChunkRecordId::parse(id).expect("well-formed record id");
-            assert_eq!(parsed.slug(), slug);
-            assert_eq!(parsed.chunk_id(), chunk_id);
-            assert_eq!(parsed.to_string(), id);
-        }
-
-        // new() -> Display -> parse() also round-trips.
+    fn chunk_record_id_builds_and_recovers_slug() {
+        // new() -> Display renders the canonical `{slug}-{chunk_id}` form,
+        // including hyphenated slugs and the empty root.
+        assert_eq!(
+            ChunkRecordId::new("onboarding", 0).to_string(),
+            "onboarding-0"
+        );
+        assert_eq!(
+            ChunkRecordId::new("gc-hard-delete", 12).to_string(),
+            "gc-hard-delete-12"
+        );
         assert_eq!(ChunkRecordId::new("", 0).to_string(), "-0");
-        let round_tripped = ChunkRecordId::parse(&ChunkRecordId::new("gc-hard-delete", 3).to_string());
-        assert_eq!(round_tripped, Some(ChunkRecordId::new("gc-hard-delete", 3)));
 
-        // Non-numeric, missing, or overflowing suffixes are not chunk ids.
-        assert_eq!(ChunkRecordId::parse("no-number-x"), None);
-        assert_eq!(ChunkRecordId::parse("trailing-"), None);
-        assert_eq!(ChunkRecordId::parse("noseparator"), None);
-        assert_eq!(ChunkRecordId::parse("slug-99999999999999999999999999999999"), None);
+        // slug_from_id() recovers the slug from that form, splitting on the last
+        // hyphen so hyphenated slugs and the empty root round-trip.
+        assert_eq!(
+            ChunkRecordId::slug_from_id("onboarding-0"),
+            Some("onboarding")
+        );
+        assert_eq!(
+            ChunkRecordId::slug_from_id("gc-hard-delete-12"),
+            Some("gc-hard-delete")
+        );
+        assert_eq!(ChunkRecordId::slug_from_id("-0"), Some(""));
+        assert_eq!(
+            ChunkRecordId::slug_from_id(&ChunkRecordId::new("gc-hard-delete", 3).to_string()),
+            Some("gc-hard-delete")
+        );
+
+        // Non-numeric or missing suffixes are not chunk ids. A digit suffix of
+        // any magnitude is still a chunk id — the slug is recoverable regardless
+        // of the number's size.
+        assert_eq!(ChunkRecordId::slug_from_id("no-number-x"), None);
+        assert_eq!(ChunkRecordId::slug_from_id("trailing-"), None);
+        assert_eq!(ChunkRecordId::slug_from_id("noseparator"), None);
+        assert_eq!(
+            ChunkRecordId::slug_from_id("slug-99999999999999999999999999999999"),
+            Some("slug")
+        );
     }
 
     // --- treesitter: round-trip ---

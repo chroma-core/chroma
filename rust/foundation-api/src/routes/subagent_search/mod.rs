@@ -57,6 +57,25 @@ pub struct SubagentSearchCreds {
     pub collection_name: String,
 }
 
+impl SubagentSearchCreds {
+    /// Builds the deep-research credentials from Foundation config, the resolved
+    /// tenant, and the caller's Chroma token. The single place that maps config
+    /// onto the forwarded creds, shared by the REST route, the agent tool, and
+    /// the MCP tool so the three entry points can't send divergent payloads.
+    pub fn from_config(
+        config: &crate::config::FoundationConfig,
+        tenant: impl Into<String>,
+        token: impl Into<String>,
+    ) -> Self {
+        Self {
+            chroma_api_key: token.into(),
+            chroma_tenant: tenant.into(),
+            chroma_database: config.database_name.clone(),
+            collection_name: config.wiki_collection.clone(),
+        }
+    }
+}
+
 /// Errors raised before the SSE stream starts. Once streaming begins,
 /// mid-stream failures are surfaced as a [`SubagentStreamError`] instead.
 #[derive(Debug, thiserror::Error)]
@@ -105,12 +124,7 @@ pub async fn foundation_subagent_search(
         .ok_or(SubagentSearchError::MissingToken)?
         .to_string();
 
-    let creds = SubagentSearchCreds {
-        chroma_api_key: token,
-        chroma_tenant: tenant,
-        chroma_database: server.config.foundation.database_name.clone(),
-        collection_name: server.config.foundation.wiki_collection.clone(),
-    };
+    let creds = SubagentSearchCreds::from_config(&server.config.foundation, tenant, token);
 
     let stream =
         stream_subagent_search(server.shared_http_client.clone(), url, creds, request.query);
