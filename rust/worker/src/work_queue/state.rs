@@ -357,6 +357,17 @@ impl QueueState {
                 self.dedup_index.remove(&key);
                 self.dirty = true;
             }
+
+            for record in self.pending_work.iter_mut() {
+                if record.fn_id == *fn_id
+                    && record.input_coll_id == *input_coll_id
+                    && completion_offset > record.completion_offset
+                {
+                    record.completion_offset = completion_offset;
+                    self.dirty = true;
+                    break;
+                }
+            }
         }
     }
 }
@@ -498,7 +509,7 @@ mod tests {
 
         state.finish_work_success(&fn_id, &coll_id, 40);
         assert_eq!(state.pending_work.len(), 1);
-        assert_eq!(state.pending_work[0].completion_offset, 20);
+        assert_eq!(state.pending_work[0].completion_offset, 40);
         assert_eq!(state.pending_work[0].compaction_offset, 60);
 
         state.finish_work_success(&fn_id, &coll_id, 60);
