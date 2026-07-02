@@ -186,6 +186,7 @@ impl QueueState {
                     fn_id,
                     input_coll_id,
                     completion_offset: offsets.value(i),
+                    compaction_offset: None,
                     insertion_order: orders.value(i),
                 };
 
@@ -222,6 +223,7 @@ impl QueueState {
         fn_id: AttachedFunctionUuid,
         input_coll_id: CollectionUuid,
         completion_offset: i64,
+        compaction_offset: Option<i64>,
     ) -> bool {
         let key = (fn_id, input_coll_id);
 
@@ -238,6 +240,7 @@ impl QueueState {
             fn_id,
             input_coll_id,
             completion_offset,
+            compaction_offset,
             insertion_order: self.next_insertion_order,
         };
 
@@ -290,6 +293,7 @@ mod tests {
             fn_id: AttachedFunctionUuid(Uuid::new_v4()),
             input_coll_id: CollectionUuid(Uuid::new_v4()),
             completion_offset: 100,
+            compaction_offset: None,
             insertion_order: 0,
         };
 
@@ -297,6 +301,7 @@ mod tests {
             fn_id: AttachedFunctionUuid(Uuid::new_v4()),
             input_coll_id: CollectionUuid(Uuid::new_v4()),
             completion_offset: 200,
+            compaction_offset: None,
             insertion_order: 1,
         };
 
@@ -304,6 +309,7 @@ mod tests {
             fn_id: AttachedFunctionUuid(Uuid::new_v4()),
             input_coll_id: CollectionUuid(Uuid::new_v4()),
             completion_offset: 300,
+            compaction_offset: None,
             insertion_order: 2,
         };
 
