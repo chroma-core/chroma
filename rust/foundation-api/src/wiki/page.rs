@@ -103,11 +103,11 @@ pub(crate) fn meta_str_array(meta: &Metadata, key: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wiki::chunking::chunk_id_for;
+    use crate::wiki::chunking::ChunkRecordId;
 
     fn chunk(chunk_id: usize, line_no: usize, text: &str) -> Chunk {
         Chunk {
-            id: chunk_id_for("foo", chunk_id),
+            id: ChunkRecordId::new("foo", chunk_id).to_string(),
             slug: "foo".to_string(),
             chunk_id,
             line_no,

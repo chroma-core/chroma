@@ -26,7 +26,7 @@ use crate::{
         CHROMA_TOKEN_HEADER,
     },
     server::FoundationApiServer,
-    wiki::chunking::slug_from_chunk_id,
+    wiki::chunking::ChunkRecordId,
 };
 
 use super::{MCP_SERVER_ICON_URL, MCP_SERVER_NAME, MCP_SERVER_VERSION};
@@ -143,16 +143,17 @@ fn pages_from_ranked_documents(
     documents
         .into_iter()
         .filter_map(|doc| {
-            let Some(slug) = slug_from_chunk_id(&doc.id) else {
+            let Some(record_id) = ChunkRecordId::parse(&doc.id) else {
                 tracing::debug!(
                     id = %doc.id,
                     "subagent returned a non-chunk document id; skipping"
                 );
                 return None;
             };
-            let url = origin.and_then(|origin| page_redirect_url(origin, tenant, &slug));
+            let slug = record_id.slug();
+            let url = origin.and_then(|origin| page_redirect_url(origin, tenant, slug));
             Some(SubagentSearchDocument {
-                slug,
+                slug: slug.to_string(),
                 url,
                 justification: doc.justification,
             })
