@@ -322,7 +322,6 @@ impl QueueState {
                 self.dirty = true;
                 return true;
             }
-
         }
 
         false

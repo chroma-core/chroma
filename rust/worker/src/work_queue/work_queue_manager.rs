@@ -550,11 +550,8 @@ impl Handler<FinishWorkMessage> for WorkQueueManager {
         }
 
         // Use the queued compaction frontier to decide whether to remove or advance the entry.
-        self.state.finish_work_success(
-            &msg.fn_id,
-            &msg.input_coll_id,
-            msg.new_completion_offset,
-        );
+        self.state
+            .finish_work_success(&msg.fn_id, &msg.input_coll_id, msg.new_completion_offset);
 
         // Send immediate success response
         if msg.response_tx.send(Ok(FinishResult::Success)).is_err() {
