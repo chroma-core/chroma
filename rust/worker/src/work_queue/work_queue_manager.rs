@@ -18,7 +18,6 @@ use chroma_types::chroma_proto::{
     TryFinishAsyncAttachedFunctionInvocationRequest,
 };
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
-use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use tokio::sync::oneshot;
 
@@ -134,7 +133,6 @@ impl WorkQueueManager {
         {
             Ok((bytes, Some(etag))) => {
                 self.state = QueueState::from_parquet_bytes(&bytes)?;
-                self.hydrate_completion_offsets_from_sysdb().await?;
                 self.state.current_etag = Some(etag);
                 tracing::info!(
                     "Loaded work queue state with {} items",
@@ -144,7 +142,6 @@ impl WorkQueueManager {
             }
             Ok((bytes, None)) => {
                 self.state = QueueState::from_parquet_bytes(&bytes)?;
-                self.hydrate_completion_offsets_from_sysdb().await?;
                 self.state.current_etag = None;
                 tracing::info!(
                     "Loaded work queue state with {} items (no ETag support)",
@@ -248,68 +245,6 @@ impl WorkQueueManager {
             self.pending_push_responses.len() + self.pending_finish_responses.len();
 
         total_pending_responses >= self.config.persistence.pending_threshold
-    }
-
-    async fn hydrate_completion_offsets_from_sysdb(&mut self) -> Result<(), WorkQueueError> {
-        if self.state.pending_work.is_empty() {
-            return Ok(());
-        }
-
-        let fn_ids: Vec<_> = self
-            .state
-            .pending_work
-            .iter()
-            .map(|record| record.fn_id)
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect();
-
-        let mut completion_offsets = HashMap::new();
-        for chunk in fn_ids.chunks(100) {
-            let attached_functions = self
-                .sysdb
-                .get_attached_functions(None, None, chunk.to_vec(), false)
-                .await
-                .map_err(|e| WorkQueueError::SysDb(e.to_string()))?;
-
-            for attached_function in attached_functions {
-                completion_offsets.insert(
-                    (attached_function.id, attached_function.input_collection_id),
-                    attached_function.completion_offset as i64,
-                );
-            }
-        }
-
-        let pending_keys: Vec<_> = self
-            .state
-            .pending_work
-            .iter()
-            .map(|record| (record.fn_id, record.input_coll_id))
-            .collect();
-        let mut missing_items = Vec::new();
-
-        for (fn_id, input_coll_id) in pending_keys {
-            let Some(completion_offset) = completion_offsets.get(&(fn_id, input_coll_id)) else {
-                missing_items.push((fn_id, input_coll_id));
-                continue;
-            };
-
-            self.state
-                .set_completion_offset(&fn_id, &input_coll_id, *completion_offset);
-        }
-
-        if !missing_items.is_empty() {
-            tracing::error!(
-                missing_items = ?missing_items,
-                "Failed to hydrate completion offsets for persisted work queue items"
-            );
-            return Err(WorkQueueError::InvalidState(format!(
-                "Missing completion offsets for {} persisted work queue items",
-                missing_items.len()
-            )));
-        }
-
-        Ok(())
     }
 
     async fn push_work_and_queue_response(
@@ -612,7 +547,6 @@ mod tests {
     use super::*;
     use crate::work_queue::state::QueueState;
     use chroma_storage::local::LocalStorage;
-    use chroma_types::AttachedFunction;
     use tempfile::TempDir;
     use uuid::Uuid;
 
@@ -627,9 +561,6 @@ mod tests {
     }
 
     fn create_test_sysdb() -> SysDb {
-        // Create a test sysdb for unit tests that only test internal state.
-        // This sysdb is not connected to any backend and is purely for testing.
-        // If a test needs real sysdb interaction, it should be an integration test.
         SysDb::Test(chroma_sysdb::test_sysdb::TestSysDb::new())
     }
 
@@ -640,47 +571,6 @@ mod tests {
         config.storage_path = "queue.parquet".to_string(); // Use relative path within temp dir
         let sysdb = create_test_sysdb();
         (WorkQueueManager::new(storage, config, sysdb), temp_dir)
-    }
-
-    fn set_test_attached_functions(sysdb: &mut SysDb, attached_functions: Vec<AttachedFunction>) {
-        match sysdb {
-            SysDb::Test(test_sysdb) => {
-                let mut by_collection = HashMap::new();
-                for attached_function in attached_functions {
-                    by_collection
-                        .entry(attached_function.input_collection_id)
-                        .or_insert_with(Vec::new)
-                        .push(attached_function);
-                }
-                test_sysdb.set_attached_functions(by_collection);
-            }
-            _ => panic!("Invalid sysdb type"),
-        }
-    }
-
-    fn create_test_attached_function(
-        fn_id: AttachedFunctionUuid,
-        coll_id: CollectionUuid,
-        completion_offset: u64,
-    ) -> AttachedFunction {
-        AttachedFunction {
-            id: fn_id,
-            name: format!("fn-{fn_id}"),
-            function_id: Uuid::new_v4(),
-            input_collection_id: coll_id,
-            output_collection_name: "output".to_string(),
-            output_collection_id: None,
-            params: None,
-            tenant_id: "tenant".to_string(),
-            database_id: "database".to_string(),
-            last_run: None,
-            completion_offset,
-            min_records_for_invocation: 0,
-            is_deleted: false,
-            is_async: true,
-            created_at: std::time::SystemTime::UNIX_EPOCH,
-            updated_at: std::time::SystemTime::UNIX_EPOCH,
-        }
     }
 
     #[test]
@@ -775,19 +665,12 @@ mod tests {
         // Load state in new manager
         {
             let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
-            let mut sysdb = create_test_sysdb();
-            set_test_attached_functions(
-                &mut sysdb,
-                vec![
-                    create_test_attached_function(fn_id_1, coll_id_1, 15),
-                    create_test_attached_function(fn_id_2, coll_id_2, 25),
-                ],
-            );
+            let sysdb = create_test_sysdb();
             let mut manager = WorkQueueManager::new(storage, config, sysdb);
             manager.load_state().await.unwrap();
             assert_eq!(manager.state.pending_work.len(), 2);
-            assert_eq!(manager.state.pending_work[0].completion_offset, 15);
-            assert_eq!(manager.state.pending_work[1].completion_offset, 25);
+            assert_eq!(manager.state.pending_work[0].completion_offset, 100);
+            assert_eq!(manager.state.pending_work[1].completion_offset, 200);
         }
     }
 

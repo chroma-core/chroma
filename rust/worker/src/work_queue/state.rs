@@ -14,7 +14,6 @@ use chroma_storage::ETag;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct QueueOffsets {
-    completion_offset: i64,
     compaction_offset: i64,
 }
 
@@ -231,7 +230,6 @@ impl QueueState {
                 state.dedup_index.insert(
                     key,
                     QueueOffsets {
-                        completion_offset: record.completion_offset,
                         compaction_offset: record.compaction_offset,
                     },
                 );
@@ -264,7 +262,6 @@ impl QueueState {
         let key = (fn_id, input_coll_id);
 
         let new_offsets = QueueOffsets {
-            completion_offset,
             compaction_offset,
         };
 
@@ -291,35 +288,6 @@ impl QueueState {
         self.dirty = true;
 
         true
-    }
-
-    /// Update the in-memory completion offset for a queued work item.
-    /// This is reconstructed from sysdb on load and is not persisted.
-    pub fn set_completion_offset(
-        &mut self,
-        fn_id: &AttachedFunctionUuid,
-        input_coll_id: &CollectionUuid,
-        completion_offset: i64,
-    ) -> bool {
-        let key = (*fn_id, *input_coll_id);
-        let Some(existing_offsets) = self.dedup_index.get_mut(&key) else {
-            return false;
-        };
-
-        let mut updated = false;
-        for record in self.pending_work.iter_mut() {
-            if record.fn_id == *fn_id && record.input_coll_id == *input_coll_id {
-                record.completion_offset = completion_offset;
-                updated = true;
-                break;
-            }
-        }
-
-        if updated {
-            existing_offsets.completion_offset = completion_offset;
-        }
-
-        updated
     }
 
     /// Mark work as successfully completed.
@@ -384,7 +352,6 @@ mod tests {
         state.dedup_index.insert(
             (record1.fn_id, record1.input_coll_id),
             QueueOffsets {
-                completion_offset: 100,
                 compaction_offset: record1.compaction_offset,
             },
         );
@@ -393,7 +360,6 @@ mod tests {
         state.dedup_index.insert(
             (record2.fn_id, record2.input_coll_id),
             QueueOffsets {
-                completion_offset: 200,
                 compaction_offset: record2.compaction_offset,
             },
         );
@@ -402,7 +368,6 @@ mod tests {
         state.dedup_index.insert(
             (record3.fn_id, record3.input_coll_id),
             QueueOffsets {
-                completion_offset: 300,
                 compaction_offset: record3.compaction_offset,
             },
         );
