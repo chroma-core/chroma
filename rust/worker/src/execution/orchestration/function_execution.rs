@@ -174,39 +174,6 @@ impl FunctionExecutionContext {
         }
     }
 
-    async fn finish_stale_work_items(
-        work_queue_client: Option<crate::work_queue::work_queue_client::WorkQueueClient>,
-        attached_function_id: AttachedFunctionUuid,
-        stale_work_items: &[(CollectionUuid, i64)],
-    ) -> Result<(), CompactionError> {
-        if stale_work_items.is_empty() {
-            return Ok(());
-        }
-
-        let Some(mut work_queue_client) = work_queue_client else {
-            return Err(CompactionError::InvariantViolation(
-                "fn-consumer stale work cleanup requires a work queue client",
-            ));
-        };
-
-        for (collection_id, completion_offset) in stale_work_items {
-            work_queue_client
-                .finish_work(
-                    attached_function_id.to_string(),
-                    collection_id.to_string(),
-                    *completion_offset,
-                )
-                .await
-                .map_err(|_| {
-                    CompactionError::InvariantViolation(
-                        "Failed to clear stale fn-consumer work queue entry",
-                    )
-                })?;
-        }
-
-        Ok(())
-    }
-
     async fn resolve_shared_input_database_name(
         compaction_context: CompactionContext,
         fn_inputs: &[FunctionExecutionInput],
@@ -252,7 +219,6 @@ impl FunctionExecutionContext {
         let shared_database_name =
             Self::resolve_shared_input_database_name(base_context.clone(), &fn_inputs).await?;
         let mut input_collection_data = Vec::with_capacity(fn_inputs.len());
-        let mut stale_work_items = Vec::new();
         for input in fn_inputs {
             let collection_data = Box::pin(Self::fetch_function_input_collection_data(
                 base_context.clone(),
@@ -279,19 +245,11 @@ impl FunctionExecutionContext {
                     queue_compaction_offset = input.queue_compaction_offset,
                     "Skipping stale fn-consumer work item because attached function is already at or beyond the queued frontier"
                 );
-                stale_work_items.push((input.collection_id, completion_offset));
                 continue;
             }
 
             input_collection_data.push(collection_data);
         }
-
-        Self::finish_stale_work_items(
-            base_context.work_queue_client.clone(),
-            attached_function_id,
-            &stale_work_items,
-        )
-        .await?;
 
         if input_collection_data.is_empty() {
             return Ok(CompactionResponse::Success {

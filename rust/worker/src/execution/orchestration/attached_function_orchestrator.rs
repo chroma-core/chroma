@@ -846,7 +846,8 @@ impl Handler<TaskResult<GetAttachedFunctionOutput, GetAttachedFunctionOperatorEr
             if !self.output_context.is_fn_consumer {
                 if let Some(work_queue_client) = &self.output_context.work_queue_client {
                     let operator = Box::new(QueueFunctionOperator::new(work_queue_client.clone()));
-                    let compaction_offset = self.get_input_collection_info().collection.log_position;
+                    let compaction_offset =
+                        self.get_input_collection_info().collection.log_position;
                     let input = QueueFunctionInput::new(
                         async_attached_function.id,
                         self.get_input_collection_info().collection_id,
@@ -864,7 +865,9 @@ impl Handler<TaskResult<GetAttachedFunctionOutput, GetAttachedFunctionOperatorEr
                         return;
                     }
                 } else {
-                    tracing::error!("Async attached function found but no WorkQueue client configured");
+                    tracing::error!(
+                        "Async attached function found but no WorkQueue client configured"
+                    );
                     self.terminate_with_result(
                         Err(AttachedFunctionOrchestratorError::InvariantViolation(
                             "Async function requires WorkQueue configuration".to_string(),
