@@ -20,6 +20,7 @@ rmcp = { version = "1.8.0", features = ["transport-streamable-http-server"] }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tower-http = { workspace = true }
@@ -42,5 +43,6 @@ frontend-core = { workspace = true }
 mdac = { workspace = true }
 
 [dev-dependencies]
+clap = { workspace = true }
 httpmock = "0.8.2"
 tower = { workspace = true }
