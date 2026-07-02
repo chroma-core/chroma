@@ -29,9 +29,7 @@ use chroma_types::{
     Metadata, QueryResponse, UpdateCollectionConfiguration, UpdateCollectionRequest,
     UpdateMetadata, WrappedSerdeJsonError,
 };
-use pyo3::{
-    exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, Python,
-};
+use pyo3::{exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, Python};
 use std::time::SystemTime;
 const DEFAULT_DATABASE: &str = "default_database";
 const DEFAULT_TENANT: &str = "default_tenant";

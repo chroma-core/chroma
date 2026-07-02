@@ -159,10 +159,10 @@ def test_async_conditional_transaction_routes_to_internal_hooks() -> None:
     asyncio.run(run())
 
 
-def test_rust_bindings_conditional_transaction_reports_unsupported(
-    rust_sqlite_ephemeral: System,
+def test_embedded_conditional_transaction_reports_unsupported(
+    sqlite: System,
 ) -> None:
-    client = ClientCreator.from_system(rust_sqlite_ephemeral)
+    client = ClientCreator.from_system(sqlite)
     try:
         collection = client.create_collection(
             name=f"conditional-{uuid4()}",
