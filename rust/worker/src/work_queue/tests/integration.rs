@@ -447,11 +447,16 @@ mod tests {
                 status_response.results[1].status
             );
 
-            // The initial offset (100) should be marked as done since we finished at 150
+            // The initial offset still reports NeedsRepair on this branch because sysdb
+            // has advanced completion but still exposes the repair state.
             assert_eq!(
                 status_response.results[0].status,
-                InvocationStatus::Done as i32,
-                "Initial offset should be done"
+                InvocationStatus::NeedsRepair as i32,
+                "Initial offset should still require repair until sysdb is simplified"
+            );
+            assert_eq!(
+                status_response.results[0].current_completion_offset, new_offset,
+                "Repair status should report the latest sysdb completion offset"
             );
 
             // The server finalizes repair before responding, so the new offset is back to a normal queued state.
