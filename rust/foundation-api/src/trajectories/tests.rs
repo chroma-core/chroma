@@ -32,7 +32,7 @@ type TestResult = Result<(), Box<dyn Error>>;
 
 /// Build a boxed test failure with a plain message.
 fn test_error(message: impl Into<String>) -> Box<dyn Error> {
-    Box::new(io::Error::new(io::ErrorKind::Other, message.into()))
+    Box::new(io::Error::other(message.into()))
 }
 
 /// Build a collection handle backed by a mocked Chroma endpoint.
