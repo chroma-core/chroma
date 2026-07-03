@@ -5,6 +5,7 @@ import chromadb
 from chromadb.config import Settings, System
 from chromadb.api import ClientAPI
 import chromadb.server.fastapi
+from chromadb.api.async_fastapi import AsyncFastAPI
 from chromadb.api.fastapi import FastAPI
 import pytest
 import tempfile
@@ -151,6 +152,25 @@ def test_fastapi_uses_http_limits_from_settings() -> None:
     assert limits.max_keepalive_connections == 16
     assert captured["timeout"] is None
     assert captured["verify"] is True
+
+
+@pytest.mark.asyncio
+async def test_async_fastapi_heartbeat_uses_heartbeat_endpoint() -> None:
+    settings = Settings(
+        chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPI",
+        chroma_server_host="localhost",
+        chroma_server_http_port=8000,
+    )
+    system = System(settings)
+    client = AsyncFastAPI(system)
+
+    async def mock_make_request(method: str, path: str) -> Dict[str, int]:
+        assert method == "get"
+        assert path == "/heartbeat"
+        return {"nanosecond heartbeat": 1234567890}
+
+    with patch.object(client, "_make_request", mock_make_request):
+        assert await client.heartbeat() == 1234567890
 
 
 def test_persistent_client_close() -> None:
