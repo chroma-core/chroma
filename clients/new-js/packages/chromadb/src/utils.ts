@@ -767,12 +767,12 @@ export const parseConnectionPath = (path: string) => {
 
     const ssl = url.protocol === "https:";
     const host = url.hostname;
-    const port = url.port;
+    const port = url.port ? Number(url.port) : undefined;
 
     return {
       ssl,
       host,
-      port: Number(port),
+      port,
     };
   } catch {
     throw new ChromaValueError(`Invalid URL: ${path}`);

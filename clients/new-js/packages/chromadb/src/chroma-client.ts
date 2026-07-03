@@ -107,7 +107,7 @@ export class ChromaClient {
       const parsedPath = parseConnectionPath(args.path);
       ssl = parsedPath.ssl;
       host = parsedPath.host;
-      port = parsedPath.port;
+      port = parsedPath.port ?? port;
     }
 
     if (args.auth) {
