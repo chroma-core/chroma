@@ -28,10 +28,44 @@ test("deprecated path parsing preserves the default client port when no port is 
   });
 });
 
-test("deprecated path parsing keeps explicit custom ports", () => {
+test("deprecated path parsing keeps explicit ports", () => {
+  expect(parseConnectionPath("http://localhost:80")).toEqual({
+    ssl: false,
+    host: "localhost",
+    port: 80,
+  });
+
+  expect(parseConnectionPath("https://api.trychroma.com:443")).toEqual({
+    ssl: true,
+    host: "api.trychroma.com",
+    port: 443,
+  });
+
   expect(parseConnectionPath("http://localhost:8001")).toEqual({
     ssl: false,
     host: "localhost",
     port: 8001,
   });
+});
+
+test("deprecated path client keeps the default port when the path omits a port", () => {
+  const chroma = new ChromaClient({ path: "http://localhost" });
+
+  expect((chroma as any).apiClient.getConfig().baseUrl).toBe(
+    "http://localhost:8000",
+  );
+});
+
+test("deprecated path client keeps explicit default ports", () => {
+  const httpClient = new ChromaClient({ path: "http://localhost:80" });
+  const httpsClient = new ChromaClient({
+    path: "https://api.trychroma.com:443",
+  });
+
+  expect((httpClient as any).apiClient.getConfig().baseUrl).toBe(
+    "http://localhost:80",
+  );
+  expect((httpsClient as any).apiClient.getConfig().baseUrl).toBe(
+    "https://api.trychroma.com:443",
+  );
 });

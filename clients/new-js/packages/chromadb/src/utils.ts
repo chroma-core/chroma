@@ -763,11 +763,18 @@ export const validateNResults = (nResults: number) => {
 
 export const parseConnectionPath = (path: string) => {
   try {
+    const explicitPort = path.match(
+      /^[a-z][a-z\d+.-]*:\/\/(?:[^@/?#]*@)?(?:\[[^\]]+\]|[^:/?#]+):(\d+)(?=[/?#]|$)/i,
+    )?.[1];
     const url = new URL(path);
 
     const ssl = url.protocol === "https:";
     const host = url.hostname;
-    const port = url.port ? Number(url.port) : undefined;
+    const port = explicitPort
+      ? Number(explicitPort)
+      : url.port
+      ? Number(url.port)
+      : undefined;
 
     return {
       ssl,
