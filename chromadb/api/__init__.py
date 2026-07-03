@@ -582,7 +582,7 @@ class AdminAPI(ABC):
         """Create a new database. Raises an error if the database already exists.
 
         Args:
-            database: The name of the database to create.
+            name: The name of the database to create.
 
         """
         pass
@@ -592,7 +592,7 @@ class AdminAPI(ABC):
         """Get a database. Raises an error if the database does not exist.
 
         Args:
-            database: The name of the database to get.
+            name: The name of the database to get.
             tenant: The tenant of the database to get.
 
         """
@@ -603,7 +603,7 @@ class AdminAPI(ABC):
         """Delete a database. Raises an error if the database does not exist.
 
         Args:
-            database: The name of the database to delete.
+            name: The name of the database to delete.
             tenant: The tenant of the database to delete.
 
         """
@@ -629,7 +629,7 @@ class AdminAPI(ABC):
         """Create a new tenant. Raises an error if the tenant already exists.
 
         Args:
-            tenant: The name of the tenant to create.
+            name: The name of the tenant to create.
 
         """
         pass
@@ -639,7 +639,7 @@ class AdminAPI(ABC):
         """Get a tenant. Raises an error if the tenant does not exist.
 
         Args:
-            tenant: The name of the tenant to get.
+            name: The name of the tenant to get.
 
         """
         pass
