@@ -308,7 +308,7 @@ impl QueueState {
         fn_id: &AttachedFunctionUuid,
         input_coll_id: &CollectionUuid,
         completion_offset: i64,
-    ) -> bool {
+    ) {
         let key = (*fn_id, *input_coll_id);
 
         if let Some(existing_offsets) = self.dedup_index.get_mut(&key) {
@@ -320,11 +320,9 @@ impl QueueState {
                 // Remove from dedup index
                 self.dedup_index.remove(&key);
                 self.dirty = true;
-                return true;
+                return;
             }
         }
-
-        false
     }
 }
 
