@@ -351,7 +351,12 @@ class SegmentAPI(ServerAPI):
         )
 
         if existing:
-            return existing[0]
+            # Object-level authorization: sysdb ignores tenant when an id is
+            # supplied (it assumes a UUID is globally unique), so re-check here.
+            coll = existing[0]
+            if coll.tenant != tenant or coll.database != database:
+                raise NotFoundError(f"Collection {collection_id} does not exist.")
+            return coll
         else:
             raise NotFoundError(f"Collection {collection_id} does not exist.")
 
@@ -405,7 +410,7 @@ class SegmentAPI(ServerAPI):
             validate_update_metadata(new_metadata)
 
         # Ensure the collection exists
-        _ = self._get_collection(id)
+        _ = self._get_collection(id, tenant=tenant, database=database)
 
         self._quota_enforcer.enforce(
             action=Action.UPDATE_COLLECTION,
@@ -516,7 +521,7 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        coll = self._get_collection(collection_id)
+        coll = self._get_collection(collection_id, tenant=tenant, database=database)
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
         validate_batch(
             (ids, embeddings, metadatas, documents, uris),
@@ -572,7 +577,7 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        coll = self._get_collection(collection_id)
+        coll = self._get_collection(collection_id, tenant=tenant, database=database)
         self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
         validate_batch(
             (ids, embeddings, metadatas, documents, uris),
@@ -629,7 +634,7 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        coll = self._get_collection(collection_id)
+        coll = self._get_collection(collection_id, tenant=tenant, database=database)
         self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
         validate_batch(
             (ids, embeddings, metadatas, documents, uris),
@@ -690,7 +695,7 @@ class SegmentAPI(ServerAPI):
             }
         )
 
-        scan = self._scan(collection_id)
+        scan = self._scan(collection_id, tenant=tenant, database=database)
 
         # TODO: Replace with unified validation
         if where is not None:
@@ -780,7 +785,7 @@ class SegmentAPI(ServerAPI):
                 """
             )
 
-        scan = self._scan(collection_id)
+        scan = self._scan(collection_id, tenant=tenant, database=database)
 
         self._quota_enforcer.enforce(
             action=Action.DELETE,
@@ -845,7 +850,9 @@ class SegmentAPI(ServerAPI):
         read_level: ReadLevel = ReadLevel.INDEX_AND_WAL,
     ) -> int:
         add_attributes_to_current_span({"collection_id": str(collection_id)})
-        return self._executor.count(CountPlan(self._scan(collection_id)))
+        return self._executor.count(
+            CountPlan(self._scan(collection_id, tenant=tenant, database=database))
+        )
 
     @trace_method("SegmentAPI._query", OpenTelemetryGranularity.OPERATION)
     # We retry on version mismatch errors because the version of the collection
@@ -906,7 +913,7 @@ class SegmentAPI(ServerAPI):
         if where_document is not None:
             validate_where_document(where_document)
 
-        scan = self._scan(collection_id)
+        scan = self._scan(collection_id, tenant=tenant, database=database)
         for embedding in query_embeddings:
             self._validate_dimension(scan.collection, len(embedding), update=False)
 
@@ -1067,17 +1074,39 @@ class SegmentAPI(ServerAPI):
             return  # all is well
 
     @trace_method("SegmentAPI._get_collection", OpenTelemetryGranularity.ALL)
-    def _get_collection(self, collection_id: UUID) -> t.Collection:
+    def _get_collection(
+        self,
+        collection_id: UUID,
+        tenant: Optional[str] = None,
+        database: Optional[str] = None,
+    ) -> t.Collection:
+        """Resolve a collection by id. If tenant+database are supplied, enforce
+        that the collection belongs to that tenant/database (object-level
+        authorization). Raises NotFoundError on mismatch to avoid leaking the
+        existence of a collection owned by another tenant."""
         collections = self._sysdb.get_collections(id=collection_id)
         if not collections or len(collections) == 0:
             raise NotFoundError(f"Collection {collection_id} does not exist.")
-        return collections[0]
+        coll = collections[0]
+        if tenant is not None and database is not None:
+            if coll.tenant != tenant or coll.database != database:
+                raise NotFoundError(f"Collection {collection_id} does not exist.")
+        return coll
 
     @trace_method("SegmentAPI._scan", OpenTelemetryGranularity.OPERATION)
-    def _scan(self, collection_id: UUID) -> Scan:
+    def _scan(
+        self,
+        collection_id: UUID,
+        tenant: Optional[str] = None,
+        database: Optional[str] = None,
+    ) -> Scan:
         collection_and_segments = self._sysdb.get_collection_with_segments(
             collection_id
         )
+        if tenant is not None and database is not None:
+            coll = collection_and_segments["collection"]
+            if coll.tenant != tenant or coll.database != database:
+                raise NotFoundError(f"Collection {collection_id} does not exist.")
         # For now collection should have exactly one segment per scope:
         # - Local scopes: vector, metadata
         # - Distributed scopes: vector, metadata, record
