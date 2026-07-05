@@ -1448,6 +1448,13 @@ def validate_documents(documents: Documents, nullable: bool = False) -> None:
             continue
         if not is_document(document):
             raise ValueError(f"Expected document to be a str, got {document}")
+        if "\x00" in document:
+            # Embedded NUL bytes corrupt the SQLite FTS5 inverted index used for
+            # full-text search, breaking queries for the whole collection.
+            raise ValueError(
+                "Expected document to not contain NUL (0x00) bytes, "
+                f"got a document with a NUL byte at index {document.index(chr(0))}"
+            )
 
 
 def validate_images(images: Images) -> None:
