@@ -25,6 +25,7 @@ use chroma::{
 };
 use chroma_types::Collection;
 use httpmock::MockServer;
+use proptest::prelude::*;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -345,6 +346,26 @@ fn fixed_base36_byte_decoding_returns_big_endian_bytes() -> TestResult {
         );
     }
     Ok(())
+}
+
+proptest! {
+    /// Verifies base36 byte encoding round-trips arbitrary big-endian bytes.
+    #[test]
+    fn base36_byte_encoding_round_trips_arbitrary_big_endian_bytes(
+        bytes in proptest::collection::vec(any::<u8>(), 0..=64),
+    ) {
+        // Because 36^2 > 256, two base36 digits per input byte is always
+        // enough to represent the value. The zero-length input still needs one
+        // output digit because the encoder represents zero as "0".
+        let width = bytes.len().saturating_mul(2).max(1);
+
+        let encoded = encode_be_bytes_base36(&bytes, width)
+            .map_err(|err| TestCaseError::fail(err.to_string()))?;
+        let decoded = decode_fixed_base36_to_be_bytes(&encoded, bytes.len())
+            .map_err(|err| TestCaseError::fail(err.to_string()))?;
+
+        prop_assert_eq!(decoded, bytes);
+    }
 }
 
 #[test]

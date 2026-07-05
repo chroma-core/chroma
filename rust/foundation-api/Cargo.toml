@@ -45,4 +45,5 @@ mdac = { workspace = true }
 [dev-dependencies]
 clap = { workspace = true }
 httpmock = "0.8.2"
+proptest = { workspace = true }
 tower = { workspace = true }

@@ -91,9 +91,15 @@ pub(crate) fn encode_be_bytes_base36(
     let mut number = bytes.to_vec();
     let mut digits = Vec::new();
 
+    // Treat `number` as one big-endian base-256 integer. Each outer pass
+    // divides it by 36 in place; the remainder from that division is the next
+    // least-significant base36 digit, so `digits` is built in reverse order.
     while number.iter().any(|byte| *byte != 0) {
         let mut remainder = 0u16;
         for byte in &mut number {
+            // This is the usual long-division carry: the remainder that could
+            // not be divided at the previous byte becomes the high base-256
+            // limb for the current byte.
             let value = remainder
                 .checked_mul(256)
                 .and_then(|value| value.checked_add(u16::from(*byte)))
