@@ -517,7 +517,7 @@ impl CompactionContext {
         system: System,
         is_getting_compacted_logs: bool,
     ) -> Result<LogFetchOrchestratorResponse, LogFetchOrchestratorError> {
-        self.run_get_logs_with_attached_function(
+        self.run_get_logs_inner(
             collection_id,
             database_name,
             system,
@@ -535,7 +535,7 @@ impl CompactionContext {
         is_getting_compacted_logs: bool,
         attached_function_id: chroma_types::AttachedFunctionUuid,
     ) -> Result<LogFetchOrchestratorResponse, LogFetchOrchestratorError> {
-        self.run_get_logs_with_attached_function(
+        self.run_get_logs_inner(
             collection_id,
             database_name,
             system,
@@ -545,7 +545,7 @@ impl CompactionContext {
         .await
     }
 
-    async fn run_get_logs_with_attached_function(
+    async fn run_get_logs_inner(
         &mut self,
         collection_id: CollectionUuid,
         database_name: chroma_types::DatabaseName,
