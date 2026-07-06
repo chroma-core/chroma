@@ -332,9 +332,6 @@ impl Orchestrator for LogFetchOrchestrator {
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
         if self.context.is_fn_consumer {
-            let attached_function_id = self
-                .attached_function_id_filter
-                .expect("fn-consumer log fetch requires an attached function id filter");
             vec![(
                 wrap(
                     Box::new(GetAttachedFunctionOperator::new(
@@ -343,7 +340,7 @@ impl Orchestrator for LogFetchOrchestrator {
                     )),
                     GetAttachedFunctionInput {
                         collection_id: self.collection_id,
-                        attached_function_id: Some(attached_function_id),
+                        attached_function_id: self.attached_function_id_filter,
                     },
                     ctx.receiver(),
                     self.context
