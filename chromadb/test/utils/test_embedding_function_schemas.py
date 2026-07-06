@@ -241,6 +241,110 @@ class TestEmbeddingFunctionSchemas:
 
         sentence_transformers.SparseEncoder.assert_not_called()
 
+    @pytest.mark.parametrize(
+        "ef_class,config",
+        [
+            (
+                SentenceTransformerEmbeddingFunction,
+                {
+                    "model_name": "all-MiniLM-L6-v2",
+                    "device": "cpu",
+                    "normalize_embeddings": False,
+                    "kwargs": {"model_kwargs": {"trust_remote_code": True}},
+                },
+            ),
+            (
+                SentenceTransformerEmbeddingFunction,
+                {
+                    "model_name": "all-MiniLM-L6-v2",
+                    "device": "cpu",
+                    "normalize_embeddings": False,
+                    "kwargs": {"config_kwargs": {"trust_remote_code": True}},
+                },
+            ),
+            (
+                SentenceTransformerEmbeddingFunction,
+                {
+                    "model_name": "all-MiniLM-L6-v2",
+                    "device": "cpu",
+                    "normalize_embeddings": False,
+                    "kwargs": {"tokenizer_kwargs": {"trust_remote_code": True}},
+                },
+            ),
+            (
+                HuggingFaceSparseEmbeddingFunction,
+                {
+                    "model_name": "naver/splade-v3",
+                    "device": "cpu",
+                    "kwargs": {"model_kwargs": {"trust_remote_code": True}},
+                },
+            ),
+            (
+                HuggingFaceSparseEmbeddingFunction,
+                {
+                    "model_name": "naver/splade-v3",
+                    "device": "cpu",
+                    "kwargs": {"processor_kwargs": {"trust_remote_code": True}},
+                },
+            ),
+        ],
+    )
+    def test_nested_trust_remote_code_rejected_by_build_from_config(
+        self,
+        ef_class: Any,
+        config: Dict[str, Any],
+        mock_common_deps: MonkeyPatch,
+    ) -> None:
+        with pytest.raises(ValueError, match="trust_remote_code is not allowed"):
+            ef_class.build_from_config(config)
+
+    def test_sentence_transformer_nested_trust_remote_code_rejected(
+        self, mock_common_deps: MonkeyPatch
+    ) -> None:
+        import sentence_transformers
+
+        sentence_transformers.SentenceTransformer.reset_mock()
+
+        with pytest.raises(ValueError, match="trust_remote_code is not allowed"):
+            SentenceTransformerEmbeddingFunction(
+                model_kwargs={"trust_remote_code": True}
+            )
+
+        sentence_transformers.SentenceTransformer.assert_not_called()
+
+    def test_huggingface_sparse_nested_trust_remote_code_rejected(
+        self, mock_common_deps: MonkeyPatch
+    ) -> None:
+        import sentence_transformers
+
+        sentence_transformers.SparseEncoder.reset_mock()
+
+        with pytest.raises(ValueError, match="trust_remote_code is not allowed"):
+            HuggingFaceSparseEmbeddingFunction(
+                model_name="naver/splade-v3",
+                device="cpu",
+                config_kwargs={"trust_remote_code": True},
+            )
+
+        sentence_transformers.SparseEncoder.assert_not_called()
+
+    def test_benign_kwargs_are_preserved(self, mock_common_deps: MonkeyPatch) -> None:
+        import sentence_transformers
+
+        sentence_transformers.SentenceTransformer.reset_mock()
+
+        ef = SentenceTransformerEmbeddingFunction(
+            model_name="test-benign-st-model",
+            cache_folder="/tmp/models",
+            model_kwargs={"torch_dtype": "float16"},
+        )
+
+        assert ef.kwargs == {
+            "cache_folder": "/tmp/models",
+            "model_kwargs": {"torch_dtype": "float16"},
+        }
+        sentence_transformers.SentenceTransformer.assert_called_once()
+
     def _create_valid_config_from_schema(
         self, schema: Dict[str, Any]
     ) -> Dict[str, Any]:

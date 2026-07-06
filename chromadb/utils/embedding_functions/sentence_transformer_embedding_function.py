@@ -1,6 +1,9 @@
 from chromadb.api.types import EmbeddingFunction, Space, Embeddings, Documents
 from typing import List, Dict, Any
 import numpy as np
+from chromadb.utils.embedding_functions.config_validation import (
+    validate_embedding_function_kwargs_are_safe,
+)
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 
 
@@ -35,10 +38,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         self.model_name = model_name
         self.device = device
         self.normalize_embeddings = normalize_embeddings
-        if "trust_remote_code" in kwargs:
-            raise ValueError(
-                "trust_remote_code is not allowed as a kwarg to prevent arbitrary remote code execution"
-            )
+        validate_embedding_function_kwargs_are_safe(kwargs)
         for key, value in kwargs.items():
             if not isinstance(value, (str, int, float, bool, list, dict, tuple)):
                 raise ValueError(f"Keyword argument {key} is not a primitive type")
