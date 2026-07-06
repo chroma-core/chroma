@@ -300,19 +300,19 @@ impl QueueState {
         true
     }
 
-    /// Mark work as successfully completed
-    /// Returns true if any work was actually removed
+    /// Mark work as successfully completed.
+    /// Removes the queue entry once completion reaches the queued frontier;
+    /// otherwise leaves the queued entry unchanged.
     pub fn finish_work_success(
         &mut self,
         fn_id: &AttachedFunctionUuid,
         input_coll_id: &CollectionUuid,
         completion_offset: i64,
-    ) -> bool {
+    ) {
         let key = (*fn_id, *input_coll_id);
 
-        // Check if there's an entry to remove
-        if let Some(&existing_offsets) = self.dedup_index.get(&key) {
-            if existing_offsets.completion_offset <= completion_offset {
+        if let Some(existing_offsets) = self.dedup_index.get_mut(&key) {
+            if existing_offsets.dedup_frontier() <= completion_offset {
                 // Remove the single entry for this key
                 self.pending_work
                     .retain(|r| !(r.fn_id == *fn_id && r.input_coll_id == *input_coll_id));
@@ -320,11 +320,8 @@ impl QueueState {
                 // Remove from dedup index
                 self.dedup_index.remove(&key);
                 self.dirty = true;
-                return true;
             }
         }
-
-        false
     }
 }
 
@@ -453,5 +450,24 @@ mod tests {
         assert_eq!(state.pending_work.len(), 1);
         assert_eq!(state.pending_work[0].completion_offset, 20);
         assert_eq!(state.pending_work[0].compaction_offset, Some(60));
+    }
+
+    #[test]
+    fn test_finish_work_waits_for_compaction_offset() {
+        let mut state = QueueState::new();
+
+        let fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let coll_id = CollectionUuid(Uuid::new_v4());
+
+        state.push_work(fn_id, coll_id, 20, Some(60));
+        assert_eq!(state.pending_work.len(), 1);
+
+        state.finish_work_success(&fn_id, &coll_id, 40);
+        assert_eq!(state.pending_work.len(), 1);
+        assert_eq!(state.pending_work[0].completion_offset, 20);
+        assert_eq!(state.pending_work[0].compaction_offset, Some(60));
+
+        state.finish_work_success(&fn_id, &coll_id, 60);
+        assert_eq!(state.pending_work.len(), 0);
     }
 }

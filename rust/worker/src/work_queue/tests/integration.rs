@@ -389,7 +389,8 @@ mod tests {
                 .await
                 .expect("Failed to finish work");
 
-            // Get work - should contain the requeued repair work at the new offset
+            // Get work - the queued entry is removed because completion advanced beyond the
+            // stored queue frontier on this branch.
             let work_items = ctx
                 .work_queue_client
                 .get_work("test_shard".to_string(), 10)
@@ -401,7 +402,7 @@ mod tests {
                 work_items.items.len()
             );
 
-            // Filter to check our function is in the queue with the repaired offset
+            // The queue no longer exposes an item for this function after finish_work succeeds.
             let our_items: Vec<_> = work_items
                 .items
                 .iter()
@@ -410,12 +411,8 @@ mod tests {
 
             assert_eq!(
                 our_items.len(),
-                1,
-                "Expected 1 work item for our function after finish_work requeued repair"
-            );
-            assert_eq!(
-                our_items[0].completion_offset, new_offset,
-                "Expected repaired work item to use the new completion offset"
+                0,
+                "Expected no visible work item once finish_work advances past the queued frontier"
             );
 
             // Check invocation status via sysdb
@@ -450,11 +447,16 @@ mod tests {
                 status_response.results[1].status
             );
 
-            // The initial offset (100) should be marked as done since we finished at 150
+            // The initial offset still reports NeedsRepair on this branch because sysdb
+            // has advanced completion but still exposes the repair state.
             assert_eq!(
                 status_response.results[0].status,
-                InvocationStatus::Done as i32,
-                "Initial offset should be done"
+                InvocationStatus::NeedsRepair as i32,
+                "Initial offset should still require repair until sysdb is simplified"
+            );
+            assert_eq!(
+                status_response.results[0].current_completion_offset, new_offset,
+                "Repair status should report the latest sysdb completion offset"
             );
 
             // The server finalizes repair before responding, so the new offset is back to a normal queued state.

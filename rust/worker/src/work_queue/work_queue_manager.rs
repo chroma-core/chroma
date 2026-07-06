@@ -14,7 +14,6 @@ use chroma_storage::{GetOptions, PutMode, PutOptions, Storage};
 use chroma_sysdb::SysDb;
 use chroma_system::{Component, ComponentContext, ComponentRuntime, Handler};
 use chroma_types::chroma_proto::{
-    try_finish_async_attached_function_invocation_response::Result as TryFinishResult,
     CheckInvocationStatusRequest, InvocationCheckItem, InvocationStatus, InvocationStatusResult,
     TryFinishAsyncAttachedFunctionInvocationRequest,
 };
@@ -282,36 +281,25 @@ impl WorkQueueManager {
         }
     }
 
-    // Call sysdb's TryFinishAsyncAttachedFunctionInvocation
+    // Update sysdb's completion offset for an async attached function invocation.
     #[tracing::instrument(name = "WorkQueueManager::try_finish_invocation", skip(self))]
     async fn try_finish_invocation(
         &mut self,
         fn_id: &AttachedFunctionUuid,
         input_coll_id: &CollectionUuid,
         completion_offset: i64,
-    ) -> Result<FinishResult, WorkQueueError> {
+    ) -> Result<(), WorkQueueError> {
         let request = TryFinishAsyncAttachedFunctionInvocationRequest {
             attached_function_id: fn_id.to_string(),
             collection_id: input_coll_id.to_string(),
             new_completion_offset: completion_offset as u64,
         };
 
-        let response = self
-            .sysdb
+        self.sysdb
             .try_finish_async_attached_function_invocation(request)
             .await
             .map_err(|e| WorkQueueError::TryFinishFailed(e.message().to_string()))?;
-
-        let inner = response.into_inner();
-        match inner.result {
-            Some(result) => match result {
-                TryFinishResult::Success(_) => Ok(FinishResult::Success),
-                TryFinishResult::NeedsRepair(_) => Ok(FinishResult::NeedsRepair),
-            },
-            None => Err(WorkQueueError::TryFinishFailed(
-                "Empty response".to_string(),
-            )),
-        }
+        Ok(())
     }
 
     // Check invocation completion status (boolean version for compatibility)
@@ -551,47 +539,23 @@ impl Handler<FinishWorkMessage> for WorkQueueManager {
 
     async fn handle(&mut self, msg: FinishWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
         // Call sysdb
-        let finish_result = match self
+        if let Err(e) = self
             .try_finish_invocation(&msg.fn_id, &msg.input_coll_id, msg.new_completion_offset)
             .await
         {
-            Ok(result) => result,
-            Err(e) => {
-                if msg.response_tx.send(Err(e)).is_err() {
-                    tracing::error!("Failed to send error response");
-                }
-                return;
+            if msg.response_tx.send(Err(e)).is_err() {
+                tracing::error!("Failed to send error response");
             }
-        };
+            return;
+        }
 
-        match finish_result {
-            FinishResult::Success => {
-                // Use encapsulated finish_work_success method
-                self.state.finish_work_success(
-                    &msg.fn_id,
-                    &msg.input_coll_id,
-                    msg.new_completion_offset,
-                );
+        // Use the queued compaction frontier to decide whether to remove or advance the entry.
+        self.state
+            .finish_work_success(&msg.fn_id, &msg.input_coll_id, msg.new_completion_offset);
 
-                // Send immediate success response
-                if msg.response_tx.send(Ok(FinishResult::Success)).is_err() {
-                    tracing::error!(
-                        "Failed to send finish work success response - receiver dropped"
-                    );
-                }
-                return;
-            }
-            FinishResult::NeedsRepair => {
-                // Re-push work and queue response atomically
-                self.push_work_and_queue_response(
-                    msg.fn_id,
-                    msg.input_coll_id,
-                    msg.new_completion_offset,
-                    None,
-                    WorkResponse::Repair(msg.response_tx),
-                )
-                .await;
-            }
+        // Send immediate success response
+        if msg.response_tx.send(Ok(FinishResult::Success)).is_err() {
+            tracing::error!("Failed to send finish work success response - receiver dropped");
         }
 
         // Check if persist needed
