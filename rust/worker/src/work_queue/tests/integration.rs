@@ -407,7 +407,8 @@ mod tests {
                 work_items.items.len()
             );
 
-            // The queue still exposes a repaired item for this function on this branch.
+            // The queued entry is removed because completion advanced beyond the
+            // stored queue frontier on this branch.
             let our_items: Vec<_> = work_items
                 .items
                 .iter()
@@ -416,8 +417,8 @@ mod tests {
 
             assert_eq!(
                 our_items.len(),
-                1,
-                "Expected repair to keep a visible work item on this branch"
+                0,
+                "Expected no visible work item once finish_work advances past the queued frontier"
             );
 
             // Check invocation status via sysdb
