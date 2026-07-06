@@ -337,7 +337,7 @@ impl QueueState {
     }
 
     /// Mark work as successfully completed.
-    /// Removes the queue entry once completion reaches the queued frontier;
+    /// Removes the queue entry once completion advances beyond the queued frontier;
     /// otherwise leaves the queued entry unchanged.
     pub fn finish_work_success(
         &mut self,
@@ -348,7 +348,7 @@ impl QueueState {
         let key = (*fn_id, *input_coll_id);
 
         if let Some(existing_offsets) = self.dedup_index.get_mut(&key) {
-            if existing_offsets.dedup_frontier() <= completion_offset {
+            if completion_offset > existing_offsets.dedup_frontier() {
                 // Remove the single entry for this key
                 self.pending_work
                     .retain(|r| !(r.fn_id == *fn_id && r.input_coll_id == *input_coll_id));
@@ -513,6 +513,10 @@ mod tests {
         assert_eq!(state.pending_work[0].compaction_offset, 60);
 
         state.finish_work_success(&fn_id, &coll_id, 60);
+        assert_eq!(state.pending_work.len(), 1);
+        assert_eq!(state.pending_work[0].completion_offset, 60);
+
+        state.finish_work_success(&fn_id, &coll_id, 61);
         assert_eq!(state.pending_work.len(), 0);
     }
 }
