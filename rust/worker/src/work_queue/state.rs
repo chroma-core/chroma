@@ -269,6 +269,8 @@ impl QueueState {
             }
         }
 
+        // We eagerly drop the older queue row here for simplicity; we could
+        // remove this retain later if get_work learns to skip stale rows lazily.
         self.pending_work
             .retain(|r| !(r.fn_id == fn_id && r.input_coll_id == input_coll_id));
 
@@ -287,7 +289,6 @@ impl QueueState {
 
         true
     }
-
     /// Mark work as successfully completed.
     /// Removes the queue entry once completion reaches the queued frontier;
     /// otherwise leaves the queued entry unchanged.
