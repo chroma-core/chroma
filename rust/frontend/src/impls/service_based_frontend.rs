@@ -20,38 +20,40 @@ use chroma_sysdb::{DatabaseOrTopology, GetCollectionsOptions, SysDb};
 use chroma_system::System;
 use chroma_types::chroma_proto::PushLogsCondition;
 use chroma_types::{
+    buffered_write_to_records,
     operator::{
         Aggregate, CountResult, Filter, GetResult, GroupBy, Key, KnnBatch, KnnBatchResult,
         KnnProjection, KnnProjectionOutput, Limit, Projection, ProjectionOutput, Scan,
         SearchPayloadResult, SearchRecord, SearchResult, Select,
     },
     plan::{Count, Get, Knn, Search, SearchPayload},
-    AddAttachedFunctionInputRequest, AddAttachedFunctionInputResponse, AddCollectionRecordsError,
-    AddCollectionRecordsRequest, AddCollectionRecordsResponse, AttachFunctionRequest,
-    AttachFunctionResponse, AttachedFunctionApiResponse, Cmek, Collection, CollectionAndSegments,
-    CollectionUuid, ConditionalBufferedWrite, ConditionalCommitAction, ConditionalCommitError,
-    ConditionalCommitRequest, ConditionalCommitResult, ConditionalTransactionState,
-    CountCollectionsError, CountCollectionsRequest, CountCollectionsResponse, CountRequest,
-    CountResponse, CreateCollectionError, CreateCollectionRequest, CreateCollectionResponse,
-    CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError,
-    CreateTenantRequest, CreateTenantResponse, DatabaseName, DeleteCollectionError,
-    DeleteCollectionRecordsError, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse,
-    DeleteCollectionRequest, DeleteCollectionResponse, DeleteDatabaseError, DeleteDatabaseRequest,
-    DeleteDatabaseResponse, DetachFunctionError, DetachFunctionRequest, DetachFunctionResponse,
-    ExecutorError, ForkCollectionError, ForkCollectionRequest, ForkCollectionResponse,
-    GetCollectionByCrnError, GetCollectionByCrnRequest, GetCollectionByCrnResponse,
-    GetCollectionByIdError, GetCollectionByIdRequest, GetCollectionByIdResponse,
-    GetCollectionError, GetCollectionRequest, GetCollectionResponse, GetCollectionsError,
-    GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
-    GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError,
-    Include, IndexStatusError, IndexStatusResponse, KnnIndex, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
-    OccReadMode, OccReadToken, Operation, OperationRecord, QueryError, QueryRequest, QueryResponse,
-    ResetError, ResetResponse, Schema, SearchRequest, SearchResponse, SegmentType, StaleReadError,
-    UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
-    UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
-    UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsError,
-    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where,
+    validate_conditional_commit_scope, AddAttachedFunctionInputRequest,
+    AddAttachedFunctionInputResponse, AddCollectionRecordsError, AddCollectionRecordsRequest,
+    AddCollectionRecordsResponse, AttachFunctionRequest, AttachFunctionResponse,
+    AttachedFunctionApiResponse, Cmek, Collection, CollectionAndSegments, CollectionUuid,
+    ConditionalBufferedWrite, ConditionalCommitAction, ConditionalCommitError,
+    ConditionalCommitResult, ConditionalTransactionState, CountCollectionsError,
+    CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
+    CreateCollectionError, CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError,
+    CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError, CreateTenantRequest,
+    CreateTenantResponse, DatabaseName, DeleteCollectionError, DeleteCollectionRecordsError,
+    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, DeleteCollectionRequest,
+    DeleteCollectionResponse, DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse,
+    DetachFunctionError, DetachFunctionRequest, DetachFunctionResponse, ExecutorError,
+    ForkCollectionError, ForkCollectionRequest, ForkCollectionResponse, GetCollectionByCrnError,
+    GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionByIdError,
+    GetCollectionByIdRequest, GetCollectionByIdResponse, GetCollectionError, GetCollectionRequest,
+    GetCollectionResponse, GetCollectionsError, GetDatabaseError, GetDatabaseRequest,
+    GetDatabaseResponse, GetRequest, GetResponse, GetTenantError, GetTenantRequest,
+    GetTenantResponse, HealthCheckResponse, HeartbeatError, Include, IndexStatusError,
+    IndexStatusResponse, KnnIndex, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, OccReadMode, OccReadToken,
+    Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
+    Schema, SearchRequest, SearchResponse, SegmentType, StaleReadError, UpdateCollectionError,
+    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
+    UpdateCollectionRequest, UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest,
+    UpdateTenantResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
+    UpsertCollectionRecordsResponse, Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -1573,131 +1575,6 @@ impl ServiceBasedFrontend {
             .await
     }
 
-    fn conditional_commit_invalid_argument(message: impl Into<String>) -> ConditionalCommitError {
-        ConditionalCommitError::Other(Box::new(ValidationError::InvalidArgument(message.into())))
-    }
-
-    fn buffered_write_scope(write: &ConditionalBufferedWrite) -> (&str, &str, CollectionUuid) {
-        match write {
-            ConditionalBufferedWrite::Add(request) => (
-                &request.tenant_id,
-                &request.database_name,
-                request.collection_id,
-            ),
-            ConditionalBufferedWrite::Update(request) => (
-                &request.tenant_id,
-                &request.database_name,
-                request.collection_id,
-            ),
-            ConditionalBufferedWrite::Upsert(request) => (
-                &request.tenant_id,
-                &request.database_name,
-                request.collection_id,
-            ),
-            ConditionalBufferedWrite::Delete(request) => (
-                &request.tenant_id,
-                &request.database_name,
-                request.collection_id,
-            ),
-        }
-    }
-
-    fn validate_conditional_commit_scope(
-        request: &ConditionalCommitRequest,
-    ) -> Result<(String, DatabaseName, CollectionUuid), ConditionalCommitError> {
-        let Some(first_write) = request.buffered_writes.first() else {
-            return Err(Self::conditional_commit_invalid_argument(
-                "conditional commit append request must contain at least one write",
-            ));
-        };
-        let (tenant_id, database_name, collection_id) = Self::buffered_write_scope(first_write);
-        for write in &request.buffered_writes[1..] {
-            let (write_tenant_id, write_database_name, write_collection_id) =
-                Self::buffered_write_scope(write);
-            if write_tenant_id != tenant_id
-                || write_database_name != database_name
-                || write_collection_id != collection_id
-            {
-                return Err(Self::conditional_commit_invalid_argument(
-                    "conditional transaction contains writes for multiple collection scopes",
-                ));
-            }
-        }
-        let database_name = DatabaseName::new(database_name.to_string())
-            .ok_or(ConditionalCommitError::InvalidDatabaseName)?;
-        Ok((tenant_id.to_string(), database_name, collection_id))
-    }
-
-    fn buffered_write_to_records(
-        write: ConditionalBufferedWrite,
-    ) -> Result<(Vec<OperationRecord>, u64), ConditionalCommitError> {
-        match write {
-            ConditionalBufferedWrite::Add(AddCollectionRecordsRequest {
-                ids,
-                embeddings,
-                documents,
-                uris,
-                metadatas,
-                ..
-            }) => {
-                let embeddings = Some(embeddings.into_iter().map(Some).collect());
-                to_records(ids, embeddings, documents, uris, metadatas, Operation::Add)
-                    .map_err(|err| ConditionalCommitError::Other(Box::new(err)))
-            }
-            ConditionalBufferedWrite::Update(UpdateCollectionRecordsRequest {
-                ids,
-                embeddings,
-                documents,
-                uris,
-                metadatas,
-                ..
-            }) => to_records(
-                ids,
-                embeddings,
-                documents,
-                uris,
-                metadatas,
-                Operation::Update,
-            )
-            .map_err(|err| ConditionalCommitError::Other(Box::new(err))),
-            ConditionalBufferedWrite::Upsert(UpsertCollectionRecordsRequest {
-                ids,
-                embeddings,
-                documents,
-                uris,
-                metadatas,
-                ..
-            }) => {
-                let embeddings = Some(embeddings.into_iter().map(Some).collect());
-                to_records(
-                    ids,
-                    embeddings,
-                    documents,
-                    uris,
-                    metadatas,
-                    Operation::Upsert,
-                )
-                .map_err(|err| ConditionalCommitError::Other(Box::new(err)))
-            }
-            ConditionalBufferedWrite::Delete(DeleteCollectionRecordsRequest { ids, .. }) => {
-                let records = ids
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|id| OperationRecord {
-                        id,
-                        operation: Operation::Delete,
-                        document: None,
-                        embedding: None,
-                        encoding: None,
-                        metadata: None,
-                    })
-                    .collect::<Vec<_>>();
-                let log_size_bytes = records.iter().map(OperationRecord::size_bytes).sum();
-                Ok((records, log_size_bytes))
-            }
-        }
-    }
-
     async fn validate_buffered_write_for_commit(
         &mut self,
         write: &ConditionalBufferedWrite,
@@ -1760,7 +1637,7 @@ impl ServiceBasedFrontend {
             .await
             .map_err(ConditionalCommitError::Other)?;
         i64::try_from(scouted_offset).map_err(|_| {
-            Self::conditional_commit_invalid_argument(format!(
+            ConditionalCommitError::InvalidArgument(format!(
                 "scouted log offset {scouted_offset} exceeds i64 range"
             ))
         })
@@ -1775,7 +1652,7 @@ impl ServiceBasedFrontend {
             ConditionalCommitAction::Append(request) => request,
         };
         let (tenant_id, database_name, collection_id) =
-            Self::validate_conditional_commit_scope(&request)?;
+            validate_conditional_commit_scope(&request)?;
         let collection = self
             .get_cached_collection(database_name.clone(), collection_id)
             .await
@@ -1786,10 +1663,11 @@ impl ServiceBasedFrontend {
                 .await?;
         }
 
-        let mut records = Vec::with_capacity(request.record_count());
+        let expected_record_count = request.record_count();
+        let mut records = Vec::with_capacity(expected_record_count);
         let mut log_size_bytes = 0;
         for write in request.buffered_writes {
-            let (mut write_records, write_log_size_bytes) = Self::buffered_write_to_records(write)?;
+            let (mut write_records, write_log_size_bytes) = buffered_write_to_records(write)?;
             log_size_bytes += write_log_size_bytes;
             records.append(&mut write_records);
         }
@@ -1853,9 +1731,21 @@ impl ServiceBasedFrontend {
         });
 
         match res {
-            Ok(push_result) => state
-                .finish_commit(push_result.first_inserted_record_offset)
-                .map_err(ConditionalCommitError::from),
+            Ok(push_result) => {
+                if usize::try_from(push_result.record_count).ok() != Some(expected_record_count) {
+                    tracing::warn!(
+                        expected_record_count,
+                        reported_record_count = push_result.record_count,
+                        %tenant_id,
+                        ?database_name,
+                        %collection_id,
+                        "Log service reported a different conditional commit record count than requested"
+                    );
+                }
+                state
+                    .finish_commit(push_result.first_inserted_record_offset)
+                    .map_err(ConditionalCommitError::from)
+            }
             Err(PushLogsError::Backoff | PushLogsError::BackoffCompaction) => {
                 Err(ConditionalCommitError::Backoff)
             }
@@ -3355,11 +3245,7 @@ mod tests {
             ConditionalBufferedWrite::Update(update),
             ConditionalBufferedWrite::Delete(delete),
         ] {
-            records.extend(
-                ServiceBasedFrontend::buffered_write_to_records(write)
-                    .unwrap()
-                    .0,
-            );
+            records.extend(buffered_write_to_records(write).unwrap().0);
         }
         let got = records
             .into_iter()
