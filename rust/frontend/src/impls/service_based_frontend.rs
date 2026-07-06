@@ -161,6 +161,16 @@ impl ServiceBasedFrontend {
         })
     }
 
+    pub fn ensure_conditional_commit_supported(&self) -> Result<(), ConditionalCommitError> {
+        if self.log_client.supports_conditional_transactions() {
+            return Ok(());
+        }
+
+        Err(ConditionalCommitError::TransactionsNotSupported {
+            implementation: self.log_client.implementation_name().to_string(),
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         allow_reset: bool,
@@ -1878,8 +1888,7 @@ impl ServiceBasedFrontend {
         request: ConditionalCommitRequest,
         region: String,
     ) -> Result<ConditionalCommitResult, ConditionalCommitError> {
-        self.ensure_conditional_transactions_supported()
-            .map_err(ConditionalCommitError::Transaction)?;
+        self.ensure_conditional_commit_supported()?;
         if request.buffered_writes.is_empty() {
             return Ok(ConditionalCommitResult {
                 first_inserted_record_offset: None,
@@ -3439,6 +3448,35 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn conditional_commit_unsupported_log_returns_transactions_not_supported() {
+        let registry = Registry::new();
+        let system = System::new();
+        let config = FrontendConfig::sqlite_in_memory();
+        let mut frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .unwrap();
+
+        let err = frontend
+            .conditional_commit(
+                ConditionalCommitRequest {
+                    buffered_writes: Vec::new(),
+                    observed_log_offset: None,
+                    read_ids: Vec::new(),
+                },
+                String::new(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            ConditionalCommitError::TransactionsNotSupported { ref implementation }
+                if implementation == "sqlite"
+        ));
+        assert_eq!(ErrorCodes::Unimplemented, err.code());
     }
 
     #[test]

@@ -13,6 +13,7 @@ use utoipa::ToSchema;
 
 const BACKOFF_ERROR_NAME: &str = "Backoff";
 const CONDITIONAL_WRITE_CONFLICT_ERROR_NAME: &str = "ConditionalWriteConflictError";
+const TRANSACTIONS_NOT_SUPPORTED_ERROR_NAME: &str = "TransactionsNotSupported";
 
 /// Wrapper around `dyn ChromaError` that implements `IntoResponse`. This means that route handlers can return `Result<_, ServerError>` and use the `?` operator to return arbitrary errors.
 pub struct ServerError(pub Box<dyn ChromaError>);
@@ -52,6 +53,14 @@ fn error_name(err: &(dyn ChromaError + 'static)) -> &'static str {
     }
     if source_chain_contains(err, |source| source.is::<StaleReadError>()) {
         return STALE_READ_ERROR_NAME;
+    }
+    if source_chain_contains(err, |source| {
+        matches!(
+            source.downcast_ref::<ConditionalCommitError>(),
+            Some(ConditionalCommitError::TransactionsNotSupported { .. })
+        )
+    }) {
+        return TRANSACTIONS_NOT_SUPPORTED_ERROR_NAME;
     }
     if source_chain_contains(err, |source| {
         matches!(

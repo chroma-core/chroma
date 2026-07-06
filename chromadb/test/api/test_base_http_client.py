@@ -63,3 +63,21 @@ def test_raise_chroma_error_maps_generic_conditional_write_conflict() -> None:
         errors.ConditionalWriteConflictError, match="conditional write conflict"
     ):
         BaseHTTPClient._raise_chroma_error(response)
+
+
+def test_raise_chroma_error_maps_transactions_not_supported() -> None:
+    request = httpx.Request("POST", "http://localhost/conditional/commit")
+    response = httpx.Response(
+        501,
+        request=request,
+        json={
+            "error": "TransactionsNotSupported",
+            "message": "conditional transactions require the gRPC log implementation",
+        },
+    )
+
+    with pytest.raises(
+        errors.TransactionsNotSupportedError,
+        match="conditional transactions require the gRPC log implementation",
+    ):
+        BaseHTTPClient._raise_chroma_error(response)

@@ -490,6 +490,10 @@ impl ChromaError for ConditionalTransactionError {
 pub enum ConditionalCommitError {
     #[error(transparent)]
     Transaction(#[from] ConditionalTransactionError),
+    #[error(
+        "conditional transactions require the gRPC log implementation; configured log is {implementation}"
+    )]
+    TransactionsNotSupported { implementation: String },
     #[error("Backoff and retry")]
     Backoff,
     #[error("Invalid database name")]
@@ -504,6 +508,7 @@ impl ChromaError for ConditionalCommitError {
     fn code(&self) -> ErrorCodes {
         match self {
             ConditionalCommitError::Transaction(err) => err.code(),
+            ConditionalCommitError::TransactionsNotSupported { .. } => ErrorCodes::Unimplemented,
             ConditionalCommitError::Backoff => ErrorCodes::ResourceExhausted,
             ConditionalCommitError::InvalidDatabaseName => ErrorCodes::InvalidArgument,
             ConditionalCommitError::InvalidArgument(_) => ErrorCodes::InvalidArgument,
@@ -754,6 +759,19 @@ mod tests {
             include: vec![Include::Document, Include::Metadata],
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn transactions_not_supported_commit_error_uses_unimplemented_code() {
+        let err = ConditionalCommitError::TransactionsNotSupported {
+            implementation: "sqlite".to_string(),
+        };
+
+        assert_eq!(ErrorCodes::Unimplemented, err.code());
+        assert_eq!(
+            "conditional transactions require the gRPC log implementation; configured log is sqlite",
+            err.to_string()
+        );
     }
 
     fn metadata_where() -> Where {
