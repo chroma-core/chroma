@@ -149,14 +149,10 @@ pub struct ServiceBasedFrontend {
 }
 
 impl ServiceBasedFrontend {
-    pub fn supports_conditional_transactions(&self) -> bool {
-        self.log_client.supports_conditional_transactions()
-    }
-
     pub fn ensure_conditional_transactions_supported(
         &self,
     ) -> Result<(), ConditionalTransactionError> {
-        if self.supports_conditional_transactions() {
+        if self.log_client.supports_conditional_transactions() {
             return Ok(());
         }
 
