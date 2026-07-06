@@ -383,14 +383,14 @@ mod tests {
                 .await
                 .expect("Failed to push work");
 
-            // Finish work - should trigger repair if collection's log position is ahead
+            // Finish work - the queue frontier should keep the entry alive while sysdb
+            // records that additional work is still needed.
             ctx.work_queue_client
                 .finish_work(fn_id.to_string(), coll_id.to_string(), new_offset)
                 .await
                 .expect("Failed to finish work");
 
-            // Get work - the queued entry is removed because completion advanced beyond the
-            // stored queue frontier on this branch.
+            // Get work - this branch still re-enqueues repair work into the queue.
             let work_items = ctx
                 .work_queue_client
                 .get_work("test_shard".to_string(), 10)
@@ -402,7 +402,7 @@ mod tests {
                 work_items.items.len()
             );
 
-            // The queue no longer exposes an item for this function after finish_work succeeds.
+            // The queue still exposes a repaired item for this function on this branch.
             let our_items: Vec<_> = work_items
                 .items
                 .iter()
@@ -411,8 +411,8 @@ mod tests {
 
             assert_eq!(
                 our_items.len(),
-                0,
-                "Expected no visible work item once finish_work advances past the queued frontier"
+                1,
+                "Expected repair to keep a visible work item on this branch"
             );
 
             // Check invocation status via sysdb
@@ -447,27 +447,27 @@ mod tests {
                 status_response.results[1].status
             );
 
-            // The initial offset still reports NeedsRepair on this branch because sysdb
-            // has advanced completion but still exposes the repair state.
+            // The original queue offset should be marked as needing repair because sysdb's
+            // completion has advanced while the collection frontier is still ahead.
             assert_eq!(
                 status_response.results[0].status,
                 InvocationStatus::NeedsRepair as i32,
-                "Initial offset should still require repair until sysdb is simplified"
+                "Initial offset should still require repair"
             );
             assert_eq!(
                 status_response.results[0].current_completion_offset, new_offset,
                 "Repair status should report the latest sysdb completion offset"
             );
 
-            // The server finalizes repair before responding, so the new offset is back to a normal queued state.
+            // The latest completion offset is not yet done because the collection frontier is ahead.
             assert_eq!(
                 status_response.results[1].status,
                 InvocationStatus::NotDone as i32,
-                "New offset should be marked as not done after repair is finalized"
+                "New offset should be marked as not done until the frontier is reached"
             );
             assert_eq!(
                 status_response.results[1].current_completion_offset, new_offset,
-                "The queued work item should retain the new completion offset after repair"
+                "The latest sysdb completion offset should be returned for the pending work"
             );
         })
         .await;
