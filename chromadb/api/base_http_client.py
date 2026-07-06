@@ -116,7 +116,7 @@ class BaseHTTPClient(Component):
             body = json.loads(resp.text)
             error_name = body.get("error")
             if error_name is not None:
-                message = body.get("message", "")
+                message = body["message"]
                 if error_name in errors.error_types:
                     chroma_error = errors.error_types[error_name](message)
 
@@ -125,6 +125,15 @@ class BaseHTTPClient(Component):
                     if trace_id:
                         chroma_error.trace_id = trace_id
 
+        except KeyError as e:
+            message = (
+                "Chroma error response missing required 'message' field: "
+                f"{resp.text}"
+            )
+            trace_id = resp.headers.get("chroma-trace-id")
+            if trace_id:
+                message = f"{message} (trace ID: {trace_id})"
+            raise ValueError(message) from e
         except BaseException:
             pass
 
