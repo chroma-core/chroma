@@ -320,7 +320,6 @@ impl QueueState {
                 // Remove from dedup index
                 self.dedup_index.remove(&key);
                 self.dirty = true;
-                return;
             }
         }
     }
