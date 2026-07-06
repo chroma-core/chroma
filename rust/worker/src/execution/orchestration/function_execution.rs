@@ -17,7 +17,6 @@ use super::{
 #[derive(Debug, Clone)]
 pub struct FunctionExecutionInput {
     pub collection_id: CollectionUuid,
-    pub queue_completion_offset: i64,
     pub queue_compaction_offset: i64,
 }
 
@@ -110,17 +109,12 @@ impl FunctionExecutionContext {
     }
 
     async fn fetch_function_input_collection_data(
-        mut compaction_context: CompactionContext,
+        compaction_context: CompactionContext,
         collection_id: CollectionUuid,
-        queue_completion_offset: i64,
         attached_function_id: AttachedFunctionUuid,
         database_name: DatabaseName,
         system: System,
     ) -> Result<FunctionInputCollectionData, CompactionError> {
-        // The queue tracks progress per (function, input collection). For
-        // multi-input async functions this is more precise than the shared
-        // attached-function completion watermark.
-        compaction_context.log_start_offset = Some(queue_completion_offset);
         let log_fetch_context = compaction_context;
         let result = match Self::fetch_function_input_logs(
             log_fetch_context.clone(),
@@ -230,28 +224,33 @@ impl FunctionExecutionContext {
             Self::resolve_shared_input_database_name(base_context.clone(), &fn_inputs).await?;
         let mut input_collection_data = Vec::with_capacity(fn_inputs.len());
         for input in fn_inputs {
-            if has_reached_queue_frontier(
-                input.queue_completion_offset,
-                input.queue_compaction_offset,
-            ) {
-                tracing::info!(
-                    collection_id = %input.collection_id,
-                    completion_offset = input.queue_completion_offset,
-                    queue_compaction_offset = input.queue_compaction_offset,
-                    "Skipping stale fn-consumer work item because queue progress is already at or beyond the queued frontier"
-                );
-                continue;
-            }
-
             let collection_data = Box::pin(Self::fetch_function_input_collection_data(
                 base_context.clone(),
                 input.collection_id,
-                input.queue_completion_offset,
                 attached_function_id,
                 shared_database_name.clone(),
                 system.clone(),
             ))
             .await?;
+
+            let completion_offset = collection_data
+                .resolved_attached_functions
+                .iter()
+                .find(|attached_function| attached_function.id == attached_function_id)
+                .map(|attached_function| attached_function.completion_offset as i64)
+                .ok_or(CompactionError::InvariantViolation(
+                    "Missing resolved attached function state for fn-consumer input collection",
+                ))?;
+
+            if has_reached_queue_frontier(completion_offset, input.queue_compaction_offset) {
+                tracing::info!(
+                    collection_id = %input.collection_id,
+                    completion_offset,
+                    queue_compaction_offset = input.queue_compaction_offset,
+                    "Skipping stale fn-consumer work item because attached function is already at or beyond the queued frontier"
+                );
+                continue;
+            }
 
             input_collection_data.push(collection_data);
         }

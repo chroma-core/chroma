@@ -627,23 +627,20 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             self.context.is_rebuild(),
         ) {
             let completion_offset = match self.attached_function_id_filter {
-                Some(_) => match self.context.log_start_offset {
-                    Some(offset) => offset,
-                    None => match self.resolved_attached_functions.as_ref() {
-                        Some(attached_functions) if attached_functions.len() == 1 => {
-                            attached_functions[0].completion_offset as i64
-                        }
-                        _ => {
-                            self.terminate_with_result(
-                                Err(LogFetchOrchestratorError::InvariantViolation(
-                                    "fn-consumer log fetch requires resolved attached function state",
-                                )),
-                                ctx,
-                            )
-                            .await;
-                            return;
-                        }
-                    },
+                Some(_) => match self.resolved_attached_functions.as_ref() {
+                    Some(attached_functions) if attached_functions.len() == 1 => {
+                        attached_functions[0].completion_offset as i64
+                    }
+                    _ => {
+                        self.terminate_with_result(
+                            Err(LogFetchOrchestratorError::InvariantViolation(
+                                "fn-consumer log fetch requires resolved attached function state",
+                            )),
+                            ctx,
+                        )
+                        .await;
+                        return;
+                    }
                 },
                 None => match self.context.log_start_offset {
                     Some(offset) => offset,
