@@ -395,7 +395,8 @@ mod tests {
                 .await
                 .expect("Failed to finish work");
 
-            // Get work - this branch still re-enqueues repair work into the queue.
+            // Get work - the queued entry should remain visible until completion
+            // advances past the stored queue frontier.
             let work_items = ctx
                 .work_queue_client
                 .get_work("test_shard".to_string(), 10)
