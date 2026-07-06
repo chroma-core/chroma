@@ -458,8 +458,12 @@ mod tests {
         state.push_work(fn_id, coll_id, 100, 100);
         assert_eq!(state.pending_work.len(), 1);
 
-        // Finish work
+        // Matching the queued frontier keeps the entry queued until work
+        // advances beyond it.
         state.finish_work_success(&fn_id, &coll_id, 100);
+        assert_eq!(state.pending_work.len(), 1);
+
+        state.finish_work_success(&fn_id, &coll_id, 101);
         assert_eq!(state.pending_work.len(), 0);
         assert!(state.dirty);
     }
@@ -610,8 +614,12 @@ mod tests {
         assert_eq!(state.pending_work.len(), 1);
         assert_eq!(state.pending_work[0].completion_offset, 300);
 
-        // Finish remaining work
+        // Matching the queued frontier keeps the entry queued.
         state.finish_work_success(&fn_id, &coll_id, 300);
+        assert_eq!(state.pending_work.len(), 1);
+
+        // Finish remaining work
+        state.finish_work_success(&fn_id, &coll_id, 301);
         assert_eq!(state.pending_work.len(), 0);
     }
 }
