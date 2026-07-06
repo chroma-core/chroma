@@ -271,18 +271,20 @@ impl FnConsumerManager {
             work_items.push((
                 fn_id,
                 input_coll_id,
+                item.completion_offset,
                 item.compaction_offset.unwrap_or(item.completion_offset),
             ));
         }
 
         let mut grouped_work_items: HashMap<AttachedFunctionUuid, Vec<FunctionExecutionInput>> =
             HashMap::new();
-        for (fn_id, input_coll_id, compaction_offset) in work_items {
+        for (fn_id, input_coll_id, completion_offset, compaction_offset) in work_items {
             grouped_work_items
                 .entry(fn_id)
                 .or_default()
                 .push(FunctionExecutionInput {
                     collection_id: input_coll_id,
+                    queue_completion_offset: completion_offset,
                     queue_compaction_offset: compaction_offset,
                 });
         }

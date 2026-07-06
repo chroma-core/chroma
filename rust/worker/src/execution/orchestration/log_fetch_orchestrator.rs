@@ -620,44 +620,30 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         let mut pulled_log_offset = collection.log_position;
         let mut log_upper_bound_offset = None;
 
-<<<<<<< HEAD
         // Compacted-state backfill reads the whole live segment and is not
         // constrained by the incremental max_compaction_size window.
         if Self::should_resolve_async_fn_boundary(
             self.context.is_fn_consumer,
             self.context.is_rebuild(),
         ) {
-            let completion_offset = match self.context.log_start_offset {
-                Some(offset) => offset,
-                None => match self.resolved_attached_functions.as_ref() {
-=======
-        if self.context.is_fn_consumer {
             let completion_offset = match self.attached_function_id_filter {
-                Some(_) => match self.resolved_attached_functions.as_ref() {
->>>>>>> 19cc0f428 ([BUG](fn-consumer): restore log fetch fallback)
-                    Some(attached_functions) if attached_functions.len() == 1 => {
-                        attached_functions[0].completion_offset as i64
-                    }
-                    _ => {
-<<<<<<< HEAD
-                    self.terminate_with_result(
-                        Err(LogFetchOrchestratorError::InvariantViolation(
-                            "fn-consumer log fetch requires resolved attached function state",
-                        )),
-                        ctx,
-                    )
-                    .await;
-                    return;
-=======
-                        self.terminate_with_result(
-                            Err(LogFetchOrchestratorError::InvariantViolation(
-                                "fn-consumer log fetch requires resolved attached function state",
-                            )),
-                            ctx,
-                        )
-                        .await;
-                        return;
-                    }
+                Some(_) => match self.context.log_start_offset {
+                    Some(offset) => offset,
+                    None => match self.resolved_attached_functions.as_ref() {
+                        Some(attached_functions) if attached_functions.len() == 1 => {
+                            attached_functions[0].completion_offset as i64
+                        }
+                        _ => {
+                            self.terminate_with_result(
+                                Err(LogFetchOrchestratorError::InvariantViolation(
+                                    "fn-consumer log fetch requires resolved attached function state",
+                                )),
+                                ctx,
+                            )
+                            .await;
+                            return;
+                        }
+                    },
                 },
                 None => match self.context.log_start_offset {
                     Some(offset) => offset,
@@ -670,7 +656,6 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                         )
                         .await;
                         return;
->>>>>>> 19cc0f428 ([BUG](fn-consumer): restore log fetch fallback)
                     }
                 },
             };
