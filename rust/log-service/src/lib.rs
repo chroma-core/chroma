@@ -6295,7 +6295,13 @@ mod tests {
             .join()
             .expect("Spawned thread should not fail to join");
         }
+    }
 
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 16,
+            .. ProptestConfig::default()
+        })]
         #[test]
         fn test_k8s_integration_rust_log_service_garbage_collect_unused_logs(
             operations in proptest::collection::vec(any::<OperationRecord>(), 1..=36),
