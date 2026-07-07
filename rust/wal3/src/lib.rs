@@ -91,6 +91,8 @@ pub enum Error {
     LogClosed,
     #[error("an empty batch was passed to append")]
     EmptyBatch,
+    #[error("append rejected by admission predicate")]
+    AdmissionRejected,
     #[error("perform exponential backoff and retry")]
     Backoff,
     #[error("an internal, otherwise unclassifiable error ({file}:{line})")]
@@ -181,6 +183,7 @@ impl chroma_error::ChromaError for Error {
             Self::LogFull => chroma_error::ErrorCodes::Aborted,
             Self::LogClosed => chroma_error::ErrorCodes::FailedPrecondition,
             Self::EmptyBatch => chroma_error::ErrorCodes::InvalidArgument,
+            Self::AdmissionRejected => chroma_error::ErrorCodes::Aborted,
             Self::Backoff => chroma_error::ErrorCodes::Unavailable,
             Self::Internal { .. } => chroma_error::ErrorCodes::Internal,
             Self::MissingFragmentSequenceNumber(_) => chroma_error::ErrorCodes::Internal,
@@ -545,6 +548,10 @@ impl Default for SnapshotOptions {
 
 /// A synchronous predicate that can inspect earlier enqueued append metadata before admitting an
 /// append.
+///
+/// The predicate runs while the batch manager holds its admission state lock.  It receives only
+/// metadata for earlier enqueued work, not the candidate append, and should not perform storage or
+/// other blocking I/O.
 pub type AdmissionPredicate = Arc<dyn Fn(&[Arc<[u8]>]) -> bool + Send + Sync + 'static>;
 
 /// Optional controls that travel with one append request.
