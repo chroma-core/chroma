@@ -13,10 +13,7 @@ use chroma_error::ChromaError;
 use chroma_storage::{GetOptions, PutMode, PutOptions, Storage};
 use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_system::{Component, ComponentContext, ComponentRuntime, Handler};
-use chroma_types::chroma_proto::{
-    CheckInvocationStatusRequest, InvocationCheckItem, InvocationStatus, InvocationStatusResult,
-    TryFinishAsyncAttachedFunctionInvocationRequest,
-};
+use chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationRequest;
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -73,34 +70,6 @@ pub(crate) struct WorkQueueManager {
         FinishResult,
         oneshot::Sender<Result<FinishResult, WorkQueueError>>,
     )>,
-}
-
-#[derive(Debug)]
-enum InvocationCompletionStatus {
-    NotDone,
-    Done,
-    NeedsRepair,
-}
-
-#[derive(Debug, thiserror::Error)]
-enum InvocationCompletionStatusConversionError {
-    #[error("invalid invocation status: {0}")]
-    InvalidStatus(i32),
-}
-
-impl TryFrom<InvocationStatusResult> for InvocationCompletionStatus {
-    type Error = InvocationCompletionStatusConversionError;
-
-    fn try_from(result: InvocationStatusResult) -> Result<Self, Self::Error> {
-        match InvocationStatus::try_from(result.status) {
-            Ok(InvocationStatus::Done) => Ok(InvocationCompletionStatus::Done),
-            Ok(InvocationStatus::NeedsRepair) => Ok(InvocationCompletionStatus::NeedsRepair),
-            Ok(InvocationStatus::NotDone) => Ok(InvocationCompletionStatus::NotDone),
-            Err(_) => Err(InvocationCompletionStatusConversionError::InvalidStatus(
-                result.status,
-            )),
-        }
-    }
 }
 
 impl WorkQueueManager {
@@ -301,63 +270,6 @@ impl WorkQueueManager {
         Ok(())
     }
 
-    // Check invocation completion status (boolean version for compatibility)
-    async fn are_invocations_done(
-        &mut self,
-        items: &[WorkQueueRecord],
-    ) -> Result<Vec<bool>, WorkQueueError> {
-        let statuses = self.check_invocations_status(items).await?;
-        // Map DONE to true, everything else (NOT_DONE, NEEDS_REPAIR) to false
-        Ok(statuses
-            .into_iter()
-            .map(|status| matches!(status, InvocationCompletionStatus::Done))
-            .collect())
-    }
-
-    // Check invocation completion status with detailed status
-    #[tracing::instrument(
-        name = "WorkQueueManager::check_invocations_status",
-        skip(self, items),
-        level = "debug"
-    )]
-    async fn check_invocations_status(
-        &mut self,
-        items: &[WorkQueueRecord],
-    ) -> Result<Vec<InvocationCompletionStatus>, WorkQueueError> {
-        if items.is_empty() {
-            return Ok(vec![]);
-        }
-
-        let invocation_items: Vec<InvocationCheckItem> = items
-            .iter()
-            .map(|item| InvocationCheckItem {
-                function_id: item.fn_id.to_string(),
-                input_collection_id: item.input_coll_id.to_string(),
-                completion_offset: item.completion_offset,
-            })
-            .collect();
-
-        let request = CheckInvocationStatusRequest {
-            items: invocation_items,
-        };
-
-        let response = self
-            .sysdb
-            .check_invocation_status(request)
-            .await
-            .map_err(|e| WorkQueueError::CheckInvocationsFailed(e.message().to_string()))?;
-
-        let statuses = response
-            .into_inner()
-            .results
-            .into_iter()
-            .map(InvocationCompletionStatus::try_from)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| WorkQueueError::CheckInvocationsFailed(e.to_string()))?;
-
-        Ok(statuses)
-    }
-
     #[tracing::instrument(
         name = "WorkQueueManager::hydrate_missing_compaction_offsets",
         skip(self)
@@ -548,40 +460,17 @@ impl Handler<GetWorkMessage> for WorkQueueManager {
     type Result = ();
 
     async fn handle(&mut self, msg: GetWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
-        // For now, return all items up to limit
-        // TODO: In the future, this will be filtered based on work assignment
-
-        let items: Vec<_> = self
+        // With eager stale-row removal on push, the queue's dedup index is the
+        // source of truth for whether a row is still live.
+        let filtered: Vec<_> = self
             .state
             .pending_work
             .iter()
+            .filter(|item| self.state.contains_entry(&item.fn_id, &item.input_coll_id))
             .take(msg.limit)
             .cloned()
             .collect();
-
-        // Check invocations done
-        // TODO(tanujnay112): We won't need this if we make sure finish_work
-        // deletes the work item from the queue and we look for repair on bootup.
-        let done_flags = match self.are_invocations_done(&items).await {
-            Ok(flags) => flags,
-            Err(e) => {
-                tracing::error!("Failed to check invocations done: {}", e);
-                // If we fail to check, return empty results
-                if msg.response_tx.send(Err(e)).is_err() {
-                    tracing::warn!("Failed to send error response - receiver dropped");
-                }
-                return;
-            }
-        };
-
-        let filtered: Vec<_> = items
-            .into_iter()
-            .zip(done_flags.iter())
-            .filter(|(_, done)| !**done)
-            .map(|(item, _)| item)
-            .take(msg.limit)
-            .collect();
-        tracing::info!("Filtered {} items from get work response", filtered.len());
+        tracing::info!("Returning {} items from get work response", filtered.len());
 
         if msg.response_tx.send(Ok(filtered)).is_err() {
             tracing::warn!("Failed to send get work response - receiver dropped");
@@ -716,6 +605,8 @@ mod tests {
     #[test]
     fn test_get_work_filtering() {
         let mut state = QueueState::new();
+        let stale_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let stale_coll_id = CollectionUuid(Uuid::new_v4());
 
         // Add multiple work items
         for i in 0..5 {
@@ -729,13 +620,28 @@ mod tests {
 
         assert_eq!(state.pending_work.len(), 5);
 
+        // Add an orphaned row to simulate a stale queue entry without a dedup record.
+        state.pending_work.push_back(WorkQueueRecord {
+            fn_id: stale_fn_id,
+            input_coll_id: stale_coll_id,
+            completion_offset: 999,
+            compaction_offset: 999,
+            insertion_order: 999,
+        });
+
         // Test filtering logic (simulating what get_work does)
         let limit = 3;
-        let filtered: Vec<_> = state.pending_work.iter().take(limit).cloned().collect();
+        let filtered: Vec<_> = state
+            .pending_work
+            .iter()
+            .filter(|item| state.contains_entry(&item.fn_id, &item.input_coll_id))
+            .take(limit)
+            .cloned()
+            .collect();
 
         assert_eq!(filtered.len(), 3);
 
-        // Verify we got the first 3 items (FIFO order)
+        // Verify we got the first 3 live items in FIFO order.
         for (i, item) in filtered.iter().enumerate().take(3) {
             assert_eq!(item.completion_offset, (i as i64) * 100);
         }

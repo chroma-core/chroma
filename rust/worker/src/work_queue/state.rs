@@ -351,6 +351,15 @@ impl QueueState {
         self.dirty = true;
         true
     }
+
+    pub(crate) fn contains_entry(
+        &self,
+        fn_id: &AttachedFunctionUuid,
+        input_coll_id: &CollectionUuid,
+    ) -> bool {
+        self.dedup_index.contains_key(&(*fn_id, *input_coll_id))
+    }
+
     /// Mark work as successfully completed.
     /// Removes the queue entry once completion reaches the queued frontier;
     /// otherwise leaves the queued entry unchanged.
