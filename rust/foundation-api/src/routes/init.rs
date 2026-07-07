@@ -3,6 +3,7 @@ use super::init_schema::{
     CollectionEmbeddingFunctions,
 };
 use super::whoami::whoami_and_authorize;
+use crate::collections::{create_planned_collection, ensure_database, ensure_slack_raw_collection};
 use crate::{
     auth::AuthzAction, config::FoundationConfig, errors::ServerError, server::FoundationApiServer,
 };
@@ -10,20 +11,12 @@ use axum::{extract::State, http::HeaderMap, Json};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_sysdb::SysDb;
 use chroma_types::{
-    Collection, CollectionUuid, CreateDatabaseError, DatabaseName, KnnIndex, Metadata,
-    MetadataValue, Schema, CHROMA_GROUP_CHUNK_SIBLINGS_KEY,
+    Collection, CollectionUuid, DatabaseName, Metadata, MetadataValue, Schema,
+    CHROMA_GROUP_CHUNK_SIBLINGS_KEY, SLACK_RAW_COLLECTION_NAME,
 };
-use frontend_core::{
-    attached_function_ops,
-    collection_ops::{
-        plan_create_collection, supported_segment_types, ExecutorKind, TenantFeatureFlags,
-    },
-    foundation::source_kind_for_collection_name,
-    retry::retry_transient,
-};
+use frontend_core::{attached_function_ops, foundation::source_kind_for_collection_name};
 use serde::Serialize;
 use std::collections::HashMap;
-use uuid::Uuid;
 
 #[derive(Serialize)]
 pub struct FoundationInitResponse {
@@ -36,8 +29,13 @@ pub struct FoundationInitResponse {
     pub currents_collection_id: String,
     pub file_uploads_collection_id: String,
     pub agent_sessions_collection_id: String,
-    /// Source collection name -> id for each ensured source collection
-    /// (slack, notion, …). Each carries the chunk-sibling grouping flag.
+    /// Id of the `slack_raw` append-log collection. Metadata is
+    /// inverted-indexed for filtering; text/vector indexing is deferred
+    /// downstream. Wired as the attached function's base input in place of
+    /// the old indexed `slack` source.
+    pub slack_raw_collection_id: String,
+    /// Name -> id for each ensured INDEXED source collection
+    /// (notion, gdrive, …). Each carries the chunk-sibling grouping flag.
     pub source_collection_ids: std::collections::HashMap<String, String>,
 }
 
@@ -159,15 +157,40 @@ pub async fn foundation_init(
     )
     .await?;
 
-    // Source collections are the attached function's *input*. They carry
-    // the chunk-sibling grouping flag so a job's chunk records stay in one
-    // partition and the trailing end-of-job marker on `{base}-0` is
-    // observed after every sibling chunk (ADR 0001 §6). All sources share
-    // one async attached function, and extra sources are added via
-    // `add_input()`.
+    // Real-time Slack messages land in `slack_raw` as raw, single records (an
+    // append log). Metadata (channel/team/thread/op) is inverted-indexed so
+    // records are filterable at read time, but text/vector indexing —
+    // batching, rendering, embedding — is deferred to the attached function
+    // downstream, so the collection has no FTS/vector indexes, no embedding
+    // function, and no dimension. It also does NOT carry the chunk-sibling
+    // grouping flag: each message is its own single record, so there are no
+    // sibling chunks to keep in one partition.
+    //
+    // Created BEFORE the config-driven indexed-source loop below: collection
+    // creation is GET_OR_CREATE (first writer wins), so ensuring `slack_raw`
+    // first guarantees its hybrid schema even if a misconfigured
+    // `indexed_source_collections` also lists `slack_raw` — the loop would
+    // then get this collection back unchanged instead of creating it with the
+    // fully indexed schema. Same protection the other fixed collections
+    // (wiki, currents, agent_sessions) already get from preceding the loop.
+    let slack_raw = ensure_slack_raw_collection(
+        &mut sysdb,
+        tenant.clone(),
+        db_name.clone(),
+        SLACK_RAW_COLLECTION_NAME,
+        None,
+    )
+    .await?;
+
+    // Indexed source collections (notion, gdrive, …) are *extra* inputs to the
+    // attached function. They carry the chunk-sibling grouping flag so a job's
+    // chunk records stay in one partition and the trailing end-of-job marker on
+    // `{base}-0` is observed after every sibling chunk (ADR 0001 §6). All
+    // inputs share one async attached function; extras are added via
+    // `add_input()` below.
     let mut source_collection_ids = HashMap::new();
-    let mut source_collections = Vec::new();
-    for source_name in &foundation_cfg.source_collections {
+    let mut indexed_source_collections = Vec::new();
+    for source_name in &foundation_cfg.indexed_source_collections {
         let source = ensure_collection(
             &mut sysdb,
             tenant.clone(),
@@ -178,47 +201,54 @@ pub async fn foundation_init(
             CollectionEmbeddingFunctions::default(),
         )
         .await?;
-        source_collections.push((source_name.clone(), source.collection_id));
+        indexed_source_collections.push((source_name.clone(), source.collection_id));
         source_collection_ids.insert(source_name.clone(), source.collection_id.to_string());
     }
 
-    if let Some((base_source_name, base_source_id)) = source_collections.first() {
-        ensure_attached_function(
-            &mut sysdb,
-            tenant.clone(),
-            *base_source_id,
-            base_source_name,
-            foundation_cfg,
-        )
-        .await?;
+    // `slack_raw` is the attached function's *base* input, in place of the old
+    // indexed `slack` source. It is the right base for two reasons:
+    //  - it is always created (above), so the function is always created and
+    //    every input is wired even when `indexed_source_collections` is
+    //    empty; and
+    //  - it is a fixed collection, so the base — which keys the function's
+    //    identity in sysdb — is stable across `indexed_source_collections`
+    //    changes, keeping repeated `/init` calls idempotent.
+    // Its source_kind resolves to `slack`, so the generation contract is
+    // unchanged from the old `slack` base.
+    ensure_attached_function(
+        &mut sysdb,
+        tenant.clone(),
+        slack_raw.collection_id,
+        SLACK_RAW_COLLECTION_NAME,
+        foundation_cfg,
+    )
+    .await?;
 
-        for (_, source_collection_id) in source_collections.iter().skip(1) {
-            attached_function_ops::add_attached_function_input(
-                &mut sysdb,
-                foundation_attached_function_name(),
-                *base_source_id,
-                *source_collection_id,
-                db_name.clone(),
-            )
-            .await?;
-        }
-
-        // Wire the per-user coding-agent traces collection into the same
-        // sources->wiki function so synced agent sessions flow into the
-        // shared wiki output alongside slack/notion.
+    // Add the indexed sources and the per-user coding-agent traces collection
+    // as extra inputs to the same sources->wiki function, so they flow into the
+    // shared wiki output alongside slack_raw.
+    for (_, source_collection_id) in &indexed_source_collections {
         attached_function_ops::add_attached_function_input(
             &mut sysdb,
             foundation_attached_function_name(),
-            *base_source_id,
-            agent_sessions.collection_id,
+            slack_raw.collection_id,
+            *source_collection_id,
             db_name.clone(),
         )
         .await?;
     }
+    attached_function_ops::add_attached_function_input(
+        &mut sysdb,
+        foundation_attached_function_name(),
+        slack_raw.collection_id,
+        agent_sessions.collection_id,
+        db_name.clone(),
+    )
+    .await?;
 
     tracing::info!(
         tenant = %tenant,
-        num_source_collections = source_collection_ids.len(),
+        num_indexed_source_collections = source_collection_ids.len(),
         "foundation init complete"
     );
 
@@ -232,13 +262,14 @@ pub async fn foundation_init(
         currents_collection_id: currents.collection_id.to_string(),
         file_uploads_collection_id: file_uploads.collection_id.to_string(),
         agent_sessions_collection_id: agent_sessions.collection_id.to_string(),
+        slack_raw_collection_id: slack_raw.collection_id.to_string(),
         source_collection_ids,
     }))
 }
 
 /// Dense-index dimensionality to pin a source collection to.
 ///
-/// Most sources (slack, notion) carry 1024-dim vectors supplied by the
+/// Most sources (e.g. notion) carry 1024-dim vectors supplied by the
 /// writer. The Google Drive source instead carries no vectors of its own —
 /// the caller upserts records without embeddings — so it is pinned to a
 /// single dimension (with no embedding function, like currents /
@@ -419,61 +450,10 @@ async fn ensure_currents_collection(
     .await
 }
 
-#[tracing::instrument(
-    name = "ensure_database",
-    skip_all,
-    fields(database = %database_name.as_ref(), tenant = %tenant),
-    err(Display)
-)]
-async fn ensure_database(
-    sysdb: &mut SysDb,
-    database_name: DatabaseName,
-    tenant: String,
-) -> Result<Uuid, ServerError> {
-    // Generate the id once so retries don't churn through fresh UUIDs; the
-    // create is keyed on the (tenant, name) pair and is idempotent — an
-    // `AlreadyExists` from a previous/concurrent init is the success path.
-    let database_id = Uuid::new_v4();
-    let created = match retry_transient(|| {
-        let mut sysdb = sysdb.clone();
-        let database_name = database_name.clone();
-        let tenant = tenant.clone();
-        async move {
-            sysdb
-                .create_database(database_id, database_name, tenant)
-                .await
-        }
-    })
-    .await
-    {
-        Ok(_) => true,
-        Err(CreateDatabaseError::AlreadyExists(_)) => false,
-        Err(e) => return Err(e.into()),
-    };
-
-    let db = retry_transient(|| {
-        let mut sysdb = sysdb.clone();
-        let database_name = database_name.clone();
-        let tenant = tenant.clone();
-        async move { sysdb.get_database(database_name, tenant).await }
-    })
-    .await?;
-
-    tracing::info!(database = %database_name.as_ref(), database_id = %db.id, created, "ensured foundation database");
-    Ok(db.id)
-}
-
-/// SysDb's `create_collection` takes a `get_or_create: bool`. When true, an
-/// existing collection with the same (tenant, database, name) is returned
-/// instead of failing with `AlreadyExists` — atomic idempotency in one round
-/// trip, so we don't need the try-then-fallback dance we use for databases.
-const GET_OR_CREATE: bool = true;
-
-/// Plan a fresh distributed-mode collection with the shared
-/// `frontend_core::collection_ops` planner and hand it to sysdb. The
-/// planner reconciles the Foundation schema (sparse vector index for
-/// SPLADE) with the default config, picks the right segment types for
-/// distributed mode, and emits everything sysdb needs.
+/// Ensure a fully indexed Foundation collection: build the Foundation
+/// schema (dense + SPLADE sparse indexes, optional embedding functions) and
+/// create it via the shared [`create_planned_collection`] core in
+/// [`crate::collections`].
 #[tracing::instrument(
     name = "ensure_collection",
     skip_all,
@@ -490,53 +470,16 @@ async fn ensure_collection(
     embedding_functions: CollectionEmbeddingFunctions,
 ) -> Result<Collection, ServerError> {
     let schema = foundation_collection_schema(embedding_functions);
-    let plan = plan_create_collection(
-        None,
-        Some(schema),
-        ExecutorKind::Distributed,
-        &supported_segment_types(ExecutorKind::Distributed),
-        true,
-        KnnIndex::Spann,
-        TenantFeatureFlags::default(),
-    )?;
-    // `GET_OR_CREATE` makes this idempotent in a single round trip, so a
-    // transient sysdb failure is safe to retry. The plan (collection id +
-    // segments + config) is fixed up front and reused across attempts.
-    let collection_id = plan.collection_id;
-    let collection = retry_transient(|| {
-        let mut sysdb = sysdb.clone();
-        let tenant = tenant.clone();
-        let database_name = database_name.clone();
-        let collection_name = collection_name.to_string();
-        let segments = plan.segments.clone();
-        let configuration = plan.configuration.clone();
-        let schema = plan.schema.clone();
-        let metadata = metadata.clone();
-        async move {
-            sysdb
-                .create_collection(
-                    tenant,
-                    database_name,
-                    collection_id,
-                    collection_name,
-                    segments,
-                    configuration,
-                    schema,
-                    metadata,
-                    dimension,
-                    GET_OR_CREATE,
-                )
-                .await
-        }
-    })
-    .await?;
-
-    tracing::info!(
-        collection = %collection_name,
-        collection_id = %collection.collection_id,
-        "ensured foundation collection"
-    );
-    Ok(collection)
+    create_planned_collection(
+        sysdb,
+        tenant,
+        database_name,
+        collection_name,
+        schema,
+        metadata,
+        dimension,
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -547,9 +490,20 @@ mod tests {
     fn gdrive_source_is_single_dimension_others_are_1024() {
         assert_eq!(source_dimension("gdrive"), Some(1));
         assert_eq!(source_dimension("gdrive_master"), Some(1));
-        assert_eq!(source_dimension("slack"), Some(1024));
         assert_eq!(source_dimension("notion"), Some(1024));
         // Unknown sources fall back to the default 1024 dims.
         assert_eq!(source_dimension("unknown_source"), Some(1024));
+    }
+
+    /// `slack_raw` is the attached function's base input, so its source_kind
+    /// must resolve to `slack` — that keeps the generation contract identical
+    /// to the old `slack` base and guarantees `ensure_attached_function` won't
+    /// error on an unknown source kind.
+    #[test]
+    fn slack_raw_maps_to_slack_source_kind() {
+        assert_eq!(
+            source_kind_for_collection_name(SLACK_RAW_COLLECTION_NAME).unwrap(),
+            "slack"
+        );
     }
 }
