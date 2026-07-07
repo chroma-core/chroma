@@ -1129,6 +1129,16 @@ mod tests {
     }
 
     #[test]
+    fn async_queue_frontier_uses_pulled_log_offset_even_when_it_regresses() {
+        let collection_info = compact_info(200, 250);
+
+        assert_eq!(
+            AttachedFunctionOrchestrator::queued_compaction_offset(&collection_info),
+            Some(200)
+        );
+    }
+
+    #[test]
     fn async_queue_frontier_ignores_uninitialized_offsets() {
         let collection_info = compact_info(-1, 250);
 
