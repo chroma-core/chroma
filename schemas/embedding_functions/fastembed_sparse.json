@@ -73,6 +73,9 @@
         "kwargs": {
             "type": "object",
             "description": "Additional arguments to pass to the model",
+            "properties": {
+                "trust_remote_code": false
+            },
             "additionalProperties": {
                 "type": [
                     "string",
