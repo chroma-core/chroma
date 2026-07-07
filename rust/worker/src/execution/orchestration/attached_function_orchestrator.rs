@@ -245,6 +245,10 @@ pub enum AttachedFunctionOrchestratorResponse {
 }
 
 impl AttachedFunctionOrchestrator {
+    fn queued_compaction_offset(collection_info: &CollectionCompactInfo) -> Option<i64> {
+        (collection_info.pulled_log_offset >= 0).then_some(collection_info.pulled_log_offset)
+    }
+
     pub fn new(
         input_collection_data: Vec<FunctionInputCollectionData>,
         output_context: CompactionContext,
@@ -352,8 +356,8 @@ impl AttachedFunctionOrchestrator {
     ) -> bool {
         if let Some(work_queue_client) = &self.output_context.work_queue_client {
             let operator = Box::new(QueueFunctionOperator::new(work_queue_client.clone()));
-            let compaction_offset = (self.get_input_collection_info().pulled_log_offset >= 0)
-                .then_some(self.get_input_collection_info().pulled_log_offset);
+            let compaction_offset =
+                Self::queued_compaction_offset(self.get_input_collection_info());
             let input = QueueFunctionInput::new(
                 attached_function.id,
                 self.get_input_collection_info().collection_id,
@@ -1095,6 +1099,7 @@ impl Handler<TaskResult<QueueFunctionOutput, QueueFunctionError>> for AttachedFu
 
 #[cfg(test)]
 mod tests {
+    use super::AttachedFunctionOrchestrator;
     use crate::execution::orchestration::compact::CollectionCompactInfo;
     use chroma_types::{Collection, CollectionUuid};
 
@@ -1117,19 +1122,19 @@ mod tests {
     fn async_queue_frontier_uses_pulled_log_offset() {
         let collection_info = compact_info(550, 250);
 
-        let compaction_offset = (collection_info.pulled_log_offset >= 0)
-            .then_some(collection_info.pulled_log_offset);
-
-        assert_eq!(compaction_offset, Some(550));
+        assert_eq!(
+            AttachedFunctionOrchestrator::queued_compaction_offset(&collection_info),
+            Some(550)
+        );
     }
 
     #[test]
     fn async_queue_frontier_ignores_uninitialized_offsets() {
         let collection_info = compact_info(-1, 250);
 
-        let compaction_offset = (collection_info.pulled_log_offset >= 0)
-            .then_some(collection_info.pulled_log_offset);
-
-        assert_eq!(compaction_offset, None);
+        assert_eq!(
+            AttachedFunctionOrchestrator::queued_compaction_offset(&collection_info),
+            None
+        );
     }
 }
