@@ -245,6 +245,10 @@ pub enum AttachedFunctionOrchestratorResponse {
 }
 
 impl AttachedFunctionOrchestrator {
+    fn queued_compaction_offset(collection_info: &CollectionCompactInfo) -> Option<i64> {
+        (collection_info.pulled_log_offset >= 0).then_some(collection_info.pulled_log_offset)
+    }
+
     pub fn new(
         input_collection_data: Vec<FunctionInputCollectionData>,
         output_context: CompactionContext,
@@ -352,8 +356,8 @@ impl AttachedFunctionOrchestrator {
     ) -> bool {
         if let Some(work_queue_client) = &self.output_context.work_queue_client {
             let operator = Box::new(QueueFunctionOperator::new(work_queue_client.clone()));
-            let compaction_offset = (self.get_input_collection_info().collection.log_position >= 0)
-                .then_some(self.get_input_collection_info().collection.log_position);
+            let compaction_offset =
+                Self::queued_compaction_offset(self.get_input_collection_info());
             let input = QueueFunctionInput::new(
                 attached_function.id,
                 self.get_input_collection_info().collection_id,
@@ -1090,5 +1094,47 @@ impl Handler<TaskResult<QueueFunctionOutput, QueueFunctionError>> for AttachedFu
         // For async-only functions, we don't have any output records to apply.
         // The function will be processed asynchronously by an external consumer.
         self.finish_no_attached_function(ctx).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AttachedFunctionOrchestrator;
+    use crate::execution::orchestration::compact::CollectionCompactInfo;
+    use chroma_types::{Collection, CollectionUuid};
+
+    fn compact_info(pulled_log_offset: i64, persisted_log_position: i64) -> CollectionCompactInfo {
+        CollectionCompactInfo {
+            collection_id: CollectionUuid::new(),
+            collection: Collection {
+                log_position: persisted_log_position,
+                ..Default::default()
+            },
+            writers: None,
+            pulled_log_offset,
+            hnsw_index_uuid: None,
+            schema: None,
+            original_segment_flush_infos: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn queued_compaction_offset_uses_pulled_log_offset() {
+        let collection_info = compact_info(550, 250);
+
+        assert_eq!(
+            AttachedFunctionOrchestrator::queued_compaction_offset(&collection_info),
+            Some(550)
+        );
+    }
+
+    #[test]
+    fn queued_compaction_offset_ignores_uninitialized_frontier() {
+        let collection_info = compact_info(-1, 250);
+
+        assert_eq!(
+            AttachedFunctionOrchestrator::queued_compaction_offset(&collection_info),
+            None
+        );
     }
 }
