@@ -356,13 +356,13 @@ impl AttachedFunctionOrchestrator {
     ) -> bool {
         if let Some(work_queue_client) = &self.output_context.work_queue_client {
             let operator = Box::new(QueueFunctionOperator::new(work_queue_client.clone()));
-            let compaction_offset =
+            let queued_compaction_offset =
                 Self::queued_compaction_offset(self.get_input_collection_info());
             let input = QueueFunctionInput::new(
                 attached_function.id,
                 self.get_input_collection_info().collection_id,
                 attached_function.completion_offset as i64,
-                compaction_offset,
+                queued_compaction_offset,
             );
             let task = wrap(
                 operator,
