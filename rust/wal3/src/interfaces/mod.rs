@@ -27,6 +27,9 @@ pub use batch_manager::BatchManager;
 pub trait FragmentPointer: Clone + Send + Sync + 'static {
     fn try_create(ident: FragmentIdentifier, pos: LogPosition) -> Option<Self>;
     fn identifier(&self) -> FragmentIdentifier;
+    fn fragment_start(&self) -> Option<LogPosition> {
+        None
+    }
     fn bootstrap(position: LogPosition) -> Self
     where
         Self: Sized;
@@ -43,6 +46,10 @@ impl FragmentPointer for (FragmentSeqNo, LogPosition) {
 
     fn identifier(&self) -> FragmentIdentifier {
         FragmentIdentifier::SeqNo(self.0)
+    }
+
+    fn fragment_start(&self) -> Option<LogPosition> {
+        Some(self.1)
     }
 
     fn bootstrap(position: LogPosition) -> Self {
@@ -271,7 +278,7 @@ where
     async fn take_work(
         &self,
         manifest_manager: &(dyn ManifestPublisher<Self::FragmentPointer> + Sync),
-    ) -> Result<Option<(Self::FragmentPointer, Vec<AppendWork>)>, Error> {
+    ) -> Result<Option<(Self::FragmentPointer, Option<LogPosition>, Vec<AppendWork>)>, Error> {
         match self {
             Self::Plain(publisher) => publisher.take_work(manifest_manager).await,
             Self::FaultInjecting(publisher) => publisher.take_work(manifest_manager).await,
@@ -531,6 +538,13 @@ impl AppendWork {
             .map(|options| Arc::clone(&options.admission_metadata))
             .unwrap_or_else(|| Arc::<[u8]>::from([]))
     }
+
+    /// Return the required fragment start, if this append has one.
+    pub fn required_fragment_start(&self) -> Option<LogPosition> {
+        self.options
+            .as_ref()
+            .and_then(|options| options.required_fragment_start)
+    }
 }
 
 impl std::fmt::Debug for AppendWork {
@@ -553,7 +567,7 @@ pub trait FragmentPublisher: Send + Sync + 'static {
     async fn take_work(
         &self,
         manifest_manager: &(dyn ManifestPublisher<Self::FragmentPointer> + Sync),
-    ) -> Result<Option<(Self::FragmentPointer, Vec<AppendWork>)>, Error>;
+    ) -> Result<Option<(Self::FragmentPointer, Option<LogPosition>, Vec<AppendWork>)>, Error>;
     /// Finish the previous call to take_work.
     async fn finish_write(&self);
 
@@ -718,6 +732,7 @@ pub trait ManifestPublisher<FP: FragmentPointer>: Send + Sync + 'static {
     /// the fragment during upload. For single-region deployments, this is empty (all regions
     /// are implied). For multi-region deployments, only these regions should be recorded as
     /// having the fragment.
+    #[allow(clippy::too_many_arguments)]
     async fn publish_fragment(
         &self,
         pointer: &FP,
@@ -725,6 +740,7 @@ pub trait ManifestPublisher<FP: FragmentPointer>: Send + Sync + 'static {
         messages_len: u64,
         num_bytes: u64,
         setsum: Setsum,
+        required_fragment_start: Option<LogPosition>,
         successful_regions: &[String],
     ) -> Result<LogPosition, Error>;
     /// Check if the garbge will apply "cleanly", that is without violating invariants.
