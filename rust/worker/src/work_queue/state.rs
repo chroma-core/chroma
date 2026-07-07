@@ -1,12 +1,12 @@
 use crate::work_queue::types::{WorkQueueError, WorkQueueRecord};
-use arrow::array::{Int64Array, StringArray, UInt64Array};
+use arrow::array::{Array, Int64Array, StringArray, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use bytes::Bytes;
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::arrow::ArrowWriter;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -36,6 +36,8 @@ pub struct QueueState {
     pub next_insertion_order: u64,
     // Persistence tracking
     pub dirty: bool,
+    // Legacy rows loaded without a compaction frontier must be hydrated from sysdb
+    legacy_missing_compaction_offsets: HashSet<(AttachedFunctionUuid, CollectionUuid)>,
 }
 
 impl QueueState {
@@ -47,6 +49,7 @@ impl QueueState {
             current_etag: None,
             next_insertion_order: 0,
             dirty: false,
+            legacy_missing_compaction_offsets: HashSet::new(),
         }
     }
 
@@ -153,12 +156,7 @@ impl QueueState {
                 .0;
             let compaction_offsets_idx = schema
                 .column_with_name("compaction_offset")
-                .ok_or_else(|| {
-                    WorkQueueError::Serialization(
-                        "Missing required field: compaction_offset".to_string(),
-                    )
-                })?
-                .0;
+                .map(|(idx, _)| idx);
 
             let fn_ids = batch
                 .column(fn_ids_idx)
@@ -192,15 +190,19 @@ impl QueueState {
                 .ok_or_else(|| {
                     WorkQueueError::Serialization("Failed to downcast orders".to_string())
                 })?;
-            let compaction_offsets = batch
-                .column(compaction_offsets_idx)
-                .as_any()
-                .downcast_ref::<Int64Array>()
-                .ok_or_else(|| {
-                    WorkQueueError::Serialization(
-                        "Failed to downcast compaction offsets".to_string(),
-                    )
-                })?;
+            let compaction_offsets = compaction_offsets_idx
+                .map(|idx| {
+                    batch
+                        .column(idx)
+                        .as_any()
+                        .downcast_ref::<Int64Array>()
+                        .ok_or_else(|| {
+                            WorkQueueError::Serialization(
+                                "Failed to downcast compaction offsets".to_string(),
+                            )
+                        })
+                })
+                .transpose()?;
 
             for i in 0..batch.num_rows() {
                 let fn_id = AttachedFunctionUuid::from_str(fn_ids.value(i))
@@ -209,13 +211,28 @@ impl QueueState {
                     WorkQueueError::Serialization(format!("Invalid collection_id: {}", e))
                 })?;
 
+                let completion_offset = offsets.map(|offsets| offsets.value(i));
+                let (compaction_offset, missing_compaction_offset) =
+                    match compaction_offsets {
+                        Some(compaction_offsets) if compaction_offsets.is_valid(i) => {
+                            (compaction_offsets.value(i), false)
+                        }
+                        _ => (
+                            completion_offset.ok_or_else(|| {
+                                WorkQueueError::Serialization(
+                                    "Legacy row is missing both completion_offset and compaction_offset"
+                                        .to_string(),
+                                )
+                            })?,
+                            true,
+                        ),
+                    };
+
                 let record = WorkQueueRecord {
                     fn_id,
                     input_coll_id,
-                    completion_offset: offsets
-                        .map(|offsets| offsets.value(i))
-                        .unwrap_or_else(|| compaction_offsets.value(i)),
-                    compaction_offset: compaction_offsets.value(i),
+                    completion_offset: completion_offset.unwrap_or(compaction_offset),
+                    compaction_offset,
                     insertion_order: orders.value(i),
                 };
 
@@ -233,6 +250,9 @@ impl QueueState {
                         compaction_offset: record.compaction_offset,
                     },
                 );
+                if missing_compaction_offset {
+                    state.legacy_missing_compaction_offsets.insert(key);
+                }
                 state.pending_work.push_back(record);
             }
         }
@@ -284,9 +304,51 @@ impl QueueState {
 
         self.next_insertion_order += 1;
         self.dedup_index.insert(key, new_offsets);
+        self.legacy_missing_compaction_offsets.remove(&key);
         self.pending_work.push_back(record);
         self.dirty = true;
 
+        true
+    }
+
+    pub(crate) fn count_entries_missing_compaction_offset(&self) -> usize {
+        self.legacy_missing_compaction_offsets.len()
+    }
+
+    pub(crate) fn entries_missing_compaction_offset(
+        &self,
+    ) -> Vec<(AttachedFunctionUuid, CollectionUuid)> {
+        self.legacy_missing_compaction_offsets
+            .iter()
+            .copied()
+            .collect()
+    }
+
+    pub(crate) fn set_compaction_offset_if_missing(
+        &mut self,
+        fn_id: &AttachedFunctionUuid,
+        input_coll_id: &CollectionUuid,
+        compaction_offset: i64,
+    ) -> bool {
+        let key = (*fn_id, *input_coll_id);
+        if !self.legacy_missing_compaction_offsets.contains(&key) {
+            return false;
+        }
+
+        let Some(existing_offsets) = self.dedup_index.get_mut(&key) else {
+            return false;
+        };
+
+        for record in self.pending_work.iter_mut() {
+            if record.fn_id == *fn_id && record.input_coll_id == *input_coll_id {
+                record.compaction_offset = compaction_offset;
+                break;
+            }
+        }
+
+        existing_offsets.compaction_offset = compaction_offset;
+        self.legacy_missing_compaction_offsets.remove(&key);
+        self.dirty = true;
         true
     }
     /// Mark work as successfully completed.
@@ -308,6 +370,7 @@ impl QueueState {
 
                 // Remove from dedup index
                 self.dedup_index.remove(&key);
+                self.legacy_missing_compaction_offsets.remove(&key);
                 self.dirty = true;
             }
         }
@@ -390,7 +453,6 @@ mod tests {
             Field::new("fn_id", DataType::Utf8, false),
             Field::new("input_coll_id", DataType::Utf8, false),
             Field::new("completion_offset", DataType::Int64, false),
-            Field::new("compaction_offset", DataType::Int64, false),
             Field::new("insertion_order", DataType::UInt64, false),
         ]));
 
@@ -403,7 +465,6 @@ mod tests {
                 Arc::new(StringArray::from(vec![fn_id.to_string()])),
                 Arc::new(StringArray::from(vec![coll_id.to_string()])),
                 Arc::new(Int64Array::from(vec![100])),
-                Arc::new(Int64Array::from(vec![140])),
                 Arc::new(UInt64Array::from(vec![0])),
             ],
         )
@@ -420,7 +481,8 @@ mod tests {
 
         assert_eq!(restored.pending_work.len(), 1);
         assert_eq!(restored.pending_work[0].completion_offset, 100);
-        assert_eq!(restored.pending_work[0].compaction_offset, 140);
+        assert_eq!(restored.pending_work[0].compaction_offset, 100);
+        assert_eq!(restored.count_entries_missing_compaction_offset(), 1);
     }
 
     #[test]
