@@ -6,7 +6,7 @@ use bytes::Bytes;
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::arrow::ArrowWriter;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -36,8 +36,6 @@ pub struct QueueState {
     pub next_insertion_order: u64,
     // Persistence tracking
     pub dirty: bool,
-    // Legacy rows loaded without a compaction frontier must be hydrated from sysdb
-    legacy_missing_compaction_offsets: HashSet<(AttachedFunctionUuid, CollectionUuid)>,
 }
 
 impl QueueState {
@@ -49,7 +47,6 @@ impl QueueState {
             current_etag: None,
             next_insertion_order: 0,
             dirty: false,
-            legacy_missing_compaction_offsets: HashSet::new(),
         }
     }
 
@@ -212,21 +209,17 @@ impl QueueState {
                 })?;
 
                 let completion_offset = offsets.map(|offsets| offsets.value(i));
-                let (compaction_offset, missing_compaction_offset) =
-                    match compaction_offsets {
-                        Some(compaction_offsets) if compaction_offsets.is_valid(i) => {
-                            (compaction_offsets.value(i), false)
-                        }
-                        _ => (
-                            completion_offset.ok_or_else(|| {
-                                WorkQueueError::Serialization(
-                                    "Legacy row is missing both completion_offset and compaction_offset"
-                                        .to_string(),
-                                )
-                            })?,
-                            true,
-                        ),
-                    };
+                let compaction_offset = match compaction_offsets {
+                    Some(compaction_offsets) if compaction_offsets.is_valid(i) => {
+                        compaction_offsets.value(i)
+                    }
+                    _ => completion_offset.ok_or_else(|| {
+                        WorkQueueError::Serialization(
+                            "Legacy row is missing both completion_offset and compaction_offset"
+                                .to_string(),
+                        )
+                    })?,
+                };
 
                 let record = WorkQueueRecord {
                     fn_id,
@@ -250,9 +243,6 @@ impl QueueState {
                         compaction_offset: record.compaction_offset,
                     },
                 );
-                if missing_compaction_offset {
-                    state.legacy_missing_compaction_offsets.insert(key);
-                }
                 state.pending_work.push_back(record);
             }
         }
@@ -304,51 +294,9 @@ impl QueueState {
 
         self.next_insertion_order += 1;
         self.dedup_index.insert(key, new_offsets);
-        self.legacy_missing_compaction_offsets.remove(&key);
         self.pending_work.push_back(record);
         self.dirty = true;
 
-        true
-    }
-
-    pub(crate) fn count_entries_missing_compaction_offset(&self) -> usize {
-        self.legacy_missing_compaction_offsets.len()
-    }
-
-    pub(crate) fn entries_missing_compaction_offset(
-        &self,
-    ) -> Vec<(AttachedFunctionUuid, CollectionUuid)> {
-        self.legacy_missing_compaction_offsets
-            .iter()
-            .copied()
-            .collect()
-    }
-
-    pub(crate) fn set_compaction_offset_if_missing(
-        &mut self,
-        fn_id: &AttachedFunctionUuid,
-        input_coll_id: &CollectionUuid,
-        compaction_offset: i64,
-    ) -> bool {
-        let key = (*fn_id, *input_coll_id);
-        if !self.legacy_missing_compaction_offsets.contains(&key) {
-            return false;
-        }
-
-        let Some(existing_offsets) = self.dedup_index.get_mut(&key) else {
-            return false;
-        };
-
-        for record in self.pending_work.iter_mut() {
-            if record.fn_id == *fn_id && record.input_coll_id == *input_coll_id {
-                record.compaction_offset = compaction_offset;
-                break;
-            }
-        }
-
-        existing_offsets.compaction_offset = compaction_offset;
-        self.legacy_missing_compaction_offsets.remove(&key);
-        self.dirty = true;
         true
     }
 
@@ -379,7 +327,6 @@ impl QueueState {
 
                 // Remove from dedup index
                 self.dedup_index.remove(&key);
-                self.legacy_missing_compaction_offsets.remove(&key);
                 self.dirty = true;
             }
         }
@@ -491,7 +438,6 @@ mod tests {
         assert_eq!(restored.pending_work.len(), 1);
         assert_eq!(restored.pending_work[0].completion_offset, 100);
         assert_eq!(restored.pending_work[0].compaction_offset, 100);
-        assert_eq!(restored.count_entries_missing_compaction_offset(), 1);
     }
 
     #[test]

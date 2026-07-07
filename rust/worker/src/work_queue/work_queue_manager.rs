@@ -11,11 +11,10 @@ enum WorkResponse {
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_storage::{GetOptions, PutMode, PutOptions, Storage};
-use chroma_sysdb::{GetCollectionsOptions, SysDb};
+use chroma_sysdb::SysDb;
 use chroma_system::{Component, ComponentContext, ComponentRuntime, Handler};
 use chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationRequest;
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
-use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use tokio::sync::oneshot;
 
@@ -269,78 +268,6 @@ impl WorkQueueManager {
             .map_err(|e| WorkQueueError::TryFinishFailed(e.message().to_string()))?;
         Ok(())
     }
-
-    #[tracing::instrument(
-        name = "WorkQueueManager::hydrate_missing_compaction_offsets",
-        skip(self)
-    )]
-    async fn hydrate_missing_compaction_offsets(&mut self) -> Result<(), WorkQueueError> {
-        let missing_entries = self.state.count_entries_missing_compaction_offset();
-        if missing_entries == 0 {
-            return Ok(());
-        }
-
-        tracing::info!(
-            missing_entries,
-            "Hydrating missing work queue compaction frontiers from sysdb"
-        );
-
-        let entries_missing_compaction_offset = self.state.entries_missing_compaction_offset();
-        let collection_ids: Vec<_> = entries_missing_compaction_offset
-            .iter()
-            .map(|(_, input_coll_id)| *input_coll_id)
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect();
-
-        let collections = self
-            .sysdb
-            .get_collections(GetCollectionsOptions {
-                collection_ids: Some(collection_ids),
-                ..Default::default()
-            })
-            .await
-            .map_err(|e| WorkQueueError::SysDb(e.to_string()))?;
-
-        let compaction_offsets_by_collection: HashMap<_, _> = collections
-            .into_iter()
-            .map(|collection| (collection.collection_id, collection.log_position))
-            .collect();
-
-        let mut repaired_entries = 0;
-        for (fn_id, input_coll_id) in entries_missing_compaction_offset {
-            let Some(compaction_offset) = compaction_offsets_by_collection.get(&input_coll_id)
-            else {
-                continue;
-            };
-
-            if self.state.set_compaction_offset_if_missing(
-                &fn_id,
-                &input_coll_id,
-                *compaction_offset,
-            ) {
-                repaired_entries += 1;
-            }
-        }
-
-        let remaining_missing_entries = self.state.count_entries_missing_compaction_offset();
-        if remaining_missing_entries > 0 {
-            return Err(WorkQueueError::InvalidState(format!(
-                "Failed to backfill compaction frontiers for {remaining_missing_entries} work queue entries"
-            )));
-        }
-
-        tracing::info!(
-            repaired_entries,
-            "Hydrated missing work queue compaction frontiers from sysdb"
-        );
-
-        if self.state.dirty {
-            self.persist().await?;
-        }
-
-        Ok(())
-    }
 }
 
 #[async_trait]
@@ -364,14 +291,6 @@ impl Component for WorkQueueManager {
         if let Err(e) = self.load_state().await {
             tracing::error!("Failed to load work queue state: {}", e);
             panic!("Cannot start without valid state");
-        }
-
-        if let Err(e) = self.hydrate_missing_compaction_offsets().await {
-            tracing::error!(
-                "Failed to hydrate missing work queue compaction frontiers: {}",
-                e
-            );
-            panic!("Cannot start without valid work queue frontiers");
         }
 
         // Schedule periodic persistence
@@ -516,12 +435,7 @@ impl Handler<PeriodicPersistMessage> for WorkQueueManager {
 mod tests {
     use super::*;
     use crate::work_queue::state::QueueState;
-    use arrow::array::{Int64Array, StringArray, UInt64Array};
-    use arrow::datatypes::{DataType, Field, Schema};
-    use arrow::record_batch::RecordBatch;
     use chroma_storage::local::LocalStorage;
-    use parquet::arrow::ArrowWriter;
-    use std::sync::Arc;
     use tempfile::TempDir;
     use uuid::Uuid;
 
@@ -537,18 +451,6 @@ mod tests {
 
     fn create_test_sysdb() -> SysDb {
         SysDb::Test(chroma_sysdb::test_sysdb::TestSysDb::new())
-    }
-
-    fn add_test_collection(sysdb: &mut SysDb, collection_id: CollectionUuid, log_position: i64) {
-        match sysdb {
-            SysDb::Test(test_sysdb) => test_sysdb.add_collection(chroma_types::Collection {
-                collection_id,
-                name: format!("collection-{collection_id}"),
-                log_position,
-                ..Default::default()
-            }),
-            _ => panic!("Invalid sysdb type"),
-        }
     }
 
     async fn create_test_manager() -> (WorkQueueManager, TempDir) {
@@ -676,51 +578,6 @@ mod tests {
             assert_eq!(manager.state.pending_work[0].completion_offset, 100);
             assert_eq!(manager.state.pending_work[1].completion_offset, 200);
         }
-    }
-
-    #[tokio::test]
-    async fn test_hydrate_missing_compaction_offsets_from_sysdb() {
-        let (mut manager, _temp_dir) = create_test_manager().await;
-        let fn_id = AttachedFunctionUuid(Uuid::new_v4());
-        let coll_id = CollectionUuid(Uuid::new_v4());
-        add_test_collection(&mut manager.sysdb, coll_id, 140);
-
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("fn_id", DataType::Utf8, false),
-            Field::new("input_coll_id", DataType::Utf8, false),
-            Field::new("completion_offset", DataType::Int64, false),
-            Field::new("insertion_order", DataType::UInt64, false),
-        ]));
-
-        let batch = RecordBatch::try_new(
-            schema.clone(),
-            vec![
-                Arc::new(StringArray::from(vec![fn_id.to_string()])),
-                Arc::new(StringArray::from(vec![coll_id.to_string()])),
-                Arc::new(Int64Array::from(vec![100])),
-                Arc::new(UInt64Array::from(vec![0])),
-            ],
-        )
-        .expect("Failed to build legacy batch");
-
-        let mut buffer = Vec::new();
-        let mut writer =
-            ArrowWriter::try_new(&mut buffer, schema, None).expect("Failed to create writer");
-        writer.write(&batch).expect("Failed to write batch");
-        writer.close().expect("Failed to close writer");
-
-        manager.state =
-            QueueState::from_parquet_bytes(&buffer).expect("Failed to load legacy state");
-        assert_eq!(manager.state.count_entries_missing_compaction_offset(), 1);
-        assert_eq!(manager.state.pending_work[0].compaction_offset, 100);
-
-        manager
-            .hydrate_missing_compaction_offsets()
-            .await
-            .expect("Failed to hydrate missing frontiers");
-
-        assert_eq!(manager.state.count_entries_missing_compaction_offset(), 0);
-        assert_eq!(manager.state.pending_work[0].compaction_offset, 140);
     }
 
     #[tokio::test]
