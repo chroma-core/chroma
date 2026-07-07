@@ -1092,3 +1092,44 @@ impl Handler<TaskResult<QueueFunctionOutput, QueueFunctionError>> for AttachedFu
         self.finish_no_attached_function(ctx).await;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::execution::orchestration::compact::CollectionCompactInfo;
+    use chroma_types::{Collection, CollectionUuid};
+
+    fn compact_info(pulled_log_offset: i64, persisted_log_position: i64) -> CollectionCompactInfo {
+        CollectionCompactInfo {
+            collection_id: CollectionUuid::new(),
+            collection: Collection {
+                log_position: persisted_log_position,
+                ..Default::default()
+            },
+            writers: None,
+            pulled_log_offset,
+            hnsw_index_uuid: None,
+            schema: None,
+            original_segment_flush_infos: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn async_queue_frontier_uses_pulled_log_offset() {
+        let collection_info = compact_info(550, 250);
+
+        let compaction_offset = (collection_info.pulled_log_offset >= 0)
+            .then_some(collection_info.pulled_log_offset);
+
+        assert_eq!(compaction_offset, Some(550));
+    }
+
+    #[test]
+    fn async_queue_frontier_ignores_uninitialized_offsets() {
+        let collection_info = compact_info(-1, 250);
+
+        let compaction_offset = (collection_info.pulled_log_offset >= 0)
+            .then_some(collection_info.pulled_log_offset);
+
+        assert_eq!(compaction_offset, None);
+    }
+}
