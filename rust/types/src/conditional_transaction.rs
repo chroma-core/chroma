@@ -61,7 +61,8 @@ impl ConditionalCommitRequest {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ConditionalCommitResult {
     pub first_inserted_record_offset: Option<i64>,
     pub record_count: usize,
@@ -315,7 +316,9 @@ impl ConditionalTransactionState {
         self.read_ids = next_read_ids;
         self.known_present = next_known_present;
         self.known_absent = next_known_absent;
-        self.read_token.get_or_insert(read_token);
+        if self.read_token.is_none() {
+            self.read_token = Some(read_token);
+        }
 
         Ok(())
     }
@@ -441,6 +444,10 @@ pub enum ConditionalTransactionError {
     DuplicateBufferedWrite { id: String },
     #[error("transactional writes do not support operation {operation:?}")]
     UnsupportedWriteOperation { operation: Operation },
+    #[error(
+        "conditional transactions require the gRPC log implementation; configured log is {implementation}"
+    )]
+    UnsupportedLogImplementation { implementation: String },
     #[error("transactional get response did not include an OCC read token")]
     MissingReadToken,
     #[error(
@@ -466,7 +473,8 @@ impl ChromaError for ConditionalTransactionError {
             | ConditionalTransactionError::DeleteRequiresKnownPresent { .. }
             | ConditionalTransactionError::DuplicateWriteIdInRequest { .. }
             | ConditionalTransactionError::DuplicateBufferedWrite { .. }
-            | ConditionalTransactionError::UnsupportedWriteOperation { .. } => {
+            | ConditionalTransactionError::UnsupportedWriteOperation { .. }
+            | ConditionalTransactionError::UnsupportedLogImplementation { .. } => {
                 ErrorCodes::InvalidArgument
             }
             ConditionalTransactionError::MissingReadToken
@@ -482,6 +490,10 @@ impl ChromaError for ConditionalTransactionError {
 pub enum ConditionalCommitError {
     #[error(transparent)]
     Transaction(#[from] ConditionalTransactionError),
+    #[error(
+        "conditional transactions require the gRPC log implementation; configured log is {implementation}"
+    )]
+    TransactionsNotSupported { implementation: String },
     #[error("Backoff and retry")]
     Backoff,
     #[error("Invalid database name")]
@@ -496,6 +508,7 @@ impl ChromaError for ConditionalCommitError {
     fn code(&self) -> ErrorCodes {
         match self {
             ConditionalCommitError::Transaction(err) => err.code(),
+            ConditionalCommitError::TransactionsNotSupported { .. } => ErrorCodes::Unimplemented,
             ConditionalCommitError::Backoff => ErrorCodes::ResourceExhausted,
             ConditionalCommitError::InvalidDatabaseName => ErrorCodes::InvalidArgument,
             ConditionalCommitError::InvalidArgument(_) => ErrorCodes::InvalidArgument,
@@ -746,6 +759,19 @@ mod tests {
             include: vec![Include::Document, Include::Metadata],
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn transactions_not_supported_commit_error_uses_unimplemented_code() {
+        let err = ConditionalCommitError::TransactionsNotSupported {
+            implementation: "sqlite".to_string(),
+        };
+
+        assert_eq!(ErrorCodes::Unimplemented, err.code());
+        assert_eq!(
+            "conditional transactions require the gRPC log implementation; configured log is sqlite",
+            err.to_string()
+        );
     }
 
     fn metadata_where() -> Where {

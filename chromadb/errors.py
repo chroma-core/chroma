@@ -206,6 +206,17 @@ class ConditionalWriteConflictError(ChromaError):
         return "ConditionalWriteConflictError"
 
 
+class TransactionsNotSupportedError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 501
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "TransactionsNotSupported"
+
+
 error_types: Dict[str, Type[ChromaError]] = {
     "InvalidDimension": InvalidDimensionException,
     "InvalidArgumentError": InvalidArgumentError,
@@ -224,6 +235,7 @@ error_types: Dict[str, Type[ChromaError]] = {
     "QuotaError": QuotaError,
     "StaleReadError": StaleReadError,
     "ConditionalWriteConflictError": ConditionalWriteConflictError,
+    "TransactionsNotSupported": TransactionsNotSupportedError,
     "InternalError": InternalError,
     # Catch-all for any other errors
     "ChromaError": ChromaError,

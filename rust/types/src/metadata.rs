@@ -401,6 +401,42 @@ impl<'py> pyo3::FromPyObject<'py> for UpdateMetadataValue {
     }
 }
 
+#[cfg(feature = "pyo3")]
+impl<'py> pyo3::IntoPyObject<'py> for UpdateMetadataValue {
+    type Target = pyo3::PyAny;
+    type Output = pyo3::Bound<'py, Self::Target>;
+    type Error = pyo3::PyErr;
+
+    fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
+        use pyo3::BoundObject;
+
+        match self {
+            UpdateMetadataValue::Bool(value) => {
+                Ok(value.into_pyobject(py)?.into_bound().into_any())
+            }
+            UpdateMetadataValue::Int(value) => Ok(value.into_pyobject(py)?.into_bound().into_any()),
+            UpdateMetadataValue::Float(value) => {
+                Ok(value.into_pyobject(py)?.into_bound().into_any())
+            }
+            UpdateMetadataValue::Str(value) => Ok(value.into_pyobject(py)?.into_bound().into_any()),
+            UpdateMetadataValue::SparseVector(value) => value.into_pyobject(py),
+            UpdateMetadataValue::BoolArray(value) => {
+                Ok(value.into_pyobject(py)?.into_bound().into_any())
+            }
+            UpdateMetadataValue::IntArray(value) => {
+                Ok(value.into_pyobject(py)?.into_bound().into_any())
+            }
+            UpdateMetadataValue::FloatArray(value) => {
+                Ok(value.into_pyobject(py)?.into_bound().into_any())
+            }
+            UpdateMetadataValue::StringArray(value) => {
+                Ok(value.into_pyobject(py)?.into_bound().into_any())
+            }
+            UpdateMetadataValue::None => Ok(py.None().into_bound(py)),
+        }
+    }
+}
+
 impl From<bool> for UpdateMetadataValue {
     fn from(b: bool) -> Self {
         Self::Bool(b)

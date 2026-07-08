@@ -14,6 +14,7 @@ pyo3::import_exception!(chromadb.errors, InternalError);
 pyo3::import_exception!(chromadb.errors, RateLimitError);
 pyo3::import_exception!(chromadb.errors, BackoffError);
 pyo3::import_exception!(chromadb.errors, ConditionalWriteConflictError);
+pyo3::import_exception!(chromadb.errors, TransactionsNotSupportedError);
 pyo3::import_exception!(chromadb.errors, StaleReadError);
 
 #[derive(Error, Debug)]
@@ -37,6 +38,14 @@ impl From<ChromaPyError> for PyErr {
         }
         if source_chain_contains(chroma_error, |err| err.is::<ApiStaleReadError>()) {
             return StaleReadError::new_err(message);
+        }
+        if source_chain_contains(chroma_error, |err| {
+            matches!(
+                err.downcast_ref::<ConditionalCommitError>(),
+                Some(ConditionalCommitError::TransactionsNotSupported { .. })
+            )
+        }) {
+            return TransactionsNotSupportedError::new_err(message);
         }
         if source_chain_contains(chroma_error, |err| {
             matches!(

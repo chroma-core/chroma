@@ -6,7 +6,9 @@ use axum::{
     routing::{get, patch, post},
     Json, Router, ServiceExt,
 };
-use chroma_api_types::{ForkCollectionPayload, GetUserIdentityResponse, HeartbeatResponse};
+use chroma_api_types::{
+    ForkCollectionPayload, GetUserIdentityResponse, HeartbeatResponse, OccReadToken,
+};
 use chroma_metering::{
     CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable,
     ExternalCollectionReadContext, MeteredFutureExt, ReadAction, StartRequest, WriteAction,
@@ -17,27 +19,31 @@ use chroma_types::{
     decode_embeddings, maybe_decode_update_embeddings, plan::ReadLevel, validate_name,
     AddAttachedFunctionInputRequest, AddAttachedFunctionInputResponse, AddCollectionRecordsPayload,
     AddCollectionRecordsResponse, AttachFunctionRequest, AttachFunctionResponse, Collection,
-    CollectionConfiguration, CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest,
-    CountCollectionsResponse, CountRequest, CountResponse, CreateCollectionPayload,
-    CreateCollectionRequest, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest,
-    CreateTenantResponse, DatabaseName, DeleteCollectionRecordsPayload,
-    DeleteCollectionRecordsResponse, DeleteCollectionResponse, DeleteDatabaseRequest,
-    DeleteDatabaseResponse, DetachFunctionRequest, DetachFunctionResponse, ForkCollectionResponse,
-    GetAttachedFunctionResponse, GetCollectionByCrnRequest, GetCollectionByIdRequest,
-    GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetRequestPayload,
-    GetResponse, GetTenantRequest, GetTenantResponse, HealthCheckResponse, IndexStatusResponse,
-    InternalCollectionConfiguration, InternalUpdateCollectionConfiguration, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse, QueryRequest,
-    QueryRequestPayload, QueryResponse, SearchRequest, SearchRequestPayload, SearchResponse,
-    UpdateCollectionPayload, UpdateCollectionRecordsPayload, UpdateCollectionRecordsResponse,
-    UpdateCollectionResponse, UpdateTenantRequest, UpdateTenantResponse,
-    UpsertCollectionRecordsPayload, UpsertCollectionRecordsResponse,
+    CollectionConfiguration, CollectionMetadataUpdate, CollectionUuid, ConditionalBufferedWrite,
+    ConditionalCommitPayload, ConditionalCommitRequest, ConditionalCommitResult,
+    ConditionalGetRequestPayload, ConditionalGetResponse, ConditionalTransactionOperationPayload,
+    CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
+    CreateCollectionPayload, CreateCollectionRequest, CreateDatabaseRequest,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, DatabaseName,
+    DeleteCollectionRecordsPayload, DeleteCollectionRecordsResponse, DeleteCollectionResponse,
+    DeleteDatabaseRequest, DeleteDatabaseResponse, DetachFunctionRequest, DetachFunctionResponse,
+    ForkCollectionResponse, GetAttachedFunctionResponse, GetCollectionByCrnRequest,
+    GetCollectionByIdRequest, GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse,
+    GetRequest, GetRequestPayload, GetResponse, GetTenantRequest, GetTenantResponse,
+    HealthCheckResponse, IndexStatusResponse, InternalCollectionConfiguration,
+    InternalUpdateCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesRequest, ListDatabasesResponse, QueryRequest, QueryRequestPayload, QueryResponse,
+    Schema, SearchRequest, SearchRequestPayload, SearchResponse, UpdateCollectionPayload,
+    UpdateCollectionRecordsPayload, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
+    UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsPayload,
+    UpsertCollectionRecordsResponse,
 };
 use frontend_core::routes::{SystemMetrics, SystemState};
 use mdac::{Rule, Scorecard, ScorecardGuard};
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -154,6 +160,8 @@ pub struct Metrics {
     collection_delete: Counter<u64>,
     collection_count: Counter<u64>,
     collection_get: Counter<u64>,
+    collection_conditional_get: Counter<u64>,
+    collection_conditional_commit: Counter<u64>,
     collection_index_status: Counter<u64>,
     collection_query: Counter<u64>,
     collection_search: Counter<u64>,
@@ -191,6 +199,10 @@ impl Metrics {
             collection_delete: meter.u64_counter("collection_delete").build(),
             collection_count: meter.u64_counter("collection_count").build(),
             collection_get: meter.u64_counter("collection_get").build(),
+            collection_conditional_get: meter.u64_counter("collection_conditional_get").build(),
+            collection_conditional_commit: meter
+                .u64_counter("collection_conditional_commit")
+                .build(),
             collection_index_status: meter.u64_counter("collection_index_status").build(),
             collection_query: meter.u64_counter("collection_query").build(),
             collection_search: meter.u64_counter("collection_search").build(),
@@ -350,6 +362,14 @@ impl FrontendServer {
             .route(
                 "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/get",
                 post(collection_get),
+            )
+            .route(
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/conditional/get",
+                post(collection_conditional_get),
+            )
+            .route(
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/conditional/commit",
+                post(collection_conditional_commit),
             )
             .route(
                 "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/query",
@@ -2799,6 +2819,450 @@ async fn collection_get(
     Ok(Json(res))
 }
 
+fn parse_collection_scope(
+    database: &str,
+    collection_id: &str,
+) -> Result<(DatabaseName, CollectionUuid), ServerError> {
+    let database_name = DatabaseName::new(database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
+    let collection_id =
+        CollectionUuid::from_str(collection_id).map_err(|_| ValidationError::CollectionId)?;
+    Ok((database_name, collection_id))
+}
+
+fn conditional_operation_authz_action(
+    operation: &ConditionalTransactionOperationPayload,
+) -> AuthzAction {
+    match operation {
+        ConditionalTransactionOperationPayload::Add(_) => AuthzAction::Add,
+        ConditionalTransactionOperationPayload::Update(_) => AuthzAction::Update,
+        ConditionalTransactionOperationPayload::Upsert(_) => AuthzAction::Upsert,
+        ConditionalTransactionOperationPayload::Delete(_) => AuthzAction::Delete,
+    }
+}
+
+fn conditional_operation_to_buffered_write(
+    tenant: &str,
+    database: &str,
+    collection_id: CollectionUuid,
+    operation: ConditionalTransactionOperationPayload,
+) -> Result<ConditionalBufferedWrite, ServerError> {
+    match operation {
+        ConditionalTransactionOperationPayload::Add(payload) => {
+            let embeddings =
+                decode_embeddings(payload.embeddings).map_err(ValidationError::from)?;
+            let request = chroma_types::AddCollectionRecordsRequest::try_new(
+                tenant.to_string(),
+                database.to_string(),
+                collection_id,
+                payload.ids,
+                embeddings,
+                payload.documents,
+                payload.uris,
+                payload.metadatas,
+            )?;
+            Ok(ConditionalBufferedWrite::Add(request))
+        }
+        ConditionalTransactionOperationPayload::Update(payload) => {
+            let embeddings = maybe_decode_update_embeddings(payload.embeddings)
+                .map_err(ValidationError::from)?;
+            let request = chroma_types::UpdateCollectionRecordsRequest::try_new(
+                tenant.to_string(),
+                database.to_string(),
+                collection_id,
+                payload.ids,
+                embeddings,
+                payload.documents,
+                payload.uris,
+                payload.metadatas,
+            )?;
+            Ok(ConditionalBufferedWrite::Update(request))
+        }
+        ConditionalTransactionOperationPayload::Upsert(payload) => {
+            let embeddings =
+                decode_embeddings(payload.embeddings).map_err(ValidationError::from)?;
+            let request = chroma_types::UpsertCollectionRecordsRequest::try_new(
+                tenant.to_string(),
+                database.to_string(),
+                collection_id,
+                payload.ids,
+                embeddings,
+                payload.documents,
+                payload.uris,
+                payload.metadatas,
+            )?;
+            Ok(ConditionalBufferedWrite::Upsert(request))
+        }
+        ConditionalTransactionOperationPayload::Delete(payload) => {
+            let r#where = payload.where_fields.parse()?;
+            let request = chroma_types::DeleteCollectionRecordsRequest::try_new(
+                tenant.to_string(),
+                database.to_string(),
+                collection_id,
+                payload.ids,
+                r#where,
+                payload.limit,
+            )?;
+            Ok(ConditionalBufferedWrite::Delete(request))
+        }
+    }
+}
+
+async fn enforce_conditional_write_quota(
+    server: &FrontendServer,
+    tenant: &str,
+    api_token: Option<String>,
+    collection_id: CollectionUuid,
+    schema: Option<&Schema>,
+    write: &ConditionalBufferedWrite,
+) -> Result<(), ServerError> {
+    let mut quota_payload = match write {
+        ConditionalBufferedWrite::Add(request) => {
+            let mut payload = QuotaPayload::new(Action::Add, tenant.to_string(), api_token)
+                .with_ids(&request.ids)
+                .with_add_embeddings(&request.embeddings)
+                .with_collection_uuid(collection_id);
+            if let Some(metadatas) = &request.metadatas {
+                payload = payload.with_metadatas(metadatas);
+            }
+            if let Some(documents) = &request.documents {
+                payload = payload.with_documents(documents);
+            }
+            if let Some(uris) = &request.uris {
+                payload = payload.with_uris(uris);
+            }
+            payload
+        }
+        ConditionalBufferedWrite::Update(request) => {
+            let mut payload = QuotaPayload::new(Action::Update, tenant.to_string(), api_token)
+                .with_ids(&request.ids)
+                .with_collection_uuid(collection_id);
+            if let Some(embeddings) = &request.embeddings {
+                payload = payload.with_update_embeddings(embeddings);
+            }
+            if let Some(metadatas) = &request.metadatas {
+                payload = payload.with_update_metadatas(metadatas);
+            }
+            if let Some(documents) = &request.documents {
+                payload = payload.with_documents(documents);
+            }
+            if let Some(uris) = &request.uris {
+                payload = payload.with_uris(uris);
+            }
+            payload
+        }
+        ConditionalBufferedWrite::Upsert(request) => {
+            let mut payload = QuotaPayload::new(Action::Upsert, tenant.to_string(), api_token)
+                .with_ids(&request.ids)
+                .with_add_embeddings(&request.embeddings)
+                .with_collection_uuid(collection_id);
+            if let Some(metadatas) = &request.metadatas {
+                payload = payload.with_update_metadatas(metadatas);
+            }
+            if let Some(documents) = &request.documents {
+                payload = payload.with_documents(documents);
+            }
+            if let Some(uris) = &request.uris {
+                payload = payload.with_uris(uris);
+            }
+            payload
+        }
+        ConditionalBufferedWrite::Delete(request) => {
+            let mut payload = QuotaPayload::new(Action::Delete, tenant.to_string(), api_token)
+                .with_collection_uuid(collection_id);
+            if let Some(ids) = &request.ids {
+                payload = payload.with_ids(ids);
+            }
+            if let Some(r#where) = &request.r#where {
+                payload = payload.with_where(r#where);
+            }
+            if let Some(limit) = request.limit {
+                payload = payload.with_limit(limit);
+            }
+            payload
+        }
+    };
+    if let Some(schema) = schema {
+        quota_payload = quota_payload.with_schema(schema);
+    }
+    let _ = server.quota_enforcer.enforce(&quota_payload).await?;
+    Ok(())
+}
+
+/// Conditional get
+/// Returns records from a collection and exposes the OCC read token used by the read.
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/conditional/get",
+    summary = "Conditional get",
+    description = "Returns records from a collection and includes the OCC read token for conditional transactions.",
+    tag = "Record",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
+    request_body = ConditionalGetRequestPayload,
+    responses(
+        (status = 200, description = "Records retrieved from the collection", body = ConditionalGetResponse),
+        (status = 400, description = "Invalid request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant UUID"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "Collection UUID")
+    ),
+    extensions(
+        ("x-hidden" = json!(true))
+    )
+)]
+async fn collection_conditional_get(
+    headers: HeaderMap,
+    Path((tenant, database, collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<ConditionalGetRequestPayload>,
+) -> Result<Json<ConditionalGetResponse>, ServerError> {
+    server.metrics.collection_conditional_get.add(1, &[]);
+    server
+        .frontend
+        .ensure_conditional_transactions_supported()?;
+    let (database_name, collection_id) = parse_collection_scope(&database, &collection_id)?;
+    let requester_identity = server
+        .authenticate_and_authorize_collection(
+            &headers,
+            AuthzAction::Get,
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
+                collection: Some(collection_id.0.to_string()),
+            },
+            database_name,
+            collection_id,
+        )
+        .await?;
+    let _guard = server.scorecard_request(&[
+        "op:read",
+        "op:conditional_get",
+        format!("tenant:{}", tenant).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+        format!("requester:{}", requester_identity.tenant).as_str(),
+    ])?;
+
+    let read_token = payload.read_token;
+    let get_payload = payload.into_get_payload();
+    let parsed_where = get_payload.where_fields.parse()?;
+    let api_token = headers
+        .get("x-chroma-token")
+        .map(|val| val.to_str().unwrap_or_default())
+        .map(|val| val.to_string());
+    let mut quota_payload = QuotaPayload::new(Action::Get, tenant.clone(), api_token);
+    if let Some(ids) = &get_payload.ids {
+        quota_payload = quota_payload.with_ids(ids);
+    }
+    if let Some(r#where) = &parsed_where {
+        quota_payload = quota_payload.with_where(r#where);
+    }
+    if let Some(provided_limit) = get_payload.limit {
+        quota_payload = quota_payload.with_limit(provided_limit);
+    }
+    let quota_overrides = server.quota_enforcer.enforce(&quota_payload).await?;
+    let validated_limit = match quota_overrides {
+        Some(overrides) => Some(overrides.limit),
+        None => get_payload.limit,
+    };
+
+    let metering_context_container = if requester_identity.tenant == tenant {
+        chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
+            requester_identity.tenant.clone(),
+            database.clone(),
+            collection_id.0.to_string(),
+            ReadAction::Get,
+            server.config.region.clone(),
+        ))
+    } else {
+        chroma_metering::create::<ExternalCollectionReadContext>(
+            ExternalCollectionReadContext::new(
+                requester_identity.tenant.clone(),
+                database.clone(),
+                collection_id.0.to_string(),
+                ReadAction::Get,
+                server.config.region.clone(),
+            ),
+        )
+    };
+    metering_context_container.enter();
+    chroma_metering::with_current(|context| {
+        context.start_request(Instant::now());
+    });
+
+    let mut request = GetRequest::try_new(
+        tenant,
+        database,
+        collection_id,
+        get_payload.ids,
+        parsed_where,
+        validated_limit,
+        get_payload.offset.unwrap_or(0),
+        get_payload.include,
+    )?;
+    request = match read_token {
+        Some(read_token) => request.with_occ_read_token(OccReadToken::try_new(read_token)?),
+        None => request.with_occ_read_token_generation(),
+    };
+    let response = server
+        .frontend
+        .get(request)
+        .meter(metering_context_container)
+        .await?;
+    let response_read_token = response
+        .occ_read_token()
+        .map(|token| token.log_upper_bound_offset())
+        .or(read_token)
+        .ok_or_else(|| {
+            ValidationError::InvalidArgument(
+                "conditional get response did not include a read token".to_string(),
+            )
+        })?;
+    Ok(Json(ConditionalGetResponse::from_get_response(
+        response,
+        response_read_token,
+    )))
+}
+
+/// Conditional commit
+/// Commits buffered writes with the transaction's OCC read token and read set.
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/conditional/commit",
+    summary = "Conditional commit",
+    description = "Commits buffered writes as one conditional append using the transaction's OCC read token and read set.",
+    tag = "Record",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
+    request_body = ConditionalCommitPayload,
+    responses(
+        (status = 200, description = "Conditional transaction committed", body = ConditionalCommitResult),
+        (status = 400, description = "Invalid request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 409, description = "Conditional write conflict", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant UUID"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "Collection UUID")
+    ),
+    extensions(
+        ("x-hidden" = json!(true))
+    )
+)]
+async fn collection_conditional_commit(
+    headers: HeaderMap,
+    Path((tenant, database, collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<ConditionalCommitPayload>,
+) -> Result<Json<ConditionalCommitResult>, ServerError> {
+    server.metrics.collection_conditional_commit.add(1, &[]);
+    server.frontend.ensure_conditional_commit_supported()?;
+    let (database_name, collection_id) = parse_collection_scope(&database, &collection_id)?;
+    let mut authz_actions = BTreeSet::new();
+    for operation in &payload.operations {
+        authz_actions.insert(conditional_operation_authz_action(operation));
+    }
+    if authz_actions.is_empty() {
+        authz_actions.insert(AuthzAction::Get);
+    }
+    for action in authz_actions {
+        server
+            .authenticate_and_authorize_collection(
+                &headers,
+                action,
+                AuthzResource {
+                    tenant: Some(tenant.clone()),
+                    database: Some(database.clone()),
+                    collection: Some(collection_id.0.to_string()),
+                },
+                database_name.clone(),
+                collection_id,
+            )
+            .await?;
+    }
+    let _guard = server.scorecard_request(&[
+        "op:write",
+        "op:conditional_commit",
+        format!("tenant:{}", tenant).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+    ])?;
+
+    let collection = server
+        .frontend
+        .get_cached_collection(database_name, collection_id)
+        .await?;
+    let api_token = headers
+        .get("x-chroma-token")
+        .map(|val| val.to_str().unwrap_or_default())
+        .map(|val| val.to_string());
+    let observed_log_offset = payload
+        .read_token
+        .map(|read_token| -> Result<i64, ServerError> {
+            let read_token = OccReadToken::try_new(read_token)?;
+            i64::try_from(read_token.log_upper_bound_offset()).map_err(|_| {
+                ValidationError::InvalidArgument(format!(
+                    "conditional read token {} exceeds i64 range",
+                    read_token.log_upper_bound_offset()
+                ))
+                .into()
+            })
+        })
+        .transpose()?;
+    if observed_log_offset.is_none() && !payload.read_ids.is_empty() {
+        return Err(ValidationError::InvalidArgument(
+            "conditional commit with read_ids requires read_token".to_string(),
+        )
+        .into());
+    }
+    let mut buffered_writes = Vec::with_capacity(payload.operations.len());
+
+    for operation in payload.operations {
+        let write =
+            conditional_operation_to_buffered_write(&tenant, &database, collection_id, operation)?;
+        enforce_conditional_write_quota(
+            &server,
+            &tenant,
+            api_token.clone(),
+            collection_id,
+            collection.schema.as_ref(),
+            &write,
+        )
+        .await?;
+        buffered_writes.push(write);
+    }
+
+    if buffered_writes.is_empty() {
+        return Ok(Json(ConditionalCommitResult {
+            first_inserted_record_offset: None,
+            record_count: 0,
+        }));
+    }
+
+    let result = server
+        .frontend
+        .conditional_commit(
+            ConditionalCommitRequest {
+                buffered_writes,
+                observed_log_offset,
+                read_ids: payload.read_ids,
+            },
+            server.config.region.clone(),
+        )
+        .await?;
+    Ok(Json(result))
+}
+
 /// Query collection
 /// Queries a collection using dense vector search with metadata and full-text search filtering.
 #[utoipa::path(
@@ -3461,6 +3925,8 @@ impl Modify for ChromaTokenSecurityAddon {
         collection_delete,
         collection_count,
         collection_get,
+        collection_conditional_get,
+        collection_conditional_commit,
         collection_query,
         collection_search,
         attach_function,

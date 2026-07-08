@@ -1,4 +1,4 @@
-from typing import List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 from uuid import UUID
 from chromadb import CollectionMetadata, Embeddings, IDs
 from chromadb.api.types import (
@@ -37,6 +37,92 @@ class QueryResponse:
     metadatas: Optional[List[Metadatas]]
     distances: Optional[List[List[float]]]
     include: Include
+
+class ConditionalTransaction:
+    def __init__(self) -> None: ...
+    def is_closed(self) -> bool: ...
+    def prepare_get(
+        self,
+        collection_id: str,
+        ids: Optional[IDs],
+        where: Optional[str],
+        limit: Optional[int],
+        offset: Optional[int],
+        where_document: Optional[str],
+        include: Include,
+        tenant: str,
+        database: str,
+    ) -> Optional[int]: ...
+    def record_get_response(
+        self,
+        collection_id: str,
+        ids: Optional[IDs],
+        where: Optional[str],
+        limit: Optional[int],
+        offset: Optional[int],
+        where_document: Optional[str],
+        include: Include,
+        tenant: str,
+        database: str,
+        returned_ids: IDs,
+        read_token: int,
+    ) -> None: ...
+    def buffer_add(
+        self,
+        collection_id: str,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas],
+        documents: Optional[Documents],
+        uris: Optional[URIs],
+        tenant: str,
+        database: str,
+    ) -> None: ...
+    def buffer_update(
+        self,
+        collection_id: str,
+        ids: IDs,
+        embeddings: Optional[Embeddings],
+        metadatas: Optional[Metadatas],
+        documents: Optional[Documents],
+        uris: Optional[URIs],
+        tenant: str,
+        database: str,
+    ) -> None: ...
+    def buffer_upsert(
+        self,
+        collection_id: str,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas],
+        documents: Optional[Documents],
+        uris: Optional[URIs],
+        tenant: str,
+        database: str,
+    ) -> None: ...
+    def buffer_delete(
+        self,
+        collection_id: str,
+        ids: IDs,
+        tenant: str,
+        database: str,
+    ) -> None: ...
+    def prepare_commit(self) -> Optional[ConditionalCommitPayload]: ...
+    def finish_commit(
+        self,
+        first_inserted_record_offset: Optional[int],
+    ) -> ConditionalCommitResult: ...
+
+class ConditionalCommitPayload:
+    read_token: Optional[int]
+    read_ids: List[str]
+    operation_names: List[str]
+    record_count: int
+    def to_json(self) -> Dict[str, Any]: ...
+
+class ConditionalCommitResult:
+    first_inserted_record_offset: Optional[int]
+    record_count: int
 
 class GetTenantResponse:
     name: str

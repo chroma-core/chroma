@@ -12,7 +12,7 @@ use chroma_metering::{
     CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable,
     ExternalCollectionReadContext, FinishRequest, FtsQueryLength, LatestCollectionLogicalSizeBytes,
     LogSizeBytes, MetadataPredicateCount, MeterEvent, MeteredFutureExt, PulledLogSizeBytes,
-    QueryEmbeddingCount, ReturnBytes, WriteAction,
+    QueryEmbeddingCount, ReadAction, ReturnBytes, WriteAction,
 };
 use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
@@ -31,8 +31,8 @@ use chroma_types::{
     AddAttachedFunctionInputResponse, AddCollectionRecordsError, AddCollectionRecordsRequest,
     AddCollectionRecordsResponse, AttachFunctionRequest, AttachFunctionResponse,
     AttachedFunctionApiResponse, Cmek, Collection, CollectionAndSegments, CollectionUuid,
-    ConditionalBufferedWrite, ConditionalCommitAction, ConditionalCommitError,
-    ConditionalCommitResult, ConditionalTransactionState, CountCollectionsError,
+    ConditionalBufferedWrite, ConditionalCommitError, ConditionalCommitRequest,
+    ConditionalCommitResult, ConditionalTransactionError, CountCollectionsError,
     CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
     CreateCollectionError, CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError,
     CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError, CreateTenantRequest,
@@ -90,6 +90,45 @@ struct GetReadPlan {
     stale_read_token: Option<OccReadToken>,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct ConditionalCommitWriteMetering {
+    add_log_size_bytes: u64,
+    update_log_size_bytes: u64,
+    upsert_log_size_bytes: u64,
+    delete_log_size_bytes: u64,
+}
+
+impl ConditionalCommitWriteMetering {
+    fn add_log_size_bytes(&mut self, action: WriteAction, log_size_bytes: u64) {
+        match action {
+            WriteAction::Add => {
+                self.add_log_size_bytes = self.add_log_size_bytes.saturating_add(log_size_bytes)
+            }
+            WriteAction::Update => {
+                self.update_log_size_bytes =
+                    self.update_log_size_bytes.saturating_add(log_size_bytes)
+            }
+            WriteAction::Upsert => {
+                self.upsert_log_size_bytes =
+                    self.upsert_log_size_bytes.saturating_add(log_size_bytes)
+            }
+            WriteAction::Delete => {
+                self.delete_log_size_bytes =
+                    self.delete_log_size_bytes.saturating_add(log_size_bytes)
+            }
+        }
+    }
+
+    fn into_events(self) -> [(WriteAction, u64); 4] {
+        [
+            (WriteAction::Add, self.add_log_size_bytes),
+            (WriteAction::Update, self.update_log_size_bytes),
+            (WriteAction::Upsert, self.upsert_log_size_bytes),
+            (WriteAction::Delete, self.delete_log_size_bytes),
+        ]
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ServiceBasedFrontend {
     allow_reset: bool,
@@ -110,6 +149,28 @@ pub struct ServiceBasedFrontend {
 }
 
 impl ServiceBasedFrontend {
+    pub fn ensure_conditional_transactions_supported(
+        &self,
+    ) -> Result<(), ConditionalTransactionError> {
+        if self.log_client.supports_conditional_transactions() {
+            return Ok(());
+        }
+
+        Err(ConditionalTransactionError::UnsupportedLogImplementation {
+            implementation: self.log_client.implementation_name().to_string(),
+        })
+    }
+
+    pub fn ensure_conditional_commit_supported(&self) -> Result<(), ConditionalCommitError> {
+        if self.log_client.supports_conditional_transactions() {
+            return Ok(());
+        }
+
+        Err(ConditionalCommitError::TransactionsNotSupported {
+            implementation: self.log_client.implementation_name().to_string(),
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         allow_reset: bool,
@@ -1575,6 +1636,15 @@ impl ServiceBasedFrontend {
             .await
     }
 
+    fn buffered_write_action(write: &ConditionalBufferedWrite) -> WriteAction {
+        match write {
+            ConditionalBufferedWrite::Add(_) => WriteAction::Add,
+            ConditionalBufferedWrite::Update(_) => WriteAction::Update,
+            ConditionalBufferedWrite::Upsert(_) => WriteAction::Upsert,
+            ConditionalBufferedWrite::Delete(_) => WriteAction::Delete,
+        }
+    }
+
     async fn validate_buffered_write_for_commit(
         &mut self,
         write: &ConditionalBufferedWrite,
@@ -1643,32 +1713,34 @@ impl ServiceBasedFrontend {
         })
     }
 
-    pub async fn conditional_commit(
+    async fn conditional_commit_append(
         &mut self,
-        state: &mut ConditionalTransactionState,
-    ) -> Result<ConditionalCommitResult, ConditionalCommitError> {
-        let request = match state.prepare_commit()? {
-            ConditionalCommitAction::NoOp(result) => return Ok(result),
-            ConditionalCommitAction::Append(request) => request,
-        };
+        request: ConditionalCommitRequest,
+        region: &str,
+    ) -> Result<Option<i64>, ConditionalCommitError> {
+        let metering_started_at = Instant::now();
+        let expected_record_count = request.record_count();
         let (tenant_id, database_name, collection_id) =
             validate_conditional_commit_scope(&request)?;
+        let database_name_for_metering = database_name.as_ref().to_string();
+        let submit_read_metering = !request.read_ids.is_empty();
         let collection = self
             .get_cached_collection(database_name.clone(), collection_id)
             .await
             .map_err(|err| ConditionalCommitError::Other(Box::new(err)))?;
+        let latest_collection_logical_size_bytes = collection.size_bytes_post_compaction;
 
         for write in &request.buffered_writes {
             self.validate_buffered_write_for_commit(write, database_name.clone(), collection_id)
                 .await?;
         }
 
-        let expected_record_count = request.record_count();
         let mut records = Vec::with_capacity(expected_record_count);
-        let mut log_size_bytes = 0;
+        let mut write_metering = ConditionalCommitWriteMetering::default();
         for write in request.buffered_writes {
+            let write_action = Self::buffered_write_action(&write);
             let (mut write_records, write_log_size_bytes) = buffered_write_to_records(write)?;
-            log_size_bytes += write_log_size_bytes;
+            write_metering.add_log_size_bytes(write_action, write_log_size_bytes);
             records.append(&mut write_records);
         }
 
@@ -1725,11 +1797,6 @@ impl ServiceBasedFrontend {
             })
             .await;
 
-        chroma_metering::with_current(|context| {
-            context.log_size_bytes(log_size_bytes);
-            context.finish_request(Instant::now());
-        });
-
         match res {
             Ok(push_result) => {
                 if usize::try_from(push_result.record_count).ok() != Some(expected_record_count) {
@@ -1742,15 +1809,98 @@ impl ServiceBasedFrontend {
                         "Log service reported a different conditional commit record count than requested"
                     );
                 }
-                state
-                    .finish_commit(push_result.first_inserted_record_offset)
-                    .map_err(ConditionalCommitError::from)
+
+                let metering_finished_at = Instant::now();
+                if submit_read_metering {
+                    let collection_read_context = CollectionReadContext::new(
+                        tenant_id.clone(),
+                        database_name_for_metering.clone(),
+                        collection_id.0.to_string(),
+                        ReadAction::Get,
+                        region.to_string(),
+                    );
+                    if let Err(error) = collection_read_context
+                        .request_received_at
+                        .store(metering_started_at)
+                    {
+                        tracing::error!(
+                            "Failed to set conditional commit read metering start time: {:?}",
+                            error
+                        );
+                    }
+                    collection_read_context.fts_query_length(0);
+                    collection_read_context.metadata_predicate_count(0);
+                    collection_read_context.query_embedding_count(0);
+                    collection_read_context.pulled_log_size_bytes(0);
+                    collection_read_context
+                        .latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
+                    collection_read_context.return_bytes(0);
+                    collection_read_context.finish_request(metering_finished_at);
+                    if let Ok(()) = MeterEvent::CollectionRead(collection_read_context)
+                        .submit()
+                        .await
+                    {
+                        self.metrics.metering_read_counter.add(1, &[]);
+                    }
+                }
+
+                for (action, log_size_bytes) in write_metering.into_events() {
+                    if log_size_bytes == 0 {
+                        continue;
+                    }
+                    let collection_write_context = CollectionWriteContext::new(
+                        tenant_id.clone(),
+                        database_name_for_metering.clone(),
+                        collection_id.0.to_string(),
+                        action,
+                        region.to_string(),
+                    );
+                    if let Err(error) = collection_write_context
+                        .request_received_at
+                        .store(metering_started_at)
+                    {
+                        tracing::error!(
+                            "Failed to set conditional commit write metering start time: {:?}",
+                            error
+                        );
+                    }
+                    collection_write_context.log_size_bytes(log_size_bytes);
+                    collection_write_context.finish_request(metering_finished_at);
+                    if let Ok(()) = MeterEvent::CollectionWrite(collection_write_context)
+                        .submit()
+                        .await
+                    {
+                        self.metrics.metering_write_counter.add(1, &[]);
+                    }
+                }
+
+                Ok(push_result.first_inserted_record_offset)
             }
             Err(PushLogsError::Backoff | PushLogsError::BackoffCompaction) => {
                 Err(ConditionalCommitError::Backoff)
             }
             Err(other) => Err(ConditionalCommitError::Other(Box::new(other))),
         }
+    }
+
+    pub async fn conditional_commit(
+        &mut self,
+        request: ConditionalCommitRequest,
+        region: String,
+    ) -> Result<ConditionalCommitResult, ConditionalCommitError> {
+        self.ensure_conditional_commit_supported()?;
+        if request.buffered_writes.is_empty() {
+            return Ok(ConditionalCommitResult {
+                first_inserted_record_offset: None,
+                record_count: 0,
+            });
+        }
+        let record_count = request.record_count();
+        let first_inserted_record_offset = self.conditional_commit_append(request, &region).await?;
+        Ok(ConditionalCommitResult {
+            first_inserted_record_offset,
+            record_count,
+        })
     }
 
     pub async fn add(
@@ -3300,6 +3450,35 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn conditional_commit_unsupported_log_returns_transactions_not_supported() {
+        let registry = Registry::new();
+        let system = System::new();
+        let config = FrontendConfig::sqlite_in_memory();
+        let mut frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .unwrap();
+
+        let err = frontend
+            .conditional_commit(
+                ConditionalCommitRequest {
+                    buffered_writes: Vec::new(),
+                    observed_log_offset: None,
+                    read_ids: Vec::new(),
+                },
+                String::new(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            ConditionalCommitError::TransactionsNotSupported { ref implementation }
+                if implementation == "sqlite"
+        ));
+        assert_eq!(ErrorCodes::Unimplemented, err.code());
+    }
+
     #[test]
     fn occ_read_capture_plan_uses_exact_scouted_offset() {
         let plan = ServiceBasedFrontend::get_read_plan(true, OccReadMode::Capture, Some(42))
@@ -3307,6 +3486,16 @@ mod tests {
         let token = OccReadToken::try_new(42).unwrap();
         assert_eq!(plan.log_upper_bound_offset, 42);
         assert_eq!(plan.response_read_token, Some(token));
+        assert_eq!(plan.stale_read_token, Some(token));
+    }
+
+    #[test]
+    fn occ_read_at_token_plan_uses_token_offset() {
+        let token = OccReadToken::try_new(42).unwrap();
+        let plan = ServiceBasedFrontend::get_read_plan(true, OccReadMode::AtToken(token), Some(99))
+            .expect("read at token should use the supplied token");
+        assert_eq!(plan.log_upper_bound_offset, 42);
+        assert_eq!(plan.response_read_token, None);
         assert_eq!(plan.stale_read_token, Some(token));
     }
 
