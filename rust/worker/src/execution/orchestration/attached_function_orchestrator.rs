@@ -245,8 +245,8 @@ pub enum AttachedFunctionOrchestratorResponse {
 }
 
 impl AttachedFunctionOrchestrator {
-    fn queued_compaction_offset(collection_info: &CollectionCompactInfo) -> Option<i64> {
-        (collection_info.pulled_log_offset >= 0).then_some(collection_info.pulled_log_offset)
+    fn queued_compaction_offset(collection_info: &CollectionCompactInfo) -> i64 {
+        collection_info.pulled_log_offset
     }
 
     pub fn new(
@@ -1124,7 +1124,7 @@ mod tests {
 
         assert_eq!(
             AttachedFunctionOrchestrator::queued_compaction_offset(&collection_info),
-            Some(550)
+            550
         );
     }
 
@@ -1134,17 +1134,17 @@ mod tests {
 
         assert_eq!(
             AttachedFunctionOrchestrator::queued_compaction_offset(&collection_info),
-            Some(200)
+            200
         );
     }
 
     #[test]
-    fn async_queue_frontier_ignores_uninitialized_offsets() {
-        let collection_info = compact_info(-1, 250);
+    fn async_queue_frontier_preserves_zero_offsets() {
+        let collection_info = compact_info(0, 250);
 
         assert_eq!(
             AttachedFunctionOrchestrator::queued_compaction_offset(&collection_info),
-            None
+            0
         );
     }
 }
