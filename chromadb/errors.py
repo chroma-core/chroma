@@ -184,6 +184,17 @@ class StaleReadError(ChromaError):
         return "StaleReadError"
 
 
+class ConditionalWriteConflictError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 409
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "ConditionalWriteConflictError"
+
+
 error_types: Dict[str, Type[ChromaError]] = {
     "InvalidDimension": InvalidDimensionException,
     "InvalidArgumentError": InvalidArgumentError,
@@ -200,6 +211,7 @@ error_types: Dict[str, Type[ChromaError]] = {
     "UniqueConstraintError": UniqueConstraintError,
     "QuotaError": QuotaError,
     "StaleReadError": StaleReadError,
+    "ConditionalWriteConflictError": ConditionalWriteConflictError,
     "InternalError": InternalError,
     # Catch-all for any other errors
     "ChromaError": ChromaError,

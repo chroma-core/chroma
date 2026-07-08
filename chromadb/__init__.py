@@ -45,6 +45,7 @@ from chromadb.api.types import (
     IntInvertedIndexConfig,
     FloatInvertedIndexConfig,
     BoolInvertedIndexConfig,
+    ConditionalCommitResult,
 )
 
 # Import Search API components
@@ -81,6 +82,7 @@ __all__ = [
     "UpdateCollectionMetadata",
     "QueryResult",
     "GetResult",
+    "ConditionalCommitResult",
     "TokenTransportHeader",
     # Search API components
     "Search",

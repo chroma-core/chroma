@@ -41,7 +41,7 @@ use crate::UpdateEmbeddingsPayload;
 use crate::UpdateMetadata;
 use crate::Where;
 use crate::WhereValidationError;
-pub use chroma_api_types::{OccReadMode, OccReadToken, StaleReadError, STALE_READ_ERROR_NAME};
+use chroma_api_types::{OccReadMode, OccReadToken, StaleReadError};
 use chroma_error::ChromaValidationError;
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::Deserialize;

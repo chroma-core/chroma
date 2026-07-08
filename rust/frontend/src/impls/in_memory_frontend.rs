@@ -1,4 +1,5 @@
 use super::utils::to_records;
+use chroma_api_types::{OccReadMode, StaleReadError};
 use chroma_distance::DistanceFunction;
 use chroma_error::ChromaError;
 use chroma_segment::test::TestReferenceSegment;
@@ -6,8 +7,8 @@ use chroma_types::operator::{Filter, KnnBatch, KnnProjection, Limit, Projection,
 use chroma_types::plan::{Count, Get, Knn};
 use chroma_types::{
     test_segment, Collection, CollectionAndSegments, CreateCollectionError, Database, Include,
-    IncludeList, InternalCollectionConfiguration, KnnIndex, OccReadMode, Schema, SchemaError,
-    Segment, StaleReadError, VectorIndexConfiguration,
+    IncludeList, InternalCollectionConfiguration, KnnIndex, Schema, SchemaError, Segment,
+    VectorIndexConfiguration,
 };
 use std::collections::HashSet;
 

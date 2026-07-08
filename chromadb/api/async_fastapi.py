@@ -2,7 +2,7 @@ import asyncio
 from uuid import UUID
 import urllib.parse
 import orjson
-from typing import Any, Mapping, Optional, cast, Tuple, Sequence, Dict, List
+from typing import Any, Mapping, Optional, cast, Tuple, Sequence, Dict, List, NoReturn
 import logging
 import httpx
 from overrides import override
@@ -28,6 +28,7 @@ from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.execution.expression.plan import Search
 
 from chromadb.api.types import (
+    ConditionalCommitResult,
     DeleteResult,
     Documents,
     Embeddings,
@@ -749,6 +750,94 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             f"/tenants/{tenant}/databases/{database}/collections/{str(collection_id)}/upsert",
         )
         return True
+
+    async def _unsupported_conditional_transactions(self) -> NoReturn:
+        raise NotImplementedError(
+            "Conditional transactions are not supported by this Chroma API"
+        )
+
+    @override
+    async def _begin_conditional_transaction(self) -> object:
+        await self._unsupported_conditional_transactions()
+
+    @override
+    async def _conditional_get(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocuments,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
+        await self._unsupported_conditional_transactions()
+
+    @override
+    async def _conditional_add(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        await self._unsupported_conditional_transactions()
+
+    @override
+    async def _conditional_update(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        await self._unsupported_conditional_transactions()
+
+    @override
+    async def _conditional_upsert(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        await self._unsupported_conditional_transactions()
+
+    @override
+    async def _conditional_delete(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        await self._unsupported_conditional_transactions()
+
+    @override
+    async def _conditional_commit(
+        self,
+        transaction: object,
+    ) -> ConditionalCommitResult:
+        await self._unsupported_conditional_transactions()
 
     @trace_method("AsyncFastAPI._query", OpenTelemetryGranularity.ALL)
     @override

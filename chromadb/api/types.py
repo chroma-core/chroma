@@ -788,6 +788,11 @@ class DeleteResult(TypedDict):
     deleted: int
 
 
+class ConditionalCommitResult(TypedDict):
+    first_inserted_record_offset: Optional[int]
+    record_count: int
+
+
 class IndexMetadata(TypedDict):
     dimensionality: int
     # The current number of elements in the index (total = additions - deletes)

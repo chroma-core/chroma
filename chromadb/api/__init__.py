@@ -51,6 +51,7 @@ from chromadb.api.collection_configuration import (
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from chromadb.api.types import (
     CollectionMetadata,
+    ConditionalCommitResult,
     DeleteResult,
     Documents,
     Embeddable,
@@ -312,6 +313,138 @@ class BaseAPI(ABC):
 
         Returns:
             DeleteResult: A dict containing the number of records deleted.
+        """
+        pass
+
+    @abstractmethod
+    def _begin_conditional_transaction(self) -> object:
+        """[Internal] Begin a conditional collection transaction.
+
+        Returns:
+            object: An opaque transaction handle to pass to subsequent
+                conditional transaction operations.
+        """
+        pass
+
+    @abstractmethod
+    def _conditional_get(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocuments,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
+        """[Internal] Perform a read inside a conditional collection transaction.
+
+        Args:
+            transaction: Opaque transaction handle returned by
+                `_begin_conditional_transaction`.
+            collection_id: The UUID of the collection to read from.
+            ids: Optional IDs to read.
+            where: Optional metadata filter.
+            limit: Optional result limit.
+            offset: Optional result offset.
+            where_document: Optional document filter.
+            include: Fields to include in the response.
+            tenant: Tenant containing the collection.
+            database: Database containing the collection.
+
+        Returns:
+            GetResult: The matching records.
+        """
+        pass
+
+    @abstractmethod
+    def _conditional_add(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        """[Internal] Buffer an add operation in a conditional transaction.
+
+        Returns:
+            bool: True if the operation was buffered.
+        """
+        pass
+
+    @abstractmethod
+    def _conditional_update(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        """[Internal] Buffer an update operation in a conditional transaction.
+
+        Returns:
+            bool: True if the operation was buffered.
+        """
+        pass
+
+    @abstractmethod
+    def _conditional_upsert(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        """[Internal] Buffer an upsert operation in a conditional transaction.
+
+        Returns:
+            bool: True if the operation was buffered.
+        """
+        pass
+
+    @abstractmethod
+    def _conditional_delete(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        """[Internal] Buffer a delete operation in a conditional transaction.
+
+        Returns:
+            bool: True if the operation was buffered.
+        """
+        pass
+
+    @abstractmethod
+    def _conditional_commit(
+        self,
+        transaction: object,
+    ) -> ConditionalCommitResult:
+        """[Internal] Commit a conditional collection transaction.
+
+        Returns:
+            ConditionalCommitResult: Commit metadata for the buffered writes.
         """
         pass
 

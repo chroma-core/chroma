@@ -16,6 +16,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 chroma-segment = { workspace = true }
+chroma-api-types = { workspace = true }
 chroma-sqlite = { workspace = true, features = ["pyo3"] }
 chroma-frontend = { workspace = true }
 chroma-sysdb = { workspace = true }
