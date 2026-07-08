@@ -115,12 +115,14 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
             };
 
             for (i, (version, created_at, mode)) in versions.iter_mut().rev().enumerate() {
-                if fn_protected_version == Some(*version) {
+                if fn_protected_version.is_some_and(|protected_version| *version >= protected_version)
+                {
                     tracing::debug!(
                         collection_id = %collection_id,
-                        protected_version = *version,
+                        protected_version = fn_protected_version,
+                        version = *version,
                         min_completion_offset,
-                        "Keeping version <= attached function completion offset"
+                        "Keeping version in attached function protected chain"
                     );
                     *mode = CollectionVersionAction::Keep;
                 } else if i >= input.min_versions_to_keep as usize
@@ -673,5 +675,67 @@ mod tests {
         let b_versions = result.versions.remove(&collection_b).unwrap();
         assert_eq!(b_versions.get(&40), Some(&CollectionVersionAction::Keep));
         assert_eq!(b_versions.get(&50), Some(&CollectionVersionAction::Keep));
+    }
+
+    #[tokio::test]
+    async fn test_compute_versions_to_delete_keeps_full_chain_after_attached_function_floor() {
+        let now = Utc::now();
+        let collection_id = CollectionUuid::new();
+
+        let mut graph = VersionGraph::new();
+        let v30 = graph.add_node(VersionGraphNode {
+            collection_id,
+            version: 30,
+            status: VersionStatus::Alive {
+                created_at: now - Duration::hours(48),
+            },
+        });
+        let v409 = graph.add_node(VersionGraphNode {
+            collection_id,
+            version: 409,
+            status: VersionStatus::Alive {
+                created_at: now - Duration::hours(24),
+            },
+        });
+        let v410 = graph.add_node(VersionGraphNode {
+            collection_id,
+            version: 410,
+            status: VersionStatus::Alive {
+                created_at: now - Duration::hours(12),
+            },
+        });
+        let v411 = graph.add_node(VersionGraphNode {
+            collection_id,
+            version: 411,
+            status: VersionStatus::Alive {
+                created_at: now - Duration::hours(1),
+            },
+        });
+        graph.add_edge(v30, v409, ());
+        graph.add_edge(v409, v410, ());
+        graph.add_edge(v410, v411, ());
+
+        let input = ComputeVersionsToDeleteInput {
+            graph,
+            cutoff_time: now - Duration::hours(6),
+            min_versions_to_keep: 1,
+            soft_deleted_collections: HashSet::new(),
+            min_attached_function_completion_offsets: HashMap::from([(collection_id, 21433)]),
+            version_log_positions: HashMap::from([(
+                collection_id,
+                BTreeMap::from([(21433, 30), (314658, 409), (315490, 410), (315855, 411)]),
+            )]),
+        };
+
+        let mut result = ComputeVersionsToDeleteOperator {}
+            .run(&input)
+            .await
+            .unwrap();
+
+        let versions = result.versions.remove(&collection_id).unwrap();
+        assert_eq!(versions.get(&30), Some(&CollectionVersionAction::Keep));
+        assert_eq!(versions.get(&409), Some(&CollectionVersionAction::Keep));
+        assert_eq!(versions.get(&410), Some(&CollectionVersionAction::Keep));
+        assert_eq!(versions.get(&411), Some(&CollectionVersionAction::Keep));
     }
 }
