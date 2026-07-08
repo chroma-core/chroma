@@ -211,7 +211,7 @@ jobs:
           CHROMA_TEST_INVENTORY_JSON: ${{ runner.temp }}/python-test-inventory/shard.json
           CHROMA_TEST_INVENTORY_JOB: test-rust-bindings
           CHROMA_TEST_INVENTORY_PYTHON: ${{ matrix.python }}
-          CHROMA_TEST_INVENTORY_TARGET: ${{ matrix.test-glob }}
+          CHROMA_TEST_INVENTORY_TARGET: ${{ matrix.test_target.args }}
       - name: Upload test inventory shard
         if: always()
         uses: actions/upload-artifact@v7
@@ -363,7 +363,7 @@ jobs:
         CHROMA_TEST_INVENTORY_JSON: ${{ runner.temp }}/python-test-inventory/shard.json
         CHROMA_TEST_INVENTORY_JOB: test-rust-single-node-integration
         CHROMA_TEST_INVENTORY_PYTHON: ${{ matrix.python }}
-        CHROMA_TEST_INVENTORY_TARGET: ${{ matrix.test-glob }}
+        CHROMA_TEST_INVENTORY_TARGET: ${{ matrix.test_target.args }}
         PYTEST_SHARD_INDEX: ${{ matrix.test_target.shard_index }}
         PYTEST_SHARD_COUNT: ${{ matrix.test_target.shard_count }}
     - name: Upload test inventory shard
@@ -435,7 +435,7 @@ jobs:
           CHROMA_TEST_INVENTORY_JSON: ${{ runner.temp }}/python-test-inventory/shard.json
           CHROMA_TEST_INVENTORY_JOB: test-rust-thin-client
           CHROMA_TEST_INVENTORY_PYTHON: ${{ matrix.python }}
-          CHROMA_TEST_INVENTORY_TARGET: ${{ matrix.test-glob }}
+          CHROMA_TEST_INVENTORY_TARGET: ${{ matrix.test_target.args }}
           PYTEST_SHARD_INDEX: ${{ matrix.test_target.shard_index }}
           PYTEST_SHARD_COUNT: ${{ matrix.test_target.shard_count }}
       - name: Upload test inventory shard
