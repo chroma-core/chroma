@@ -161,6 +161,7 @@ pub async fn fn_consumer_service_entrypoint() {
     // Build and start the manager
     let mut manager = FnConsumerManager::new(
         service_config.fn_consumer.clone(),
+        config.compaction_service.compactor.clone(),
         service_config.my_member_id.clone(),
         system.clone(),
         work_queue_client.clone(),

@@ -13,6 +13,7 @@ use std::time::{Duration, SystemTime};
 use thiserror::Error;
 use tracing::{instrument, span};
 
+use crate::compactor::config::CompactorConfig;
 use crate::execution::orchestration::compact::CompactionContext;
 use crate::execution::orchestration::function_execution::FunctionExecutionContext;
 use crate::fn_consumer::config::FnConsumerConfig;
@@ -67,6 +68,10 @@ pub struct FnConsumerContext {
     pub blockfile_provider: BlockfileProvider,
     pub hnsw_provider: HnswIndexProvider,
     pub spann_provider: SpannProvider,
+    pub fetch_log_batch_size: u32,
+    pub fetch_log_concurrency: usize,
+    pub max_compaction_size: usize,
+    pub max_partition_size: usize,
 }
 
 impl std::fmt::Debug for FnConsumerContext {
@@ -100,6 +105,7 @@ impl FnConsumerManager {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: FnConsumerConfig,
+        compactor_config: CompactorConfig,
         my_member_id: String,
         system: System,
         work_queue_client: WorkQueueClient,
@@ -122,6 +128,10 @@ impl FnConsumerManager {
             blockfile_provider,
             hnsw_provider,
             spann_provider,
+            fetch_log_batch_size: compactor_config.fetch_log_batch_size,
+            fetch_log_concurrency: compactor_config.fetch_log_concurrency,
+            max_compaction_size: compactor_config.max_compaction_size,
+            max_partition_size: compactor_config.max_partition_size,
         };
         Self {
             context,
@@ -172,11 +182,11 @@ impl FnConsumerManager {
         // execution flow applies each input collection's completion offset when
         // fetching logs, so the shared base context should not carry one.
         let compaction_context = CompactionContext::new(
-            None,  // rebuild_info
-            100,   // fetch_log_batch_size
-            10,    // fetch_log_concurrency
-            10000, // max_compaction_size
-            1000,  // max_partition_size
+            None, // rebuild_info
+            self.context.fetch_log_batch_size,
+            self.context.fetch_log_concurrency,
+            self.context.max_compaction_size,
+            self.context.max_partition_size,
             self.context.log.clone(),
             self.context.sysdb.clone(),
             self.context.blockfile_provider.clone(),
