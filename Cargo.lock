@@ -1590,7 +1590,9 @@ dependencies = [
 name = "chroma-api-types"
 version = "0.15.0"
 dependencies = [
+ "chroma-error",
  "serde",
+ "thiserror 1.0.69",
  "utoipa",
 ]
 
@@ -2199,6 +2201,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bitpacking",
+ "chroma-api-types",
  "chroma-error",
  "chrono",
  "criterion",
