@@ -178,12 +178,12 @@ pub async fn foundation_upsert_page(
     request.validate().map_err(ChromaValidationError::from)?;
     let categories = normalize_categories(&request.categories);
 
-    let response = upsert_page(&server, &headers, &tenant, &request, &categories).await?;
+    let response = run_upsert_page(&server, &headers, &tenant, &request, &categories).await?;
     Ok(Json(response))
 }
 
 /// Runs the replace flow against the proxied wiki collection.
-async fn upsert_page(
+pub(crate) async fn run_upsert_page(
     server: &FoundationApiServer,
     headers: &HeaderMap,
     tenant: &str,
@@ -496,7 +496,7 @@ fn is_conditional_conflict(err: &ChromaHttpClientError) -> bool {
 }
 
 /// Validates the slug against [`SLUG_RE`].
-fn validate_slug(slug: &str) -> Result<(), ValidationError> {
+pub(crate) fn validate_slug(slug: &str) -> Result<(), ValidationError> {
     if SLUG_RE.is_match(slug) {
         Ok(())
     } else {
@@ -510,7 +510,7 @@ fn validate_slug(slug: &str) -> Result<(), ValidationError> {
 /// Validates each source id is `<collection>:<record_id>` with a non-empty
 /// collection. The record id (after the first `:`) may be empty (the wiki
 /// root's citation id).
-fn validate_source_ids(source_ids: &[String]) -> Result<(), ValidationError> {
+pub(crate) fn validate_source_ids(source_ids: &[String]) -> Result<(), ValidationError> {
     for source_id in source_ids {
         match source_id.split_once(':') {
             Some((collection, _record_id)) if !collection.is_empty() => {}
@@ -528,7 +528,7 @@ fn validate_source_ids(source_ids: &[String]) -> Result<(), ValidationError> {
 }
 
 /// Validates each category against [`CATEGORY_RE`].
-fn validate_categories(categories: &[String]) -> Result<(), ValidationError> {
+pub(crate) fn validate_categories(categories: &[String]) -> Result<(), ValidationError> {
     for category in categories {
         if !CATEGORY_RE.is_match(category) {
             return Err(ValidationError::new("categories").with_message(
@@ -542,7 +542,7 @@ fn validate_categories(categories: &[String]) -> Result<(), ValidationError> {
 
 /// Deduplicates and lexicographically sorts the (already-validated) category
 /// list.
-fn normalize_categories(categories: &[String]) -> Vec<String> {
+pub(crate) fn normalize_categories(categories: &[String]) -> Vec<String> {
     categories
         .iter()
         .map(String::as_str)
