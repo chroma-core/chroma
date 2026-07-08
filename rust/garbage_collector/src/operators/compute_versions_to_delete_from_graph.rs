@@ -114,8 +114,13 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
                 None
             };
 
+            // We have a lower bound on which versions we can delete via fn_protected_version.
+            // We must mark EVERY version above this to keep. We use the same logic to also
+            // keep versions that are too new (based on cutoff_time and min_versions_to_keep).
+            // Earlier, this code mistakenly assumed that only the lowest version in the protected
+            // chain needs to be marked as Keep and later logic will make sure to keep all versions
+            // above it. This was wrong.
             for (i, (version, created_at, mode)) in versions.iter_mut().rev().enumerate() {
-                // Keep around every version that the fn-consumer has yet to process.
                 if fn_protected_version
                     .is_some_and(|protected_version| *version >= protected_version)
                 {
