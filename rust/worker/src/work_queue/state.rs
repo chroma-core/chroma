@@ -56,6 +56,7 @@ impl QueueState {
         let schema = Arc::new(Schema::new(vec![
             Field::new("fn_id", DataType::Utf8, false),
             Field::new("input_coll_id", DataType::Utf8, false),
+            Field::new("completion_offset", DataType::Int64, false),
             Field::new("compaction_offset", DataType::Int64, false),
             Field::new("insertion_order", DataType::UInt64, false),
         ]));
@@ -80,6 +81,11 @@ impl QueueState {
                 .iter()
                 .map(|r| r.insertion_order)
                 .collect();
+            let completion_offsets: Vec<_> = self
+                .pending_work
+                .iter()
+                .map(|r| r.completion_offset)
+                .collect();
             let compaction_offsets: Vec<_> = self
                 .pending_work
                 .iter()
@@ -91,6 +97,7 @@ impl QueueState {
                 vec![
                     Arc::new(StringArray::from(fn_ids)),
                     Arc::new(StringArray::from(coll_ids)),
+                    Arc::new(Int64Array::from(completion_offsets)),
                     Arc::new(Int64Array::from(compaction_offsets)),
                     Arc::new(UInt64Array::from(orders)),
                 ],
@@ -394,11 +401,11 @@ mod tests {
         let restored = QueueState::from_parquet_bytes(&bytes).expect("Failed to deserialize");
 
         assert_eq!(restored.pending_work.len(), 3);
-        assert_eq!(restored.pending_work[0].completion_offset, 140);
+        assert_eq!(restored.pending_work[0].completion_offset, 100);
         assert_eq!(restored.pending_work[0].compaction_offset, 140);
-        assert_eq!(restored.pending_work[1].completion_offset, 240);
+        assert_eq!(restored.pending_work[1].completion_offset, 200);
         assert_eq!(restored.pending_work[1].compaction_offset, 240);
-        assert_eq!(restored.pending_work[2].completion_offset, 360);
+        assert_eq!(restored.pending_work[2].completion_offset, 300);
         assert_eq!(restored.pending_work[2].compaction_offset, 360);
         assert_eq!(restored.dedup_index.len(), 3);
     }
