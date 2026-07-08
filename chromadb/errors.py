@@ -162,6 +162,17 @@ class RateLimitError(ChromaError):
         return "RateLimitError"
 
 
+class BackoffError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 429
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "Backoff"
+
+
 class QuotaError(ChromaError):
     @overrides
     def code(self) -> int:
@@ -207,6 +218,7 @@ error_types: Dict[str, Type[ChromaError]] = {
     "BatchSizeExceededError": BatchSizeExceededError,
     "VersionMismatchError": VersionMismatchError,
     "RateLimitError": RateLimitError,
+    "Backoff": BackoffError,
     "AuthError": ChromaAuthError,
     "UniqueConstraintError": UniqueConstraintError,
     "QuotaError": QuotaError,

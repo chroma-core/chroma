@@ -2,6 +2,7 @@ use crate::grpc_log::{GrpcLog, GrpcPushLogsError, GrpcSealLogError, ScoutLogFrag
 use crate::in_memory_log::InMemoryLog;
 use crate::sqlite_log::SqliteLog;
 use crate::types::CollectionInfo;
+use chroma_api_types::CONDITIONAL_WRITE_CONFLICT_MESSAGE;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_memberlist::client_manager::ClientAssignmentError;
 use chroma_types::{
@@ -57,6 +58,9 @@ pub enum PushLogsError {
     /// Conditional writes are not supported by this log implementation.
     #[error("conditional writes are not supported by {0} log")]
     ConditionalWritesUnsupported(&'static str),
+    /// The conditional write was rejected because the observed log state changed.
+    #[error("conditional write conflict")]
+    ConditionalWriteConflict,
     /// The record count cannot be represented by the log-service API.
     #[error("too many records in push_logs request: {0}")]
     RecordCountOutOfRange(usize),
@@ -71,6 +75,7 @@ impl ChromaError for PushLogsError {
             PushLogsError::Backoff => ErrorCodes::ResourceExhausted,
             PushLogsError::BackoffCompaction => ErrorCodes::ResourceExhausted,
             PushLogsError::ConditionalWritesUnsupported(_) => ErrorCodes::Unimplemented,
+            PushLogsError::ConditionalWriteConflict => ErrorCodes::AlreadyExists,
             PushLogsError::RecordCountOutOfRange(_) => ErrorCodes::InvalidArgument,
             PushLogsError::Other(e) => e.code(),
         }
@@ -82,6 +87,12 @@ impl From<GrpcPushLogsError> for PushLogsError {
         match err {
             GrpcPushLogsError::Backoff => PushLogsError::Backoff,
             GrpcPushLogsError::BackoffCompaction => PushLogsError::BackoffCompaction,
+            GrpcPushLogsError::FailedToPushLogs(status)
+                if status.code() == tonic::Code::Aborted
+                    && status.message() == CONDITIONAL_WRITE_CONFLICT_MESSAGE =>
+            {
+                PushLogsError::ConditionalWriteConflict
+            }
             other => PushLogsError::Other(Box::new(other)),
         }
     }
@@ -96,6 +107,18 @@ pub enum Log {
 }
 
 impl Log {
+    pub fn implementation_name(&self) -> &'static str {
+        match self {
+            Log::Sqlite(_) => "sqlite",
+            Log::Grpc(_) => "grpc",
+            Log::InMemory(_) => "in-memory",
+        }
+    }
+
+    pub fn supports_conditional_transactions(&self) -> bool {
+        matches!(self, Log::Grpc(_))
+    }
+
     #[tracing::instrument(skip(self))]
     pub async fn read(
         &mut self,
@@ -465,5 +488,15 @@ mod tests {
             PushLogsError::ConditionalWritesUnsupported("in-memory")
         ));
         assert_eq!(ErrorCodes::Unimplemented, err.code());
+    }
+
+    #[test]
+    fn grpc_conditional_write_conflict_maps_to_typed_error() {
+        let status = tonic::Status::aborted(CONDITIONAL_WRITE_CONFLICT_MESSAGE);
+        let err = PushLogsError::from(GrpcPushLogsError::FailedToPushLogs(status));
+
+        assert!(matches!(err, PushLogsError::ConditionalWriteConflict));
+        assert_eq!(ErrorCodes::AlreadyExists, err.code());
+        assert_eq!(CONDITIONAL_WRITE_CONFLICT_MESSAGE, err.to_string());
     }
 }
