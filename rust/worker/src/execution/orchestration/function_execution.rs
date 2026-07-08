@@ -1,11 +1,16 @@
 use chroma_error::source_chain_contains;
 use chroma_log::grpc_log::GrpcPullLogsError;
-use chroma_system::System;
+use std::collections::HashSet;
+
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_system::{Operator, System};
 use chroma_types::{AttachedFunction, AttachedFunctionUuid, CollectionUuid, DatabaseName};
 use uuid::Uuid;
 
 use crate::execution::operators::{
-    fetch_log::FetchLogError, materialize_logs::MaterializeLogOutput,
+    fetch_log::FetchLogError,
+    finish_async_work::{FinishAsyncWorkInput, FinishAsyncWorkItem, FinishAsyncWorkOperator},
+    materialize_logs::MaterializeLogOutput,
 };
 
 use super::{
@@ -55,6 +60,51 @@ impl FunctionExecutionContext {
         Self {
             compaction_context: compaction_context.clone(),
         }
+    }
+
+    fn deleted_input_finish_work_item(input: &FunctionExecutionInput) -> FinishAsyncWorkItem {
+        FinishAsyncWorkItem {
+            input_collection_id: input.collection_id,
+            // Deleted inputs have no live completion frontier to re-read, so
+            // retire the queue row by finishing just past the queued frontier.
+            completion_offset: input.queue_compaction_offset.saturating_add(1),
+        }
+    }
+
+    fn stale_input_finish_work_item(
+        input_collection_id: CollectionUuid,
+        completion_offset: i64,
+    ) -> FinishAsyncWorkItem {
+        FinishAsyncWorkItem {
+            input_collection_id,
+            completion_offset,
+        }
+    }
+
+    async fn finish_work_items(
+        &self,
+        attached_function_id: AttachedFunctionUuid,
+        work_items: Vec<FinishAsyncWorkItem>,
+    ) -> Result<(), CompactionError> {
+        if work_items.is_empty() {
+            return Ok(());
+        }
+
+        let Some(work_queue_client) = self.compaction_context.work_queue_client.clone() else {
+            return Err(CompactionError::InvariantViolation(
+                "Function consumer async cleanup requires work queue client",
+            ));
+        };
+
+        FinishAsyncWorkOperator::new()
+            .run(&FinishAsyncWorkInput::new(
+                attached_function_id,
+                work_items,
+                work_queue_client,
+            ))
+            .await?;
+
+        Ok(())
     }
 
     async fn fetch_function_input_logs(
@@ -180,29 +230,47 @@ impl FunctionExecutionContext {
     async fn resolve_shared_input_database_name(
         compaction_context: CompactionContext,
         fn_inputs: &[FunctionExecutionInput],
-    ) -> Result<DatabaseName, CompactionError> {
-        let Some(first_input) = fn_inputs.first() else {
+    ) -> Result<(Option<DatabaseName>, Vec<FinishAsyncWorkItem>), CompactionError> {
+        if fn_inputs.is_empty() {
             return Err(CompactionError::InvariantViolation(
                 "Function execution requires at least one input collection",
             ));
-        };
+        }
 
         let mut sysdb = compaction_context.sysdb.clone();
+        let mut deleted_inputs = Vec::new();
         // TODO(tanujnay112): This does not support MCMR yet because work queue records
         // do not carry the database name. Pass the database name from the work queue
         // service and remove this unscoped lookup once that metadata is available.
-        let collection_info = sysdb
-            .get_collection_with_segments(None, first_input.collection_id)
-            .await
-            .map_err(|_| {
-                CompactionError::InvariantViolation(
-                    "Failed to resolve function input collection database",
-                )
-            })?;
+        for input in fn_inputs {
+            match sysdb
+                .get_collection_with_segments(None, input.collection_id)
+                .await
+            {
+                Ok(collection_info) => {
+                    let database_name = DatabaseName::new(&collection_info.collection.database)
+                        .ok_or(CompactionError::InvariantViolation(
+                            "Invalid function input collection database name",
+                        ))?;
+                    return Ok((Some(database_name), deleted_inputs));
+                }
+                Err(err) if err.code() == ErrorCodes::NotFound => {
+                    tracing::info!(
+                        collection_id = %input.collection_id,
+                        queue_compaction_offset = input.queue_compaction_offset,
+                        "Finishing deleted fn-consumer work item because the input collection no longer exists"
+                    );
+                    deleted_inputs.push(Self::deleted_input_finish_work_item(input));
+                }
+                Err(_) => {
+                    return Err(CompactionError::InvariantViolation(
+                        "Failed to resolve function input collection database",
+                    ));
+                }
+            }
+        }
 
-        DatabaseName::new(&collection_info.collection.database).ok_or(
-            CompactionError::InvariantViolation("Invalid function input collection database name"),
-        )
+        Ok((None, deleted_inputs))
     }
 
     #[tracing::instrument(skip(self, system))]
@@ -219,18 +287,49 @@ impl FunctionExecutionContext {
         }
 
         let base_context = self.compaction_context;
-        let shared_database_name =
+        let (shared_database_name, mut skipped_work_items) =
             Self::resolve_shared_input_database_name(base_context.clone(), &fn_inputs).await?;
+        let Some(shared_database_name) = shared_database_name else {
+            self.finish_work_items(attached_function_id, skipped_work_items)
+                .await?;
+            return Ok(CompactionResponse::Success {
+                job_id: attached_function_id.into(),
+            });
+        };
+
+        let deleted_collection_ids: HashSet<_> = skipped_work_items
+            .iter()
+            .map(|work_item| work_item.input_collection_id)
+            .collect();
         let mut input_collection_data = Vec::with_capacity(fn_inputs.len());
         for input in fn_inputs {
-            let collection_data = Box::pin(Self::fetch_function_input_collection_data(
+            if deleted_collection_ids.contains(&input.collection_id) {
+                continue;
+            }
+
+            let collection_data = match Box::pin(Self::fetch_function_input_collection_data(
                 base_context.clone(),
                 input.collection_id,
                 attached_function_id,
                 shared_database_name.clone(),
                 system.clone(),
             ))
-            .await?;
+            .await
+            {
+                Ok(collection_data) => collection_data,
+                Err(err) if err.code() == ErrorCodes::NotFound => {
+                    tracing::info!(
+                        function_id = %attached_function_id,
+                        collection_id = %input.collection_id,
+                        queue_compaction_offset = input.queue_compaction_offset,
+                        error = %err,
+                        "Finishing stale fn-consumer work item because the attached function or collection was deleted"
+                    );
+                    skipped_work_items.push(Self::deleted_input_finish_work_item(&input));
+                    continue;
+                }
+                Err(err) => return Err(err),
+            };
 
             let completion_offset = collection_data
                 .resolved_attached_functions
@@ -248,11 +347,18 @@ impl FunctionExecutionContext {
                     queue_compaction_offset = input.queue_compaction_offset,
                     "Skipping stale fn-consumer work item because attached function is already at or beyond the queued frontier"
                 );
+                skipped_work_items.push(Self::stale_input_finish_work_item(
+                    input.collection_id,
+                    completion_offset,
+                ));
                 continue;
             }
 
             input_collection_data.push(collection_data);
         }
+
+        self.finish_work_items(attached_function_id, skipped_work_items)
+            .await?;
 
         if input_collection_data.is_empty() {
             return Ok(CompactionResponse::Success {
@@ -288,7 +394,7 @@ impl FunctionExecutionContext {
 
 #[cfg(test)]
 mod tests {
-    use super::{has_reached_queue_frontier, FunctionExecutionContext};
+    use super::{has_reached_queue_frontier, FunctionExecutionContext, FunctionExecutionInput};
     use crate::execution::{
         operators::fetch_log::FetchLogError,
         orchestration::{
@@ -296,7 +402,9 @@ mod tests {
         },
     };
     use chroma_log::grpc_log::GrpcPullLogsError;
+    use chroma_types::CollectionUuid;
     use tonic::Status;
+    use uuid::Uuid;
 
     #[test]
     fn purged_pull_logs_error_triggers_backfill() {
@@ -335,5 +443,18 @@ mod tests {
     #[test]
     fn positive_queue_frontier_requires_advancing_past_completion() {
         assert!(has_reached_queue_frontier(41, 40));
+    }
+
+    #[test]
+    fn deleted_input_cleanup_finishes_past_queue_frontier() {
+        let input = FunctionExecutionInput {
+            collection_id: CollectionUuid(Uuid::new_v4()),
+            queue_compaction_offset: 40,
+        };
+
+        let work_item = FunctionExecutionContext::deleted_input_finish_work_item(&input);
+
+        assert_eq!(work_item.input_collection_id, input.collection_id);
+        assert_eq!(work_item.completion_offset, 41);
     }
 }
