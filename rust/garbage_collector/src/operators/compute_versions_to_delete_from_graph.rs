@@ -115,6 +115,7 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
             };
 
             for (i, (version, created_at, mode)) in versions.iter_mut().rev().enumerate() {
+                // Fn-consumers need every surviving boundary after the protected version.
                 if fn_protected_version
                     .is_some_and(|protected_version| *version >= protected_version)
                 {
