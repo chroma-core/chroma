@@ -85,7 +85,8 @@ impl Operator<SourceRecordSegmentV2Input, SourceRecordSegmentV2Output>
         let empty_shard = || MaterializeLogsResult {
             logs: Chunk::new(Vec::new().into()),
             materialized: Chunk::new(Vec::new().into()),
-            has_backfill: false,
+            backfill_attached_function_ids: std::collections::HashSet::new(),
+            has_legacy_backfill_signal: false,
         };
         let build_partition = |materialized: MaterializeLogsResult| {
             let shards = (0..self.shard_count)

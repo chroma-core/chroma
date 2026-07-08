@@ -11,6 +11,7 @@ use chroma_sysdb::SysDb;
 use chroma_types::{
     AttachFunctionError, AttachedFunction, AttachedFunctionUuid, Cmek, Collection, CollectionUuid,
     DatabaseName, FinishCreateAttachedFunctionError, Operation, OperationRecord, Schema,
+    UpdateMetadataValue, CHROMA_BACKFILL_ATTACHED_FUNCTION_ID_KEY,
 };
 
 use crate::retry::retry_transient;
@@ -49,6 +50,39 @@ pub struct AddAttachedFunctionInputResult {
     pub attached_function_id: AttachedFunctionUuid,
     pub created: bool,
     pub output_schema_str: String,
+}
+
+pub async fn push_backfill_records(
+    log: &mut Log,
+    tenant: &str,
+    database_name: DatabaseName,
+    input_collection_id: CollectionUuid,
+    input_collection: &Collection,
+    attached_function_id: AttachedFunctionUuid,
+    num_backfill_records: usize,
+) -> Result<(), PushLogsError> {
+    let dim = input_collection.dimension.unwrap_or(1) as usize;
+    let fake_embedding = vec![0.0; dim];
+    let cmek: Option<Cmek> = input_collection
+        .schema
+        .as_ref()
+        .and_then(|s| s.cmek.clone());
+    let records = vec![
+        OperationRecord {
+            id: "backfill_id".to_string(),
+            embedding: Some(fake_embedding),
+            encoding: None,
+            metadata: Some(std::collections::HashMap::from([(
+                CHROMA_BACKFILL_ATTACHED_FUNCTION_ID_KEY.to_string(),
+                UpdateMetadataValue::Str(attached_function_id.to_string()),
+            )])),
+            document: None,
+            operation: Operation::BackfillFn,
+        };
+        num_backfill_records
+    ];
+    log.push_logs(tenant, database_name, input_collection_id, records, cmek)
+        .await
 }
 
 /// Create an attached function and mark it ready in one shot.
@@ -289,25 +323,16 @@ pub async fn create_attached_function_with_backfill(
     }
 
     // Backfill: push dummy records to force a compaction cycle.
-    let dim = input_collection.dimension.unwrap_or(1) as usize;
-    let fake_embedding = vec![0.0; dim];
-    let cmek: Option<Cmek> = input_collection
-        .schema
-        .as_ref()
-        .and_then(|s| s.cmek.clone());
-    let records = vec![
-        OperationRecord {
-            id: "backfill_id".to_string(),
-            embedding: Some(fake_embedding),
-            encoding: None,
-            metadata: None,
-            document: None,
-            operation: Operation::BackfillFn,
-        };
-        num_backfill_records
-    ];
-    log.push_logs(&tenant, database_name, input_collection_id, records, cmek)
-        .await?;
+    push_backfill_records(
+        log,
+        &tenant,
+        database_name,
+        input_collection_id,
+        input_collection,
+        id,
+        num_backfill_records,
+    )
+    .await?;
 
     let schema_str = serde_json::to_string(&output_schema)?;
     sysdb

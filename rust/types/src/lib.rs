@@ -58,6 +58,7 @@ pub use operation::*;
 pub use operators::*;
 pub use quantized_cluster::*;
 pub use record::*;
+pub const CHROMA_BACKFILL_ATTACHED_FUNCTION_ID_KEY: &str = "chroma:backfill_attached_function_id";
 pub use scalar_encoding::*;
 pub use segment::*;
 pub use segment_scope::*;

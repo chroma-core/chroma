@@ -92,7 +92,13 @@ impl FunctionExecutionContext {
             LogFetchOrchestratorResponse::Success(success) => {
                 (success.materialized, success.collection_info)
             }
-            LogFetchOrchestratorResponse::RequireFunctionBackfill(_) => {
+            LogFetchOrchestratorResponse::RequireFunctionBackfill(backfill) => {
+                tracing::info!(
+                    collection_id = %collection_id,
+                    backfill_function_count = backfill.attached_function_ids.len(),
+                    has_legacy_backfill_signal = backfill.has_legacy_backfill_signal,
+                    "Refetching compacted logs after attached-function backfill signal"
+                );
                 match Self::fetch_function_input_logs(
                     log_fetch_context,
                     collection_id,

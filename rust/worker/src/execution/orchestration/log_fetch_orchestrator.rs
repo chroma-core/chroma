@@ -22,10 +22,11 @@ use chroma_system::{
     Orchestrator, OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    Chunk, CollectionUuid, JobId, LogRecord, MetadataValue, SchemaMismatchError, SegmentFlushInfo,
-    SegmentScope, SegmentShard, SegmentShardError,
+    AttachedFunctionUuid, Chunk, CollectionUuid, JobId, LogRecord, MetadataValue,
+    SchemaMismatchError, SegmentFlushInfo, SegmentScope, SegmentShard, SegmentShardError,
 };
 use opentelemetry::trace::TraceContextExt;
+use std::collections::HashSet;
 use std::sync::{atomic::AtomicU32, Arc};
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
@@ -215,16 +216,22 @@ pub(crate) struct RequireCompactionOffsetRepair {
 pub(crate) struct RequireFunctionBackfill {
     pub materialized: Vec<MaterializeLogOutput>,
     pub collection_info: CollectionCompactInfo,
+    pub attached_function_ids: HashSet<AttachedFunctionUuid>,
+    pub has_legacy_backfill_signal: bool,
 }
 
 impl RequireFunctionBackfill {
     pub fn new(
         materialized: Vec<MaterializeLogOutput>,
         collection_info: CollectionCompactInfo,
+        attached_function_ids: HashSet<AttachedFunctionUuid>,
+        has_legacy_backfill_signal: bool,
     ) -> Self {
         Self {
             materialized,
             collection_info,
+            attached_function_ids,
+            has_legacy_backfill_signal,
         }
     }
 }
@@ -291,7 +298,8 @@ pub(crate) struct LogFetchOrchestrator {
     state: ExecutionState,
     num_uncompleted_materialization_tasks: usize,
     materialized_outputs: Vec<MaterializeLogOutput>,
-    has_backfill: bool,
+    backfill_attached_function_ids: HashSet<AttachedFunctionUuid>,
+    has_legacy_backfill_signal: bool,
 }
 
 #[async_trait]
@@ -408,7 +416,8 @@ impl LogFetchOrchestrator {
             state: ExecutionState::Pending,
             num_uncompleted_materialization_tasks: 0,
             materialized_outputs: Vec::new(),
-            has_backfill: false,
+            backfill_attached_function_ids: HashSet::new(),
+            has_legacy_backfill_signal: false,
         }
     }
 
@@ -1141,7 +1150,9 @@ impl Handler<TaskResult<SourceRecordSegmentV2Output, SourceRecordSegmentV2Error>
         self.num_uncompleted_materialization_tasks = 0;
         for partition in output.partitions {
             if partition.result.has_backfill() {
-                self.has_backfill = true;
+                self.backfill_attached_function_ids
+                    .extend(partition.result.backfill_attached_function_ids());
+                self.has_legacy_backfill_signal |= partition.result.has_legacy_backfill_signal();
             }
 
             if !partition.result.is_empty() {
@@ -1165,9 +1176,18 @@ impl Handler<TaskResult<SourceRecordSegmentV2Output, SourceRecordSegmentV2Error>
         };
 
         let materialized = std::mem::take(&mut self.materialized_outputs);
-        if self.has_backfill {
+        if self.has_legacy_backfill_signal || !self.backfill_attached_function_ids.is_empty() {
+            let backfill_attached_function_ids =
+                std::mem::take(&mut self.backfill_attached_function_ids);
+            let has_legacy_backfill_signal = std::mem::take(&mut self.has_legacy_backfill_signal);
             self.terminate_with_result(
-                Ok(RequireFunctionBackfill::new(materialized, collection_info).into()),
+                Ok(RequireFunctionBackfill::new(
+                    materialized,
+                    collection_info,
+                    backfill_attached_function_ids,
+                    has_legacy_backfill_signal,
+                )
+                .into()),
                 ctx,
             )
             .await;
@@ -1212,7 +1232,9 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
         };
 
         if output.result.has_backfill() {
-            self.has_backfill = true;
+            self.backfill_attached_function_ids
+                .extend(output.result.backfill_attached_function_ids());
+            self.has_legacy_backfill_signal |= output.result.has_legacy_backfill_signal();
         }
 
         if !output.result.is_empty() {
@@ -1235,9 +1257,19 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
             };
 
             let materialized = std::mem::take(&mut self.materialized_outputs);
-            if self.has_backfill {
+            if self.has_legacy_backfill_signal || !self.backfill_attached_function_ids.is_empty() {
+                let backfill_attached_function_ids =
+                    std::mem::take(&mut self.backfill_attached_function_ids);
+                let has_legacy_backfill_signal =
+                    std::mem::take(&mut self.has_legacy_backfill_signal);
                 self.terminate_with_result(
-                    Ok(RequireFunctionBackfill::new(materialized, collection_info).into()),
+                    Ok(RequireFunctionBackfill::new(
+                        materialized,
+                        collection_info,
+                        backfill_attached_function_ids,
+                        has_legacy_backfill_signal,
+                    )
+                    .into()),
                     ctx,
                 )
                 .await;

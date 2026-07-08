@@ -1,10 +1,12 @@
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
-    logical_size_of_metadata, Chunk, DataRecord, DeletedMetadata, LogRecord,
+    logical_size_of_metadata, AttachedFunctionUuid, Chunk, DataRecord, DeletedMetadata, LogRecord,
     MaterializedLogOperation, Metadata, MetadataDelta, MetadataValue, MetadataValueConversionError,
     Operation, Schema, SegmentType, SegmentUuid, UpdateMetadata, UpdateMetadataValue,
+    CHROMA_BACKFILL_ATTACHED_FUNCTION_ID_KEY,
 };
 use std::collections::{HashMap, HashSet};
+use std::str::FromStr;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use thiserror::Error;
@@ -572,6 +574,17 @@ impl PartitionedMaterializeLogsResult {
         self.shards.iter().any(|s| s.has_backfill())
     }
 
+    pub fn backfill_attached_function_ids(&self) -> HashSet<AttachedFunctionUuid> {
+        self.shards
+            .iter()
+            .flat_map(|s| s.backfill_attached_function_ids().iter().copied())
+            .collect()
+    }
+
+    pub fn has_legacy_backfill_signal(&self) -> bool {
+        self.shards.iter().any(|s| s.has_legacy_backfill_signal())
+    }
+
     pub fn split(
         &self,
         pivot_offset_id: u32,
@@ -609,7 +622,8 @@ impl PartitionedMaterializeLogsResult {
 pub struct MaterializeLogsResult {
     pub logs: Chunk<LogRecord>,
     pub materialized: Chunk<MaterializedLogRecord>,
-    pub has_backfill: bool,
+    pub backfill_attached_function_ids: HashSet<AttachedFunctionUuid>,
+    pub has_legacy_backfill_signal: bool,
 }
 
 impl MaterializeLogsResult {
@@ -626,7 +640,15 @@ impl MaterializeLogsResult {
     }
 
     pub fn has_backfill(&self) -> bool {
-        self.has_backfill
+        self.has_legacy_backfill_signal || !self.backfill_attached_function_ids.is_empty()
+    }
+
+    pub fn backfill_attached_function_ids(&self) -> &HashSet<AttachedFunctionUuid> {
+        &self.backfill_attached_function_ids
+    }
+
+    pub fn has_legacy_backfill_signal(&self) -> bool {
+        self.has_legacy_backfill_signal
     }
 
     pub fn iter(&'_ self) -> MaterializeLogsResultIter<'_> {
@@ -804,14 +826,29 @@ pub async fn materialize_logs(
         .await?;
     }
 
-    let mut has_backfill = false;
+    let mut backfill_attached_function_ids = HashSet::new();
+    let mut has_legacy_backfill_signal = false;
     // Populate updates to these and fresh records that are being
     // inserted for the first time.
     async {
         for (log_record, log_index) in logs.iter() {
             match log_record.record.operation {
                 Operation::BackfillFn => {
-                    has_backfill = true;
+                    if let Some(metadata) = &log_record.record.metadata {
+                        if let Some(UpdateMetadataValue::Str(attached_function_id)) =
+                            metadata.get(CHROMA_BACKFILL_ATTACHED_FUNCTION_ID_KEY)
+                        {
+                            if let Ok(attached_function_id) =
+                                AttachedFunctionUuid::from_str(attached_function_id)
+                            {
+                                backfill_attached_function_ids.insert(attached_function_id);
+                            }
+                        } else {
+                            has_legacy_backfill_signal = true;
+                        }
+                    } else {
+                        has_legacy_backfill_signal = true;
+                    }
                     continue;
                 }
                 Operation::Add => {
@@ -1103,7 +1140,8 @@ pub async fn materialize_logs(
     Ok(MaterializeLogsResult {
         logs,
         materialized: Chunk::new(res.into()),
-        has_backfill,
+        backfill_attached_function_ids,
+        has_legacy_backfill_signal,
     })
 }
 
@@ -1135,7 +1173,8 @@ pub async fn materialize_logs_for_rebuild(
     Ok(MaterializeLogsResult {
         logs,
         materialized: Chunk::new(res.into()),
-        has_backfill: false, // Rebuild path never has backfill
+        backfill_attached_function_ids: HashSet::new(), // Rebuild path never has backfill
+        has_legacy_backfill_signal: false,              // Rebuild path never has backfill
     })
 }
 
