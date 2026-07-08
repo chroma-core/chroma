@@ -5,10 +5,10 @@ use chroma_error::{ChromaError, ErrorCodes};
 use thiserror::Error;
 
 use crate::{
-    AddCollectionRecordsRequest, CHROMA_DOCUMENT_KEY, CHROMA_URI_KEY, CollectionUuid, DatabaseName,
-    DeleteCollectionRecordsRequest, GetRequest, GetResponse, Operation, OperationRecord,
-    ScalarEncoding, UpdateCollectionRecordsRequest, UpdateMetadata, UpdateMetadataValue,
-    UpsertCollectionRecordsRequest,
+    AddCollectionRecordsRequest, CollectionUuid, DatabaseName, DeleteCollectionRecordsRequest,
+    GetRequest, GetResponse, Operation, OperationRecord, ScalarEncoding,
+    UpdateCollectionRecordsRequest, UpdateMetadata, UpdateMetadataValue,
+    UpsertCollectionRecordsRequest, CHROMA_DOCUMENT_KEY, CHROMA_URI_KEY,
 };
 
 /// One buffered write operation in transaction call order.
