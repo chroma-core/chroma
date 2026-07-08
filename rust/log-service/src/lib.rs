@@ -30,8 +30,8 @@ use chroma_types::chroma_proto::{
     InspectLogStateRequest, InspectLogStateResponse, LogRecord, MigrateLogRequest,
     MigrateLogResponse, OperationRecord, PullLogsRequest, PullLogsResponse,
     PurgeDirtyForCollectionRequest, PurgeDirtyForCollectionResponse, PurgeFromCacheRequest,
-    PurgeFromCacheResponse, PushLogsRequest, PushLogsResponse, ScoutLogsRequest, ScoutLogsResponse,
-    ScrubLogRequest, ScrubLogResponse, SealLogRequest, SealLogResponse,
+    PurgeFromCacheResponse, PushLogsCondition, PushLogsRequest, PushLogsResponse, ScoutLogsRequest,
+    ScoutLogsResponse, ScrubLogRequest, ScrubLogResponse, SealLogRequest, SealLogResponse,
     UpdateCollectionLogOffsetRequest, UpdateCollectionLogOffsetResponse,
 };
 use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
@@ -81,6 +81,17 @@ use crate::state_hash_table::StateHashTable;
 /// The gRPC metadata key for the backoff reason.
 const BACKOFF_REASON_MD_KEY: &str = "backoff-reason";
 
+/// A stable message clients can use to identify conditional write conflicts.
+const CONDITIONAL_WRITE_CONFLICT_MESSAGE: &str = "conditional write conflict";
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ConditionalWriteRequest {
+    observed_log_offset: u64,
+    read_ids: HashSet<Arc<str>>,
+    write_ids: HashSet<Arc<str>>,
+    conflict_ids: HashSet<Arc<str>>,
+}
+
 /// Construct a `tonic::Status` with a `backoff-reason` metadata entry.
 ///
 /// `reason` should be `"batching"` for normal write backpressure or
@@ -96,6 +107,71 @@ fn status_with_backoff_reason(
         reason.parse().expect("valid ascii metadata value"),
     );
     Status::with_metadata(code, message, metadata)
+}
+
+fn normalize_conditional_ids<'a>(
+    ids: impl IntoIterator<Item = &'a str>,
+    empty_id_message: &'static str,
+) -> Result<HashSet<Arc<str>>, Status> {
+    let mut normalized = HashSet::new();
+    for id in ids {
+        if id.is_empty() {
+            return Err(Status::invalid_argument(empty_id_message));
+        }
+        normalized.insert(Arc::from(id));
+    }
+    Ok(normalized)
+}
+
+fn create_conditional_write_request(
+    condition: Option<&PushLogsCondition>,
+    records: &[OperationRecord],
+) -> Result<Option<ConditionalWriteRequest>, Status> {
+    let Some(condition) = condition else {
+        return Ok(None);
+    };
+    if condition.observed_log_offset < 0 {
+        return Err(Status::invalid_argument(
+            "observed_log_offset must be non-negative",
+        ));
+    }
+    let read_ids = normalize_conditional_ids(
+        condition.read_ids.iter().map(String::as_str),
+        "read_ids must not contain empty ids",
+    )?;
+    let write_ids = normalize_conditional_ids(
+        records.iter().map(|record| record.id.as_str()),
+        "records must not contain empty ids",
+    )?;
+    let mut conflict_ids = read_ids.clone();
+    conflict_ids.extend(write_ids.iter().cloned());
+    Ok(Some(ConditionalWriteRequest {
+        observed_log_offset: condition.observed_log_offset as u64,
+        read_ids,
+        write_ids,
+        conflict_ids,
+    }))
+}
+
+fn validate_conditional_log_bounds(
+    request: &ConditionalWriteRequest,
+    readable_lower_bound: LogPosition,
+    current_committed_tail: LogPosition,
+) -> Result<(), Status> {
+    let observed_log_offset = request.observed_log_offset;
+    let readable_lower_bound = readable_lower_bound.offset();
+    let current_committed_tail = current_committed_tail.offset();
+    if observed_log_offset > current_committed_tail {
+        return Err(Status::invalid_argument(
+            "observed_log_offset is beyond the current log tail",
+        ));
+    }
+    if observed_log_offset < readable_lower_bound {
+        return Err(Status::failed_precondition(
+            "observed_log_offset is before the readable log lower bound",
+        ));
+    }
+    Ok(())
 }
 
 /// Converts a SpannerSessionPoolConfig to the library's SessionConfig.
@@ -2255,12 +2331,19 @@ impl LogServer {
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
         let database_name = DatabaseName::new(&push_logs.database_name)
             .ok_or_else(|| Status::invalid_argument("Database name invalid"))?;
+        let topology_name = database_name
+            .topology()
+            .map(|t| TopologyName::new(&t))
+            .transpose()
+            .map_err(|_| Status::invalid_argument("Invalid topology in database name"))?;
         if push_logs.records.len() > i32::MAX as usize {
             return Err(Status::invalid_argument("Too many records"));
         }
         if push_logs.records.is_empty() {
             return Err(Status::invalid_argument("Too few records"));
         }
+        let conditional_write =
+            create_conditional_write_request(push_logs.condition.as_ref(), &push_logs.records)?;
         self.check_for_backpressure(collection_id).await?;
 
         // Extract CMEK from request
@@ -2308,6 +2391,14 @@ impl LogServer {
                 return Err(status_from_chroma_error(err));
             }
         };
+        if let Some(conditional_write) = conditional_write.as_ref() {
+            self.validate_committed_log_for_conditional_write(
+                topology_name.as_ref(),
+                collection_id,
+                conditional_write,
+            )
+            .await?;
+        }
         let mut messages = Vec::with_capacity(push_logs.records.len());
         for record in push_logs.records {
             let mut buf = vec![];
@@ -2594,6 +2685,122 @@ impl LogServer {
         Ok(log_reader.scan(from, limits).await?)
     }
 
+    async fn read_fragment_record_bytes(
+        &self,
+        log_reader: Arc<dyn LogReaderTrait>,
+        collection_id: CollectionUuid,
+        fragment: Fragment,
+    ) -> Result<Vec<(LogPosition, Vec<u8>)>, Error> {
+        if let Some(cache) = self.cache.as_ref() {
+            let cache_key = cache_key_for_fragment(collection_id, &fragment.path);
+            if let Ok(Some(answer)) = cache.get(&cache_key).await {
+                if answer.version == Some(1) {
+                    let (records, _, _) = log_reader
+                        .parse_parquet_fast(&answer.bytes, fragment.start)
+                        .await?;
+                    return Ok(records);
+                }
+            }
+            let bytes = log_reader.read_bytes(&fragment).await?;
+            let cache_value = CachedBytes::new((*bytes).clone());
+            let (records, _, _) = log_reader
+                .parse_parquet_fast(&bytes, fragment.start)
+                .await?;
+            cache.insert(cache_key, cache_value).await;
+            Ok(records)
+        } else {
+            let (_, records, _, _) = log_reader.read_parquet(&fragment).await?;
+            Ok(records)
+        }
+    }
+
+    async fn validate_committed_log_for_conditional_write(
+        &self,
+        topology_name: Option<&TopologyName>,
+        collection_id: CollectionUuid,
+        request: &ConditionalWriteRequest,
+    ) -> Result<LogPosition, Status> {
+        let log_reader = self
+            .make_log_reader(topology_name, collection_id)
+            .await
+            .map_err(status_from_chroma_error)?;
+        let Some(manifest_and_witness) =
+            log_reader.manifest_and_witness().await.map_err(|err| {
+                Status::new(
+                    err.code().into(),
+                    format!("could not validate conditional write bounds: {err:?}"),
+                )
+            })?
+        else {
+            let empty_log_position = LogPosition::from_offset(1);
+            validate_conditional_log_bounds(request, empty_log_position, empty_log_position)?;
+            return Ok(empty_log_position);
+        };
+        let readable_lower_bound = manifest_and_witness.manifest.oldest_timestamp();
+        let current_committed_tail = manifest_and_witness.manifest.next_write_timestamp();
+        validate_conditional_log_bounds(request, readable_lower_bound, current_committed_tail)?;
+
+        if request.observed_log_offset == current_committed_tail.offset() {
+            return Ok(current_committed_tail);
+        }
+
+        let from = LogPosition::from_offset(request.observed_log_offset);
+        let expected_records = current_committed_tail
+            .offset()
+            .saturating_sub(request.observed_log_offset);
+        let limits = Limits {
+            max_files: None,
+            max_bytes: None,
+            max_records: Some(expected_records),
+        };
+        let fragments = match scan_from_manifest(&manifest_and_witness.manifest, from, limits) {
+            Some(fragments) => fragments,
+            None => log_reader.scan(from, limits).await.map_err(|err| {
+                Status::new(
+                    err.code().into(),
+                    format!("could not scan committed log for conditional write: {err:?}"),
+                )
+            })?,
+        };
+        if fragments.is_empty() {
+            return Err(Status::failed_precondition(
+                "conditional write validation could not read committed log records",
+            ));
+        }
+
+        let mut records_read = 0;
+        for fragment in fragments {
+            let record_batch = self
+                .read_fragment_record_bytes(Arc::clone(&log_reader), collection_id, fragment)
+                .await
+                .map_err(|err| {
+                    Status::new(
+                        err.code().into(),
+                        format!("could not read committed log for conditional write: {err}"),
+                    )
+                })?;
+            for (log_offset, record_bytes) in record_batch {
+                if log_offset.offset() < request.observed_log_offset
+                    || log_offset.offset() >= current_committed_tail.offset()
+                {
+                    continue;
+                }
+                records_read += 1;
+                let op_record = OperationRecord::decode(record_bytes.as_slice())
+                    .map_err(|err| Status::data_loss(err.to_string()))?;
+                if request.conflict_ids.contains(op_record.id.as_str()) {
+                    return Err(Status::aborted(CONDITIONAL_WRITE_CONFLICT_MESSAGE));
+                }
+            }
+        }
+        if records_read != expected_records {
+            return Err(Status::failed_precondition(
+                "conditional write validation could not read all committed log records",
+            ));
+        }
+        Ok(current_committed_tail)
+    }
+
     async fn pull_logs(
         &self,
         request: Request<PullLogsRequest>,
@@ -2637,27 +2844,8 @@ impl LogServer {
                     let log_reader = this
                         .make_log_reader(topology_name.as_ref(), collection_id)
                         .await?;
-                    if let Some(cache) = this.cache.as_ref() {
-                        let cache_key = cache_key_for_fragment(collection_id, &fragment.path);
-                        if let Ok(Some(answer)) = cache.get(&cache_key).await {
-                            if answer.version == Some(1) {
-                                let (records, _, _) = log_reader
-                                    .parse_parquet_fast(&answer.bytes, fragment.start)
-                                    .await?;
-                                return Ok(records);
-                            }
-                        }
-                        let bytes = log_reader.read_bytes(&fragment).await?;
-                        let cache_value = CachedBytes::new((*bytes).clone());
-                        let (answer, _, _) = log_reader
-                            .parse_parquet_fast(&bytes, fragment.start)
-                            .await?;
-                        cache.insert(cache_key, cache_value).await;
-                        Ok(answer)
-                    } else {
-                        let (_, answer, _, _) = log_reader.read_parquet(&fragment.clone()).await?;
-                        Ok(answer)
-                    }
+                    this.read_fragment_record_bytes(log_reader, collection_id, fragment)
+                        .await
                 }
             })
             .collect::<Vec<_>>();
@@ -3922,7 +4110,7 @@ mod tests {
     };
 
     use chroma_types::chroma_proto::UpdateCollectionLogOffsetRequest;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use tonic::Request;
     use wal3::LogWriterOptions;
 
@@ -3932,6 +4120,192 @@ mod tests {
     );
 
     const TEST_TOPOLOGY_NAME: &str = "test-mcmr-topology";
+
+    fn string_set(ids: &[&str]) -> HashSet<Arc<str>> {
+        ids.iter().map(|id| Arc::from(*id)).collect()
+    }
+
+    fn proto_operation_record(
+        id: impl Into<String>,
+    ) -> chroma_types::chroma_proto::OperationRecord {
+        chroma_types::chroma_proto::OperationRecord {
+            id: id.into(),
+            vector: None,
+            metadata: None,
+            operation: 0,
+        }
+    }
+
+    #[test]
+    fn conditional_write_request_normalizes_and_dedupes_ids() {
+        let condition = PushLogsCondition {
+            observed_log_offset: 7,
+            read_ids: vec![
+                "read-2".to_string(),
+                "read-1".to_string(),
+                "read-1".to_string(),
+            ],
+        };
+        let records = vec![
+            proto_operation_record("write-1"),
+            proto_operation_record("write-1"),
+            proto_operation_record("read-2"),
+        ];
+        let expected = Some(ConditionalWriteRequest {
+            observed_log_offset: 7,
+            read_ids: string_set(&["read-1", "read-2"]),
+            write_ids: string_set(&["write-1", "read-2"]),
+            conflict_ids: string_set(&["read-1", "read-2", "write-1"]),
+        });
+
+        let got = create_conditional_write_request(Some(&condition), &records)
+            .expect("conditional request should validate");
+
+        assert_eq!(expected, got);
+    }
+
+    #[test]
+    fn conditionless_write_has_no_conditional_validation() {
+        let records = vec![proto_operation_record("write-1")];
+        let expected = None;
+
+        let got = create_conditional_write_request(None, &records)
+            .expect("conditionless request should validate");
+
+        assert_eq!(expected, got);
+    }
+
+    #[test]
+    fn conditional_write_request_rejects_empty_read_id() {
+        let condition = PushLogsCondition {
+            observed_log_offset: 7,
+            read_ids: vec!["".to_string()],
+        };
+        let records = vec![proto_operation_record("write-1")];
+
+        let err = create_conditional_write_request(Some(&condition), &records)
+            .expect_err("empty read id should be invalid");
+
+        assert_eq!(Code::InvalidArgument, err.code());
+        assert_eq!("read_ids must not contain empty ids", err.message());
+    }
+
+    #[test]
+    fn conditional_write_request_rejects_empty_write_id() {
+        let condition = PushLogsCondition {
+            observed_log_offset: 7,
+            read_ids: vec!["read-1".to_string()],
+        };
+        let records = vec![proto_operation_record("")];
+
+        let err = create_conditional_write_request(Some(&condition), &records)
+            .expect_err("empty write id should be invalid");
+
+        assert_eq!(Code::InvalidArgument, err.code());
+        assert_eq!("records must not contain empty ids", err.message());
+    }
+
+    #[test]
+    fn conditional_write_request_rejects_negative_observed_offset() {
+        let condition = PushLogsCondition {
+            observed_log_offset: -1,
+            read_ids: vec!["read-1".to_string()],
+        };
+        let records = vec![proto_operation_record("write-1")];
+
+        let err = create_conditional_write_request(Some(&condition), &records)
+            .expect_err("negative observed offset should be invalid");
+
+        assert_eq!(Code::InvalidArgument, err.code());
+        assert_eq!("observed_log_offset must be non-negative", err.message());
+    }
+
+    #[test]
+    fn conditional_write_request_builds_conflict_set_from_write_ids() {
+        let condition = PushLogsCondition {
+            observed_log_offset: 7,
+            read_ids: vec![],
+        };
+        let records = vec![
+            proto_operation_record("write-1"),
+            proto_operation_record("write-2"),
+            proto_operation_record("write-1"),
+        ];
+        let expected = Some(ConditionalWriteRequest {
+            observed_log_offset: 7,
+            read_ids: string_set(&[]),
+            write_ids: string_set(&["write-1", "write-2"]),
+            conflict_ids: string_set(&["write-1", "write-2"]),
+        });
+
+        let got = create_conditional_write_request(Some(&condition), &records)
+            .expect("conditional request should validate");
+
+        assert_eq!(expected, got);
+    }
+
+    #[test]
+    fn conditional_log_bounds_accept_observed_offset_inside_readable_range() {
+        let request = ConditionalWriteRequest {
+            observed_log_offset: 5,
+            read_ids: string_set(&["read-1"]),
+            write_ids: string_set(&["write-1"]),
+            conflict_ids: string_set(&["read-1", "write-1"]),
+        };
+
+        validate_conditional_log_bounds(
+            &request,
+            LogPosition::from_offset(5),
+            LogPosition::from_offset(8),
+        )
+        .expect("observed offset at lower bound should be valid");
+    }
+
+    #[test]
+    fn conditional_log_bounds_reject_observed_offset_beyond_tail() {
+        let request = ConditionalWriteRequest {
+            observed_log_offset: 9,
+            read_ids: string_set(&["read-1"]),
+            write_ids: string_set(&["write-1"]),
+            conflict_ids: string_set(&["read-1", "write-1"]),
+        };
+
+        let err = validate_conditional_log_bounds(
+            &request,
+            LogPosition::from_offset(5),
+            LogPosition::from_offset(8),
+        )
+        .expect_err("observed offset beyond tail should be invalid");
+
+        assert_eq!(Code::InvalidArgument, err.code());
+        assert_eq!(
+            "observed_log_offset is beyond the current log tail",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn conditional_log_bounds_reject_observed_offset_before_readable_lower_bound() {
+        let request = ConditionalWriteRequest {
+            observed_log_offset: 4,
+            read_ids: string_set(&["read-1"]),
+            write_ids: string_set(&["write-1"]),
+            conflict_ids: string_set(&["read-1", "write-1"]),
+        };
+
+        let err = validate_conditional_log_bounds(
+            &request,
+            LogPosition::from_offset(5),
+            LogPosition::from_offset(8),
+        )
+        .expect_err("observed offset before lower bound should fail precondition");
+
+        assert_eq!(Code::FailedPrecondition, err.code());
+        assert_eq!(
+            "observed_log_offset is before the readable log lower bound",
+            err.message()
+        );
+    }
 
     #[test]
     fn unsafe_constants() {
@@ -5765,6 +6139,79 @@ mod tests {
         }
     }
 
+    fn local_setup_log_server() -> LogServerSetup {
+        let (temp_dir, storage) = chroma_storage::test_storage();
+        let ctor = Box::pin(async move {
+            let writer_options = LogWriterOptions {
+                snapshot_manifest: SnapshotOptions {
+                    snapshot_rollover_threshold: 10,
+                    fragment_rollover_threshold: 3,
+                },
+                throttle_fragment: ThrottleOptions {
+                    batch_size_bytes: 4,
+                    batch_interval_us: 4096,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let storage_arc = Arc::new(storage.clone());
+            let (fragment_publisher_factory, manifest_publisher_factory) = create_s3_factories(
+                writer_options.clone(),
+                LogReaderOptions::default(),
+                Arc::clone(&storage_arc),
+                "test-rust-log-service".to_string(),
+                "test-dirty-log-writer".to_string(),
+                Arc::new(()),
+                Arc::new(()),
+            );
+            let dirty_log: Option<Arc<dyn LogWriterTrait>> = Some(Arc::new(
+                LogWriter::open_or_initialize(
+                    writer_options.clone(),
+                    "test-dirty-log-writer",
+                    fragment_publisher_factory,
+                    manifest_publisher_factory,
+                    None,
+                )
+                .await
+                .expect("Dirty log should be initializable"),
+            ));
+            let config = LogServerConfig {
+                writer: writer_options,
+                ..Default::default()
+            };
+            let local =
+                RegionName::new("local").expect("'local' is unit tested to be a good region name");
+            let storages = Arc::new(MultiCloudMultiRegionConfiguration {
+                preferred: local.clone(),
+                regions: vec![ProviderRegion {
+                    name: local,
+                    provider: "local".to_string(),
+                    region: "local".to_string(),
+                    config: RegionalStorage { storage },
+                }],
+                topologies: vec![],
+            });
+            LogServer {
+                storages,
+                dirty_log,
+                faults: Arc::new(FaultRegistry::new()),
+                metrics: Metrics::new(meter("test-rust-log-service")),
+                config,
+                open_logs: Default::default(),
+                rolling_up_s3: Default::default(),
+                rolling_up_repl: Default::default(),
+                backpressure: Default::default(),
+                need_to_compact_s3: Default::default(),
+                need_to_compact_repl: Default::default(),
+                cache: Default::default(),
+            }
+        });
+        let dtor = Box::pin(async move {
+            drop(temp_dir);
+        });
+        (ctor, dtor)
+    }
+
     async fn garbage_collect_unused_logs(
         server: &LogServer,
         new_garbage_collector: impl Fn(
@@ -5905,6 +6352,130 @@ mod tests {
             document: None,
             operation: Operation::Add,
         }
+    }
+
+    fn conditional_push_logs_request(
+        db_name: &str,
+        collection_id: CollectionUuid,
+        records: &[OperationRecord],
+        condition: PushLogsCondition,
+    ) -> PushLogsRequest {
+        PushLogsRequest {
+            collection_id: collection_id.to_string(),
+            records: records
+                .iter()
+                .cloned()
+                .map(chroma_types::chroma_proto::OperationRecord::try_from)
+                .collect::<Result<_, _>>()
+                .expect("operation records should convert to proto"),
+            cmek: None,
+            database_name: db_name.to_string(),
+            condition: Some(condition),
+        }
+    }
+
+    #[tokio::test]
+    async fn conditional_push_rejects_committed_write_id_conflict() {
+        let (ctor, dtor) = local_setup_log_server();
+        let log_server = ctor.await;
+        let collection_id = CollectionUuid::new();
+        let db_name = "dbname";
+        push_log_to_server(
+            &log_server,
+            db_name,
+            collection_id,
+            &[test_operation_record("doc-1")],
+        )
+        .await;
+        let request = conditional_push_logs_request(
+            db_name,
+            collection_id,
+            &[test_operation_record("doc-1")],
+            PushLogsCondition {
+                observed_log_offset: 1,
+                read_ids: vec!["doc-2".to_string()],
+            },
+        );
+
+        let result = log_server.push_logs(Request::new(request)).await;
+        let err = match result {
+            Ok(_) => panic!("conditional push should reject committed write-id conflict"),
+            Err(err) => err,
+        };
+
+        assert_eq!(Code::Aborted, err.code());
+        assert_eq!(CONDITIONAL_WRITE_CONFLICT_MESSAGE, err.message());
+        dtor.await;
+    }
+
+    #[tokio::test]
+    async fn conditional_push_allows_non_conflicting_committed_records() {
+        let (ctor, dtor) = local_setup_log_server();
+        let log_server = ctor.await;
+        let collection_id = CollectionUuid::new();
+        let db_name = "dbname";
+        push_log_to_server(
+            &log_server,
+            db_name,
+            collection_id,
+            &[test_operation_record("doc-1")],
+        )
+        .await;
+        let request = conditional_push_logs_request(
+            db_name,
+            collection_id,
+            &[test_operation_record("doc-3")],
+            PushLogsCondition {
+                observed_log_offset: 1,
+                read_ids: vec!["doc-2".to_string()],
+            },
+        );
+
+        let response = log_server
+            .push_logs(Request::new(request))
+            .await
+            .expect("conditional push should allow non-conflicting committed records")
+            .into_inner();
+
+        assert_eq!(1, response.record_count);
+        dtor.await;
+    }
+
+    #[tokio::test]
+    async fn conditional_push_rejects_observed_offset_beyond_tail() {
+        let (ctor, dtor) = local_setup_log_server();
+        let log_server = ctor.await;
+        let collection_id = CollectionUuid::new();
+        let db_name = "dbname";
+        push_log_to_server(
+            &log_server,
+            db_name,
+            collection_id,
+            &[test_operation_record("doc-1")],
+        )
+        .await;
+        let request = conditional_push_logs_request(
+            db_name,
+            collection_id,
+            &[test_operation_record("doc-2")],
+            PushLogsCondition {
+                observed_log_offset: 3,
+                read_ids: vec![],
+            },
+        );
+
+        let result = log_server.push_logs(Request::new(request)).await;
+        let err = match result {
+            Ok(_) => panic!("conditional push should reject observed offset beyond tail"),
+            Err(err) => err,
+        };
+
+        assert_eq!(Code::InvalidArgument, err.code());
+        assert_eq!(
+            "observed_log_offset is beyond the current log tail",
+            err.message()
+        );
+        dtor.await;
     }
 
     fn test_fork_logs(
