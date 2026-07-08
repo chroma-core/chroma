@@ -3,11 +3,6 @@
 use crate::work_queue::state::QueueState;
 use crate::work_queue::types::{FinishResult, WorkQueueError, WorkQueueRecord};
 
-#[allow(dead_code)]
-enum WorkResponse {
-    Push(oneshot::Sender<Result<(), WorkQueueError>>),
-    Repair(oneshot::Sender<Result<FinishResult, WorkQueueError>>),
-}
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_storage::{GetOptions, PutMode, PutOptions, Storage};
@@ -216,14 +211,15 @@ impl WorkQueueManager {
         total_pending_responses >= self.config.persistence.pending_threshold
     }
 
-    async fn push_work_and_queue_response(
-        &mut self,
-        fn_id: AttachedFunctionUuid,
-        input_coll_id: CollectionUuid,
-        completion_offset: i64,
-        compaction_offset: i64,
-        response: WorkResponse,
-    ) {
+    async fn push_work_and_queue_response(&mut self, msg: PushWorkMessage) {
+        let PushWorkMessage {
+            fn_id,
+            input_coll_id,
+            completion_offset,
+            compaction_offset,
+            response_tx,
+        } = msg;
+
         let _ = self
             .state
             .push_work(fn_id, input_coll_id, completion_offset, compaction_offset);
@@ -233,12 +229,7 @@ impl WorkQueueManager {
         // where the epoch is incremented per persistence event and
         // we associate each dedup map entry with an epoch.
 
-        match response {
-            WorkResponse::Push(tx) => self.pending_push_responses.push(tx),
-            WorkResponse::Repair(tx) => self
-                .pending_finish_responses
-                .push((FinishResult::NeedsRepair, tx)),
-        }
+        self.pending_push_responses.push(response_tx);
 
         // Check if persist needed
         if self.should_persist() {
@@ -331,14 +322,7 @@ impl Handler<PushWorkMessage> for WorkQueueManager {
             msg.completion_offset,
             msg.compaction_offset
         );
-        self.push_work_and_queue_response(
-            msg.fn_id,
-            msg.input_coll_id,
-            msg.completion_offset,
-            msg.compaction_offset,
-            WorkResponse::Push(msg.response_tx),
-        )
-        .await;
+        self.push_work_and_queue_response(msg).await;
     }
 }
 
