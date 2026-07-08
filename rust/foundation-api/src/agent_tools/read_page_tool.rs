@@ -105,6 +105,8 @@ mod tests {
             slug: "onboarding".to_string(),
             title: "Onboarding".to_string(),
             categories: categories.into_iter().map(str::to_string).collect(),
+            source_ids: Vec::new(),
+            version: 7,
             updated_at: Some(1700),
             content: "# Welcome\nBody text.".to_string(),
             url: url.map(str::to_string),
