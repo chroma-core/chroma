@@ -115,7 +115,8 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
             };
 
             for (i, (version, created_at, mode)) in versions.iter_mut().rev().enumerate() {
-                if fn_protected_version.is_some_and(|protected_version| *version >= protected_version)
+                if fn_protected_version
+                    .is_some_and(|protected_version| *version >= protected_version)
                 {
                     tracing::debug!(
                         collection_id = %collection_id,
