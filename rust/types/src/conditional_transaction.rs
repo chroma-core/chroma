@@ -4,9 +4,10 @@ use chroma_error::{ChromaError, ErrorCodes};
 use thiserror::Error;
 
 use crate::{
-    AddCollectionRecordsRequest, DeleteCollectionRecordsRequest, GetRequest, GetResponse,
-    OccReadMode, OccReadToken, Operation, UpdateCollectionRecordsRequest,
-    UpsertCollectionRecordsRequest,
+    AddCollectionRecordsRequest, CollectionUuid, DatabaseName, DeleteCollectionRecordsRequest,
+    GetRequest, GetResponse, OccReadMode, OccReadToken, Operation, OperationRecord, ScalarEncoding,
+    UpdateCollectionRecordsRequest, UpdateMetadata, UpdateMetadataValue,
+    UpsertCollectionRecordsRequest, CHROMA_DOCUMENT_KEY, CHROMA_URI_KEY,
 };
 
 /// One buffered write operation in transaction call order.
@@ -41,6 +42,34 @@ impl ConditionalBufferedWrite {
             Self::Delete(request) => request.ids.as_deref().unwrap_or_default(),
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConditionalCommitRequest {
+    pub buffered_writes: Vec<ConditionalBufferedWrite>,
+    pub observed_log_offset: Option<i64>,
+    pub read_ids: Vec<String>,
+}
+
+impl ConditionalCommitRequest {
+    pub fn record_count(&self) -> usize {
+        self.buffered_writes
+            .iter()
+            .map(|write| write.ids().len())
+            .sum()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConditionalCommitResult {
+    pub first_inserted_record_offset: Option<i64>,
+    pub record_count: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConditionalCommitAction {
+    NoOp(ConditionalCommitResult),
+    Append(ConditionalCommitRequest),
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -118,6 +147,50 @@ impl ConditionalTransactionState {
 
     pub fn close(&mut self) {
         self.closed = true;
+    }
+
+    pub fn prepare_commit(
+        &mut self,
+    ) -> Result<ConditionalCommitAction, ConditionalTransactionError> {
+        if self.closed {
+            return Err(ConditionalTransactionError::Closed);
+        }
+
+        if self.buffered_writes.is_empty() {
+            self.closed = true;
+            return Ok(ConditionalCommitAction::NoOp(ConditionalCommitResult {
+                first_inserted_record_offset: None,
+                record_count: 0,
+            }));
+        }
+
+        let observed_log_offset = self.read_token.map(observed_log_offset).transpose()?;
+
+        Ok(ConditionalCommitAction::Append(ConditionalCommitRequest {
+            buffered_writes: self.buffered_writes.clone(),
+            observed_log_offset,
+            read_ids: self.read_ids.iter().cloned().collect(),
+        }))
+    }
+
+    pub fn finish_commit(
+        &mut self,
+        first_inserted_record_offset: Option<i64>,
+    ) -> Result<ConditionalCommitResult, ConditionalTransactionError> {
+        if self.closed {
+            return Err(ConditionalTransactionError::Closed);
+        }
+
+        let result = ConditionalCommitResult {
+            first_inserted_record_offset,
+            record_count: self
+                .buffered_writes
+                .iter()
+                .map(|write| write.ids().len())
+                .sum(),
+        };
+        self.closed = true;
+        Ok(result)
     }
 
     /// Buffers an already-normalized add request.
@@ -402,6 +475,226 @@ impl ChromaError for ConditionalTransactionError {
             }
         }
     }
+}
+
+#[derive(Debug, Error)]
+pub enum ConditionalCommitError {
+    #[error(transparent)]
+    Transaction(#[from] ConditionalTransactionError),
+    #[error("Backoff and retry")]
+    Backoff,
+    #[error("Invalid database name")]
+    InvalidDatabaseName,
+    #[error("Invalid argument: {0}")]
+    InvalidArgument(String),
+    #[error(transparent)]
+    Other(#[from] Box<dyn ChromaError>),
+}
+
+impl ChromaError for ConditionalCommitError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ConditionalCommitError::Transaction(err) => err.code(),
+            ConditionalCommitError::Backoff => ErrorCodes::ResourceExhausted,
+            ConditionalCommitError::InvalidDatabaseName => ErrorCodes::InvalidArgument,
+            ConditionalCommitError::InvalidArgument(_) => ErrorCodes::InvalidArgument,
+            ConditionalCommitError::Other(err) => err.code(),
+        }
+    }
+}
+
+fn conditional_commit_invalid_argument(message: impl Into<String>) -> ConditionalCommitError {
+    ConditionalCommitError::InvalidArgument(message.into())
+}
+
+fn buffered_write_scope(write: &ConditionalBufferedWrite) -> (&str, &str, CollectionUuid) {
+    match write {
+        ConditionalBufferedWrite::Add(request) => (
+            &request.tenant_id,
+            &request.database_name,
+            request.collection_id,
+        ),
+        ConditionalBufferedWrite::Update(request) => (
+            &request.tenant_id,
+            &request.database_name,
+            request.collection_id,
+        ),
+        ConditionalBufferedWrite::Upsert(request) => (
+            &request.tenant_id,
+            &request.database_name,
+            request.collection_id,
+        ),
+        ConditionalBufferedWrite::Delete(request) => (
+            &request.tenant_id,
+            &request.database_name,
+            request.collection_id,
+        ),
+    }
+}
+
+pub fn validate_conditional_commit_scope(
+    request: &ConditionalCommitRequest,
+) -> Result<(String, DatabaseName, CollectionUuid), ConditionalCommitError> {
+    let Some(first_write) = request.buffered_writes.first() else {
+        return Err(conditional_commit_invalid_argument(
+            "conditional commit append request must contain at least one write",
+        ));
+    };
+    let (tenant_id, database_name, collection_id) = buffered_write_scope(first_write);
+    for write in &request.buffered_writes[1..] {
+        let (write_tenant_id, write_database_name, write_collection_id) =
+            buffered_write_scope(write);
+        if write_tenant_id != tenant_id
+            || write_database_name != database_name
+            || write_collection_id != collection_id
+        {
+            return Err(conditional_commit_invalid_argument(
+                "conditional transaction contains writes for multiple collection scopes",
+            ));
+        }
+    }
+    let database_name = DatabaseName::new(database_name.to_string())
+        .ok_or(ConditionalCommitError::InvalidDatabaseName)?;
+    Ok((tenant_id.to_string(), database_name, collection_id))
+}
+
+pub fn buffered_write_to_records(
+    write: ConditionalBufferedWrite,
+) -> Result<(Vec<OperationRecord>, u64), ConditionalCommitError> {
+    match write {
+        ConditionalBufferedWrite::Add(AddCollectionRecordsRequest {
+            ids,
+            embeddings,
+            documents,
+            uris,
+            metadatas,
+            ..
+        }) => {
+            let embeddings = Some(embeddings.into_iter().map(Some).collect());
+            to_records(ids, embeddings, documents, uris, metadatas, Operation::Add)
+        }
+        ConditionalBufferedWrite::Update(UpdateCollectionRecordsRequest {
+            ids,
+            embeddings,
+            documents,
+            uris,
+            metadatas,
+            ..
+        }) => to_records(
+            ids,
+            embeddings,
+            documents,
+            uris,
+            metadatas,
+            Operation::Update,
+        ),
+        ConditionalBufferedWrite::Upsert(UpsertCollectionRecordsRequest {
+            ids,
+            embeddings,
+            documents,
+            uris,
+            metadatas,
+            ..
+        }) => {
+            let embeddings = Some(embeddings.into_iter().map(Some).collect());
+            to_records(
+                ids,
+                embeddings,
+                documents,
+                uris,
+                metadatas,
+                Operation::Upsert,
+            )
+        }
+        ConditionalBufferedWrite::Delete(DeleteCollectionRecordsRequest { ids, .. }) => {
+            let records = ids
+                .unwrap_or_default()
+                .into_iter()
+                .map(|id| OperationRecord {
+                    id,
+                    operation: Operation::Delete,
+                    document: None,
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                })
+                .collect::<Vec<_>>();
+            let log_size_bytes = records.iter().map(OperationRecord::size_bytes).sum();
+            Ok((records, log_size_bytes))
+        }
+    }
+}
+
+fn to_records<V: Into<UpdateMetadataValue>, M: IntoIterator<Item = (String, V)>>(
+    ids: Vec<String>,
+    embeddings: Option<Vec<Option<Vec<f32>>>>,
+    documents: Option<Vec<Option<String>>>,
+    uris: Option<Vec<Option<String>>>,
+    metadatas: Option<Vec<Option<M>>>,
+    operation: Operation,
+) -> Result<(Vec<OperationRecord>, u64), ConditionalCommitError> {
+    let mut total_bytes = 0;
+    let len = ids.len();
+
+    if embeddings.as_ref().is_some_and(|v| v.len() != len)
+        || documents.as_ref().is_some_and(|v| v.len() != len)
+        || uris.as_ref().is_some_and(|v| v.len() != len)
+        || metadatas.as_ref().is_some_and(|v| v.len() != len)
+    {
+        return Err(conditional_commit_invalid_argument(
+            "inconsistent number of IDs, embeddings, documents, URIs and metadatas",
+        ));
+    }
+
+    let mut embeddings_iter = embeddings.into_iter().flatten();
+    let mut documents_iter = documents.into_iter().flatten();
+    let mut uris_iter = uris.into_iter().flatten();
+    let mut metadatas_iter = metadatas.into_iter().flatten();
+    let mut records = Vec::with_capacity(len);
+
+    for id in ids {
+        if id.is_empty() {
+            return Err(conditional_commit_invalid_argument(
+                "empty ID, ID must have at least one character",
+            ));
+        }
+
+        let embedding = embeddings_iter.next().flatten();
+        let document = documents_iter.next().flatten();
+        let uri = uris_iter.next().flatten();
+        let metadata = metadatas_iter.next().flatten();
+        let encoding = embedding.as_ref().map(|_| ScalarEncoding::FLOAT32);
+
+        let mut metadata = metadata
+            .map(|m| {
+                m.into_iter()
+                    .map(|(key, value)| (key, value.into()))
+                    .collect::<UpdateMetadata>()
+            })
+            .unwrap_or_default();
+        if let Some(document) = document.clone() {
+            metadata.insert(
+                CHROMA_DOCUMENT_KEY.to_string(),
+                UpdateMetadataValue::Str(document),
+            );
+        }
+        if let Some(uri) = uri {
+            metadata.insert(CHROMA_URI_KEY.to_string(), UpdateMetadataValue::Str(uri));
+        }
+
+        let record = OperationRecord {
+            id,
+            embedding,
+            encoding,
+            metadata: Some(metadata),
+            document,
+            operation,
+        };
+        total_bytes += record.size_bytes();
+        records.push(record);
+    }
+
+    Ok((records, total_bytes))
 }
 
 #[cfg(test)]
@@ -978,6 +1271,103 @@ mod tests {
                 ]),
                 closed: false,
             }
+        );
+    }
+
+    #[test]
+    fn no_pending_writes_commit_is_successful_noop_and_closes() {
+        let mut state = ConditionalTransactionState::new();
+        record_point_read(&mut state, &["present"], &["present"]);
+
+        let action = state.prepare_commit().unwrap();
+
+        assert_eq!(
+            action,
+            ConditionalCommitAction::NoOp(ConditionalCommitResult {
+                first_inserted_record_offset: None,
+                record_count: 0,
+            })
+        );
+        assert!(state.is_closed());
+    }
+
+    #[test]
+    fn prepare_commit_carries_buffered_writes_condition_inputs_and_record_count() {
+        let mut state = ConditionalTransactionState::new();
+        record_point_read(
+            &mut state,
+            &["present", "absent-a", "absent-b"],
+            &["present"],
+        );
+        let add = add_request(&["absent-a", "absent-b"]);
+        let update = update_request(&["present"]);
+        state.buffer_add(add.clone()).unwrap();
+        state.buffer_update(update.clone()).unwrap();
+
+        let action = state.prepare_commit().unwrap();
+
+        assert_eq!(
+            action,
+            ConditionalCommitAction::Append(ConditionalCommitRequest {
+                buffered_writes: vec![
+                    ConditionalBufferedWrite::Add(add),
+                    ConditionalBufferedWrite::Update(update),
+                ],
+                observed_log_offset: Some(42),
+                read_ids: vec![
+                    "absent-a".to_string(),
+                    "absent-b".to_string(),
+                    "present".to_string(),
+                ],
+            })
+        );
+        match action {
+            ConditionalCommitAction::Append(request) => assert_eq!(request.record_count(), 3),
+            ConditionalCommitAction::NoOp(_) => panic!("pending writes should require append"),
+        }
+        assert!(!state.is_closed());
+    }
+
+    #[test]
+    fn finish_commit_returns_result_and_closes_transaction() {
+        let mut state = ConditionalTransactionState::new();
+        state
+            .buffer_upsert(upsert_request(&["first", "second"]))
+            .unwrap();
+
+        let result = state.finish_commit(Some(123)).unwrap();
+
+        assert_eq!(
+            result,
+            ConditionalCommitResult {
+                first_inserted_record_offset: Some(123),
+                record_count: 2,
+            }
+        );
+        assert!(state.is_closed());
+    }
+
+    #[test]
+    fn operations_after_successful_commit_fail_as_closed() {
+        let mut state = ConditionalTransactionState::new();
+        state.buffer_upsert(upsert_request(&["written"])).unwrap();
+        state.finish_commit(None).unwrap();
+
+        assert!(matches!(
+            state.prepare_get_request(request(Some(vec!["other"]), None, None)),
+            Err(ConditionalTransactionError::Closed)
+        ));
+        assert_eq!(
+            state.buffer_upsert(upsert_request(&["other"])),
+            Err(ConditionalTransactionError::Closed)
+        );
+        assert_eq!(
+            state.prepare_commit(),
+            Err(ConditionalTransactionError::Closed)
+        );
+        assert_eq!(
+            state.finish_commit(None),
+            Err(ConditionalTransactionError::Closed)
         );
     }
 }

@@ -10,6 +10,12 @@ use chroma_types::{
 };
 use std::fmt::Debug;
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PushLogsResult {
+    pub record_count: i32,
+    pub first_inserted_record_offset: Option<i64>,
+}
+
 #[derive(Clone, Debug)]
 pub struct CollectionRecord {
     pub collection_id: CollectionUuid,
@@ -51,6 +57,9 @@ pub enum PushLogsError {
     /// Conditional writes are not supported by this log implementation.
     #[error("conditional writes are not supported by {0} log")]
     ConditionalWritesUnsupported(&'static str),
+    /// The record count cannot be represented by the log-service API.
+    #[error("too many records in push_logs request: {0}")]
+    RecordCountOutOfRange(usize),
     /// Any other push failure.
     #[error(transparent)]
     Other(Box<dyn ChromaError>),
@@ -62,6 +71,7 @@ impl ChromaError for PushLogsError {
             PushLogsError::Backoff => ErrorCodes::ResourceExhausted,
             PushLogsError::BackoffCompaction => ErrorCodes::ResourceExhausted,
             PushLogsError::ConditionalWritesUnsupported(_) => ErrorCodes::Unimplemented,
+            PushLogsError::RecordCountOutOfRange(_) => ErrorCodes::InvalidArgument,
             PushLogsError::Other(e) => e.code(),
         }
     }
@@ -184,6 +194,30 @@ impl Log {
         cmek: Option<Cmek>,
         condition: Option<PushLogsCondition>,
     ) -> Result<(), PushLogsError> {
+        self.push_logs_with_result(
+            tenant,
+            database_name,
+            collection_id,
+            records,
+            cmek,
+            condition,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    #[tracing::instrument(skip(self, records), err(Display))]
+    pub async fn push_logs_with_result(
+        &mut self,
+        tenant: &str,
+        database_name: DatabaseName,
+        collection_id: CollectionUuid,
+        records: Vec<OperationRecord>,
+        cmek: Option<Cmek>,
+        condition: Option<PushLogsCondition>,
+    ) -> Result<PushLogsResult, PushLogsError> {
+        let record_count = i32::try_from(records.len())
+            .map_err(|_| PushLogsError::RecordCountOutOfRange(records.len()))?;
         match self {
             Log::Sqlite(log) => {
                 if condition.is_some() {
@@ -191,7 +225,11 @@ impl Log {
                 }
                 log.push_logs(collection_id, records)
                     .await
-                    .map_err(|e| PushLogsError::Other(Box::new(e)))
+                    .map_err(|e| PushLogsError::Other(Box::new(e)))?;
+                Ok(PushLogsResult {
+                    record_count,
+                    first_inserted_record_offset: None,
+                })
             }
             Log::Grpc(log) => log
                 .push_logs(database_name, collection_id, records, cmek, condition)
