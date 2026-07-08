@@ -552,13 +552,13 @@ impl Default for SnapshotOptions {
 /// The predicate runs while the batch manager holds its admission state lock.  It receives only
 /// metadata for earlier enqueued work, not the candidate append, and should not perform storage or
 /// other blocking I/O.
-pub type AdmissionPredicate = Arc<dyn Fn(&[Arc<[u8]>]) -> bool + Send + Sync + 'static>;
+pub type AdmissionPredicate = Arc<dyn Fn(&[Vec<Arc<[u8]>>]) -> bool + Send + Sync + 'static>;
 
 /// Optional controls that travel with one append request.
 #[derive(Clone)]
 pub struct AppendOptions {
     /// Opaque metadata exposed to later admission predicates.
-    pub admission_metadata: Arc<[u8]>,
+    pub admission_metadata: Vec<Arc<[u8]>>,
     /// Optional admission predicate evaluated before the append is admitted to the batch.
     pub admission_predicate: Option<AdmissionPredicate>,
     /// Optional requirement for the fragment start position selected for this append.
@@ -568,12 +568,17 @@ pub struct AppendOptions {
 impl AppendOptions {
     /// Create append options with admission metadata and no predicate or fragment-start
     /// requirement.
-    pub fn new(admission_metadata: impl Into<Arc<[u8]>>) -> Self {
+    pub fn new(admission_metadata: Vec<Arc<[u8]>>) -> Self {
         Self {
-            admission_metadata: admission_metadata.into(),
+            admission_metadata,
             admission_predicate: None,
             required_fragment_start: None,
         }
+    }
+
+    /// Create append options with a single admission metadata item.
+    pub fn from_single_admission_metadata(admission_metadata: impl Into<Arc<[u8]>>) -> Self {
+        Self::new(vec![admission_metadata.into()])
     }
 
     /// Attach an admission predicate.
@@ -591,14 +596,14 @@ impl AppendOptions {
 
 impl Default for AppendOptions {
     fn default() -> Self {
-        Self::new(Arc::<[u8]>::from([]))
+        Self::new(Vec::new())
     }
 }
 
 impl std::fmt::Debug for AppendOptions {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fmt.debug_struct("AppendOptions")
-            .field("admission_metadata_len", &self.admission_metadata.len())
+            .field("admission_metadata_count", &self.admission_metadata.len())
             .field(
                 "has_admission_predicate",
                 &self.admission_predicate.is_some(),
