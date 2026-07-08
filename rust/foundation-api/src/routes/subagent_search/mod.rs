@@ -25,7 +25,9 @@
 //! database/collection come from foundation config.
 
 mod events;
+use crate::routes::links::page_url;
 use crate::routes::{caller_token, to_sse_event, whoami::whoami_and_authorize};
+use crate::wiki::chunking::ChunkRecordId;
 use crate::{auth::AuthzAction, errors::ServerError, server::FoundationApiServer};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::{extract::State, http::HeaderMap, Json};
@@ -352,18 +354,43 @@ pub(crate) async fn subagent_search_text(
     url: String,
     creds: SubagentSearchCreds,
     query: String,
+    ui_origin: Option<&str>,
 ) -> Result<String, SubagentResultError> {
+    let tenant = creds.chroma_tenant.clone();
     let documents = collect_subagent_search_final(http, url, creds, query).await?;
-    Ok(format_ranked_documents(&documents))
+    Ok(format_ranked_documents(&documents, ui_origin, &tenant))
 }
 
-/// Renders ranked documents (most-relevant first) into a numbered text block of
-/// `id` + justification lines for the model to read.
-fn format_ranked_documents(documents: &[events::RankedDocument]) -> String {
+/// Renders ranked documents (most-relevant first) into a numbered text block
+/// for the model to read. Each entry carries the record `id`, the page `slug=`
+/// it resolves to, and a `url=` page link when a UI origin is configured —
+/// matching the `search` tool's output so the agent cites results from both
+/// tools the same way. A document whose id is not a chunk id gets neither
+/// slug nor url.
+fn format_ranked_documents(
+    documents: &[events::RankedDocument],
+    ui_origin: Option<&str>,
+    tenant: &str,
+) -> String {
     documents
         .iter()
         .enumerate()
-        .map(|(i, doc)| format!("{}. {}\n   {}", i + 1, doc.id, doc.justification))
+        .map(|(i, doc)| {
+            let slug = ChunkRecordId::slug_from_id(&doc.id);
+            let url = slug
+                .and_then(|slug| page_url(ui_origin, tenant, slug))
+                .map(|url| format!(" url={url}"))
+                .unwrap_or_default();
+            let slug = slug.map(|slug| format!(" slug={slug}")).unwrap_or_default();
+            format!(
+                "{}. {}{}{}\n   {}",
+                i + 1,
+                doc.id,
+                slug,
+                url,
+                doc.justification
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }

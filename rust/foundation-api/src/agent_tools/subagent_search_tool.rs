@@ -21,16 +21,28 @@ pub(crate) struct SubagentSearchToolParams {
     pub query: String,
 }
 
-/// A deep-research tool bound to one request's endpoint and Chroma creds.
+/// A deep-research tool bound to one request's endpoint, Chroma creds, and UI
+/// origin (used to stamp page links on ranked documents).
 pub(crate) struct SubagentSearchTool {
     http: reqwest::Client,
     url: String,
     creds: SubagentSearchCreds,
+    ui_origin: Option<String>,
 }
 
 impl SubagentSearchTool {
-    pub(crate) fn new(http: reqwest::Client, url: String, creds: SubagentSearchCreds) -> Self {
-        Self { http, url, creds }
+    pub(crate) fn new(
+        http: reqwest::Client,
+        url: String,
+        creds: SubagentSearchCreds,
+        ui_origin: Option<String>,
+    ) -> Self {
+        Self {
+            http,
+            url,
+            creds,
+            ui_origin,
+        }
     }
 }
 
@@ -60,6 +72,7 @@ impl Tool for SubagentSearchTool {
             self.url.clone(),
             self.creds.clone(),
             params.query,
+            self.ui_origin.as_deref(),
         )
         .await
         .map_err(|err| AgentError::Tool(err.to_string()))?;
