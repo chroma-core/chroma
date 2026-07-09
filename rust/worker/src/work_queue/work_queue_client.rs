@@ -70,7 +70,7 @@ impl WorkQueueClient {
         fn_id: String,
         input_coll_id: String,
         completion_offset: i64,
-        compaction_offset: Option<i64>,
+        compaction_offset: i64,
     ) -> Result<(), Box<dyn ChromaError>> {
         let request = Request::new(PushWorkRequest {
             fn_id,

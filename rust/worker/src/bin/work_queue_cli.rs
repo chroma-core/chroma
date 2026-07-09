@@ -31,7 +31,7 @@ enum Commands {
 
         /// Compaction offset
         #[arg(long)]
-        compaction_offset: Option<i64>,
+        compaction_offset: i64,
     },
 
     /// Get work from the queue

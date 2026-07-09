@@ -8,7 +8,7 @@ pub struct WorkQueueRecord {
     pub fn_id: AttachedFunctionUuid,
     pub input_coll_id: CollectionUuid,
     pub completion_offset: i64,
-    pub compaction_offset: Option<i64>,
+    pub compaction_offset: i64,
     pub insertion_order: u64,
 }
 
