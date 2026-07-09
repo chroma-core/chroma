@@ -756,8 +756,8 @@ def filtered_fixture_names() -> List[str]:
         "fastapi",
         "async_fastapi",
         "fastapi_persistent",
-        "sqlite",
-        "sqlite_persistent",
+        "python_sqlite_ephemeral",
+        "python_sqlite_persistent",
     ]
 
     if "CHROMA_INTEGRATION_TEST" in os.environ:
