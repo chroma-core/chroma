@@ -1046,13 +1046,30 @@ class SegmentAPI(ServerAPI):
     def _validate_embedding_record_set(
         self, collection: t.Collection, records: List[t.OperationRecord]
     ) -> None:
-        """Validate the dimension of an embedding record before submitting it to the system."""
+        """Validate the dimension and numeric integrity of an embedding record
+        before submitting it to the system."""
         add_attributes_to_current_span({"collection_id": str(collection["id"])})
         for record in records:
             if record["embedding"] is not None:
                 self._validate_dimension(
                     collection, len(record["embedding"]), update=True
                 )
+                # Validate numeric integrity: reject NaN and Inf values that
+                # corrupt distance calculations and search results.
+                embedding = record["embedding"]
+                for value in embedding:
+                    if value != value:  # NaN check (faster than math.isnan)
+                        raise ValueError(
+                            "Embedding contains NaN values. NaN corrupts distance "
+                            "calculations and search results. Ensure the embedding "
+                            "model returns finite values."
+                        )
+                    if value == float("inf") or value == float("-inf"):
+                        raise ValueError(
+                            "Embedding contains Inf values. Inf corrupts distance "
+                            "calculations and search results. Ensure the embedding "
+                            "model returns finite values."
+                        )
 
     # This method is intentionally left untraced because otherwise it can emit thousands of spans for requests containing many embeddings.
     def _validate_dimension(
