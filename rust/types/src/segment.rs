@@ -326,7 +326,7 @@ impl Segment {
     /// only one shard's files while preserving others.
     pub fn clear_shard_file_paths(&mut self, shard_index: u32) {
         let shard_idx = shard_index as usize;
-        for (_, paths) in self.file_path.iter_mut() {
+        for paths in self.file_path.values_mut() {
             if paths.len() > shard_idx {
                 paths[shard_idx].clear();
             }

@@ -3079,7 +3079,7 @@ mod tests {
             .add(1, &[0.0, 0.0])
             .await
             .expect("Error adding to spann index writer");
-        println!("Inserted {:?}", &[0.0, 0.0]);
+        println!("Inserted {:?}", [0.0, 0.0]);
         // Insert 100 points. There should be no splitting yet.
         // Generate these points within a radius of 1 from origin.
         let mut rng = rand::thread_rng();
