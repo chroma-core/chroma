@@ -127,6 +127,7 @@ impl QueueState {
             .map_err(|e| WorkQueueError::Serialization(e.to_string()))?;
 
         let mut state = QueueState::new();
+        let mut hydrated_legacy_rows = 0usize;
 
         for batch_result in reader {
             let batch = batch_result.map_err(|e| WorkQueueError::Serialization(e.to_string()))?;
@@ -216,17 +217,25 @@ impl QueueState {
                 })?;
 
                 let completion_offset = offsets.map(|offsets| offsets.value(i));
-                let compaction_offset = match compaction_offsets {
-                    Some(compaction_offsets) if compaction_offsets.is_valid(i) => {
-                        compaction_offsets.value(i)
-                    }
-                    _ => completion_offset.ok_or_else(|| {
-                        WorkQueueError::Serialization(
-                            "Legacy row is missing both completion_offset and compaction_offset"
-                                .to_string(),
-                        )
-                    })?,
-                };
+                let (compaction_offset, hydrated_from_legacy_completion_offset) =
+                    match compaction_offsets {
+                        Some(compaction_offsets) if compaction_offsets.is_valid(i) => {
+                            (compaction_offsets.value(i), false)
+                        }
+                        _ => (
+                            completion_offset.ok_or_else(|| {
+                                WorkQueueError::Serialization(
+                                    "Legacy row is missing both completion_offset and compaction_offset"
+                                        .to_string(),
+                                )
+                            })?,
+                            true,
+                        ),
+                    };
+
+                if hydrated_from_legacy_completion_offset {
+                    hydrated_legacy_rows += 1;
+                }
 
                 let record = WorkQueueRecord {
                     fn_id,
@@ -265,6 +274,18 @@ impl QueueState {
             .back()
             .map(|r| r.insertion_order + 1)
             .unwrap_or(0);
+
+        if hydrated_legacy_rows > 0 {
+            tracing::info!(
+                "Successfully hydrated missing compaction_offset for {} legacy work queue entr{}",
+                hydrated_legacy_rows,
+                if hydrated_legacy_rows == 1 {
+                    "y"
+                } else {
+                    "ies"
+                }
+            );
+        }
 
         Ok(state)
     }
