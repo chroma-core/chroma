@@ -48,7 +48,7 @@ pub struct FunctionExecutionContext {
 }
 
 fn has_reached_queue_frontier(completion_offset: i64, queue_compaction_offset: i64) -> bool {
-    queue_compaction_offset > 0 && completion_offset >= queue_compaction_offset
+    completion_offset >= queue_compaction_offset
 }
 
 impl FunctionExecutionContext {
@@ -67,12 +67,12 @@ impl FunctionExecutionContext {
         attached_function_id: AttachedFunctionUuid,
     ) -> Result<LogFetchOrchestratorResponse, CompactionError> {
         Ok(log_fetch_context
-            .run_get_logs_for_attached_function(
+            .run_get_logs(
                 collection_id,
                 database_name.clone(),
                 system.clone(),
                 use_compacted_logs,
-                attached_function_id,
+                Some(attached_function_id),
             )
             .await?)
     }
@@ -289,7 +289,7 @@ impl FunctionExecutionContext {
 
 #[cfg(test)]
 mod tests {
-    use super::FunctionExecutionContext;
+    use super::{has_reached_queue_frontier, FunctionExecutionContext};
     use crate::execution::{
         operators::fetch_log::FetchLogError,
         orchestration::{
@@ -308,6 +308,11 @@ mod tests {
         assert!(FunctionExecutionContext::should_backfill_on_fetch_error(
             &err
         ));
+    }
+
+    #[test]
+    fn zero_queue_frontier_treats_equality_as_complete() {
+        assert!(has_reached_queue_frontier(0, 0));
     }
 
     #[test]

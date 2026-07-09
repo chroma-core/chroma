@@ -516,41 +516,6 @@ impl CompactionContext {
         database_name: chroma_types::DatabaseName,
         system: System,
         is_getting_compacted_logs: bool,
-    ) -> Result<LogFetchOrchestratorResponse, LogFetchOrchestratorError> {
-        self.run_get_logs_inner(
-            collection_id,
-            database_name,
-            system,
-            is_getting_compacted_logs,
-            None,
-        )
-        .await
-    }
-
-    pub(crate) async fn run_get_logs_for_attached_function(
-        &mut self,
-        collection_id: CollectionUuid,
-        database_name: chroma_types::DatabaseName,
-        system: System,
-        is_getting_compacted_logs: bool,
-        attached_function_id: chroma_types::AttachedFunctionUuid,
-    ) -> Result<LogFetchOrchestratorResponse, LogFetchOrchestratorError> {
-        self.run_get_logs_inner(
-            collection_id,
-            database_name,
-            system,
-            is_getting_compacted_logs,
-            Some(attached_function_id),
-        )
-        .await
-    }
-
-    async fn run_get_logs_inner(
-        &mut self,
-        collection_id: CollectionUuid,
-        database_name: chroma_types::DatabaseName,
-        system: System,
-        is_getting_compacted_logs: bool,
         attached_function_id_filter: Option<chroma_types::AttachedFunctionUuid>,
     ) -> Result<LogFetchOrchestratorResponse, LogFetchOrchestratorError> {
         // TODO(tanujnay112): This is awful, we need to find a better way to pass
@@ -844,6 +809,7 @@ impl CompactionContext {
                 database_name,
                 system.clone(),
                 true,
+                None,
             )
             .await?
         {
@@ -980,7 +946,13 @@ impl CompactionContext {
         system: System,
     ) -> Result<CompactionResponse, CompactionError> {
         let result = self
-            .run_get_logs(collection_id, database_name.clone(), system.clone(), false)
+            .run_get_logs(
+                collection_id,
+                database_name.clone(),
+                system.clone(),
+                false,
+                None,
+            )
             .await?;
 
         let (log_fetch_records, collection_info) = match result {
@@ -3640,6 +3612,7 @@ mod tests {
                     .expect("database name should be valid"),
                 system.clone(),
                 false,
+                None,
             )
             .await;
 
@@ -5182,7 +5155,13 @@ mod tests {
         );
 
         let fetch_response = fn_consumer_context
-            .run_get_logs(collection_id, database_name.clone(), system.clone(), false)
+            .run_get_logs(
+                collection_id,
+                database_name.clone(),
+                system.clone(),
+                false,
+                None,
+            )
             .await
             .expect("fn-consumer log fetch should succeed");
 
@@ -5244,7 +5223,13 @@ mod tests {
         );
 
         let second_fetch_response = second_window_context
-            .run_get_logs(collection_id, database_name.clone(), system.clone(), false)
+            .run_get_logs(
+                collection_id,
+                database_name.clone(),
+                system.clone(),
+                false,
+                None,
+            )
             .await
             .expect("second fn-consumer log fetch should succeed");
 
