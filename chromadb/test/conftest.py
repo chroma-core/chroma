@@ -387,19 +387,22 @@ def _fastapi_fixture(
         yield from run(args)
 
 
+@pytest.fixture()
 def fastapi() -> Generator[System, None, None]:
-    return _fastapi_fixture(is_persistent=False)
+    yield from _fastapi_fixture(is_persistent=False)
 
 
+@pytest.fixture()
 def async_fastapi() -> Generator[System, None, None]:
-    return _fastapi_fixture(
+    yield from _fastapi_fixture(
         is_persistent=False,
         chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPI",
     )
 
 
+@pytest.fixture()
 def fastapi_persistent() -> Generator[System, None, None]:
-    return _fastapi_fixture(is_persistent=True)
+    yield from _fastapi_fixture(is_persistent=True)
 
 
 def fastapi_ssl() -> Generator[System, None, None]:
@@ -753,7 +756,7 @@ def filtered_fixture_names() -> List[str]:
         "fastapi",
         "async_fastapi",
         "fastapi_persistent",
-        "sqlite_fixture",
+        "sqlite",
         "sqlite_persistent",
     ]
 
@@ -777,6 +780,8 @@ def filtered_http_server_fixture_names() -> List[str]:
         not in [
             "python_sqlite_ephemeral",
             "python_sqlite_persistent",
+            "sqlite",
+            "sqlite_persistent",
             "rust_sqlite_ephemeral",
             "rust_sqlite_persistent",
         ]
