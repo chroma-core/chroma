@@ -715,7 +715,7 @@ impl CompactionContext {
     ) -> Result<Vec<AttachedFunctionUuid>, CompactionError> {
         let collection_info = self.get_collection_info()?;
         let collection_id = collection_info.collection_id;
-        let log_position = collection_info.collection.log_position;
+        let compaction_offset = collection_info.collection.log_position;
 
         // Create the operator and wrap it as a task
         let operator = Box::new(GetAttachedFunctionOperator::new(
@@ -757,22 +757,26 @@ impl CompactionContext {
             .into_inner()
             .map_err(|_| CompactionError::InvariantViolation("GetAttachedFunction task failed"))?;
 
-        let log_position_u64 = log_position.max(0) as u64;
+        let compaction_offset_u64 = compaction_offset.max(0) as u64;
         let mut stale_function_ids = Vec::new();
 
         for function in &output.attached_functions {
-            if log_position_u64 < function.completion_offset {
+            if compaction_offset_u64 < function.completion_offset {
                 return Err(CompactionError::InvariantViolation(
                     "Log position is less than completion offset",
                 ));
             }
 
-            if function.completion_offset < log_position_u64 {
+            if Self::needs_sync_function_backfill(function.completion_offset, compaction_offset) {
                 stale_function_ids.push(function.id);
             }
         }
 
         Ok(stale_function_ids)
+    }
+
+    fn needs_sync_function_backfill(completion_offset: u64, compaction_offset: i64) -> bool {
+        completion_offset < compaction_offset.max(0) as u64
     }
 
     async fn run_backfill_attached_function_workflow(
@@ -5236,5 +5240,15 @@ mod tests {
         // Clean up - delete the collections
         // Note: We don't have segment IDs easily available here, so we can't delete
         // the collections. In a real test cleanup, you'd want to track the segment IDs.
+    }
+
+    #[test]
+    fn sync_backfill_only_runs_when_completion_is_before_compaction_offset() {
+        assert!(!CompactionContext::needs_sync_function_backfill(0, -1));
+        assert!(!CompactionContext::needs_sync_function_backfill(0, 0));
+        assert!(CompactionContext::needs_sync_function_backfill(0, 1));
+        assert!(CompactionContext::needs_sync_function_backfill(29, 30));
+        assert!(!CompactionContext::needs_sync_function_backfill(30, 30));
+        assert!(!CompactionContext::needs_sync_function_backfill(31, 30));
     }
 }

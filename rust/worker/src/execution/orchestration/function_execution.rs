@@ -123,29 +123,10 @@ impl FunctionExecutionContext {
             LogFetchOrchestratorResponse::Success(success) => {
                 (success.materialized, success.collection_info)
             }
-            LogFetchOrchestratorResponse::RequireFunctionBackfill(_) => {
-                // This branch is reached when we read an explicit BackfillFn record
-                // from the logs. The purged-log retry above is a separate trigger,
-                // but both cases backfill by replaying from compacted logs here.
-                match Self::fetch_function_input_logs(
-                    log_fetch_context,
-                    collection_id,
-                    database_name,
-                    system,
-                    true,
-                )
-                .await?
-                {
-                    LogFetchOrchestratorResponse::Success(success) => {
-                        (success.materialized, success.collection_info)
-                    }
-                    LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(_)
-                    | LogFetchOrchestratorResponse::RequireFunctionBackfill(_) => {
-                        return Err(CompactionError::InvariantViolation(
-                            "Function execution backfill fetch should only return success",
-                        ));
-                    }
-                }
+            LogFetchOrchestratorResponse::RequireFunctionBackfill(backfill) => {
+                // BackfillFn forces compaction and schedules async work. Fn-consumers
+                // only backfill when their incremental log offset has been purged.
+                (backfill.materialized, backfill.collection_info)
             }
             LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(_) => {
                 return Err(CompactionError::InvariantViolation(
