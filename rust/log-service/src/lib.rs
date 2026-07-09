@@ -78,6 +78,9 @@ pub mod state_hash_table;
 
 use crate::state_hash_table::StateHashTable;
 
+const PULL_LOGS_REASON_MD_KEY: &str = "pull-logs-reason";
+const PULL_LOGS_REASON_PURGED: &str = "purged";
+
 ///////////////////////////////////////////// helpers //////////////////////////////////////////////
 
 /// The gRPC metadata key for the backoff reason.
@@ -2763,7 +2766,14 @@ impl LogServer {
                 })?,
         };
         if !fragments.is_empty() && fragments[0].start.offset() > req.start_from_offset {
-            return Err(Status::not_found("Some entries have been purged"));
+            let mut status = Status::not_found("Some entries have been purged");
+            status.metadata_mut().insert(
+                PULL_LOGS_REASON_MD_KEY,
+                PULL_LOGS_REASON_PURGED
+                    .parse()
+                    .expect("valid metadata value"),
+            );
+            return Err(status);
         }
         let storage_prefix = collection_id.storage_prefix_for_log();
         let absolute_offsets = topology_name.is_none();
@@ -3126,7 +3136,14 @@ impl LogServer {
         if records.len() != pull_logs.batch_size as usize
             || (!records.is_empty() && records[0].log_offset != pull_logs.start_from_offset)
         {
-            return Err(Status::not_found("Some entries have been purged"));
+            let mut status = Status::not_found("Some entries have been purged");
+            status.metadata_mut().insert(
+                PULL_LOGS_REASON_MD_KEY,
+                PULL_LOGS_REASON_PURGED
+                    .parse()
+                    .expect("valid metadata value"),
+            );
+            return Err(status);
         }
         Ok(Response::new(PullLogsResponse { records }))
     }
