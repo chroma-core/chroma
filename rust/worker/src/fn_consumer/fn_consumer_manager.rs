@@ -268,11 +268,16 @@ impl FnConsumerManager {
                 );
                 continue;
             };
-            work_items.push((
-                fn_id,
-                input_coll_id,
-                item.compaction_offset.unwrap_or(item.completion_offset),
-            ));
+            let Some(compaction_offset) = item.compaction_offset else {
+                tracing::error!(
+                    fn_id = %fn_id,
+                    input_coll_id = %input_coll_id,
+                    completion_offset = item.completion_offset,
+                    "skipping work item: missing required compaction_offset"
+                );
+                continue;
+            };
+            work_items.push((fn_id, input_coll_id, compaction_offset));
         }
 
         let mut grouped_work_items: HashMap<AttachedFunctionUuid, Vec<FunctionExecutionInput>> =
