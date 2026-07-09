@@ -1,4 +1,19 @@
 //! Conditional transaction support for collection-scoped optimistic writes.
+//!
+//! Conditional transactions provide optimistic read-check-write behavior for a
+//! single collection. Reads execute immediately and writes are buffered until an
+//! explicit commit or an implicit [`run`](ConditionalCollectionTransaction::run)
+//! commit succeeds.
+//!
+//! # Current limitations
+//!
+//! - Transactions are scoped to one collection.
+//! - Nested transaction guarantees are not provided.
+//! - Query operations are not supported inside transactions.
+//! - Predicate deletes are not supported; deletes must name explicit IDs.
+//! - Reading an ID after buffering a write for that ID is an explicit error.
+//! - Each transaction can buffer at most one write for a given ID.
+//! - Filter reads protect only the IDs returned by the filter read.
 
 use std::ops::AsyncFn;
 
@@ -21,6 +36,10 @@ use crate::{client::ChromaHttpClientError, ChromaCollection, IntoOptionalEmbeddi
 /// capture a stable read token. Writes are buffered locally and sent only when
 /// [`commit`](Self::commit) is awaited. Dropping this value does not commit;
 /// any uncommitted buffered writes are discarded with the transaction.
+///
+/// Reading an ID after buffering a write for that ID is an explicit error.
+/// Queries and predicate deletes are not supported, and only one write can be
+/// buffered per ID.
 pub struct ConditionalCollectionTransaction {
     collection: ChromaCollection,
     state: ConditionalTransactionState,

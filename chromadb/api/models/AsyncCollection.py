@@ -37,6 +37,17 @@ from chromadb.api.models.AsyncConditionalCollectionTransaction import (
 
 class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
     async def conditional(self) -> "AsyncConditionalCollectionTransaction":
+        """Start a collection-scoped conditional transaction.
+
+        Conditional transactions read from a stable snapshot, buffer writes
+        locally, and commit them with optimistic conflict detection.
+
+        Current limitations: transactions cannot span collections, nested
+        transaction guarantees are not provided, ``txn.query(...)`` and
+        predicate deletes are not supported, reading an ID after buffering a
+        write for that ID is an explicit transaction error, only one write per
+        ID can be buffered, and filter reads protect only returned IDs.
+        """
         transaction = await self._client._begin_conditional_transaction()
         return AsyncConditionalCollectionTransaction(self, transaction)
 
