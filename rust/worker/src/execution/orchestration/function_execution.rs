@@ -124,6 +124,9 @@ impl FunctionExecutionContext {
                 (success.materialized, success.collection_info)
             }
             LogFetchOrchestratorResponse::RequireFunctionBackfill(_) => {
+                // This branch is reached when we read an explicit BackfillFn record
+                // from the logs. The purged-log retry above is a separate trigger,
+                // but both cases backfill by replaying from compacted logs here.
                 match Self::fetch_function_input_logs(
                     log_fetch_context,
                     collection_id,
