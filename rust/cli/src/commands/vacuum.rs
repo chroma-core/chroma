@@ -236,7 +236,7 @@ pub fn vacuum(args: VacuumArgs) -> Result<(), CliError> {
         return Err(VacuumError::PathDoesNotExist(persistent_path).into());
     }
 
-    let sqlite_url = format!("{}/{}", &persistent_path, &config.sqlite_filename);
+    let sqlite_url = format!("{}/{}", persistent_path, config.sqlite_filename);
 
     if !Path::new(sqlite_url.as_str()).exists() {
         return Err(VacuumError::NotAChromaPath(sqlite_url).into());

@@ -3687,7 +3687,7 @@ mod test {
             tenant, database_id, record_segment.collection, record_segment.id,
         );
         assert_eq!(record_segment.file_path.len(), 4);
-        for (_, file_path) in record_segment.file_path.iter() {
+        for file_path in record_segment.file_path.values() {
             assert_eq!(file_path.len(), 1);
             assert!(file_path
                 .first()
@@ -3701,7 +3701,7 @@ mod test {
         // Without a schema, no sparse index is created (5 = FTS + 4 metadata
         // type indexes). Sparse index files only appear for schema-enabled keys.
         assert_eq!(metadata_segment.file_path.len(), 5);
-        for (_, file_path) in metadata_segment.file_path.iter() {
+        for file_path in metadata_segment.file_path.values() {
             assert_eq!(file_path.len(), 1);
             assert!(file_path
                 .first()
