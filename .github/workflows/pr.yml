@@ -19,7 +19,7 @@ jobs:
     name: Detect changes and determine tests
     runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
-      helm-changes: ${{ steps.filter.outputs.helm-changes }}
+      helm-changes: ${{ steps.helm_relevant_changes.outputs['helm-changes'] }}
       # Test flags as a JSON array
       tests-to-run: ${{ steps.determine-tests.outputs.tests-to-run }}
       # Helm version check
@@ -38,6 +38,9 @@ jobs:
             # Helm chart changes
             helm-changes:
               - 'k8s/distributed-chroma/**'
+            # Dev values files do not require a published chart version bump.
+            helm-dev-values:
+              - 'k8s/distributed-chroma/values*.dev.*'
             # JavaScript client changes
             js-client:
               - 'clients/js/**'
@@ -94,6 +97,19 @@ jobs:
               # which is the Helm chart and has its own filter.
               - 'k8s/test/**'
 
+      - name: Exclude Helm dev values-only changes
+        id: helm_relevant_changes
+        shell: bash
+        env:
+          HELM_CHANGE_COUNT: ${{ steps.filter.outputs['helm-changes_count'] }}
+          HELM_DEV_VALUE_COUNT: ${{ steps.filter.outputs['helm-dev-values_count'] }}
+        run: |
+          if (( HELM_CHANGE_COUNT > HELM_DEV_VALUE_COUNT )); then
+            echo "helm-changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "helm-changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Determine tests to run
         id: determine-tests
         env:
@@ -106,7 +122,7 @@ jobs:
 
       - name: Check Helm version change
         id: helm-version
-        if: steps.filter.outputs.helm-changes == 'true'
+        if: steps.helm_relevant_changes.outputs['helm-changes'] == 'true'
         shell: bash
         run: |
           current=$(git show HEAD:$file | yq ".version")
