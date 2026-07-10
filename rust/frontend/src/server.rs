@@ -3027,7 +3027,7 @@ async fn collection_conditional_get(
     server.metrics.collection_conditional_get.add(1, &[]);
     server
         .frontend
-        .ensure_conditional_transactions_supported()?;
+        .ensure_conditional_transactions_supported_for_tenant(&tenant)?;
     let (database_name, collection_id) = parse_collection_scope(&database, &collection_id)?;
     let requester_identity = server
         .authenticate_and_authorize_collection(
@@ -3167,7 +3167,9 @@ async fn collection_conditional_commit(
     Json(payload): Json<ConditionalCommitPayload>,
 ) -> Result<Json<ConditionalCommitResult>, ServerError> {
     server.metrics.collection_conditional_commit.add(1, &[]);
-    server.frontend.ensure_conditional_commit_supported()?;
+    server
+        .frontend
+        .ensure_conditional_commit_supported_for_tenant(&tenant)?;
     let (database_name, collection_id) = parse_collection_scope(&database, &collection_id)?;
     let mut authz_actions = BTreeSet::new();
     for operation in &payload.operations {

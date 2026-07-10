@@ -63,7 +63,10 @@ fn error_name(err: &(dyn ChromaError + 'static)) -> &'static str {
             )
         ) || matches!(
             source.downcast_ref::<ConditionalTransactionError>(),
-            Some(ConditionalTransactionError::TransactionsDisabled)
+            Some(
+                ConditionalTransactionError::UnsupportedLogImplementation { .. }
+                    | ConditionalTransactionError::TransactionsDisabled
+            )
         )
     }) {
         return TRANSACTIONS_NOT_SUPPORTED_ERROR_NAME;

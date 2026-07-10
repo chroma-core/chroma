@@ -145,15 +145,36 @@ pub struct ServiceBasedFrontend {
     tenants_with_quantization_enabled: Vec<String>,
     tenants_with_maxscore_enabled: Vec<String>,
     tenants_with_token_bitmap_fts_enabled: Vec<String>,
+    tenants_with_transactions_enabled: Vec<String>,
     enable_log_scouting: bool,
     enable_transactions: bool,
 }
 
 impl ServiceBasedFrontend {
+    fn tenant_list_contains(tenants: &[String], tenant_id: &str) -> bool {
+        tenants.iter().any(|t| t == "*" || t == tenant_id)
+    }
+
     pub fn ensure_conditional_transactions_supported(
         &self,
     ) -> Result<(), ConditionalTransactionError> {
-        if !self.enable_transactions {
+        if !self.enable_transactions && self.tenants_with_transactions_enabled.is_empty() {
+            return Err(ConditionalTransactionError::TransactionsDisabled);
+        }
+        if self.log_client.supports_conditional_transactions() {
+            return Ok(());
+        }
+
+        Err(ConditionalTransactionError::UnsupportedLogImplementation {
+            implementation: self.log_client.implementation_name().to_string(),
+        })
+    }
+
+    pub fn ensure_conditional_transactions_supported_for_tenant(
+        &self,
+        tenant_id: &str,
+    ) -> Result<(), ConditionalTransactionError> {
+        if !self.should_enable_transactions_for_tenant(tenant_id) {
             return Err(ConditionalTransactionError::TransactionsDisabled);
         }
         if self.log_client.supports_conditional_transactions() {
@@ -166,7 +187,23 @@ impl ServiceBasedFrontend {
     }
 
     pub fn ensure_conditional_commit_supported(&self) -> Result<(), ConditionalCommitError> {
-        if !self.enable_transactions {
+        if !self.enable_transactions && self.tenants_with_transactions_enabled.is_empty() {
+            return Err(ConditionalCommitError::TransactionsDisabled);
+        }
+        if self.log_client.supports_conditional_transactions() {
+            return Ok(());
+        }
+
+        Err(ConditionalCommitError::TransactionsNotSupported {
+            implementation: self.log_client.implementation_name().to_string(),
+        })
+    }
+
+    pub fn ensure_conditional_commit_supported_for_tenant(
+        &self,
+        tenant_id: &str,
+    ) -> Result<(), ConditionalCommitError> {
+        if !self.should_enable_transactions_for_tenant(tenant_id) {
             return Err(ConditionalCommitError::TransactionsDisabled);
         }
         if self.log_client.supports_conditional_transactions() {
@@ -192,6 +229,7 @@ impl ServiceBasedFrontend {
         tenants_with_quantization_enabled: Vec<String>,
         tenants_with_maxscore_enabled: Vec<String>,
         tenants_with_token_bitmap_fts_enabled: Vec<String>,
+        tenants_with_transactions_enabled: Vec<String>,
         enable_log_scouting: bool,
         enable_transactions: bool,
     ) -> Self {
@@ -243,6 +281,7 @@ impl ServiceBasedFrontend {
             tenants_with_quantization_enabled,
             tenants_with_maxscore_enabled,
             tenants_with_token_bitmap_fts_enabled,
+            tenants_with_transactions_enabled,
             enable_log_scouting,
             enable_transactions,
         }
@@ -1011,24 +1050,24 @@ impl ServiceBasedFrontend {
     /// - The list contains "*" (all tenants), OR
     /// - The tenant_id is in the list
     fn should_enable_quantization_for_tenant(&self, tenant_id: &str) -> bool {
-        self.tenants_with_quantization_enabled
-            .iter()
-            .any(|t| t == "*" || t == tenant_id)
+        Self::tenant_list_contains(&self.tenants_with_quantization_enabled, tenant_id)
     }
 
     /// Check if MaxScore sparse index should be enabled for the given tenant.
     /// Returns true if the list contains "*" (all tenants) or the exact tenant_id.
     fn should_enable_maxscore_for_tenant(&self, tenant_id: &str) -> bool {
-        self.tenants_with_maxscore_enabled
-            .iter()
-            .any(|t| t == "*" || t == tenant_id)
+        Self::tenant_list_contains(&self.tenants_with_maxscore_enabled, tenant_id)
     }
 
     /// Check if TokenBitmap FTS index should be enabled for the given tenant.
     fn should_enable_token_bitmap_fts_for_tenant(&self, tenant_id: &str) -> bool {
-        self.tenants_with_token_bitmap_fts_enabled
-            .iter()
-            .any(|t| t == "*" || t == tenant_id)
+        Self::tenant_list_contains(&self.tenants_with_token_bitmap_fts_enabled, tenant_id)
+    }
+
+    /// Check if conditional transactions should be enabled for the given tenant.
+    fn should_enable_transactions_for_tenant(&self, tenant_id: &str) -> bool {
+        self.enable_transactions
+            || Self::tenant_list_contains(&self.tenants_with_transactions_enabled, tenant_id)
     }
 
     pub fn get_default_knn_index(&self) -> KnnIndex {
@@ -1897,13 +1936,15 @@ impl ServiceBasedFrontend {
         request: ConditionalCommitRequest,
         region: String,
     ) -> Result<ConditionalCommitResult, ConditionalCommitError> {
-        self.ensure_conditional_commit_supported()?;
         if request.buffered_writes.is_empty() {
+            self.ensure_conditional_commit_supported()?;
             return Ok(ConditionalCommitResult {
                 first_inserted_record_offset: None,
                 record_count: 0,
             });
         }
+        let (tenant_id, _, _) = validate_conditional_commit_scope(&request)?;
+        self.ensure_conditional_commit_supported_for_tenant(&tenant_id)?;
         let record_count = request.record_count();
         let first_inserted_record_offset = self.conditional_commit_append(request, &region).await?;
         Ok(ConditionalCommitResult {
@@ -3346,6 +3387,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             config.tenants_with_quantization_enabled.clone(),
             config.tenants_with_maxscore_enabled.clone(),
             config.tenants_with_token_bitmap_fts_enabled.clone(),
+            config.tenants_with_transactions_enabled.clone(),
             config.enable_log_scouting,
             config.enable_transactions,
         ))
@@ -3363,6 +3405,26 @@ mod tests {
     use chroma_types::CreateCollectionPayload;
 
     use super::*;
+
+    fn conditional_commit_request_for_tenant(tenant_id: &str) -> ConditionalCommitRequest {
+        let add = AddCollectionRecordsRequest::try_new(
+            tenant_id.to_string(),
+            "database".to_string(),
+            CollectionUuid::default(),
+            vec!["id".to_string()],
+            vec![vec![1.0]],
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        ConditionalCommitRequest {
+            buffered_writes: vec![ConditionalBufferedWrite::Add(add)],
+            observed_log_offset: None,
+            read_ids: Vec::new(),
+        }
+    }
 
     #[test]
     fn conditional_commit_record_conversion_preserves_order_and_delete_shape() {
@@ -3502,6 +3564,54 @@ mod tests {
                     observed_log_offset: None,
                     read_ids: Vec::new(),
                 },
+                String::new(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            ConditionalCommitError::TransactionsNotSupported { ref implementation }
+                if implementation == "sqlite"
+        ));
+        assert_eq!(ErrorCodes::Unimplemented, err.code());
+    }
+
+    #[tokio::test]
+    async fn conditional_commit_non_allowlisted_tenant_returns_transactions_disabled() {
+        let registry = Registry::new();
+        let system = System::new();
+        let mut config = FrontendConfig::sqlite_in_memory();
+        config.tenants_with_transactions_enabled = vec!["enabled_tenant".to_string()];
+        let mut frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .unwrap();
+
+        let err = frontend
+            .conditional_commit(
+                conditional_commit_request_for_tenant("disabled_tenant"),
+                String::new(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, ConditionalCommitError::TransactionsDisabled));
+        assert_eq!(ErrorCodes::Unimplemented, err.code());
+    }
+
+    #[tokio::test]
+    async fn conditional_commit_allowlisted_tenant_checks_log_support() {
+        let registry = Registry::new();
+        let system = System::new();
+        let mut config = FrontendConfig::sqlite_in_memory();
+        config.tenants_with_transactions_enabled = vec!["enabled_tenant".to_string()];
+        let mut frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .unwrap();
+
+        let err = frontend
+            .conditional_commit(
+                conditional_commit_request_for_tenant("enabled_tenant"),
                 String::new(),
             )
             .await

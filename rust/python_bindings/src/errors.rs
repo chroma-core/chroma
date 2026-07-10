@@ -1,7 +1,7 @@
 use chroma_api_types::{StaleReadError as ApiStaleReadError, CONDITIONAL_WRITE_CONFLICT_MESSAGE};
 use chroma_error::{source_chain_contains, ChromaError, ErrorCodes};
 use chroma_log::PushLogsError;
-use chroma_types::ConditionalCommitError;
+use chroma_types::{ConditionalCommitError, ConditionalTransactionError};
 use pyo3::PyErr;
 use thiserror::Error;
 
@@ -45,6 +45,12 @@ impl From<ChromaPyError> for PyErr {
                 Some(
                     ConditionalCommitError::TransactionsNotSupported { .. }
                         | ConditionalCommitError::TransactionsDisabled
+                )
+            ) || matches!(
+                err.downcast_ref::<ConditionalTransactionError>(),
+                Some(
+                    ConditionalTransactionError::UnsupportedLogImplementation { .. }
+                        | ConditionalTransactionError::TransactionsDisabled
                 )
             )
         }) {
