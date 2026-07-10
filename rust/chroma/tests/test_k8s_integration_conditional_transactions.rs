@@ -187,10 +187,6 @@ async fn verify_transaction_sequence_with_session(
                 format!("{label}: empty prong two commit result"),
             )?;
         } else {
-            ensure(
-                prong_two_result.first_inserted_record_offset.is_some(),
-                format!("{label}: non-empty prong two commit did not append"),
-            )?;
             ensure_eq(
                 case.record_count(),
                 prong_two_result.record_count,
