@@ -80,6 +80,8 @@ pub struct FrontendConfig {
     pub tenants_with_token_bitmap_fts_enabled: Vec<String>,
     #[serde(default = "default_enable_log_scouting")]
     pub enable_log_scouting: bool,
+    #[serde(default = "default_enable_transactions")]
+    pub enable_transactions: bool,
 }
 
 impl FrontendConfig {
@@ -105,6 +107,7 @@ impl FrontendConfig {
             tenants_with_maxscore_enabled: vec![],
             tenants_with_token_bitmap_fts_enabled: vec![],
             enable_log_scouting: false,
+            enable_transactions: false,
         }
     }
 }
@@ -138,6 +141,10 @@ fn default_enable_schema() -> bool {
 }
 
 fn default_enable_log_scouting() -> bool {
+    false
+}
+
+fn default_enable_transactions() -> bool {
     false
 }
 
@@ -250,12 +257,14 @@ mod tests {
             _ => {}
         }
         assert!(config.frontend.enable_schema);
+        assert!(config.frontend.enable_transactions);
     }
 
     #[test]
     fn single_node_full_config_valid() {
         let config = FrontendServerConfig::load_from_path("sample_configs/single_node_full.yaml");
         assert_eq!(config.port, 8000);
+        assert!(!config.frontend.enable_transactions);
     }
 
     #[test]
@@ -274,6 +283,7 @@ mod tests {
                 2,
                 "{path}"
             );
+            assert!(config.frontend.enable_transactions, "{path}");
         }
     }
 }

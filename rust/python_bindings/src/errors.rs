@@ -42,7 +42,10 @@ impl From<ChromaPyError> for PyErr {
         if source_chain_contains(chroma_error, |err| {
             matches!(
                 err.downcast_ref::<ConditionalCommitError>(),
-                Some(ConditionalCommitError::TransactionsNotSupported { .. })
+                Some(
+                    ConditionalCommitError::TransactionsNotSupported { .. }
+                        | ConditionalCommitError::TransactionsDisabled
+                )
             )
         }) {
             return TransactionsNotSupportedError::new_err(message);

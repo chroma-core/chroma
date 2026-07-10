@@ -6,7 +6,7 @@ use axum::{
 use chroma_api_types::{StaleReadError, STALE_READ_ERROR_NAME};
 use chroma_error::{source_chain_contains, ChromaError};
 use chroma_log::PushLogsError;
-use chroma_types::ConditionalCommitError;
+use chroma_types::{ConditionalCommitError, ConditionalTransactionError};
 use serde::Serialize;
 use std::fmt;
 use utoipa::ToSchema;
@@ -57,7 +57,13 @@ fn error_name(err: &(dyn ChromaError + 'static)) -> &'static str {
     if source_chain_contains(err, |source| {
         matches!(
             source.downcast_ref::<ConditionalCommitError>(),
-            Some(ConditionalCommitError::TransactionsNotSupported { .. })
+            Some(
+                ConditionalCommitError::TransactionsNotSupported { .. }
+                    | ConditionalCommitError::TransactionsDisabled
+            )
+        ) || matches!(
+            source.downcast_ref::<ConditionalTransactionError>(),
+            Some(ConditionalTransactionError::TransactionsDisabled)
         )
     }) {
         return TRANSACTIONS_NOT_SUPPORTED_ERROR_NAME;

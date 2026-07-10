@@ -78,3 +78,4 @@ tenants_with_quantization_enabled: []
 tenants_with_maxscore_enabled: []
 tenants_with_token_bitmap_fts_enabled: []
 enable_log_scouting: true
+enable_transactions: true

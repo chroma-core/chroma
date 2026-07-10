@@ -508,6 +508,7 @@ impl Bindings {
             tenants_with_maxscore_enabled: vec![],
             tenants_with_token_bitmap_fts_enabled: vec![],
             enable_log_scouting: false,
+            enable_transactions: false,
         };
 
         let frontend = runtime.block_on(async {

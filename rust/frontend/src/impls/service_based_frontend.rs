@@ -146,12 +146,16 @@ pub struct ServiceBasedFrontend {
     tenants_with_maxscore_enabled: Vec<String>,
     tenants_with_token_bitmap_fts_enabled: Vec<String>,
     enable_log_scouting: bool,
+    enable_transactions: bool,
 }
 
 impl ServiceBasedFrontend {
     pub fn ensure_conditional_transactions_supported(
         &self,
     ) -> Result<(), ConditionalTransactionError> {
+        if !self.enable_transactions {
+            return Err(ConditionalTransactionError::TransactionsDisabled);
+        }
         if self.log_client.supports_conditional_transactions() {
             return Ok(());
         }
@@ -162,6 +166,9 @@ impl ServiceBasedFrontend {
     }
 
     pub fn ensure_conditional_commit_supported(&self) -> Result<(), ConditionalCommitError> {
+        if !self.enable_transactions {
+            return Err(ConditionalCommitError::TransactionsDisabled);
+        }
         if self.log_client.supports_conditional_transactions() {
             return Ok(());
         }
@@ -186,6 +193,7 @@ impl ServiceBasedFrontend {
         tenants_with_maxscore_enabled: Vec<String>,
         tenants_with_token_bitmap_fts_enabled: Vec<String>,
         enable_log_scouting: bool,
+        enable_transactions: bool,
     ) -> Self {
         let meter = global::meter("chroma");
         let fork_retries_counter = meter.u64_counter("fork_retries").build();
@@ -236,6 +244,7 @@ impl ServiceBasedFrontend {
             tenants_with_maxscore_enabled,
             tenants_with_token_bitmap_fts_enabled,
             enable_log_scouting,
+            enable_transactions,
         }
     }
 
@@ -3338,6 +3347,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             config.tenants_with_maxscore_enabled.clone(),
             config.tenants_with_token_bitmap_fts_enabled.clone(),
             config.enable_log_scouting,
+            config.enable_transactions,
         ))
     }
 }
@@ -3451,10 +3461,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn conditional_commit_unsupported_log_returns_transactions_not_supported() {
+    async fn conditional_commit_disabled_returns_transactions_disabled() {
         let registry = Registry::new();
         let system = System::new();
         let config = FrontendConfig::sqlite_in_memory();
+        let mut frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .unwrap();
+
+        let err = frontend
+            .conditional_commit(
+                ConditionalCommitRequest {
+                    buffered_writes: Vec::new(),
+                    observed_log_offset: None,
+                    read_ids: Vec::new(),
+                },
+                String::new(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, ConditionalCommitError::TransactionsDisabled));
+        assert_eq!(ErrorCodes::Unimplemented, err.code());
+    }
+
+    #[tokio::test]
+    async fn conditional_commit_unsupported_log_returns_transactions_not_supported() {
+        let registry = Registry::new();
+        let system = System::new();
+        let mut config = FrontendConfig::sqlite_in_memory();
+        config.enable_transactions = true;
         let mut frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
             .await
             .unwrap();
