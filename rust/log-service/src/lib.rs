@@ -208,20 +208,37 @@ fn push_append_error_to_status(err: wal3::Error) -> Status {
 
 fn validate_conditional_log_bounds(
     request: &ConditionalWriteRequest,
+    validation_start: LogPosition,
     readable_lower_bound: LogPosition,
     current_committed_tail: LogPosition,
 ) -> Result<(), Status> {
     let observed_log_offset = request.observed_log_offset;
+    let validation_start = validation_start.offset();
     let readable_lower_bound = readable_lower_bound.offset();
     let current_committed_tail = current_committed_tail.offset();
+    if validation_start < observed_log_offset {
+        return Err(Status::invalid_argument(
+            "conditional validation start is before observed_log_offset",
+        ));
+    }
     if observed_log_offset > current_committed_tail {
         return Err(Status::invalid_argument(
             "observed_log_offset is beyond the current log tail",
         ));
     }
-    if observed_log_offset < readable_lower_bound {
+    if validation_start > current_committed_tail {
         return Err(Status::failed_precondition(
-            "observed_log_offset is before the readable log lower bound",
+            "conditional validation start is beyond the current log tail",
+        ));
+    }
+    if validation_start < readable_lower_bound {
+        if validation_start == observed_log_offset {
+            return Err(Status::failed_precondition(
+                "observed_log_offset is before the readable log lower bound",
+            ));
+        }
+        return Err(Status::failed_precondition(
+            "conditional validation start is before the readable log lower bound",
         ));
     }
     Ok(())
@@ -2520,6 +2537,8 @@ impl LogServer {
             if let Some(conditional_write) = conditional_write.as_ref() {
                 let admission_predicate = conditional_admission_predicate(conditional_write);
                 let mut append_result = None;
+                let mut validation_start =
+                    LogPosition::from_offset(conditional_write.observed_log_offset);
                 let conditional_push_max_retries = self.config.conditional_push_retry_attempts();
                 for attempt in 0..conditional_push_max_retries {
                     let validated_tail = self
@@ -2527,6 +2546,7 @@ impl LogServer {
                             topology_name.as_ref(),
                             collection_id,
                             conditional_write,
+                            validation_start,
                         )
                         .await?;
                     let append_options = AppendOptions::new(write_id_metadata.clone())
@@ -2575,6 +2595,7 @@ impl LogServer {
                         Err(wal3::Error::LogContentionRetry)
                             if attempt + 1 < conditional_push_max_retries =>
                         {
+                            validation_start = validated_tail;
                             self.metrics
                                 .conditional_write_required_start_retries
                                 .add(1, &[]);
@@ -2909,10 +2930,12 @@ impl LogServer {
         topology_name: Option<&TopologyName>,
         collection_id: CollectionUuid,
         request: &ConditionalWriteRequest,
+        validation_start: LogPosition,
     ) -> Result<LogPosition, Status> {
         tracing::debug!(
             %collection_id,
             observed_log_offset = request.observed_log_offset,
+            validation_start_offset = validation_start.offset(),
             read_ids = request.read_ids.len(),
             write_ids = request.write_ids.len(),
             conflict_ids = request.conflict_ids.len(),
@@ -2934,7 +2957,12 @@ impl LogServer {
             })?
         else {
             let empty_log_position = LogPosition::from_offset(1);
-            validate_conditional_log_bounds(request, empty_log_position, empty_log_position)?;
+            validate_conditional_log_bounds(
+                request,
+                validation_start,
+                empty_log_position,
+                empty_log_position,
+            )?;
             self.metrics
                 .conditional_write_validated_tail
                 .record(empty_log_position.offset(), &[]);
@@ -2951,12 +2979,17 @@ impl LogServer {
         };
         let readable_lower_bound = manifest_and_witness.manifest.oldest_timestamp();
         let current_committed_tail = manifest_and_witness.manifest.next_write_timestamp();
-        validate_conditional_log_bounds(request, readable_lower_bound, current_committed_tail)?;
+        validate_conditional_log_bounds(
+            request,
+            validation_start,
+            readable_lower_bound,
+            current_committed_tail,
+        )?;
         self.metrics
             .conditional_write_validated_tail
             .record(current_committed_tail.offset(), &[]);
 
-        if request.observed_log_offset == current_committed_tail.offset() {
+        if validation_start.offset() == current_committed_tail.offset() {
             self.metrics
                 .conditional_write_scanned_records
                 .record(0, &[]);
@@ -2969,10 +3002,10 @@ impl LogServer {
             return Ok(current_committed_tail);
         }
 
-        let from = LogPosition::from_offset(request.observed_log_offset);
+        let from = validation_start;
         let expected_records = current_committed_tail
             .offset()
-            .saturating_sub(request.observed_log_offset);
+            .saturating_sub(validation_start.offset());
         let limits = Limits {
             max_files: None,
             max_bytes: None,
@@ -3005,7 +3038,7 @@ impl LogServer {
                     )
                 })?;
             for (log_offset, record_bytes) in record_batch {
-                if log_offset.offset() < request.observed_log_offset
+                if log_offset.offset() < validation_start.offset()
                     || log_offset.offset() >= current_committed_tail.offset()
                 {
                     continue;
@@ -4515,9 +4548,28 @@ mod tests {
         validate_conditional_log_bounds(
             &request,
             LogPosition::from_offset(5),
+            LogPosition::from_offset(5),
             LogPosition::from_offset(8),
         )
         .expect("observed offset at lower bound should be valid");
+    }
+
+    #[test]
+    fn conditional_log_bounds_accept_advanced_validation_start() {
+        let request = ConditionalWriteRequest {
+            observed_log_offset: 4,
+            read_ids: string_set(&["read-1"]),
+            write_ids: string_set(&["write-1"]),
+            conflict_ids: string_set(&["read-1", "write-1"]),
+        };
+
+        validate_conditional_log_bounds(
+            &request,
+            LogPosition::from_offset(6),
+            LogPosition::from_offset(5),
+            LogPosition::from_offset(8),
+        )
+        .expect("previously validated records before the readable bound can be skipped");
     }
 
     #[test]
@@ -4531,6 +4583,7 @@ mod tests {
 
         let err = validate_conditional_log_bounds(
             &request,
+            LogPosition::from_offset(9),
             LogPosition::from_offset(5),
             LogPosition::from_offset(8),
         )
@@ -4554,6 +4607,7 @@ mod tests {
 
         let err = validate_conditional_log_bounds(
             &request,
+            LogPosition::from_offset(4),
             LogPosition::from_offset(5),
             LogPosition::from_offset(8),
         )
@@ -4562,6 +4616,54 @@ mod tests {
         assert_eq!(Code::FailedPrecondition, err.code());
         assert_eq!(
             "observed_log_offset is before the readable log lower bound",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn conditional_log_bounds_reject_validation_start_before_observed_offset() {
+        let request = ConditionalWriteRequest {
+            observed_log_offset: 5,
+            read_ids: string_set(&["read-1"]),
+            write_ids: string_set(&["write-1"]),
+            conflict_ids: string_set(&["read-1", "write-1"]),
+        };
+
+        let err = validate_conditional_log_bounds(
+            &request,
+            LogPosition::from_offset(4),
+            LogPosition::from_offset(4),
+            LogPosition::from_offset(8),
+        )
+        .expect_err("validation start cannot precede the original observed offset");
+
+        assert_eq!(Code::InvalidArgument, err.code());
+        assert_eq!(
+            "conditional validation start is before observed_log_offset",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn conditional_log_bounds_reject_advanced_validation_start_before_readable_lower_bound() {
+        let request = ConditionalWriteRequest {
+            observed_log_offset: 4,
+            read_ids: string_set(&["read-1"]),
+            write_ids: string_set(&["write-1"]),
+            conflict_ids: string_set(&["read-1", "write-1"]),
+        };
+
+        let err = validate_conditional_log_bounds(
+            &request,
+            LogPosition::from_offset(6),
+            LogPosition::from_offset(7),
+            LogPosition::from_offset(8),
+        )
+        .expect_err("unvalidated range before readable lower bound should fail");
+
+        assert_eq!(Code::FailedPrecondition, err.code());
+        assert_eq!(
+            "conditional validation start is before the readable log lower bound",
             err.message()
         );
     }
