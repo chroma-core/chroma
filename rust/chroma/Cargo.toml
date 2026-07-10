@@ -34,6 +34,7 @@ ollama = []
 [dev-dependencies]
 dotenvy = "0.15.7"
 futures-util = "0.3.31"
+proptest = { workspace = true }
 test-log = { version = "0.2.18", features = ["trace"] }
 tokio.workspace = true
 uuid.workspace = true

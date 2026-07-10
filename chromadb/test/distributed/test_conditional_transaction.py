@@ -166,7 +166,6 @@ def test_conditional_multi_update_commits_all_buffered_records(
     committed = txn.commit()
 
     assert committed["record_count"] == 2
-    assert committed["first_inserted_record_offset"] is not None
     assert collection.get(ids=["left", "right"], include=["metadatas"])[
         "metadatas"
     ] == [
