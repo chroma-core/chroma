@@ -444,6 +444,8 @@ pub enum ConditionalTransactionError {
     DuplicateBufferedWrite { id: String },
     #[error("transactional writes do not support operation {operation:?}")]
     UnsupportedWriteOperation { operation: Operation },
+    #[error("conditional transactions are disabled by frontend configuration")]
+    TransactionsDisabled,
     #[error(
         "conditional transactions require the gRPC log implementation; configured log is {implementation}"
     )]
@@ -477,6 +479,7 @@ impl ChromaError for ConditionalTransactionError {
             | ConditionalTransactionError::UnsupportedLogImplementation { .. } => {
                 ErrorCodes::InvalidArgument
             }
+            ConditionalTransactionError::TransactionsDisabled => ErrorCodes::Unimplemented,
             ConditionalTransactionError::MissingReadToken
             | ConditionalTransactionError::ReadTokenMismatch { .. }
             | ConditionalTransactionError::ReadTokenOutOfRange { .. } => {
@@ -494,6 +497,8 @@ pub enum ConditionalCommitError {
         "conditional transactions require the gRPC log implementation; configured log is {implementation}"
     )]
     TransactionsNotSupported { implementation: String },
+    #[error("conditional transactions are disabled by frontend configuration")]
+    TransactionsDisabled,
     #[error("Backoff and retry")]
     Backoff,
     #[error("Invalid database name")]
@@ -508,7 +513,8 @@ impl ChromaError for ConditionalCommitError {
     fn code(&self) -> ErrorCodes {
         match self {
             ConditionalCommitError::Transaction(err) => err.code(),
-            ConditionalCommitError::TransactionsNotSupported { .. } => ErrorCodes::Unimplemented,
+            ConditionalCommitError::TransactionsNotSupported { .. }
+            | ConditionalCommitError::TransactionsDisabled => ErrorCodes::Unimplemented,
             ConditionalCommitError::Backoff => ErrorCodes::ResourceExhausted,
             ConditionalCommitError::InvalidDatabaseName => ErrorCodes::InvalidArgument,
             ConditionalCommitError::InvalidArgument(_) => ErrorCodes::InvalidArgument,
@@ -770,6 +776,17 @@ mod tests {
         assert_eq!(ErrorCodes::Unimplemented, err.code());
         assert_eq!(
             "conditional transactions require the gRPC log implementation; configured log is sqlite",
+            err.to_string()
+        );
+    }
+
+    #[test]
+    fn transactions_disabled_commit_error_uses_unimplemented_code() {
+        let err = ConditionalCommitError::TransactionsDisabled;
+
+        assert_eq!(ErrorCodes::Unimplemented, err.code());
+        assert_eq!(
+            "conditional transactions are disabled by frontend configuration",
             err.to_string()
         );
     }

@@ -507,7 +507,9 @@ impl Bindings {
             tenants_with_quantization_enabled: vec![],
             tenants_with_maxscore_enabled: vec![],
             tenants_with_token_bitmap_fts_enabled: vec![],
+            tenants_with_transactions_enabled: vec![],
             enable_log_scouting: false,
+            enable_transactions: false,
         };
 
         let frontend = runtime.block_on(async {
@@ -1018,6 +1020,8 @@ impl Bindings {
         database: String,
         py: Python<'_>,
     ) -> ChromaPyResult<GetResponse> {
+        self.frontend
+            .ensure_conditional_transactions_supported_for_tenant(&tenant)?;
         let r#where = chroma_types::RawWhereFields::from_json_str(
             r#where.as_deref(),
             where_document.as_deref(),
