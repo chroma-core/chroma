@@ -61,6 +61,18 @@ use crate::execution::{
 use super::compact::{CollectionCompactInfo, CompactWriters};
 use chroma_types::AdvanceAttachedFunctionError;
 
+fn resolve_pulled_log_offset(
+    is_for_backfill: bool,
+    pulled_log_offset: i64,
+    collection_log_position: i64,
+) -> i64 {
+    if is_for_backfill {
+        collection_log_position
+    } else {
+        pulled_log_offset
+    }
+}
+
 #[derive(Debug)]
 pub struct AttachedFunctionOrchestrator {
     input_collection_data: Vec<FunctionInputCollectionData>,
@@ -483,9 +495,14 @@ impl AttachedFunctionOrchestrator {
                 .iter()
                 .map(|input_collection_data| FunctionExecutionProgress {
                     input_collection_id: input_collection_data.collection_info.collection_id,
-                    updated_completion_offset: input_collection_data
-                        .collection_info
-                        .pulled_log_offset as u64,
+                    updated_completion_offset: resolve_pulled_log_offset(
+                        self.is_for_backfill,
+                        input_collection_data.collection_info.pulled_log_offset,
+                        input_collection_data
+                            .collection_info
+                            .collection
+                            .log_position,
+                    ) as u64,
                 })
                 .collect();
         }
@@ -1013,7 +1030,11 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
                         input_collection_name: collection_info.collection.name.clone(),
                         tenant_id: collection_info.collection.tenant.clone(),
                         database_id: collection_info.collection.database_id.to_string(),
-                        completion_offset: collection_info.pulled_log_offset as u64,
+                        pulled_log_offset: resolve_pulled_log_offset(
+                            self.is_for_backfill,
+                            collection_info.pulled_log_offset,
+                            collection_info.collection.log_position,
+                        ) as u64,
                     }
                 })
                 .collect(),
@@ -1088,5 +1109,16 @@ impl Handler<TaskResult<QueueFunctionOutput, QueueFunctionError>> for AttachedFu
         // For async-only functions, we don't have any output records to apply.
         // The function will be processed asynchronously by an external consumer.
         self.finish_no_attached_function(ctx).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_pulled_log_offset;
+
+    #[test]
+    fn test_resolve_pulled_log_offset() {
+        assert_eq!(resolve_pulled_log_offset(true, 199, 299), 299);
+        assert_eq!(resolve_pulled_log_offset(false, 199, 299), 199);
     }
 }
