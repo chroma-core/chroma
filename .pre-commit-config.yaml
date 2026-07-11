@@ -29,8 +29,14 @@ repos:
     hooks:
       - id: flake8
         args:
-          - "--extend-ignore=E203,E501,E503"
+          # I250 (unnecessary import alias) is left off intentionally: the
+          # codebase uses explicit `import x as x` re-exports. Only the
+          # relative-import ban (I252) from flake8-tidy-imports is enforced.
+          - "--extend-ignore=E203,E501,E503,I250"
           - "--max-line-length=88"
+          - "--ban-relative-imports=true"
+        additional_dependencies:
+          - flake8-tidy-imports
 
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: "v1.10.0"
