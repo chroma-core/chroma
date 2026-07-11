@@ -95,6 +95,19 @@ struct RunTimeConfig {
     disabled_collections: Vec<String>,
 }
 
+/// Whether the compaction failure-count gate applies while verifying a set of
+/// collections against sysdb.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FailureCountGate {
+    /// Regular dirty-log collections: skip collections that have already
+    /// failed compaction `max_failure_count` times (the dead-letter gate).
+    Apply,
+    /// One-off (manually requested) compactions: a manual request is the
+    /// operator's way to retry a collection that has been dead-lettered, so
+    /// the gate does not apply.
+    Skip,
+}
+
 impl Scheduler {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
@@ -253,6 +266,7 @@ impl Scheduler {
     async fn verify_and_enrich_collections(
         &mut self,
         collections: Vec<CollectionInfo>,
+        failure_count_gate: FailureCountGate,
     ) -> Vec<CollectionRecord> {
         let mut by_topology: HashMap<Option<DatabaseOrTopology>, Vec<CollectionInfo>> =
             HashMap::new();
@@ -314,13 +328,8 @@ impl Scheduler {
             let mut with_infos = vec![];
             for collection in all_collections.into_iter() {
                 if let Some(info) = info_map.remove(&collection.collection_id) {
-                    // One-off (manually requested) compactions skip the failure-count
-                    // gate: a manual request is the operator's way to retry a
-                    // collection that has been dead-lettered.
-                    if collection.compaction_failure_count >= self.max_failure_count
-                        && !self
-                            .oneoff_collections
-                            .contains_key(&collection.collection_id)
+                    if failure_count_gate == FailureCountGate::Apply
+                        && collection.compaction_failure_count >= self.max_failure_count
                     {
                         tracing::info!(
                             "Ignoring collection {} - too many compaction failures ({}/{})",
@@ -365,7 +374,44 @@ impl Scheduler {
         collection_records
     }
 
-    async fn filter_collections(
+    /// Filter one-off (manually requested) collections. One-offs were
+    /// explicitly requested on this node, so the assignment policy does not
+    /// apply to them: only the disabled-collections kill switch and the
+    /// in-progress dedup do.
+    async fn filter_oneoff_collections(
+        &mut self,
+        collections: Vec<CollectionInfo>,
+    ) -> Vec<CollectionInfo> {
+        let mut filtered_collections = Vec::new();
+        for collection in collections {
+            if self
+                .disabled_collections
+                .contains(&collection.collection_id)
+            {
+                tracing::warn!(
+                    "Skipping one-off compaction for {:?} because it is disabled for compaction",
+                    collection.collection_id
+                );
+                continue;
+            }
+
+            if self.is_job_in_progress(&collection.collection_id).await {
+                tracing::info!(
+                    "Compaction for {} is already in progress, skipping",
+                    collection.collection_id
+                );
+                continue;
+            }
+
+            filtered_collections.push(collection);
+        }
+        filtered_collections
+    }
+
+    /// Filter regular dirty-log collections: the disabled-collections kill
+    /// switch, the in-progress dedup, and the assignment policy (only
+    /// collections assigned to this member are kept).
+    async fn filter_dirty_log_collections(
         &mut self,
         collections: Vec<CollectionInfo>,
     ) -> Vec<CollectionInfo> {
@@ -382,20 +428,10 @@ impl Scheduler {
                 .disabled_collections
                 .contains(&collection.collection_id)
             {
-                if self
-                    .oneoff_collections
-                    .contains_key(&collection.collection_id)
-                {
-                    tracing::warn!(
-                        "Skipping one-off compaction for {:?} because it is disabled for compaction",
-                        collection.collection_id
-                    );
-                } else {
-                    tracing::info!(
-                        "Ignoring collection: {:?} because it is disabled for compaction",
-                        collection.collection_id
-                    );
-                }
+                tracing::info!(
+                    "Ignoring collection: {:?} because it is disabled for compaction",
+                    collection.collection_id
+                );
                 continue;
             }
 
@@ -404,17 +440,6 @@ impl Scheduler {
                     "Compaction for {} is already in progress, skipping",
                     collection.collection_id
                 );
-                continue;
-            }
-
-            // One-off collections were explicitly requested on this node, so run
-            // them here even if the assignment policy would give them to another
-            // member. The disabled_collections check above still applies to them.
-            if self
-                .oneoff_collections
-                .contains_key(&collection.collection_id)
-            {
-                filtered_collections.push(collection);
                 continue;
             }
 
@@ -636,10 +661,29 @@ impl Scheduler {
         if collections.is_empty() {
             return;
         }
-        let filtered_collections = self.filter_collections(collections).await;
-        let collection_records = self
-            .verify_and_enrich_collections(filtered_collections)
+
+        // One-off (manually requested) compactions follow their own path
+        // through the scheduler: they were explicitly requested on this node,
+        // so neither the assignment policy nor the failure-count gate applies
+        // to them. Regular dirty-log collections go through both.
+        let (oneoff_collections, dirty_log_collections): (Vec<_>, Vec<_>) =
+            collections.into_iter().partition(|collection| {
+                self.oneoff_collections
+                    .contains_key(&collection.collection_id)
+            });
+
+        let oneoff_collections = self.filter_oneoff_collections(oneoff_collections).await;
+        let dirty_log_collections = self
+            .filter_dirty_log_collections(dirty_log_collections)
             .await;
+
+        let mut collection_records = self
+            .verify_and_enrich_collections(oneoff_collections, FailureCountGate::Skip)
+            .await;
+        collection_records.extend(
+            self.verify_and_enrich_collections(dirty_log_collections, FailureCountGate::Apply)
+                .await,
+        );
         self.schedule_internal(collection_records).await;
     }
 
@@ -1042,7 +1086,7 @@ mod tests {
         }];
 
         let records = scheduler
-            .verify_and_enrich_collections(collection_infos)
+            .verify_and_enrich_collections(collection_infos, FailureCountGate::Apply)
             .await;
 
         assert_eq!(records.len(), 1, "should produce exactly one record");
@@ -1140,7 +1184,7 @@ mod tests {
         }];
 
         let records = scheduler
-            .verify_and_enrich_collections(collection_infos)
+            .verify_and_enrich_collections(collection_infos, FailureCountGate::Skip)
             .await;
 
         // The collection must not be dropped by the invariant check.
@@ -1212,7 +1256,7 @@ mod tests {
 
         let records = f
             .scheduler
-            .verify_and_enrich_collections(collection_infos)
+            .verify_and_enrich_collections(collection_infos, FailureCountGate::Apply)
             .await;
 
         assert_eq!(records.len(), 1, "only collection_1 should be enriched");
@@ -1250,12 +1294,15 @@ mod tests {
 
         let records = f
             .scheduler
-            .verify_and_enrich_collections(vec![CollectionInfo {
-                collection_id: f.collection_uuid_2,
-                topology_name: None,
-                first_log_offset: 0,
-                first_log_ts: 1,
-            }])
+            .verify_and_enrich_collections(
+                vec![CollectionInfo {
+                    collection_id: f.collection_uuid_2,
+                    topology_name: None,
+                    first_log_offset: 0,
+                    first_log_ts: 1,
+                }],
+                FailureCountGate::Skip,
+            )
             .await;
 
         assert!(
@@ -1488,7 +1535,7 @@ mod tests {
             },
         ];
 
-        let filtered = f.scheduler.filter_collections(input).await;
+        let filtered = f.scheduler.filter_dirty_log_collections(input).await;
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].collection_id, f.collection_uuid_2);
     }
