@@ -108,3 +108,33 @@ def test_configuration_validation() -> None:
 def test_hnsw_validation() -> None:
     with pytest.raises(ValueError, match="must be less than or equal"):
         HNSWConfiguration(batch_size=500, sync_threshold=100)
+
+
+def test_hnsw_rejects_bool_for_int_params() -> None:
+    """Regression test for chroma-core/chroma#7290.
+
+    ``bool`` is a subclass of ``int`` in Python, so naive
+    ``isinstance(value, int)`` checks accept ``True``/``False`` as if they
+    were integers. HNSW parameters that must be ``int`` (or ``float`` for
+    ``resize_factor``) should reject ``bool`` values explicitly.
+    """
+    int_params = [
+        "ef_construction",
+        "ef_search",
+        "num_threads",
+        "M",
+        "batch_size",
+        "sync_threshold",
+    ]
+    for name in int_params:
+        with pytest.raises(ValueError):
+            HNSWConfiguration(**{name: True})  # type: ignore[arg-type]
+        with pytest.raises(ValueError):
+            HNSWConfiguration(**{name: False})  # type: ignore[arg-type]
+
+    # resize_factor must be float; bool is also a subclass of int, not float,
+    # but rejecting it explicitly is the consistent, safe behaviour.
+    with pytest.raises(ValueError):
+        HNSWConfiguration(resize_factor=True)  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        HNSWConfiguration(resize_factor=False)  # type: ignore[arg-type]
