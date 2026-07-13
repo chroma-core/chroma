@@ -319,7 +319,7 @@ impl AttachedFunctionExecutor for HttpGenerateExecutor {
                 output_collection: self.output_collection.clone(),
                 base_collection: None,
                 records,
-                completion_offset: batch.completion_offset,
+                completion_offset: batch.pulled_log_offset,
             });
         }
 

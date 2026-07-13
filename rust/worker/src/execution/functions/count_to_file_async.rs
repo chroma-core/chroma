@@ -188,9 +188,9 @@ impl AttachedFunctionExecutor for CountToFileAsyncExecutor {
                 }
             }
 
-            let pulled_log_offset = i64::try_from(batch.completion_offset).map_err(|_| {
+            let pulled_log_offset = i64::try_from(batch.pulled_log_offset).map_err(|_| {
                 Box::new(CountToFileAsyncError::InvalidPulledLogOffset(
-                    batch.completion_offset,
+                    batch.pulled_log_offset,
                 )) as Box<dyn ChromaError>
             })?;
             state
@@ -279,7 +279,7 @@ mod tests {
                     input_collection_name: "test-input".to_string(),
                     tenant_id: "test-tenant".to_string(),
                     database_id: "test-database".to_string(),
-                    completion_offset: pulled_log_offset,
+                    pulled_log_offset,
                     records: Chunk::new(Arc::from(records)),
                 }],
                 None,
