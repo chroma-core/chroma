@@ -405,10 +405,9 @@ def fastapi_persistent() -> Generator[System, None, None]:
     yield from _fastapi_fixture(is_persistent=True)
 
 
-@pytest.fixture(scope="function")
 def fastapi_ssl() -> Generator[System, None, None]:
     generate_self_signed_certificate()
-    yield from _fastapi_fixture(
+    return _fastapi_fixture(
         is_persistent=False,
         chroma_server_ssl_certfile="./servercert.pem",
         chroma_server_ssl_keyfile="./serverkey.pem",
@@ -757,9 +756,11 @@ def filtered_fixture_names() -> List[str]:
         "fastapi",
         "async_fastapi",
         "fastapi_persistent",
-        "sqlite",
-        "sqlite_persistent",
     ]
+    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
+        fixtures.extend(["rust_sqlite_ephemeral", "rust_sqlite_persistent"])
+    else:
+        fixtures.extend(["python_sqlite_ephemeral", "python_sqlite_persistent"])
 
     if "CHROMA_INTEGRATION_TEST" in os.environ:
         fixtures.append("integration")
