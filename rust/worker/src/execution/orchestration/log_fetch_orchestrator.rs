@@ -339,6 +339,10 @@ impl Orchestrator for LogFetchOrchestrator {
 }
 
 impl LogFetchOrchestrator {
+    fn should_resolve_async_fn_boundary(is_fn_consumer: bool, is_rebuild: bool) -> bool {
+        is_fn_consumer && !is_rebuild
+    }
+
     async fn get_async_fn_fetch_boundaries(
         collection: &chroma_types::Collection,
         record_segment: &chroma_types::Segment,
@@ -539,7 +543,12 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         let mut pulled_log_offset = collection.log_position;
         let mut log_upper_bound_offset = None;
 
-        if self.context.is_fn_consumer {
+        // Compacted-state backfill reads the whole live segment and is not
+        // constrained by the incremental max_compaction_size window.
+        if Self::should_resolve_async_fn_boundary(
+            self.context.is_fn_consumer,
+            self.context.is_rebuild(),
+        ) {
             let completion_offset = match self.context.log_start_offset {
                 Some(offset) => offset,
                 None => {
@@ -1246,5 +1255,23 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
             self.terminate_with_result(Ok(Success::new(materialized, collection_info).into()), ctx)
                 .await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LogFetchOrchestrator;
+
+    #[test]
+    fn compacted_backfill_skips_async_boundary_resolution() {
+        assert!(LogFetchOrchestrator::should_resolve_async_fn_boundary(
+            true, false
+        ));
+        assert!(!LogFetchOrchestrator::should_resolve_async_fn_boundary(
+            true, true
+        ));
+        assert!(!LogFetchOrchestrator::should_resolve_async_fn_boundary(
+            false, false
+        ));
     }
 }

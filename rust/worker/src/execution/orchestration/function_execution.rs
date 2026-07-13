@@ -1,5 +1,7 @@
 use std::cell::OnceCell;
 
+use chroma_error::source_chain_contains;
+use chroma_log::grpc_log::GrpcPullLogsError;
 use chroma_system::System;
 use chroma_types::{AttachedFunction, AttachedFunctionUuid, CollectionUuid, DatabaseName};
 use uuid::Uuid;
@@ -8,8 +10,9 @@ use crate::execution::operators::materialize_logs::MaterializeLogOutput;
 
 use super::{
     compact::{CollectionCompactInfo, CompactionContext, CompactionError, CompactionResponse},
-    log_fetch_orchestrator::LogFetchOrchestratorResponse,
+    log_fetch_orchestrator::{LogFetchOrchestratorError, LogFetchOrchestratorResponse},
 };
+use crate::execution::operators::fetch_log::FetchLogError;
 
 #[derive(Debug, Clone)]
 pub struct FunctionInputCollectionData {
@@ -79,20 +82,17 @@ impl FunctionExecutionContext {
     ) -> Result<FunctionInputCollectionData, CompactionError> {
         let log_fetch_context =
             Self::build_log_fetch_context(compaction_context, completion_offset);
-        let result = Self::fetch_function_input_logs(
+        let result = match Self::fetch_function_input_logs(
             log_fetch_context.clone(),
             collection_id,
             database_name.clone(),
             system.clone(),
             false,
         )
-        .await?;
-
-        let (materialized_log_data, collection_info) = match result {
-            LogFetchOrchestratorResponse::Success(success) => {
-                (success.materialized, success.collection_info)
-            }
-            LogFetchOrchestratorResponse::RequireFunctionBackfill(_) => {
+        .await
+        {
+            Ok(result) => result,
+            Err(err) if Self::should_backfill_on_fetch_error(&err) => {
                 match Self::fetch_function_input_logs(
                     log_fetch_context,
                     collection_id,
@@ -103,7 +103,10 @@ impl FunctionExecutionContext {
                 .await?
                 {
                     LogFetchOrchestratorResponse::Success(success) => {
-                        (success.materialized, success.collection_info)
+                        return Ok(FunctionInputCollectionData {
+                            collection_info: success.collection_info,
+                            materialized_log_data: success.materialized,
+                        });
                     }
                     LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(_)
                     | LogFetchOrchestratorResponse::RequireFunctionBackfill(_) => {
@@ -112,6 +115,18 @@ impl FunctionExecutionContext {
                         ));
                     }
                 }
+            }
+            Err(err) => return Err(err),
+        };
+
+        let (materialized_log_data, collection_info) = match result {
+            LogFetchOrchestratorResponse::Success(success) => {
+                (success.materialized, success.collection_info)
+            }
+            LogFetchOrchestratorResponse::RequireFunctionBackfill(backfill) => {
+                // BackfillFn forces compaction and schedules async work. Fn-consumers
+                // only backfill when their incremental log offset has been purged.
+                (backfill.materialized, backfill.collection_info)
             }
             LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(_) => {
                 return Err(CompactionError::InvariantViolation(
@@ -124,6 +139,20 @@ impl FunctionExecutionContext {
             collection_info,
             materialized_log_data,
         })
+    }
+
+    fn should_backfill_on_fetch_error(error: &CompactionError) -> bool {
+        match error {
+            CompactionError::DataFetchError(LogFetchOrchestratorError::FetchLog(
+                FetchLogError::PullLog(err),
+            )) => source_chain_contains(err.as_ref(), |source| {
+                source
+                    .downcast_ref::<GrpcPullLogsError>()
+                    .map(|pull_err| matches!(pull_err, GrpcPullLogsError::Purged))
+                    .unwrap_or(false)
+            }),
+            _ => false,
+        }
     }
 
     async fn resolve_shared_input_database_name(
@@ -207,5 +236,42 @@ impl FunctionExecutionContext {
         Ok(CompactionResponse::Success {
             job_id: attached_function_id.into(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FunctionExecutionContext;
+    use crate::execution::{
+        operators::fetch_log::FetchLogError,
+        orchestration::{
+            compact::CompactionError, log_fetch_orchestrator::LogFetchOrchestratorError,
+        },
+    };
+    use chroma_log::grpc_log::GrpcPullLogsError;
+    use tonic::Status;
+
+    #[test]
+    fn purged_pull_logs_error_triggers_backfill() {
+        let err = CompactionError::DataFetchError(LogFetchOrchestratorError::FetchLog(
+            FetchLogError::PullLog(Box::new(GrpcPullLogsError::Purged)),
+        ));
+
+        assert!(FunctionExecutionContext::should_backfill_on_fetch_error(
+            &err
+        ));
+    }
+
+    #[test]
+    fn generic_not_found_does_not_trigger_backfill() {
+        let err = CompactionError::DataFetchError(LogFetchOrchestratorError::FetchLog(
+            FetchLogError::PullLog(Box::new(GrpcPullLogsError::FailedToPullLogs(
+                Status::not_found("unrelated not found"),
+            ))),
+        ));
+
+        assert!(!FunctionExecutionContext::should_backfill_on_fetch_error(
+            &err
+        ));
     }
 }

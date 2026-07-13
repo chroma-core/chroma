@@ -78,6 +78,9 @@ pub mod state_hash_table;
 
 use crate::state_hash_table::StateHashTable;
 
+const PULL_LOGS_REASON_MD_KEY: &str = "pull-logs-reason";
+const PULL_LOGS_REASON_PURGED: &str = "purged";
+
 ///////////////////////////////////////////// helpers //////////////////////////////////////////////
 
 /// The gRPC metadata key for the backoff reason.
@@ -109,6 +112,17 @@ fn status_with_backoff_reason(
         reason.parse().expect("valid ascii metadata value"),
     );
     Status::with_metadata(code, message, metadata)
+}
+
+fn purged_logs_status() -> Status {
+    let mut status = Status::not_found("Some entries have been purged");
+    // SAFETY(tanuj): This static ASCII value is covered by
+    // `purged_logs_status_has_reason_metadata` below.
+    status.metadata_mut().insert(
+        PULL_LOGS_REASON_MD_KEY,
+        tonic::metadata::MetadataValue::from_static(PULL_LOGS_REASON_PURGED),
+    );
+    status
 }
 
 fn normalize_conditional_ids<'a>(
@@ -2784,7 +2798,7 @@ impl LogServer {
                 })?,
         };
         if !fragments.is_empty() && fragments[0].start.offset() > req.start_from_offset {
-            return Err(Status::not_found("Some entries have been purged"));
+            return Err(purged_logs_status());
         }
         let storage_prefix = collection_id.storage_prefix_for_log();
         let absolute_offsets = topology_name.is_none();
@@ -3159,7 +3173,7 @@ impl LogServer {
         if records.len() != pull_logs.batch_size as usize
             || (!records.is_empty() && records[0].log_offset != pull_logs.start_from_offset)
         {
-            return Err(Status::not_found("Some entries have been purged"));
+            return Err(purged_logs_status());
         }
         Ok(Response::new(PullLogsResponse { records }))
     }
@@ -8373,6 +8387,21 @@ mod tests {
         BACKOFF_REASON_MD_KEY
             .parse::<tonic::metadata::MetadataKey<tonic::metadata::Ascii>>()
             .expect("BACKOFF_REASON_MD_KEY must be a valid ASCII metadata key");
+    }
+
+    #[test]
+    fn purged_logs_status_has_reason_metadata() {
+        let status = purged_logs_status();
+
+        assert_eq!(status.code(), Code::NotFound);
+        assert_eq!(status.message(), "Some entries have been purged");
+        assert_eq!(
+            status
+                .metadata()
+                .get(PULL_LOGS_REASON_MD_KEY)
+                .and_then(|value| value.to_str().ok()),
+            Some(PULL_LOGS_REASON_PURGED)
+        );
     }
 
     #[cfg(feature = "faults")]
