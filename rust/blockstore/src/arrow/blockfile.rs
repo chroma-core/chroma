@@ -829,7 +829,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                 .sum::<u32>() as usize;
         } else {
             self.load_blocks(&block_ids).await;
-            for block_id in block_ids.iter().take(block_ids.len() - 1) {
+            for block_id in &block_ids {
                 let block = self
                     .get_block(*block_id, StorageRequestPriority::P0)
                     .await
@@ -2503,6 +2503,10 @@ mod tests {
         assert_eq!(reader.get("prefix", "f").await.unwrap(), Some("value_b"));
         assert_eq!(reader.count().await.unwrap(), 2);
         assert_eq!(reader.root.version, Version::V1);
+        assert_eq!(reader.rank("prefix", "a").await.unwrap(), 0);
+        assert_eq!(reader.rank("prefix", "b").await.unwrap(), 1);
+        assert_eq!(reader.rank("prefix", "f").await.unwrap(), 1);
+        assert_eq!(reader.rank("prefix", "g").await.unwrap(), 2);
 
         ////////////////////////// STEP 3 //////////////////////////
 
