@@ -108,11 +108,30 @@ pub async fn foundation_apply_patch(
 
     request.validate().map_err(ChromaValidationError::from)?;
 
-    let response = run_apply_patch(&server, &headers, &tenant, &request).await?;
+    let response = match run_apply_patch(&server, &headers, &tenant, &request).await {
+        Ok(response) => response,
+        Err(err) => {
+            tracing::warn!(
+                tenant = %tenant,
+                slug = %request.slug,
+                code = ?err.code(),
+                error = %err,
+                "wiki apply-patch failed"
+            );
+            return Err(err.into());
+        }
+    };
     Ok(Json(response))
 }
 
 /// Reads, patches, and writes a wiki page through the upsert-page flow.
+#[tracing::instrument(
+    name = "foundation_run_apply_patch",
+    level = "debug",
+    skip_all,
+    fields(tenant = %tenant, slug = %request.slug, expected_version = ?request.expected_version),
+    err(Display)
+)]
 pub(crate) async fn run_apply_patch(
     server: &FoundationApiServer,
     headers: &HeaderMap,
@@ -124,6 +143,7 @@ pub(crate) async fn run_apply_patch(
         .ok_or_else(|| ApplyPatchError::MissingPage {
             slug: request.slug.clone(),
         })?;
+
     let patched = patch_page(page, request)?;
 
     let upsert = UpsertPageRequest {

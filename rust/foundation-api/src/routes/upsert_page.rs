@@ -40,9 +40,11 @@ const DENSE_EMBED_BATCH_SIZE: usize = 100;
 /// upsert records; stale chunks are delete records.
 const MAX_TRANSACTION_WRITES: usize = 300;
 
-/// Read one past the write cap so an oversized existing page is detected
-/// without reading arbitrarily many ids.
-const PAGE_CHUNK_READ_LIMIT: u32 = MAX_TRANSACTION_WRITES as u32 + 1;
+/// Chroma Cloud caps `Get` limit at 300, matching the transaction write cap.
+/// Oversized existing pages are detected with a follow-up one-row read at this
+/// offset instead of asking Chroma for `limit=301`.
+const PAGE_CHUNK_READ_LIMIT: u32 = MAX_TRANSACTION_WRITES as u32;
+const PAGE_CHUNK_OVERFLOW_OFFSET: u32 = MAX_TRANSACTION_WRITES as u32;
 
 /// `^(?:[a-z0-9][a-z0-9-]*|category:[a-z0-9][a-z0-9-]*|)$` — the wiki slug
 /// shape (empty root, lowercase alnum/hyphen, or a `category:<slug>`). The
@@ -178,11 +180,30 @@ pub async fn foundation_upsert_page(
     request.validate().map_err(ChromaValidationError::from)?;
     let categories = normalize_categories(&request.categories);
 
-    let response = run_upsert_page(&server, &headers, &tenant, &request, &categories).await?;
+    let response = match run_upsert_page(&server, &headers, &tenant, &request, &categories).await {
+        Ok(response) => response,
+        Err(err) => {
+            tracing::warn!(
+                tenant = %tenant,
+                slug = %request.slug,
+                code = ?err.code(),
+                error = %err,
+                "wiki upsert-page failed"
+            );
+            return Err(err.into());
+        }
+    };
     Ok(Json(response))
 }
 
 /// Runs the replace flow against the proxied wiki collection.
+#[tracing::instrument(
+    name = "foundation_run_upsert_page",
+    level = "debug",
+    skip_all,
+    fields(tenant = %tenant, slug = %request.slug, expected_version = request.expected_version),
+    err(Display)
+)]
 pub(crate) async fn run_upsert_page(
     server: &FoundationApiServer,
     headers: &HeaderMap,
@@ -229,7 +250,26 @@ pub(crate) async fn run_upsert_page(
         ),
     )
     .await?;
-    if existing.ids.len() > MAX_TRANSACTION_WRITES {
+    if existing.ids.len() == MAX_TRANSACTION_WRITES {
+        let overflow = record_op(
+            wiki_client,
+            tenant,
+            txn.get(
+                None,
+                Some(where_slug(slug)),
+                Some(1),
+                Some(PAGE_CHUNK_OVERFLOW_OFFSET),
+                Some(IncludeList(vec![Include::Metadata])),
+            ),
+        )
+        .await?;
+        if !overflow.ids.is_empty() {
+            return Err(UpsertPageError::TooManyTransactionWrites {
+                writes: MAX_TRANSACTION_WRITES + 1,
+                limit: MAX_TRANSACTION_WRITES,
+            });
+        }
+    } else if existing.ids.len() > MAX_TRANSACTION_WRITES {
         return Err(UpsertPageError::TooManyTransactionWrites {
             writes: existing.ids.len(),
             limit: MAX_TRANSACTION_WRITES,
@@ -645,6 +685,12 @@ mod tests {
             vec!["a".to_string(), "b".to_string()]
         );
         assert_eq!(normalize_categories(&[]), Vec::<String>::new());
+    }
+
+    #[test]
+    fn page_chunk_read_limit_stays_within_chroma_get_limit() {
+        assert_eq!(PAGE_CHUNK_READ_LIMIT as usize, MAX_TRANSACTION_WRITES);
+        assert_eq!(PAGE_CHUNK_OVERFLOW_OFFSET as usize, MAX_TRANSACTION_WRITES);
     }
 
     #[test]
