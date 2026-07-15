@@ -69,29 +69,43 @@ impl ManagerState {
     }
 }
 
-fn required_fragment_start_for_selected(
-    selected: &[AppendWork],
-) -> Result<Option<LogPosition>, Error> {
+fn required_fragment_start_for_selected(selected: &[AppendWork]) -> Option<LogPosition> {
     let mut required_fragment_start = None;
     for work in selected {
         let Some(next_required_fragment_start) = work.required_fragment_start() else {
             continue;
         };
         if let Some(required_fragment_start) = required_fragment_start {
+            debug_assert_eq!(required_fragment_start, next_required_fragment_start);
+        } else {
+            required_fragment_start = Some(next_required_fragment_start);
+        }
+    }
+    required_fragment_start
+}
+
+fn count_compatible_required_fragment_starts(selected: &[AppendWork]) -> usize {
+    let mut required_fragment_start = None;
+    for (index, work) in selected.iter().enumerate() {
+        let Some(next_required_fragment_start) = work.required_fragment_start() else {
+            continue;
+        };
+        if let Some(required_fragment_start) = required_fragment_start {
             if required_fragment_start != next_required_fragment_start {
-                tracing::error!(
+                tracing::info!(
                     ?required_fragment_start,
                     ?next_required_fragment_start,
                     selected_work_count = selected.len(),
-                    "selected wal3 batch has incompatible required_fragment_start values"
+                    compatible_work_count = index,
+                    "splitting wal3 batch on incompatible required_fragment_start"
                 );
-                return Err(Error::LogContentionRetry);
+                return index;
             }
         } else {
             required_fragment_start = Some(next_required_fragment_start);
         }
     }
-    Ok(required_fragment_start)
+    selected.len()
 }
 
 fn take_selected_work(state: &mut ManagerState, split_off: usize) -> Vec<AppendWork> {
@@ -272,18 +286,17 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
             self.write_finished.notify_one();
             return Ok(None);
         }
+        let compatible_split_off =
+            count_compatible_required_fragment_starts(&state.enqueued[..split_off]);
+        if compatible_split_off < split_off {
+            split_off = compatible_split_off;
+            acc_count = state.enqueued[..split_off]
+                .iter()
+                .map(AppendWork::record_count)
+                .sum();
+        }
         let required_fragment_start =
-            match required_fragment_start_for_selected(&state.enqueued[..split_off]) {
-                Ok(required_fragment_start) => required_fragment_start,
-                Err(err) => {
-                    let work = take_selected_work(&mut state, split_off);
-                    if refresh_backoff_after_split(&mut state, &self.options) {
-                        self.write_finished.notify_one();
-                    }
-                    reject_selected_work(work, err);
-                    return Ok(None);
-                }
-            };
+            required_fragment_start_for_selected(&state.enqueued[..split_off]);
         let Some(pointer) =
             state.select_for_write(&self.options.throttle_fragment, manifest_manager, acc_count)?
         else {
@@ -675,81 +688,6 @@ mod tests {
         rx
     }
 
-    struct PanickingS3ManifestPublisher;
-
-    #[async_trait::async_trait]
-    impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for PanickingS3ManifestPublisher {
-        async fn recover(&mut self) -> Result<(), Error> {
-            unreachable!("recover is not used in required-start selection tests")
-        }
-
-        async fn manifest_and_witness(&self) -> Result<ManifestAndWitness, Error> {
-            unreachable!("manifest_and_witness is not used in required-start selection tests")
-        }
-
-        fn assign_timestamp(&self, _record_count: usize) -> Option<(FragmentSeqNo, LogPosition)> {
-            unreachable!("incompatible required starts should fail before timestamp assignment")
-        }
-
-        async fn publish_fragment(
-            &self,
-            _pointer: &(FragmentSeqNo, LogPosition),
-            _path: &str,
-            _messages_len: u64,
-            _num_bytes: u64,
-            _setsum: Setsum,
-            _required_fragment_start: Option<LogPosition>,
-            _successful_regions: &[String],
-        ) -> Result<LogPosition, Error> {
-            unreachable!("publish_fragment is not used in required-start selection tests")
-        }
-
-        async fn garbage_applies_cleanly(&self, _garbage: &Garbage) -> Result<bool, Error> {
-            unreachable!("garbage_applies_cleanly is not used in required-start selection tests")
-        }
-
-        async fn apply_garbage(&self, _garbage: Garbage) -> Result<(), Error> {
-            unreachable!("apply_garbage is not used in required-start selection tests")
-        }
-
-        async fn compute_garbage(
-            &self,
-            _options: &crate::GarbageCollectionOptions,
-            _first_to_keep: LogPosition,
-        ) -> Result<Option<Garbage>, Error> {
-            unreachable!("compute_garbage is not used in required-start selection tests")
-        }
-
-        async fn snapshot_load(
-            &self,
-            _pointer: &SnapshotPointer,
-        ) -> Result<Option<Snapshot>, Error> {
-            unreachable!("snapshot_load is not used in required-start selection tests")
-        }
-
-        async fn snapshot_install(&self, _snapshot: &Snapshot) -> Result<SnapshotPointer, Error> {
-            unreachable!("snapshot_install is not used in required-start selection tests")
-        }
-
-        async fn manifest_head(&self, _witness: &ManifestWitness) -> Result<bool, Error> {
-            unreachable!("manifest_head is not used in required-start selection tests")
-        }
-
-        async fn manifest_load(&self) -> Result<Option<(Manifest, ManifestWitness)>, Error> {
-            unreachable!("manifest_load is not used in required-start selection tests")
-        }
-
-        fn shutdown(&self) {}
-
-        async fn destroy(&self) -> Result<(), Error> {
-            unreachable!("destroy is not used in required-start selection tests")
-        }
-
-        async fn load_intrinsic_cursor(&self) -> Result<Option<LogPosition>, Error> {
-            unreachable!("load_intrinsic_cursor is not used in required-start selection tests")
-        }
-    }
-
     struct FixedS3ManifestPublisher {
         assigned_fragment_start: LogPosition,
     }
@@ -955,9 +893,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mismatched_required_fragment_starts_reject_selected_batch() {
+    async fn mismatched_required_fragment_starts_split_selected_batch() {
         let batch_manager = s3_batch_manager();
-        let first_rx = enqueue_s3(
+        let _first_rx = enqueue_s3(
             &batch_manager,
             Vec::from("first"),
             Some(
@@ -966,7 +904,7 @@ mod tests {
             ),
         )
         .await;
-        let second_rx = enqueue_s3(
+        let mut second_rx = enqueue_s3(
             &batch_manager,
             Vec::from("second"),
             Some(
@@ -977,23 +915,22 @@ mod tests {
         .await;
 
         let selected = batch_manager
-            .take_work(&PanickingS3ManifestPublisher)
+            .take_work(&FixedS3ManifestPublisher {
+                assigned_fragment_start: LogPosition::from_offset(10),
+            })
             .await
-            .expect("required-start rejection should not fail take_work");
+            .expect("required-start split should not fail take_work")
+            .expect("compatible prefix should be selected");
 
-        assert!(selected.is_none());
-        assert_eq!(0, batch_manager.count_waiters());
+        let ((_seq_no, log_position), required_fragment_start, work) = selected;
+        assert_eq!(LogPosition::from_offset(10), log_position);
+        assert_eq!(Some(LogPosition::from_offset(10)), required_fragment_start);
+        assert_eq!(1, work.len());
+        assert_eq!(vec![Vec::from("first")], work[0].messages);
+        assert_eq!(1, batch_manager.count_waiters());
         assert!(matches!(
-            first_rx
-                .await
-                .expect("first append should receive a result"),
-            Err(Error::LogContentionRetry)
-        ));
-        assert!(matches!(
-            second_rx
-                .await
-                .expect("second append should receive a result"),
-            Err(Error::LogContentionRetry)
+            second_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
         ));
     }
 
