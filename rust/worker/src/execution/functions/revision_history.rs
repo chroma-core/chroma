@@ -645,7 +645,15 @@ mod tests {
         let records = vec![
             build_record(
                 "page-1",
-                HashMap::from([("version".to_string(), UpdateMetadataValue::Int(1))]),
+                HashMap::from([
+                    ("version".to_string(), UpdateMetadataValue::Int(1)),
+                    (
+                        "last_written_by".to_string(),
+                        UpdateMetadataValue::Str(
+                            "00000000-0000-0000-0000-000000000001".to_string(),
+                        ),
+                    ),
+                ]),
             ),
             build_record(
                 "page-2",
@@ -689,6 +697,12 @@ mod tests {
         assert_eq!(
             meta.get("original_id"),
             Some(&UpdateMetadataValue::Str("page-1".to_string()))
+        );
+        assert_eq!(
+            meta.get("last_written_by"),
+            Some(&UpdateMetadataValue::Str(
+                "00000000-0000-0000-0000-000000000001".to_string()
+            ))
         );
         assert!(meta.get("archived_at").is_some());
         assert_eq!(rev1.record.document.as_deref(), Some("doc content"));

@@ -108,6 +108,7 @@ mod tests {
             source_ids: Vec::new(),
             version: 7,
             updated_at: Some(1700),
+            last_written_by: None,
             content: "# Welcome\nBody text.".to_string(),
             url: url.map(str::to_string),
         }
