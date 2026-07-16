@@ -28,6 +28,9 @@ pub fn source_kind_for_collection_name(
     if collection_name.contains("coding") || collection_name.contains("agent_sessions") {
         return Ok("coding_agent_session");
     }
+    if collection_name.contains("granola") {
+        return Ok("granola");
+    }
     Err(FoundationSourceKindError::UnknownSourceCollection(
         collection_name.to_string(),
     ))
@@ -93,6 +96,18 @@ mod tests {
         assert_eq!(
             source_kind_for_collection_name("agent_sessions_hammad").unwrap(),
             "coding_agent_session"
+        );
+    }
+
+    #[test]
+    fn detects_granola_source_kind() {
+        assert_eq!(
+            source_kind_for_collection_name("granola").unwrap(),
+            "granola"
+        );
+        assert_eq!(
+            source_kind_for_collection_name("granola_master").unwrap(),
+            "granola"
         );
     }
 }
