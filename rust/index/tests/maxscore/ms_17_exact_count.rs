@@ -185,6 +185,90 @@ async fn untouched_legacy_dimension_keeps_estimate() {
 }
 
 #[tokio::test]
+async fn suffix_fully_deleted_keeps_prefix_count() {
+    const DIM: u32 = 9;
+    // Two full blocks at block size 4: offsets 0..8.
+    let docs: Vec<(u32, Vec<(u32, f32)>)> = (0..8).map(|i| (i, vec![(DIM, 0.5)])).collect();
+    let (_dir, provider, reader) = common::build_index_with_block_size(docs, Some(4)).await;
+    assert_eq!(stored_count(&reader, DIM).await, Some(8));
+
+    // Delete every offset in the tail block only: the rewritten suffix
+    // is empty, but the prefix block survives, so the directory (and
+    // its exact count) must be carried forward from the prefix alone.
+    let writer = common::fork_writer_with_block_size(&provider, &reader, Some(4)).await;
+    for off in 4..8 {
+        writer.delete(off, vec![DIM]).await;
+    }
+    let reader2 = common::commit_writer(&provider, writer).await;
+
+    assert_eq!(common::count_blocks(&reader2, DIM).await, 1);
+    assert_eq!(stored_count(&reader2, DIM).await, Some(4));
+    assert_eq!(count(&reader2, DIM).await, 4);
+    assert_eq!(recount(&reader2, DIM).await, 4);
+}
+
+#[tokio::test]
+async fn rolling_downgrade_estimates_then_converges() {
+    const DIM: u32 = 11;
+    // 10 entries at block size 4 → blocks of 4/4/2, so the legacy
+    // estimate (num_blocks * first_block_len) would report 12.
+    let docs: Vec<(u32, Vec<(u32, f32)>)> = (0..10).map(|i| (i, vec![(DIM, 0.5)])).collect();
+    let (_dir, provider, reader) = common::build_index_with_block_size(docs, Some(4)).await;
+    assert_eq!(stored_count(&reader, DIM).await, Some(10));
+
+    // Simulate a rolling downgrade: an old writer forks the index and
+    // rewrites the directory part without a count stamp (version 0),
+    // exactly as any pre-count writer would serialize it.
+    let encoded_dim = encode_u32(DIM);
+    let (dir, _) = reader
+        .get_directory(&encoded_dim)
+        .await
+        .unwrap()
+        .expect("directory should exist");
+    let legacy_part = DirectoryBlock::new(dir.max_offsets(), dir.max_weights()).unwrap();
+    let posting_writer = provider
+        .write::<u32, SparsePostingBlock>(
+            BlockfileWriterOptions::new("".to_string())
+                .ordered_mutations()
+                .max_block_size_bytes(SPARSE_POSTING_BLOCK_SIZE_BYTES)
+                .fork(reader.posting_id()),
+        )
+        .await
+        .unwrap();
+    let dir_prefix = format!("{}{}", DIRECTORY_PREFIX, encoded_dim);
+    posting_writer
+        .set(dir_prefix.as_str(), 0u32, legacy_part.into_block())
+        .await
+        .unwrap();
+    let flusher = posting_writer
+        .commit::<u32, SparsePostingBlock>()
+        .await
+        .unwrap();
+    let posting_id = flusher.id();
+    flusher.flush::<u32, SparsePostingBlock>().await.unwrap();
+    let posting_reader = provider
+        .read::<u32, SparsePostingBlock>(BlockfileReaderOptions::new(posting_id, "".to_string()))
+        .await
+        .unwrap();
+    let reader2 = MaxScoreReader::new(posting_reader);
+
+    // The count stamp is gone; the reader degrades to the estimate.
+    assert_eq!(stored_count(&reader2, DIM).await, None);
+    assert_eq!(count(&reader2, DIM).await, 12, "estimate after downgrade");
+    assert_eq!(recount(&reader2, DIM).await, 10);
+
+    // Convergence: the next new-writer commit that touches the dimension
+    // re-backfills the exact count from the prefix block headers.
+    let writer = common::fork_writer_with_block_size(&provider, &reader2, Some(4)).await;
+    writer.set(100, vec![(DIM, 0.9)]).await;
+    let reader3 = common::commit_writer(&provider, writer).await;
+
+    assert_eq!(stored_count(&reader3, DIM).await, Some(11));
+    assert_eq!(count(&reader3, DIM).await, 11);
+    assert_eq!(recount(&reader3, DIM).await, 11);
+}
+
+#[tokio::test]
 async fn count_stays_exact_across_mixed_commits() {
     const DIM: u32 = 1;
     let docs: Vec<(u32, Vec<(u32, f32)>)> = (0..20)

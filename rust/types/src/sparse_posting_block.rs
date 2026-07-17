@@ -809,6 +809,17 @@ impl Directory {
                     // count stored" — surface it to the caller.
                     Err(err) => return Err(err),
                 };
+            } else {
+                // Only part 0 may carry a count stamp (`into_parts`
+                // stamps nothing else); a stamp on a later part means
+                // the directory was mis-assembled.
+                debug_assert!(
+                    matches!(
+                        part.posting_count(),
+                        Err(SparsePostingBlockError::MissingPostingCount { .. })
+                    ),
+                    "count stamp on non-initial directory part {i}"
+                );
             }
             let (o, w) = part.entries();
             max_offsets.extend(o);
