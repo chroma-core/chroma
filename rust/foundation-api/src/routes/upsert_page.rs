@@ -204,7 +204,7 @@ async fn upsert_page(
 
     let mut txn = collection.conditional();
     let chunk0 = ChunkRecordId::new(slug, 0).to_string();
-    record_op(
+    let chunk0_response = record_op(
         wiki_client,
         tenant,
         txn.get(
@@ -237,8 +237,7 @@ async fn upsert_page(
     }
 
     let existing_ids = existing.ids.clone();
-    let exists = !existing_ids.is_empty();
-    let existing_meta = head_metadata(&existing);
+    let (exists, existing_meta) = existing_page_state(&existing, &chunk0_response);
     let actual_version = current_version(exists, existing_meta.as_ref());
     if request.expected_version != actual_version {
         return Err(UpsertPageError::VersionConflict {
@@ -268,18 +267,22 @@ async fn upsert_page(
                     now
                 }
             };
-            let version =
-                actual_version
-                    .checked_add(1)
-                    .ok_or_else(|| UpsertPageError::VersionOverflow {
-                        slug: slug.to_string(),
-                    })?;
-            if meta_version(meta).is_none() {
-                tracing::warn!(
-                    slug = %slug,
-                    "existing wiki page has no integer version; resetting to 1"
-                );
-            }
+            let version = match meta_version(meta) {
+                Some(version) => {
+                    version
+                        .checked_add(1)
+                        .ok_or_else(|| UpsertPageError::VersionOverflow {
+                            slug: slug.to_string(),
+                        })?
+                }
+                None => {
+                    tracing::warn!(
+                        slug = %slug,
+                        "existing wiki page has no positive integer version; resetting to 1"
+                    );
+                    1
+                }
+            };
             ("updated", created_at, version)
         }
         (true, None) => {
@@ -449,16 +452,25 @@ fn head_metadata(response: &GetResponse) -> Option<Metadata> {
         .cloned()
 }
 
+fn existing_page_state(existing: &GetResponse, chunk0: &GetResponse) -> (bool, Option<Metadata>) {
+    (
+        !existing.ids.is_empty() || !chunk0.ids.is_empty(),
+        head_metadata(existing).or_else(|| head_metadata(chunk0)),
+    )
+}
+
 fn current_version(exists: bool, meta: Option<&Metadata>) -> u32 {
     if exists {
-        meta.and_then(meta_version).unwrap_or(0)
+        meta.and_then(meta_version).unwrap_or(1)
     } else {
         0
     }
 }
 
 fn meta_version(meta: &Metadata) -> Option<u32> {
-    meta_int(meta, "version").and_then(|version| u32::try_from(version).ok())
+    meta_int(meta, "version")
+        .and_then(|version| u32::try_from(version).ok())
+        .filter(|version| *version > 0)
 }
 
 fn meta_int(meta: &Metadata, key: &str) -> Option<i64> {
@@ -569,6 +581,18 @@ mod tests {
         meta
     }
 
+    fn get_response(ids: &[&str], metadatas: Option<Vec<Option<Metadata>>>) -> GetResponse {
+        GetResponse {
+            ids: ids.iter().map(|id| id.to_string()).collect(),
+            embeddings: None,
+            documents: None,
+            uris: None,
+            metadatas,
+            include: vec![Include::Metadata],
+            occ_read_token: None,
+        }
+    }
+
     #[test]
     fn validate_slug_accepts_root_and_well_formed_slugs() {
         validate_slug("").unwrap();
@@ -640,29 +664,48 @@ mod tests {
     }
 
     #[test]
-    fn current_version_reads_metadata_and_defaults_absent_pages_to_zero() {
+    fn current_version_reads_metadata_and_treats_corrupt_pages_as_present() {
         let meta = chunk_meta(0, Some(7));
 
         assert_eq!(current_version(true, Some(&meta)), 7);
         assert_eq!(current_version(false, Some(&meta)), 0);
-        assert_eq!(current_version(true, Some(&chunk_meta(0, None))), 0);
-        assert_eq!(current_version(true, None), 0);
+        assert_eq!(current_version(true, Some(&chunk_meta(0, None))), 1);
+        assert_eq!(current_version(true, Some(&chunk_meta(0, Some(0)))), 1);
+        assert_eq!(current_version(true, None), 1);
+    }
+
+    #[test]
+    fn existing_page_state_uses_exact_chunk0_read_for_metadata_less_rows() {
+        let existing = get_response(&[], Some(vec![]));
+        let chunk0 = get_response(&["page-0"], Some(vec![None]));
+
+        let (exists, meta) = existing_page_state(&existing, &chunk0);
+
+        assert!(exists);
+        assert!(meta.is_none());
+        assert_eq!(current_version(exists, meta.as_ref()), 1);
+    }
+
+    #[test]
+    fn existing_page_state_falls_back_to_chunk0_metadata() {
+        let existing = get_response(&[], Some(vec![]));
+        let chunk0 = get_response(&["page-0"], Some(vec![Some(chunk_meta(0, Some(4)))]));
+
+        let (exists, meta) = existing_page_state(&existing, &chunk0);
+
+        assert!(exists);
+        assert_eq!(meta.as_ref().and_then(meta_version), Some(4));
     }
 
     #[test]
     fn head_metadata_picks_lowest_chunk_id() {
-        let response = GetResponse {
-            ids: vec!["page-1".to_string(), "page-0".to_string()],
-            embeddings: None,
-            documents: None,
-            uris: None,
-            metadatas: Some(vec![
+        let response = get_response(
+            &["page-1", "page-0"],
+            Some(vec![
                 Some(chunk_meta(1, Some(4))),
                 Some(chunk_meta(0, Some(3))),
             ]),
-            include: vec![Include::Metadata],
-            occ_read_token: None,
-        };
+        );
 
         let head = head_metadata(&response).expect("head metadata");
 
