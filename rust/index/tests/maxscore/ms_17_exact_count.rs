@@ -19,7 +19,7 @@ async fn stored_count(reader: &MaxScoreReader<'_>, dim: u32) -> Option<u32> {
         .await
         .unwrap()
         .expect("directory should exist");
-    dir.posting_count()
+    dir.posting_count().ok()
 }
 
 /// Brute-force recount: total entries actually stored for a dimension.

@@ -59,6 +59,24 @@ impl MaxScoreFlusher {
     }
 }
 
+/// Attach an exact posting count to a directory, if it fits in the
+/// version-1 header slot (u32).
+///
+/// A dimension holds at most one posting per u32 offset, so the count
+/// can only exceed `u32::MAX` in the degenerate case where all 2^32
+/// offsets carry the dimension (or if an already-corrupt stored count
+/// was carried forward). Rather than fabricate a saturated count —
+/// which [`MaxScoreReader::count_postings`] would report as a real
+/// document frequency, collapsing the term's IDF to ~0 and silently
+/// dropping it from scoring — leave the directory uncounted (legacy
+/// version-0 semantics) so readers fall back to the estimate path.
+fn with_exact_count(directory: Directory, count: u64) -> Directory {
+    match u32::try_from(count) {
+        Ok(count) => directory.with_posting_count(count),
+        Err(_) => directory,
+    }
+}
+
 // ── MaxScoreWriter ───────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -201,8 +219,8 @@ impl<'me> MaxScoreWriter<'me> {
                 // block headers (bodies stay encoded); the commit below
                 // upgrades the directory to version 1.
                 let prefix_count = match directory.posting_count() {
-                    Some(old_count) => (old_count as u64).saturating_sub(suffix_old_len),
-                    None => match self.old_reader {
+                    Ok(old_count) => (old_count as u64).saturating_sub(suffix_old_len),
+                    Err(_) => match self.old_reader {
                         Some(ref reader) => {
                             reader
                                 .count_posting_entries_below(encoded_dim, first_affected)
@@ -291,8 +309,8 @@ impl<'me> MaxScoreWriter<'me> {
                 // distinguishable from real adds/removes), but the loaded
                 // suffix lengths can.
                 let new_count = prefix_count + sorted_suffix.len() as u64;
-                let directory = Directory::new(dir_max_offsets, dir_max_weights)?
-                    .with_posting_count(u32::try_from(new_count).unwrap_or(u32::MAX));
+                let directory =
+                    with_exact_count(Directory::new(dir_max_offsets, dir_max_weights)?, new_count);
                 dir_work.push(DirWork {
                     prefix: dir_prefix,
                     directory: Some(directory),
@@ -327,8 +345,10 @@ impl<'me> MaxScoreWriter<'me> {
                         .await?;
                 }
 
-                let directory = Directory::new(dir_max_offsets, dir_max_weights)?
-                    .with_posting_count(u32::try_from(entries.len()).unwrap_or(u32::MAX));
+                let directory = with_exact_count(
+                    Directory::new(dir_max_offsets, dir_max_weights)?,
+                    entries.len() as u64,
+                );
                 dir_work.push(DirWork {
                     prefix: dir_prefix,
                     directory: Some(directory),
@@ -476,8 +496,15 @@ impl<'me> MaxScoreReader<'me> {
         let Some((dir, _)) = self.get_directory(encoded_dim).await? else {
             return Ok(0);
         };
-        if let Some(count) = dir.posting_count() {
-            return Ok(count as usize);
+        match dir.posting_count() {
+            Ok(count) => return Ok(count as usize),
+            Err(err) => {
+                tracing::debug!(
+                    dim = encoded_dim,
+                    %err,
+                    "no exact posting count stored; falling back to estimate"
+                );
+            }
         }
         let num_blocks = dir.num_blocks();
         if num_blocks == 0 {
@@ -1088,6 +1115,35 @@ mod tests {
         let mut scores = vec![0.1; 8];
         filter_competitive(&mut docs, &mut scores, 1.0);
         assert!(docs.is_empty());
+    }
+
+    #[test]
+    fn with_exact_count_stores_fitting_count() {
+        let dir = Directory::new(vec![10], vec![0.5]).unwrap();
+        let dir = with_exact_count(dir, 42);
+        assert_eq!(dir.posting_count().unwrap(), 42);
+
+        let dir = Directory::new(vec![10], vec![0.5]).unwrap();
+        let dir = with_exact_count(dir, u32::MAX as u64);
+        assert_eq!(dir.posting_count().unwrap(), u32::MAX);
+    }
+
+    #[test]
+    fn with_exact_count_overflow_leaves_uncounted() {
+        // A count that cannot fit in the version-1 header slot must not
+        // be fabricated (e.g. saturated to u32::MAX, which the IDF
+        // operator would treat as a real document frequency). The
+        // directory stays uncounted so readers use the estimate path.
+        let dir = Directory::new(vec![10], vec![0.5]).unwrap();
+        let dir = with_exact_count(dir, u32::MAX as u64 + 1);
+        assert!(matches!(
+            dir.posting_count(),
+            Err(SparsePostingBlockError::MissingPostingCount { .. })
+        ));
+
+        let dir = Directory::new(vec![10], vec![0.5]).unwrap();
+        let dir = with_exact_count(dir, u64::MAX);
+        assert!(dir.posting_count().is_err());
     }
 
     #[test]

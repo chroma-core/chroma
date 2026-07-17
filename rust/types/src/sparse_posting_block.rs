@@ -77,6 +77,11 @@ pub enum SparsePostingBlockError {
     TruncatedBody { expected: usize, actual: usize },
     #[error("invalid bits_per_delta: {value} (expected 0..=32 or 0xFF for directory)")]
     InvalidBitsPerDelta { value: u8 },
+    #[error(
+        "directory carries no exact posting count (format version {version}); \
+         only part 0 of a version-{DIRECTORY_VERSION_COUNTED} directory stores one"
+    )]
+    MissingPostingCount { version: u8 },
 }
 
 /// Header read from the first 16 bytes of a serialized block.
@@ -670,11 +675,18 @@ impl DirectoryBlock {
         self.0.header.num_entries as usize
     }
 
-    /// Exact posting count carried by this part, if any. Only part 0 of
-    /// a version-1 directory stores one; legacy (version-0) parts and
-    /// non-initial parts return `None`.
-    pub fn posting_count(&self) -> Option<u32> {
-        (self.0.header.version == DIRECTORY_VERSION_COUNTED).then_some(self.0.header.min_offset)
+    /// Exact posting count carried by this part. Only part 0 of a
+    /// version-1 directory stores one; legacy (version-0) parts and
+    /// non-initial parts yield a descriptive
+    /// [`SparsePostingBlockError::MissingPostingCount`] error.
+    pub fn posting_count(&self) -> Result<u32, SparsePostingBlockError> {
+        if self.0.header.version == DIRECTORY_VERSION_COUNTED {
+            Ok(self.0.header.min_offset)
+        } else {
+            Err(SparsePostingBlockError::MissingPostingCount {
+                version: self.0.header.version,
+            })
+        }
     }
 
     /// Stamp this part as version 1, storing the dimension's exact
@@ -787,7 +799,10 @@ impl Directory {
         let mut posting_count = None;
         for (i, part) in parts.into_iter().enumerate() {
             if i == 0 {
-                posting_count = part.posting_count();
+                // Legacy (version-0) part 0 carries no count; the merged
+                // directory stays uncounted and readers fall back to
+                // estimating.
+                posting_count = part.posting_count().ok();
             }
             let (o, w) = part.entries();
             max_offsets.extend(o);
@@ -837,10 +852,15 @@ impl Directory {
         self.max_offsets.len()
     }
 
-    /// Exact posting count across all posting blocks, if this directory
-    /// carries one (format version 1). Legacy directories return `None`.
-    pub fn posting_count(&self) -> Option<u32> {
+    /// Exact posting count across all posting blocks (format version 1).
+    /// Legacy (version-0) directories carry none and yield a descriptive
+    /// [`SparsePostingBlockError::MissingPostingCount`] error; readers
+    /// fall back to estimating in that case.
+    pub fn posting_count(&self) -> Result<u32, SparsePostingBlockError> {
         self.posting_count
+            .ok_or(SparsePostingBlockError::MissingPostingCount {
+                version: DIRECTORY_VERSION_LEGACY,
+            })
     }
 
     /// Maximum directory entries per [`DirectoryBlock`] part that fit
@@ -1461,19 +1481,24 @@ mod tests {
         let dir = Directory::new(offsets.clone(), weights.clone())
             .unwrap()
             .with_posting_count(1234);
-        assert_eq!(dir.posting_count(), Some(1234));
+        assert_eq!(dir.posting_count().unwrap(), 1234);
 
         let parts = dir.into_parts(100);
         assert_eq!(parts.len(), 1);
-        assert_eq!(parts[0].posting_count(), Some(1234));
+        assert_eq!(parts[0].posting_count().unwrap(), 1234);
 
         let bytes = parts[0].clone().into_block().serialize();
+        assert_eq!(
+            bytes[3], DIRECTORY_VERSION_COUNTED,
+            "version stamp at byte 3"
+        );
+        assert_eq!(&bytes[4..8], 1234u32.to_le_bytes().as_slice());
         let restored =
             DirectoryBlock::from_block(SparsePostingBlock::deserialize(&bytes).unwrap()).unwrap();
-        assert_eq!(restored.posting_count(), Some(1234));
+        assert_eq!(restored.posting_count().unwrap(), 1234);
 
         let merged = Directory::from_parts(vec![restored]).unwrap();
-        assert_eq!(merged.posting_count(), Some(1234));
+        assert_eq!(merged.posting_count().unwrap(), 1234);
         assert_eq!(merged.max_offsets(), &offsets[..]);
         assert_eq!(merged.max_weights(), &weights[..]);
     }
@@ -1486,13 +1511,16 @@ mod tests {
             .with_posting_count(42);
         let parts = dir.into_parts(30);
         assert_eq!(parts.len(), 4);
-        assert_eq!(parts[0].posting_count(), Some(42));
+        assert_eq!(parts[0].posting_count().unwrap(), 42);
         for part in &parts[1..] {
-            assert_eq!(part.posting_count(), None);
+            assert!(matches!(
+                part.posting_count(),
+                Err(SparsePostingBlockError::MissingPostingCount { version: 0 })
+            ));
         }
 
         let merged = Directory::from_parts(parts).unwrap();
-        assert_eq!(merged.posting_count(), Some(42));
+        assert_eq!(merged.posting_count().unwrap(), 42);
         assert_eq!(merged.max_offsets(), &offsets[..]);
         assert_eq!(merged.max_weights(), &weights[..]);
     }
@@ -1500,16 +1528,22 @@ mod tests {
     #[test]
     fn legacy_directory_reports_no_posting_count() {
         let dir_block = DirectoryBlock::new(&[10, 20, 30], &[0.5, 0.9, 0.2]).unwrap();
-        assert_eq!(dir_block.posting_count(), None);
+        assert!(matches!(
+            dir_block.posting_count(),
+            Err(SparsePostingBlockError::MissingPostingCount { version: 0 })
+        ));
 
         let bytes = dir_block.into_block().serialize();
         assert_eq!(bytes[3], DIRECTORY_VERSION_LEGACY, "legacy version byte");
         let restored =
             DirectoryBlock::from_block(SparsePostingBlock::deserialize(&bytes).unwrap()).unwrap();
-        assert_eq!(restored.posting_count(), None);
+        assert!(restored.posting_count().is_err());
 
         let merged = Directory::from_parts(vec![restored]).unwrap();
-        assert_eq!(merged.posting_count(), None);
+        assert!(matches!(
+            merged.posting_count(),
+            Err(SparsePostingBlockError::MissingPostingCount { version: 0 })
+        ));
     }
 
     #[test]
@@ -1566,6 +1600,59 @@ mod tests {
         assert_eq!(bytes[3], 0);
         let hdr = SparsePostingBlock::peek_header(&bytes).unwrap();
         assert_eq!(hdr.version, 0);
+    }
+
+    #[test]
+    fn mutated_version_byte_leaves_legacy_fields_intact() {
+        // Byte 3 was a reserved (always-zero) header byte before it became
+        // a version stamp. Readers that predate versioning never consumed
+        // it, so deserialization must accept ANY value there and every
+        // legacy-visible field must keep its byte-identical meaning —
+        // proving that stamping a future version cannot break old readers.
+        let stamps = [1u8, 2, 0x7F, 0xFE, 0xFF];
+
+        // Posting block: offsets, weights, and header fields must decode
+        // identically regardless of the stamp. The baseline is itself a
+        // round-tripped block so weights carry the same f16 quantization.
+        let bytes = make_block(&[(10, 0.5), (20, 0.9), (300, 0.25)]).serialize();
+        let mut baseline = SparsePostingBlock::deserialize(&bytes).unwrap();
+        let (expected_offsets, expected_values) = baseline.decode();
+        let (expected_offsets, expected_values) =
+            (expected_offsets.to_vec(), expected_values.to_vec());
+        for stamp in stamps {
+            let mut mutated = bytes.clone();
+            mutated[3] = stamp;
+            let mut block = SparsePostingBlock::deserialize(&mutated).unwrap();
+            assert_eq!(block.header.version, stamp);
+            assert!(!block.is_directory());
+            assert_eq!(block.header.num_entries, baseline.header.num_entries);
+            assert_eq!(block.header.bits_per_delta, baseline.header.bits_per_delta);
+            assert_eq!(block.header.min_offset, baseline.header.min_offset);
+            assert_eq!(block.header.max_offset, baseline.header.max_offset);
+            assert_eq!(block.header.max_weight, baseline.header.max_weight);
+            let (offsets, values) = block.decode();
+            assert_eq!(offsets, expected_offsets, "stamp {stamp:#04x}");
+            assert_eq!(values, expected_values, "stamp {stamp:#04x}");
+        }
+
+        // Directory part: entries, block count, and dimension max weight
+        // must survive any stamp. (Version-gated extras like the posting
+        // count are exactly the fields legacy readers never look at.)
+        let dir_block = DirectoryBlock::new(&[10, 20, 30], &[0.5, 0.9, 0.2]).unwrap();
+        let expected_entries = dir_block.entries();
+        let expected_num_blocks = dir_block.num_blocks();
+        let expected_dim_max = dir_block.dim_max_weight();
+        let dir_bytes = dir_block.into_block().serialize();
+        for stamp in stamps {
+            let mut mutated = dir_bytes.clone();
+            mutated[3] = stamp;
+            let restored =
+                DirectoryBlock::from_block(SparsePostingBlock::deserialize(&mutated).unwrap())
+                    .unwrap();
+            assert_eq!(restored.num_blocks(), expected_num_blocks);
+            assert_eq!(restored.dim_max_weight(), expected_dim_max);
+            assert_eq!(restored.entries(), expected_entries, "stamp {stamp:#04x}");
+        }
     }
 
     #[test]
