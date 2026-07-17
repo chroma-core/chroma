@@ -180,20 +180,10 @@ pub async fn foundation_upsert_page(
     request.validate().map_err(ChromaValidationError::from)?;
     let categories = normalize_categories(&request.categories);
 
-    let response = match run_upsert_page(&server, &headers, &tenant, &request, &categories).await {
-        Ok(response) => response,
-        Err(err) => {
-            tracing::warn!(
-                tenant = %tenant,
-                slug = %request.slug,
-                code = ?err.code(),
-                error = %err,
-                "wiki upsert-page failed"
-            );
-            return Err(err.into());
-        }
-    };
-    Ok(Json(response))
+    match run_upsert_page(&server, &headers, &tenant, &request, &categories).await {
+        Ok(response) => Ok(Json(response)),
+        Err(err) => Err(err.into()),
+    }
 }
 
 /// Runs the replace flow against the proxied wiki collection.

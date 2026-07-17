@@ -108,20 +108,10 @@ pub async fn foundation_apply_patch(
 
     request.validate().map_err(ChromaValidationError::from)?;
 
-    let response = match run_apply_patch(&server, &headers, &tenant, &request).await {
-        Ok(response) => response,
-        Err(err) => {
-            tracing::warn!(
-                tenant = %tenant,
-                slug = %request.slug,
-                code = ?err.code(),
-                error = %err,
-                "wiki apply-patch failed"
-            );
-            return Err(err.into());
-        }
-    };
-    Ok(Json(response))
+    match run_apply_patch(&server, &headers, &tenant, &request).await {
+        Ok(response) => Ok(Json(response)),
+        Err(err) => Err(err.into()),
+    }
 }
 
 /// Reads, patches, and writes a wiki page through the upsert-page flow.
