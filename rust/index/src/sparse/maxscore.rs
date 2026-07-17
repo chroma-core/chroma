@@ -187,14 +187,18 @@ impl<'me> MaxScoreWriter<'me> {
             // forked blockfile.
             //
             // Fallback: if there is no old reader or no directory, we do
-            // a full write (same as a fresh dimension).
-            let old_directory = if let Some(ref reader) = self.old_reader {
-                reader.get_directory(encoded_dim).await?
-            } else {
-                None
+            // a full write (same as a fresh dimension). The reader travels
+            // with the directory it came from, so the suffix-rewrite arm
+            // below always has both or neither.
+            let old_state = match self.old_reader {
+                Some(ref reader) => reader
+                    .get_directory(encoded_dim)
+                    .await?
+                    .map(|(directory, part_count)| (reader, directory, part_count)),
+                None => None,
             };
 
-            if let Some((ref directory, old_dir_part_count)) = old_directory {
+            if let Some((reader, ref directory, old_dir_part_count)) = old_state {
                 let old_block_count = directory.num_blocks() as u32;
 
                 // Find the smallest offset touched by any delta.
@@ -210,13 +214,9 @@ impl<'me> MaxScoreWriter<'me> {
                     as u32;
 
                 // Load only the suffix of posting blocks.
-                let suffix_blocks = if let Some(ref reader) = self.old_reader {
-                    reader
-                        .get_posting_blocks_range(encoded_dim, first_affected)
-                        .await?
-                } else {
-                    vec![]
-                };
+                let suffix_blocks = reader
+                    .get_posting_blocks_range(encoded_dim, first_affected)
+                    .await?;
                 let suffix_old_len: u64 = suffix_blocks.iter().map(|b| b.len() as u64).sum();
 
                 // Postings in the untouched prefix blocks [0, first_affected).
@@ -247,15 +247,33 @@ impl<'me> MaxScoreWriter<'me> {
                     }
                 };
                 let prefix_count = match stored_count {
-                    Some(old_count) => (old_count as u64).saturating_sub(suffix_old_len),
-                    None => match self.old_reader {
-                        Some(ref reader) => {
+                    Some(old_count) => match (old_count as u64).checked_sub(suffix_old_len) {
+                        Some(count) => count,
+                        // Underflow: the stored count is smaller than the
+                        // suffix we just loaded, so it is corrupt (or a
+                        // past writer bug). Don't launder it into a
+                        // plausible prefix count — recount from the prefix
+                        // block headers, which trusts no directory state;
+                        // the commit below persists the corrected count,
+                        // so the dimension self-heals on this touch.
+                        None => {
+                            tracing::warn!(
+                                dim = encoded_dim,
+                                stored_count = old_count,
+                                suffix_len = suffix_old_len,
+                                "stored posting count smaller than rewritten \
+                                 suffix; recounting prefix from block headers"
+                            );
                             reader
                                 .count_posting_entries_below(encoded_dim, first_affected)
                                 .await?
                         }
-                        None => 0,
                     },
+                    None => {
+                        reader
+                            .count_posting_entries_below(encoded_dim, first_affected)
+                            .await?
+                    }
                 };
 
                 // Decompress suffix blocks into entries.

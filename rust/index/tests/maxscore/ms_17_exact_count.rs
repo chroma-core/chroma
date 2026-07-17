@@ -7,7 +7,7 @@ use chroma_blockstore::{
 };
 use chroma_index::sparse::maxscore::{MaxScoreReader, SPARSE_POSTING_BLOCK_SIZE_BYTES};
 use chroma_index::sparse::types::encode_u32;
-use chroma_types::{DirectoryBlock, SparsePostingBlock, DIRECTORY_PREFIX};
+use chroma_types::{Directory, DirectoryBlock, SparsePostingBlock, DIRECTORY_PREFIX};
 
 async fn count(reader: &MaxScoreReader<'_>, dim: u32) -> usize {
     reader.count_postings(&encode_u32(dim)).await.unwrap()
@@ -266,6 +266,75 @@ async fn rolling_downgrade_estimates_then_converges() {
     assert_eq!(stored_count(&reader3, DIM).await, Some(11));
     assert_eq!(count(&reader3, DIM).await, 11);
     assert_eq!(recount(&reader3, DIM).await, 11);
+}
+
+#[tokio::test]
+async fn corrupt_stored_count_self_heals_on_touch() {
+    const DIM: u32 = 13;
+    // 10 entries at block size 4 → blocks of 4/4/2.
+    let docs: Vec<(u32, Vec<(u32, f32)>)> = (0..10).map(|i| (i, vec![(DIM, 0.5)])).collect();
+    let (_dir, provider, reader) = common::build_index_with_block_size(docs, Some(4)).await;
+    assert_eq!(stored_count(&reader, DIM).await, Some(10));
+
+    // Corrupt the stored count: rewrite the directory part with a
+    // deliberately-low count of 1, as a buggy past writer might have
+    // persisted. Same raw-write pattern as the rolling-downgrade test.
+    let encoded_dim = encode_u32(DIM);
+    let (dir, _) = reader
+        .get_directory(&encoded_dim)
+        .await
+        .unwrap()
+        .expect("directory should exist");
+    let corrupt_part = Directory::new(dir.max_offsets().to_vec(), dir.max_weights().to_vec())
+        .unwrap()
+        .with_posting_count(1)
+        .into_parts(100)
+        .remove(0);
+    let posting_writer = provider
+        .write::<u32, SparsePostingBlock>(
+            BlockfileWriterOptions::new("".to_string())
+                .ordered_mutations()
+                .max_block_size_bytes(SPARSE_POSTING_BLOCK_SIZE_BYTES)
+                .fork(reader.posting_id()),
+        )
+        .await
+        .unwrap();
+    let dir_prefix = format!("{}{}", DIRECTORY_PREFIX, encoded_dim);
+    posting_writer
+        .set(dir_prefix.as_str(), 0u32, corrupt_part.into_block())
+        .await
+        .unwrap();
+    let flusher = posting_writer
+        .commit::<u32, SparsePostingBlock>()
+        .await
+        .unwrap();
+    let posting_id = flusher.id();
+    flusher.flush::<u32, SparsePostingBlock>().await.unwrap();
+    let posting_reader = provider
+        .read::<u32, SparsePostingBlock>(BlockfileReaderOptions::new(posting_id, "".to_string()))
+        .await
+        .unwrap();
+    let reader2 = MaxScoreReader::new(posting_reader);
+
+    assert_eq!(stored_count(&reader2, DIM).await, Some(1));
+    assert_eq!(recount(&reader2, DIM).await, 10);
+
+    // Suffix rewrite that underflows the corrupt count: overwriting
+    // offset 5 (block 1) makes blocks 1..3 the rewritten suffix — 6 old
+    // entries against a stored count of 1. The writer must detect the
+    // underflow and recount the prefix from block headers instead of
+    // laundering a saturated 0 into the new count.
+    let writer = common::fork_writer_with_block_size(&provider, &reader2, Some(4)).await;
+    writer.set(5, vec![(DIM, 0.9)]).await;
+    let reader3 = common::commit_writer(&provider, writer).await;
+
+    assert_eq!(
+        stored_count(&reader3, DIM).await,
+        Some(10),
+        "count self-heals to the true value"
+    );
+    assert_eq!(count(&reader3, DIM).await, 10);
+    assert_eq!(recount(&reader3, DIM).await, 10);
 }
 
 #[tokio::test]
