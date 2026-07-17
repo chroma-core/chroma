@@ -5,7 +5,7 @@ use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use foundation_api::trajectories::GenerateTrajectoryFile;
+use foundation_api::trajectories::ReasoningTrajectoryFile;
 
 /// Run the trajectory parser over explicit paths or the default tree.
 fn main() -> ExitCode {
@@ -63,11 +63,11 @@ fn parse_paths(paths: &[PathBuf], print_each: bool) -> ExitCode {
     }
 }
 
-/// Parse one JSON file as a generated trajectory file.
+/// Parse one JSON file as a reasoning trajectory projection.
 fn parse_path(path: &Path) -> Result<(), String> {
     let file = File::open(path).map_err(|err| format!("open: {err}"))?;
     let reader = BufReader::new(file);
-    serde_json::from_reader::<_, GenerateTrajectoryFile>(reader)
+    serde_json::from_reader::<_, ReasoningTrajectoryFile>(reader)
         .map(|_| ())
         .map_err(|err| format!("parse: {err}"))
 }

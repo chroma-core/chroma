@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::io;
 
-use super::chunkset::{push_chunkset, push_json_record, utf8_chunks};
+use super::chunkset::{push_json_record, utf8_chunks};
 use super::citations::{read_citations, write_citations};
 use super::ids::{
     decode_fixed_base36_to_be_bytes, decode_index, encode_be_bytes_base36, encode_index, hex_lower,
@@ -26,7 +26,7 @@ use chroma::{
 use chroma_types::Collection;
 use httpmock::MockServer;
 use proptest::prelude::*;
-use serde_json::json;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -67,102 +67,21 @@ fn collection_path(collection: &ChromaCollection, suffix: &str) -> String {
     )
 }
 
-/// Construct the sample tool used by round-trip fixtures.
-fn sample_tool() -> Tool {
-    Tool {
-        tool_schema: ToolSchema {
-            name: "wiki_upsert_file".to_string(),
-            description: "write a page".to_string(),
-            parameters: json!({"type": "object"}),
-            required: vec!["slug".to_string()],
-            extra: BTreeMap::new(),
-        },
-        extra: BTreeMap::new(),
+/// Construct a pruned reasoning entry.
+fn reasoning_entry(reasoning: Option<String>, writes: &[&str]) -> ReasoningEntry {
+    ReasoningEntry {
+        reasoning,
+        writes: writes
+            .iter()
+            .map(|slug| ReasoningWrite {
+                slug: (*slug).to_string(),
+            })
+            .collect(),
     }
 }
 
-/// Construct a representative generated trajectory fixture.
-fn sample_file(id: Uuid) -> GenerateTrajectoryFile {
-    let mut final_citations = BTreeMap::new();
-    final_citations.insert("page-a".to_string(), json!(["source:1", "source:2"]));
-    let mut categories_assigned = BTreeMap::new();
-    categories_assigned.insert("page-a".to_string(), json!(["systems"]));
-    let mut citation_extra = BTreeMap::new();
-    citation_extra.insert("custom".to_string(), json!({"kept": true}));
-
-    GenerateTrajectoryFile {
-        batch_index: Some(1),
-        batch_offset: Some(10),
-        worker_id: Some("w01".to_string()),
-        span: Some(Span::Text("span".to_string())),
-        attempt_id: Some(2),
-        deadlock_retries: Some(0),
-        attempt_paths: Some(vec![json!("attempt")]),
-        started_at: Some(StringOrNumber::String("2026-06-29T00:00:00Z".to_string())),
-        duration_seconds: Some(1.25),
-        status: Some("completed".to_string()),
-        error: None,
-        usage: Some(Usage {
-            n_calls: Some(2),
-            input_tokens: Some(100),
-            output_tokens: Some(50),
-            cache_read_tokens: None,
-            cache_write_tokens: None,
-            cost_usd: Some(0.01),
-            cost_without_cache_usd: None,
-            unknown_model_calls: None,
-            models_seen: Some(vec!["model".to_string()]),
-            extra: BTreeMap::new(),
-        }),
-        citations: Some(Citations {
-            input_ids: vec!["source:1".to_string(), "source:2".to_string()],
-            surfaced_page_ids: vec!["wiki:page-a".to_string()],
-            read_page_ids: vec!["wiki:page-b".to_string()],
-            final_citations,
-            new_page_slugs: vec!["page-a".to_string()],
-            updated_page_slugs: vec!["page-b".to_string()],
-            categories_assigned,
-            extra: citation_extra,
-        }),
-        final_todos: Some(vec![json!({"task": "done"})]),
-        trajectory: Trajectory {
-            id,
-            actions_and_observations: vec![
-                TrajectoryEntry::Action(Action {
-                    tools: vec![sample_tool()],
-                    params: vec![json!({"slug": "page-a"})],
-                    sources: vec![Source::new("agent")],
-                    reasoning: Some("because".to_string()),
-                    reasoning_signature: Some("sig".to_string()),
-                }),
-                TrajectoryEntry::Observation(Observation {
-                    observations: vec!["x".repeat(VALUE_MAX_BYTES + 64)],
-                    sources: vec![Source::new("wiki")],
-                    tool_metadata: vec![Some(ToolCallMetadata {
-                        lock_handoff: None,
-                        lock_waits: None,
-                        skipped_due_to_handoff: None,
-                        surfaced_page_ids: Some(vec!["wiki:page-a".to_string()]),
-                        read_page_id: None,
-                        page_id: None,
-                        record_ids: None,
-                        todos: None,
-                        op: Some("added".to_string()),
-                        slug: Some("page-a".to_string()),
-                        source_ids: Some(vec!["source:1".to_string()]),
-                        categories: Some(vec!["systems".to_string()]),
-                        latest_raw_source_date: None,
-                        extra: BTreeMap::new(),
-                    })],
-                }),
-            ],
-        },
-        extra: BTreeMap::new(),
-    }
-}
-
-/// Construct citations that exercise ordering, deduplication, and extras.
-fn sample_citations_with_duplicates_and_conflicts() -> Citations {
+/// Construct citation attribution that exercises ordering and deduplication.
+fn sample_citations_with_duplicates() -> Citations {
     Citations {
         input_ids: vec![
             "source:b".to_string(),
@@ -179,18 +98,241 @@ fn sample_citations_with_duplicates_and_conflicts() -> Citations {
             ("page-a".to_string(), json!(["source:a"])),
             ("page-b".to_string(), json!(["source:b", "source:c"])),
         ]),
-        new_page_slugs: vec![
-            "page-new".to_string(),
-            "page-both".to_string(),
-            "page-new".to_string(),
-        ],
-        updated_page_slugs: vec!["page-updated".to_string(), "page-both".to_string()],
-        categories_assigned: BTreeMap::from([
-            ("page-a".to_string(), json!(["systems"])),
-            ("page-b".to_string(), json!(["storage", "rust"])),
-        ]),
-        extra: BTreeMap::from([("custom".to_string(), json!({"kept": true}))]),
     }
+}
+
+/// Construct a representative pruned reasoning trajectory fixture.
+fn sample_file(id: Uuid) -> ReasoningTrajectoryFile {
+    ReasoningTrajectoryFile {
+        citations: Some(Citations {
+            input_ids: vec!["source:b".to_string(), "source:a".to_string()],
+            surfaced_page_ids: vec!["wiki:page-2".to_string(), "wiki:page-1".to_string()],
+            read_page_ids: vec!["wiki:read-2".to_string(), "wiki:read-1".to_string()],
+            final_citations: BTreeMap::from([
+                ("page-a".to_string(), json!(["source:a"])),
+                ("page-b".to_string(), json!(["source:b", "source:c"])),
+            ]),
+        }),
+        trajectory: ReasoningTrajectory {
+            id,
+            entries: vec![
+                reasoning_entry(Some("x".repeat(VALUE_MAX_BYTES + 64)), &["page-a"]),
+                reasoning_entry(Some("context".to_string()), &[]),
+                reasoning_entry(None, &["page-b"]),
+            ],
+        },
+    }
+}
+
+/// Construct a full historical generated trajectory JSON fixture.
+fn generated_json(id: Uuid) -> Value {
+    json!({
+        "batch_index": 1,
+        "batch_offset": 10,
+        "worker_id": "w01",
+        "span": "span",
+        "attempt_id": 2,
+        "deadlock_retries": 0,
+        "attempt_paths": ["attempt"],
+        "started_at": "2026-06-29T00:00:00Z",
+        "duration_seconds": 1.25,
+        "status": "completed",
+        "usage": {
+            "n_calls": 5,
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "cost_usd": 0.01
+        },
+        "citations": {
+            "input_ids": ["source:1", "source:2"],
+            "surfaced_page_ids": ["wiki:page-a"],
+            "read_page_ids": ["wiki:page-b"],
+            "final_citations": {
+                "page-a": ["source:1", "source:2"]
+            },
+            "new_page_slugs": ["page-a"],
+            "updated_page_slugs": ["page-b"],
+            "categories_assigned": {
+                "page-a": ["systems"]
+            },
+            "custom": {"discarded": true}
+        },
+        "final_todos": [{"task": "done"}],
+        "trajectory": {
+            "id": id,
+            "actions_and_observations": [
+                {
+                    "tools": [{
+                        "tool_schema": {
+                            "name": "wiki_upsert_file",
+                            "description": "write a page",
+                            "parameters": {"type": "object"},
+                            "required": ["slug"]
+                        }
+                    }],
+                    "params": [{"slug": "page-a"}],
+                    "sources": ["agent"],
+                    "reasoning": "  first  ",
+                    "reasoning_signature": "sig"
+                },
+                {
+                    "observations": ["x"],
+                    "sources": ["wiki"],
+                    "tool_metadata": [{
+                        "slug": "page-a",
+                        "skipped_due_to_handoff": false,
+                        "categories": ["systems"]
+                    }]
+                },
+                {
+                    "tools": [{
+                        "tool_schema": {"name": "search"}
+                    }],
+                    "params": [{"query": "target"}],
+                    "sources": ["agent"],
+                    "reasoning": "middle"
+                },
+                {
+                    "observations": ["ok"],
+                    "sources": ["search"],
+                    "tool_metadata": [null]
+                },
+                {
+                    "tools": [
+                        {"tool_schema": {"name": "wiki_apply_patch"}},
+                        {"tool_schema": {"name": "wiki_upsert_file"}},
+                        {"tool_schema": {"name": "wiki_upsert_file"}},
+                        {"tool_schema": {"name": "search"}}
+                    ],
+                    "params": [{}, {"slug": "sibling"}, {"slug": "sibling"}, {"slug": "ignored"}],
+                    "sources": ["agent", "agent", "agent", "agent"],
+                    "reasoning": "  \n  "
+                },
+                {
+                    "observations": ["ok", "ok", "ok", "ok"],
+                    "sources": ["wiki", "wiki", "wiki", "search"],
+                    "tool_metadata": [
+                        {"slug": "target", "skipped_due_to_handoff": false},
+                        null,
+                        null,
+                        {"slug": "ignored"}
+                    ]
+                },
+                {
+                    "tools": [{
+                        "tool_schema": {"name": "wiki_upsert_file"}
+                    }],
+                    "params": [{"slug": "skipped"}],
+                    "sources": ["agent"],
+                    "reasoning": "skipped reason"
+                },
+                {
+                    "observations": ["ok"],
+                    "sources": ["wiki"],
+                    "tool_metadata": [{
+                        "slug": "skipped",
+                        "skipped_due_to_handoff": true
+                    }]
+                },
+                {
+                    "tools": [{
+                        "tool_schema": {"name": "search"}
+                    }],
+                    "params": [{}],
+                    "sources": ["agent"],
+                    "reasoning": "   "
+                }
+            ]
+        },
+        "unknown_top_level": {"discarded": true}
+    })
+}
+
+#[test]
+/// Verifies full generated JSON deserializes into only user-facing projection data.
+fn generated_json_deserializes_to_reasoning_projection() -> TestResult {
+    let id = Uuid::parse_str("00000000-0000-0000-0000-000000000020")?;
+    let file: ReasoningTrajectoryFile = serde_json::from_value(generated_json(id))?;
+
+    assert_eq!(
+        file,
+        ReasoningTrajectoryFile {
+            citations: Some(Citations {
+                input_ids: vec!["source:1".to_string(), "source:2".to_string()],
+                surfaced_page_ids: vec!["wiki:page-a".to_string()],
+                read_page_ids: vec!["wiki:page-b".to_string()],
+                final_citations: BTreeMap::from([(
+                    "page-a".to_string(),
+                    json!(["source:1", "source:2"])
+                )]),
+            }),
+            trajectory: ReasoningTrajectory {
+                id,
+                entries: vec![
+                    reasoning_entry(Some("first".to_string()), &["page-a"]),
+                    reasoning_entry(Some("middle".to_string()), &[]),
+                    reasoning_entry(None, &["target", "sibling"]),
+                    reasoning_entry(Some("skipped reason".to_string()), &[]),
+                ],
+            },
+        }
+    );
+
+    let stored_json = serde_json::to_string(&file)?;
+    for discarded in [
+        "tool_schema",
+        "params",
+        "sources",
+        "reasoning_signature",
+        "observations",
+        "tool_metadata",
+        "batch_index",
+        "categories_assigned",
+        "custom",
+    ] {
+        assert!(
+            !stored_json.contains(discarded),
+            "stored json retained discarded field {discarded}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+/// Verifies the pruned type can deserialize its own serialized JSON.
+fn reasoning_file_deserializes_from_pruned_json() -> TestResult {
+    let file = sample_file(Uuid::parse_str("00000000-0000-0000-0000-000000000021")?);
+    let json = serde_json::to_value(&file)?;
+    let decoded: ReasoningTrajectoryFile = serde_json::from_value(json)?;
+    assert_eq!(decoded, file);
+
+    let id = Uuid::parse_str("00000000-0000-0000-0000-000000000022")?;
+    let decoded: ReasoningTrajectoryFile = serde_json::from_value(json!({
+        "trajectory": {
+            "id": id,
+            "entries": [
+                {
+                    "reasoning": "  kept  ",
+                    "writes": [{"slug": "a"}, {"slug": "a"}]
+                },
+                {
+                    "reasoning": "   ",
+                    "writes": []
+                }
+            ]
+        }
+    }))?;
+    assert_eq!(
+        decoded,
+        ReasoningTrajectoryFile {
+            citations: None,
+            trajectory: ReasoningTrajectory {
+                id,
+                entries: vec![reasoning_entry(Some("kept".to_string()), &["a"])],
+            },
+        }
+    );
+    Ok(())
 }
 
 #[test]
@@ -354,9 +496,6 @@ proptest! {
     fn base36_byte_encoding_round_trips_arbitrary_big_endian_bytes(
         bytes in proptest::collection::vec(any::<u8>(), 0..=64),
     ) {
-        // Because 36^2 > 256, two base36 digits per input byte is always
-        // enough to represent the value. The zero-length input still needs one
-        // output digit because the encoder represents zero as "0".
         let width = bytes.len().saturating_mul(2).max(1);
 
         let encoded = encode_be_bytes_base36(&bytes, width)
@@ -400,10 +539,10 @@ fn fixed_base36_byte_decoding_rejects_invalid_text() {
 }
 
 #[test]
-/// Verifies citation records round-trip as a complete normalized object.
-fn citations_roundtrip_deduplicates_orders_and_preserves_extra() -> TestResult {
+/// Verifies citation records round-trip as a pruned normalized object.
+fn citations_roundtrip_deduplicates_and_orders() -> TestResult {
     let tid = uuid_to_tid(Uuid::parse_str("00000000-0000-0000-0000-000000000007")?)?;
-    let citations = sample_citations_with_duplicates_and_conflicts();
+    let citations = sample_citations_with_duplicates();
     let mut records = Vec::new();
     write_citations(&mut records, &tid, &citations)?;
     let documents = documents_from_records(&records);
@@ -417,37 +556,33 @@ fn citations_roundtrip_deduplicates_orders_and_preserves_extra() -> TestResult {
         json!({
             "v": 1,
             "item_id_bits": 256,
-            "next_order": 9,
+            "next_order": 6,
             "counts": {
                 "input_ids": 2,
                 "surfaced_page_ids": 2,
                 "read_page_ids": 2,
-                "page_write_ops": 3,
-                "final_citations": 2,
-                "categories_assigned": 2
-            },
-            "has_extra": true
+                "final_citations": 2
+            }
         })
     );
     assert_eq!(
         read_citations(&documents, &tid)?,
-        json!({
-            "input_ids": ["source:b", "source:a"],
-            "surfaced_page_ids": ["wiki:page-2", "wiki:page-1"],
-            "read_page_ids": ["wiki:read-2", "wiki:read-1"],
-            "final_citations": {
-                "page-a": ["source:a"],
-                "page-b": ["source:b", "source:c"]
-            },
-            "new_page_slugs": ["page-new"],
-            "updated_page_slugs": ["page-both", "page-updated"],
-            "categories_assigned": {
-                "page-a": ["systems"],
-                "page-b": ["storage", "rust"]
-            },
-            "custom": {"kept": true}
-        })
+        Citations {
+            input_ids: vec!["source:b".to_string(), "source:a".to_string()],
+            surfaced_page_ids: vec!["wiki:page-2".to_string(), "wiki:page-1".to_string()],
+            read_page_ids: vec!["wiki:read-2".to_string(), "wiki:read-1".to_string()],
+            final_citations: BTreeMap::from([
+                ("page-a".to_string(), json!(["source:a"])),
+                ("page-b".to_string(), json!(["source:b", "source:c"])),
+            ]),
+        }
     );
+    assert!(records
+        .iter()
+        .all(|record| !record.id.contains("page_write_ops")));
+    assert!(records
+        .iter()
+        .all(|record| !record.id.contains("categories_assigned")));
     Ok(())
 }
 
@@ -460,27 +595,12 @@ fn empty_citations_roundtrip_to_complete_empty_shape() -> TestResult {
         surfaced_page_ids: Vec::new(),
         read_page_ids: Vec::new(),
         final_citations: BTreeMap::new(),
-        new_page_slugs: Vec::new(),
-        updated_page_slugs: Vec::new(),
-        categories_assigned: BTreeMap::new(),
-        extra: BTreeMap::new(),
     };
     let mut records = Vec::new();
     write_citations(&mut records, &tid, &citations)?;
     let documents = documents_from_records(&records);
 
-    assert_eq!(
-        read_citations(&documents, &tid)?,
-        json!({
-            "input_ids": [],
-            "surfaced_page_ids": [],
-            "read_page_ids": [],
-            "final_citations": {},
-            "new_page_slugs": [],
-            "updated_page_slugs": [],
-            "categories_assigned": {}
-        })
-    );
+    assert_eq!(read_citations(&documents, &tid)?, citations);
     Ok(())
 }
 
@@ -493,10 +613,6 @@ fn citations_reject_header_count_mismatch() -> TestResult {
         surfaced_page_ids: Vec::new(),
         read_page_ids: Vec::new(),
         final_citations: BTreeMap::new(),
-        new_page_slugs: Vec::new(),
-        updated_page_slugs: Vec::new(),
-        categories_assigned: BTreeMap::new(),
-        extra: BTreeMap::new(),
     };
     let mut records = Vec::new();
     write_citations(&mut records, &tid, &citations)?;
@@ -526,10 +642,6 @@ fn citations_reject_item_id_mismatch() -> TestResult {
         surfaced_page_ids: Vec::new(),
         read_page_ids: Vec::new(),
         final_citations: BTreeMap::new(),
-        new_page_slugs: Vec::new(),
-        updated_page_slugs: Vec::new(),
-        categories_assigned: BTreeMap::new(),
-        extra: BTreeMap::new(),
     };
     let mut records = Vec::new();
     write_citations(&mut records, &tid, &citations)?;
@@ -552,75 +664,8 @@ fn citations_reject_item_id_mismatch() -> TestResult {
 }
 
 #[test]
-/// Verifies citation extras cannot replace known citation fields.
-fn citations_reject_extra_field_collision() -> TestResult {
-    let tid = uuid_to_tid(Uuid::parse_str("00000000-0000-0000-0000-00000000000b")?)?;
-    let citations = Citations {
-        input_ids: Vec::new(),
-        surfaced_page_ids: Vec::new(),
-        read_page_ids: Vec::new(),
-        final_citations: BTreeMap::new(),
-        new_page_slugs: Vec::new(),
-        updated_page_slugs: Vec::new(),
-        categories_assigned: BTreeMap::new(),
-        extra: BTreeMap::from([("input_ids".to_string(), json!(["shadow"]))]),
-    };
-    let mut records = Vec::new();
-    write_citations(&mut records, &tid, &citations)?;
-    let documents = documents_from_records(&records);
-
-    assert_eq!(
-        read_citations(&documents, &tid).map_err(|err| err.to_string()),
-        Err(
-            "invalid value: citation extra field \"input_ids\" collides with a known field"
-                .to_string()
-        )
-    );
-    Ok(())
-}
-
-#[test]
-/// Verifies unsupported page-write operations are rejected on read.
-fn citations_reject_unsupported_page_write_operation() -> TestResult {
-    let tid = uuid_to_tid(Uuid::parse_str("00000000-0000-0000-0000-00000000000c")?)?;
-    let citations = Citations {
-        input_ids: Vec::new(),
-        surfaced_page_ids: Vec::new(),
-        read_page_ids: Vec::new(),
-        final_citations: BTreeMap::new(),
-        new_page_slugs: vec!["page-a".to_string()],
-        updated_page_slugs: Vec::new(),
-        categories_assigned: BTreeMap::new(),
-        extra: BTreeMap::new(),
-    };
-    let mut records = Vec::new();
-    write_citations(&mut records, &tid, &citations)?;
-    let mut documents = documents_from_records(&records);
-    let mut replacement_records = Vec::new();
-    push_chunkset(
-        &mut replacement_records,
-        &format!(
-            "gt/{tid}/citations/page_write_ops/{}",
-            sha256_base36(b"page-a")?
-        ),
-        &json!({
-            "slug": "page-a",
-            "op": "deleted",
-            "order": 0
-        }),
-    )?;
-    insert_documents(&mut documents, replacement_records);
-
-    assert_eq!(
-        read_citations(&documents, &tid).map_err(|err| err.to_string()),
-        Err("invalid value: unsupported page_write_ops op \"deleted\"".to_string())
-    );
-    Ok(())
-}
-
-#[test]
-/// Verifies that finalized record serialization can be loaded losslessly.
-fn save_and_load_finalized_file_roundtrips() -> TestResult {
+/// Verifies finalized record serialization round-trips only pruned data.
+fn save_and_load_finalized_file_roundtrips_pruned_data() -> TestResult {
     let file = sample_file(Uuid::parse_str("00000000-0000-0000-0000-000000000001")?);
     let records = records_for_file(&file, WriteState::Finalized)?;
     assert!(records
@@ -631,38 +676,58 @@ fn save_and_load_finalized_file_roundtrips() -> TestResult {
         .all(|record| record.id.len() <= KEY_MAX_BYTES));
     assert!(records
         .iter()
-        .any(|record| record.id.contains("/chunks/00001")));
+        .any(|record| record.id.contains("/entries/000000/entry/chunks/00001")));
+
+    for forbidden in [
+        "root_metadata",
+        "/action/",
+        "/observation/",
+        "tools",
+        "params",
+        "sources",
+        "reasoning_signature",
+        "tool_metadata",
+        "page_write_ops",
+        "categories_assigned",
+        "/extra/",
+    ] {
+        assert!(
+            records.iter().all(|record| !record.id.contains(forbidden)),
+            "record ids retained forbidden storage segment {forbidden}"
+        );
+    }
 
     let documents = documents_from_records(&records);
     let loaded = load_one_from_documents(&documents, file.trajectory.id, true)?;
-    assert_eq!(serde_json::to_value(&loaded)?, serde_json::to_value(&file)?);
+    assert_eq!(loaded, file);
     Ok(())
 }
 
 #[test]
-/// Verifies that finalization writes the complete entry payload.
-fn finalization_records_include_complete_entry_payload() -> TestResult {
+/// Verifies that finalization writes pruned entry payloads.
+fn finalization_records_include_pruned_entry_payload() -> TestResult {
     let file = sample_file(Uuid::parse_str("00000000-0000-0000-0000-000000000002")?);
     let tid = uuid_to_tid(file.trajectory.id)?;
     let mut header = TrajectoryHeader {
         v: 1,
-        record_type: "GenerateTrajectoryFile".to_string(),
+        record_type: "ReasoningTrajectoryFile".to_string(),
         tid: tid.clone(),
-        entries: file.trajectory.actions_and_observations.len(),
+        entries: file.trajectory.entries.len(),
         write_state: WriteState::Open,
         has_citations: false,
     };
     let mut records = Vec::new();
     collect_finalization_records(&mut records, &mut header, &file, &tid)?;
 
-    assert!(records.iter().any(|record| {
-        record
-            .id
-            .contains("/entries/000000/action/tools/0000/metadata")
-    }));
+    assert!(records
+        .iter()
+        .any(|record| { record.id.contains("/entries/000000/entry/metadata") }));
+    assert!(records
+        .iter()
+        .all(|record| !record.id.contains("/action/tools/")));
     let documents = documents_from_records(&records);
     let loaded = load_one_from_documents(&documents, file.trajectory.id, true)?;
-    assert_eq!(serde_json::to_value(loaded)?, serde_json::to_value(file)?);
+    assert_eq!(loaded, file);
     Ok(())
 }
 
@@ -681,6 +746,10 @@ fn trajectory_header_has_trajectory_metadata() -> TestResult {
         Some(&MetadataValue::Str("trajectory_header".to_string()))
     );
     assert_eq!(
+        header.metadata.get("schema"),
+        Some(&MetadataValue::Str("reasoning_trajectory".to_string()))
+    );
+    assert_eq!(
         header.metadata.get("tid"),
         Some(&MetadataValue::Str(first.trajectory.id.to_string()))
     );
@@ -688,26 +757,23 @@ fn trajectory_header_has_trajectory_metadata() -> TestResult {
 }
 
 #[test]
-/// Verifies open trajectories can accept entries before finalization.
+/// Verifies open trajectories can accept pruned entries before finalization.
 fn open_trajectory_records_can_be_extended_and_finalized() -> TestResult {
-    let mut file = sample_file(Uuid::parse_str("00000000-0000-0000-0000-000000000003")?);
-    let entries = file.trajectory.actions_and_observations.clone();
-    file.trajectory.actions_and_observations.clear();
-    file.duration_seconds = None;
-    file.status = None;
-    file.usage = None;
-    file.final_todos = None;
-    file.citations = None;
+    let finalized = sample_file(Uuid::parse_str("00000000-0000-0000-0000-000000000003")?);
+    let entries = finalized.trajectory.entries.clone();
+    let mut open_file = finalized.clone();
+    open_file.trajectory.entries.clear();
+    open_file.citations = None;
 
-    let records = records_for_file(&file, WriteState::Open)?;
+    let records = records_for_file(&open_file, WriteState::Open)?;
     let mut documents = documents_from_records(&records);
     assert!(matches!(
-        load_one_from_documents(&documents, file.trajectory.id, true),
+        load_one_from_documents(&documents, open_file.trajectory.id, true),
         Err(TrajectoryError::FinalizedRequired { .. })
     ));
 
-    let tid = uuid_to_tid(file.trajectory.id)?;
-    let mut header = read_trajectory_header(&documents, file.trajectory.id)?;
+    let tid = uuid_to_tid(open_file.trajectory.id)?;
+    let mut header = read_trajectory_header(&documents, open_file.trajectory.id)?;
     let mut append_records = Vec::new();
     for (index, entry) in entries.iter().enumerate() {
         collect_entry_records(&mut append_records, &tid, index, entry)?;
@@ -721,10 +787,10 @@ fn open_trajectory_records_can_be_extended_and_finalized() -> TestResult {
     )?;
     insert_documents(&mut documents, append_records);
 
-    let open_loaded = load_one_from_documents(&documents, file.trajectory.id, false)?;
-    assert_eq!(open_loaded.trajectory.actions_and_observations.len(), 2);
+    let open_loaded = load_one_from_documents(&documents, open_file.trajectory.id, false)?;
+    assert_eq!(open_loaded.trajectory.entries.len(), entries.len());
+    assert!(open_loaded.citations.is_none());
 
-    let finalized = sample_file(file.trajectory.id);
     let mut finalize_records = Vec::new();
     collect_finalization_records(
         &mut finalize_records,
@@ -735,10 +801,7 @@ fn open_trajectory_records_can_be_extended_and_finalized() -> TestResult {
     insert_documents(&mut documents, finalize_records);
 
     let finalized_loaded = load_one_from_documents(&documents, finalized.trajectory.id, true)?;
-    assert_eq!(
-        serde_json::to_value(finalized_loaded)?,
-        serde_json::to_value(finalized)?
-    );
+    assert_eq!(finalized_loaded, finalized);
     Ok(())
 }
 
@@ -748,16 +811,9 @@ async fn create_open_trajectory_reads_absence_before_add() -> TestResult {
     let server = MockServer::start_async().await;
     let collection = mocked_collection(&server);
     let mut file = sample_file(Uuid::parse_str("00000000-0000-0000-0000-000000000009")?);
-    file.trajectory.actions_and_observations.clear();
-    file.duration_seconds = None;
-    file.status = None;
-    file.error = None;
-    file.usage = None;
+    file.trajectory.entries.clear();
     file.citations = None;
-    file.final_todos = None;
 
-    let tid = uuid_to_tid(file.trajectory.id)?;
-    let root_key = format!("gt/{tid}/root_metadata");
     let header_key = trajectory_header_key(file.trajectory.id)?;
     let get_path = collection_path(&collection, "conditional/get");
     let commit_path = collection_path(&collection, "conditional/commit");
@@ -765,7 +821,7 @@ async fn create_open_trajectory_reads_absence_before_add() -> TestResult {
     let get_mock = server
         .mock_async(|when, then| {
             when.method("POST").path(get_path).json_body(json!({
-                "ids": [root_key, header_key],
+                "ids": [header_key],
                 "where": null,
                 "where_document": null,
                 "limit": null,
@@ -789,7 +845,7 @@ async fn create_open_trajectory_reads_absence_before_add() -> TestResult {
             when.method("POST").path(commit_path);
             then.status(200).json_body(json!({
                 "first_inserted_record_offset": 7,
-                "record_count": 2,
+                "record_count": 1,
             }));
         })
         .await;
@@ -798,23 +854,27 @@ async fn create_open_trajectory_reads_absence_before_add() -> TestResult {
     chroma_create_open_trajectory(&mut txn, &file).await?;
     let result = txn.commit().await?;
 
-    assert_eq!(result.record_count, 2);
+    assert_eq!(result.record_count, 1);
     assert_eq!(get_mock.calls(), 1);
     assert_eq!(commit_mock.calls(), 1);
     Ok(())
 }
 
 #[test]
-/// Verifies action and observation vectors must remain parallel.
-fn unequal_parallel_vectors_are_rejected() -> TestResult {
+/// Verifies entries with no displayable data are rejected.
+fn empty_reasoning_entries_are_rejected() -> TestResult {
     let mut file = sample_file(Uuid::parse_str("00000000-0000-0000-0000-000000000004")?);
-    let TrajectoryEntry::Action(action) = &mut file.trajectory.actions_and_observations[0] else {
-        return Err(test_error("expected action entry"));
+    file.trajectory.entries[0] = ReasoningEntry {
+        reasoning: None,
+        writes: Vec::new(),
     };
-    action.sources.clear();
     let mut records = Vec::new();
     let error = match collect_file_records(&mut records, &file, WriteState::Finalized) {
-        Ok(()) => return Err(test_error("expected parallel vector validation error")),
+        Ok(()) => {
+            return Err(test_error(
+                "expected empty reasoning entry validation error",
+            ))
+        }
         Err(error) => error,
     };
     assert!(matches!(error, TrajectoryError::InvalidValue(_)));
@@ -849,23 +909,16 @@ fn chunk_hash_mismatch_is_rejected() -> TestResult {
 /// Verifies metadata extraction for nested entry chunk keys.
 fn metadata_for_entry_chunk_is_queryable() -> TestResult {
     let tid = uuid_to_tid(Uuid::parse_str("00000000-0000-0000-0000-000000000006")?)?;
-    let metadata = metadata_for_key(&format!(
-        "gt/{tid}/entries/000001/observation/tool_metadata/0002/chunks/00003"
-    ))?;
+    let metadata = metadata_for_key(&format!("gt/{tid}/entries/000001/entry/chunks/00003"))?;
     assert_eq!(
         metadata.get("subtree"),
         Some(&MetadataValue::Str("entries".to_string()))
     );
     assert_eq!(metadata.get("entry"), Some(&MetadataValue::Int(1)));
     assert_eq!(
-        metadata.get("entry_kind"),
-        Some(&MetadataValue::Str("observation".to_string()))
-    );
-    assert_eq!(
         metadata.get("field"),
-        Some(&MetadataValue::Str("tool_metadata".to_string()))
+        Some(&MetadataValue::Str("entry".to_string()))
     );
-    assert_eq!(metadata.get("call"), Some(&MetadataValue::Int(2)));
     assert_eq!(metadata.get("chunk"), Some(&MetadataValue::Int(3)));
     Ok(())
 }
@@ -886,7 +939,7 @@ fn chunking_keeps_utf8_boundaries() -> TestResult {
 
 /// Serialize a fixture into Chroma records with the requested write state.
 fn records_for_file(
-    file: &GenerateTrajectoryFile,
+    file: &ReasoningTrajectoryFile,
     write_state: WriteState,
 ) -> Result<Vec<ChromaRecord>, TrajectoryError> {
     let mut records = Vec::new();

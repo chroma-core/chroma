@@ -4,9 +4,6 @@ pub const KEY_MAX_BYTES: usize = 128;
 /// Bound the byte length of every generated Chroma record document.
 pub const VALUE_MAX_BYTES: usize = 16 * 1024;
 
-/// Bound the byte length of the unchunked root metadata document.
-pub const ROOT_METADATA_MAX_BYTES: usize = 8 * 1024;
-
 /// Bound a chunkset base so `/metadata` and `/chunks/{index}` suffixes fit.
 pub const CHUNKSET_BASE_MAX_BYTES: usize = 115;
 

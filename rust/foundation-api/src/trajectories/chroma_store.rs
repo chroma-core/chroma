@@ -11,7 +11,7 @@ use super::error::TrajectoryError;
 use super::ids::uuid_to_tid;
 use super::limits::VALUE_MAX_BYTES;
 use super::metadata::update_metadata_from_metadata;
-use super::model::{GenerateTrajectoryFile, TrajectoryEntry, WriteState};
+use super::model::{ReasoningEntry, ReasoningTrajectoryFile, WriteState};
 use super::record_format::{
     collect_entry_records, collect_file_records, collect_finalization_records,
     load_one_from_documents, trajectory_header_key, validate_trajectory_header, ChromaRecord,
@@ -21,7 +21,7 @@ use super::validate::{validate_entry, validate_file};
 
 const TRAJECTORY_FILTER_PAGE_LIMIT: u32 = 300;
 
-/// Load one generated trajectory from Chroma by UUID.
+/// Load one reasoning trajectory from Chroma by UUID.
 ///
 /// When `require_finalized` is true, open trajectories are rejected before their
 /// entries are returned.
@@ -35,22 +35,22 @@ pub async fn chroma_load_generate_trajectory(
     txn: &mut ConditionalCollectionTransaction,
     tid: Uuid,
     require_finalized: bool,
-) -> Result<GenerateTrajectoryFile, TrajectoryError> {
+) -> Result<ReasoningTrajectoryFile, TrajectoryError> {
     let records = chroma_records_for_tid(txn, tid).await?;
     load_one_from_documents(&records, tid, require_finalized)
 }
 
-/// Save one complete trajectory as finalized Chroma records.
+/// Save one complete reasoning trajectory as finalized Chroma records.
 ///
 /// This operation upserts the records that represent `file`.
 ///
 /// # Errors
 ///
-/// Returns [`TrajectoryError`] when `file` violates local size or shape constraints, or
-/// when Chroma rejects the write.
+/// Returns [`TrajectoryError`] when `file` violates local shape constraints, or when
+/// Chroma rejects the write.
 pub async fn chroma_save_generate_trajectory(
     txn: &mut ConditionalCollectionTransaction,
-    file: &GenerateTrajectoryFile,
+    file: &ReasoningTrajectoryFile,
 ) -> Result<(), TrajectoryError> {
     validate_file(file)?;
 
@@ -59,7 +59,7 @@ pub async fn chroma_save_generate_trajectory(
     chroma_upsert_records(txn, records).await
 }
 
-/// Save many complete trajectories as finalized Chroma records.
+/// Save many complete reasoning trajectories as finalized Chroma records.
 ///
 /// This operation validates every file before writing the accumulated record set.
 ///
@@ -69,7 +69,7 @@ pub async fn chroma_save_generate_trajectory(
 /// or when Chroma rejects the write.
 pub async fn chroma_save_all_generate_trajectories(
     txn: &mut ConditionalCollectionTransaction,
-    files: &[GenerateTrajectoryFile],
+    files: &[ReasoningTrajectoryFile],
 ) -> Result<(), TrajectoryError> {
     let mut records = Vec::new();
     for file in files {
@@ -81,7 +81,7 @@ pub async fn chroma_save_all_generate_trajectories(
 
 /// Create an open trajectory that starts with zero committed entries.
 ///
-/// The root metadata is written immediately and entries can later be added with
+/// The open header is written immediately and entries can later be added with
 /// [`chroma_extend_open_trajectory`].
 ///
 /// # Errors
@@ -90,12 +90,12 @@ pub async fn chroma_save_all_generate_trajectories(
 /// Returns other [`TrajectoryError`] values when validation or Chroma insertion fails.
 pub async fn chroma_create_open_trajectory(
     txn: &mut ConditionalCollectionTransaction,
-    file: &GenerateTrajectoryFile,
+    file: &ReasoningTrajectoryFile,
 ) -> Result<(), TrajectoryError> {
-    if !file.trajectory.actions_and_observations.is_empty() {
+    if !file.trajectory.entries.is_empty() {
         return Err(TrajectoryError::InvalidValue(format!(
             "chroma_create_open_trajectory requires zero committed entries, got {}",
-            file.trajectory.actions_and_observations.len()
+            file.trajectory.entries.len()
         )));
     }
 
@@ -123,7 +123,7 @@ pub async fn chroma_extend_open_trajectory_at<'a, I>(
     entries: I,
 ) -> Result<usize, TrajectoryError>
 where
-    I: IntoIterator<Item = &'a TrajectoryEntry>,
+    I: IntoIterator<Item = &'a ReasoningEntry>,
 {
     let tid = uuid_to_tid(tid_uuid)?;
     let mut header = chroma_read_trajectory_header(txn, tid_uuid).await?;
@@ -193,7 +193,7 @@ pub async fn chroma_extend_open_trajectory<'a, I>(
     entries: I,
 ) -> Result<usize, TrajectoryError>
 where
-    I: IntoIterator<Item = &'a TrajectoryEntry>,
+    I: IntoIterator<Item = &'a ReasoningEntry>,
 {
     let header = chroma_read_trajectory_header(txn, tid_uuid).await?;
     chroma_extend_open_trajectory_at(txn, tid_uuid, header.entries, entries).await
@@ -201,9 +201,9 @@ where
 
 /// Mark an open trajectory as finalized using the complete final file.
 ///
-/// The persisted entry count must match `file`; the final write upserts the root
-/// metadata, citations, header, and complete entry payload so the stored
-/// trajectory is the same entity as the supplied file.
+/// The persisted entry count must match `file`; the final write upserts citations,
+/// header, and complete pruned entry payload so the stored trajectory is the same
+/// entity as the supplied file.
 ///
 /// # Errors
 ///
@@ -212,7 +212,7 @@ where
 /// or another [`TrajectoryError`] for validation and Chroma failures.
 pub async fn chroma_finalize_open_trajectory(
     txn: &mut ConditionalCollectionTransaction,
-    file: &GenerateTrajectoryFile,
+    file: &ReasoningTrajectoryFile,
 ) -> Result<(), TrajectoryError> {
     validate_file(file)?;
 
@@ -227,7 +227,7 @@ pub async fn chroma_finalize_open_trajectory(
         });
     }
 
-    let actual = file.trajectory.actions_and_observations.len();
+    let actual = file.trajectory.entries.len();
     if header.entries != actual {
         return Err(TrajectoryError::EntryCountMismatch {
             tid: tid_uuid,

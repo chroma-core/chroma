@@ -1,10 +1,10 @@
 #![deny(missing_docs)]
-//! Persist generated trajectory JSON as structured Chroma records.
+//! Persist user-facing reasoning projections as structured Chroma records.
 //!
-//! A [`GenerateTrajectoryFile`] is a single generated trajectory together with
-//! the execution metadata that makes the trajectory intelligible after the fact.
-//! This crate preserves that JSON shape while splitting large values into
-//! bounded Chroma documents whose keys and metadata remain queryable.
+//! A [`ReasoningTrajectoryFile`] is the projection of generated trajectory JSON
+//! that can be shown through reasoning and citation views. Producer metadata,
+//! tools, parameters, observations, and reasoning signatures are discarded at
+//! deserialization and never enter the storage format.
 //!
 //! # Examples
 //!
@@ -18,7 +18,7 @@
 //! }"#;
 //!
 //! let file = foundation_api::trajectories::parse_generate_trajectory_bytes(json)?;
-//! assert_eq!(file.trajectory.actions_and_observations.len(), 0);
+//! assert_eq!(file.trajectory.entries.len(), 0);
 //! # Ok(())
 //! # }
 //! ```
@@ -41,9 +41,7 @@ pub use chroma_store::{
 };
 pub use error::TrajectoryError;
 pub use ids::{sha256_base36, tid_to_uuid, uuid_to_tid};
-pub use limits::{
-    CHUNKSET_BASE_MAX_BYTES, KEY_MAX_BYTES, ROOT_METADATA_MAX_BYTES, VALUE_MAX_BYTES,
-};
+pub use limits::{CHUNKSET_BASE_MAX_BYTES, KEY_MAX_BYTES, VALUE_MAX_BYTES};
 pub use model::*;
 
 #[cfg(test)]

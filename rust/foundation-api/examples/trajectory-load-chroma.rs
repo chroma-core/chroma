@@ -1,4 +1,4 @@
-//! Load generated trajectories into Chroma and verify JSON-equivalent reads.
+//! Load generated trajectories into Chroma and verify projected reads.
 //!
 //! Run against a Chroma server that supports conditional transactions:
 //!
@@ -8,8 +8,8 @@
 //!   --collection generated_trajectories path/to/trajectory.json
 //! ```
 //!
-//! Use `--incremental` to create each trajectory open, append one trajectory
-//! entry per committed transaction, finalize, and verify the finalized read.
+//! Use `--incremental` to create each trajectory open, append one projected
+//! reasoning entry per committed transaction, finalize, and verify the finalized read.
 
 use std::error::Error;
 use std::fs::{self, File};
@@ -21,7 +21,7 @@ use clap::Parser;
 use foundation_api::trajectories::{
     chroma_create_open_trajectory, chroma_extend_open_trajectory_at,
     chroma_finalize_open_trajectory, chroma_load_generate_trajectory,
-    chroma_save_generate_trajectory, GenerateTrajectoryFile, TrajectoryEntry,
+    chroma_save_generate_trajectory, ReasoningEntry, ReasoningTrajectoryFile,
 };
 use serde_json::Value;
 
@@ -94,7 +94,7 @@ async fn run(args: Args) -> Result<Summary, Box<dyn Error>> {
         println!(
             "PASS {} {} entries",
             path.display(),
-            file.trajectory.actions_and_observations.len()
+            file.trajectory.entries.len()
         );
     }
 
@@ -113,7 +113,7 @@ struct Summary {
 /// Save a complete finalized trajectory in one committed transaction.
 async fn save_one_shot(
     collection: &ChromaCollection,
-    file: &GenerateTrajectoryFile,
+    file: &ReasoningTrajectoryFile,
 ) -> Result<(), Box<dyn Error>> {
     let mut txn = collection.conditional();
     chroma_save_generate_trajectory(&mut txn, file).await?;
@@ -128,10 +128,10 @@ async fn save_one_shot(
 /// Save a trajectory by committing the open header, each entry, and finalization.
 async fn save_incremental(
     collection: &ChromaCollection,
-    file: &GenerateTrajectoryFile,
+    file: &ReasoningTrajectoryFile,
 ) -> Result<(), Box<dyn Error>> {
     let open_file = open_trajectory_skeleton(file);
-    let entries = &file.trajectory.actions_and_observations;
+    let entries = &file.trajectory.entries;
 
     let mut txn = collection.conditional();
     chroma_create_open_trajectory(&mut txn, &open_file).await?;
@@ -156,15 +156,10 @@ async fn save_incremental(
 }
 
 /// Build the initial open trajectory shape before terminal metadata exists.
-fn open_trajectory_skeleton(file: &GenerateTrajectoryFile) -> GenerateTrajectoryFile {
+fn open_trajectory_skeleton(file: &ReasoningTrajectoryFile) -> ReasoningTrajectoryFile {
     let mut open_file = file.clone();
-    open_file.trajectory.actions_and_observations.clear();
-    open_file.duration_seconds = None;
-    open_file.status = None;
-    open_file.error = None;
-    open_file.usage = None;
     open_file.citations = None;
-    open_file.final_todos = None;
+    open_file.trajectory.entries.clear();
     open_file
 }
 
@@ -173,7 +168,7 @@ async fn append_one_entry(
     collection: &ChromaCollection,
     id: uuid::Uuid,
     index: usize,
-    entry: &TrajectoryEntry,
+    entry: &ReasoningEntry,
 ) -> Result<(), Box<dyn Error>> {
     let mut txn = collection.conditional();
     let next =
@@ -189,7 +184,7 @@ async fn append_one_entry(
 /// Load the finalized trajectory and compare canonical JSON values.
 async fn verify_json_equivalent(
     collection: &ChromaCollection,
-    expected: &GenerateTrajectoryFile,
+    expected: &ReasoningTrajectoryFile,
 ) -> Result<(), Box<dyn Error>> {
     let mut txn = collection.conditional();
     let actual = chroma_load_generate_trajectory(&mut txn, expected.trajectory.id, true).await?;
@@ -202,7 +197,7 @@ async fn verify_json_equivalent(
 }
 
 /// Parse one generated trajectory JSON file.
-fn parse_path(path: &Path) -> Result<GenerateTrajectoryFile, Box<dyn Error>> {
+fn parse_path(path: &Path) -> Result<ReasoningTrajectoryFile, Box<dyn Error>> {
     let file = File::open(path).map_err(|err| format!("open {}: {err}", path.display()))?;
     let reader = BufReader::new(file);
     serde_json::from_reader(reader).map_err(|err| format!("parse {}: {err}", path.display()).into())

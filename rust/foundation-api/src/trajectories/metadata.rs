@@ -4,7 +4,7 @@ use chroma::types::{Metadata, MetadataValue, UpdateMetadata, UpdateMetadataValue
 
 use super::error::TrajectoryError;
 use super::ids::{decode_fixed_base36_to_be_bytes, decode_index, hex_lower, tid_to_uuid};
-use super::limits::{CALL_INDEX_WIDTH, CHUNK_INDEX_WIDTH, ENTRY_INDEX_WIDTH, ITEM_ID_WIDTH};
+use super::limits::{CHUNK_INDEX_WIDTH, ENTRY_INDEX_WIDTH, ITEM_ID_WIDTH};
 
 /// Convert Chroma metadata into the update form accepted by Chroma mutations.
 pub(crate) fn update_metadata_from_metadata(metadata: Metadata) -> UpdateMetadata {
@@ -37,7 +37,7 @@ pub(crate) fn metadata_for_key(key: &str) -> Result<Metadata, TrajectoryError> {
     let tid = parts[1];
     let tid_uuid = tid_to_uuid(tid)?;
     let mut metadata = Metadata::new();
-    metadata_insert_str(&mut metadata, "schema", "generate_trajectory");
+    metadata_insert_str(&mut metadata, "schema", "reasoning_trajectory");
     metadata_insert_str(&mut metadata, "tid", &tid_uuid.to_string());
     metadata_insert_str(&mut metadata, "tid_key", tid);
 
@@ -46,29 +46,10 @@ pub(crate) fn metadata_for_key(key: &str) -> Result<Metadata, TrajectoryError> {
             metadata_insert_str(&mut metadata, "part", "header");
             metadata_insert_str(&mut metadata, "record_kind", "trajectory_header");
         }
-        ["gt", _, "root_metadata"] => {
-            metadata_insert_str(&mut metadata, "part", "root_metadata");
-            metadata_insert_str(&mut metadata, "record_kind", "root_metadata");
-        }
         ["gt", _, "citations", "header"] => {
             metadata_insert_str(&mut metadata, "subtree", "citations");
             metadata_insert_str(&mut metadata, "part", "header");
             metadata_insert_str(&mut metadata, "record_kind", "citations_header");
-        }
-        ["gt", _, "citations", "extra", "metadata"] => {
-            metadata_insert_str(&mut metadata, "subtree", "citations");
-            metadata_insert_str(&mut metadata, "field", "extra");
-            metadata_insert_str(&mut metadata, "part", "metadata");
-        }
-        ["gt", _, "citations", "extra", "chunks", chunk] => {
-            metadata_insert_str(&mut metadata, "subtree", "citations");
-            metadata_insert_str(&mut metadata, "field", "extra");
-            metadata_insert_str(&mut metadata, "part", "chunk");
-            metadata_insert_int(
-                &mut metadata,
-                "chunk",
-                decode_index(chunk, CHUNK_INDEX_WIDTH)?,
-            )?;
         }
         ["gt", _, "citations", collection, item_id, "metadata"] => {
             metadata_insert_str(&mut metadata, "subtree", "citations");
@@ -87,37 +68,14 @@ pub(crate) fn metadata_for_key(key: &str) -> Result<Metadata, TrajectoryError> {
                 decode_index(chunk, CHUNK_INDEX_WIDTH)?,
             )?;
         }
-        ["gt", _, "entries", entry, "header"] => {
-            metadata_insert_str(&mut metadata, "subtree", "entries");
-            metadata_insert_int(
-                &mut metadata,
-                "entry",
-                decode_index(entry, ENTRY_INDEX_WIDTH)?,
-            )?;
-            metadata_insert_str(&mut metadata, "part", "header");
-            metadata_insert_str(&mut metadata, "record_kind", "entry_header");
-        }
-        ["gt", _, "entries", entry, kind, field, "metadata"] => {
-            metadata_insert_entry_field(&mut metadata, entry, kind, field)?;
+        ["gt", _, "entries", entry, "entry", "metadata"] => {
+            metadata_insert_entry(&mut metadata, entry)?;
+            metadata_insert_str(&mut metadata, "field", "entry");
             metadata_insert_str(&mut metadata, "part", "metadata");
         }
-        ["gt", _, "entries", entry, kind, field, "chunks", chunk] => {
-            metadata_insert_entry_field(&mut metadata, entry, kind, field)?;
-            metadata_insert_str(&mut metadata, "part", "chunk");
-            metadata_insert_int(
-                &mut metadata,
-                "chunk",
-                decode_index(chunk, CHUNK_INDEX_WIDTH)?,
-            )?;
-        }
-        ["gt", _, "entries", entry, kind, field, call, "metadata"] => {
-            metadata_insert_entry_field(&mut metadata, entry, kind, field)?;
-            metadata_insert_int(&mut metadata, "call", decode_index(call, CALL_INDEX_WIDTH)?)?;
-            metadata_insert_str(&mut metadata, "part", "metadata");
-        }
-        ["gt", _, "entries", entry, kind, field, call, "chunks", chunk] => {
-            metadata_insert_entry_field(&mut metadata, entry, kind, field)?;
-            metadata_insert_int(&mut metadata, "call", decode_index(call, CALL_INDEX_WIDTH)?)?;
+        ["gt", _, "entries", entry, "entry", "chunks", chunk] => {
+            metadata_insert_entry(&mut metadata, entry)?;
+            metadata_insert_str(&mut metadata, "field", "entry");
             metadata_insert_str(&mut metadata, "part", "chunk");
             metadata_insert_int(
                 &mut metadata,
@@ -134,16 +92,9 @@ pub(crate) fn metadata_for_key(key: &str) -> Result<Metadata, TrajectoryError> {
 }
 
 /// Insert metadata fields shared by entry payload records.
-fn metadata_insert_entry_field(
-    metadata: &mut Metadata,
-    entry: &str,
-    kind: &str,
-    field: &str,
-) -> Result<(), TrajectoryError> {
+fn metadata_insert_entry(metadata: &mut Metadata, entry: &str) -> Result<(), TrajectoryError> {
     metadata_insert_str(metadata, "subtree", "entries");
     metadata_insert_int(metadata, "entry", decode_index(entry, ENTRY_INDEX_WIDTH)?)?;
-    metadata_insert_str(metadata, "entry_kind", kind);
-    metadata_insert_str(metadata, "field", field);
     Ok(())
 }
 
