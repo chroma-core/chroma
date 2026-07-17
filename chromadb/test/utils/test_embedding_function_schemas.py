@@ -86,6 +86,31 @@ class TestEmbeddingFunctionSchemas:
             config == new_config
         ), f"Configs don't match after recreation for {ef_name}"
 
+    def test_chroma_cloud_qwen_config_roundtrip_with_none_task(
+        self, monkeypatch: MonkeyPatch
+    ) -> None:
+        """A Qwen EF created with task=None must survive a real get_config ->
+        build_from_config roundtrip. task is Optional in the signature and
+        docstring, nullable in the JSON schema, and get_config() emits it as
+        None, so a persisted collection using task=None must be able to reload.
+        (The parametrized roundtrip test above mocks build_from_config, so it
+        never exercised the real one.)"""
+        monkeypatch.setenv("CHROMA_API_KEY", "dummy-key")
+        from chromadb.utils.embedding_functions.chroma_cloud_qwen_embedding_function import (
+            ChromaCloudQwenEmbeddingFunction,
+            ChromaCloudQwenEmbeddingModel,
+        )
+
+        ef = ChromaCloudQwenEmbeddingFunction(
+            model=ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B, task=None
+        )
+        config = ef.get_config()
+        assert config["task"] is None
+        ChromaCloudQwenEmbeddingFunction.validate_config(config)
+        rebuilt = ChromaCloudQwenEmbeddingFunction.build_from_config(config)
+        assert rebuilt.task is None
+        assert rebuilt.model == ef.model
+
     def test_schema_required_fields(self) -> None:
         """Test that schemas enforce required fields"""
         for schema_name in get_available_schemas():
