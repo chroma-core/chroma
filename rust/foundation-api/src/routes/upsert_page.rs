@@ -595,6 +595,15 @@ pub(crate) fn normalize_categories(categories: &[String]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::FoundationApiConfig;
+    use crate::routes::CHROMA_TOKEN_HEADER;
+    use axum::http::HeaderValue;
+    use chroma_sysdb::{SysDb, TestSysDb};
+    use chroma_system::System;
+    use chroma_types::{Collection, CollectionUuid};
+    use httpmock::MockServer;
+    use serde_json::{json, Value};
+    use std::sync::Arc;
 
     fn request(
         slug: &str,
@@ -610,6 +619,54 @@ mod tests {
             reason: None,
             expected_version: 0,
         }
+    }
+
+    fn test_server(frontend_ingress_url: String) -> FoundationApiServer {
+        let mut config = FoundationApiConfig::default();
+        config.foundation.frontend_ingress_url = Some(frontend_ingress_url);
+
+        FoundationApiServer::new(
+            config,
+            Arc::new(()),
+            SysDb::Test(TestSysDb::new()),
+            vec![],
+            System::new(),
+        )
+    }
+
+    fn wiki_collection() -> Collection {
+        Collection {
+            collection_id: CollectionUuid::default(),
+            name: "wiki".to_string(),
+            tenant: "tenant".to_string(),
+            database: "FOUNDATION".to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn collection_path(collection: &Collection, suffix: &str) -> String {
+        format!(
+            "/api/v2/tenants/{}/databases/{}/collections/{}/{}",
+            collection.tenant, collection.database, collection.collection_id, suffix
+        )
+    }
+
+    fn conditional_get_response(ids: Vec<String>) -> Value {
+        json!({
+            "ids": ids,
+            "embeddings": null,
+            "documents": null,
+            "uris": null,
+            "metadatas": null,
+            "include": ["metadatas"],
+            "read_token": 42,
+        })
+    }
+
+    fn chunk_ids(slug: &str, count: usize) -> Vec<String> {
+        (0..count)
+            .map(|chunk_id| ChunkRecordId::new(slug, chunk_id).to_string())
+            .collect()
     }
 
     fn chunk_meta(chunk_id: i64, version: Option<i64>) -> Metadata {
@@ -707,6 +764,118 @@ mod tests {
             }
         ));
         assert_eq!(err.code(), ErrorCodes::ResourceExhausted);
+    }
+
+    #[tokio::test]
+    async fn run_upsert_page_rejects_non_empty_overflow_read() {
+        let mock_server = MockServer::start_async().await;
+        let server = test_server(mock_server.base_url());
+        let collection = wiki_collection();
+        let slug = "foo";
+        let chunk0 = ChunkRecordId::new(slug, 0).to_string();
+        let where_slug_json = serde_json::to_value(where_slug(slug)).expect("serialize where");
+        let mut headers = HeaderMap::new();
+        headers.insert(CHROMA_TOKEN_HEADER, HeaderValue::from_static("user-token"));
+
+        let get_collection_path = format!(
+            "/api/v2/tenants/{}/databases/{}/collections/{}",
+            collection.tenant, collection.database, collection.name
+        );
+        let get_collection_body =
+            serde_json::to_value(collection.clone()).expect("serialize collection");
+        let get_collection_mock = mock_server
+            .mock_async(move |when, then| {
+                when.method("GET").path(get_collection_path);
+                then.status(200).json_body(get_collection_body.clone());
+            })
+            .await;
+
+        let conditional_get_path = collection_path(&collection, "conditional/get");
+        let chunk0_get_path = conditional_get_path.clone();
+        let chunk0_get = chunk0.clone();
+        let chunk0_get_mock = mock_server
+            .mock_async(move |when, then| {
+                when.method("POST").path(chunk0_get_path).json_body(json!({
+                    "ids": [chunk0_get],
+                    "where": null,
+                    "where_document": null,
+                    "limit": null,
+                    "offset": 0,
+                    "include": ["metadatas"],
+                    "read_token": null,
+                }));
+                then.status(200)
+                    .json_body(conditional_get_response(vec![chunk0.clone()]));
+            })
+            .await;
+
+        let existing_get_path = conditional_get_path.clone();
+        let existing_where = where_slug_json.clone();
+        let existing_get_mock = mock_server
+            .mock_async(move |when, then| {
+                when.method("POST")
+                    .path(existing_get_path)
+                    .json_body(json!({
+                        "ids": null,
+                        "where": existing_where,
+                        "where_document": null,
+                        "limit": PAGE_CHUNK_READ_LIMIT,
+                        "offset": 0,
+                        "include": ["metadatas"],
+                        "read_token": 42,
+                    }));
+                then.status(200)
+                    .json_body(conditional_get_response(chunk_ids(
+                        slug,
+                        MAX_TRANSACTION_WRITES,
+                    )));
+            })
+            .await;
+
+        let overflow_get_mock = mock_server
+            .mock_async(move |when, then| {
+                when.method("POST")
+                    .path(conditional_get_path)
+                    .json_body(json!({
+                        "ids": null,
+                        "where": where_slug_json,
+                        "where_document": null,
+                        "limit": 1,
+                        "offset": PAGE_CHUNK_OVERFLOW_OFFSET,
+                        "include": ["metadatas"],
+                        "read_token": 42,
+                    }));
+                then.status(200)
+                    .json_body(conditional_get_response(vec![ChunkRecordId::new(
+                        slug,
+                        MAX_TRANSACTION_WRITES,
+                    )
+                    .to_string()]));
+            })
+            .await;
+
+        let err = run_upsert_page(
+            &server,
+            &headers,
+            "tenant",
+            &request(slug, "# Title\n\nBody", &[], &[]),
+            &[],
+        )
+        .await
+        .expect_err("overflow read should reject the upsert");
+
+        assert!(matches!(
+            err,
+            UpsertPageError::TooManyTransactionWrites {
+                writes: 301,
+                limit: MAX_TRANSACTION_WRITES,
+            }
+        ));
+        assert_eq!(err.code(), ErrorCodes::ResourceExhausted);
+        assert_eq!(get_collection_mock.calls(), 1);
+        assert_eq!(chunk0_get_mock.calls(), 1);
+        assert_eq!(existing_get_mock.calls(), 1);
+        assert_eq!(overflow_get_mock.calls(), 1);
     }
 
     #[test]
