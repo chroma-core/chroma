@@ -1,8 +1,13 @@
 from concurrent.futures import ThreadPoolExecutor
+from typing import List, Optional, Sequence
 import uuid
+import numpy as np
+from numpy.typing import NDArray
 from chromadb.api import ClientAPI
+from chromadb.api.types import URI, DataLoader, Image
 from chromadb.errors import ChromaError, UniqueConstraintError
 from chromadb.test.conftest import multi_region_test
+from chromadb.test.ef.test_multimodal_ef import hashing_multimodal_ef
 
 
 @multi_region_test
@@ -74,3 +79,42 @@ def test_multithreaded_get_or_create(client: ClientAPI) -> None:
                 future.result()
             except Exception as e:
                 assert False, f"Thread raised an exception: {e}"
+
+
+class _StubDataLoader(DataLoader[List[Optional[Image]]]):
+    def __call__(self, uris: Sequence[Optional[URI]]) -> List[Optional[Image]]:
+        def load(uri: Optional[URI]) -> Optional[NDArray[np.uint8]]:
+            return None if uri is None else np.array(uri.encode())
+
+        return [load(uri) for uri in uris]
+
+
+def test_include_data_parameter_not_mutated(client: ClientAPI) -> None:
+    """Regression test for issue #5857: an `include` list containing "data" must not be
+    mutated in-place with an appended "uris" entry. This specifically requires "data" to
+    be in `include`, since that's the only branch that appends to `request_include`; a
+    collection needs a data_loader configured or "data" is rejected before that point."""
+    collection = client.get_or_create_collection(
+        name="test_include_data_mutation",
+        data_loader=_StubDataLoader(),
+        embedding_function=hashing_multimodal_ef(),
+    )
+    collection.add(ids=["id1", "id2"], uris=["uri_1", "uri_2"])
+
+    include_get: List[str] = ["documents", "data"]
+    collection.get(include=include_get)
+    assert include_get == [
+        "documents",
+        "data",
+    ], "get() must not mutate the include parameter"
+
+    include_query: List[str] = ["documents", "data"]
+    collection.query(
+        query_uris=["uri_1"],
+        n_results=1,
+        include=include_query,
+    )
+    assert include_query == [
+        "documents",
+        "data",
+    ], "query() must not mutate the include parameter"
