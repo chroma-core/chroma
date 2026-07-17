@@ -654,6 +654,18 @@ mod tests {
         BatchManager::new(LogWriterOptions::default(), NoopS3Uploader).unwrap()
     }
 
+    fn immediate_s3_batch_manager() -> BatchManager<(FragmentSeqNo, LogPosition), NoopS3Uploader> {
+        let options = LogWriterOptions {
+            throttle_fragment: ThrottleOptions {
+                throughput: 2_000_000,
+                batch_interval_us: 0,
+                ..ThrottleOptions::default()
+            },
+            ..LogWriterOptions::default()
+        };
+        BatchManager::new(options, NoopS3Uploader).unwrap()
+    }
+
     async fn enqueue(
         batch_manager: &BatchManager<FragmentUuid, NoopUploader>,
         message: Vec<u8>,
@@ -686,6 +698,91 @@ mod tests {
             ))
             .await;
         rx
+    }
+
+    async fn enqueue_s3_with_required_start(
+        batch_manager: &BatchManager<(FragmentSeqNo, LogPosition), NoopS3Uploader>,
+        message: &str,
+        required_fragment_start: Option<u64>,
+    ) -> tokio::sync::oneshot::Receiver<Result<LogPosition, Error>> {
+        let options = required_fragment_start.map(|offset| {
+            append_options(&[message])
+                .with_required_fragment_start(LogPosition::from_offset(offset))
+        });
+        enqueue_s3(batch_manager, Vec::from(message), options).await
+    }
+
+    async fn take_s3_work(
+        batch_manager: &BatchManager<(FragmentSeqNo, LogPosition), NoopS3Uploader>,
+        assigned_fragment_start: u64,
+    ) -> (
+        (FragmentSeqNo, LogPosition),
+        Option<LogPosition>,
+        Vec<AppendWork>,
+    ) {
+        batch_manager
+            .take_work(&FixedS3ManifestPublisher {
+                assigned_fragment_start: LogPosition::from_offset(assigned_fragment_start),
+            })
+            .await
+            .expect("required-start selection should not fail take_work")
+            .expect("compatible prefix should be selected")
+    }
+
+    fn assert_s3_work(
+        selected: (
+            (FragmentSeqNo, LogPosition),
+            Option<LogPosition>,
+            Vec<AppendWork>,
+        ),
+        assigned_fragment_start: u64,
+        required_fragment_start: Option<u64>,
+        messages: &[&str],
+    ) -> Vec<AppendWork> {
+        let ((seq_no, log_position), selected_required_fragment_start, work) = selected;
+        assert_eq!(FragmentSeqNo::BEGIN, seq_no);
+        assert_eq!(
+            LogPosition::from_offset(assigned_fragment_start),
+            log_position
+        );
+        assert_eq!(
+            required_fragment_start.map(LogPosition::from_offset),
+            selected_required_fragment_start
+        );
+        assert_eq!(messages.len(), work.len());
+        let selected_messages: Vec<Vec<Vec<u8>>> =
+            work.iter().map(|work| work.messages.clone()).collect();
+        let expected_messages: Vec<Vec<Vec<u8>>> = messages
+            .iter()
+            .map(|message| vec![Vec::from(*message)])
+            .collect();
+        assert_eq!(expected_messages, selected_messages);
+        work
+    }
+
+    async fn commit_s3_work(
+        batch_manager: &BatchManager<(FragmentSeqNo, LogPosition), NoopS3Uploader>,
+        mut log_position: LogPosition,
+        work: Vec<AppendWork>,
+    ) {
+        for work in work {
+            let record_count = work.record_count();
+            assert!(work.tx.send(Ok(log_position)).is_ok());
+            log_position += record_count;
+        }
+        batch_manager.finish_write().await;
+    }
+
+    async fn expect_committed(
+        rx: tokio::sync::oneshot::Receiver<Result<LogPosition, Error>>,
+        log_position: u64,
+    ) {
+        assert_eq!(
+            LogPosition::from_offset(log_position),
+            rx.await
+                .expect("append should receive a result")
+                .expect("append should commit")
+        );
     }
 
     struct FixedS3ManifestPublisher {
@@ -894,44 +991,92 @@ mod tests {
 
     #[tokio::test]
     async fn mismatched_required_fragment_starts_split_selected_batch() {
-        let batch_manager = s3_batch_manager();
-        let _first_rx = enqueue_s3(
-            &batch_manager,
-            Vec::from("first"),
-            Some(
-                append_options(&["first"])
-                    .with_required_fragment_start(LogPosition::from_offset(10)),
-            ),
-        )
-        .await;
-        let mut second_rx = enqueue_s3(
-            &batch_manager,
-            Vec::from("second"),
-            Some(
-                append_options(&["second"])
-                    .with_required_fragment_start(LogPosition::from_offset(11)),
-            ),
-        )
-        .await;
+        let batch_manager = immediate_s3_batch_manager();
+        let first_rx = enqueue_s3_with_required_start(&batch_manager, "first", Some(10)).await;
+        let mut second_rx =
+            enqueue_s3_with_required_start(&batch_manager, "second", Some(11)).await;
 
-        let selected = batch_manager
-            .take_work(&FixedS3ManifestPublisher {
-                assigned_fragment_start: LogPosition::from_offset(10),
-            })
-            .await
-            .expect("required-start split should not fail take_work")
-            .expect("compatible prefix should be selected");
-
-        let ((_seq_no, log_position), required_fragment_start, work) = selected;
-        assert_eq!(LogPosition::from_offset(10), log_position);
-        assert_eq!(Some(LogPosition::from_offset(10)), required_fragment_start);
-        assert_eq!(1, work.len());
-        assert_eq!(vec![Vec::from("first")], work[0].messages);
+        let work = assert_s3_work(
+            take_s3_work(&batch_manager, 10).await,
+            10,
+            Some(10),
+            &["first"],
+        );
         assert_eq!(1, batch_manager.count_waiters());
         assert!(matches!(
             second_rx.try_recv(),
             Err(tokio::sync::oneshot::error::TryRecvError::Empty)
         ));
+        commit_s3_work(&batch_manager, LogPosition::from_offset(10), work).await;
+        expect_committed(first_rx, 10).await;
+
+        let work = assert_s3_work(
+            take_s3_work(&batch_manager, 11).await,
+            11,
+            Some(11),
+            &["second"],
+        );
+        assert_eq!(0, batch_manager.count_waiters());
+        commit_s3_work(&batch_manager, LogPosition::from_offset(11), work).await;
+        expect_committed(second_rx, 11).await;
+    }
+
+    #[tokio::test]
+    async fn compatible_required_fragment_start_prefix_commits_before_requeue() {
+        let batch_manager = immediate_s3_batch_manager();
+        let first_rx = enqueue_s3_with_required_start(&batch_manager, "first", Some(10)).await;
+        let second_rx = enqueue_s3_with_required_start(&batch_manager, "second", Some(10)).await;
+        let third_rx = enqueue_s3_with_required_start(&batch_manager, "third", Some(20)).await;
+
+        let work = assert_s3_work(
+            take_s3_work(&batch_manager, 10).await,
+            10,
+            Some(10),
+            &["first", "second"],
+        );
+        assert_eq!(1, batch_manager.count_waiters());
+        commit_s3_work(&batch_manager, LogPosition::from_offset(10), work).await;
+        expect_committed(first_rx, 10).await;
+        expect_committed(second_rx, 11).await;
+
+        let work = assert_s3_work(
+            take_s3_work(&batch_manager, 20).await,
+            20,
+            Some(20),
+            &["third"],
+        );
+        assert_eq!(0, batch_manager.count_waiters());
+        commit_s3_work(&batch_manager, LogPosition::from_offset(20), work).await;
+        expect_committed(third_rx, 20).await;
+    }
+
+    #[tokio::test]
+    async fn none_required_fragment_start_between_mismatches_stays_with_prefix() {
+        let batch_manager = immediate_s3_batch_manager();
+        let first_rx = enqueue_s3_with_required_start(&batch_manager, "first", Some(10)).await;
+        let second_rx = enqueue_s3_with_required_start(&batch_manager, "second", None).await;
+        let third_rx = enqueue_s3_with_required_start(&batch_manager, "third", Some(20)).await;
+
+        let work = assert_s3_work(
+            take_s3_work(&batch_manager, 10).await,
+            10,
+            Some(10),
+            &["first", "second"],
+        );
+        assert_eq!(1, batch_manager.count_waiters());
+        commit_s3_work(&batch_manager, LogPosition::from_offset(10), work).await;
+        expect_committed(first_rx, 10).await;
+        expect_committed(second_rx, 11).await;
+
+        let work = assert_s3_work(
+            take_s3_work(&batch_manager, 20).await,
+            20,
+            Some(20),
+            &["third"],
+        );
+        assert_eq!(0, batch_manager.count_waiters());
+        commit_s3_work(&batch_manager, LogPosition::from_offset(20), work).await;
+        expect_committed(third_rx, 20).await;
     }
 
     #[tokio::test]
