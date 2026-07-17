@@ -27,6 +27,8 @@ use crate::execution::operators::fetch_log::FetchLogOutput;
 /// where
 ///     n: total number of documents in the collection
 ///     n_t: number of documents with term t
+/// n_t is clamped to n because the sparse index may overestimate document
+/// frequency (e.g. block-quantized estimation), which would yield a negative idf.
 
 #[derive(Debug)]
 pub struct Idf {
@@ -77,6 +79,13 @@ impl ChromaError for IdfError {
             IdfError::TokenLengthMismatch { .. } => chroma_error::ErrorCodes::InvalidArgument,
         }
     }
+}
+
+fn scale(n: f32, nt: f32) -> f32 {
+    // Clamp nt to n to keep the idf non-negative: the sparse index may
+    // overestimate document frequency (e.g. block-quantized estimation).
+    let nt = nt.min(n);
+    ((n - nt + 0.5) / (nt + 0.5)).ln_1p()
 }
 
 #[async_trait]
@@ -194,10 +203,6 @@ impl Operator<IdfInput, IdfOutput> for Idf {
                 MaterializedLogOperation::AddNew => n.saturating_add(1),
                 MaterializedLogOperation::DeleteExisting => n.saturating_sub(1),
             };
-        }
-
-        fn scale(n: f32, nt: f32) -> f32 {
-            ((n - nt + 0.5) / (nt + 0.5)).ln_1p()
         }
 
         if let Some(tokens) = self.query.tokens.as_ref() {
@@ -725,5 +730,20 @@ mod tests {
         assert_eq!(scaled.tokens.as_ref().unwrap()[0], "term_a");
         assert_eq!(scaled.tokens.as_ref().unwrap()[1], "term_b");
         assert_eq!(scaled.tokens.as_ref().unwrap()[2], "term_c");
+    }
+
+    #[test]
+    fn test_idf_clamps_df_above_collection_size() {
+        // The sparse index may report a document frequency above the
+        // collection size (e.g. MaxScore estimates df in 1024-entry block
+        // quanta), which would make the idf negative without the clamp.
+        let clamped = scale(10.0, 1500.0);
+        assert!(
+            clamped >= 0.0,
+            "idf should be non-negative when df exceeds collection size, got {}",
+            clamped
+        );
+        // The clamped value should match df == n exactly.
+        assert_eq!(clamped, scale(10.0, 10.0));
     }
 }
