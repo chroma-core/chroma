@@ -1,4 +1,4 @@
-//! Load generated trajectories through the foundation-api HTTP routes.
+//! Load reasoning trajectories through the foundation-api HTTP routes.
 //!
 //! Run against a foundation-api server that has trajectory record I/O enabled:
 //!
@@ -9,9 +9,9 @@
 //!   ../foundation-research/trajectories/generate
 //! ```
 //!
-//! Add `--incremental` to create each trajectory open, append entries, finalize,
-//! and verify the finalized read through `GET /api/trajectories/{id}`. The
-//! default mode is wholesale.
+//! Add `--incremental` to create each trajectory open, append pruned reasoning
+//! entries, finalize, and verify the finalized read through
+//! `GET /api/trajectories/{id}`. The default mode is wholesale.
 
 use std::env;
 use std::error::Error;
@@ -20,7 +20,7 @@ use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
-use foundation_api::trajectories::{GenerateTrajectoryFile, TrajectoryEntry, WriteState};
+use foundation_api::trajectories::{ReasoningEntry, ReasoningTrajectoryFile, WriteState};
 use reqwest::{Method, StatusCode};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
@@ -66,7 +66,7 @@ struct TrajectoryWriteResponse {
 #[derive(Debug, Serialize)]
 struct AppendTrajectoryEntriesRequest<'a> {
     expected_entry_index: usize,
-    entries: &'a [TrajectoryEntry],
+    entries: &'a [ReasoningEntry],
 }
 
 #[tokio::main]
@@ -102,7 +102,7 @@ async fn run(args: Args) -> Result<(), Box<dyn Error>> {
         println!(
             "PASS {} {} entries",
             path.display(),
-            file.trajectory.actions_and_observations.len()
+            file.trajectory.entries.len()
         );
     }
 
@@ -143,7 +143,7 @@ impl FoundationTrajectoryClient {
 
     async fn save(
         &self,
-        file: &GenerateTrajectoryFile,
+        file: &ReasoningTrajectoryFile,
     ) -> Result<TrajectoryWriteResponse, Box<dyn Error>> {
         self.send_json(Method::POST, "/api/trajectories/save", file)
             .await
@@ -151,7 +151,7 @@ impl FoundationTrajectoryClient {
 
     async fn open(
         &self,
-        file: &GenerateTrajectoryFile,
+        file: &ReasoningTrajectoryFile,
     ) -> Result<TrajectoryWriteResponse, Box<dyn Error>> {
         self.send_json(Method::POST, "/api/trajectories/open", file)
             .await
@@ -172,7 +172,7 @@ impl FoundationTrajectoryClient {
 
     async fn finalize(
         &self,
-        file: &GenerateTrajectoryFile,
+        file: &ReasoningTrajectoryFile,
     ) -> Result<TrajectoryWriteResponse, Box<dyn Error>> {
         self.send_json(
             Method::POST,
@@ -182,7 +182,7 @@ impl FoundationTrajectoryClient {
         .await
     }
 
-    async fn get_finalized(&self, id: Uuid) -> Result<GenerateTrajectoryFile, Box<dyn Error>> {
+    async fn get_finalized(&self, id: Uuid) -> Result<ReasoningTrajectoryFile, Box<dyn Error>> {
         self.request_json(
             Method::GET,
             &format!("/api/trajectories/{id}?require_finalized=true"),
@@ -252,7 +252,7 @@ fn http_error(status: StatusCode, body: String) -> String {
 
 async fn save_one_shot(
     client: &FoundationTrajectoryClient,
-    file: &GenerateTrajectoryFile,
+    file: &ReasoningTrajectoryFile,
 ) -> Result<(), Box<dyn Error>> {
     let response = client.save(file).await?;
     print_write("WRITE", &response);
@@ -261,7 +261,7 @@ async fn save_one_shot(
 
 async fn save_incremental(
     client: &FoundationTrajectoryClient,
-    file: &GenerateTrajectoryFile,
+    file: &ReasoningTrajectoryFile,
     append_batch: usize,
 ) -> Result<(), Box<dyn Error>> {
     let open_file = open_trajectory_skeleton(file);
@@ -269,7 +269,7 @@ async fn save_incremental(
     print_write("OPEN", &open);
 
     let id = file.trajectory.id;
-    let entries = &file.trajectory.actions_and_observations;
+    let entries = &file.trajectory.entries;
     for (chunk_index, chunk) in entries.chunks(append_batch).enumerate() {
         let expected_entry_index = chunk_index * append_batch;
         let request = AppendTrajectoryEntriesRequest {
@@ -296,21 +296,16 @@ fn print_write(prefix: &str, response: &TrajectoryWriteResponse) {
     );
 }
 
-fn open_trajectory_skeleton(file: &GenerateTrajectoryFile) -> GenerateTrajectoryFile {
+fn open_trajectory_skeleton(file: &ReasoningTrajectoryFile) -> ReasoningTrajectoryFile {
     let mut open_file = file.clone();
-    open_file.trajectory.actions_and_observations.clear();
-    open_file.duration_seconds = None;
-    open_file.status = None;
-    open_file.error = None;
-    open_file.usage = None;
     open_file.citations = None;
-    open_file.final_todos = None;
+    open_file.trajectory.entries.clear();
     open_file
 }
 
 async fn verify_json_equivalent(
     client: &FoundationTrajectoryClient,
-    expected: &GenerateTrajectoryFile,
+    expected: &ReasoningTrajectoryFile,
 ) -> Result<(), Box<dyn Error>> {
     let actual = client.get_finalized(expected.trajectory.id).await?;
     let expected_json = serde_json::to_value(expected)?;
@@ -321,7 +316,7 @@ async fn verify_json_equivalent(
     Ok(())
 }
 
-fn parse_path(path: &Path) -> Result<GenerateTrajectoryFile, Box<dyn Error>> {
+fn parse_path(path: &Path) -> Result<ReasoningTrajectoryFile, Box<dyn Error>> {
     let file = File::open(path).map_err(|err| format!("open {}: {err}", path.display()))?;
     let reader = BufReader::new(file);
     serde_json::from_reader(reader).map_err(|err| format!("parse {}: {err}", path.display()).into())

@@ -26,7 +26,7 @@ use crate::{
     trajectories::{
         append_open_generate_trajectory, create_open_generate_trajectory,
         finalize_open_generate_trajectory, load_generate_trajectory, save_generate_trajectory,
-        AppendTrajectoryEntriesRequest, GenerateTrajectoryFile, TrajectoryError,
+        AppendTrajectoryEntriesRequest, ReasoningTrajectoryFile, TrajectoryError,
         TrajectoryWriteResponse,
     },
 };
@@ -73,7 +73,7 @@ impl ChromaError for TrajectoryRouteError {
 pub async fn foundation_save_trajectory(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
-    Json(file): Json<GenerateTrajectoryFile>,
+    Json(file): Json<ReasoningTrajectoryFile>,
 ) -> Result<Json<TrajectoryWriteResponse>, ServerError> {
     let identity =
         whoami_and_authorize(&*server.auth, &headers, AuthzAction::UpsertFoundation).await?;
@@ -95,7 +95,7 @@ pub async fn foundation_save_trajectory(
 pub async fn foundation_open_trajectory(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
-    Json(file): Json<GenerateTrajectoryFile>,
+    Json(file): Json<ReasoningTrajectoryFile>,
 ) -> Result<Json<TrajectoryWriteResponse>, ServerError> {
     let identity =
         whoami_and_authorize(&*server.auth, &headers, AuthzAction::UpsertFoundation).await?;
@@ -143,7 +143,7 @@ pub async fn foundation_finalize_trajectory(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
     Path(id): Path<Uuid>,
-    Json(file): Json<GenerateTrajectoryFile>,
+    Json(file): Json<ReasoningTrajectoryFile>,
 ) -> Result<Json<TrajectoryWriteResponse>, ServerError> {
     let identity =
         whoami_and_authorize(&*server.auth, &headers, AuthzAction::UpsertFoundation).await?;
@@ -169,7 +169,7 @@ pub async fn foundation_get_trajectory(
     State(server): State<FoundationApiServer>,
     Path(id): Path<Uuid>,
     Query(query): Query<ReadTrajectoryQuery>,
-) -> Result<Json<GenerateTrajectoryFile>, ServerError> {
+) -> Result<Json<ReasoningTrajectoryFile>, ServerError> {
     let identity =
         whoami_and_authorize(&*server.auth, &headers, AuthzAction::ViewFoundation).await?;
     let tenant = identity.tenant;

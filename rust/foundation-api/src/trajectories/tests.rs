@@ -866,16 +866,9 @@ async fn create_open_generate_trajectory_returns_complete_write_response() -> Te
     let server = MockServer::start_async().await;
     let collection = mocked_collection(&server);
     let mut file = sample_file(Uuid::parse_str("00000000-0000-0000-0000-00000000000d")?);
-    file.trajectory.actions_and_observations.clear();
-    file.duration_seconds = None;
-    file.status = None;
-    file.error = None;
-    file.usage = None;
+    file.trajectory.entries.clear();
     file.citations = None;
-    file.final_todos = None;
 
-    let tid = uuid_to_tid(file.trajectory.id)?;
-    let root_key = format!("gt/{tid}/root_metadata");
     let header_key = trajectory_header_key(file.trajectory.id)?;
     let get_path = collection_path(&collection, "conditional/get");
     let commit_path = collection_path(&collection, "conditional/commit");
@@ -883,7 +876,7 @@ async fn create_open_generate_trajectory_returns_complete_write_response() -> Te
     let get_mock = server
         .mock_async(|when, then| {
             when.method("POST").path(get_path).json_body(json!({
-                "ids": [root_key, header_key],
+                "ids": [header_key],
                 "where": null,
                 "where_document": null,
                 "limit": null,
@@ -907,7 +900,7 @@ async fn create_open_generate_trajectory_returns_complete_write_response() -> Te
             when.method("POST").path(commit_path);
             then.status(200).json_body(json!({
                 "first_inserted_record_offset": 17,
-                "record_count": 2,
+                "record_count": 1,
             }));
         })
         .await;
@@ -918,7 +911,7 @@ async fn create_open_generate_trajectory_returns_complete_write_response() -> Te
             trajectory_id: file.trajectory.id,
             write_state: WriteState::Open,
             entry_count: 0,
-            record_count: 2,
+            record_count: 1,
             first_inserted_record_offset: Some(17),
         }
     );
@@ -950,7 +943,7 @@ async fn save_generate_trajectory_returns_complete_write_response() -> TestResul
         TrajectoryWriteResponse {
             trajectory_id: file.trajectory.id,
             write_state: WriteState::Finalized,
-            entry_count: file.trajectory.actions_and_observations.len(),
+            entry_count: file.trajectory.entries.len(),
             record_count: 99,
             first_inserted_record_offset: Some(23),
         }
@@ -965,23 +958,17 @@ async fn create_open_trajectory_existing_record_is_already_exists() -> TestResul
     let server = MockServer::start_async().await;
     let collection = mocked_collection(&server);
     let mut file = sample_file(Uuid::parse_str("00000000-0000-0000-0000-00000000000f")?);
-    file.trajectory.actions_and_observations.clear();
-    file.duration_seconds = None;
-    file.status = None;
-    file.error = None;
-    file.usage = None;
+    file.trajectory.entries.clear();
     file.citations = None;
-    file.final_todos = None;
 
-    let tid = uuid_to_tid(file.trajectory.id)?;
-    let root_key = format!("gt/{tid}/root_metadata");
+    let header_key = trajectory_header_key(file.trajectory.id)?;
     let get_path = collection_path(&collection, "conditional/get");
 
     let get_mock = server
         .mock_async(|when, then| {
             when.method("POST").path(get_path);
             then.status(200).json_body(json!({
-                "ids": [root_key],
+                "ids": [header_key],
                 "embeddings": null,
                 "documents": null,
                 "uris": null,

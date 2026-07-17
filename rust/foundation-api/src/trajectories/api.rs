@@ -8,19 +8,19 @@ use super::chroma_store::{
     chroma_save_generate_trajectory,
 };
 use super::error::TrajectoryError;
-use super::model::{GenerateTrajectoryFile, TrajectoryEntry, WriteState};
+use super::model::{ReasoningEntry, ReasoningTrajectoryFile, WriteState};
 
 /// Request body for appending complete entries to an open trajectory.
 ///
-/// `entries` uses the exact [`TrajectoryEntry`] JSON shape. It must be
-/// non-empty; callers with no complete action/observation to append should skip
+/// `entries` uses the exact [`ReasoningEntry`] JSON shape. It must be
+/// non-empty; callers with no displayable reasoning entry to append should skip
 /// the request.
 #[derive(Debug, Deserialize)]
 pub struct AppendTrajectoryEntriesRequest {
     /// Entry count the caller expects the stored open trajectory to have.
     pub expected_entry_index: usize,
-    /// Complete action or observation entries to append atomically.
-    pub entries: Vec<TrajectoryEntry>,
+    /// Pruned reasoning entries to append atomically.
+    pub entries: Vec<ReasoningEntry>,
 }
 
 /// Compact response returned by trajectory write endpoints.
@@ -62,7 +62,7 @@ impl TrajectoryWriteResponse {
 /// live incremental writes.
 pub async fn save_generate_trajectory(
     collection: &ChromaCollection,
-    file: &GenerateTrajectoryFile,
+    file: &ReasoningTrajectoryFile,
 ) -> Result<TrajectoryWriteResponse, TrajectoryError> {
     let mut txn = collection.conditional();
     chroma_save_generate_trajectory(&mut txn, file).await?;
@@ -70,20 +70,20 @@ pub async fn save_generate_trajectory(
     Ok(TrajectoryWriteResponse::from_commit(
         file.trajectory.id,
         WriteState::Finalized,
-        file.trajectory.actions_and_observations.len(),
+        file.trajectory.entries.len(),
         commit,
     ))
 }
 
 /// Create an open trajectory with zero committed entries.
 ///
-/// The supplied [`GenerateTrajectoryFile`] must already be an open skeleton:
-/// `trajectory.actions_and_observations` must be empty. The API deliberately
-/// does not strip entries from the body. If the caller has a complete file, use
+/// The supplied [`ReasoningTrajectoryFile`] must already be an open skeleton:
+/// `trajectory.entries` must be empty. The API deliberately does not strip
+/// entries from the body. If the caller has a complete file, use
 /// [`save_generate_trajectory`] instead.
 pub async fn create_open_generate_trajectory(
     collection: &ChromaCollection,
-    file: &GenerateTrajectoryFile,
+    file: &ReasoningTrajectoryFile,
 ) -> Result<TrajectoryWriteResponse, TrajectoryError> {
     let mut txn = collection.conditional();
     chroma_create_open_trajectory(&mut txn, file).await?;
@@ -136,7 +136,7 @@ pub async fn append_open_generate_trajectory(
 pub async fn finalize_open_generate_trajectory(
     collection: &ChromaCollection,
     tid: Uuid,
-    file: &GenerateTrajectoryFile,
+    file: &ReasoningTrajectoryFile,
 ) -> Result<TrajectoryWriteResponse, TrajectoryError> {
     if file.trajectory.id != tid {
         return Err(TrajectoryError::IdMismatch {
@@ -151,7 +151,7 @@ pub async fn finalize_open_generate_trajectory(
     Ok(TrajectoryWriteResponse::from_commit(
         tid,
         WriteState::Finalized,
-        file.trajectory.actions_and_observations.len(),
+        file.trajectory.entries.len(),
         commit,
     ))
 }
@@ -164,7 +164,7 @@ pub async fn load_generate_trajectory(
     collection: &ChromaCollection,
     tid: Uuid,
     require_finalized: bool,
-) -> Result<GenerateTrajectoryFile, TrajectoryError> {
+) -> Result<ReasoningTrajectoryFile, TrajectoryError> {
     let mut txn = collection.conditional();
     let file = chroma_load_generate_trajectory(&mut txn, tid, require_finalized).await?;
     let _ = txn.commit().await?;
@@ -173,8 +173,6 @@ pub async fn load_generate_trajectory(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use chroma::{
         client::{ChromaHttpClientOptions, ChromaRetryOptions},
         types::ConditionalCommitResult,
@@ -182,10 +180,9 @@ mod tests {
     };
     use chroma_error::{ChromaError, ErrorCodes};
     use chroma_types::Collection;
-    use serde_json::json;
 
     use super::*;
-    use crate::trajectories::{Action, Source, Tool, ToolSchema, Trajectory};
+    use crate::trajectories::{ReasoningTrajectory, ReasoningWrite};
 
     fn dummy_collection() -> ChromaCollection {
         let client = ChromaHttpClient::new(ChromaHttpClientOptions {
@@ -206,47 +203,20 @@ mod tests {
         )
     }
 
-    fn minimal_file(id: Uuid, entries: Vec<TrajectoryEntry>) -> GenerateTrajectoryFile {
-        GenerateTrajectoryFile {
-            batch_index: None,
-            batch_offset: None,
-            worker_id: None,
-            span: None,
-            attempt_id: None,
-            deadlock_retries: None,
-            attempt_paths: None,
-            started_at: None,
-            duration_seconds: None,
-            status: None,
-            error: None,
-            usage: None,
+    fn minimal_file(id: Uuid, entries: Vec<ReasoningEntry>) -> ReasoningTrajectoryFile {
+        ReasoningTrajectoryFile {
             citations: None,
-            final_todos: None,
-            trajectory: Trajectory {
-                id,
-                actions_and_observations: entries,
-            },
-            extra: BTreeMap::new(),
+            trajectory: ReasoningTrajectory { id, entries },
         }
     }
 
-    fn action_entry() -> TrajectoryEntry {
-        TrajectoryEntry::Action(Action {
-            tools: vec![Tool {
-                tool_schema: ToolSchema {
-                    name: "noop".to_string(),
-                    description: String::new(),
-                    parameters: json!({"type": "object"}),
-                    required: Vec::new(),
-                    extra: BTreeMap::new(),
-                },
-                extra: BTreeMap::new(),
+    fn reasoning_entry() -> ReasoningEntry {
+        ReasoningEntry {
+            reasoning: Some("reason".to_string()),
+            writes: vec![ReasoningWrite {
+                slug: "page".to_string(),
             }],
-            params: vec![json!({})],
-            sources: vec![Source::new("test")],
-            reasoning: None,
-            reasoning_signature: None,
-        })
+        }
     }
 
     #[test]
@@ -296,7 +266,7 @@ mod tests {
         let collection = dummy_collection();
         let path_id = Uuid::parse_str("00000000-0000-0000-0000-000000000013").unwrap();
         let body_id = Uuid::parse_str("00000000-0000-0000-0000-000000000014").unwrap();
-        let file = minimal_file(body_id, vec![action_entry()]);
+        let file = minimal_file(body_id, vec![reasoning_entry()]);
 
         let error = finalize_open_generate_trajectory(&collection, path_id, &file)
             .await
@@ -312,7 +282,7 @@ mod tests {
     async fn open_create_rejects_non_empty_file_before_chroma() {
         let collection = dummy_collection();
         let trajectory_id = Uuid::parse_str("00000000-0000-0000-0000-000000000015").unwrap();
-        let file = minimal_file(trajectory_id, vec![action_entry()]);
+        let file = minimal_file(trajectory_id, vec![reasoning_entry()]);
 
         let error = create_open_generate_trajectory(&collection, &file)
             .await
