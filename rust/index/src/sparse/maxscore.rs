@@ -218,9 +218,28 @@ impl<'me> MaxScoreWriter<'me> {
                 // rewritten anyway, establish it once by summing the prefix
                 // block headers (bodies stay encoded); the commit below
                 // upgrades the directory to version 1.
-                let prefix_count = match directory.posting_count() {
-                    Ok(old_count) => (old_count as u64).saturating_sub(suffix_old_len),
-                    Err(_) => match self.old_reader {
+                let stored_count = match directory.posting_count() {
+                    Ok(old_count) => Some(old_count),
+                    // Only `MissingPostingCount` means "legacy uncounted
+                    // directory" — expected, not an error.
+                    Err(SparsePostingBlockError::MissingPostingCount { .. }) => None,
+                    // Any other variant does not mean the count is merely
+                    // absent; don't silently treat it as legacy. Recounting
+                    // from the prefix block headers below is still safe (it
+                    // trusts no directory state), so log loudly and recount.
+                    Err(err) => {
+                        tracing::error!(
+                            dim = encoded_dim,
+                            %err,
+                            "unexpected error reading directory posting count; \
+                             recounting prefix from block headers"
+                        );
+                        None
+                    }
+                };
+                let prefix_count = match stored_count {
+                    Some(old_count) => (old_count as u64).saturating_sub(suffix_old_len),
+                    None => match self.old_reader {
                         Some(ref reader) => {
                             reader
                                 .count_posting_entries_below(encoded_dim, first_affected)
@@ -498,11 +517,24 @@ impl<'me> MaxScoreReader<'me> {
         };
         match dir.posting_count() {
             Ok(count) => return Ok(count as usize),
-            Err(err) => {
+            // Only `MissingPostingCount` means "legacy uncounted
+            // directory" — expected, not an error.
+            Err(err @ SparsePostingBlockError::MissingPostingCount { .. }) => {
                 tracing::debug!(
                     dim = encoded_dim,
                     %err,
                     "no exact posting count stored; falling back to estimate"
+                );
+            }
+            // Any other variant does not mean the count is merely absent;
+            // don't silently treat it as legacy. Log loudly, then degrade
+            // gracefully to the estimate like the rest of the read path.
+            Err(err) => {
+                tracing::error!(
+                    dim = encoded_dim,
+                    %err,
+                    "unexpected error reading directory posting count; \
+                     falling back to estimate"
                 );
             }
         }

@@ -799,10 +799,16 @@ impl Directory {
         let mut posting_count = None;
         for (i, part) in parts.into_iter().enumerate() {
             if i == 0 {
-                // Legacy (version-0) part 0 carries no count; the merged
-                // directory stays uncounted and readers fall back to
-                // estimating.
-                posting_count = part.posting_count().ok();
+                posting_count = match part.posting_count() {
+                    Ok(count) => Some(count),
+                    // Legacy (version-0) part 0 carries no count; the
+                    // merged directory stays uncounted and readers fall
+                    // back to estimating.
+                    Err(SparsePostingBlockError::MissingPostingCount { .. }) => None,
+                    // Any other variant must not be conflated with "no
+                    // count stored" — surface it to the caller.
+                    Err(err) => return Err(err),
+                };
             }
             let (o, w) = part.entries();
             max_offsets.extend(o);
