@@ -191,6 +191,26 @@ impl<'me> MaxScoreWriter<'me> {
                 } else {
                     vec![]
                 };
+                let suffix_old_len: u64 = suffix_blocks.iter().map(|b| b.len() as u64).sum();
+
+                // Postings in the untouched prefix blocks [0, first_affected).
+                // Version-1 directories store the exact old count, so the
+                // prefix count is derived without extra IO. Legacy (v0)
+                // directories carry no count — since this dimension is being
+                // rewritten anyway, establish it once by summing the prefix
+                // block headers (bodies stay encoded); the commit below
+                // upgrades the directory to version 1.
+                let prefix_count = match directory.posting_count() {
+                    Some(old_count) => (old_count as u64).saturating_sub(suffix_old_len),
+                    None => match self.old_reader {
+                        Some(ref reader) => {
+                            reader
+                                .count_posting_entries_below(encoded_dim, first_affected)
+                                .await?
+                        }
+                        None => 0,
+                    },
+                };
 
                 // Decompress suffix blocks into entries.
                 let mut entries = std::collections::HashMap::new();
@@ -265,7 +285,14 @@ impl<'me> MaxScoreWriter<'me> {
                     }
                 }
 
-                let directory = Directory::new(dir_max_offsets, dir_max_weights)?;
+                // Exact per-dimension posting count, maintained incrementally:
+                // the delta map alone cannot provide it (overwrites of
+                // existing offsets and deletes of absent ones are not
+                // distinguishable from real adds/removes), but the loaded
+                // suffix lengths can.
+                let new_count = prefix_count + sorted_suffix.len() as u64;
+                let directory = Directory::new(dir_max_offsets, dir_max_weights)?
+                    .with_posting_count(u32::try_from(new_count).unwrap_or(u32::MAX));
                 dir_work.push(DirWork {
                     prefix: dir_prefix,
                     directory: Some(directory),
@@ -300,7 +327,8 @@ impl<'me> MaxScoreWriter<'me> {
                         .await?;
                 }
 
-                let directory = Directory::new(dir_max_offsets, dir_max_weights)?;
+                let directory = Directory::new(dir_max_offsets, dir_max_weights)?
+                    .with_posting_count(u32::try_from(entries.len()).unwrap_or(u32::MAX));
                 dir_work.push(DirWork {
                     prefix: dir_prefix,
                     directory: Some(directory),
@@ -414,17 +442,43 @@ impl<'me> MaxScoreReader<'me> {
             .map(|d| (d, part_count)))
     }
 
-    /// Estimate total posting entries for a dimension.
+    /// Sum of `num_entries` across posting blocks `[0, end_seq)` for a
+    /// dimension. Reads only block headers — bodies stay encoded.
+    pub async fn count_posting_entries_below(
+        &self,
+        encoded_dim: &str,
+        end_seq: u32,
+    ) -> Result<u64, MaxScoreError> {
+        if end_seq == 0 {
+            return Ok(0);
+        }
+        let blocks: Vec<(&str, u32, SparsePostingBlock)> = self
+            .posting_reader
+            .get_range(encoded_dim..=encoded_dim, ..end_seq)
+            .await?
+            .collect();
+        Ok(blocks.iter().map(|(_, _, b)| b.len() as u64).sum())
+    }
+
+    /// Total posting entries for a dimension.
     ///
     /// Used by the IDF operator to compute document frequency. Loads only
-    /// the directory (usually cached) and the first posting block to learn
-    /// the block size, then returns `num_blocks * block_size`. This
-    /// overestimates by at most `block_size - 1` on the last block, which
-    /// is negligible for the IDF formula.
+    /// the directory (usually cached). Version-1 directories store the
+    /// exact count, maintained incrementally by [`MaxScoreWriter::commit`].
+    ///
+    /// Legacy (version-0) directories carry no count, so this falls back
+    /// to estimating `num_blocks * first_block_len`. The estimate is
+    /// quantized to the first block's length: it rounds up on the (usually
+    /// partial) last block — potentially past the collection size — and
+    /// can badly undercount when block 0 is itself partial, since
+    /// append-only compactions can strand partial interior blocks.
     pub async fn count_postings(&self, encoded_dim: &str) -> Result<usize, MaxScoreError> {
         let Some((dir, _)) = self.get_directory(encoded_dim).await? else {
             return Ok(0);
         };
+        if let Some(count) = dir.posting_count() {
+            return Ok(count as usize);
+        }
         let num_blocks = dir.num_blocks();
         if num_blocks == 0 {
             return Ok(0);

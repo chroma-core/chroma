@@ -8,6 +8,15 @@ const BITPACK_GROUP_SIZE: usize = BitPacker4x::BLOCK_LEN; // 128
 /// [`DirectoryBlock`] below).
 const DIRECTORY_SENTINEL: u8 = 0xFF;
 
+/// Directory format version predating exact posting counts. The header
+/// version byte is 0 and `min_offset`/`max_offset` hold the first/last
+/// posting-block max offsets (never read back).
+const DIRECTORY_VERSION_LEGACY: u8 = 0;
+
+/// Directory format version whose part 0 stores the dimension's exact
+/// posting count in the `min_offset` header slot (see [`DirectoryBlock`]).
+const DIRECTORY_VERSION_COUNTED: u8 = 1;
+
 /// Maximum number of posting entries per block. Chosen so that the
 /// decompressed block fits comfortably in L1 cache:
 ///   4096 * (4 bytes offset + 4 bytes f32 value) = 32 KB.
@@ -84,7 +93,9 @@ pub enum SparsePostingBlockError {
 /// ```text
 /// [0..2]   num_entries   : u16  — number of (offset, weight) pairs
 /// [2]      bits_per_delta: u8   — bits per bitpacked delta (0xFF = directory)
-/// [3]      _reserved     : u8   — reserved for future format versioning
+/// [3]      version       : u8   — format version (0 on posting blocks;
+///                                 see [`DirectoryBlock`] for directory
+///                                 version semantics)
 /// [4..8]   min_offset    : u32  — smallest doc offset in this block
 /// [8..12]  max_offset    : u32  — largest doc offset in this block
 /// [12..16] max_weight    : f32  — largest weight in this block (for pruning)
@@ -96,6 +107,11 @@ pub struct PostingBlockHeader {
     /// Bits per delta for bitpacked offset decompression.
     /// Set to `0xFF` for directory blocks (different body layout).
     pub bits_per_delta: u8,
+    /// Format version byte. Posting blocks always write 0. Directory
+    /// blocks use it to gate optional header fields — see the version
+    /// section of [`DirectoryBlock`]. Readers treat unknown versions as
+    /// version 0 (no optional fields).
+    pub version: u8,
     /// Smallest document offset id in this block.
     pub min_offset: u32,
     /// Largest document offset id in this block.
@@ -222,6 +238,7 @@ impl SparsePostingBlock {
                 max_weight,
                 num_entries: n as u16,
                 bits_per_delta: max_bits,
+                version: 0,
             },
             body: PostingBody::Decoded(Decompressed { offsets, values }),
         })
@@ -424,7 +441,7 @@ impl SparsePostingBlock {
 
         let num_entries = u16::from_le_bytes([bytes[0], bytes[1]]);
         let bits_per_delta = bytes[2];
-        // bytes[3] is reserved
+        let version = bytes[3];
         let min_offset = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
         let max_offset = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
         let max_weight = f32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]);
@@ -451,6 +468,7 @@ impl SparsePostingBlock {
                 max_weight,
                 num_entries,
                 bits_per_delta,
+                version,
             },
             body: PostingBody::Encoded(bytes[HEADER_SIZE..HEADER_SIZE + expected_body].to_vec()),
         })
@@ -468,7 +486,7 @@ impl SparsePostingBlock {
     fn write_header(&self, buf: &mut Vec<u8>) {
         buf.extend_from_slice(&self.header.num_entries.to_le_bytes());
         buf.push(self.header.bits_per_delta);
-        buf.push(0); // reserved — available for format versioning if needed
+        buf.push(self.header.version);
         buf.extend_from_slice(&self.header.min_offset.to_le_bytes());
         buf.extend_from_slice(&self.header.max_offset.to_le_bytes());
         buf.extend_from_slice(&self.header.max_weight.to_le_bytes());
@@ -488,6 +506,7 @@ impl SparsePostingBlock {
         Ok(PostingBlockHeader {
             num_entries: u16::from_le_bytes([bytes[0], bytes[1]]),
             bits_per_delta: bytes[2],
+            version: bytes[3],
             min_offset: u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]),
             max_offset: u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]),
             max_weight: f32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]),
@@ -578,6 +597,17 @@ impl SparsePostingBlock {
 ///
 /// The header's `max_weight` stores the dimension-level maximum weight
 /// (max of all per-block max_weights), used for early term pruning.
+///
+/// # Header version (byte 3)
+///
+/// - **0 (legacy)**: `min_offset`/`max_offset` hold the first/last
+///   posting-block max offsets. Neither is ever read back.
+/// - **1**: part 0's `min_offset` slot instead stores the dimension's
+///   exact posting count (total entries across all posting blocks).
+///   Every other field keeps its version-0 meaning, so a version-0
+///   reader — which ignores byte 3, `min_offset`, and `max_offset` on
+///   directory blocks — parses version-1 parts identically. Parts
+///   after part 0 remain version 0.
 #[derive(Debug, Clone)]
 pub struct DirectoryBlock(SparsePostingBlock);
 
@@ -614,6 +644,7 @@ impl DirectoryBlock {
                 max_weight: dim_max,
                 num_entries: n as u16,
                 bits_per_delta: DIRECTORY_SENTINEL,
+                version: DIRECTORY_VERSION_LEGACY,
             },
             body: PostingBody::Encoded(raw_body),
         }))
@@ -637,6 +668,21 @@ impl DirectoryBlock {
     /// Number of posting blocks summarized by this directory.
     pub fn num_blocks(&self) -> usize {
         self.0.header.num_entries as usize
+    }
+
+    /// Exact posting count carried by this part, if any. Only part 0 of
+    /// a version-1 directory stores one; legacy (version-0) parts and
+    /// non-initial parts return `None`.
+    pub fn posting_count(&self) -> Option<u32> {
+        (self.0.header.version == DIRECTORY_VERSION_COUNTED).then_some(self.0.header.min_offset)
+    }
+
+    /// Stamp this part as version 1, storing the dimension's exact
+    /// posting count in the (otherwise unused) `min_offset` header slot.
+    /// Must only be applied to part 0.
+    fn set_posting_count(&mut self, count: u32) {
+        self.0.header.version = DIRECTORY_VERSION_COUNTED;
+        self.0.header.min_offset = count;
     }
 
     /// Extract `(max_offsets, max_weights)` — one pair per posting block.
@@ -694,6 +740,10 @@ pub struct Directory {
     max_offsets: Vec<u32>,
     max_weights: Vec<f32>,
     dim_max_weight: f32,
+    /// Exact posting count across all posting blocks, if known. `Some`
+    /// for version-1 directories; `None` for legacy (version-0) ones,
+    /// whose readers must fall back to estimating.
+    posting_count: Option<u32>,
 }
 
 impl Directory {
@@ -716,21 +766,38 @@ impl Directory {
             max_offsets,
             max_weights,
             dim_max_weight,
+            posting_count: None,
         })
     }
 
+    /// Attach the dimension's exact posting count, upgrading the
+    /// directory to format version 1 on the next [`into_parts`].
+    pub fn with_posting_count(mut self, count: u32) -> Self {
+        self.posting_count = Some(count);
+        self
+    }
+
     /// Reconstruct a directory from on-disk [`DirectoryBlock`] parts.
+    /// The exact posting count, if part 0 carries one, is preserved.
     pub fn from_parts(
         parts: impl IntoIterator<Item = DirectoryBlock>,
     ) -> Result<Self, SparsePostingBlockError> {
         let mut max_offsets = Vec::new();
         let mut max_weights = Vec::new();
-        for part in parts {
+        let mut posting_count = None;
+        for (i, part) in parts.into_iter().enumerate() {
+            if i == 0 {
+                posting_count = part.posting_count();
+            }
             let (o, w) = part.entries();
             max_offsets.extend(o);
             max_weights.extend(w);
         }
-        Self::new(max_offsets, max_weights)
+        let dir = Self::new(max_offsets, max_weights)?;
+        Ok(Directory {
+            posting_count,
+            ..dir
+        })
     }
 
     /// Split into [`DirectoryBlock`] parts that each fit within a
@@ -740,11 +807,16 @@ impl Directory {
     /// from the blockfile's `max_block_size_bytes`.
     pub fn into_parts(self, max_entries_per_part: usize) -> Vec<DirectoryBlock> {
         let cap = max_entries_per_part.max(1).min(u16::MAX as usize);
-        self.max_offsets
+        let mut parts: Vec<DirectoryBlock> = self
+            .max_offsets
             .chunks(cap)
             .zip(self.max_weights.chunks(cap))
             .map(|(o, w)| DirectoryBlock::new(o, w).expect("chunk from valid directory"))
-            .collect()
+            .collect();
+        if let (Some(count), Some(first)) = (self.posting_count, parts.first_mut()) {
+            first.set_posting_count(count);
+        }
+        parts
     }
 
     pub fn max_offsets(&self) -> &[u32] {
@@ -763,6 +835,12 @@ impl Directory {
     /// Number of posting blocks summarized.
     pub fn num_blocks(&self) -> usize {
         self.max_offsets.len()
+    }
+
+    /// Exact posting count across all posting blocks, if this directory
+    /// carries one (format version 1). Legacy directories return `None`.
+    pub fn posting_count(&self) -> Option<u32> {
+        self.posting_count
     }
 
     /// Maximum directory entries per [`DirectoryBlock`] part that fit
@@ -1373,6 +1451,121 @@ mod tests {
         let merged = Directory::from_parts(parts).unwrap();
         assert_eq!(merged.max_offsets(), &offsets[..]);
         assert_eq!(merged.max_weights(), &weights[..]);
+    }
+
+    // ── Directory posting count (format version 1) ───────────────────
+
+    #[test]
+    fn directory_posting_count_roundtrip() {
+        let (offsets, weights) = make_dir_data(10);
+        let dir = Directory::new(offsets.clone(), weights.clone())
+            .unwrap()
+            .with_posting_count(1234);
+        assert_eq!(dir.posting_count(), Some(1234));
+
+        let parts = dir.into_parts(100);
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].posting_count(), Some(1234));
+
+        let bytes = parts[0].clone().into_block().serialize();
+        let restored =
+            DirectoryBlock::from_block(SparsePostingBlock::deserialize(&bytes).unwrap()).unwrap();
+        assert_eq!(restored.posting_count(), Some(1234));
+
+        let merged = Directory::from_parts(vec![restored]).unwrap();
+        assert_eq!(merged.posting_count(), Some(1234));
+        assert_eq!(merged.max_offsets(), &offsets[..]);
+        assert_eq!(merged.max_weights(), &weights[..]);
+    }
+
+    #[test]
+    fn directory_posting_count_only_on_part_zero() {
+        let (offsets, weights) = make_dir_data(100);
+        let dir = Directory::new(offsets.clone(), weights.clone())
+            .unwrap()
+            .with_posting_count(42);
+        let parts = dir.into_parts(30);
+        assert_eq!(parts.len(), 4);
+        assert_eq!(parts[0].posting_count(), Some(42));
+        for part in &parts[1..] {
+            assert_eq!(part.posting_count(), None);
+        }
+
+        let merged = Directory::from_parts(parts).unwrap();
+        assert_eq!(merged.posting_count(), Some(42));
+        assert_eq!(merged.max_offsets(), &offsets[..]);
+        assert_eq!(merged.max_weights(), &weights[..]);
+    }
+
+    #[test]
+    fn legacy_directory_reports_no_posting_count() {
+        let dir_block = DirectoryBlock::new(&[10, 20, 30], &[0.5, 0.9, 0.2]).unwrap();
+        assert_eq!(dir_block.posting_count(), None);
+
+        let bytes = dir_block.into_block().serialize();
+        assert_eq!(bytes[3], DIRECTORY_VERSION_LEGACY, "legacy version byte");
+        let restored =
+            DirectoryBlock::from_block(SparsePostingBlock::deserialize(&bytes).unwrap()).unwrap();
+        assert_eq!(restored.posting_count(), None);
+
+        let merged = Directory::from_parts(vec![restored]).unwrap();
+        assert_eq!(merged.posting_count(), None);
+    }
+
+    #[test]
+    fn counted_directory_is_forward_compatible_with_legacy_readers() {
+        // A version-1 part must differ from its legacy encoding only in
+        // the version byte (3) and the dead min_offset slot (4..8), so a
+        // reader that predates posting counts parses it identically.
+        let (offsets, weights) = make_dir_data(10);
+
+        let legacy_bytes = Directory::new(offsets.clone(), weights.clone())
+            .unwrap()
+            .into_parts(100)
+            .remove(0)
+            .into_block()
+            .serialize();
+        let counted_bytes = Directory::new(offsets, weights)
+            .unwrap()
+            .with_posting_count(9999)
+            .into_parts(100)
+            .remove(0)
+            .into_block()
+            .serialize();
+
+        assert_eq!(legacy_bytes.len(), counted_bytes.len());
+        assert_eq!(
+            legacy_bytes[..3],
+            counted_bytes[..3],
+            "num_entries and directory sentinel unchanged"
+        );
+        assert_eq!(legacy_bytes[3], DIRECTORY_VERSION_LEGACY);
+        assert_eq!(counted_bytes[3], DIRECTORY_VERSION_COUNTED);
+        assert_eq!(&counted_bytes[4..8], 9999u32.to_le_bytes().as_slice());
+        assert_eq!(
+            legacy_bytes[8..],
+            counted_bytes[8..],
+            "max_offset, max_weight, and body unchanged"
+        );
+
+        // Every field a legacy reader consumes is identical in meaning.
+        let legacy =
+            DirectoryBlock::from_block(SparsePostingBlock::deserialize(&legacy_bytes).unwrap())
+                .unwrap();
+        let counted =
+            DirectoryBlock::from_block(SparsePostingBlock::deserialize(&counted_bytes).unwrap())
+                .unwrap();
+        assert_eq!(counted.num_blocks(), legacy.num_blocks());
+        assert_eq!(counted.dim_max_weight(), legacy.dim_max_weight());
+        assert_eq!(counted.entries(), legacy.entries());
+    }
+
+    #[test]
+    fn posting_block_version_byte_is_zero() {
+        let bytes = make_block(&[(10, 0.5), (20, 0.9)]).serialize();
+        assert_eq!(bytes[3], 0);
+        let hdr = SparsePostingBlock::peek_header(&bytes).unwrap();
+        assert_eq!(hdr.version, 0);
     }
 
     #[test]
