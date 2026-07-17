@@ -100,7 +100,6 @@ async fn test_k8s_integration_copy_with_deep_snapshots() {
     )
     .await
     .unwrap();
-    // TODO(claude): use Limits::UNLIMITED everywhere you scrub.
     let scrubbed_target = copied.scrub(wal3::Limits::default()).await.unwrap();
     assert_eq!(
         scrubbed_source.calculated_setsum, scrubbed_target.calculated_setsum,

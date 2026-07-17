@@ -103,6 +103,7 @@
 mod attached_function;
 pub mod client;
 mod collection;
+mod conditional_transaction;
 pub mod embed;
 pub mod types;
 
@@ -111,6 +112,7 @@ pub use client::ChromaHttpClient;
 pub use client::ChromaHttpClientOptions;
 pub use collection::ChromaCollection;
 pub use collection::IntoOptionalEmbeddings;
+pub use conditional_transaction::ConditionalCollectionTransaction;
 
 #[cfg(test)]
 mod tests {

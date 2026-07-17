@@ -204,6 +204,10 @@ k8s_yaml(
 
 rfe_config_file = os.environ.get('RFE_CONFIG_FILE') or ("rust/frontend/sample_configs/distributed_mcmr.yaml" if os.environ.get('MULTI_REGION') == 'true' else "rust/frontend/sample_configs/distributed.yaml")
 worker_config_file = 'rust/worker/chroma_mcmr.yaml' if os.environ.get('MULTI_REGION') == 'true' else 'rust/worker/chroma_config.yaml'
+foundation_config_file = os.environ.get('FOUNDATION_CONFIG_FILE')
+foundation_config_set_file = ''
+if foundation_config_file:
+  foundation_config_set_file = ',foundationService.configuration=' + foundation_config_file
 
 distributed_chroma_values = "k8s/distributed-chroma/values.yaml,k8s/distributed-chroma/values.dev.yaml"
 if os.environ.get('ADDITIONAL_DISTRIBUTED_CHROMA_VALUES'):
@@ -214,7 +218,7 @@ if os.path.exists('k8s/distributed-chroma/values.foundation.local.yaml'):
 # We manually call helm template so we can call set-file
 k8s_yaml(
   local(
-    'helm template --set-file rustFrontendService.configuration=' + rfe_config_file + ',rustLogService.configuration=' + worker_config_file + ',heapTenderService.configuration=' + worker_config_file + ',compactionService.configuration=' + worker_config_file + ',queryService.configuration=' + worker_config_file + ',garbageCollector.configuration=' + worker_config_file + ',rustSysdbService.configuration=' + worker_config_file + ',workQueueService.configuration=' + worker_config_file + ',fnConsumer.configuration=' + worker_config_file + ' --values ' + distributed_chroma_values + ' k8s/distributed-chroma'
+    'helm template --set-file rustFrontendService.configuration=' + rfe_config_file + ',rustLogService.configuration=' + worker_config_file + ',heapTenderService.configuration=' + worker_config_file + ',compactionService.configuration=' + worker_config_file + ',queryService.configuration=' + worker_config_file + ',garbageCollector.configuration=' + worker_config_file + ',rustSysdbService.configuration=' + worker_config_file + ',workQueueService.configuration=' + worker_config_file + ',fnConsumer.configuration=' + worker_config_file + foundation_config_set_file + ' --values ' + distributed_chroma_values + ' k8s/distributed-chroma'
   ),
 )
 
@@ -236,6 +240,8 @@ watch_file('rust/frontend/sample_configs/distributed2.yaml')
 watch_file('rust/worker/chroma_config.yaml')
 watch_file('rust/worker/chroma_config2.yaml')
 watch_file('rust/worker/chroma_mcmr.yaml')
+if foundation_config_file:
+  watch_file(foundation_config_file)
 watch_file('k8s/distributed-chroma/values.yaml')
 watch_file('k8s/distributed-chroma/values.dev.yaml')
 watch_file('k8s/distributed-chroma/values2.yaml')

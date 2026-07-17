@@ -35,11 +35,11 @@ pub use interfaces::s3::{
     S3FragmentPuller, S3FragmentUploader, S3ManifestManagerFactory,
 };
 pub use interfaces::{
-    fragment_upload_replica_fault_label, BatchManager, FaultInjectingFragmentManagerFactory,
-    FragmentConsumer, FragmentManagerFactory, FragmentPointer, FragmentPublisher,
-    FragmentUploadFault, FragmentUploadFaultInjector, FragmentUploader, ManifestConsumer,
-    ManifestManagerFactory, ManifestPublisher, ManifestWitness, PositionWitness,
-    FRAGMENT_UPLOAD_FAULT_LABEL, FRAGMENT_UPLOAD_REPLICA_FAULT_LABELS,
+    fragment_upload_replica_fault_label, AppendWork, BatchManager,
+    FaultInjectingFragmentManagerFactory, FragmentConsumer, FragmentManagerFactory,
+    FragmentPointer, FragmentPublisher, FragmentUploadFault, FragmentUploadFaultInjector,
+    FragmentUploader, ManifestConsumer, ManifestManagerFactory, ManifestPublisher, ManifestWitness,
+    PositionWitness, FRAGMENT_UPLOAD_FAULT_LABEL, FRAGMENT_UPLOAD_REPLICA_FAULT_LABELS,
 };
 pub use manifest::{
     unprefixed_snapshot_path, Manifest, ManifestAndWitness, ManifestBounds,
@@ -91,6 +91,8 @@ pub enum Error {
     LogClosed,
     #[error("an empty batch was passed to append")]
     EmptyBatch,
+    #[error("append rejected by admission predicate")]
+    AdmissionRejected,
     #[error("perform exponential backoff and retry")]
     Backoff,
     #[error("an internal, otherwise unclassifiable error ({file}:{line})")]
@@ -181,6 +183,7 @@ impl chroma_error::ChromaError for Error {
             Self::LogFull => chroma_error::ErrorCodes::Aborted,
             Self::LogClosed => chroma_error::ErrorCodes::FailedPrecondition,
             Self::EmptyBatch => chroma_error::ErrorCodes::InvalidArgument,
+            Self::AdmissionRejected => chroma_error::ErrorCodes::Aborted,
             Self::Backoff => chroma_error::ErrorCodes::Unavailable,
             Self::Internal { .. } => chroma_error::ErrorCodes::Internal,
             Self::MissingFragmentSequenceNumber(_) => chroma_error::ErrorCodes::Internal,
@@ -538,6 +541,75 @@ impl Default for SnapshotOptions {
             snapshot_rollover_threshold: Self::default_snapshot_rollover_threshold(),
             fragment_rollover_threshold: Self::default_fragment_rollover_threshold(),
         }
+    }
+}
+
+////////////////////////////////////////// AppendOptions ///////////////////////////////////////////
+
+/// A synchronous predicate that can inspect earlier enqueued append metadata before admitting an
+/// append.
+///
+/// The predicate runs while the batch manager holds its admission state lock.  It receives only
+/// metadata for earlier enqueued work, not the candidate append, and should not perform storage or
+/// other blocking I/O.
+pub type AdmissionPredicate = Arc<dyn Fn(&[Vec<Arc<[u8]>>]) -> bool + Send + Sync + 'static>;
+
+/// Optional controls that travel with one append request.
+#[derive(Clone)]
+pub struct AppendOptions {
+    /// Opaque metadata exposed to later admission predicates.
+    pub admission_metadata: Vec<Arc<[u8]>>,
+    /// Optional admission predicate evaluated before the append is admitted to the batch.
+    pub admission_predicate: Option<AdmissionPredicate>,
+    /// Optional requirement for the fragment start position selected for this append.
+    pub required_fragment_start: Option<LogPosition>,
+}
+
+impl AppendOptions {
+    /// Create append options with admission metadata and no predicate or fragment-start
+    /// requirement.
+    pub fn new(admission_metadata: Vec<Arc<[u8]>>) -> Self {
+        Self {
+            admission_metadata,
+            admission_predicate: None,
+            required_fragment_start: None,
+        }
+    }
+
+    /// Create append options with a single admission metadata item.
+    pub fn from_single_admission_metadata(admission_metadata: impl Into<Arc<[u8]>>) -> Self {
+        Self::new(vec![admission_metadata.into()])
+    }
+
+    /// Attach an admission predicate.
+    pub fn with_admission_predicate(mut self, admission_predicate: AdmissionPredicate) -> Self {
+        self.admission_predicate = Some(admission_predicate);
+        self
+    }
+
+    /// Attach a required fragment start.
+    pub fn with_required_fragment_start(mut self, required_fragment_start: LogPosition) -> Self {
+        self.required_fragment_start = Some(required_fragment_start);
+        self
+    }
+}
+
+impl Default for AppendOptions {
+    fn default() -> Self {
+        Self::new(Vec::new())
+    }
+}
+
+impl std::fmt::Debug for AppendOptions {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fmt.debug_struct("AppendOptions")
+            .field("admission_metadata_count", &self.admission_metadata.len())
+            .field(
+                "has_admission_predicate",
+                &self.admission_predicate.is_some(),
+            )
+            .field("required_fragment_start", &self.required_fragment_start)
+            .finish()
     }
 }
 
@@ -947,10 +1019,28 @@ pub fn fragment_path(prefix: &str, path: &str) -> String {
 #[async_trait::async_trait]
 pub trait LogWriterTrait: std::fmt::Debug + Send + Sync + 'static {
     /// Append a single message to the log.
-    async fn append(&self, message: Vec<u8>) -> Result<LogPosition, Error>;
+    async fn append(&self, message: Vec<u8>) -> Result<LogPosition, Error> {
+        self.append_with_options(message, None).await
+    }
+
+    /// Append a single message to the log with options.
+    async fn append_with_options(
+        &self,
+        message: Vec<u8>,
+        options: Option<AppendOptions>,
+    ) -> Result<LogPosition, Error>;
 
     /// Append multiple messages to the log atomically.
-    async fn append_many(&self, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error>;
+    async fn append_many(&self, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error> {
+        self.append_many_with_options(messages, None).await
+    }
+
+    /// Append multiple messages to the log atomically with options.
+    async fn append_many_with_options(
+        &self,
+        messages: Vec<Vec<u8>>,
+        options: Option<AppendOptions>,
+    ) -> Result<LogPosition, Error>;
 
     /// Returns a possibly-stale copy of the manifest with a witness for verification.
     async fn manifest_and_witness(&self) -> Result<ManifestAndWitness, Error>;
@@ -1004,12 +1094,20 @@ where
     FP::Consumer: 'static,
     MP::Consumer: 'static,
 {
-    async fn append(&self, message: Vec<u8>) -> Result<LogPosition, Error> {
-        LogWriter::append(self, message).await
+    async fn append_with_options(
+        &self,
+        message: Vec<u8>,
+        options: Option<AppendOptions>,
+    ) -> Result<LogPosition, Error> {
+        LogWriter::append_with_options(self, message, options).await
     }
 
-    async fn append_many(&self, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error> {
-        LogWriter::append_many(self, messages).await
+    async fn append_many_with_options(
+        &self,
+        messages: Vec<Vec<u8>>,
+        options: Option<AppendOptions>,
+    ) -> Result<LogPosition, Error> {
+        LogWriter::append_many_with_options(self, messages, options).await
     }
 
     async fn manifest_and_witness(&self) -> Result<ManifestAndWitness, Error> {

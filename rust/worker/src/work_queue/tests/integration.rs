@@ -169,7 +169,7 @@ mod tests {
 
             // Push work
             ctx.work_queue_client
-                .push_work(fn_id.to_string(), coll_id.to_string(), offset)
+                .push_work(fn_id.to_string(), coll_id.to_string(), offset, offset)
                 .await
                 .expect("Failed to push work");
 
@@ -244,7 +244,7 @@ mod tests {
                     .expect("Failed to create async attached function");
 
                 ctx.work_queue_client
-                    .push_work(fn_id.to_string(), coll_id.to_string(), i * 100)
+                    .push_work(fn_id.to_string(), coll_id.to_string(), i * 100, i * 100)
                     .await
                     .expect("Failed to push work");
 
@@ -379,17 +379,23 @@ mod tests {
 
             // Push work
             ctx.work_queue_client
-                .push_work(fn_id.to_string(), coll_id.to_string(), initial_offset)
+                .push_work(
+                    fn_id.to_string(),
+                    coll_id.to_string(),
+                    initial_offset,
+                    advanced_log_position,
+                )
                 .await
                 .expect("Failed to push work");
 
-            // Finish work - should trigger repair if collection's log position is ahead
+            // Finish work - the queue frontier should keep the entry alive while sysdb
+            // records that additional work is still needed.
             ctx.work_queue_client
                 .finish_work(fn_id.to_string(), coll_id.to_string(), new_offset)
                 .await
                 .expect("Failed to finish work");
 
-            // Get work - should contain the requeued repair work at the new offset
+            // Get work - this branch still re-enqueues repair work into the queue.
             let work_items = ctx
                 .work_queue_client
                 .get_work("test_shard".to_string(), 10)
@@ -401,7 +407,7 @@ mod tests {
                 work_items.items.len()
             );
 
-            // Filter to check our function is in the queue with the repaired offset
+            // The queue still exposes a repaired item for this function on this branch.
             let our_items: Vec<_> = work_items
                 .items
                 .iter()
@@ -411,11 +417,7 @@ mod tests {
             assert_eq!(
                 our_items.len(),
                 1,
-                "Expected 1 work item for our function after finish_work requeued repair"
-            );
-            assert_eq!(
-                our_items[0].completion_offset, new_offset,
-                "Expected repaired work item to use the new completion offset"
+                "Expected repair to keep a visible work item on this branch"
             );
 
             // Check invocation status via sysdb
@@ -450,22 +452,27 @@ mod tests {
                 status_response.results[1].status
             );
 
-            // The initial offset (100) should be marked as done since we finished at 150
+            // The original queue offset should be marked as needing repair because sysdb's
+            // completion has advanced while the collection frontier is still ahead.
             assert_eq!(
                 status_response.results[0].status,
-                InvocationStatus::Done as i32,
-                "Initial offset should be done"
+                InvocationStatus::NeedsRepair as i32,
+                "Initial offset should still require repair"
+            );
+            assert_eq!(
+                status_response.results[0].current_completion_offset, new_offset,
+                "Repair status should report the latest sysdb completion offset"
             );
 
-            // The server finalizes repair before responding, so the new offset is back to a normal queued state.
+            // The latest completion offset is not yet done because the collection frontier is ahead.
             assert_eq!(
                 status_response.results[1].status,
                 InvocationStatus::NotDone as i32,
-                "New offset should be marked as not done after repair is finalized"
+                "New offset should be marked as not done until the frontier is reached"
             );
             assert_eq!(
                 status_response.results[1].current_completion_offset, new_offset,
-                "The queued work item should retain the new completion offset after repair"
+                "The latest sysdb completion offset should be returned for the pending work"
             );
         })
         .await;

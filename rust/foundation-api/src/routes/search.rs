@@ -1,21 +1,28 @@
 //! `POST /api/search` — hybrid dense+sparse search over the wiki collection.
 //!
 //! Embeds the query with the caller's token (dense Qwen + sparse SPLADE),
-//! fuses the two `$knn` rankings with Reciprocal Rank Fusion, and returns the
-//! top hits. Like the other wiki routes it proxies the actual query to the FE
-//! through [`WikiClient`]; the FE enforces auth, quota, metering, and billing.
+//! fuses the two `$knn` rankings with Reciprocal Rank Fusion, then groups the
+//! chunk hits by `slug` on the engine to return a slim, one-per-page result
+//! list (slug, title, snippet, score). Like the other wiki routes it proxies
+//! the actual query to the FE through [`WikiClient`]; the FE enforces auth,
+//! quota, metering, and billing.
 //!
 //! The Chroma `/search` endpoint does not embed query text — the caller
 //! supplies the dense and sparse query vectors, which is why both embedders run
 //! client-side here before the query is issued.
 
+use crate::routes::links::page_url;
 use crate::routes::{caller_token, whoami::whoami_and_authorize};
 use crate::wiki::embed::{WikiEmbedder, SPARSE_KEY};
+use crate::wiki::page::{meta_str, meta_str_array};
 use crate::wiki::WikiClientError;
 use crate::{auth::AuthzAction, errors::ServerError, server::FoundationApiServer};
 use axum::{extract::State, http::HeaderMap, Json};
 use chroma::client::ChromaHttpClientError;
-use chroma::types::{rrf, Key, QueryVector, RankExpr, SearchPayload, SearchResponse, SparseVector};
+use chroma::types::{
+    rrf, Aggregate, GroupBy, Key, QueryVector, RankExpr, SearchPayload, SearchResponse,
+    SparseVector,
+};
 use chroma::ChromaCollection;
 use chroma_error::{ChromaError, ChromaValidationError, ErrorCodes};
 use chroma_types::operator::SearchRecord;
@@ -40,6 +47,11 @@ const MAX_LIMIT: u32 = KNN_CANDIDATES;
 /// The RRF `k` smoothing constant (the conventional default).
 const RRF_K: u32 = 60;
 
+/// Upper bound on the number of unique pages a slim page search returns. Kept
+/// below the chunk-level [`MAX_LIMIT`] so a single query can still surface this
+/// many distinct pages after grouping by slug.
+const MAX_PAGE_LIMIT: u32 = 25;
+
 /// Fallback rank assigned to a document that an arm did not retrieve (i.e. it
 /// fell outside that arm's top-[`KNN_CANDIDATES`]). Using the candidate-pool
 /// size treats a missing doc as if it ranked just past the cutoff, so it still
@@ -54,18 +66,11 @@ pub struct SearchRequest {
     /// The search query text. Embedded client-side into dense + sparse vectors.
     #[validate(length(min = 1, message = "query must not be empty"))]
     pub query: String,
-    /// Maximum number of hits to return. Defaults to [`default_limit`]; must be
-    /// at least 1 and is clamped down to [`MAX_LIMIT`].
+    /// Maximum number of unique pages to return. Defaults to [`default_limit`];
+    /// must be at least 1 and is clamped down to [`MAX_PAGE_LIMIT`].
     #[validate(range(min = 1, message = "limit must be at least 1"))]
     #[serde(default = "default_limit")]
     pub limit: u32,
-}
-
-/// Response body for `POST /api/search`.
-#[derive(Debug, Serialize)]
-pub struct SearchResponseBody {
-    /// Hits in descending score order.
-    pub hits: Vec<SearchRecord>,
 }
 
 /// Errors raised while running the hybrid search flow (after validation).
@@ -113,12 +118,14 @@ impl ChromaError for SearchError {
     }
 }
 
-/// `POST /api/search` handler.
+/// `POST /api/search` handler. Returns a slim, one-per-page result list (the
+/// same shape as the MCP `search` tool); call `POST /api/read-page` with a slug
+/// to fetch a page's full content.
 pub async fn foundation_search(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
     Json(request): Json<SearchRequest>,
-) -> Result<Json<SearchResponseBody>, ServerError> {
+) -> Result<Json<PageSearchResponseBody>, ServerError> {
     let identity =
         whoami_and_authorize(&*server.auth, &headers, AuthzAction::ViewFoundation).await?;
     let tenant = identity.tenant;
@@ -128,26 +135,8 @@ pub async fn foundation_search(
 
     request.validate().map_err(ChromaValidationError::from)?;
 
-    let hits = run_search(&server, &headers, &tenant, &request).await?;
-    Ok(Json(SearchResponseBody { hits }))
-}
-
-/// Resolves the wiki collection then runs the hybrid search core.
-async fn run_search(
-    server: &FoundationApiServer,
-    headers: &HeaderMap,
-    tenant: &str,
-    request: &SearchRequest,
-) -> Result<Vec<SearchRecord>, SearchError> {
-    let wiki_client = server
-        .wiki_client
-        .as_ref()
-        .ok_or(SearchError::RouteDisabled)?;
-    let token = caller_token(headers).ok_or(SearchError::MissingToken)?;
-    let collection = wiki_client.wiki_collection(tenant, token).await?;
-    let embedder = WikiEmbedder::new(None);
-
-    run_hybrid_search(&collection, &embedder, token, &request.query, request.limit).await
+    let hits = run_page_search(&server, &headers, &tenant, &request.query, request.limit).await?;
+    Ok(Json(PageSearchResponseBody { hits }))
 }
 
 /// Embeds the query, issues a single RRF-ranked hybrid search, and maps the
@@ -157,12 +146,18 @@ async fn run_search(
 /// function (`embed_query`), so it always matches the EF the documents were
 /// embedded with — no config to keep in sync here. The sparse vector is SPLADE,
 /// which is not part of the dense EF, so it is computed separately.
+///
+/// `group_by` controls server-side grouping: pass [`GroupBy::default`] for raw
+/// chunk hits, or [`group_by_slug`] to collapse to one (best) chunk per page.
+/// When grouping is active the `limit` caps the number of groups, since the
+/// engine applies it after aggregation.
 pub(crate) async fn run_hybrid_search(
     collection: &ChromaCollection,
     embedder: &WikiEmbedder,
     token: &str,
     query: &str,
     limit: u32,
+    group_by: GroupBy,
 ) -> Result<Vec<SearchRecord>, SearchError> {
     let dense_fut = async {
         collection
@@ -183,12 +178,27 @@ pub(crate) async fn run_hybrid_search(
     };
     let (dense, sparse) = tokio::try_join!(dense_fut, sparse_fut)?;
 
-    let payload = build_hybrid_search_payload(dense, sparse, limit.min(MAX_LIMIT))?;
+    let payload = build_hybrid_search_payload(dense, sparse, limit.min(MAX_LIMIT), group_by)?;
     let response = collection
         .search(vec![payload])
         .await
         .map_err(SearchError::Query)?;
     Ok(search_response_to_hits(response))
+}
+
+/// Groups hybrid-search results by page `slug`, keeping only the single
+/// best-ranked chunk per page. `MinK` on `#score` selects the best record:
+/// [`rrf`] emits a *negated* score, so the most relevant chunk has the smallest
+/// score. The engine applies this before the payload `limit`, so the limit ends
+/// up bounding the number of pages.
+pub(crate) fn group_by_slug() -> GroupBy {
+    GroupBy {
+        keys: vec![Key::field("slug")],
+        aggregate: Some(Aggregate::MinK {
+            keys: vec![Key::Score],
+            k: 1,
+        }),
+    }
 }
 
 /// Builds the single-query RRF hybrid [`SearchPayload`]: a dense `$knn` over
@@ -204,6 +214,7 @@ fn build_hybrid_search_payload(
     dense: Vec<f32>,
     sparse: SparseVector,
     limit: u32,
+    group_by: GroupBy,
 ) -> Result<SearchPayload, SearchError> {
     let dense_knn = RankExpr::Knn {
         query: QueryVector::Dense(dense),
@@ -225,6 +236,7 @@ fn build_hybrid_search_payload(
 
     Ok(SearchPayload::default()
         .rank(rank)
+        .group_by(group_by)
         .limit(Some(limit), 0)
         .select([Key::Document, Key::Score, Key::Metadata]))
 }
@@ -252,10 +264,116 @@ fn search_response_to_hits(response: SearchResponse) -> Vec<SearchRecord> {
         .collect()
 }
 
+/// A single slim search result: one entry per unique page, carrying just
+/// enough for the model to judge relevance and decide which page to read in
+/// full via the `read_page` tool. The `snippet`/`score` come from the
+/// best-ranked chunk that surfaced the page, so no extra fetch is needed.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageSearchHit {
+    pub slug: String,
+    pub title: String,
+    pub categories: Vec<String>,
+    /// Text of the best-matched chunk, as a relevance preview (not the full
+    /// page — call `read_page` with the slug for that).
+    pub snippet: String,
+    /// Fused relevance score of that best-matched chunk.
+    pub score: Option<f32>,
+    /// Absolute web URL to view this page on the web. `None` when
+    /// `foundation_ui_origin` is unset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+/// Response body for `POST /api/search` and the MCP `search` tool: the unique
+/// pages behind the hybrid-search hits, in fused-rank order.
+#[derive(Debug, Serialize)]
+pub struct PageSearchResponseBody {
+    pub hits: Vec<PageSearchHit>,
+}
+
+/// Runs the hybrid search, grouped by `slug` server-side so the engine returns
+/// a slim, one-per-page result list (best chunk per page) in fused-rank order.
+/// Does not reconstruct full pages — that is the job of [`run_read_page`].
+/// `limit` caps the number of unique pages (clamped to [`MAX_PAGE_LIMIT`]).
+/// Each hit's `url` is stamped from the configured `foundation_ui_origin` (left
+/// `None` when the origin is unset).
+pub(crate) async fn run_page_search(
+    server: &FoundationApiServer,
+    headers: &HeaderMap,
+    tenant: &str,
+    query: &str,
+    limit: u32,
+) -> Result<Vec<PageSearchHit>, SearchError> {
+    let wiki_client = server
+        .wiki_client
+        .as_ref()
+        .ok_or(SearchError::RouteDisabled)?;
+    let token = caller_token(headers).ok_or(SearchError::MissingToken)?;
+    let collection = wiki_client.wiki_collection(tenant, token).await?;
+    let embedder = WikiEmbedder::new(None);
+
+    // `group_by_slug` collapses the candidate chunks to one (best) chunk per
+    // page on the engine, and the `limit` then caps the number of pages.
+    let hits = run_hybrid_search(
+        &collection,
+        &embedder,
+        token,
+        query,
+        limit.min(MAX_PAGE_LIMIT),
+        group_by_slug(),
+    )
+    .await?;
+
+    Ok(hits_to_page_hits(
+        hits,
+        server.config.foundation.foundation_ui_origin.as_deref(),
+        tenant,
+    ))
+}
+
+/// Maps the (already grouped-by-slug) search records into slim per-page hits.
+/// When `origin` is set, each hit's `url` is built from it plus the tenant and slug.
+fn hits_to_page_hits(
+    hits: Vec<SearchRecord>,
+    origin: Option<&str>,
+    tenant: &str,
+) -> Vec<PageSearchHit> {
+    hits.into_iter()
+        .filter_map(|hit| {
+            let slug = hit
+                .metadata
+                .as_ref()
+                .and_then(|meta| meta_str(meta, "slug"))?;
+            let title = hit
+                .metadata
+                .as_ref()
+                .and_then(|meta| meta_str(meta, "title"))
+                .unwrap_or_else(|| slug.clone());
+            let categories = hit
+                .metadata
+                .as_ref()
+                .map(|meta| meta_str_array(meta, "categories"))
+                .unwrap_or_default();
+            let url = page_url(origin, tenant, &slug);
+            Some(PageSearchHit {
+                slug,
+                title,
+                categories,
+                snippet: hit.document.unwrap_or_default().trim().to_string(),
+                score: hit.score,
+                url,
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::wiki::chunking::ChunkRecordId;
     use chroma::types::SearchResponse;
+    use chroma_types::{Metadata, MetadataValue};
     use serde_json::Value;
 
     fn collect_knn_objects(value: &Value, out: &mut Vec<Value>) {
@@ -280,7 +398,9 @@ mod tests {
     #[test]
     fn hybrid_payload_has_two_knn_arms_with_return_rank() {
         let sparse = SparseVector::new(vec![1, 5], vec![0.4, 0.7]).expect("sparse");
-        let payload = build_hybrid_search_payload(vec![0.1, 0.2, 0.3], sparse, 7).expect("payload");
+        let payload =
+            build_hybrid_search_payload(vec![0.1, 0.2, 0.3], sparse, 7, GroupBy::default())
+                .expect("payload");
 
         let json = serde_json::to_value(&payload).expect("serialize payload");
         let mut knns = Vec::new();
@@ -363,5 +483,91 @@ mod tests {
             select: vec![],
         };
         assert!(search_response_to_hits(response).is_empty());
+    }
+
+    fn chunk_meta(chunk_id: i64) -> Metadata {
+        let mut meta = Metadata::new();
+        meta.insert("chunk_id".to_string(), MetadataValue::Int(chunk_id));
+        meta.insert(
+            "title".to_string(),
+            MetadataValue::Str("My Page".to_string()),
+        );
+        meta.insert("updated_at".to_string(), MetadataValue::Int(1700));
+        meta.insert(
+            "categories".to_string(),
+            MetadataValue::StringArray(vec!["eng".to_string()]),
+        );
+        meta
+    }
+
+    fn hit(slug: &str, chunk_id: i64, document: &str, score: f32) -> SearchRecord {
+        let mut meta = chunk_meta(chunk_id);
+        meta.insert("slug".to_string(), MetadataValue::Str(slug.to_string()));
+        SearchRecord {
+            id: ChunkRecordId::new(slug, chunk_id as usize).to_string(),
+            document: Some(document.to_string()),
+            embedding: None,
+            score: Some(score),
+            metadata: Some(meta),
+        }
+    }
+
+    #[test]
+    fn page_search_payload_groups_by_slug() {
+        let sparse = SparseVector::new(vec![1], vec![0.5]).expect("sparse");
+        let payload =
+            build_hybrid_search_payload(vec![0.1], sparse, 5, group_by_slug()).expect("payload");
+
+        let json = serde_json::to_value(&payload).expect("serialize payload");
+        let text = json.to_string();
+        // The slug grouping and its best-per-group (MinK) aggregate must reach
+        // the wire so the engine — not this process — does the deduping.
+        assert!(
+            text.contains("$min_k"),
+            "expected MinK aggregate, got: {json}"
+        );
+        assert!(
+            text.contains("slug"),
+            "expected slug group key, got: {json}"
+        );
+    }
+
+    #[test]
+    fn hits_to_page_hits_maps_record_fields() {
+        let pages = hits_to_page_hits(vec![hit("alpha", 0, "  alpha snippet\n\n", 0.9)], None, "t");
+
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].slug, "alpha");
+        assert_eq!(pages[0].title, "My Page");
+        assert_eq!(pages[0].categories, vec!["eng".to_string()]);
+        // Leading/trailing whitespace from the chunk document is trimmed.
+        assert_eq!(pages[0].snippet, "alpha snippet");
+        assert_eq!(pages[0].score, Some(0.9));
+        assert_eq!(pages[0].url, None);
+    }
+
+    #[test]
+    fn hits_to_page_hits_builds_url_when_origin_set() {
+        let pages = hits_to_page_hits(
+            vec![hit("alpha", 0, "a", 0.9)],
+            Some("https://wiki.example.com"),
+            "tenant-1",
+        );
+
+        assert_eq!(
+            pages[0].url.as_deref(),
+            Some("https://wiki.example.com/~/page-redirect?tenant_uuid=tenant-1&slug=alpha")
+        );
+    }
+
+    #[test]
+    fn hits_to_page_hits_skips_slugless_records() {
+        let mut slugless = hit("x", 0, "no slug", 0.5);
+        slugless.metadata.as_mut().unwrap().remove("slug");
+
+        let pages = hits_to_page_hits(vec![slugless, hit("alpha", 0, "a", 0.9)], None, "t");
+
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].slug, "alpha");
     }
 }

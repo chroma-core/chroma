@@ -16,6 +16,7 @@ futures = { workspace = true }
 opentelemetry = { workspace = true }
 regex = { workspace = true }
 reqwest = { workspace = true, features = ["json", "stream"] }
+rmcp = { version = "1.8.0", features = ["transport-streamable-http-server"] }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -42,3 +43,4 @@ mdac = { workspace = true }
 
 [dev-dependencies]
 httpmock = "0.8.2"
+tower = { workspace = true }

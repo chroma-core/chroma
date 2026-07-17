@@ -83,8 +83,6 @@ pub enum SchemaBuilderError {
     SpecialKeyModificationNotAllowed { key: String },
     #[error("Sparse vector index requires a specific key. Use create_index(Some(\"key_name\"), config) instead of create_index(None, config)")]
     SparseVectorRequiresKey,
-    #[error("Only one sparse vector index allowed per collection. Key '{existing_key}' already has a sparse vector index. Remove it first or use that key.")]
-    MultipleSparseVectorIndexes { existing_key: String },
     #[error("Vector index deletion not supported. The vector index is always enabled on #embedding. To disable vector search, disable the collection instead.")]
     VectorIndexDeletionNotSupported,
     #[error("Sparse vector index deletion not supported yet. Sparse vector indexes cannot be removed once created.")]
@@ -432,6 +430,45 @@ impl Schema {
                 .keys
                 .values()
                 .any(|vt| vt.sparse_vector.as_ref().is_some_and(check))
+    }
+
+    /// Metadata keys that have an enabled sparse vector index, in sorted order
+    /// for deterministic iteration. Each key owns one independent sparse index.
+    pub fn enabled_sparse_keys(&self) -> Vec<String> {
+        let mut keys: Vec<String> = self
+            .keys
+            .iter()
+            .filter(|(_, value_types)| {
+                value_types
+                    .sparse_vector
+                    .as_ref()
+                    .and_then(|sv| sv.sparse_vector_index.as_ref())
+                    .is_some_and(|idx| idx.enabled)
+            })
+            .map(|(key, _)| key.clone())
+            .collect();
+        keys.sort();
+        keys
+    }
+
+    /// Whether the sparse index on a specific metadata key uses MaxScore.
+    /// Falls back to the schema defaults when the key has no explicit config.
+    /// Defaults to WAND (false) when nothing is configured.
+    pub fn is_key_maxscore_enabled(&self, key: &str) -> bool {
+        let algorithm = self
+            .keys
+            .get(key)
+            .and_then(|vt| vt.sparse_vector.as_ref())
+            .and_then(|sv| sv.sparse_vector_index.as_ref())
+            .map(|idx| &idx.config.algorithm)
+            .or_else(|| {
+                self.defaults
+                    .sparse_vector
+                    .as_ref()
+                    .and_then(|sv| sv.sparse_vector_index.as_ref())
+                    .map(|idx| &idx.config.algorithm)
+            });
+        matches!(algorithm, Some(SparseIndexAlgorithm::MaxScore))
     }
 
     /// Set the sparse index algorithm on all sparse index configs
@@ -2765,27 +2802,6 @@ impl Schema {
         config: IndexConfig,
         enabled: bool,
     ) -> Result<(), SchemaBuilderError> {
-        // Check for multiple sparse vector indexes BEFORE getting mutable reference
-        if enabled && matches!(config, IndexConfig::SparseVector(_)) {
-            // Find existing sparse vector index
-            let existing_key = self
-                .keys
-                .iter()
-                .find(|(k, v)| {
-                    k.as_str() != key
-                        && v.sparse_vector
-                            .as_ref()
-                            .and_then(|sv| sv.sparse_vector_index.as_ref())
-                            .map(|idx| idx.enabled)
-                            .unwrap_or(false)
-                })
-                .map(|(k, _)| k.clone());
-
-            if let Some(existing_key) = existing_key {
-                return Err(SchemaBuilderError::MultipleSparseVectorIndexes { existing_key });
-            }
-        }
-
         // Get or create ValueTypes for this key
         let value_types = self.keys.entry(key.to_string()).or_default();
 
@@ -3972,6 +3988,77 @@ mod tests {
     }
 
     #[test]
+    fn test_combined_knn_rejects_unindexed_sparse_key() {
+        // A rank expression may target an indexed sparse key and an unindexed key
+        // in the same search. The frontend validates every $knn leaf
+        // independently (see service_based_frontend.rs), so the indexed leaf must
+        // be accepted while the unindexed leaf is rejected.
+        use crate::operator::{Key, RankExpr};
+
+        let mut schema = Schema::new_default(KnnIndex::Spann);
+        schema.keys.insert(
+            "sparse_indexed".to_string(),
+            ValueTypes {
+                sparse_vector: Some(SparseVectorValueType {
+                    sparse_vector_index: Some(SparseVectorIndexType {
+                        enabled: true,
+                        config: SparseVectorIndexConfig {
+                            embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
+                            source_key: None,
+                            bm25: None,
+                            algorithm: SparseIndexAlgorithm::Wand,
+                        },
+                    }),
+                }),
+                ..Default::default()
+            },
+        );
+
+        let sparse_leaf = |key: &str| RankExpr::Knn {
+            query: QueryVector::Sparse(SparseVector::new(vec![0_u32], vec![1.0_f32]).unwrap()),
+            key: Key::field(key),
+            limit: 10,
+            default: None,
+            return_rank: false,
+        };
+
+        // Combined rank: one indexed sparse leaf + one unindexed leaf.
+        let expr = RankExpr::Summation(vec![
+            sparse_leaf("sparse_indexed"),
+            sparse_leaf("sparse_unindexed"),
+        ]);
+
+        // Mirror the frontend's per-leaf validation loop.
+        let mut results: Vec<(String, Result<(), FilterValidationError>)> = expr
+            .knn_queries()
+            .into_iter()
+            .map(|knn| {
+                let key = knn.key.to_string();
+                let result = schema.is_knn_key_indexing_enabled(&key, &knn.query);
+                (key, result)
+            })
+            .collect();
+
+        assert_eq!(results.len(), 2);
+
+        // The indexed leaf is accepted.
+        let (indexed_key, indexed_result) = results.remove(0);
+        assert_eq!(indexed_key, "sparse_indexed");
+        assert!(indexed_result.is_ok());
+
+        // The unindexed leaf is rejected with an indexing-disabled error.
+        let (unindexed_key, unindexed_result) = results.remove(0);
+        assert_eq!(unindexed_key, "sparse_unindexed");
+        match unindexed_result.expect_err("expected unindexed sparse leaf to be rejected") {
+            FilterValidationError::IndexingDisabled { key, value_type } => {
+                assert_eq!(key, "sparse_unindexed");
+                assert_eq!(value_type, crate::metadata::MetadataValueType::SparseVector);
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+    }
+
+    #[test]
     fn test_merge_hnsw_configs_field_level() {
         // Test field-level merging for HNSW configurations
         let default_hnsw = HnswIndexConfig {
@@ -4432,6 +4519,64 @@ mod tests {
             .unwrap()
             .enabled = false;
         assert!(!schema.is_maxscore_enabled());
+    }
+
+    fn enable_sparse_key(schema: &mut Schema, key: &str, algorithm: SparseIndexAlgorithm) {
+        schema
+            .keys
+            .entry(key.to_string())
+            .or_default()
+            .sparse_vector = Some(SparseVectorValueType {
+            sparse_vector_index: Some(SparseVectorIndexType {
+                enabled: true,
+                config: SparseVectorIndexConfig {
+                    embedding_function: None,
+                    source_key: None,
+                    bm25: None,
+                    algorithm,
+                },
+            }),
+        });
+    }
+
+    #[test]
+    fn test_enabled_sparse_keys() {
+        let mut schema = Schema::new_default(KnnIndex::Hnsw);
+        assert!(schema.enabled_sparse_keys().is_empty());
+
+        enable_sparse_key(&mut schema, "beta", SparseIndexAlgorithm::Wand);
+        enable_sparse_key(&mut schema, "alpha", SparseIndexAlgorithm::MaxScore);
+        // A disabled sparse key must not be reported.
+        enable_sparse_key(&mut schema, "gamma", SparseIndexAlgorithm::Wand);
+        schema
+            .keys
+            .get_mut("gamma")
+            .unwrap()
+            .sparse_vector
+            .as_mut()
+            .unwrap()
+            .sparse_vector_index
+            .as_mut()
+            .unwrap()
+            .enabled = false;
+
+        // Returned sorted and excludes disabled keys.
+        assert_eq!(
+            schema.enabled_sparse_keys(),
+            vec!["alpha".to_string(), "beta".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_is_key_maxscore_enabled() {
+        let mut schema = Schema::new_default(KnnIndex::Hnsw);
+        enable_sparse_key(&mut schema, "ms", SparseIndexAlgorithm::MaxScore);
+        enable_sparse_key(&mut schema, "wand", SparseIndexAlgorithm::Wand);
+
+        assert!(schema.is_key_maxscore_enabled("ms"));
+        assert!(!schema.is_key_maxscore_enabled("wand"));
+        // Unknown key with no default sparse config -> WAND (false).
+        assert!(!schema.is_key_maxscore_enabled("unknown"));
     }
 
     #[test]
@@ -6346,8 +6491,8 @@ mod tests {
             SchemaBuilderError::SparseVectorRequiresKey
         ));
 
-        // Error: Multiple sparse vector indexes (only one allowed per collection)
-        let result = Schema::new_default(KnnIndex::Hnsw)
+        // Multiple sparse vector indexes are now allowed per collection.
+        let schema = Schema::new_default(KnnIndex::Hnsw)
             .create_index(
                 Some("sparse1"),
                 IndexConfig::SparseVector(SparseVectorIndexConfig {
@@ -6364,14 +6509,14 @@ mod tests {
                     embedding_function: None,
                     source_key: None,
                     bm25: None,
-                    algorithm: SparseIndexAlgorithm::Wand,
+                    algorithm: SparseIndexAlgorithm::MaxScore,
                 }),
-            );
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            SchemaBuilderError::MultipleSparseVectorIndexes { existing_key } if existing_key == "sparse1"
-        ));
+            )
+            .expect("second sparse should succeed");
+        assert_eq!(
+            schema.enabled_sparse_keys(),
+            vec!["sparse1".to_string(), "sparse2".to_string()]
+        );
     }
 
     #[test]

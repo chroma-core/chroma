@@ -10,6 +10,10 @@
 use std::sync::Arc;
 
 pub(crate) mod agent_tools;
+/// Idempotent database/collection creation against sysdb, exported so
+/// hosted-chroma's sync service can create collections (notably `slack_raw`)
+/// identically to `/init`.
+pub mod collections;
 pub mod config;
 pub(crate) mod routes;
 pub mod server;

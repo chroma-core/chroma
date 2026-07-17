@@ -50,12 +50,20 @@ pub struct FoundationConfig {
     /// Like file uploads, the real name is `{base}_{user_id}`.
     #[serde(default = "FoundationConfig::default_agent_sessions_collection")]
     pub agent_sessions_collection: String,
-    /// Source collections (one per ingest source) that `/init` ensures.
-    /// These receive the chunk-sibling grouping flag so the attached
-    /// function observes the per-job end-of-job marker after all of a
-    /// job's chunk records (ADR 0001 §6 in chroma-core/foundation).
-    #[serde(default = "FoundationConfig::default_source_collections")]
-    pub source_collections: Vec<String>,
+    /// Extra INDEXED source collections that `/init` ensures and wires into
+    /// the sources->wiki attached function via `add_input()`. Each receives
+    /// the chunk-sibling grouping flag so the attached function observes the
+    /// per-job end-of-job marker after all of a job's chunk records
+    /// (ADR 0001 §6 in chroma-core/foundation).
+    ///
+    /// Deliberately NOT every ingest source: the `slack_raw` append-log
+    /// (`chroma_types::SLACK_RAW_COLLECTION_NAME`; metadata-indexed only,
+    /// text/vector deferred) is the function's *base* input and is ensured
+    /// unconditionally by `/init`.
+    /// Its name is a compile-time constant shared with hosted-chroma's sync
+    /// producer, so it must not drift via config.
+    #[serde(default = "FoundationConfig::default_indexed_source_collections")]
+    pub indexed_source_collections: Vec<String>,
     /// Server-registered function attached to each source collection
     /// (its output is the wiki collection). Default mirrors the POC.
     #[serde(default = "FoundationConfig::default_function_name")]
@@ -78,6 +86,18 @@ pub struct FoundationConfig {
     /// `subagent_search` route is disabled when unset.
     #[serde(default)]
     pub deep_research_api_url: Option<String>,
+    /// Public origin for this service as seen by browser-based clients.
+    /// MCP resource metadata derives route URLs from this origin.
+    #[serde(default)]
+    pub api_public_origin: Option<String>,
+    /// Public dashboard-api issuer URL that hosts the OAuth authorization
+    /// server metadata and token endpoints for the Foundation MCP resource.
+    #[serde(default)]
+    pub mcp_authorization_server_url: Option<String>,
+    /// Public origin for wiki page redirect links. When unset, MCP results
+    /// omit `url`.
+    #[serde(default)]
+    pub foundation_ui_origin: Option<String>,
 }
 
 impl FoundationConfig {
@@ -99,11 +119,15 @@ impl FoundationConfig {
     fn default_agent_sessions_collection() -> String {
         "agent_sessions".to_string()
     }
-    fn default_source_collections() -> Vec<String> {
+    fn default_indexed_source_collections() -> Vec<String> {
+        // `slack` was removed in favor of the `slack_raw` append-log
+        // collection (metadata-indexed, text/vector deferred), which `/init`
+        // creates and wires in as the attached-function base (see the field
+        // docs above). The collections listed here stay fully indexed.
         vec![
-            "slack".to_string(),
             "notion".to_string(),
             "gdrive".to_string(),
+            "granola".to_string(),
         ]
     }
     fn default_function_name() -> String {
@@ -127,12 +151,15 @@ impl Default for FoundationConfig {
             currents_collection: Self::default_currents_collection(),
             file_uploads_collection: Self::default_file_uploads_collection(),
             agent_sessions_collection: Self::default_agent_sessions_collection(),
-            source_collections: Self::default_source_collections(),
+            indexed_source_collections: Self::default_indexed_source_collections(),
             function_name: Self::default_function_name(),
             currents_function_name: Self::default_currents_function_name(),
             function_endpoint_url: None,
             min_records_for_invocation: Self::default_min_records_for_invocation(),
             deep_research_api_url: None,
+            api_public_origin: None,
+            mcp_authorization_server_url: None,
+            foundation_ui_origin: None,
         }
     }
 }
@@ -140,5 +167,25 @@ impl Default for FoundationConfig {
 impl FoundationApiConfig {
     pub fn load_from_path(path: &str) -> Self {
         load_yaml_with_env(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_sources_drop_slack_keep_indexed_sources() {
+        let sources = FoundationConfig::default().indexed_source_collections;
+        // `slack` was replaced by the `slack_raw` append-log collection
+        // (metadata-indexed only), which is created/wired separately in
+        // `/init`, so it must not appear among the indexed source
+        // collections.
+        assert!(
+            !sources.iter().any(|s| s == "slack"),
+            "slack must no longer be a default indexed source: {sources:?}"
+        );
+        assert!(sources.iter().any(|s| s == "notion"));
+        assert!(sources.iter().any(|s| s == "gdrive"));
     }
 }

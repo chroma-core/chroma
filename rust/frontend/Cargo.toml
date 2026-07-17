@@ -49,7 +49,7 @@ chroma-sqlite = { workspace = true }
 frontend-core = { workspace = true }
 utoipa = { workspace = true }
 utoipa-axum = { version = "0.2.0", features = ["debug"] }
-utoipa-swagger-ui = { version = "9", features = ["axum"] }
+utoipa-swagger-ui = { version = "9", features = ["axum", "vendored"] }
 strum = "0.27.1"
 strum_macros = "0.27.1"
 

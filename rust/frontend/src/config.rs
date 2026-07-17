@@ -78,8 +78,12 @@ pub struct FrontendConfig {
     pub tenants_with_maxscore_enabled: Vec<String>,
     #[serde(default = "Default::default")]
     pub tenants_with_token_bitmap_fts_enabled: Vec<String>,
+    #[serde(default = "Default::default")]
+    pub tenants_with_transactions_enabled: Vec<String>,
     #[serde(default = "default_enable_log_scouting")]
     pub enable_log_scouting: bool,
+    #[serde(default = "default_enable_transactions")]
+    pub enable_transactions: bool,
 }
 
 impl FrontendConfig {
@@ -104,7 +108,9 @@ impl FrontendConfig {
             tenants_with_quantization_enabled: vec![],
             tenants_with_maxscore_enabled: vec![],
             tenants_with_token_bitmap_fts_enabled: vec![],
+            tenants_with_transactions_enabled: vec![],
             enable_log_scouting: false,
+            enable_transactions: false,
         }
     }
 }
@@ -138,6 +144,10 @@ fn default_enable_schema() -> bool {
 }
 
 fn default_enable_log_scouting() -> bool {
+    false
+}
+
+fn default_enable_transactions() -> bool {
     false
 }
 
@@ -250,12 +260,19 @@ mod tests {
             _ => {}
         }
         assert!(config.frontend.enable_schema);
+        assert!(!config.frontend.enable_transactions);
+        assert_eq!(
+            config.frontend.tenants_with_transactions_enabled,
+            vec!["default_tenant"]
+        );
     }
 
     #[test]
     fn single_node_full_config_valid() {
         let config = FrontendServerConfig::load_from_path("sample_configs/single_node_full.yaml");
         assert_eq!(config.port, 8000);
+        assert!(!config.frontend.enable_transactions);
+        assert!(config.frontend.tenants_with_transactions_enabled.is_empty());
     }
 
     #[test]
@@ -272,6 +289,12 @@ mod tests {
                     .collections_with_segments_provider
                     .cache_ttl_secs,
                 2,
+                "{path}"
+            );
+            assert!(!config.frontend.enable_transactions, "{path}");
+            assert_eq!(
+                config.frontend.tenants_with_transactions_enabled,
+                vec!["default_tenant"],
                 "{path}"
             );
         }

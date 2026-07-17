@@ -39,6 +39,7 @@ mod tests {
                     operation: Operation::Add,
                 }],
                 None,
+                None,
             )
             .await
             .expect("push_logs should succeed");

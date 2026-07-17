@@ -138,7 +138,13 @@ impl Operator<IdfInput, IdfOutput> for Idf {
         let logs =
             materialize_logs(&record_segment_reader, input.logs.clone(), None, &plan).await?;
 
-        if let Some(reader) = metadata_segment_reader.sparse_index_reader.as_ref() {
+        // Use the per-key index for document frequencies, falling back to the
+        // legacy anonymous index for not-yet-migrated collections.
+        if let Some(reader) = metadata_segment_reader
+            .sparse_index_readers
+            .get(&self.key)
+            .or(metadata_segment_reader.legacy_sparse_index_reader.as_ref())
+        {
             nts = reader.dimension_counts(&self.query.indices).await?;
         }
 
@@ -268,11 +274,43 @@ mod tests {
         }
     }
 
+    /// Enable a per-key sparse index on the test segment's collection schema so
+    /// compaction actually builds an index for `key`. Without this the
+    /// schema-gated writer would index nothing and document frequencies would
+    /// be empty.
+    fn enable_sparse_index(test_segment: &mut TestDistributedSegment, key: &str) {
+        use chroma_types::{
+            SparseIndexAlgorithm, SparseVectorIndexConfig, SparseVectorIndexType,
+            SparseVectorValueType,
+        };
+        let schema = test_segment
+            .collection
+            .schema
+            .as_mut()
+            .expect("test collection should have a default schema");
+        schema
+            .keys
+            .entry(key.to_string())
+            .or_default()
+            .sparse_vector = Some(SparseVectorValueType {
+            sparse_vector_index: Some(SparseVectorIndexType {
+                enabled: true,
+                config: SparseVectorIndexConfig {
+                    embedding_function: None,
+                    source_key: None,
+                    bm25: None,
+                    algorithm: SparseIndexAlgorithm::Wand,
+                },
+            }),
+        });
+    }
+
     async fn setup_idf_input(
         num_records: usize,
         additional_logs: Vec<OperationRecord>,
     ) -> (TestDistributedSegment, IdfInput) {
         let mut test_segment = TestDistributedSegment::new().await;
+        enable_sparse_index(&mut test_segment, "sparse_embedding");
 
         // Generate initial records and compact them into the segment
         if num_records > 0 {

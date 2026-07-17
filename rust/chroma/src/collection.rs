@@ -30,7 +30,10 @@ use reqwest::Method;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::embed::{chroma_cloud::ChromaCloudQwenEmbeddingFunction, EmbeddingFunction};
-use crate::{client::ChromaHttpClientError, ChromaAttachedFunction, ChromaHttpClient};
+use crate::{
+    client::ChromaHttpClientError, ChromaAttachedFunction, ChromaHttpClient,
+    ConditionalCollectionTransaction,
+};
 
 #[derive(Deserialize)]
 struct ForkCountResponse {
@@ -244,6 +247,19 @@ impl ChromaCollection {
         E::Error: Send + Sync + 'static,
     {
         self.embedding_function = embedding_function.map(erase_embedding_function);
+    }
+
+    /// Starts a collection-scoped conditional transaction.
+    ///
+    /// Reads execute immediately and capture a stable OCC read token. Writes are
+    /// buffered locally until [`commit`](ConditionalCollectionTransaction::commit)
+    /// is awaited. Dropping the returned transaction discards uncommitted writes.
+    ///
+    /// Current conditional transactions are limited to this collection, reject
+    /// reads for IDs with buffered writes, and do not support queries or
+    /// predicate deletes.
+    pub fn conditional(&self) -> ConditionalCollectionTransaction {
+        ConditionalCollectionTransaction::new(self.clone())
     }
 
     /// Returns the database ID that contains this collection.
@@ -1166,7 +1182,7 @@ impl ChromaCollection {
         Ok(response.success)
     }
 
-    async fn resolve_embeddings(
+    pub(crate) async fn resolve_embeddings(
         &self,
         embeddings: Option<Vec<Vec<f32>>>,
         documents: &Option<Vec<Option<String>>>,
@@ -1190,7 +1206,7 @@ impl ChromaCollection {
         self.embed_documents(&input).await
     }
 
-    async fn resolve_update_embeddings(
+    pub(crate) async fn resolve_update_embeddings(
         &self,
         embeddings: Option<Vec<Option<Vec<f32>>>>,
         documents: &Option<Vec<Option<String>>>,
@@ -1299,7 +1315,7 @@ impl ChromaCollection {
     }
 
     /// Internal transport method that constructs collection-specific API paths and delegates to the client.
-    async fn send<Body: Serialize, Response: DeserializeOwned>(
+    pub(crate) async fn send<Body: Serialize, Response: DeserializeOwned>(
         &self,
         read_only: bool,
         operation: &str,

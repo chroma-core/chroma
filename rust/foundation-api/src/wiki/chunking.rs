@@ -30,9 +30,10 @@ pub const DEFAULT_MAX_BYTES: usize = 4096;
 
 /// A single chunk of a wiki page.
 ///
-/// `chunk_id` is the dense sequential index used in the Chroma record id
-/// `{slug}-{chunk_id}`; `line_no` is the 0-indexed position of the chunk's
-/// first line in the original content (sparse — gaps encode blank lines).
+/// `chunk_id` is the dense sequential index used in the Chroma record `id`
+/// (a [`ChunkRecordId`] rendered as `{slug}-{chunk_id}`); `line_no` is the
+/// 0-indexed position of the chunk's first line in the original content
+/// (sparse — gaps encode blank lines).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Chunk {
     pub id: String,
@@ -99,9 +100,54 @@ impl ChunkingConfig {
     }
 }
 
-/// The Chroma record id for a page chunk: `{slug}-{chunk_id}`.
-pub fn chunk_id_for(slug: &str, chunk_id: usize) -> String {
-    format!("{slug}-{chunk_id}")
+/// The Chroma record id for a page chunk, in the canonical `{slug}-{chunk_id}`
+/// shape.
+///
+/// This is the single place that knows the record-id format: build one from its
+/// parts with [`ChunkRecordId::new`] and render it to the stored string via its
+/// [`Display`] impl (i.e. `.to_string()`); recover the page slug from a stored
+/// id with [`ChunkRecordId::slug_from_id`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChunkRecordId {
+    slug: String,
+    chunk_id: usize,
+}
+
+impl ChunkRecordId {
+    /// Builds the record id for chunk `chunk_id` of the page `slug`.
+    pub fn new(slug: &str, chunk_id: usize) -> Self {
+        Self {
+            slug: slug.to_string(),
+            chunk_id,
+        }
+    }
+
+    /// Recovers the page slug from a stored record id, or `None` when `id` is
+    /// not in the `{slug}-{chunk_id}` shape (no hyphen, an empty suffix, or a
+    /// non-numeric suffix).
+    ///
+    /// The split point is the *last* hyphen, so a slug that itself contains
+    /// hyphens is preserved intact and only the final segment is read as the
+    /// chunk id: `gc-hard-delete-12` yields slug `gc-hard-delete`. The wiki root
+    /// has the empty slug, so `-0` yields `Some("")`.
+    ///
+    /// Only the slug is recovered — the numeric chunk id is never read back — so
+    /// the suffix is validated as digits but not parsed, and the borrowed slug
+    /// is returned directly. A digit suffix of any magnitude still identifies a
+    /// recoverable page.
+    pub fn slug_from_id(id: &str) -> Option<&str> {
+        let (slug, chunk_id) = id.rsplit_once('-')?;
+        if chunk_id.is_empty() || !chunk_id.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        Some(slug)
+    }
+}
+
+impl std::fmt::Display for ChunkRecordId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}-{}", self.slug, self.chunk_id)
+    }
 }
 
 /// Chunks `content` for the wiki collection described by `config`.
@@ -126,7 +172,7 @@ pub fn chunk_treesitter_markdown(slug: &str, content: &str, max_bytes: usize) ->
         // Entirely blank / empty content. Emit a single placeholder so every
         // page has the chunk_id=0 row title search relies on.
         return append_inter_chunk_separators(vec![Chunk {
-            id: chunk_id_for(slug, 0),
+            id: ChunkRecordId::new(slug, 0).to_string(),
             slug: slug.to_string(),
             chunk_id: 0,
             line_no: 0,
@@ -135,7 +181,7 @@ pub fn chunk_treesitter_markdown(slug: &str, content: &str, max_bytes: usize) ->
     };
 
     let mut chunks: Vec<Chunk> = vec![Chunk {
-        id: chunk_id_for(slug, 0),
+        id: ChunkRecordId::new(slug, 0).to_string(),
         slug: slug.to_string(),
         chunk_id: 0,
         line_no: title_idx,
@@ -166,7 +212,7 @@ pub fn chunk_treesitter_markdown(slug: &str, content: &str, max_bytes: usize) ->
 
     for (next_id, (cs, ce)) in (1usize..).zip(ranges) {
         chunks.push(Chunk {
-            id: chunk_id_for(slug, next_id),
+            id: ChunkRecordId::new(slug, next_id).to_string(),
             slug: slug.to_string(),
             chunk_id: next_id,
             line_no: rest_start + cs,
@@ -396,6 +442,48 @@ mod tests {
 
     fn concat(chunks: &[Chunk]) -> String {
         chunks.iter().map(|c| c.text.as_str()).collect()
+    }
+
+    #[test]
+    fn chunk_record_id_builds_and_recovers_slug() {
+        // new() -> Display renders the canonical `{slug}-{chunk_id}` form,
+        // including hyphenated slugs and the empty root.
+        assert_eq!(
+            ChunkRecordId::new("onboarding", 0).to_string(),
+            "onboarding-0"
+        );
+        assert_eq!(
+            ChunkRecordId::new("gc-hard-delete", 12).to_string(),
+            "gc-hard-delete-12"
+        );
+        assert_eq!(ChunkRecordId::new("", 0).to_string(), "-0");
+
+        // slug_from_id() recovers the slug from that form, splitting on the last
+        // hyphen so hyphenated slugs and the empty root round-trip.
+        assert_eq!(
+            ChunkRecordId::slug_from_id("onboarding-0"),
+            Some("onboarding")
+        );
+        assert_eq!(
+            ChunkRecordId::slug_from_id("gc-hard-delete-12"),
+            Some("gc-hard-delete")
+        );
+        assert_eq!(ChunkRecordId::slug_from_id("-0"), Some(""));
+        assert_eq!(
+            ChunkRecordId::slug_from_id(&ChunkRecordId::new("gc-hard-delete", 3).to_string()),
+            Some("gc-hard-delete")
+        );
+
+        // Non-numeric or missing suffixes are not chunk ids. A digit suffix of
+        // any magnitude is still a chunk id — the slug is recoverable regardless
+        // of the number's size.
+        assert_eq!(ChunkRecordId::slug_from_id("no-number-x"), None);
+        assert_eq!(ChunkRecordId::slug_from_id("trailing-"), None);
+        assert_eq!(ChunkRecordId::slug_from_id("noseparator"), None);
+        assert_eq!(
+            ChunkRecordId::slug_from_id("slug-99999999999999999999999999999999"),
+            Some("slug")
+        );
     }
 
     // --- treesitter: round-trip ---

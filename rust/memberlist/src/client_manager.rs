@@ -446,7 +446,7 @@ where
             seen_nodes.insert(node.to_string());
         }
 
-        for (node, _) in old_node_to_ip.iter() {
+        for node in old_node_to_ip.keys() {
             if !seen_nodes.contains(node) {
                 // This node has been removed
                 self.remove_node(node).await;

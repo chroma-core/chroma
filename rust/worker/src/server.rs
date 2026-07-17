@@ -253,12 +253,33 @@ impl WorkerServer {
         self.dispatcher = Some(dispatcher);
     }
 
+    fn validate_scan_log_upper_bound(
+        collection_log_position: i64,
+        log_upper_bound_offset: i64,
+    ) -> Result<(), Status> {
+        if log_upper_bound_offset < 0 {
+            return Err(Status::invalid_argument(format!(
+                "read upper bound {log_upper_bound_offset} must be non-negative"
+            )));
+        }
+        if log_upper_bound_offset > 0 && collection_log_position >= log_upper_bound_offset {
+            return Err(Status::failed_precondition(format!(
+                "collection snapshot at log position {collection_log_position} is at or newer than read upper bound {log_upper_bound_offset}"
+            )));
+        }
+        Ok(())
+    }
+
     fn fetch_log(
         &self,
         collection_and_segments: &CollectionAndSegments,
         batch_size: u32,
         log_upper_bound_offset: i64,
     ) -> Result<FetchLogOperator, Status> {
+        Self::validate_scan_log_upper_bound(
+            collection_and_segments.collection.log_position,
+            log_upper_bound_offset,
+        )?;
         let database_name =
             chroma_types::DatabaseName::new(collection_and_segments.collection.database.clone())
                 .ok_or_else(|| Status::invalid_argument("Invalid database name"))?;
@@ -926,6 +947,24 @@ mod tests {
     use chroma_types::chroma_proto::debug_client::DebugClient;
     use chroma_types::chroma_proto::query_executor_client::QueryExecutorClient;
     use uuid::Uuid;
+
+    #[test]
+    fn validate_scan_log_upper_bound_rejects_snapshots_at_or_past_bound() {
+        assert!(WorkerServer::validate_scan_log_upper_bound(41, 42).is_ok());
+        assert!(WorkerServer::validate_scan_log_upper_bound(42, 0).is_ok());
+
+        let err = WorkerServer::validate_scan_log_upper_bound(42, -1)
+            .expect_err("negative read upper bounds are invalid");
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+
+        let err = WorkerServer::validate_scan_log_upper_bound(42, 42)
+            .expect_err("snapshot at read upper bound must be stale");
+        assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+
+        let err = WorkerServer::validate_scan_log_upper_bound(43, 42)
+            .expect_err("snapshot past read upper bound must be stale");
+        assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+    }
 
     async fn run_server() -> String {
         let sysdb = TestSysDb::new();

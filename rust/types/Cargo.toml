@@ -1,6 +1,6 @@
 [package]
 name = "chroma-types"
-version = "0.14.0"
+version = "0.15.0"
 edition = "2021"
 description = "Chroma-provided crate for internal types used in the Chroma API."
 license = "Apache-2.0"
@@ -37,6 +37,7 @@ proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 
 chroma-error = { workspace = true, features = ["tonic", "validator"] }
+chroma-api-types = { workspace = true }
 itertools.workspace = true
 
 [build-dependencies]

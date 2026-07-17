@@ -245,7 +245,6 @@ pub fn validate_search_payload(payload: &SearchPayload) -> Result<(), Validation
 
 /// Validate schema
 pub fn validate_schema(schema: &Schema) -> Result<(), ValidationError> {
-    let mut sparse_index_keys = Vec::new();
     if schema
         .defaults
         .float_list
@@ -269,7 +268,7 @@ pub fn validate_schema(schema: &Schema) -> Result<(), ValidationError> {
         .as_ref()
         .is_some_and(|vt| vt.sparse_vector_index.as_ref().is_some_and(|it| it.enabled))
     {
-        return Err(ValidationError::new("schema").with_message("Sparse vector index cannot be enabled by default. Please enable sparse vector index on specific keys. At most one sparse vector index is allowed for the collection.".into()));
+        return Err(ValidationError::new("schema").with_message("Sparse vector index cannot be enabled by default. Please enable sparse vector index on specific keys.".into()));
     }
     if schema
         .defaults
@@ -337,19 +336,13 @@ pub fn validate_schema(schema: &Schema) -> Result<(), ValidationError> {
             .as_ref()
             .and_then(|vt| vt.sparse_vector_index.as_ref())
         {
-            if svit.enabled {
-                sparse_index_keys.push(key);
-                if sparse_index_keys.len() > 1 {
-                    return Err(ValidationError::new("schema").with_message(
-                        format!("At most one sparse vector index is allowed for the collection: {sparse_index_keys:?}")
-                            .into(),
-                    ));
-                }
-                if svit.config.source_key.is_some() && svit.config.embedding_function.is_none() {
-                    return Err(ValidationError::new("schema").with_message(
-                        "If source_key is provided then embedding_function must also be provided since there is no default embedding function.".into(),
-                    ));
-                }
+            if svit.enabled
+                && svit.config.source_key.is_some()
+                && svit.config.embedding_function.is_none()
+            {
+                return Err(ValidationError::new("schema").with_message(
+                    "If source_key is provided then embedding_function must also be provided since there is no default embedding function.".into(),
+                ));
             }
             // Validate source_key for sparse vector index
             if let Some(source_key) = &svit.config.source_key {
@@ -668,5 +661,108 @@ mod tests {
             ..Default::default()
         };
         assert!(validate_search_payload(&payload).is_err());
+    }
+
+    fn schema_with_sparse_key(
+        schema: &mut Schema,
+        key: &str,
+        algorithm: crate::SparseIndexAlgorithm,
+    ) {
+        use crate::{SparseVectorIndexConfig, SparseVectorIndexType, SparseVectorValueType};
+        schema
+            .keys
+            .entry(key.to_string())
+            .or_default()
+            .sparse_vector = Some(SparseVectorValueType {
+            sparse_vector_index: Some(SparseVectorIndexType {
+                enabled: true,
+                config: SparseVectorIndexConfig {
+                    embedding_function: None,
+                    source_key: None,
+                    bm25: None,
+                    algorithm,
+                },
+            }),
+        });
+    }
+
+    #[test]
+    fn test_validate_schema_allows_multiple_sparse_keys() {
+        use crate::{KnnIndex, SparseIndexAlgorithm};
+        let mut schema = Schema::new_default(KnnIndex::Hnsw);
+        schema_with_sparse_key(&mut schema, "sparse_a", SparseIndexAlgorithm::Wand);
+        schema_with_sparse_key(&mut schema, "sparse_b", SparseIndexAlgorithm::MaxScore);
+        assert!(validate_schema(&schema).is_ok());
+    }
+
+    #[test]
+    fn test_validate_schema_rejects_default_sparse_index() {
+        use crate::{
+            KnnIndex, SparseIndexAlgorithm, SparseVectorIndexConfig, SparseVectorIndexType,
+            SparseVectorValueType,
+        };
+        let mut schema = Schema::new_default(KnnIndex::Hnsw);
+        schema.defaults.sparse_vector = Some(SparseVectorValueType {
+            sparse_vector_index: Some(SparseVectorIndexType {
+                enabled: true,
+                config: SparseVectorIndexConfig {
+                    embedding_function: None,
+                    source_key: None,
+                    bm25: None,
+                    algorithm: SparseIndexAlgorithm::Wand,
+                },
+            }),
+        });
+        assert!(validate_schema(&schema).is_err());
+    }
+
+    fn sparse_rank_leaf(index: u32, key: &str) -> crate::operator::RankExpr {
+        crate::operator::RankExpr::Knn {
+            query: crate::operator::QueryVector::Sparse(
+                SparseVector::new(vec![index], vec![1.0]).unwrap(),
+            ),
+            key: Key::field(key),
+            limit: 10,
+            default: None,
+            return_rank: false,
+        }
+    }
+
+    #[test]
+    fn test_validate_rank_admits_multiple_sparse_leaves() {
+        use crate::operator::RankExpr;
+        // Distinct sparse keys plus a repeat of the first key — all valid.
+        let rank = Rank {
+            expr: Some(RankExpr::Summation(vec![
+                sparse_rank_leaf(0, "sparse_a"),
+                sparse_rank_leaf(1, "sparse_b"),
+                sparse_rank_leaf(2, "sparse_a"),
+            ])),
+        };
+        assert!(validate_rank(&rank).is_ok());
+    }
+
+    #[test]
+    fn test_validate_rank_rejects_invalid_sparse_leaf() {
+        use crate::operator::RankExpr;
+        // One valid leaf, one with mismatched indices/values lengths.
+        let bad = RankExpr::Knn {
+            query: crate::operator::QueryVector::Sparse(SparseVector {
+                indices: vec![0, 1],
+                values: vec![1.0],
+                tokens: None,
+            }),
+            key: Key::field("sparse_b"),
+            limit: 10,
+            default: None,
+            return_rank: false,
+        };
+        let rank = Rank {
+            expr: Some(RankExpr::Summation(vec![
+                sparse_rank_leaf(0, "sparse_a"),
+                bad,
+            ])),
+        };
+        assert!(validate_rank(&rank).is_err());
     }
 }

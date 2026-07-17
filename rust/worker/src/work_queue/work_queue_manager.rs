@@ -3,21 +3,12 @@
 use crate::work_queue::state::QueueState;
 use crate::work_queue::types::{FinishResult, WorkQueueError, WorkQueueRecord};
 
-#[allow(dead_code)]
-enum WorkResponse {
-    Push(oneshot::Sender<Result<(), WorkQueueError>>),
-    Repair(oneshot::Sender<Result<FinishResult, WorkQueueError>>),
-}
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_storage::{GetOptions, PutMode, PutOptions, Storage};
 use chroma_sysdb::SysDb;
 use chroma_system::{Component, ComponentContext, ComponentRuntime, Handler};
-use chroma_types::chroma_proto::{
-    try_finish_async_attached_function_invocation_response::Result as TryFinishResult,
-    CheckInvocationStatusRequest, InvocationCheckItem, InvocationStatus, InvocationStatusResult,
-    TryFinishAsyncAttachedFunctionInvocationRequest,
-};
+use chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationRequest;
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -29,6 +20,7 @@ pub struct PushWorkMessage {
     pub fn_id: AttachedFunctionUuid,
     pub input_coll_id: CollectionUuid,
     pub completion_offset: i64,
+    pub compaction_offset: i64,
     pub response_tx: oneshot::Sender<Result<(), WorkQueueError>>,
 }
 
@@ -50,6 +42,9 @@ pub struct GetWorkMessage {
     pub response_tx: oneshot::Sender<Result<Vec<WorkQueueRecord>, WorkQueueError>>,
 }
 
+#[derive(Debug)]
+pub(crate) struct WorkQueueReadyMessage;
+
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct PeriodicPersistMessage;
@@ -69,36 +64,6 @@ pub(crate) struct WorkQueueManager {
         FinishResult,
         oneshot::Sender<Result<FinishResult, WorkQueueError>>,
     )>,
-}
-
-#[derive(Debug)]
-enum InvocationCompletionStatus {
-    NotDone,
-    Done,
-    NeedsRepair(i64),
-}
-
-#[derive(Debug, thiserror::Error)]
-enum InvocationCompletionStatusConversionError {
-    #[error("invalid invocation status: {0}")]
-    InvalidStatus(i32),
-}
-
-impl TryFrom<InvocationStatusResult> for InvocationCompletionStatus {
-    type Error = InvocationCompletionStatusConversionError;
-
-    fn try_from(result: InvocationStatusResult) -> Result<Self, Self::Error> {
-        match InvocationStatus::try_from(result.status) {
-            Ok(InvocationStatus::Done) => Ok(InvocationCompletionStatus::Done),
-            Ok(InvocationStatus::NeedsRepair) => Ok(InvocationCompletionStatus::NeedsRepair(
-                result.current_completion_offset,
-            )),
-            Ok(InvocationStatus::NotDone) => Ok(InvocationCompletionStatus::NotDone),
-            Err(_) => Err(InvocationCompletionStatusConversionError::InvalidStatus(
-                result.status,
-            )),
-        }
-    }
 }
 
 impl WorkQueueManager {
@@ -246,28 +211,25 @@ impl WorkQueueManager {
         total_pending_responses >= self.config.persistence.pending_threshold
     }
 
-    async fn push_work_and_queue_response(
-        &mut self,
-        fn_id: AttachedFunctionUuid,
-        input_coll_id: CollectionUuid,
-        completion_offset: i64,
-        response: WorkResponse,
-    ) {
+    async fn push_work_and_queue_response(&mut self, msg: PushWorkMessage) {
+        let PushWorkMessage {
+            fn_id,
+            input_coll_id,
+            completion_offset,
+            compaction_offset,
+            response_tx,
+        } = msg;
+
         let _ = self
             .state
-            .push_work(fn_id, input_coll_id, completion_offset);
+            .push_work(fn_id, input_coll_id, completion_offset, compaction_offset);
 
         // TODO(tanujnay112): Can optimize the case where we push work
         // that gets deduplicated. That would require epoch tracking
         // where the epoch is incremented per persistence event and
         // we associate each dedup map entry with an epoch.
 
-        match response {
-            WorkResponse::Push(tx) => self.pending_push_responses.push(tx),
-            WorkResponse::Repair(tx) => self
-                .pending_finish_responses
-                .push((FinishResult::NeedsRepair, tx)),
-        }
+        self.pending_push_responses.push(response_tx);
 
         // Check if persist needed
         if self.should_persist() {
@@ -277,187 +239,25 @@ impl WorkQueueManager {
         }
     }
 
-    // Call sysdb's TryFinishAsyncAttachedFunctionInvocation
+    // Update sysdb's completion offset for an async attached function invocation.
     #[tracing::instrument(name = "WorkQueueManager::try_finish_invocation", skip(self))]
     async fn try_finish_invocation(
         &mut self,
         fn_id: &AttachedFunctionUuid,
         input_coll_id: &CollectionUuid,
         completion_offset: i64,
-    ) -> Result<FinishResult, WorkQueueError> {
+    ) -> Result<(), WorkQueueError> {
         let request = TryFinishAsyncAttachedFunctionInvocationRequest {
             attached_function_id: fn_id.to_string(),
             collection_id: input_coll_id.to_string(),
             new_completion_offset: completion_offset as u64,
         };
 
-        let response = self
-            .sysdb
+        self.sysdb
             .try_finish_async_attached_function_invocation(request)
             .await
             .map_err(|e| WorkQueueError::TryFinishFailed(e.message().to_string()))?;
-
-        let inner = response.into_inner();
-        match inner.result {
-            Some(result) => match result {
-                TryFinishResult::Success(_) => Ok(FinishResult::Success),
-                TryFinishResult::NeedsRepair(_) => Ok(FinishResult::NeedsRepair),
-            },
-            None => Err(WorkQueueError::TryFinishFailed(
-                "Empty response".to_string(),
-            )),
-        }
-    }
-
-    // Check invocation completion status (boolean version for compatibility)
-    async fn are_invocations_done(
-        &mut self,
-        items: &[WorkQueueRecord],
-    ) -> Result<Vec<bool>, WorkQueueError> {
-        let statuses = self.check_invocations_status(items).await?;
-        // Map DONE to true, everything else (NOT_DONE, NEEDS_REPAIR) to false
-        Ok(statuses
-            .into_iter()
-            .map(|status| matches!(status, InvocationCompletionStatus::Done))
-            .collect())
-    }
-
-    // Check invocation completion status with detailed status
-    #[tracing::instrument(
-        name = "WorkQueueManager::check_invocations_status",
-        skip(self, items),
-        level = "debug"
-    )]
-    async fn check_invocations_status(
-        &mut self,
-        items: &[WorkQueueRecord],
-    ) -> Result<Vec<InvocationCompletionStatus>, WorkQueueError> {
-        if items.is_empty() {
-            return Ok(vec![]);
-        }
-
-        let invocation_items: Vec<InvocationCheckItem> = items
-            .iter()
-            .map(|item| InvocationCheckItem {
-                function_id: item.fn_id.to_string(),
-                input_collection_id: item.input_coll_id.to_string(),
-                completion_offset: item.completion_offset,
-            })
-            .collect();
-
-        let request = CheckInvocationStatusRequest {
-            items: invocation_items,
-        };
-
-        let response = self
-            .sysdb
-            .check_invocation_status(request)
-            .await
-            .map_err(|e| WorkQueueError::CheckInvocationsFailed(e.message().to_string()))?;
-
-        let statuses = response
-            .into_inner()
-            .results
-            .into_iter()
-            .map(InvocationCompletionStatus::try_from)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| WorkQueueError::CheckInvocationsFailed(e.to_string()))?;
-
-        Ok(statuses)
-    }
-
-    // Check all pending items on startup and repair any that need it
-    #[tracing::instrument(name = "WorkQueueManager::check_and_repair_pending_items", skip(self))]
-    async fn check_and_repair_pending_items(&mut self) {
-        if self.state.pending_work.is_empty() {
-            tracing::info!("No pending work items to check for repair");
-            return;
-        }
-
-        tracing::info!(
-            "Checking {} pending work items for repair",
-            self.state.pending_work.len()
-        );
-
-        // Get all pending items
-        let items: Vec<_> = self.state.pending_work.iter().cloned().collect();
-
-        // Check their statuses
-        let statuses = match self.check_invocations_status(&items).await {
-            Ok(statuses) => statuses,
-            Err(e) => {
-                tracing::error!("Failed to check invocation statuses for repair: {}", e);
-                return;
-            }
-        };
-
-        // Find items that need repair
-        let items_needing_repair: Vec<_> = items
-            .into_iter()
-            .zip(statuses.iter())
-            .filter_map(|(item, status)| match status {
-                InvocationCompletionStatus::NeedsRepair(current_completion_offset) => {
-                    Some((item, *current_completion_offset))
-                }
-                _ => None,
-            })
-            .collect();
-
-        if items_needing_repair.is_empty() {
-            tracing::info!("No items need repair");
-            return;
-        }
-
-        tracing::warn!("Found {} items needing repair", items_needing_repair.len());
-
-        for (item, current_completion_offset) in &items_needing_repair {
-            tracing::info!(
-                "Queueing repair for fn_id: {}, input_coll_id: {}, old_completion_offset: {}, current_completion_offset: {}",
-                item.fn_id,
-                item.input_coll_id,
-                item.completion_offset,
-                current_completion_offset
-            );
-
-            self.state
-                .push_work(item.fn_id, item.input_coll_id, *current_completion_offset);
-        }
-
-        if let Err(e) = self.persist().await {
-            tracing::error!(
-                "Failed to persist repaired work queue state; skipping sysdb repair finalization: {}",
-                e
-            );
-            return;
-        }
-
-        for (item, _) in items_needing_repair {
-            tracing::info!(
-                "Finalizing repair for fn_id: {}, input_coll_id: {}",
-                item.fn_id,
-                item.input_coll_id
-            );
-
-            let repair_request =
-                chroma_types::chroma_proto::FinalizeAsyncAttachedFunctionRepairRequest {
-                    attached_function_id: item.fn_id.to_string(),
-                    collection_id: item.input_coll_id.to_string(),
-                };
-
-            if let Err(e) = self
-                .sysdb
-                .finalize_async_attached_function_repair(repair_request)
-                .await
-            {
-                tracing::error!(
-                    "Failed to finalize repair for function {}: {}",
-                    item.fn_id,
-                    e
-                );
-            }
-        }
-
-        tracing::info!("Repair check completed");
+        Ok(())
     }
 }
 
@@ -483,9 +283,6 @@ impl Component for WorkQueueManager {
             tracing::error!("Failed to load work queue state: {}", e);
             panic!("Cannot start without valid state");
         }
-
-        // Check all heap items to see if any need repair
-        self.check_and_repair_pending_items().await;
 
         // Schedule periodic persistence
         ctx.scheduler.schedule(
@@ -519,18 +316,13 @@ impl Handler<PushWorkMessage> for WorkQueueManager {
 
     async fn handle(&mut self, msg: PushWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
         tracing::info!(
-            "Received PushWorkMessage for fn_id: {}, input_coll_id: {}, completion_offset: {}",
-            msg.fn_id,
-            msg.input_coll_id,
-            msg.completion_offset
-        );
-        self.push_work_and_queue_response(
+            "Received PushWorkMessage for fn_id: {}, input_coll_id: {}, completion_offset: {}, compaction_offset: {}",
             msg.fn_id,
             msg.input_coll_id,
             msg.completion_offset,
-            WorkResponse::Push(msg.response_tx),
-        )
-        .await;
+            msg.compaction_offset
+        );
+        self.push_work_and_queue_response(msg).await;
     }
 }
 
@@ -540,46 +332,23 @@ impl Handler<FinishWorkMessage> for WorkQueueManager {
 
     async fn handle(&mut self, msg: FinishWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
         // Call sysdb
-        let finish_result = match self
+        if let Err(e) = self
             .try_finish_invocation(&msg.fn_id, &msg.input_coll_id, msg.new_completion_offset)
             .await
         {
-            Ok(result) => result,
-            Err(e) => {
-                if msg.response_tx.send(Err(e)).is_err() {
-                    tracing::error!("Failed to send error response");
-                }
-                return;
+            if msg.response_tx.send(Err(e)).is_err() {
+                tracing::error!("Failed to send error response");
             }
-        };
+            return;
+        }
 
-        match finish_result {
-            FinishResult::Success => {
-                // Use encapsulated finish_work_success method
-                self.state.finish_work_success(
-                    &msg.fn_id,
-                    &msg.input_coll_id,
-                    msg.new_completion_offset,
-                );
+        // Use the queued compaction frontier to decide whether to remove or advance the entry.
+        self.state
+            .finish_work_success(&msg.fn_id, &msg.input_coll_id, msg.new_completion_offset);
 
-                // Send immediate success response
-                if msg.response_tx.send(Ok(FinishResult::Success)).is_err() {
-                    tracing::error!(
-                        "Failed to send finish work success response - receiver dropped"
-                    );
-                }
-                return;
-            }
-            FinishResult::NeedsRepair => {
-                // Re-push work and queue response atomically
-                self.push_work_and_queue_response(
-                    msg.fn_id,
-                    msg.input_coll_id,
-                    msg.new_completion_offset,
-                    WorkResponse::Repair(msg.response_tx),
-                )
-                .await;
-            }
+        // Send immediate success response
+        if msg.response_tx.send(Ok(FinishResult::Success)).is_err() {
+            tracing::error!("Failed to send finish work success response - receiver dropped");
         }
 
         // Check if persist needed
@@ -594,44 +363,33 @@ impl Handler<GetWorkMessage> for WorkQueueManager {
     type Result = ();
 
     async fn handle(&mut self, msg: GetWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
-        // For now, return all items up to limit
-        // TODO: In the future, this will be filtered based on work assignment
-
-        let items: Vec<_> = self
+        // With eager stale-row removal on push, the queue's dedup index is the
+        // source of truth for whether a row is still live.
+        let filtered: Vec<_> = self
             .state
             .pending_work
             .iter()
+            .filter(|item| self.state.contains_entry(&item.fn_id, &item.input_coll_id))
             .take(msg.limit)
             .cloned()
             .collect();
-
-        // Check invocations done
-        // TODO(tanujnay112): We won't need this if we make sure finish_work
-        // deletes the work item from the queue and we look for repair on bootup.
-        let done_flags = match self.are_invocations_done(&items).await {
-            Ok(flags) => flags,
-            Err(e) => {
-                tracing::error!("Failed to check invocations done: {}", e);
-                // If we fail to check, return empty results
-                if msg.response_tx.send(Err(e)).is_err() {
-                    tracing::warn!("Failed to send error response - receiver dropped");
-                }
-                return;
-            }
-        };
-
-        let filtered: Vec<_> = items
-            .into_iter()
-            .zip(done_flags.iter())
-            .filter(|(_, done)| !**done)
-            .map(|(item, _)| item)
-            .take(msg.limit)
-            .collect();
-        tracing::info!("Filtered {} items from get work response", filtered.len());
+        tracing::info!("Returning {} items from get work response", filtered.len());
 
         if msg.response_tx.send(Ok(filtered)).is_err() {
             tracing::warn!("Failed to send get work response - receiver dropped");
         }
+    }
+}
+
+#[async_trait]
+impl Handler<WorkQueueReadyMessage> for WorkQueueManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        _msg: WorkQueueReadyMessage,
+        _ctx: &ComponentContext<WorkQueueManager>,
+    ) {
     }
 }
 
@@ -676,9 +434,6 @@ mod tests {
     }
 
     fn create_test_sysdb() -> SysDb {
-        // Create a test sysdb for unit tests that only test internal state.
-        // This sysdb is not connected to any backend and is purely for testing.
-        // If a test needs real sysdb interaction, it should be an integration test.
         SysDb::Test(chroma_sysdb::test_sysdb::TestSysDb::new())
     }
 
@@ -699,17 +454,17 @@ mod tests {
         let coll_id = CollectionUuid(Uuid::new_v4());
 
         // Test direct state manipulation to verify deduplication logic
-        state.push_work(fn_id, coll_id, 100);
+        state.push_work(fn_id, coll_id, 100, 100);
         assert_eq!(state.pending_work.len(), 1);
         assert_eq!(state.pending_work[0].completion_offset, 100);
 
         // Push with lower offset should be ignored
-        state.push_work(fn_id, coll_id, 50);
+        state.push_work(fn_id, coll_id, 50, 50);
         assert_eq!(state.pending_work.len(), 1);
         assert_eq!(state.pending_work[0].completion_offset, 100);
 
         // Push with higher offset should replace
-        state.push_work(fn_id, coll_id, 200);
+        state.push_work(fn_id, coll_id, 200, 200);
         assert_eq!(state.pending_work.len(), 1);
         assert_eq!(state.pending_work[0].completion_offset, 200);
 
@@ -724,7 +479,7 @@ mod tests {
         let coll_id = CollectionUuid(Uuid::new_v4());
 
         // Push work
-        state.push_work(fn_id, coll_id, 100);
+        state.push_work(fn_id, coll_id, 100, 100);
         assert_eq!(state.pending_work.len(), 1);
 
         // Finish work
@@ -736,6 +491,8 @@ mod tests {
     #[test]
     fn test_get_work_filtering() {
         let mut state = QueueState::new();
+        let stale_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let stale_coll_id = CollectionUuid(Uuid::new_v4());
 
         // Add multiple work items
         for i in 0..5 {
@@ -743,18 +500,34 @@ mod tests {
                 AttachedFunctionUuid(Uuid::new_v4()),
                 CollectionUuid(Uuid::new_v4()),
                 i * 100,
+                i * 100,
             );
         }
 
         assert_eq!(state.pending_work.len(), 5);
 
+        // Add an orphaned row to simulate a stale queue entry without a dedup record.
+        state.pending_work.push_back(WorkQueueRecord {
+            fn_id: stale_fn_id,
+            input_coll_id: stale_coll_id,
+            completion_offset: 999,
+            compaction_offset: 999,
+            insertion_order: 999,
+        });
+
         // Test filtering logic (simulating what get_work does)
         let limit = 3;
-        let filtered: Vec<_> = state.pending_work.iter().take(limit).cloned().collect();
+        let filtered: Vec<_> = state
+            .pending_work
+            .iter()
+            .filter(|item| state.contains_entry(&item.fn_id, &item.input_coll_id))
+            .take(limit)
+            .cloned()
+            .collect();
 
         assert_eq!(filtered.len(), 3);
 
-        // Verify we got the first 3 items (FIFO order)
+        // Verify we got the first 3 live items in FIFO order.
         for (i, item) in filtered.iter().enumerate().take(3) {
             assert_eq!(item.completion_offset, (i as i64) * 100);
         }
@@ -764,22 +537,18 @@ mod tests {
     async fn test_load_state() {
         let temp_dir = TempDir::new().unwrap();
         let config = create_test_config();
+        let fn_id_1 = AttachedFunctionUuid(Uuid::new_v4());
+        let coll_id_1 = CollectionUuid(Uuid::new_v4());
+        let fn_id_2 = AttachedFunctionUuid(Uuid::new_v4());
+        let coll_id_2 = CollectionUuid(Uuid::new_v4());
 
         // Create and persist state
         {
             let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
             let sysdb = create_test_sysdb();
             let mut manager = WorkQueueManager::new(storage, config.clone(), sysdb);
-            manager.state.push_work(
-                AttachedFunctionUuid(Uuid::new_v4()),
-                CollectionUuid(Uuid::new_v4()),
-                100,
-            );
-            manager.state.push_work(
-                AttachedFunctionUuid(Uuid::new_v4()),
-                CollectionUuid(Uuid::new_v4()),
-                200,
-            );
+            manager.state.push_work(fn_id_1, coll_id_1, 100, 100);
+            manager.state.push_work(fn_id_2, coll_id_2, 200, 200);
             manager.persist().await.unwrap();
         }
 
@@ -868,9 +637,9 @@ mod tests {
         let coll_id = CollectionUuid(Uuid::new_v4());
 
         // Push multiple work items with different offsets
-        state.push_work(fn_id, coll_id, 100);
-        state.push_work(fn_id, coll_id, 200);
-        state.push_work(fn_id, coll_id, 300);
+        state.push_work(fn_id, coll_id, 100, 100);
+        state.push_work(fn_id, coll_id, 200, 200);
+        state.push_work(fn_id, coll_id, 300, 300);
         assert_eq!(state.pending_work.len(), 1);
         assert_eq!(state.pending_work[0].completion_offset, 300);
 

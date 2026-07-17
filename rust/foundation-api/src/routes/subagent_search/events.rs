@@ -132,14 +132,19 @@ pub(crate) struct RankedDocument {
     pub justification: String,
 }
 
-/// Failure to turn a completed subagent stream into structured results. An
-/// answer that parses to zero documents is *not* an error — it is a valid
-/// empty result — so the only failure is the absence of any terminal answer.
+/// Failure to turn a subagent stream into structured results. An answer that
+/// parses to zero documents is *not* an error — it is a valid empty result.
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub(crate) enum SubagentResultError {
-    /// The stream finished without a terminal `user_text` action.
-    #[error("subagent stream produced no terminal answer")]
-    NoFinalAnswer,
+    /// The upstream request or byte stream failed.
+    #[error("{0}")]
+    Stream(String),
+    /// The upstream agent emitted an explicit error event.
+    #[error("subagent stream failed: {0}")]
+    Upstream(String),
+    /// The byte stream ended without an explicit `done` or `error` event.
+    #[error("subagent stream ended without a terminal event")]
+    MissingTerminalEvent,
 }
 
 /// Matches one `<Document id=…><Justification>…</Justification></Document>`

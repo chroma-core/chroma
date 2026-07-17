@@ -73,14 +73,41 @@ pub(crate) fn build_metadatas(
         .collect()
 }
 
+/// Reads a string-valued metadata field, or `None` if it is absent or a
+/// different type.
+pub(crate) fn meta_str(meta: &Metadata, key: &str) -> Option<String> {
+    match meta.get(key) {
+        Some(MetadataValue::Str(value)) => Some(value.clone()),
+        _ => None,
+    }
+}
+
+/// Reads an integer-valued metadata field, or `None` if it is absent or a
+/// different type.
+pub(crate) fn meta_int(meta: &Metadata, key: &str) -> Option<i64> {
+    match meta.get(key) {
+        Some(MetadataValue::Int(value)) => Some(*value),
+        _ => None,
+    }
+}
+
+/// Reads a string-array metadata field, or an empty `Vec` if it is absent or a
+/// different type.
+pub(crate) fn meta_str_array(meta: &Metadata, key: &str) -> Vec<String> {
+    match meta.get(key) {
+        Some(MetadataValue::StringArray(values)) => values.clone(),
+        _ => Vec::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wiki::chunking::chunk_id_for;
+    use crate::wiki::chunking::ChunkRecordId;
 
     fn chunk(chunk_id: usize, line_no: usize, text: &str) -> Chunk {
         Chunk {
-            id: chunk_id_for("foo", chunk_id),
+            id: ChunkRecordId::new("foo", chunk_id).to_string(),
             slug: "foo".to_string(),
             chunk_id,
             line_no,

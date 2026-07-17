@@ -268,7 +268,7 @@ pub struct ExecuteAttachedFunctionBatchInput {
     pub input_collection_name: String,
     pub tenant_id: String,
     pub database_id: String,
-    pub completion_offset: u64,
+    pub pulled_log_offset: u64,
 }
 
 /// Hydrated records for one input collection, passed to the executor after shard hydration.
@@ -277,7 +277,7 @@ pub struct HydratedInputBatch<'me, 'q> {
     pub input_collection_name: String,
     pub tenant_id: String,
     pub database_id: String,
-    pub completion_offset: u64,
+    pub pulled_log_offset: u64,
     pub records: Chunk<HydratedMaterializedLogRecord<'me, 'q>>,
 }
 
@@ -434,7 +434,7 @@ impl Operator<ExecuteAttachedFunctionInput, ExecuteAttachedFunctionOutput>
                 input_collection_name: batch.input_collection_name.clone(),
                 tenant_id: batch.tenant_id.clone(),
                 database_id: batch.database_id.clone(),
-                completion_offset: batch.completion_offset,
+                pulled_log_offset: batch.pulled_log_offset,
                 records: Chunk::new(std::sync::Arc::from(hydrated_records)),
             });
         }
@@ -604,7 +604,7 @@ mod tests {
                         input_collection_name: "input-a".to_string(),
                         tenant_id: output_segment.collection.tenant.clone(),
                         database_id: output_segment.collection.database_id.to_string(),
-                        completion_offset: 0,
+                        pulled_log_offset: 0,
                     },
                     ExecuteAttachedFunctionBatchInput {
                         materialized_logs: vec![materialized_b],
@@ -613,7 +613,7 @@ mod tests {
                         input_collection_name: "input-b".to_string(),
                         tenant_id: output_segment.collection.tenant.clone(),
                         database_id: output_segment.collection.database_id.to_string(),
-                        completion_offset: 0,
+                        pulled_log_offset: 0,
                     },
                 ],
                 output_collection_id: output_segment.collection.collection_id,

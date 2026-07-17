@@ -251,72 +251,72 @@ export class SparseVectorIndexConfig {
 }
 
 export class FtsIndexType {
-  constructor(public enabled: boolean, public config: FtsIndexConfig) { }
+  constructor(public enabled: boolean, public config: FtsIndexConfig) {}
 }
 
 export class StringInvertedIndexType {
   constructor(
     public enabled: boolean,
     public config: StringInvertedIndexConfig,
-  ) { }
+  ) {}
 }
 
 export class VectorIndexType {
-  constructor(public enabled: boolean, public config: VectorIndexConfig) { }
+  constructor(public enabled: boolean, public config: VectorIndexConfig) {}
 }
 
 export class SparseVectorIndexType {
   constructor(
     public enabled: boolean,
     public config: SparseVectorIndexConfig,
-  ) { }
+  ) {}
 }
 
 export class IntInvertedIndexType {
-  constructor(public enabled: boolean, public config: IntInvertedIndexConfig) { }
+  constructor(public enabled: boolean, public config: IntInvertedIndexConfig) {}
 }
 
 export class FloatInvertedIndexType {
   constructor(
     public enabled: boolean,
     public config: FloatInvertedIndexConfig,
-  ) { }
+  ) {}
 }
 
 export class BoolInvertedIndexType {
   constructor(
     public enabled: boolean,
     public config: BoolInvertedIndexConfig,
-  ) { }
+  ) {}
 }
 
 export class StringValueType {
   constructor(
     public ftsIndex: FtsIndexType | null = null,
     public stringInvertedIndex: StringInvertedIndexType | null = null,
-  ) { }
+  ) {}
 }
 
 export class FloatListValueType {
-  constructor(public vectorIndex: VectorIndexType | null = null) { }
+  constructor(public vectorIndex: VectorIndexType | null = null) {}
 }
 
 export class SparseVectorValueType {
-  constructor(public sparseVectorIndex: SparseVectorIndexType | null = null) { }
+  constructor(public sparseVectorIndex: SparseVectorIndexType | null = null) {}
 }
 
 export class IntValueType {
-  constructor(public intInvertedIndex: IntInvertedIndexType | null = null) { }
+  constructor(public intInvertedIndex: IntInvertedIndexType | null = null) {}
 }
 
 export class FloatValueType {
   constructor(
     public floatInvertedIndex: FloatInvertedIndexType | null = null,
-  ) { }
+  ) {}
 }
 
 export class BoolValueType {
-  constructor(public boolInvertedIndex: BoolInvertedIndexType | null = null) { }
+  constructor(public boolInvertedIndex: BoolInvertedIndexType | null = null) {}
 }
 
 export class ValueTypes {
@@ -351,11 +351,11 @@ const cloneObject = <T>(value: T): T => {
   return Array.isArray(value)
     ? (value.map((item) => cloneObject(item)) as T)
     : (Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([k, v]) => [
-        k,
-        cloneObject(v),
-      ]),
-    ) as T);
+        Object.entries(value as Record<string, unknown>).map(([k, v]) => [
+          k,
+          cloneObject(v),
+        ]),
+      ) as T);
 };
 
 const resolveEmbeddingFunctionName = (
@@ -520,7 +520,11 @@ export class Schema {
     }
 
     // Only allow #document with FtsIndexConfig
-    if (keyProvided && key === DOCUMENT_KEY && !(config instanceof FtsIndexConfig)) {
+    if (
+      keyProvided &&
+      key === DOCUMENT_KEY &&
+      !(config instanceof FtsIndexConfig)
+    ) {
       throw new Error(
         `Cannot create index on special key '${key}' with this config. Only FtsIndexConfig is allowed for #document.`,
       );
@@ -545,7 +549,10 @@ export class Schema {
     }
 
     // FTS index is only allowed on #document key
-    if (config instanceof FtsIndexConfig && (!keyProvided || key !== DOCUMENT_KEY)) {
+    if (
+      config instanceof FtsIndexConfig &&
+      (!keyProvided || key !== DOCUMENT_KEY)
+    ) {
       throw new Error(
         "FTS index can only be enabled on #document key. Use createIndex(new FtsIndexConfig(), '#document')",
       );
@@ -586,13 +593,15 @@ export class Schema {
 
     // Disallow using special internal key #embedding
     if (keyProvided && key && key === EMBEDDING_KEY) {
-      throw new Error(
-        "Cannot modify #embedding. Currently not supported",
-      );
+      throw new Error("Cannot modify #embedding. Currently not supported");
     }
 
     // Only allow #document with FtsIndexConfig (to disable FTS)
-    if (keyProvided && key === DOCUMENT_KEY && !(config instanceof FtsIndexConfig)) {
+    if (
+      keyProvided &&
+      key === DOCUMENT_KEY &&
+      !(config instanceof FtsIndexConfig)
+    ) {
       throw new Error(
         `Cannot delete index on special key '${key}' with this config. Only FtsIndexConfig is allowed for #document.`,
       );
@@ -619,7 +628,10 @@ export class Schema {
     }
 
     // FTS deletion is only allowed on #document key
-    if (config instanceof FtsIndexConfig && (!keyProvided || key !== DOCUMENT_KEY)) {
+    if (
+      config instanceof FtsIndexConfig &&
+      (!keyProvided || key !== DOCUMENT_KEY)
+    ) {
       throw new Error("Deleting FTS index is only supported on #document key.");
     }
 
@@ -769,7 +781,6 @@ export class Schema {
     enabled: boolean,
   ): void {
     if (config instanceof SparseVectorIndexConfig && enabled) {
-      this.validateSingleSparseVectorIndex(key);
       this.validateSparseVectorConfig(config);
     }
 
@@ -863,18 +874,6 @@ export class Schema {
     current.boolean = new BoolValueType(
       new BoolInvertedIndexType(false, new BoolInvertedIndexConfig()),
     );
-  }
-
-  private validateSingleSparseVectorIndex(targetKey: string): void {
-    for (const [existingKey, valueTypes] of Object.entries(this.keys)) {
-      if (existingKey === targetKey) continue;
-      const sparseIndex = valueTypes.sparseVector?.sparseVectorIndex;
-      if (sparseIndex?.enabled) {
-        throw new Error(
-          `Cannot enable sparse vector index on key '${targetKey}'. A sparse vector index is already enabled on key '${existingKey}'. Only one sparse vector index is allowed per collection.`,
-        );
-      }
-    }
   }
 
   private validateSparseVectorConfig(config: SparseVectorIndexConfig): void {
@@ -1087,7 +1086,8 @@ export class Schema {
       !embeddingFunction.supportedSpaces().includes(resolvedSpace)
     ) {
       console.warn(
-        `Space '${resolvedSpace}' is not supported by embedding function '${resolveEmbeddingFunctionName(embeddingFunction) ?? "unknown"
+        `Space '${resolvedSpace}' is not supported by embedding function '${
+          resolveEmbeddingFunctionName(embeddingFunction) ?? "unknown"
         }'. Supported spaces: ${embeddingFunction
           .supportedSpaces()
           .join(", ")}`,

@@ -559,7 +559,7 @@ mod tests {
             input_collection_name: "test-input".to_string(),
             tenant_id: "test-tenant".to_string(),
             database_id: "test-database".to_string(),
-            completion_offset: 0,
+            pulled_log_offset: 0,
             records,
         }
     }

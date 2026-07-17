@@ -286,7 +286,7 @@ impl AttachedFunctionExecutor for HttpCurrentsExecutor {
             database_name: self.database_name.clone(),
             wiki_collection: batch.input_collection_name.clone(),
             currents_collection: self.output_collection.clone(),
-            wiki_write_offset: batch.completion_offset,
+            wiki_write_offset: batch.pulled_log_offset,
         };
 
         tracing::info!(

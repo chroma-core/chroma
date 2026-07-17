@@ -6,6 +6,7 @@ for automatically processing collections.
 """
 
 import functools
+import json
 import pytest
 import time
 import urllib.parse
@@ -84,7 +85,11 @@ def _wait_for_minio_count(
         body = _minio_get_object(parsed.netloc, key)
         if body is not None:
             last_body = body.decode("utf-8").strip()
-            if last_body == str(expected_count):
+            payload = json.loads(last_body)
+            observed_count = (
+                payload.get("count") if isinstance(payload, dict) else payload
+            )
+            if observed_count == expected_count:
                 return
         sleep(5)
 
@@ -324,7 +329,9 @@ def test_functions_allow_one_sync_and_one_async_per_collection(
         is True
     )
     assert (
-        collection.detach_function(attached_async_fn.name, delete_output_collection=True)
+        collection.detach_function(
+            attached_async_fn.name, delete_output_collection=True
+        )
         is True
     )
 
@@ -789,7 +796,9 @@ def test_sync_and_async_count_functions_can_share_one_input_collection(
         is True
     )
     assert (
-        collection.detach_function(async_attached_fn.name, delete_output_collection=True)
+        collection.detach_function(
+            async_attached_fn.name, delete_output_collection=True
+        )
         is True
     )
 

@@ -7,12 +7,13 @@
 //! `action`/`observation`/`done` schema. Inference is non-streaming
 //! (Anthropic), so events are step-level, not token-level.
 //!
-//! The two tools (`search`, `subagent_search`) reuse the same cores as the
-//! standalone `/api/search` and `/api/subagent_search` routes; per-request
-//! state (collection, token, deep-research creds) is resolved once in the
-//! handler and captured by the tools. The shared `reqwest::Client` is cloned
-//! into both the Anthropic model and the deep-research tool so connection pools
-//! are reused rather than rebuilt per request.
+//! The tools (`search`, `read_page`, `subagent_search`) reuse the same cores as
+//! the standalone `/api/search`, `/api/read-page`, and `/api/subagent_search`
+//! routes; per-request state (collection, token, deep-research creds) is
+//! resolved once in the handler and captured by the tools. The shared
+//! `reqwest::Client` is cloned into both the Anthropic model and the
+//! deep-research tool so connection pools are reused rather than rebuilt per
+//! request.
 //!
 //! Clients may seed the agent's system prompt via the request body (`system`);
 //! when omitted, a built-in default steers the agent to answer from the
@@ -36,7 +37,7 @@ use chroma_agent::{
 };
 use events::{action_event, action_text, observation_event, AgentSseEvent};
 
-use crate::agent_tools::{SearchTool, SubagentSearchTool};
+use crate::agent_tools::{ReadPageTool, SearchTool, SubagentSearchTool};
 use crate::routes::subagent_search::SubagentSearchCreds;
 use crate::routes::{caller_token, to_sse_event, whoami::whoami_and_authorize};
 use crate::wiki::embed::WikiEmbedder;
@@ -47,9 +48,13 @@ use crate::{auth::AuthzAction, errors::ServerError, server::FoundationApiServer}
 /// to ground its answer in the knowledge base via the available tools.
 const DEFAULT_SYSTEM_PROMPT: &str = "You are a research assistant for an internal \
 knowledge base. Use the `search` tool for targeted lookups and the \
-`subagent_search` tool for broad, multi-part research questions. Ground every \
-claim in retrieved documents and cite the document ids you relied on. If the \
-tools surface nothing relevant, say so plainly rather than guessing.";
+`subagent_search` tool for broad, multi-part research questions. When a search \
+hit looks relevant, use the `read_page` tool with its `slug` to read the full \
+page before relying on it. Ground every claim in retrieved documents and cite \
+each source page inline where you use it — as a Markdown link (titled by the \
+page, targeting the result's `url=`/`URL:` when reported, otherwise its slug) \
+— rather than appending a list of sources at the end. If the tools surface \
+nothing relevant, say so plainly rather than guessing.";
 
 /// Request body for `POST /api/agent`.
 #[derive(Debug, Deserialize, Validate)]
@@ -67,13 +72,13 @@ pub struct AgentRequest {
 }
 
 /// Default model when the caller omits `model`.
-fn default_model() -> String {
+pub(crate) fn default_model() -> String {
     AnthropicModel::Sonnet4_5.id().to_string()
 }
 
 /// Default `system` prompt when the caller omits it (see
 /// [`DEFAULT_SYSTEM_PROMPT`]).
-fn default_system_prompt() -> String {
+pub(crate) fn default_system_prompt() -> String {
     DEFAULT_SYSTEM_PROMPT.to_string()
 }
 
@@ -157,7 +162,9 @@ pub async fn foundation_agent(
 /// `subagent_search` tool, which is registered only when the dependency is
 /// configured. The Anthropic model reuses the shared HTTP pool, and the system
 /// prompt is taken from the request (which defaults to [`DEFAULT_SYSTEM_PROMPT`]
-/// when the caller omits it).
+/// when the caller omits it). The configured `foundation_ui_origin` is handed
+/// to each tool so retrieved documents carry resolvable page URLs the agent
+/// can cite (mirroring the MCP tools' deterministic link stamping).
 async fn build_agent(
     server: &FoundationApiServer,
     headers: &HeaderMap,
@@ -174,26 +181,31 @@ async fn build_agent(
         .to_string();
     let collection = wiki_client.wiki_collection(tenant, &token).await?;
 
+    let ui_origin = server.config.foundation.foundation_ui_origin.clone();
+
     let mut toolset = ToolSet::new();
     toolset.add(SearchTool::new(
-        collection,
+        collection.clone(),
         WikiEmbedder::new(None),
         token.clone(),
+        tenant.to_string(),
+        ui_origin.clone(),
+    ));
+    toolset.add(ReadPageTool::new(
+        collection,
+        tenant.to_string(),
+        ui_origin.clone(),
     ));
 
     // The deep-research tool is optional: register it only when the dependency
     // is configured, so the agent still runs (search-only) without it.
     if let Some(url) = server.config.foundation.deep_research_api_url.clone() {
-        let creds = SubagentSearchCreds {
-            chroma_api_key: token,
-            chroma_tenant: tenant.to_string(),
-            chroma_database: server.config.foundation.database_name.clone(),
-            collection_name: server.config.foundation.wiki_collection.clone(),
-        };
+        let creds = SubagentSearchCreds::from_config(&server.config.foundation, tenant, token);
         toolset.add(SubagentSearchTool::new(
             server.shared_http_client.clone(),
             url,
             creds,
+            ui_origin,
         ));
     }
 

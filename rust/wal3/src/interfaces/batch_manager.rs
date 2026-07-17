@@ -1,16 +1,16 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use setsum::Setsum;
-use tracing::Span;
-
 use chroma_storage::{
     admissioncontrolleds3::StorageRequestPriority, ETag, PutMode, PutOptions, Storage, StorageError,
 };
 use chroma_types::Cmek;
+use setsum::Setsum;
 
 use crate::backoff::ExponentialBackoff;
-use crate::interfaces::{FragmentPointer, FragmentPublisher, ManifestPublisher, UploadResult};
+use crate::interfaces::{
+    AppendWork, FragmentPointer, FragmentPublisher, ManifestPublisher, UploadResult,
+};
 use crate::{Error, FragmentIdentifier, Garbage, LogPosition, LogWriterOptions, ThrottleOptions};
 
 use super::FragmentUploader;
@@ -24,11 +24,8 @@ struct ManagerState {
     backoff: bool,
     next_write: Instant,
     writers_active: usize,
-    enqueued: Vec<(
-        Vec<Vec<u8>>,
-        tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
-        Span,
-    )>,
+    enqueued: Vec<AppendWork>,
+    admission_metadata: Vec<Vec<Arc<[u8]>>>,
     tearing_down: bool,
 }
 
@@ -72,11 +69,68 @@ impl ManagerState {
     }
 }
 
+fn required_fragment_start_for_selected(
+    selected: &[AppendWork],
+) -> Result<Option<LogPosition>, Error> {
+    let mut required_fragment_start = None;
+    for work in selected {
+        let Some(next_required_fragment_start) = work.required_fragment_start() else {
+            continue;
+        };
+        if let Some(required_fragment_start) = required_fragment_start {
+            if required_fragment_start != next_required_fragment_start {
+                tracing::error!(
+                    ?required_fragment_start,
+                    ?next_required_fragment_start,
+                    selected_work_count = selected.len(),
+                    "selected wal3 batch has incompatible required_fragment_start values"
+                );
+                return Err(Error::LogContentionRetry);
+            }
+        } else {
+            required_fragment_start = Some(next_required_fragment_start);
+        }
+    }
+    Ok(required_fragment_start)
+}
+
+fn take_selected_work(state: &mut ManagerState, split_off: usize) -> Vec<AppendWork> {
+    let mut work = std::mem::take(&mut state.enqueued);
+    state.enqueued = work.split_off(split_off);
+    let mut admission_metadata = std::mem::take(&mut state.admission_metadata);
+    state.admission_metadata = admission_metadata.split_off(split_off);
+    debug_assert_eq!(work.len(), admission_metadata.len());
+    debug_assert_eq!(state.enqueued.len(), state.admission_metadata.len());
+    work
+}
+
+fn refresh_backoff_after_split(state: &mut ManagerState, options: &LogWriterOptions) -> bool {
+    if !state.enqueued.is_empty() {
+        state.backoff = state
+            .enqueued
+            .iter()
+            .map(AppendWork::byte_count)
+            .sum::<usize>()
+            >= options.throttle_fragment.batch_size_bytes;
+        true
+    } else {
+        state.backoff = false;
+        false
+    }
+}
+
+fn reject_selected_work(work: Vec<AppendWork>, err: Error) {
+    for work in work {
+        let _ = work.tx.send(Err(err.clone()));
+    }
+}
+
 impl Drop for ManagerState {
     fn drop(&mut self) {
-        for (_, notify, _) in std::mem::take(&mut self.enqueued).into_iter() {
-            let _ = notify.send(Err(Error::LogContentionRetry));
+        for work in std::mem::take(&mut self.enqueued).into_iter() {
+            let _ = work.tx.send(Err(Error::LogContentionRetry));
         }
+        self.admission_metadata.clear();
     }
 }
 
@@ -102,6 +156,7 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> BatchManager<FP, U> {
                 next_write,
                 writers_active: 0,
                 enqueued: Vec::new(),
+                admission_metadata: Vec::new(),
                 tearing_down: false,
             }),
             write_finished: tokio::sync::Notify::new(),
@@ -137,22 +192,29 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
     type FragmentPointer = FP;
 
     /// Enqueue work to be published.
-    async fn push_work(
-        &self,
-        messages: Vec<Vec<u8>>,
-        tx: tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
-        span: Span,
-    ) {
+    async fn push_work(&self, work: AppendWork) {
         // SAFETY(rescrv): Mutex poisoning.
         let mut state = self.state.lock().unwrap();
         if state.tearing_down {
-            let _ = tx.send(Err(Error::LogContentionRetry));
+            let _ = work.tx.send(Err(Error::LogContentionRetry));
             self.write_finished.notify_one();
         } else if state.backoff {
-            let _ = tx.send(Err(Error::Backoff));
+            let _ = work.tx.send(Err(Error::Backoff));
             self.write_finished.notify_one();
         } else {
-            state.enqueued.push((messages, tx, span));
+            if let Some(admission_predicate) = work
+                .options
+                .as_ref()
+                .and_then(|options| options.admission_predicate.as_ref())
+            {
+                if !admission_predicate(&state.admission_metadata) {
+                    let _ = work.tx.send(Err(Error::AdmissionRejected));
+                    self.write_finished.notify_one();
+                    return;
+                }
+            }
+            state.admission_metadata.push(work.admission_metadata());
+            state.enqueued.push(work);
         }
     }
 
@@ -160,22 +222,14 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
     async fn take_work(
         &self,
         manifest_manager: &(dyn ManifestPublisher<Self::FragmentPointer> + Sync),
-    ) -> Result<
-        Option<(
-            Self::FragmentPointer,
-            Vec<(
-                Vec<Vec<u8>>,
-                tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
-                Span,
-            )>,
-        )>,
-        Error,
-    > {
+    ) -> Result<Option<(Self::FragmentPointer, Option<LogPosition>, Vec<AppendWork>)>, Error> {
         // SAFETY(rescrv): Mutex poisoning.
         let mut state = self.state.lock().unwrap();
 
         // We're shutting down.  Throw the work away.
         if state.tearing_down {
+            state.enqueued.clear();
+            state.admission_metadata.clear();
             self.write_finished.notify_one();
             return Ok(None);
         }
@@ -185,6 +239,7 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
             // No work, no notify.
             return Ok(None);
         }
+        debug_assert_eq!(state.enqueued.len(), state.admission_metadata.len());
 
         let mut split_off = 0usize;
         let mut acc_count = 0usize;
@@ -192,9 +247,9 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
         let mut did_split = false;
         // This loop has two sets of exit conditions that are identical, but switched on
         // `short_read`.
-        for (batch, _, _) in state.enqueued.iter() {
-            let cur_count = batch.len();
-            let cur_bytes = batch.iter().map(|r| r.len()).sum::<usize>();
+        for work in state.enqueued.iter() {
+            let cur_count = work.record_count();
+            let cur_bytes = work.byte_count();
             if split_off > 0
                 && acc_bytes + cur_bytes >= self.options.throttle_fragment.batch_size_bytes
             {
@@ -217,26 +272,48 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
             self.write_finished.notify_one();
             return Ok(None);
         }
+        let required_fragment_start =
+            match required_fragment_start_for_selected(&state.enqueued[..split_off]) {
+                Ok(required_fragment_start) => required_fragment_start,
+                Err(err) => {
+                    let work = take_selected_work(&mut state, split_off);
+                    if refresh_backoff_after_split(&mut state, &self.options) {
+                        self.write_finished.notify_one();
+                    }
+                    reject_selected_work(work, err);
+                    return Ok(None);
+                }
+            };
         let Some(pointer) =
             state.select_for_write(&self.options.throttle_fragment, manifest_manager, acc_count)?
         else {
             // Cannot yet select for write.  Notify will come from the timeout background is on.
             return Ok(None);
         };
-        let mut work = std::mem::take(&mut state.enqueued);
-        state.enqueued = work.split_off(split_off);
-        if !state.enqueued.is_empty() {
-            state.backoff = state
-                .enqueued
-                .iter()
-                .map(|(recs, _, _)| recs.iter().map(|r| r.len()).sum::<usize>())
-                .sum::<usize>()
-                >= self.options.throttle_fragment.batch_size_bytes;
-            self.write_finished.notify_one();
-        } else {
-            state.backoff = false;
+        if let (Some(required_fragment_start), Some(assigned_fragment_start)) =
+            (required_fragment_start, pointer.fragment_start())
+        {
+            if required_fragment_start != assigned_fragment_start {
+                tracing::info!(
+                    ?required_fragment_start,
+                    ?assigned_fragment_start,
+                    selected_work_count = split_off,
+                    "selected wal3 batch missed required_fragment_start"
+                );
+                let work = take_selected_work(&mut state, split_off);
+                state.finish_write();
+                if refresh_backoff_after_split(&mut state, &self.options) {
+                    self.write_finished.notify_one();
+                }
+                reject_selected_work(work, Error::LogContentionRetry);
+                return Ok(None);
+            }
         }
-        Ok(Some((pointer, work)))
+        let work = take_selected_work(&mut state, split_off);
+        if refresh_backoff_after_split(&mut state, &self.options) {
+            self.write_finished.notify_one();
+        }
+        Ok(Some((pointer, required_fragment_start, work)))
     }
 
     /// Finish the previous call to take_work.
@@ -305,10 +382,11 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
         let enqueued = {
             let mut state = self.state.lock().unwrap();
             state.tearing_down = true;
+            state.admission_metadata.clear();
             std::mem::take(&mut state.enqueued)
         };
-        for (_, tx, _) in enqueued {
-            let _ = tx.send(Err(Error::LogContentionRetry));
+        for work in enqueued {
+            let _ = work.tx.send(Err(Error::LogContentionRetry));
         }
     }
 
@@ -477,9 +555,476 @@ mod tests {
     use crate::interfaces::s3::manifest_manager::ManifestManager;
     use crate::interfaces::s3::S3FragmentUploader;
     use crate::{
-        FragmentSeqNo, FragmentUuid, LogWriterOptions, SnapshotOptions, StorageWrapper,
+        AppendOptions, FragmentSeqNo, FragmentUuid, LogWriterOptions, Manifest, ManifestAndWitness,
+        ManifestWitness, Snapshot, SnapshotOptions, SnapshotPointer, StorageWrapper,
         ThrottleOptions,
     };
+
+    struct NoopUploader;
+
+    #[async_trait::async_trait]
+    impl FragmentUploader<FragmentUuid> for NoopUploader {
+        async fn upload_parquet(
+            &self,
+            _pointer: &FragmentUuid,
+            _messages: Vec<Vec<u8>>,
+            _cmek: Option<Cmek>,
+            _epoch_micros: u64,
+        ) -> Result<UploadResult, Error> {
+            unreachable!("upload_parquet is not used in admission tests")
+        }
+
+        async fn preferred_storage(&self) -> Storage {
+            unreachable!("preferred_storage is not used in admission tests")
+        }
+
+        async fn preferred_prefix(&self) -> String {
+            unreachable!("preferred_prefix is not used in admission tests")
+        }
+
+        async fn preferred_storage_wrapper(&self) -> &StorageWrapper {
+            unreachable!("preferred_storage_wrapper is not used in admission tests")
+        }
+
+        async fn storages(&self) -> &[StorageWrapper] {
+            unreachable!("storages is not used in admission tests")
+        }
+    }
+
+    fn admission_batch_manager() -> BatchManager<FragmentUuid, NoopUploader> {
+        BatchManager::new(LogWriterOptions::default(), NoopUploader).unwrap()
+    }
+
+    fn admission_metadata(metadata: &[&str]) -> Vec<Arc<[u8]>> {
+        metadata
+            .iter()
+            .map(|metadata| Arc::<[u8]>::from(metadata.as_bytes()))
+            .collect()
+    }
+
+    fn append_options(metadata: &[&str]) -> AppendOptions {
+        AppendOptions::new(admission_metadata(metadata))
+    }
+
+    struct NoopS3Uploader;
+
+    #[async_trait::async_trait]
+    impl FragmentUploader<(FragmentSeqNo, LogPosition)> for NoopS3Uploader {
+        async fn upload_parquet(
+            &self,
+            _pointer: &(FragmentSeqNo, LogPosition),
+            _messages: Vec<Vec<u8>>,
+            _cmek: Option<Cmek>,
+            _epoch_micros: u64,
+        ) -> Result<UploadResult, Error> {
+            unreachable!("upload_parquet is not used in required-start selection tests")
+        }
+
+        async fn preferred_storage(&self) -> Storage {
+            unreachable!("preferred_storage is not used in required-start selection tests")
+        }
+
+        async fn preferred_prefix(&self) -> String {
+            unreachable!("preferred_prefix is not used in required-start selection tests")
+        }
+
+        async fn preferred_storage_wrapper(&self) -> &StorageWrapper {
+            unreachable!("preferred_storage_wrapper is not used in required-start selection tests")
+        }
+
+        async fn storages(&self) -> &[StorageWrapper] {
+            unreachable!("storages is not used in required-start selection tests")
+        }
+    }
+
+    fn s3_batch_manager() -> BatchManager<(FragmentSeqNo, LogPosition), NoopS3Uploader> {
+        BatchManager::new(LogWriterOptions::default(), NoopS3Uploader).unwrap()
+    }
+
+    async fn enqueue(
+        batch_manager: &BatchManager<FragmentUuid, NoopUploader>,
+        message: Vec<u8>,
+        options: Option<AppendOptions>,
+    ) -> tokio::sync::oneshot::Receiver<Result<LogPosition, Error>> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        batch_manager
+            .push_work(AppendWork::new(
+                vec![message],
+                options,
+                tx,
+                tracing::Span::current(),
+            ))
+            .await;
+        rx
+    }
+
+    async fn enqueue_s3(
+        batch_manager: &BatchManager<(FragmentSeqNo, LogPosition), NoopS3Uploader>,
+        message: Vec<u8>,
+        options: Option<AppendOptions>,
+    ) -> tokio::sync::oneshot::Receiver<Result<LogPosition, Error>> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        batch_manager
+            .push_work(AppendWork::new(
+                vec![message],
+                options,
+                tx,
+                tracing::Span::current(),
+            ))
+            .await;
+        rx
+    }
+
+    struct PanickingS3ManifestPublisher;
+
+    #[async_trait::async_trait]
+    impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for PanickingS3ManifestPublisher {
+        async fn recover(&mut self) -> Result<(), Error> {
+            unreachable!("recover is not used in required-start selection tests")
+        }
+
+        async fn manifest_and_witness(&self) -> Result<ManifestAndWitness, Error> {
+            unreachable!("manifest_and_witness is not used in required-start selection tests")
+        }
+
+        fn assign_timestamp(&self, _record_count: usize) -> Option<(FragmentSeqNo, LogPosition)> {
+            unreachable!("incompatible required starts should fail before timestamp assignment")
+        }
+
+        async fn publish_fragment(
+            &self,
+            _pointer: &(FragmentSeqNo, LogPosition),
+            _path: &str,
+            _messages_len: u64,
+            _num_bytes: u64,
+            _setsum: Setsum,
+            _required_fragment_start: Option<LogPosition>,
+            _successful_regions: &[String],
+        ) -> Result<LogPosition, Error> {
+            unreachable!("publish_fragment is not used in required-start selection tests")
+        }
+
+        async fn garbage_applies_cleanly(&self, _garbage: &Garbage) -> Result<bool, Error> {
+            unreachable!("garbage_applies_cleanly is not used in required-start selection tests")
+        }
+
+        async fn apply_garbage(&self, _garbage: Garbage) -> Result<(), Error> {
+            unreachable!("apply_garbage is not used in required-start selection tests")
+        }
+
+        async fn compute_garbage(
+            &self,
+            _options: &crate::GarbageCollectionOptions,
+            _first_to_keep: LogPosition,
+        ) -> Result<Option<Garbage>, Error> {
+            unreachable!("compute_garbage is not used in required-start selection tests")
+        }
+
+        async fn snapshot_load(
+            &self,
+            _pointer: &SnapshotPointer,
+        ) -> Result<Option<Snapshot>, Error> {
+            unreachable!("snapshot_load is not used in required-start selection tests")
+        }
+
+        async fn snapshot_install(&self, _snapshot: &Snapshot) -> Result<SnapshotPointer, Error> {
+            unreachable!("snapshot_install is not used in required-start selection tests")
+        }
+
+        async fn manifest_head(&self, _witness: &ManifestWitness) -> Result<bool, Error> {
+            unreachable!("manifest_head is not used in required-start selection tests")
+        }
+
+        async fn manifest_load(&self) -> Result<Option<(Manifest, ManifestWitness)>, Error> {
+            unreachable!("manifest_load is not used in required-start selection tests")
+        }
+
+        fn shutdown(&self) {}
+
+        async fn destroy(&self) -> Result<(), Error> {
+            unreachable!("destroy is not used in required-start selection tests")
+        }
+
+        async fn load_intrinsic_cursor(&self) -> Result<Option<LogPosition>, Error> {
+            unreachable!("load_intrinsic_cursor is not used in required-start selection tests")
+        }
+    }
+
+    struct FixedS3ManifestPublisher {
+        assigned_fragment_start: LogPosition,
+    }
+
+    #[async_trait::async_trait]
+    impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for FixedS3ManifestPublisher {
+        async fn recover(&mut self) -> Result<(), Error> {
+            unreachable!("recover is not used in required-start selection tests")
+        }
+
+        async fn manifest_and_witness(&self) -> Result<ManifestAndWitness, Error> {
+            unreachable!("manifest_and_witness is not used in required-start selection tests")
+        }
+
+        fn assign_timestamp(&self, _record_count: usize) -> Option<(FragmentSeqNo, LogPosition)> {
+            Some((FragmentSeqNo::BEGIN, self.assigned_fragment_start))
+        }
+
+        async fn publish_fragment(
+            &self,
+            _pointer: &(FragmentSeqNo, LogPosition),
+            _path: &str,
+            _messages_len: u64,
+            _num_bytes: u64,
+            _setsum: Setsum,
+            _required_fragment_start: Option<LogPosition>,
+            _successful_regions: &[String],
+        ) -> Result<LogPosition, Error> {
+            unreachable!("publish_fragment is not used in required-start selection tests")
+        }
+
+        async fn garbage_applies_cleanly(&self, _garbage: &Garbage) -> Result<bool, Error> {
+            unreachable!("garbage_applies_cleanly is not used in required-start selection tests")
+        }
+
+        async fn apply_garbage(&self, _garbage: Garbage) -> Result<(), Error> {
+            unreachable!("apply_garbage is not used in required-start selection tests")
+        }
+
+        async fn compute_garbage(
+            &self,
+            _options: &crate::GarbageCollectionOptions,
+            _first_to_keep: LogPosition,
+        ) -> Result<Option<Garbage>, Error> {
+            unreachable!("compute_garbage is not used in required-start selection tests")
+        }
+
+        async fn snapshot_load(
+            &self,
+            _pointer: &SnapshotPointer,
+        ) -> Result<Option<Snapshot>, Error> {
+            unreachable!("snapshot_load is not used in required-start selection tests")
+        }
+
+        async fn snapshot_install(&self, _snapshot: &Snapshot) -> Result<SnapshotPointer, Error> {
+            unreachable!("snapshot_install is not used in required-start selection tests")
+        }
+
+        async fn manifest_head(&self, _witness: &ManifestWitness) -> Result<bool, Error> {
+            unreachable!("manifest_head is not used in required-start selection tests")
+        }
+
+        async fn manifest_load(&self) -> Result<Option<(Manifest, ManifestWitness)>, Error> {
+            unreachable!("manifest_load is not used in required-start selection tests")
+        }
+
+        fn shutdown(&self) {}
+
+        async fn destroy(&self) -> Result<(), Error> {
+            unreachable!("destroy is not used in required-start selection tests")
+        }
+
+        async fn load_intrinsic_cursor(&self) -> Result<Option<LogPosition>, Error> {
+            unreachable!("load_intrinsic_cursor is not used in required-start selection tests")
+        }
+    }
+
+    #[tokio::test]
+    async fn admission_predicate_sees_earlier_metadata() {
+        let batch_manager = admission_batch_manager();
+        let _first_rx = enqueue(
+            &batch_manager,
+            Vec::from("first"),
+            Some(append_options(&["metadata-1", "metadata-1b"])),
+        )
+        .await;
+
+        let observed = Arc::new(std::sync::Mutex::new(Vec::<Vec<Vec<u8>>>::new()));
+        let observed_clone = Arc::clone(&observed);
+        let predicate = Arc::new(move |earlier_metadata: &[Vec<Arc<[u8]>>]| {
+            *observed_clone.lock().unwrap() = earlier_metadata
+                .iter()
+                .map(|entry_metadata| {
+                    entry_metadata
+                        .iter()
+                        .map(|metadata| metadata.as_ref().to_vec())
+                        .collect()
+                })
+                .collect();
+            true
+        });
+        let _second_rx = enqueue(
+            &batch_manager,
+            Vec::from("second"),
+            Some(append_options(&["metadata-2"]).with_admission_predicate(predicate)),
+        )
+        .await;
+
+        assert_eq!(
+            *observed.lock().unwrap(),
+            vec![vec![Vec::from("metadata-1"), Vec::from("metadata-1b")]]
+        );
+        assert_eq!(2, batch_manager.count_waiters());
+    }
+
+    #[tokio::test]
+    async fn admission_predicate_does_not_see_candidate_metadata() {
+        let batch_manager = admission_batch_manager();
+        let predicate = Arc::new(move |earlier_metadata: &[Vec<Arc<[u8]>>]| {
+            !earlier_metadata
+                .iter()
+                .flatten()
+                .any(|metadata| metadata.as_ref() == b"candidate")
+        });
+        let mut rx = enqueue(
+            &batch_manager,
+            Vec::from("candidate"),
+            Some(append_options(&["candidate"]).with_admission_predicate(predicate)),
+        )
+        .await;
+
+        assert!(matches!(
+            rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        assert_eq!(1, batch_manager.count_waiters());
+    }
+
+    #[tokio::test]
+    async fn admission_rejection_is_non_fatal() {
+        let batch_manager = admission_batch_manager();
+        let mut first_rx = enqueue(
+            &batch_manager,
+            Vec::from("first"),
+            Some(append_options(&["first"])),
+        )
+        .await;
+        let rejecting_predicate = Arc::new(|_earlier_metadata: &[Vec<Arc<[u8]>>]| false);
+        let rejected_rx = enqueue(
+            &batch_manager,
+            Vec::from("reject"),
+            Some(append_options(&["reject"]).with_admission_predicate(rejecting_predicate)),
+        )
+        .await;
+        let mut third_rx = enqueue(
+            &batch_manager,
+            Vec::from("third"),
+            Some(append_options(&["third"])),
+        )
+        .await;
+
+        let rejected = rejected_rx.await.unwrap();
+        assert!(matches!(rejected, Err(Error::AdmissionRejected)));
+        assert!(matches!(
+            first_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        assert!(matches!(
+            third_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        assert_eq!(2, batch_manager.count_waiters());
+    }
+
+    #[tokio::test]
+    async fn normal_writes_contribute_empty_admission_metadata() {
+        let batch_manager = admission_batch_manager();
+        let _first_rx = enqueue(&batch_manager, Vec::from("normal"), None).await;
+
+        let observed = Arc::new(std::sync::Mutex::new(Vec::<Vec<Vec<u8>>>::new()));
+        let observed_clone = Arc::clone(&observed);
+        let predicate = Arc::new(move |earlier_metadata: &[Vec<Arc<[u8]>>]| {
+            *observed_clone.lock().unwrap() = earlier_metadata
+                .iter()
+                .map(|entry_metadata| {
+                    entry_metadata
+                        .iter()
+                        .map(|metadata| metadata.as_ref().to_vec())
+                        .collect()
+                })
+                .collect();
+            true
+        });
+        let _second_rx = enqueue(
+            &batch_manager,
+            Vec::from("conditional"),
+            Some(append_options(&["conditional"]).with_admission_predicate(predicate)),
+        )
+        .await;
+
+        assert_eq!(*observed.lock().unwrap(), vec![Vec::<Vec<u8>>::new()]);
+        assert_eq!(2, batch_manager.count_waiters());
+    }
+
+    #[tokio::test]
+    async fn mismatched_required_fragment_starts_reject_selected_batch() {
+        let batch_manager = s3_batch_manager();
+        let first_rx = enqueue_s3(
+            &batch_manager,
+            Vec::from("first"),
+            Some(
+                append_options(&["first"])
+                    .with_required_fragment_start(LogPosition::from_offset(10)),
+            ),
+        )
+        .await;
+        let second_rx = enqueue_s3(
+            &batch_manager,
+            Vec::from("second"),
+            Some(
+                append_options(&["second"])
+                    .with_required_fragment_start(LogPosition::from_offset(11)),
+            ),
+        )
+        .await;
+
+        let selected = batch_manager
+            .take_work(&PanickingS3ManifestPublisher)
+            .await
+            .expect("required-start rejection should not fail take_work");
+
+        assert!(selected.is_none());
+        assert_eq!(0, batch_manager.count_waiters());
+        assert!(matches!(
+            first_rx
+                .await
+                .expect("first append should receive a result"),
+            Err(Error::LogContentionRetry)
+        ));
+        assert!(matches!(
+            second_rx
+                .await
+                .expect("second append should receive a result"),
+            Err(Error::LogContentionRetry)
+        ));
+    }
+
+    #[tokio::test]
+    async fn s3_required_fragment_start_mismatch_rejects_before_upload_selection() {
+        let batch_manager = s3_batch_manager();
+        let rx = enqueue_s3(
+            &batch_manager,
+            Vec::from("record"),
+            Some(
+                append_options(&["record"])
+                    .with_required_fragment_start(LogPosition::from_offset(42)),
+            ),
+        )
+        .await;
+        let manifest = FixedS3ManifestPublisher {
+            assigned_fragment_start: LogPosition::from_offset(41),
+        };
+
+        let selected = batch_manager
+            .take_work(&manifest)
+            .await
+            .expect("required-start mismatch should not fail take_work");
+
+        assert!(selected.is_none());
+        assert_eq!(0, batch_manager.count_waiters());
+        assert!(matches!(
+            rx.await.expect("append should receive a result"),
+            Err(Error::LogContentionRetry)
+        ));
+    }
 
     #[tokio::test]
     async fn test_k8s_integration_upload_parquet_returns_retry_on_already_exists() {
@@ -558,29 +1103,54 @@ mod tests {
         .await
         .unwrap();
         let (tx, _rx1) = tokio::sync::oneshot::channel();
+        let options1 = append_options(&["metadata-1"]);
         batch_manager
-            .push_work(vec![vec![1]], tx, tracing::Span::current())
+            .push_work(AppendWork::new(
+                vec![vec![1]],
+                Some(options1.clone()),
+                tx,
+                tracing::Span::current(),
+            ))
             .await;
         let (tx, _rx2) = tokio::sync::oneshot::channel();
         batch_manager
-            .push_work(vec![vec![2, 3]], tx, tracing::Span::current())
+            .push_work(AppendWork::new(
+                vec![vec![2, 3]],
+                None,
+                tx,
+                tracing::Span::current(),
+            ))
             .await;
         let (tx, _rx3) = tokio::sync::oneshot::channel();
         batch_manager
-            .push_work(vec![vec![4, 5, 6]], tx, tracing::Span::current())
+            .push_work(AppendWork::new(
+                vec![vec![4, 5, 6]],
+                None,
+                tx,
+                tracing::Span::current(),
+            ))
             .await;
-        let ((seq_no, log_position), work) = batch_manager
+        let ((seq_no, log_position), required_fragment_start, work) = batch_manager
             .take_work(&manifest_manager)
             .await
             .unwrap()
             .unwrap();
         assert_eq!(seq_no, FragmentSeqNo::from_u64(1));
         assert_eq!(log_position.offset(), 1);
+        assert_eq!(None, required_fragment_start);
         assert_eq!(2, work.len());
         // Check batch 1
-        assert_eq!(vec![vec![1]], work[0].0);
+        assert_eq!(vec![vec![1]], work[0].messages);
+        assert_eq!(
+            Some(options1.admission_metadata.as_slice()),
+            work[0]
+                .options
+                .as_ref()
+                .map(|options| options.admission_metadata.as_slice())
+        );
         // Check batch 2
-        assert_eq!(vec![vec![2, 3]], work[1].0);
+        assert_eq!(vec![vec![2, 3]], work[1].messages);
+        assert!(work[1].options.is_none());
     }
 
     struct DualStorageUploader {

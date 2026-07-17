@@ -59,6 +59,9 @@ spec:
             {{- with .Values.foundationService.env }}
 {{ toYaml . | indent 12 }}
             {{- end }}
+            {{ if .Values.foundationService.otherEnvConfig }}
+              {{ .Values.foundationService.otherEnvConfig | nindent 12 }}
+            {{ end }}
           volumeMounts:
             - name: foundation-server-config
               mountPath: /config/

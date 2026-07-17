@@ -1,4 +1,5 @@
 use crate::errors::{ChromaPyResult, InvalidDatabaseNameError, WrappedPyErr, WrappedUuidError};
+use chroma_api_types::{OccReadMode, OccReadToken};
 use chroma_cache::FoyerCacheConfig;
 use chroma_cli::chroma_cli;
 use chroma_config::{registry::Registry, Configurable};
@@ -20,16 +21,21 @@ use chroma_sqlite::db::SqliteDb;
 use chroma_sysdb::{SqliteSysDbConfig, SysDbConfig};
 use chroma_system::{ComponentHandle, System};
 use chroma_types::{
-    Collection, CollectionConfiguration, CollectionMetadataUpdate, CountCollectionsRequest,
-    CountResponse, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, Database,
-    DatabaseName, DeleteCollectionRequest, DeleteDatabaseRequest, GetCollectionByIdRequest,
-    GetCollectionRequest, GetDatabaseRequest, GetResponse, GetTenantRequest, GetTenantResponse,
-    HeartbeatError, IncludeList, InternalCollectionConfiguration,
-    InternalUpdateCollectionConfiguration, KnnIndex, ListCollectionsRequest, ListDatabasesRequest,
-    Metadata, QueryResponse, UpdateCollectionConfiguration, UpdateCollectionRequest,
-    UpdateMetadata, WrappedSerdeJsonError,
+    Collection, CollectionConfiguration, CollectionMetadataUpdate, ConditionalBufferedWrite,
+    CountCollectionsRequest, CountResponse, CreateCollectionRequest, CreateDatabaseRequest,
+    CreateTenantRequest, Database, DatabaseName, DeleteCollectionRequest, DeleteDatabaseRequest,
+    GetCollectionByIdRequest, GetCollectionRequest, GetDatabaseRequest, GetResponse,
+    GetTenantRequest, GetTenantResponse, HeartbeatError, IncludeList,
+    InternalCollectionConfiguration, InternalUpdateCollectionConfiguration, KnnIndex,
+    ListCollectionsRequest, ListDatabasesRequest, Metadata, QueryResponse,
+    UpdateCollectionConfiguration, UpdateCollectionRequest, UpdateMetadata, WrappedSerdeJsonError,
 };
-use pyo3::{exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, Python};
+use pyo3::{
+    exceptions::PyValueError,
+    pyclass, pyfunction, pymethods,
+    types::{PyAnyMethods, PyDict, PyDictMethods, PyList, PyListMethods},
+    Py, PyRefMut, Python,
+};
 use std::time::SystemTime;
 const DEFAULT_DATABASE: &str = "default_database";
 const DEFAULT_TENANT: &str = "default_tenant";
@@ -48,6 +54,366 @@ pub(crate) struct Bindings {
 pub struct PythonBindingsConfig {
     #[pyo3(get, set)]
     sqlite_db_config: SqliteDBConfig,
+}
+
+#[pyclass]
+pub struct ConditionalTransaction {
+    state: chroma_types::ConditionalTransactionState,
+}
+
+impl ConditionalTransaction {
+    #[allow(clippy::too_many_arguments)]
+    fn http_get_request(
+        collection_id: String,
+        ids: Option<Vec<String>>,
+        r#where: Option<String>,
+        limit: Option<u32>,
+        offset: Option<u32>,
+        where_document: Option<String>,
+        include: Vec<String>,
+        tenant: String,
+        database: String,
+    ) -> ChromaPyResult<chroma_types::GetRequest> {
+        let r#where = chroma_types::RawWhereFields::from_json_str(
+            r#where.as_deref(),
+            where_document.as_deref(),
+        )?
+        .parse()?;
+        let collection_id = chroma_types::CollectionUuid(
+            uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
+        );
+        let include = IncludeList::try_from(include)?;
+        Ok(chroma_types::GetRequest::try_new(
+            tenant,
+            database,
+            collection_id,
+            ids,
+            r#where,
+            limit,
+            offset.unwrap_or(0),
+            include,
+        )?)
+    }
+
+    fn collection_uuid(collection_id: String) -> ChromaPyResult<chroma_types::CollectionUuid> {
+        Ok(chroma_types::CollectionUuid(
+            uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
+        ))
+    }
+
+    fn buffered_write_operation_name(write: &ConditionalBufferedWrite) -> &'static str {
+        match write {
+            ConditionalBufferedWrite::Add(_) => "add",
+            ConditionalBufferedWrite::Update(_) => "update",
+            ConditionalBufferedWrite::Upsert(_) => "upsert",
+            ConditionalBufferedWrite::Delete(_) => "delete",
+        }
+    }
+
+    fn write_to_py(py: Python<'_>, write: ConditionalBufferedWrite) -> pyo3::PyResult<Py<PyDict>> {
+        let operation = PyDict::new(py);
+        let payload = PyDict::new(py);
+        operation.set_item("operation", Self::buffered_write_operation_name(&write))?;
+        match write {
+            ConditionalBufferedWrite::Add(request) => {
+                payload.set_item("ids", request.ids)?;
+                payload.set_item("embeddings", request.embeddings)?;
+                payload.set_item("documents", request.documents)?;
+                payload.set_item("uris", request.uris)?;
+                payload.set_item("metadatas", request.metadatas)?;
+            }
+            ConditionalBufferedWrite::Update(request) => {
+                payload.set_item("ids", request.ids)?;
+                payload.set_item("embeddings", request.embeddings)?;
+                payload.set_item("documents", request.documents)?;
+                payload.set_item("uris", request.uris)?;
+                payload.set_item("metadatas", request.metadatas)?;
+            }
+            ConditionalBufferedWrite::Upsert(request) => {
+                payload.set_item("ids", request.ids)?;
+                payload.set_item("embeddings", request.embeddings)?;
+                payload.set_item("documents", request.documents)?;
+                payload.set_item("uris", request.uris)?;
+                payload.set_item("metadatas", request.metadatas)?;
+            }
+            ConditionalBufferedWrite::Delete(request) => {
+                payload.set_item("ids", request.ids)?;
+                payload.set_item("where", py.None())?;
+                payload.set_item("where_document", py.None())?;
+                payload.set_item("limit", py.None())?;
+            }
+        }
+        operation.set_item("payload", payload)?;
+        Ok(operation.unbind())
+    }
+}
+
+#[pyclass]
+pub struct ConditionalCommitPayload {
+    #[pyo3(get)]
+    read_token: Option<u64>,
+    #[pyo3(get)]
+    read_ids: Vec<String>,
+    buffered_writes: Vec<ConditionalBufferedWrite>,
+}
+
+#[pymethods]
+impl ConditionalCommitPayload {
+    #[getter]
+    fn operation_names(&self) -> Vec<String> {
+        self.buffered_writes
+            .iter()
+            .map(ConditionalTransaction::buffered_write_operation_name)
+            .map(str::to_string)
+            .collect()
+    }
+
+    #[getter]
+    fn record_count(&self) -> usize {
+        self.buffered_writes
+            .iter()
+            .map(|write| write.ids().len())
+            .sum()
+    }
+
+    fn to_json(&self, py: Python<'_>) -> pyo3::PyResult<Py<PyDict>> {
+        let payload = PyDict::new(py);
+        payload.set_item("read_token", self.read_token)?;
+        payload.set_item("read_ids", self.read_ids.clone())?;
+        let operations = PyList::empty(py);
+        for write in self.buffered_writes.iter().cloned() {
+            operations.append(ConditionalTransaction::write_to_py(py, write)?)?;
+        }
+        payload.set_item("operations", operations)?;
+        Ok(payload.unbind())
+    }
+}
+
+#[pymethods]
+impl ConditionalTransaction {
+    #[new]
+    pub fn py_new() -> Self {
+        Self {
+            state: chroma_types::ConditionalTransactionState::new(),
+        }
+    }
+
+    fn is_closed(&self) -> bool {
+        self.state.is_closed()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn prepare_get(
+        &self,
+        collection_id: String,
+        ids: Option<Vec<String>>,
+        r#where: Option<String>,
+        limit: Option<u32>,
+        offset: Option<u32>,
+        where_document: Option<String>,
+        include: Vec<String>,
+        tenant: String,
+        database: String,
+    ) -> ChromaPyResult<Option<u64>> {
+        let request = Self::http_get_request(
+            collection_id,
+            ids,
+            r#where,
+            limit,
+            offset,
+            where_document,
+            include,
+            tenant,
+            database,
+        )?;
+        let request = self.state.prepare_get_request(request)?;
+        Ok(match request.occ_read_mode() {
+            OccReadMode::AtToken(read_token) => Some(read_token.log_upper_bound_offset()),
+            OccReadMode::Capture => None,
+            OccReadMode::None => None,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn record_get_response(
+        &mut self,
+        collection_id: String,
+        ids: Option<Vec<String>>,
+        r#where: Option<String>,
+        limit: Option<u32>,
+        offset: Option<u32>,
+        where_document: Option<String>,
+        include: Vec<String>,
+        tenant: String,
+        database: String,
+        returned_ids: Vec<String>,
+        read_token: u64,
+    ) -> ChromaPyResult<()> {
+        let request = Self::http_get_request(
+            collection_id,
+            ids,
+            r#where,
+            limit,
+            offset,
+            where_document,
+            include,
+            tenant,
+            database,
+        )?;
+        let request = self.state.prepare_get_request(request)?;
+        if let OccReadMode::AtToken(expected_read_token) = request.occ_read_mode() {
+            if expected_read_token.log_upper_bound_offset() != read_token {
+                return Err(
+                    chroma_types::ConditionalTransactionError::ReadTokenMismatch {
+                        expected_log_upper_bound_offset: expected_read_token
+                            .log_upper_bound_offset(),
+                        actual_log_upper_bound_offset: read_token,
+                    }
+                    .into(),
+                );
+            }
+        }
+        let response = GetResponse {
+            ids: returned_ids,
+            occ_read_token: Some(OccReadToken::try_new(read_token)?),
+            ..GetResponse::default()
+        };
+        self.state.record_get_response(&request, &response)?;
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn buffer_add(
+        &mut self,
+        collection_id: String,
+        ids: Vec<String>,
+        embeddings: Vec<Vec<f32>>,
+        metadatas: Option<Vec<Option<Metadata>>>,
+        documents: Option<Vec<Option<String>>>,
+        uris: Option<Vec<Option<String>>>,
+        tenant: String,
+        database: String,
+    ) -> ChromaPyResult<()> {
+        let collection_id = Self::collection_uuid(collection_id)?;
+        let request = chroma_types::AddCollectionRecordsRequest::try_new(
+            tenant,
+            database,
+            collection_id,
+            ids,
+            embeddings,
+            documents,
+            uris,
+            metadatas,
+        )?;
+        self.state.buffer_add(request)?;
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn buffer_update(
+        &mut self,
+        collection_id: String,
+        ids: Vec<String>,
+        embeddings: Option<Vec<Option<Vec<f32>>>>,
+        metadatas: Option<Vec<Option<UpdateMetadata>>>,
+        documents: Option<Vec<Option<String>>>,
+        uris: Option<Vec<Option<String>>>,
+        tenant: String,
+        database: String,
+    ) -> ChromaPyResult<()> {
+        let collection_id = Self::collection_uuid(collection_id)?;
+        let request = chroma_types::UpdateCollectionRecordsRequest::try_new(
+            tenant,
+            database,
+            collection_id,
+            ids,
+            embeddings,
+            documents,
+            uris,
+            metadatas,
+        )?;
+        self.state.buffer_update(request)?;
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn buffer_upsert(
+        &mut self,
+        collection_id: String,
+        ids: Vec<String>,
+        embeddings: Vec<Vec<f32>>,
+        metadatas: Option<Vec<Option<UpdateMetadata>>>,
+        documents: Option<Vec<Option<String>>>,
+        uris: Option<Vec<Option<String>>>,
+        tenant: String,
+        database: String,
+    ) -> ChromaPyResult<()> {
+        let collection_id = Self::collection_uuid(collection_id)?;
+        let request = chroma_types::UpsertCollectionRecordsRequest::try_new(
+            tenant,
+            database,
+            collection_id,
+            ids,
+            embeddings,
+            documents,
+            uris,
+            metadatas,
+        )?;
+        self.state.buffer_upsert(request)?;
+        Ok(())
+    }
+
+    fn buffer_delete(
+        &mut self,
+        collection_id: String,
+        ids: Vec<String>,
+        tenant: String,
+        database: String,
+    ) -> ChromaPyResult<()> {
+        let collection_id = Self::collection_uuid(collection_id)?;
+        let request = chroma_types::DeleteCollectionRecordsRequest::try_new(
+            tenant,
+            database,
+            collection_id,
+            Some(ids),
+            None,
+            None,
+        )?;
+        self.state.buffer_delete(request)?;
+        Ok(())
+    }
+
+    fn prepare_commit(&mut self) -> ChromaPyResult<Option<ConditionalCommitPayload>> {
+        match self.state.prepare_commit()? {
+            chroma_types::ConditionalCommitAction::NoOp(_) => Ok(None),
+            chroma_types::ConditionalCommitAction::Append(request) => {
+                Ok(Some(ConditionalCommitPayload {
+                    read_token: request.observed_log_offset.map(|offset| offset as u64),
+                    read_ids: request.read_ids,
+                    buffered_writes: request.buffered_writes,
+                }))
+            }
+        }
+    }
+
+    fn finish_commit(
+        &mut self,
+        first_inserted_record_offset: Option<i64>,
+    ) -> ChromaPyResult<ConditionalCommitResult> {
+        let result = self.state.finish_commit(first_inserted_record_offset)?;
+        Ok(ConditionalCommitResult {
+            first_inserted_record_offset: result.first_inserted_record_offset,
+            record_count: result.record_count,
+        })
+    }
+}
+
+#[pyclass]
+pub struct ConditionalCommitResult {
+    #[pyo3(get)]
+    first_inserted_record_offset: Option<i64>,
+    #[pyo3(get)]
+    record_count: usize,
 }
 
 #[pymethods]
@@ -141,7 +507,9 @@ impl Bindings {
             tenants_with_quantization_enabled: vec![],
             tenants_with_maxscore_enabled: vec![],
             tenants_with_token_bitmap_fts_enabled: vec![],
+            tenants_with_transactions_enabled: vec![],
             enable_log_scouting: false,
+            enable_transactions: false,
         };
 
         let frontend = runtime.block_on(async {
@@ -625,6 +993,279 @@ impl Bindings {
             .runtime
             .block_on(async { Box::pin(frontend_clone.delete(request, String::new())).await })?;
         Ok(response.deleted)
+    }
+
+    fn begin_conditional_transaction(&self) -> ChromaPyResult<ConditionalTransaction> {
+        self.frontend.ensure_conditional_transactions_supported()?;
+        Ok(ConditionalTransaction {
+            state: chroma_types::ConditionalTransactionState::new(),
+        })
+    }
+
+    #[pyo3(
+        signature = (transaction, collection_id, ids = None, r#where = None, limit = None, offset = 0, where_document = None, include = ["metadatas".to_string(), "documents".to_string()].to_vec(), tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+    )]
+    #[allow(clippy::too_many_arguments)]
+    fn conditional_get(
+        &self,
+        mut transaction: PyRefMut<'_, ConditionalTransaction>,
+        collection_id: String,
+        ids: Option<Vec<String>>,
+        r#where: Option<String>,
+        limit: Option<u32>,
+        offset: u32,
+        where_document: Option<String>,
+        include: Vec<String>,
+        tenant: String,
+        database: String,
+        py: Python<'_>,
+    ) -> ChromaPyResult<GetResponse> {
+        self.frontend
+            .ensure_conditional_transactions_supported_for_tenant(&tenant)?;
+        let r#where = chroma_types::RawWhereFields::from_json_str(
+            r#where.as_deref(),
+            where_document.as_deref(),
+        )?
+        .parse()?;
+
+        let collection_id = chroma_types::CollectionUuid(
+            uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
+        );
+
+        let include = IncludeList::try_from(include)?;
+
+        let request = chroma_types::GetRequest::try_new(
+            tenant,
+            database,
+            collection_id,
+            ids,
+            r#where,
+            limit,
+            offset,
+            include,
+        )?;
+        let request = transaction.state.prepare_get_request(request)?;
+        let request_for_finish = request.clone();
+
+        let mut frontend_clone = self.frontend.clone();
+        let result = py.allow_threads(move || {
+            self.runtime
+                .block_on(async { Box::pin(frontend_clone.get(request)).await })
+        })?;
+        let result = transaction.state.finish_get(&request_for_finish, result)?;
+        Ok(result)
+    }
+
+    #[pyo3(
+        signature = (transaction, ids, collection_id, embeddings, metadatas = None, documents = None, uris = None, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+    )]
+    #[allow(clippy::too_many_arguments)]
+    fn conditional_add(
+        &self,
+        mut transaction: PyRefMut<'_, ConditionalTransaction>,
+        ids: Vec<String>,
+        collection_id: String,
+        embeddings: Vec<Vec<f32>>,
+        metadatas: Option<Vec<Option<Metadata>>>,
+        documents: Option<Vec<Option<String>>>,
+        uris: Option<Vec<Option<String>>>,
+        tenant: String,
+        database: String,
+    ) -> ChromaPyResult<bool> {
+        if self.get_max_batch_size() < ids.len() as u32 {
+            return Err(WrappedPyErr::from(PyValueError::new_err(format!(
+                "Batch size of {} is greater than max batch size of {}",
+                ids.len(),
+                self.get_max_batch_size()
+            )))
+            .into());
+        }
+
+        let collection_id = chroma_types::CollectionUuid(
+            uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
+        );
+
+        let req = chroma_types::AddCollectionRecordsRequest::try_new(
+            tenant,
+            database,
+            collection_id,
+            ids,
+            embeddings,
+            documents,
+            uris,
+            metadatas,
+        )?;
+
+        transaction.state.buffer_add(req)?;
+        Ok(true)
+    }
+
+    #[pyo3(
+        signature = (transaction, collection_id, ids, embeddings = None, metadatas = None, documents = None, uris = None, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+    )]
+    #[allow(clippy::too_many_arguments)]
+    fn conditional_update(
+        &self,
+        mut transaction: PyRefMut<'_, ConditionalTransaction>,
+        collection_id: String,
+        ids: Vec<String>,
+        embeddings: Option<Vec<Option<Vec<f32>>>>,
+        metadatas: Option<Vec<Option<UpdateMetadata>>>,
+        documents: Option<Vec<Option<String>>>,
+        uris: Option<Vec<Option<String>>>,
+        tenant: String,
+        database: String,
+    ) -> ChromaPyResult<bool> {
+        if self.get_max_batch_size() < ids.len() as u32 {
+            return Err(WrappedPyErr::from(PyValueError::new_err(format!(
+                "Batch size of {} is greater than max batch size of {}",
+                ids.len(),
+                self.get_max_batch_size()
+            )))
+            .into());
+        }
+
+        let collection_id = chroma_types::CollectionUuid(
+            uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
+        );
+
+        let req = chroma_types::UpdateCollectionRecordsRequest::try_new(
+            tenant,
+            database,
+            collection_id,
+            ids,
+            embeddings,
+            documents,
+            uris,
+            metadatas,
+        )?;
+
+        transaction.state.buffer_update(req)?;
+        Ok(true)
+    }
+
+    #[pyo3(
+        signature = (transaction, collection_id, ids, embeddings, metadatas = None, documents = None, uris = None, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+    )]
+    #[allow(clippy::too_many_arguments)]
+    fn conditional_upsert(
+        &self,
+        mut transaction: PyRefMut<'_, ConditionalTransaction>,
+        collection_id: String,
+        ids: Vec<String>,
+        embeddings: Vec<Vec<f32>>,
+        metadatas: Option<Vec<Option<UpdateMetadata>>>,
+        documents: Option<Vec<Option<String>>>,
+        uris: Option<Vec<Option<String>>>,
+        tenant: String,
+        database: String,
+    ) -> ChromaPyResult<bool> {
+        if self.get_max_batch_size() < ids.len() as u32 {
+            return Err(WrappedPyErr::from(PyValueError::new_err(format!(
+                "Batch size of {} is greater than max batch size of {}",
+                ids.len(),
+                self.get_max_batch_size()
+            )))
+            .into());
+        }
+
+        let collection_id = chroma_types::CollectionUuid(
+            uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
+        );
+
+        let req = chroma_types::UpsertCollectionRecordsRequest::try_new(
+            tenant,
+            database,
+            collection_id,
+            ids,
+            embeddings,
+            documents,
+            uris,
+            metadatas,
+        )?;
+
+        transaction.state.buffer_upsert(req)?;
+        Ok(true)
+    }
+
+    #[pyo3(
+        signature = (transaction, collection_id, ids, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+    )]
+    fn conditional_delete(
+        &self,
+        mut transaction: PyRefMut<'_, ConditionalTransaction>,
+        collection_id: String,
+        ids: Vec<String>,
+        tenant: String,
+        database: String,
+    ) -> ChromaPyResult<bool> {
+        let collection_id = chroma_types::CollectionUuid(
+            uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
+        );
+
+        let request = chroma_types::DeleteCollectionRecordsRequest::try_new(
+            tenant,
+            database,
+            collection_id,
+            Some(ids),
+            None,
+            None,
+        )?;
+
+        transaction.state.buffer_delete(request)?;
+        Ok(true)
+    }
+
+    fn conditional_commit(
+        &self,
+        mut transaction: PyRefMut<'_, ConditionalTransaction>,
+        py: Python<'_>,
+    ) -> ChromaPyResult<ConditionalCommitResult> {
+        let mut state = std::mem::take(&mut transaction.state);
+        let action = match state.prepare_commit() {
+            Ok(action) => action,
+            Err(err) => {
+                transaction.state = state;
+                return Err(err.into());
+            }
+        };
+        let request = match action {
+            chroma_types::ConditionalCommitAction::NoOp(result) => {
+                transaction.state = state;
+                return Ok(ConditionalCommitResult {
+                    first_inserted_record_offset: result.first_inserted_record_offset,
+                    record_count: result.record_count,
+                });
+            }
+            chroma_types::ConditionalCommitAction::Append(request) => request,
+        };
+
+        let mut frontend_clone = self.frontend.clone();
+        let result = py.allow_threads(move || {
+            self.runtime.block_on(async {
+                frontend_clone
+                    .conditional_commit(request, String::new())
+                    .await
+            })
+        });
+        let result = match result {
+            Ok(result) => match state.finish_commit(result.first_inserted_record_offset) {
+                Ok(result) => result,
+                Err(err) => {
+                    transaction.state = state;
+                    return Err(err.into());
+                }
+            },
+            Err(err) => {
+                transaction.state = state;
+                return Err(err.into());
+            }
+        };
+        transaction.state = state;
+        Ok(ConditionalCommitResult {
+            first_inserted_record_offset: result.first_inserted_record_offset,
+            record_count: result.record_count,
+        })
     }
 
     #[pyo3(

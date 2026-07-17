@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use backon::{ExponentialBuilder, Retryable};
+use chroma_api_types::CONDITIONAL_WRITE_CONFLICT_MESSAGE;
 use chroma_cache::CacheConfig;
 use chroma_config::helpers::{deserialize_duration_from_seconds, serialize_duration_to_seconds};
 use chroma_config::spanner::{SpannerChannelConfig, SpannerConfig, SpannerSessionPoolConfig};
@@ -30,8 +31,8 @@ use chroma_types::chroma_proto::{
     InspectLogStateRequest, InspectLogStateResponse, LogRecord, MigrateLogRequest,
     MigrateLogResponse, OperationRecord, PullLogsRequest, PullLogsResponse,
     PurgeDirtyForCollectionRequest, PurgeDirtyForCollectionResponse, PurgeFromCacheRequest,
-    PurgeFromCacheResponse, PushLogsRequest, PushLogsResponse, ScoutLogsRequest, ScoutLogsResponse,
-    ScrubLogRequest, ScrubLogResponse, SealLogRequest, SealLogResponse,
+    PurgeFromCacheResponse, PushLogsCondition, PushLogsRequest, PushLogsResponse, ScoutLogsRequest,
+    ScoutLogsResponse, ScrubLogRequest, ScrubLogResponse, SealLogRequest, SealLogResponse,
     UpdateCollectionLogOffsetRequest, UpdateCollectionLogOffsetResponse,
 };
 use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
@@ -58,12 +59,13 @@ use uuid::Uuid;
 use wal3::{
     create_repl_factories, create_s3_factories,
     interfaces::repl::ManifestManager as ReplManifestManager, interfaces::ManifestManagerFactory,
-    scan_from_manifest, Cursor, CursorName, CursorStore, CursorStoreOptions, CursorWitness,
-    Fragment, FragmentManagerFactory, FragmentUploadFaultInjector, GarbageCollectionOptions,
-    Limits, LogPosition, LogReader, LogReaderOptions, LogReaderTrait, LogWriter, LogWriterOptions,
-    LogWriterTrait, Manifest, ManifestAndWitness, MarkDirty as MarkDirtyTrait,
-    ReplicatedFragmentManagerFactory, ReplicatedFragmentOptions, ReplicatedManifestManagerFactory,
-    Snapshot, SnapshotCache, SnapshotPointer, StorageWrapper, INTRINSIC_CURSOR,
+    scan_from_manifest, AdmissionPredicate, AppendOptions, Cursor, CursorName, CursorStore,
+    CursorStoreOptions, CursorWitness, Fragment, FragmentManagerFactory,
+    FragmentUploadFaultInjector, GarbageCollectionOptions, Limits, LogPosition, LogReader,
+    LogReaderOptions, LogReaderTrait, LogWriter, LogWriterOptions, LogWriterTrait, Manifest,
+    ManifestAndWitness, MarkDirty as MarkDirtyTrait, ReplicatedFragmentManagerFactory,
+    ReplicatedFragmentOptions, ReplicatedManifestManagerFactory, Snapshot, SnapshotCache,
+    SnapshotPointer, StorageWrapper, INTRINSIC_CURSOR,
 };
 #[cfg(feature = "faults")]
 use wal3::{
@@ -76,10 +78,24 @@ pub mod state_hash_table;
 
 use crate::state_hash_table::StateHashTable;
 
+const PULL_LOGS_REASON_MD_KEY: &str = "pull-logs-reason";
+const PULL_LOGS_REASON_PURGED: &str = "purged";
+
 ///////////////////////////////////////////// helpers //////////////////////////////////////////////
 
 /// The gRPC metadata key for the backoff reason.
 const BACKOFF_REASON_MD_KEY: &str = "backoff-reason";
+
+/// Default bound for conditional push retry loop attempts.
+const DEFAULT_CONDITIONAL_PUSH_MAX_RETRIES: usize = 3;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ConditionalWriteRequest {
+    observed_log_offset: u64,
+    read_ids: HashSet<Arc<str>>,
+    write_ids: HashSet<Arc<str>>,
+    conflict_ids: HashSet<Arc<str>>,
+}
 
 /// Construct a `tonic::Status` with a `backoff-reason` metadata entry.
 ///
@@ -96,6 +112,150 @@ fn status_with_backoff_reason(
         reason.parse().expect("valid ascii metadata value"),
     );
     Status::with_metadata(code, message, metadata)
+}
+
+fn purged_logs_status() -> Status {
+    let mut status = Status::not_found("Some entries have been purged");
+    // SAFETY(tanuj): This static ASCII value is covered by
+    // `purged_logs_status_has_reason_metadata` below.
+    status.metadata_mut().insert(
+        PULL_LOGS_REASON_MD_KEY,
+        tonic::metadata::MetadataValue::from_static(PULL_LOGS_REASON_PURGED),
+    );
+    status
+}
+
+fn normalize_conditional_ids<'a>(
+    ids: impl IntoIterator<Item = &'a str>,
+    empty_id_message: &'static str,
+) -> Result<HashSet<Arc<str>>, Status> {
+    let mut normalized = HashSet::new();
+    for id in ids {
+        if id.is_empty() {
+            return Err(Status::invalid_argument(empty_id_message));
+        }
+        normalized.insert(Arc::from(id));
+    }
+    Ok(normalized)
+}
+
+fn create_conditional_write_request(
+    condition: Option<&PushLogsCondition>,
+    records: &[OperationRecord],
+) -> Result<Option<ConditionalWriteRequest>, Status> {
+    let Some(condition) = condition else {
+        return Ok(None);
+    };
+    if condition.observed_log_offset < 0 {
+        return Err(Status::invalid_argument(
+            "observed_log_offset must be non-negative",
+        ));
+    }
+    let read_ids = normalize_conditional_ids(
+        condition.read_ids.iter().map(String::as_str),
+        "read_ids must not contain empty ids",
+    )?;
+    let write_ids = normalize_conditional_ids(
+        records.iter().map(|record| record.id.as_str()),
+        "records must not contain empty ids",
+    )?;
+    let mut conflict_ids = read_ids.clone();
+    conflict_ids.extend(write_ids.iter().cloned());
+    Ok(Some(ConditionalWriteRequest {
+        observed_log_offset: condition.observed_log_offset as u64,
+        read_ids,
+        write_ids,
+        conflict_ids,
+    }))
+}
+
+fn write_id_admission_metadata(records: &[OperationRecord]) -> Vec<Arc<[u8]>> {
+    let mut seen = HashSet::new();
+    let mut metadata = Vec::new();
+    for record in records {
+        let id = record.id.as_str();
+        if seen.insert(id) {
+            metadata.push(Arc::<[u8]>::from(id.as_bytes()));
+        }
+    }
+    metadata
+}
+
+fn id_set_admission_metadata(ids: &HashSet<Arc<str>>) -> Vec<Arc<[u8]>> {
+    ids.iter()
+        .map(|id| Arc::<[u8]>::from(id.as_bytes()))
+        .collect()
+}
+
+fn conditional_admission_predicate(request: &ConditionalWriteRequest) -> AdmissionPredicate {
+    let conflict_ids: HashSet<Vec<u8>> = request
+        .conflict_ids
+        .iter()
+        .map(|id| id.as_bytes().to_vec())
+        .collect();
+    Arc::new(move |earlier_metadata: &[Vec<Arc<[u8]>>]| {
+        for metadata in earlier_metadata.iter().flatten() {
+            if conflict_ids.contains(metadata.as_ref()) {
+                tracing::info!(
+                    earlier_enqueued_appends = earlier_metadata.len(),
+                    metadata_len = metadata.len(),
+                    "conditional write in-flight conflict"
+                );
+                return false;
+            }
+        }
+        true
+    })
+}
+
+fn push_append_error_to_status(err: wal3::Error) -> Status {
+    match err {
+        err @ wal3::Error::Backoff => {
+            status_with_backoff_reason(tonic::Code::ResourceExhausted, err.to_string(), "batching")
+        }
+        err => {
+            tracing::error!(err = %err, "append_many failure");
+            Status::new(err.code().into(), err.to_string())
+        }
+    }
+}
+
+fn validate_conditional_log_bounds(
+    request: &ConditionalWriteRequest,
+    validation_start: LogPosition,
+    readable_lower_bound: LogPosition,
+    current_committed_tail: LogPosition,
+) -> Result<(), Status> {
+    let observed_log_offset = request.observed_log_offset;
+    let validation_start = validation_start.offset();
+    let readable_lower_bound = readable_lower_bound.offset();
+    let current_committed_tail = current_committed_tail.offset();
+    if validation_start < observed_log_offset {
+        return Err(Status::invalid_argument(
+            "conditional validation start is before observed_log_offset",
+        ));
+    }
+    if observed_log_offset > current_committed_tail {
+        return Err(Status::invalid_argument(
+            "observed_log_offset is beyond the current log tail",
+        ));
+    }
+    if validation_start > current_committed_tail {
+        return Err(Status::failed_precondition(
+            "conditional validation start is beyond the current log tail",
+        ));
+    }
+    if validation_start < readable_lower_bound {
+        if validation_start == observed_log_offset {
+            return Err(Status::failed_precondition(
+                "observed_log_offset is before the readable log lower bound",
+            ));
+        }
+        return Err(Status::failed_precondition(
+            "conditional validation start is before the readable log lower bound",
+        ));
+    }
+    Ok(())
 }
 
 /// Converts a SpannerSessionPoolConfig to the library's SessionConfig.
@@ -299,6 +459,26 @@ pub struct Metrics {
     snapshot_cache_serialization_errors: opentelemetry::metrics::Counter<u64>,
     /// The number of cache deserialization errors during get.
     snapshot_cache_deserialization_errors: opentelemetry::metrics::Counter<u64>,
+    /// The number of push requests carrying a conditional write.
+    conditional_write_requests: opentelemetry::metrics::Counter<u64>,
+    /// The observed offset requested by conditional writes.
+    conditional_write_observed_offset: opentelemetry::metrics::Histogram<u64>,
+    /// The committed tail validated for conditional writes.
+    conditional_write_validated_tail: opentelemetry::metrics::Histogram<u64>,
+    /// The number of committed records scanned during conditional validation.
+    conditional_write_scanned_records: opentelemetry::metrics::Histogram<u64>,
+    /// The number of committed-log conditional conflicts.
+    conditional_write_committed_conflicts: opentelemetry::metrics::Counter<u64>,
+    /// The number of in-flight conditional conflicts.
+    conditional_write_in_flight_conflicts: opentelemetry::metrics::Counter<u64>,
+    /// The number of wal3 admission rejections for conditional writes.
+    conditional_write_admission_rejections: opentelemetry::metrics::Counter<u64>,
+    /// The number of conditional push retries after a stale required fragment start.
+    conditional_write_required_start_retries: opentelemetry::metrics::Counter<u64>,
+    /// The number of successful conditional writes with an inserted offset.
+    conditional_write_success_with_offset: opentelemetry::metrics::Counter<u64>,
+    /// The number of successful conditional writes with durable contention and no offset.
+    conditional_write_success_without_offset: opentelemetry::metrics::Counter<u64>,
 }
 
 impl Metrics {
@@ -319,6 +499,34 @@ impl Metrics {
                 .build(),
             snapshot_cache_deserialization_errors: meter
                 .u64_counter("snapshot_cache_deserialization_errors")
+                .build(),
+            conditional_write_requests: meter.u64_counter("conditional_write_requests").build(),
+            conditional_write_observed_offset: meter
+                .u64_histogram("conditional_write_observed_offset")
+                .build(),
+            conditional_write_validated_tail: meter
+                .u64_histogram("conditional_write_validated_tail")
+                .build(),
+            conditional_write_scanned_records: meter
+                .u64_histogram("conditional_write_scanned_records")
+                .build(),
+            conditional_write_committed_conflicts: meter
+                .u64_counter("conditional_write_committed_conflicts")
+                .build(),
+            conditional_write_in_flight_conflicts: meter
+                .u64_counter("conditional_write_in_flight_conflicts")
+                .build(),
+            conditional_write_admission_rejections: meter
+                .u64_counter("conditional_write_admission_rejections")
+                .build(),
+            conditional_write_required_start_retries: meter
+                .u64_counter("conditional_write_required_start_retries")
+                .build(),
+            conditional_write_success_with_offset: meter
+                .u64_counter("conditional_write_success_with_offset")
+                .build(),
+            conditional_write_success_without_offset: meter
+                .u64_counter("conditional_write_success_without_offset")
                 .build(),
         }
     }
@@ -2255,11 +2463,32 @@ impl LogServer {
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
         let database_name = DatabaseName::new(&push_logs.database_name)
             .ok_or_else(|| Status::invalid_argument("Database name invalid"))?;
+        let topology_name = database_name
+            .topology()
+            .map(|t| TopologyName::new(&t))
+            .transpose()
+            .map_err(|_| Status::invalid_argument("Invalid topology in database name"))?;
         if push_logs.records.len() > i32::MAX as usize {
             return Err(Status::invalid_argument("Too many records"));
         }
         if push_logs.records.is_empty() {
             return Err(Status::invalid_argument("Too few records"));
+        }
+        let conditional_write =
+            create_conditional_write_request(push_logs.condition.as_ref(), &push_logs.records)?;
+        let write_id_metadata = conditional_write
+            .as_ref()
+            .map(|request| id_set_admission_metadata(&request.write_ids))
+            .unwrap_or_else(|| write_id_admission_metadata(&push_logs.records));
+        if let Some(conditional_write) = conditional_write.as_ref() {
+            self.metrics.conditional_write_requests.add(1, &[]);
+            tracing::debug!(
+                %collection_id,
+                observed_log_offset = conditional_write.observed_log_offset,
+                read_ids = conditional_write.read_ids.len(),
+                write_ids = conditional_write.write_ids.len(),
+                "received conditional push_logs request"
+            );
         }
         self.check_for_backpressure(collection_id).await?;
 
@@ -2273,7 +2502,7 @@ impl LogServer {
                 Status::invalid_argument("Invalid CMEK configuration")
             })?;
 
-        tracing::info!("Pushing logs for collection {}", collection_id);
+        tracing::debug!("Pushing logs for collection {}", collection_id);
         let prefix = collection_id.storage_prefix_for_log();
         let key = LogKey { collection_id };
         let handle = self.open_logs.get_or_create_state(key);
@@ -2318,20 +2547,107 @@ impl LogServer {
             messages.push(buf);
         }
         let record_count = messages.len() as i32;
-        match log.append_many(messages).await {
-            Ok(_) | Err(wal3::Error::LogContentionDurable) => {}
-            Err(err @ wal3::Error::Backoff) => {
-                return Err(status_with_backoff_reason(
-                    tonic::Code::ResourceExhausted,
-                    err.to_string(),
-                    "batching",
-                ));
-            }
-            Err(err) => {
-                tracing::error!(err = %err, "append_many failure");
-                return Err(Status::new(err.code().into(), err.to_string()));
-            }
-        };
+        let first_inserted_record_offset =
+            if let Some(conditional_write) = conditional_write.as_ref() {
+                let admission_predicate = conditional_admission_predicate(conditional_write);
+                let mut append_result = None;
+                let mut validation_start =
+                    LogPosition::from_offset(conditional_write.observed_log_offset);
+                let conditional_push_max_retries = self.config.conditional_push_retry_attempts();
+                for attempt in 0..conditional_push_max_retries {
+                    let validated_tail = self
+                        .validate_committed_log_for_conditional_write(
+                            topology_name.as_ref(),
+                            collection_id,
+                            conditional_write,
+                            validation_start,
+                        )
+                        .await?;
+                    let append_options = AppendOptions::new(write_id_metadata.clone())
+                        .with_admission_predicate(Arc::clone(&admission_predicate))
+                        .with_required_fragment_start(validated_tail);
+                    match log
+                        .append_many_with_options(messages.clone(), Some(append_options))
+                        .await
+                    {
+                        Ok(offset) => {
+                            self.metrics
+                                .conditional_write_success_with_offset
+                                .add(1, &[]);
+                            tracing::debug!(
+                                %collection_id,
+                                first_inserted_record_offset = offset.offset(),
+                                "conditional write append succeeded"
+                            );
+                            append_result = Some(Some(offset));
+                            break;
+                        }
+                        Err(wal3::Error::LogContentionDurable) => {
+                            self.metrics
+                                .conditional_write_success_without_offset
+                                .add(1, &[]);
+                            tracing::debug!(
+                                %collection_id,
+                                "conditional write append durably contended"
+                            );
+                            append_result = Some(None);
+                            break;
+                        }
+                        Err(wal3::Error::AdmissionRejected) => {
+                            self.metrics
+                                .conditional_write_admission_rejections
+                                .add(1, &[]);
+                            self.metrics
+                                .conditional_write_in_flight_conflicts
+                                .add(1, &[]);
+                            tracing::info!(
+                                %collection_id,
+                                "conditional write rejected by in-flight admission"
+                            );
+                            return Err(Status::aborted(CONDITIONAL_WRITE_CONFLICT_MESSAGE));
+                        }
+                        Err(wal3::Error::LogContentionRetry)
+                            if attempt + 1 < conditional_push_max_retries =>
+                        {
+                            validation_start = validated_tail;
+                            self.metrics
+                                .conditional_write_required_start_retries
+                                .add(1, &[]);
+                            tracing::info!(
+                                %collection_id,
+                                attempt = attempt + 1,
+                                "conditional write missed required start; retrying validation"
+                            );
+                        }
+                        Err(err) => return Err(push_append_error_to_status(err)),
+                    }
+                }
+                match append_result {
+                    Some(append_result) => append_result,
+                    None => {
+                        return Err(Status::internal(
+                            "conditional push retry loop exited without an append result",
+                        ));
+                    }
+                }
+            } else {
+                let append_options = AppendOptions::new(write_id_metadata);
+                match log
+                    .append_many_with_options(messages, Some(append_options))
+                    .await
+                {
+                    Ok(offset) => Some(offset),
+                    Err(wal3::Error::LogContentionDurable) => None,
+                    Err(err) => return Err(push_append_error_to_status(err)),
+                }
+            };
+        let first_inserted_record_offset = first_inserted_record_offset
+            .map(|offset| {
+                offset.offset().try_into().map_err(|_| {
+                    Status::internal("first_inserted_record_offset exceeded int64 range")
+                })
+            })
+            .transpose()?;
         if let Some(cache) = self.cache.as_ref() {
             let cache_key = cache_key_for_manifest_and_etag(collection_id);
             if let Ok(manifest_and_etag) = log.manifest_and_witness().await {
@@ -2344,6 +2660,7 @@ impl LogServer {
         Ok(Response::new(PushLogsResponse {
             record_count,
             log_is_sealed: false,
+            first_inserted_record_offset,
         }))
     }
 
@@ -2481,7 +2798,7 @@ impl LogServer {
                 })?,
         };
         if !fragments.is_empty() && fragments[0].start.offset() > req.start_from_offset {
-            return Err(Status::not_found("Some entries have been purged"));
+            return Err(purged_logs_status());
         }
         let storage_prefix = collection_id.storage_prefix_for_log();
         let absolute_offsets = topology_name.is_none();
@@ -2593,6 +2910,190 @@ impl LogServer {
         Ok(log_reader.scan(from, limits).await?)
     }
 
+    async fn read_fragment_record_bytes(
+        &self,
+        log_reader: Arc<dyn LogReaderTrait>,
+        collection_id: CollectionUuid,
+        fragment: Fragment,
+    ) -> Result<Vec<(LogPosition, Vec<u8>)>, Error> {
+        if let Some(cache) = self.cache.as_ref() {
+            let cache_key = cache_key_for_fragment(collection_id, &fragment.path);
+            if let Ok(Some(answer)) = cache.get(&cache_key).await {
+                if answer.version == Some(1) {
+                    let (records, _, _) = log_reader
+                        .parse_parquet_fast(&answer.bytes, fragment.start)
+                        .await?;
+                    return Ok(records);
+                }
+            }
+            let bytes = log_reader.read_bytes(&fragment).await?;
+            let cache_value = CachedBytes::new((*bytes).clone());
+            let (records, _, _) = log_reader
+                .parse_parquet_fast(&bytes, fragment.start)
+                .await?;
+            cache.insert(cache_key, cache_value).await;
+            Ok(records)
+        } else {
+            let (_, records, _, _) = log_reader.read_parquet(&fragment).await?;
+            Ok(records)
+        }
+    }
+
+    async fn validate_committed_log_for_conditional_write(
+        &self,
+        topology_name: Option<&TopologyName>,
+        collection_id: CollectionUuid,
+        request: &ConditionalWriteRequest,
+        validation_start: LogPosition,
+    ) -> Result<LogPosition, Status> {
+        tracing::debug!(
+            %collection_id,
+            observed_log_offset = request.observed_log_offset,
+            validation_start_offset = validation_start.offset(),
+            read_ids = request.read_ids.len(),
+            write_ids = request.write_ids.len(),
+            conflict_ids = request.conflict_ids.len(),
+            "validating committed log for conditional write"
+        );
+        self.metrics
+            .conditional_write_observed_offset
+            .record(request.observed_log_offset, &[]);
+        let log_reader = self
+            .make_log_reader(topology_name, collection_id)
+            .await
+            .map_err(status_from_chroma_error)?;
+        let Some(manifest_and_witness) =
+            log_reader.manifest_and_witness().await.map_err(|err| {
+                Status::new(
+                    err.code().into(),
+                    format!("could not validate conditional write bounds: {err:?}"),
+                )
+            })?
+        else {
+            let empty_log_position = LogPosition::from_offset(1);
+            validate_conditional_log_bounds(
+                request,
+                validation_start,
+                empty_log_position,
+                empty_log_position,
+            )?;
+            self.metrics
+                .conditional_write_validated_tail
+                .record(empty_log_position.offset(), &[]);
+            self.metrics
+                .conditional_write_scanned_records
+                .record(0, &[]);
+            tracing::debug!(
+                %collection_id,
+                validated_tail = empty_log_position.offset(),
+                scanned_records = 0,
+                "conditional write validated empty committed log"
+            );
+            return Ok(empty_log_position);
+        };
+        let readable_lower_bound = manifest_and_witness.manifest.oldest_timestamp();
+        let current_committed_tail = manifest_and_witness.manifest.next_write_timestamp();
+        validate_conditional_log_bounds(
+            request,
+            validation_start,
+            readable_lower_bound,
+            current_committed_tail,
+        )?;
+        self.metrics
+            .conditional_write_validated_tail
+            .record(current_committed_tail.offset(), &[]);
+
+        if validation_start.offset() == current_committed_tail.offset() {
+            self.metrics
+                .conditional_write_scanned_records
+                .record(0, &[]);
+            tracing::debug!(
+                %collection_id,
+                validated_tail = current_committed_tail.offset(),
+                scanned_records = 0,
+                "conditional write validation reached current tail"
+            );
+            return Ok(current_committed_tail);
+        }
+
+        let from = validation_start;
+        let expected_records = current_committed_tail
+            .offset()
+            .saturating_sub(validation_start.offset());
+        let limits = Limits {
+            max_files: None,
+            max_bytes: None,
+            max_records: Some(expected_records),
+        };
+        let fragments = match scan_from_manifest(&manifest_and_witness.manifest, from, limits) {
+            Some(fragments) => fragments,
+            None => log_reader.scan(from, limits).await.map_err(|err| {
+                Status::new(
+                    err.code().into(),
+                    format!("could not scan committed log for conditional write: {err:?}"),
+                )
+            })?,
+        };
+        if fragments.is_empty() {
+            return Err(Status::failed_precondition(
+                "conditional write validation could not read committed log records",
+            ));
+        }
+
+        let mut records_read = 0;
+        for fragment in fragments {
+            let record_batch = self
+                .read_fragment_record_bytes(Arc::clone(&log_reader), collection_id, fragment)
+                .await
+                .map_err(|err| {
+                    Status::new(
+                        err.code().into(),
+                        format!("could not read committed log for conditional write: {err}"),
+                    )
+                })?;
+            for (log_offset, record_bytes) in record_batch {
+                if log_offset.offset() < validation_start.offset()
+                    || log_offset.offset() >= current_committed_tail.offset()
+                {
+                    continue;
+                }
+                records_read += 1;
+                let op_record = OperationRecord::decode(record_bytes.as_slice())
+                    .map_err(|err| Status::data_loss(err.to_string()))?;
+                if request.conflict_ids.contains(op_record.id.as_str()) {
+                    self.metrics
+                        .conditional_write_committed_conflicts
+                        .add(1, &[]);
+                    self.metrics
+                        .conditional_write_scanned_records
+                        .record(records_read, &[]);
+                    tracing::info!(
+                        %collection_id,
+                        validated_tail = current_committed_tail.offset(),
+                        scanned_records = records_read,
+                        "conditional write committed-log conflict"
+                    );
+                    return Err(Status::aborted(CONDITIONAL_WRITE_CONFLICT_MESSAGE));
+                }
+            }
+        }
+        if records_read != expected_records {
+            return Err(Status::failed_precondition(
+                "conditional write validation could not read all committed log records",
+            ));
+        }
+        self.metrics
+            .conditional_write_scanned_records
+            .record(records_read, &[]);
+        tracing::debug!(
+            %collection_id,
+            validated_tail = current_committed_tail.offset(),
+            scanned_records = records_read,
+            "conditional write committed-log validation complete"
+        );
+        Ok(current_committed_tail)
+    }
+
     async fn pull_logs(
         &self,
         request: Request<PullLogsRequest>,
@@ -2636,27 +3137,8 @@ impl LogServer {
                     let log_reader = this
                         .make_log_reader(topology_name.as_ref(), collection_id)
                         .await?;
-                    if let Some(cache) = this.cache.as_ref() {
-                        let cache_key = cache_key_for_fragment(collection_id, &fragment.path);
-                        if let Ok(Some(answer)) = cache.get(&cache_key).await {
-                            if answer.version == Some(1) {
-                                let (records, _, _) = log_reader
-                                    .parse_parquet_fast(&answer.bytes, fragment.start)
-                                    .await?;
-                                return Ok(records);
-                            }
-                        }
-                        let bytes = log_reader.read_bytes(&fragment).await?;
-                        let cache_value = CachedBytes::new((*bytes).clone());
-                        let (answer, _, _) = log_reader
-                            .parse_parquet_fast(&bytes, fragment.start)
-                            .await?;
-                        cache.insert(cache_key, cache_value).await;
-                        Ok(answer)
-                    } else {
-                        let (_, answer, _, _) = log_reader.read_parquet(&fragment.clone()).await?;
-                        Ok(answer)
-                    }
+                    this.read_fragment_record_bytes(log_reader, collection_id, fragment)
+                        .await
                 }
             })
             .collect::<Vec<_>>();
@@ -2691,7 +3173,7 @@ impl LogServer {
         if records.len() != pull_logs.batch_size as usize
             || (!records.is_empty() && records[0].log_offset != pull_logs.start_from_offset)
         {
-            return Err(Status::not_found("Some entries have been purged"));
+            return Err(purged_logs_status());
         }
         Ok(Response::new(PullLogsResponse { records }))
     }
@@ -3563,6 +4045,8 @@ pub struct LogServerConfig {
     pub dirty: Option<LogWriterOptions>,
     #[serde(default)]
     pub cache: Option<CacheConfig>,
+    #[serde(default = "LogServerConfig::default_conditional_push_max_retries")]
+    pub conditional_push_max_retries: usize,
     #[serde(default = "LogServerConfig::default_record_count_threshold")]
     pub record_count_threshold: u64,
     #[serde(default = "LogServerConfig::default_num_records_before_backpressure")]
@@ -3630,6 +4114,16 @@ impl LogServerConfig {
 
     fn default_my_member_id() -> String {
         "rust-log-service-0".to_string()
+    }
+
+    /// Default bound for conditional push retry loop attempts.
+    fn default_conditional_push_max_retries() -> usize {
+        DEFAULT_CONDITIONAL_PUSH_MAX_RETRIES
+    }
+
+    /// Bound conditional pushes to at least one append attempt.
+    fn conditional_push_retry_attempts(&self) -> usize {
+        self.conditional_push_max_retries.max(1)
     }
 
     /// one million records on the log.
@@ -3703,6 +4197,7 @@ impl Default for LogServerConfig {
             repl: ReplicatedFragmentOptions::default(),
             dirty: None,
             cache: None,
+            conditional_push_max_retries: Self::default_conditional_push_max_retries(),
             record_count_threshold: Self::default_record_count_threshold(),
             num_records_before_backpressure: Self::default_num_records_before_backpressure(),
             reinsert_threshold: Self::default_reinsert_threshold(),
@@ -3921,7 +4416,7 @@ mod tests {
     };
 
     use chroma_types::chroma_proto::UpdateCollectionLogOffsetRequest;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use tonic::Request;
     use wal3::LogWriterOptions;
 
@@ -3931,6 +4426,261 @@ mod tests {
     );
 
     const TEST_TOPOLOGY_NAME: &str = "test-mcmr-topology";
+
+    fn string_set(ids: &[&str]) -> HashSet<Arc<str>> {
+        ids.iter().map(|id| Arc::from(*id)).collect()
+    }
+
+    fn proto_operation_record(
+        id: impl Into<String>,
+    ) -> chroma_types::chroma_proto::OperationRecord {
+        chroma_types::chroma_proto::OperationRecord {
+            id: id.into(),
+            vector: None,
+            metadata: None,
+            operation: 0,
+        }
+    }
+
+    #[test]
+    fn conditional_write_request_normalizes_and_dedupes_ids() {
+        let condition = PushLogsCondition {
+            observed_log_offset: 7,
+            read_ids: vec![
+                "read-2".to_string(),
+                "read-1".to_string(),
+                "read-1".to_string(),
+            ],
+        };
+        let records = vec![
+            proto_operation_record("write-1"),
+            proto_operation_record("write-1"),
+            proto_operation_record("read-2"),
+        ];
+        let expected = Some(ConditionalWriteRequest {
+            observed_log_offset: 7,
+            read_ids: string_set(&["read-1", "read-2"]),
+            write_ids: string_set(&["write-1", "read-2"]),
+            conflict_ids: string_set(&["read-1", "read-2", "write-1"]),
+        });
+
+        let got = create_conditional_write_request(Some(&condition), &records)
+            .expect("conditional request should validate");
+
+        assert_eq!(expected, got);
+    }
+
+    #[test]
+    fn conditionless_write_has_no_conditional_validation() {
+        let records = vec![proto_operation_record("write-1")];
+        let expected = None;
+
+        let got = create_conditional_write_request(None, &records)
+            .expect("conditionless request should validate");
+
+        assert_eq!(expected, got);
+    }
+
+    #[test]
+    fn conditional_write_request_rejects_empty_read_id() {
+        let condition = PushLogsCondition {
+            observed_log_offset: 7,
+            read_ids: vec!["".to_string()],
+        };
+        let records = vec![proto_operation_record("write-1")];
+
+        let err = create_conditional_write_request(Some(&condition), &records)
+            .expect_err("empty read id should be invalid");
+
+        assert_eq!(Code::InvalidArgument, err.code());
+        assert_eq!("read_ids must not contain empty ids", err.message());
+    }
+
+    #[test]
+    fn conditional_write_request_rejects_empty_write_id() {
+        let condition = PushLogsCondition {
+            observed_log_offset: 7,
+            read_ids: vec!["read-1".to_string()],
+        };
+        let records = vec![proto_operation_record("")];
+
+        let err = create_conditional_write_request(Some(&condition), &records)
+            .expect_err("empty write id should be invalid");
+
+        assert_eq!(Code::InvalidArgument, err.code());
+        assert_eq!("records must not contain empty ids", err.message());
+    }
+
+    #[test]
+    fn conditional_write_request_rejects_negative_observed_offset() {
+        let condition = PushLogsCondition {
+            observed_log_offset: -1,
+            read_ids: vec!["read-1".to_string()],
+        };
+        let records = vec![proto_operation_record("write-1")];
+
+        let err = create_conditional_write_request(Some(&condition), &records)
+            .expect_err("negative observed offset should be invalid");
+
+        assert_eq!(Code::InvalidArgument, err.code());
+        assert_eq!("observed_log_offset must be non-negative", err.message());
+    }
+
+    #[test]
+    fn conditional_write_request_builds_conflict_set_from_write_ids() {
+        let condition = PushLogsCondition {
+            observed_log_offset: 7,
+            read_ids: vec![],
+        };
+        let records = vec![
+            proto_operation_record("write-1"),
+            proto_operation_record("write-2"),
+            proto_operation_record("write-1"),
+        ];
+        let expected = Some(ConditionalWriteRequest {
+            observed_log_offset: 7,
+            read_ids: string_set(&[]),
+            write_ids: string_set(&["write-1", "write-2"]),
+            conflict_ids: string_set(&["write-1", "write-2"]),
+        });
+
+        let got = create_conditional_write_request(Some(&condition), &records)
+            .expect("conditional request should validate");
+
+        assert_eq!(expected, got);
+    }
+
+    #[test]
+    fn conditional_log_bounds_accept_observed_offset_inside_readable_range() {
+        let request = ConditionalWriteRequest {
+            observed_log_offset: 5,
+            read_ids: string_set(&["read-1"]),
+            write_ids: string_set(&["write-1"]),
+            conflict_ids: string_set(&["read-1", "write-1"]),
+        };
+
+        validate_conditional_log_bounds(
+            &request,
+            LogPosition::from_offset(5),
+            LogPosition::from_offset(5),
+            LogPosition::from_offset(8),
+        )
+        .expect("observed offset at lower bound should be valid");
+    }
+
+    #[test]
+    fn conditional_log_bounds_accept_advanced_validation_start() {
+        let request = ConditionalWriteRequest {
+            observed_log_offset: 4,
+            read_ids: string_set(&["read-1"]),
+            write_ids: string_set(&["write-1"]),
+            conflict_ids: string_set(&["read-1", "write-1"]),
+        };
+
+        validate_conditional_log_bounds(
+            &request,
+            LogPosition::from_offset(6),
+            LogPosition::from_offset(5),
+            LogPosition::from_offset(8),
+        )
+        .expect("previously validated records before the readable bound can be skipped");
+    }
+
+    #[test]
+    fn conditional_log_bounds_reject_observed_offset_beyond_tail() {
+        let request = ConditionalWriteRequest {
+            observed_log_offset: 9,
+            read_ids: string_set(&["read-1"]),
+            write_ids: string_set(&["write-1"]),
+            conflict_ids: string_set(&["read-1", "write-1"]),
+        };
+
+        let err = validate_conditional_log_bounds(
+            &request,
+            LogPosition::from_offset(9),
+            LogPosition::from_offset(5),
+            LogPosition::from_offset(8),
+        )
+        .expect_err("observed offset beyond tail should be invalid");
+
+        assert_eq!(Code::InvalidArgument, err.code());
+        assert_eq!(
+            "observed_log_offset is beyond the current log tail",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn conditional_log_bounds_reject_observed_offset_before_readable_lower_bound() {
+        let request = ConditionalWriteRequest {
+            observed_log_offset: 4,
+            read_ids: string_set(&["read-1"]),
+            write_ids: string_set(&["write-1"]),
+            conflict_ids: string_set(&["read-1", "write-1"]),
+        };
+
+        let err = validate_conditional_log_bounds(
+            &request,
+            LogPosition::from_offset(4),
+            LogPosition::from_offset(5),
+            LogPosition::from_offset(8),
+        )
+        .expect_err("observed offset before lower bound should fail precondition");
+
+        assert_eq!(Code::FailedPrecondition, err.code());
+        assert_eq!(
+            "observed_log_offset is before the readable log lower bound",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn conditional_log_bounds_reject_validation_start_before_observed_offset() {
+        let request = ConditionalWriteRequest {
+            observed_log_offset: 5,
+            read_ids: string_set(&["read-1"]),
+            write_ids: string_set(&["write-1"]),
+            conflict_ids: string_set(&["read-1", "write-1"]),
+        };
+
+        let err = validate_conditional_log_bounds(
+            &request,
+            LogPosition::from_offset(4),
+            LogPosition::from_offset(4),
+            LogPosition::from_offset(8),
+        )
+        .expect_err("validation start cannot precede the original observed offset");
+
+        assert_eq!(Code::InvalidArgument, err.code());
+        assert_eq!(
+            "conditional validation start is before observed_log_offset",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn conditional_log_bounds_reject_advanced_validation_start_before_readable_lower_bound() {
+        let request = ConditionalWriteRequest {
+            observed_log_offset: 4,
+            read_ids: string_set(&["read-1"]),
+            write_ids: string_set(&["write-1"]),
+            conflict_ids: string_set(&["read-1", "write-1"]),
+        };
+
+        let err = validate_conditional_log_bounds(
+            &request,
+            LogPosition::from_offset(6),
+            LogPosition::from_offset(7),
+            LogPosition::from_offset(8),
+        )
+        .expect_err("unvalidated range before readable lower bound should fail");
+
+        assert_eq!(Code::FailedPrecondition, err.code());
+        assert_eq!(
+            "conditional validation start is before the readable log lower bound",
+            err.message()
+        );
+    }
 
     #[test]
     fn unsafe_constants() {
@@ -4709,6 +5459,10 @@ mod tests {
         let config = LogServerConfig::default();
         assert_eq!(50051, config.port);
         assert_eq!("rust-log-service-0", config.my_member_id);
+        assert_eq!(
+            DEFAULT_CONDITIONAL_PUSH_MAX_RETRIES,
+            config.conditional_push_max_retries
+        );
         assert_eq!(100, config.record_count_threshold);
         assert_eq!(1_000_000, config.num_records_before_backpressure);
         assert_eq!(10, config.reinsert_threshold);
@@ -4998,6 +5752,38 @@ mod tests {
             config.record_count_threshold,
             deserialized.record_count_threshold
         );
+        assert_eq!(
+            config.conditional_push_max_retries,
+            deserialized.conditional_push_max_retries
+        );
+    }
+
+    #[test]
+    fn config_deserialization_defaults_conditional_push_max_retries() {
+        let config: LogServerConfig = serde_json::from_str("{}").unwrap();
+
+        assert_eq!(
+            DEFAULT_CONDITIONAL_PUSH_MAX_RETRIES,
+            config.conditional_push_max_retries
+        );
+    }
+
+    #[test]
+    fn config_deserialization_accepts_conditional_push_max_retries() {
+        let config: LogServerConfig =
+            serde_json::from_str(r#"{"conditional_push_max_retries":7}"#).unwrap();
+
+        assert_eq!(7, config.conditional_push_max_retries);
+    }
+
+    #[test]
+    fn conditional_push_retry_attempts_clamps_zero_to_one() {
+        let config = LogServerConfig {
+            conditional_push_max_retries: 0,
+            ..Default::default()
+        };
+
+        assert_eq!(1, config.conditional_push_retry_attempts());
     }
 
     #[test]
@@ -5074,6 +5860,17 @@ mod tests {
     }
 
     fn mcmr_setup_log_server() -> LogServerSetup {
+        mcmr_setup_log_server_with_batch_interval(4096)
+    }
+
+    fn mcmr_setup_log_server_with_batch_interval(batch_interval_us: usize) -> LogServerSetup {
+        mcmr_setup_log_server_with_throttle(4, batch_interval_us)
+    }
+
+    fn mcmr_setup_log_server_with_throttle(
+        batch_size_bytes: usize,
+        batch_interval_us: usize,
+    ) -> LogServerSetup {
         let emulator = SpannerEmulatorConfig {
             host: "localhost".to_string(),
             grpc_port: 9010,
@@ -5096,8 +5893,8 @@ mod tests {
                     fragment_rollover_threshold: 3,
                 },
                 throttle_fragment: ThrottleOptions {
-                    batch_size_bytes: 4,
-                    batch_interval_us: 4096,
+                    batch_size_bytes,
+                    batch_interval_us,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -5239,7 +6036,18 @@ mod tests {
     }
 
     fn s3_setup_log_server() -> LogServerSetup {
-        let ctor = Box::pin(async {
+        s3_setup_log_server_with_batch_interval(4096)
+    }
+
+    fn s3_setup_log_server_with_batch_interval(batch_interval_us: usize) -> LogServerSetup {
+        s3_setup_log_server_with_throttle(4, batch_interval_us)
+    }
+
+    fn s3_setup_log_server_with_throttle(
+        batch_size_bytes: usize,
+        batch_interval_us: usize,
+    ) -> LogServerSetup {
+        let ctor = Box::pin(async move {
             let storage = s3_client_for_test_with_new_bucket().await;
             let writer_options = LogWriterOptions {
                 snapshot_manifest: SnapshotOptions {
@@ -5249,8 +6057,8 @@ mod tests {
                     fragment_rollover_threshold: 3,
                 },
                 throttle_fragment: ThrottleOptions {
-                    batch_size_bytes: 4,
-                    batch_interval_us: 4096,
+                    batch_size_bytes,
+                    batch_interval_us,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -5329,6 +6137,7 @@ mod tests {
                     .expect("Logs should be valid"),
                 cmek: None,
                 database_name: db_name.to_string(),
+                condition: None,
             });
             if let Err(err) = server.push_logs(proto_push_log_req).await {
                 if err.code() == Code::Unavailable {
@@ -5366,6 +6175,7 @@ mod tests {
             .expect("operation record should convert to proto")],
             cmek: None,
             database_name: "default_database".to_string(),
+            condition: None,
         };
 
         log_server.faults.inject(
@@ -5904,6 +6714,715 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct FakeLogWriter {
+        append_results: Mutex<Vec<Result<LogPosition, wal3::Error>>>,
+        observed_options: Mutex<Vec<Option<AppendOptions>>>,
+    }
+
+    impl FakeLogWriter {
+        fn new(append_results: Vec<Result<LogPosition, wal3::Error>>) -> Arc<Self> {
+            Arc::new(Self {
+                append_results: Mutex::new(append_results),
+                observed_options: Mutex::new(Vec::new()),
+            })
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl LogWriterTrait for FakeLogWriter {
+        async fn append_with_options(
+            &self,
+            message: Vec<u8>,
+            options: Option<AppendOptions>,
+        ) -> Result<LogPosition, wal3::Error> {
+            self.append_many_with_options(vec![message], options).await
+        }
+
+        async fn append_many_with_options(
+            &self,
+            _messages: Vec<Vec<u8>>,
+            options: Option<AppendOptions>,
+        ) -> Result<LogPosition, wal3::Error> {
+            self.observed_options.lock().push(options);
+            let mut append_results = self.append_results.lock();
+            if append_results.is_empty() {
+                Err(wal3::Error::internal(file!(), line!()))
+            } else {
+                append_results.remove(0)
+            }
+        }
+
+        async fn manifest_and_witness(&self) -> Result<ManifestAndWitness, wal3::Error> {
+            Err(wal3::Error::UninitializedLog)
+        }
+
+        async fn reader(&self, _options: LogReaderOptions) -> Option<Arc<dyn LogReaderTrait>> {
+            None
+        }
+
+        async fn garbage_collect_phase1_compute_garbage(
+            &self,
+            _options: &GarbageCollectionOptions,
+            _keep_at_least: Option<LogPosition>,
+        ) -> Result<Option<wal3::GarbageCollectionState>, wal3::Error> {
+            unreachable!("fake log writer does not run garbage collection")
+        }
+
+        async fn garbage_collect_phase2_update_manifest(
+            &self,
+            _options: &GarbageCollectionOptions,
+        ) -> Result<(), wal3::Error> {
+            unreachable!("fake log writer does not run garbage collection")
+        }
+
+        async fn garbage_collect_phase3_delete_garbage(
+            &self,
+            _options: &GarbageCollectionOptions,
+            _gc_state: &wal3::GarbageCollectionState,
+        ) -> Result<(), wal3::Error> {
+            unreachable!("fake log writer does not run garbage collection")
+        }
+
+        async fn garbage_collect(
+            &self,
+            _options: &GarbageCollectionOptions,
+            _keep_at_least: Option<LogPosition>,
+        ) -> Result<(), wal3::Error> {
+            unreachable!("fake log writer does not run garbage collection")
+        }
+    }
+
+    async fn install_active_log(
+        server: &LogServer,
+        collection_id: CollectionUuid,
+        log: Arc<dyn LogWriterTrait>,
+    ) -> crate::state_hash_table::Handle<LogKey, LogStub> {
+        let handle = server
+            .open_logs
+            .get_or_create_state(LogKey { collection_id });
+        let mut active = handle.active.lock().await;
+        active.log = Some(log);
+        active.keep_alive(Duration::from_secs(60));
+        drop(active);
+        handle
+    }
+
+    fn conditional_push_logs_request(
+        db_name: &str,
+        collection_id: CollectionUuid,
+        records: &[OperationRecord],
+        condition: PushLogsCondition,
+    ) -> PushLogsRequest {
+        push_logs_request(db_name, collection_id, records, Some(condition))
+    }
+
+    fn push_logs_request(
+        db_name: &str,
+        collection_id: CollectionUuid,
+        records: &[OperationRecord],
+        condition: Option<PushLogsCondition>,
+    ) -> PushLogsRequest {
+        PushLogsRequest {
+            collection_id: collection_id.to_string(),
+            records: records
+                .iter()
+                .cloned()
+                .map(chroma_types::chroma_proto::OperationRecord::try_from)
+                .collect::<Result<_, _>>()
+                .expect("operation records should convert to proto"),
+            cmek: None,
+            database_name: db_name.to_string(),
+            condition,
+        }
+    }
+
+    fn log_server_for_installed_writer_tests() -> LogServer {
+        let unused_region = RegionName::new("unused").expect("'unused' is a valid region name");
+        let dirty_log: Arc<dyn LogWriterTrait> = FakeLogWriter::new(vec![]);
+        LogServer {
+            storages: Arc::new(MultiCloudMultiRegionConfiguration {
+                preferred: unused_region,
+                regions: vec![],
+                topologies: vec![],
+            }),
+            dirty_log: Some(dirty_log),
+            faults: Arc::new(FaultRegistry::new()),
+            metrics: Metrics::new(meter("test-rust-log-service")),
+            config: LogServerConfig::default(),
+            open_logs: Default::default(),
+            rolling_up_s3: Default::default(),
+            rolling_up_repl: Default::default(),
+            backpressure: Default::default(),
+            need_to_compact_s3: Default::default(),
+            need_to_compact_repl: Default::default(),
+            cache: Default::default(),
+        }
+    }
+
+    fn log_server_with_batch_interval(source: &LogServer, batch_interval_us: usize) -> LogServer {
+        let mut config = source.config.clone();
+        config.writer.throttle_fragment.batch_interval_us = batch_interval_us;
+        LogServer {
+            storages: Arc::clone(&source.storages),
+            dirty_log: source.dirty_log.clone(),
+            faults: Arc::clone(&source.faults),
+            metrics: Metrics::new(meter("test-rust-log-service")),
+            config,
+            open_logs: Default::default(),
+            rolling_up_s3: Default::default(),
+            rolling_up_repl: Default::default(),
+            backpressure: Default::default(),
+            need_to_compact_s3: Default::default(),
+            need_to_compact_repl: Default::default(),
+            cache: Default::default(),
+        }
+    }
+
+    fn expected_proto_log_record(
+        log_offset: i64,
+        record: &OperationRecord,
+    ) -> chroma_types::chroma_proto::LogRecord {
+        chroma_types::chroma_proto::LogRecord {
+            log_offset,
+            record: Some(
+                record
+                    .clone()
+                    .try_into()
+                    .expect("operation record should convert to proto"),
+            ),
+        }
+    }
+
+    async fn pull_proto_log_records_from_server(
+        server: &LogServer,
+        db_name: &str,
+        collection_id: CollectionUuid,
+        start_from_offset: i64,
+        batch_size: i32,
+    ) -> Vec<chroma_types::chroma_proto::LogRecord> {
+        server
+            .pull_logs(Request::new(PullLogsRequest {
+                collection_id: collection_id.to_string(),
+                start_from_offset,
+                batch_size,
+                end_timestamp: i64::MAX,
+                database_name: db_name.to_string(),
+            }))
+            .await
+            .expect("Pull Logs should not fail")
+            .into_inner()
+            .records
+    }
+
+    async fn assert_conditional_push_rejects_committed_write_id_conflict_for_setup(
+        db_name: &str,
+        setup_log_server: impl FnOnce() -> LogServerSetup + Send + 'static,
+    ) {
+        let (ctor, dtor) = setup_log_server();
+        let log_server = ctor.await;
+        let collection_id = CollectionUuid::new();
+        let committed_record = test_operation_record("doc-1");
+        push_log_to_server(
+            &log_server,
+            db_name,
+            collection_id,
+            std::slice::from_ref(&committed_record),
+        )
+        .await;
+        let request = conditional_push_logs_request(
+            db_name,
+            collection_id,
+            &[test_operation_record("doc-1")],
+            PushLogsCondition {
+                observed_log_offset: 1,
+                read_ids: vec!["doc-2".to_string()],
+            },
+        );
+
+        let err = log_server
+            .push_logs(Request::new(request))
+            .await
+            .expect_err("conditional push should reject committed write-id conflict");
+
+        assert_eq!(Code::Aborted, err.code());
+        assert_eq!(CONDITIONAL_WRITE_CONFLICT_MESSAGE, err.message());
+        assert_eq!(
+            vec![expected_proto_log_record(1, &committed_record)],
+            pull_proto_log_records_from_server(&log_server, db_name, collection_id, 1, 1).await
+        );
+        dtor.await;
+    }
+
+    async fn assert_conditional_push_allows_non_conflicting_committed_records_for_setup(
+        db_name: &str,
+        setup_log_server: impl FnOnce() -> LogServerSetup + Send + 'static,
+    ) {
+        let (ctor, dtor) = setup_log_server();
+        let log_server = ctor.await;
+        let collection_id = CollectionUuid::new();
+        let committed_record = test_operation_record("doc-1");
+        let conditional_record = test_operation_record("doc-3");
+        push_log_to_server(
+            &log_server,
+            db_name,
+            collection_id,
+            std::slice::from_ref(&committed_record),
+        )
+        .await;
+        let request = conditional_push_logs_request(
+            db_name,
+            collection_id,
+            std::slice::from_ref(&conditional_record),
+            PushLogsCondition {
+                observed_log_offset: 1,
+                read_ids: vec!["doc-2".to_string()],
+            },
+        );
+
+        let response = log_server
+            .push_logs(Request::new(request))
+            .await
+            .expect("conditional push should allow non-conflicting committed records")
+            .into_inner();
+
+        assert_eq!(
+            PushLogsResponse {
+                record_count: 1,
+                log_is_sealed: false,
+                first_inserted_record_offset: Some(2),
+            },
+            response
+        );
+        assert_eq!(
+            vec![
+                expected_proto_log_record(1, &committed_record),
+                expected_proto_log_record(2, &conditional_record),
+            ],
+            pull_proto_log_records_from_server(&log_server, db_name, collection_id, 1, 2).await
+        );
+        dtor.await;
+    }
+
+    async fn assert_conditional_push_rejects_concurrent_in_flight_conflict_for_setup(
+        db_name: &str,
+        setup_log_server: impl FnOnce() -> LogServerSetup + Send + 'static,
+    ) {
+        let (ctor, dtor) = setup_log_server();
+        let log_server = Arc::new(ctor.await);
+        let collection_id = CollectionUuid::new();
+        let seed_record = test_operation_record("seed");
+        let in_flight_record = test_operation_record("doc-1");
+        push_log_to_server(
+            &log_server,
+            db_name,
+            collection_id,
+            std::slice::from_ref(&seed_record),
+        )
+        .await;
+
+        let first_request = push_logs_request(
+            db_name,
+            collection_id,
+            std::slice::from_ref(&in_flight_record),
+            None,
+        );
+        let first_server = Arc::clone(&log_server);
+        let first_push =
+            tokio::spawn(async move { first_server.push_logs(Request::new(first_request)).await });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let conflicting_request = conditional_push_logs_request(
+            db_name,
+            collection_id,
+            &[test_operation_record("doc-2")],
+            PushLogsCondition {
+                observed_log_offset: 2,
+                read_ids: vec!["doc-1".to_string()],
+            },
+        );
+        let err = log_server
+            .push_logs(Request::new(conflicting_request))
+            .await
+            .expect_err("conditional push should reject in-flight conflict");
+
+        assert_eq!(Code::Aborted, err.code());
+        assert_eq!(CONDITIONAL_WRITE_CONFLICT_MESSAGE, err.message());
+
+        let first_response = tokio::time::timeout(Duration::from_secs(2), first_push)
+            .await
+            .expect("first in-flight push should complete")
+            .expect("first in-flight push task should not panic")
+            .expect("first in-flight push should succeed")
+            .into_inner();
+        assert_eq!(
+            PushLogsResponse {
+                record_count: 1,
+                log_is_sealed: false,
+                first_inserted_record_offset: Some(2),
+            },
+            first_response
+        );
+        assert_eq!(
+            vec![
+                expected_proto_log_record(1, &seed_record),
+                expected_proto_log_record(2, &in_flight_record),
+            ],
+            pull_proto_log_records_from_server(&log_server, db_name, collection_id, 1, 2).await
+        );
+        dtor.await;
+    }
+
+    async fn assert_conditional_push_revalidates_after_required_start_retry_for_setup(
+        db_name: &str,
+        setup_log_server: impl FnOnce() -> LogServerSetup + Send + 'static,
+    ) {
+        let (ctor, dtor) = setup_log_server();
+        let slow_server = Arc::new(ctor.await);
+        let fast_server = Arc::new(log_server_with_batch_interval(&slow_server, 1));
+        let collection_id = CollectionUuid::new();
+        let seed_record = test_operation_record("seed");
+        let intervening_record = test_operation_record("doc-1");
+        let conditional_record = test_operation_record("doc-2");
+        push_log_to_server(
+            &slow_server,
+            db_name,
+            collection_id,
+            std::slice::from_ref(&seed_record),
+        )
+        .await;
+
+        let conditional_request = conditional_push_logs_request(
+            db_name,
+            collection_id,
+            std::slice::from_ref(&conditional_record),
+            PushLogsCondition {
+                observed_log_offset: 2,
+                read_ids: vec![],
+            },
+        );
+        let conditional_server = Arc::clone(&slow_server);
+        let conditional_push = tokio::spawn(async move {
+            conditional_server
+                .push_logs(Request::new(conditional_request))
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        push_log_to_server(
+            &fast_server,
+            db_name,
+            collection_id,
+            std::slice::from_ref(&intervening_record),
+        )
+        .await;
+
+        let conditional_response = tokio::time::timeout(Duration::from_secs(3), conditional_push)
+            .await
+            .expect("conditional push should complete after required-start retry")
+            .expect("conditional push task should not panic")
+            .expect("conditional push should retry after required-start contention")
+            .into_inner();
+        assert_eq!(
+            PushLogsResponse {
+                record_count: 1,
+                log_is_sealed: false,
+                first_inserted_record_offset: Some(3),
+            },
+            conditional_response
+        );
+        assert_eq!(
+            vec![
+                expected_proto_log_record(1, &seed_record),
+                expected_proto_log_record(2, &intervening_record),
+                expected_proto_log_record(3, &conditional_record),
+            ],
+            pull_proto_log_records_from_server(&fast_server, db_name, collection_id, 1, 3).await
+        );
+        dtor.await;
+    }
+
+    async fn assert_conditional_push_rejects_observed_offset_beyond_tail_for_setup(
+        db_name: &str,
+        setup_log_server: impl FnOnce() -> LogServerSetup + Send + 'static,
+    ) {
+        let (ctor, dtor) = setup_log_server();
+        let log_server = ctor.await;
+        let collection_id = CollectionUuid::new();
+        push_log_to_server(
+            &log_server,
+            db_name,
+            collection_id,
+            &[test_operation_record("doc-1")],
+        )
+        .await;
+        let request = conditional_push_logs_request(
+            db_name,
+            collection_id,
+            &[test_operation_record("doc-2")],
+            PushLogsCondition {
+                observed_log_offset: 3,
+                read_ids: vec![],
+            },
+        );
+
+        let err = log_server
+            .push_logs(Request::new(request))
+            .await
+            .expect_err("conditional push should reject observed offset beyond tail");
+
+        assert_eq!(Code::InvalidArgument, err.code());
+        assert_eq!(
+            "observed_log_offset is beyond the current log tail",
+            err.message()
+        );
+        dtor.await;
+    }
+
+    async fn assert_backward_compatible_plain_operation_record_payloads_still_read_for_setup(
+        db_name: &str,
+        setup_log_server: impl FnOnce() -> LogServerSetup + Send + 'static,
+    ) {
+        let (ctor, dtor) = setup_log_server();
+        let log_server = ctor.await;
+        let collection_id = CollectionUuid::new();
+        let record = test_operation_record("plain-doc");
+        push_log_to_server(
+            &log_server,
+            db_name,
+            collection_id,
+            std::slice::from_ref(&record),
+        )
+        .await;
+
+        assert_eq!(
+            vec![expected_proto_log_record(1, &record)],
+            pull_proto_log_records_from_server(&log_server, db_name, collection_id, 1, 1).await
+        );
+        dtor.await;
+    }
+
+    async fn assert_backward_compatible_conditionless_push_preserves_existing_behavior_for_setup(
+        db_name: &str,
+        setup_log_server: impl FnOnce() -> LogServerSetup + Send + 'static,
+    ) {
+        let (ctor, dtor) = setup_log_server();
+        let log_server = ctor.await;
+        let collection_id = CollectionUuid::new();
+        let records = [
+            test_operation_record("conditionless-doc-1"),
+            test_operation_record("conditionless-doc-2"),
+        ];
+        push_log_to_server(
+            &log_server,
+            db_name,
+            collection_id,
+            std::slice::from_ref(&records[0]),
+        )
+        .await;
+        push_log_to_server(
+            &log_server,
+            db_name,
+            collection_id,
+            std::slice::from_ref(&records[1]),
+        )
+        .await;
+        assert_eq!(
+            vec![
+                expected_proto_log_record(1, &records[0]),
+                expected_proto_log_record(2, &records[1]),
+            ],
+            pull_proto_log_records_from_server(&log_server, db_name, collection_id, 1, 2).await
+        );
+        dtor.await;
+    }
+
+    async fn assert_backward_compatible_conditionless_batch_push_returns_first_offset_for_setup(
+        db_name: &str,
+        setup_log_server: impl FnOnce() -> LogServerSetup + Send + 'static,
+    ) {
+        let (ctor, dtor) = setup_log_server();
+        let log_server = ctor.await;
+        let collection_id = CollectionUuid::new();
+        let records = vec![
+            test_operation_record("conditionless-batch-doc-1"),
+            test_operation_record("conditionless-batch-doc-2"),
+        ];
+        let response = log_server
+            .push_logs(Request::new(push_logs_request(
+                db_name,
+                collection_id,
+                &records,
+                None,
+            )))
+            .await
+            .expect("conditionless push should succeed")
+            .into_inner();
+
+        assert_eq!(
+            PushLogsResponse {
+                record_count: 2,
+                log_is_sealed: false,
+                first_inserted_record_offset: Some(1),
+            },
+            response
+        );
+        assert_eq!(
+            vec![
+                expected_proto_log_record(1, &records[0]),
+                expected_proto_log_record(2, &records[1]),
+            ],
+            pull_proto_log_records_from_server(&log_server, db_name, collection_id, 1, 2).await
+        );
+        dtor.await;
+    }
+
+    #[tokio::test]
+    async fn conditionless_push_returns_first_inserted_record_offset() {
+        let log_server = log_server_for_installed_writer_tests();
+        let collection_id = CollectionUuid::new();
+        let fake_log = FakeLogWriter::new(vec![Ok(LogPosition::from_offset(9))]);
+        let fake_log_trait: Arc<dyn LogWriterTrait> = fake_log;
+        let _handle = install_active_log(&log_server, collection_id, fake_log_trait).await;
+
+        let response = log_server
+            .push_logs(Request::new(push_logs_request(
+                "dbname",
+                collection_id,
+                &[test_operation_record("doc-1")],
+                None,
+            )))
+            .await
+            .expect("conditionless push should succeed")
+            .into_inner();
+
+        assert_eq!(
+            PushLogsResponse {
+                record_count: 1,
+                log_is_sealed: false,
+                first_inserted_record_offset: Some(9),
+            },
+            response
+        );
+    }
+
+    #[tokio::test]
+    async fn conditionless_push_omits_first_inserted_record_offset_after_durable_contention() {
+        let log_server = log_server_for_installed_writer_tests();
+        let collection_id = CollectionUuid::new();
+        let fake_log = FakeLogWriter::new(vec![Err(wal3::Error::LogContentionDurable)]);
+        let fake_log_trait: Arc<dyn LogWriterTrait> = fake_log;
+        let _handle = install_active_log(&log_server, collection_id, fake_log_trait).await;
+
+        let response = log_server
+            .push_logs(Request::new(push_logs_request(
+                "dbname",
+                collection_id,
+                &[test_operation_record("doc-1")],
+                None,
+            )))
+            .await
+            .expect("durable contention should be reported as success")
+            .into_inner();
+
+        assert_eq!(
+            PushLogsResponse {
+                record_count: 1,
+                log_is_sealed: false,
+                first_inserted_record_offset: None,
+            },
+            response
+        );
+    }
+
+    fn run_k8s_async_test(future: impl Future<Output = ()> + Send + 'static) {
+        let runtime = Runtime::new().unwrap();
+        std::thread::Builder::new()
+            .stack_size(1 << 22)
+            .spawn(move || runtime.block_on(future))
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
+    }
+
+    #[test]
+    fn test_k8s_integration_conditional_push_rejects_committed_write_id_conflict() {
+        run_k8s_async_test(
+            assert_conditional_push_rejects_committed_write_id_conflict_for_setup("dbname", || {
+                s3_setup_log_server_with_throttle(64_000_000, 4096)
+            }),
+        );
+    }
+
+    #[test]
+    fn test_k8s_integration_conditional_push_allows_non_conflicting_committed_records() {
+        run_k8s_async_test(
+            assert_conditional_push_allows_non_conflicting_committed_records_for_setup(
+                "dbname",
+                || s3_setup_log_server_with_throttle(64_000_000, 4096),
+            ),
+        );
+    }
+
+    #[test]
+    fn test_k8s_integration_conditional_push_rejects_concurrent_in_flight_conflict() {
+        run_k8s_async_test(
+            assert_conditional_push_rejects_concurrent_in_flight_conflict_for_setup(
+                "dbname",
+                || s3_setup_log_server_with_throttle(64_000_000, 500_000),
+            ),
+        );
+    }
+
+    #[test]
+    fn test_k8s_integration_conditional_push_revalidates_after_required_start_retry() {
+        run_k8s_async_test(
+            assert_conditional_push_revalidates_after_required_start_retry_for_setup(
+                "dbname",
+                || s3_setup_log_server_with_throttle(64_000_000, 500_000),
+            ),
+        );
+    }
+
+    #[test]
+    fn test_k8s_integration_conditional_push_rejects_observed_offset_beyond_tail() {
+        run_k8s_async_test(
+            assert_conditional_push_rejects_observed_offset_beyond_tail_for_setup("dbname", || {
+                s3_setup_log_server_with_throttle(64_000_000, 4096)
+            }),
+        );
+    }
+
+    #[test]
+    fn test_k8s_integration_backward_compatible_plain_operation_record_payloads_still_read() {
+        run_k8s_async_test(
+            assert_backward_compatible_plain_operation_record_payloads_still_read_for_setup(
+                "dbname",
+                || s3_setup_log_server_with_throttle(64_000_000, 4096),
+            ),
+        );
+    }
+
+    #[test]
+    fn test_k8s_integration_backward_compatible_conditionless_push_preserves_existing_behavior() {
+        run_k8s_async_test(
+            assert_backward_compatible_conditionless_push_preserves_existing_behavior_for_setup(
+                "dbname",
+                || s3_setup_log_server_with_throttle(64_000_000, 4096),
+            ),
+        );
+    }
+
+    #[test]
+    fn test_k8s_integration_backward_compatible_conditionless_batch_push_returns_first_offset() {
+        run_k8s_async_test(
+            assert_backward_compatible_conditionless_batch_push_returns_first_offset_for_setup(
+                "dbname",
+                || s3_setup_log_server_with_throttle(64_000_000, 4096),
+            ),
+        );
+    }
+
     fn test_fork_logs(
         db_name: &str,
         initial_operations: Vec<OperationRecord>,
@@ -6255,6 +7774,41 @@ mod tests {
         assert_eq!(err.code(), Code::Unavailable);
     }
 
+    #[test]
+    fn test_k8s_mcmr_integration_conditional_push_rejects_committed_write_id_conflict() {
+        run_k8s_async_test(async move {
+            let db_name = format!("{TEST_TOPOLOGY_NAME}+dbname");
+            assert_conditional_push_rejects_committed_write_id_conflict_for_setup(&db_name, || {
+                mcmr_setup_log_server_with_throttle(64_000_000, 4096)
+            })
+            .await;
+        });
+    }
+
+    #[test]
+    fn test_k8s_mcmr_integration_conditional_push_rejects_concurrent_in_flight_conflict() {
+        run_k8s_async_test(async move {
+            let db_name = format!("{TEST_TOPOLOGY_NAME}+dbname");
+            assert_conditional_push_rejects_concurrent_in_flight_conflict_for_setup(
+                &db_name,
+                || mcmr_setup_log_server_with_throttle(64_000_000, 500_000),
+            )
+            .await;
+        });
+    }
+
+    #[test]
+    fn test_k8s_mcmr_integration_conditional_push_revalidates_after_required_start_retry() {
+        run_k8s_async_test(async move {
+            let db_name = format!("{TEST_TOPOLOGY_NAME}+dbname");
+            assert_conditional_push_revalidates_after_required_start_retry_for_setup(
+                &db_name,
+                || mcmr_setup_log_server_with_throttle(64_000_000, 500_000),
+            )
+            .await;
+        });
+    }
+
     proptest! {
         #[test]
         fn test_k8s_integration_rust_log_service_push_pull_logs(
@@ -6292,7 +7846,13 @@ mod tests {
             .join()
             .expect("Spawned thread should not fail to join");
         }
+    }
 
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 16,
+            .. ProptestConfig::default()
+        })]
         #[test]
         fn test_k8s_integration_rust_log_service_garbage_collect_unused_logs(
             operations in proptest::collection::vec(any::<OperationRecord>(), 1..=36),
@@ -6827,6 +8387,21 @@ mod tests {
         BACKOFF_REASON_MD_KEY
             .parse::<tonic::metadata::MetadataKey<tonic::metadata::Ascii>>()
             .expect("BACKOFF_REASON_MD_KEY must be a valid ASCII metadata key");
+    }
+
+    #[test]
+    fn purged_logs_status_has_reason_metadata() {
+        let status = purged_logs_status();
+
+        assert_eq!(status.code(), Code::NotFound);
+        assert_eq!(status.message(), "Some entries have been purged");
+        assert_eq!(
+            status
+                .metadata()
+                .get(PULL_LOGS_REASON_MD_KEY)
+                .and_then(|value| value.to_str().ok()),
+            Some(PULL_LOGS_REASON_PURGED)
+        );
     }
 
     #[cfg(feature = "faults")]

@@ -4,7 +4,7 @@ use crate::{
     CollectionsWithSegmentsProvider,
 };
 use backon::{ExponentialBuilder, Retryable};
-use chroma_api_types::HeartbeatResponse;
+use chroma_api_types::{HeartbeatResponse, OccReadMode, OccReadToken, StaleReadError};
 use chroma_config::{registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log, PushLogsError};
@@ -12,31 +12,35 @@ use chroma_metering::{
     CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable,
     ExternalCollectionReadContext, FinishRequest, FtsQueryLength, LatestCollectionLogicalSizeBytes,
     LogSizeBytes, MetadataPredicateCount, MeterEvent, MeteredFutureExt, PulledLogSizeBytes,
-    QueryEmbeddingCount, ReturnBytes, WriteAction,
+    QueryEmbeddingCount, ReadAction, ReturnBytes, WriteAction,
 };
 use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
 use chroma_sysdb::{DatabaseOrTopology, GetCollectionsOptions, SysDb};
 use chroma_system::System;
+use chroma_types::chroma_proto::PushLogsCondition;
 use chroma_types::{
+    buffered_write_to_records,
     operator::{
         Aggregate, CountResult, Filter, GetResult, GroupBy, Key, KnnBatch, KnnBatchResult,
         KnnProjection, KnnProjectionOutput, Limit, Projection, ProjectionOutput, Scan,
         SearchPayloadResult, SearchRecord, SearchResult, Select,
     },
     plan::{Count, Get, Knn, Search, SearchPayload},
-    AddAttachedFunctionInputRequest, AddAttachedFunctionInputResponse, AddCollectionRecordsError,
-    AddCollectionRecordsRequest, AddCollectionRecordsResponse, AttachFunctionRequest,
-    AttachFunctionResponse, AttachedFunctionApiResponse, Cmek, Collection, CollectionAndSegments,
-    CollectionUuid, CountCollectionsError, CountCollectionsRequest, CountCollectionsResponse,
-    CountRequest, CountResponse, CreateCollectionError, CreateCollectionRequest,
-    CreateCollectionResponse, CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse,
-    CreateTenantError, CreateTenantRequest, CreateTenantResponse, DatabaseName,
-    DeleteCollectionError, DeleteCollectionRecordsError, DeleteCollectionRecordsRequest,
-    DeleteCollectionRecordsResponse, DeleteCollectionRequest, DeleteCollectionResponse,
-    DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, DetachFunctionError,
-    DetachFunctionRequest, DetachFunctionResponse, ExecutorError, ForkCollectionError,
-    ForkCollectionRequest, ForkCollectionResponse, GetCollectionByCrnError,
+    validate_conditional_commit_scope, AddAttachedFunctionInputRequest,
+    AddAttachedFunctionInputResponse, AddCollectionRecordsError, AddCollectionRecordsRequest,
+    AddCollectionRecordsResponse, AttachFunctionRequest, AttachFunctionResponse,
+    AttachedFunctionApiResponse, Cmek, Collection, CollectionAndSegments, CollectionUuid,
+    ConditionalBufferedWrite, ConditionalCommitError, ConditionalCommitRequest,
+    ConditionalCommitResult, ConditionalTransactionError, CountCollectionsError,
+    CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
+    CreateCollectionError, CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError,
+    CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError, CreateTenantRequest,
+    CreateTenantResponse, DatabaseName, DeleteCollectionError, DeleteCollectionRecordsError,
+    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, DeleteCollectionRequest,
+    DeleteCollectionResponse, DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse,
+    DetachFunctionError, DetachFunctionRequest, DetachFunctionResponse, ExecutorError,
+    ForkCollectionError, ForkCollectionRequest, ForkCollectionResponse, GetCollectionByCrnError,
     GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionByIdError,
     GetCollectionByIdRequest, GetCollectionByIdResponse, GetCollectionError, GetCollectionRequest,
     GetCollectionResponse, GetCollectionsError, GetDatabaseError, GetDatabaseRequest,
@@ -70,6 +74,61 @@ struct Metrics {
     metering_external_read_counter: Counter<u64>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct GetReadPlan {
+    /// Exclusive upper bound passed to the read executor. A value of 0 is only
+    /// used for non-OCC reads on the legacy worker-scouting path.
+    log_upper_bound_offset: i64,
+    /// Token to attach to this response when the caller asked us to capture a
+    /// new OCC read position. This is `None` when consuming an existing token:
+    /// reading at a token should not mint or return a replacement token.
+    response_read_token: Option<OccReadToken>,
+    /// Token whose snapshot must remain materializable for this read. This is
+    /// present both when capturing a new token and when reading at an existing
+    /// token, because both paths must fail as stale instead of falling forward
+    /// to newer data after compaction or log GC.
+    stale_read_token: Option<OccReadToken>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct ConditionalCommitWriteMetering {
+    add_log_size_bytes: u64,
+    update_log_size_bytes: u64,
+    upsert_log_size_bytes: u64,
+    delete_log_size_bytes: u64,
+}
+
+impl ConditionalCommitWriteMetering {
+    fn add_log_size_bytes(&mut self, action: WriteAction, log_size_bytes: u64) {
+        match action {
+            WriteAction::Add => {
+                self.add_log_size_bytes = self.add_log_size_bytes.saturating_add(log_size_bytes)
+            }
+            WriteAction::Update => {
+                self.update_log_size_bytes =
+                    self.update_log_size_bytes.saturating_add(log_size_bytes)
+            }
+            WriteAction::Upsert => {
+                self.upsert_log_size_bytes =
+                    self.upsert_log_size_bytes.saturating_add(log_size_bytes)
+            }
+            WriteAction::Delete => {
+                self.delete_log_size_bytes =
+                    self.delete_log_size_bytes.saturating_add(log_size_bytes)
+            }
+        }
+    }
+
+    fn into_events(self) -> [(WriteAction, u64); 4] {
+        [
+            (WriteAction::Add, self.add_log_size_bytes),
+            (WriteAction::Update, self.update_log_size_bytes),
+            (WriteAction::Upsert, self.upsert_log_size_bytes),
+            (WriteAction::Delete, self.delete_log_size_bytes),
+        ]
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ServiceBasedFrontend {
     allow_reset: bool,
@@ -86,10 +145,76 @@ pub struct ServiceBasedFrontend {
     tenants_with_quantization_enabled: Vec<String>,
     tenants_with_maxscore_enabled: Vec<String>,
     tenants_with_token_bitmap_fts_enabled: Vec<String>,
+    tenants_with_transactions_enabled: Vec<String>,
     enable_log_scouting: bool,
+    enable_transactions: bool,
 }
 
 impl ServiceBasedFrontend {
+    fn tenant_list_contains(tenants: &[String], tenant_id: &str) -> bool {
+        tenants.iter().any(|t| t == "*" || t == tenant_id)
+    }
+
+    pub fn ensure_conditional_transactions_supported(
+        &self,
+    ) -> Result<(), ConditionalTransactionError> {
+        if !self.enable_transactions && self.tenants_with_transactions_enabled.is_empty() {
+            return Err(ConditionalTransactionError::TransactionsDisabled);
+        }
+        if self.log_client.supports_conditional_transactions() {
+            return Ok(());
+        }
+
+        Err(ConditionalTransactionError::UnsupportedLogImplementation {
+            implementation: self.log_client.implementation_name().to_string(),
+        })
+    }
+
+    pub fn ensure_conditional_transactions_supported_for_tenant(
+        &self,
+        tenant_id: &str,
+    ) -> Result<(), ConditionalTransactionError> {
+        if !self.should_enable_transactions_for_tenant(tenant_id) {
+            return Err(ConditionalTransactionError::TransactionsDisabled);
+        }
+        if self.log_client.supports_conditional_transactions() {
+            return Ok(());
+        }
+
+        Err(ConditionalTransactionError::UnsupportedLogImplementation {
+            implementation: self.log_client.implementation_name().to_string(),
+        })
+    }
+
+    pub fn ensure_conditional_commit_supported(&self) -> Result<(), ConditionalCommitError> {
+        if !self.enable_transactions && self.tenants_with_transactions_enabled.is_empty() {
+            return Err(ConditionalCommitError::TransactionsDisabled);
+        }
+        if self.log_client.supports_conditional_transactions() {
+            return Ok(());
+        }
+
+        Err(ConditionalCommitError::TransactionsNotSupported {
+            implementation: self.log_client.implementation_name().to_string(),
+        })
+    }
+
+    pub fn ensure_conditional_commit_supported_for_tenant(
+        &self,
+        tenant_id: &str,
+    ) -> Result<(), ConditionalCommitError> {
+        if !self.should_enable_transactions_for_tenant(tenant_id) {
+            return Err(ConditionalCommitError::TransactionsDisabled);
+        }
+        if self.log_client.supports_conditional_transactions() {
+            return Ok(());
+        }
+
+        Err(ConditionalCommitError::TransactionsNotSupported {
+            implementation: self.log_client.implementation_name().to_string(),
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         allow_reset: bool,
@@ -104,7 +229,9 @@ impl ServiceBasedFrontend {
         tenants_with_quantization_enabled: Vec<String>,
         tenants_with_maxscore_enabled: Vec<String>,
         tenants_with_token_bitmap_fts_enabled: Vec<String>,
+        tenants_with_transactions_enabled: Vec<String>,
         enable_log_scouting: bool,
+        enable_transactions: bool,
     ) -> Self {
         let meter = global::meter("chroma");
         let fork_retries_counter = meter.u64_counter("fork_retries").build();
@@ -154,7 +281,116 @@ impl ServiceBasedFrontend {
             tenants_with_quantization_enabled,
             tenants_with_maxscore_enabled,
             tenants_with_token_bitmap_fts_enabled,
+            tenants_with_transactions_enabled,
             enable_log_scouting,
+            enable_transactions,
+        }
+    }
+
+    fn log_upper_bound_offset_to_i64(log_upper_bound_offset: u64) -> Result<i64, QueryError> {
+        i64::try_from(log_upper_bound_offset).map_err(|_| {
+            QueryError::Other(Box::new(ValidationError::InvalidArgument(format!(
+                "log upper bound offset {log_upper_bound_offset} exceeds i64 range"
+            ))) as Box<dyn ChromaError>)
+        })
+    }
+
+    fn get_read_plan(
+        enable_log_scouting: bool,
+        occ_read_mode: OccReadMode,
+        scouted_log_upper_bound_offset: Option<u64>,
+    ) -> Result<GetReadPlan, QueryError> {
+        match occ_read_mode {
+            OccReadMode::None => {
+                let log_upper_bound_offset = if enable_log_scouting {
+                    Self::log_upper_bound_offset_to_i64(
+                        scouted_log_upper_bound_offset.ok_or_else(|| {
+                            QueryError::Other(Box::new(ValidationError::InvalidArgument(
+                                "missing scouted log upper bound offset".to_string(),
+                            ))
+                                as Box<dyn ChromaError>)
+                        })?,
+                    )?
+                } else {
+                    0
+                };
+                Ok(GetReadPlan {
+                    log_upper_bound_offset,
+                    response_read_token: None,
+                    stale_read_token: None,
+                })
+            }
+            OccReadMode::Capture => {
+                if !enable_log_scouting {
+                    return Err(StaleReadError::ReadTokenGenerationDisabled.into());
+                }
+                let log_upper_bound_offset = scouted_log_upper_bound_offset.ok_or_else(|| {
+                    QueryError::Other(Box::new(ValidationError::InvalidArgument(
+                        "missing scouted log upper bound offset".to_string(),
+                    )) as Box<dyn ChromaError>)
+                })?;
+                let read_token = OccReadToken::try_new(log_upper_bound_offset)?;
+                Ok(GetReadPlan {
+                    log_upper_bound_offset: Self::log_upper_bound_offset_to_i64(
+                        log_upper_bound_offset,
+                    )?,
+                    // Capturing both executes at this exact offset and returns
+                    // the token so later transaction state can remember it.
+                    response_read_token: Some(read_token),
+                    stale_read_token: Some(read_token),
+                })
+            }
+            OccReadMode::AtToken(read_token) => Ok(GetReadPlan {
+                log_upper_bound_offset: Self::log_upper_bound_offset_to_i64(
+                    read_token.log_upper_bound_offset(),
+                )?,
+                // Consuming a token pins execution and stale detection, but
+                // intentionally does not expose a new token to the caller.
+                response_read_token: None,
+                stale_read_token: Some(read_token),
+            }),
+        }
+    }
+
+    fn validate_occ_read_snapshot(
+        collection_log_position: i64,
+        read_token: OccReadToken,
+    ) -> Result<(), QueryError> {
+        let compacted_past_read_token = match u64::try_from(collection_log_position) {
+            Ok(position) => position >= read_token.log_upper_bound_offset(),
+            Err(_) => false,
+        };
+        if compacted_past_read_token {
+            return Err(StaleReadError::version_too_old(
+                read_token.log_upper_bound_offset(),
+                collection_log_position,
+            )
+            .into());
+        }
+        Ok(())
+    }
+
+    fn map_occ_read_executor_error(
+        error: ExecutorError,
+        read_token: Option<OccReadToken>,
+    ) -> QueryError {
+        let Some(read_token) = read_token else {
+            return QueryError::Executor(error);
+        };
+        match &error {
+            ExecutorError::Grpc(status)
+                if matches!(
+                    status.code(),
+                    tonic::Code::NotFound | tonic::Code::FailedPrecondition
+                ) =>
+            {
+                StaleReadError::version_purged(
+                    read_token.log_upper_bound_offset(),
+                    status.message(),
+                )
+                .into()
+            }
+            _ => QueryError::Executor(error),
         }
     }
 
@@ -264,7 +500,11 @@ impl ServiceBasedFrontend {
         })
     }
 
-    async fn fan_out_get(&self, plan: Get) -> Result<GetResult, ExecutorError> {
+    async fn fan_out_get(
+        &self,
+        plan: Get,
+        stale_read_token: Option<OccReadToken>,
+    ) -> Result<GetResult, ExecutorError> {
         let num_shards = plan
             .scan
             .collection_and_segments
@@ -288,7 +528,17 @@ impl ServiceBasedFrontend {
                         let mut provider = provider.clone();
                         let mut replan = plan.clone();
                         let database_name = database_name.clone();
+                        let stale_read_token = stale_read_token;
                         async move {
+                            if code == tonic::Code::NotFound {
+                                if let Some(read_token) = stale_read_token {
+                                    return Err(StaleReadError::version_purged(
+                                        read_token.log_upper_bound_offset(),
+                                        "log records needed for the read token were purged",
+                                    )
+                                    .boxed());
+                                }
+                            }
                             if code == tonic::Code::NotFound {
                                 provider
                                     .collections_with_segments_cache
@@ -336,7 +586,17 @@ impl ServiceBasedFrontend {
                         let mut replan = shard_plan.clone();
                         let database_name = database_name.clone();
                         let original_limit = original_limit.clone();
+                        let stale_read_token = stale_read_token;
                         async move {
+                            if code == tonic::Code::NotFound {
+                                if let Some(read_token) = stale_read_token {
+                                    return Err(StaleReadError::version_purged(
+                                        read_token.log_upper_bound_offset(),
+                                        "log records needed for the read token were purged",
+                                    )
+                                    .boxed());
+                                }
+                            }
                             if code == tonic::Code::NotFound {
                                 provider
                                     .collections_with_segments_cache
@@ -790,24 +1050,24 @@ impl ServiceBasedFrontend {
     /// - The list contains "*" (all tenants), OR
     /// - The tenant_id is in the list
     fn should_enable_quantization_for_tenant(&self, tenant_id: &str) -> bool {
-        self.tenants_with_quantization_enabled
-            .iter()
-            .any(|t| t == "*" || t == tenant_id)
+        Self::tenant_list_contains(&self.tenants_with_quantization_enabled, tenant_id)
     }
 
     /// Check if MaxScore sparse index should be enabled for the given tenant.
     /// Returns true if the list contains "*" (all tenants) or the exact tenant_id.
     fn should_enable_maxscore_for_tenant(&self, tenant_id: &str) -> bool {
-        self.tenants_with_maxscore_enabled
-            .iter()
-            .any(|t| t == "*" || t == tenant_id)
+        Self::tenant_list_contains(&self.tenants_with_maxscore_enabled, tenant_id)
     }
 
     /// Check if TokenBitmap FTS index should be enabled for the given tenant.
     fn should_enable_token_bitmap_fts_for_tenant(&self, tenant_id: &str) -> bool {
-        self.tenants_with_token_bitmap_fts_enabled
-            .iter()
-            .any(|t| t == "*" || t == tenant_id)
+        Self::tenant_list_contains(&self.tenants_with_token_bitmap_fts_enabled, tenant_id)
+    }
+
+    /// Check if conditional transactions should be enabled for the given tenant.
+    fn should_enable_transactions_for_tenant(&self, tenant_id: &str) -> bool {
+        self.enable_transactions
+            || Self::tenant_list_contains(&self.tenants_with_transactions_enabled, tenant_id)
     }
 
     pub fn get_default_knn_index(&self) -> KnnIndex {
@@ -1420,8 +1680,277 @@ impl ServiceBasedFrontend {
         cmek: Option<Cmek>,
     ) -> Result<(), PushLogsError> {
         self.log_client
-            .push_logs(tenant_id, database_name, collection_id, records, cmek)
+            .push_logs(tenant_id, database_name, collection_id, records, cmek, None)
             .await
+    }
+
+    fn buffered_write_action(write: &ConditionalBufferedWrite) -> WriteAction {
+        match write {
+            ConditionalBufferedWrite::Add(_) => WriteAction::Add,
+            ConditionalBufferedWrite::Update(_) => WriteAction::Update,
+            ConditionalBufferedWrite::Upsert(_) => WriteAction::Upsert,
+            ConditionalBufferedWrite::Delete(_) => WriteAction::Delete,
+        }
+    }
+
+    async fn validate_buffered_write_for_commit(
+        &mut self,
+        write: &ConditionalBufferedWrite,
+        database_name: DatabaseName,
+        collection_id: CollectionUuid,
+    ) -> Result<(), ConditionalCommitError> {
+        match write {
+            ConditionalBufferedWrite::Add(request) => {
+                self.validate_embedding(
+                    database_name,
+                    collection_id,
+                    Some(&request.embeddings),
+                    true,
+                    |embedding: &Vec<f32>| Some(embedding.len()),
+                )
+                .await
+                .map_err(|err| ConditionalCommitError::Other(Box::new(err)))?;
+            }
+            ConditionalBufferedWrite::Update(request) => {
+                self.validate_embedding(
+                    database_name,
+                    collection_id,
+                    request.embeddings.as_ref(),
+                    true,
+                    |embedding| embedding.as_ref().map(|emb| emb.len()),
+                )
+                .await
+                .map_err(|err| ConditionalCommitError::Other(Box::new(err)))?;
+            }
+            ConditionalBufferedWrite::Upsert(request) => {
+                self.validate_embedding(
+                    database_name,
+                    collection_id,
+                    Some(&request.embeddings),
+                    true,
+                    |embedding: &Vec<f32>| Some(embedding.len()),
+                )
+                .await
+                .map_err(|err| ConditionalCommitError::Other(Box::new(err)))?;
+            }
+            ConditionalBufferedWrite::Delete(_) => {}
+        }
+        Ok(())
+    }
+
+    async fn conditional_commit_observed_offset(
+        &mut self,
+        tenant_id: &str,
+        database_name: DatabaseName,
+        collection_id: CollectionUuid,
+        observed_log_offset: Option<i64>,
+    ) -> Result<i64, ConditionalCommitError> {
+        if let Some(observed_log_offset) = observed_log_offset {
+            return Ok(observed_log_offset);
+        }
+
+        let scouted_offset = self
+            .log_client
+            .scout_logs(tenant_id, database_name, collection_id, 0)
+            .await
+            .map_err(ConditionalCommitError::Other)?;
+        i64::try_from(scouted_offset).map_err(|_| {
+            ConditionalCommitError::InvalidArgument(format!(
+                "scouted log offset {scouted_offset} exceeds i64 range"
+            ))
+        })
+    }
+
+    async fn conditional_commit_append(
+        &mut self,
+        request: ConditionalCommitRequest,
+        region: &str,
+    ) -> Result<Option<i64>, ConditionalCommitError> {
+        let metering_started_at = Instant::now();
+        let expected_record_count = request.record_count();
+        let (tenant_id, database_name, collection_id) =
+            validate_conditional_commit_scope(&request)?;
+        let database_name_for_metering = database_name.as_ref().to_string();
+        let submit_read_metering = !request.read_ids.is_empty();
+        let collection = self
+            .get_cached_collection(database_name.clone(), collection_id)
+            .await
+            .map_err(|err| ConditionalCommitError::Other(Box::new(err)))?;
+        let latest_collection_logical_size_bytes = collection.size_bytes_post_compaction;
+
+        for write in &request.buffered_writes {
+            self.validate_buffered_write_for_commit(write, database_name.clone(), collection_id)
+                .await?;
+        }
+
+        let mut records = Vec::with_capacity(expected_record_count);
+        let mut write_metering = ConditionalCommitWriteMetering::default();
+        for write in request.buffered_writes {
+            let write_action = Self::buffered_write_action(&write);
+            let (mut write_records, write_log_size_bytes) = buffered_write_to_records(write)?;
+            write_metering.add_log_size_bytes(write_action, write_log_size_bytes);
+            records.append(&mut write_records);
+        }
+
+        let observed_log_offset = self
+            .conditional_commit_observed_offset(
+                &tenant_id,
+                database_name.clone(),
+                collection_id,
+                request.observed_log_offset,
+            )
+            .await?;
+        let condition = PushLogsCondition {
+            observed_log_offset,
+            read_ids: request.read_ids,
+        };
+        let cmek = collection
+            .schema
+            .as_ref()
+            .and_then(|schema| schema.cmek.clone());
+
+        let retries = Arc::new(AtomicUsize::new(0));
+        let commit_to_retry = || {
+            let mut self_clone = self.clone();
+            let tenant_id_clone = tenant_id.clone();
+            let database_name_clone = database_name.clone();
+            let records_clone = records.clone();
+            let cmek_clone = cmek.clone();
+            let condition_clone = condition.clone();
+            async move {
+                self_clone
+                    .log_client
+                    .push_logs_with_result(
+                        &tenant_id_clone,
+                        database_name_clone,
+                        collection_id,
+                        records_clone,
+                        cmek_clone,
+                        Some(condition_clone),
+                    )
+                    .await
+            }
+        };
+        let res = commit_to_retry
+            .retry(self.retries_builder)
+            .when(|e| matches!(e, PushLogsError::Backoff))
+            .notify(|_, _| {
+                let retried = retries.fetch_add(1, Ordering::Relaxed);
+                if retried > 0 {
+                    tracing::info!(
+                        "Retrying conditional commit request for collection {}",
+                        collection_id
+                    );
+                }
+            })
+            .await;
+
+        match res {
+            Ok(push_result) => {
+                if usize::try_from(push_result.record_count).ok() != Some(expected_record_count) {
+                    tracing::warn!(
+                        expected_record_count,
+                        reported_record_count = push_result.record_count,
+                        %tenant_id,
+                        ?database_name,
+                        %collection_id,
+                        "Log service reported a different conditional commit record count than requested"
+                    );
+                }
+
+                let metering_finished_at = Instant::now();
+                if submit_read_metering {
+                    let collection_read_context = CollectionReadContext::new(
+                        tenant_id.clone(),
+                        database_name_for_metering.clone(),
+                        collection_id.0.to_string(),
+                        ReadAction::Get,
+                        region.to_string(),
+                    );
+                    if let Err(error) = collection_read_context
+                        .request_received_at
+                        .store(metering_started_at)
+                    {
+                        tracing::error!(
+                            "Failed to set conditional commit read metering start time: {:?}",
+                            error
+                        );
+                    }
+                    collection_read_context.fts_query_length(0);
+                    collection_read_context.metadata_predicate_count(0);
+                    collection_read_context.query_embedding_count(0);
+                    collection_read_context.pulled_log_size_bytes(0);
+                    collection_read_context
+                        .latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
+                    collection_read_context.return_bytes(0);
+                    collection_read_context.finish_request(metering_finished_at);
+                    if let Ok(()) = MeterEvent::CollectionRead(collection_read_context)
+                        .submit()
+                        .await
+                    {
+                        self.metrics.metering_read_counter.add(1, &[]);
+                    }
+                }
+
+                for (action, log_size_bytes) in write_metering.into_events() {
+                    if log_size_bytes == 0 {
+                        continue;
+                    }
+                    let collection_write_context = CollectionWriteContext::new(
+                        tenant_id.clone(),
+                        database_name_for_metering.clone(),
+                        collection_id.0.to_string(),
+                        action,
+                        region.to_string(),
+                    );
+                    if let Err(error) = collection_write_context
+                        .request_received_at
+                        .store(metering_started_at)
+                    {
+                        tracing::error!(
+                            "Failed to set conditional commit write metering start time: {:?}",
+                            error
+                        );
+                    }
+                    collection_write_context.log_size_bytes(log_size_bytes);
+                    collection_write_context.finish_request(metering_finished_at);
+                    if let Ok(()) = MeterEvent::CollectionWrite(collection_write_context)
+                        .submit()
+                        .await
+                    {
+                        self.metrics.metering_write_counter.add(1, &[]);
+                    }
+                }
+
+                Ok(push_result.first_inserted_record_offset)
+            }
+            Err(PushLogsError::Backoff | PushLogsError::BackoffCompaction) => {
+                Err(ConditionalCommitError::Backoff)
+            }
+            Err(other) => Err(ConditionalCommitError::Other(Box::new(other))),
+        }
+    }
+
+    pub async fn conditional_commit(
+        &mut self,
+        request: ConditionalCommitRequest,
+        region: String,
+    ) -> Result<ConditionalCommitResult, ConditionalCommitError> {
+        if request.buffered_writes.is_empty() {
+            self.ensure_conditional_commit_supported()?;
+            return Ok(ConditionalCommitResult {
+                first_inserted_record_offset: None,
+                record_count: 0,
+            });
+        }
+        let (tenant_id, _, _) = validate_conditional_commit_scope(&request)?;
+        self.ensure_conditional_commit_supported_for_tenant(&tenant_id)?;
+        let record_count = request.record_count();
+        let first_inserted_record_offset = self.conditional_commit_append(request, &region).await?;
+        Ok(ConditionalCommitResult {
+            first_inserted_record_offset,
+            record_count,
+        })
     }
 
     pub async fn add(
@@ -1791,21 +2320,24 @@ impl ServiceBasedFrontend {
                 where_clause: Some(where_clause),
             };
 
-            let get_result = Box::pin(self.fan_out_get(Get {
-                scan: Scan {
-                    collection_and_segments,
-                    shard_index: 0,
-                    num_shards: 1,
-                    log_upper_bound_offset,
+            let get_result = Box::pin(self.fan_out_get(
+                Get {
+                    scan: Scan {
+                        collection_and_segments,
+                        shard_index: 0,
+                        num_shards: 1,
+                        log_upper_bound_offset,
+                    },
+                    filter,
+                    limit: Limit { offset: 0, limit },
+                    proj: Projection {
+                        document: false,
+                        embedding: false,
+                        metadata: false,
+                    },
                 },
-                filter,
-                limit: Limit { offset: 0, limit },
-                proj: Projection {
-                    document: false,
-                    embedding: false,
-                    metadata: false,
-                },
-            }))
+                None,
+            ))
             .await?;
 
             let return_bytes = get_result.size_bytes();
@@ -2113,9 +2645,9 @@ impl ServiceBasedFrontend {
         })
     }
 
-    pub async fn get(
-        &mut self,
-        GetRequest {
+    pub async fn get(&mut self, request: GetRequest) -> Result<GetResponse, QueryError> {
+        let occ_read_mode = request.occ_read_mode();
+        let GetRequest {
             database_name,
             collection_id,
             ids,
@@ -2124,8 +2656,7 @@ impl ServiceBasedFrontend {
             offset,
             include,
             ..
-        }: GetRequest,
-    ) -> Result<GetResponse, QueryError> {
+        } = request;
         let database_name_typed = DatabaseName::new(&database_name).ok_or_else(|| {
             QueryError::Other(Box::new(ValidationError::InvalidArgument(
                 "database name must be at least 3 characters".to_string(),
@@ -2156,47 +2687,70 @@ impl ServiceBasedFrontend {
             .as_ref()
             .map(Where::fts_query_length)
             .unwrap_or_default();
-        let log_upper_bound_offset = if self.enable_log_scouting {
-            self.log_client
-                .scout_logs(
-                    &collection_and_segments.collection.tenant,
-                    database_name_typed,
-                    collection_id,
-                    0,
+        let scouted_log_upper_bound_offset =
+            if self.enable_log_scouting && !matches!(occ_read_mode, OccReadMode::AtToken(_)) {
+                Some(
+                    self.log_client
+                        .scout_logs(
+                            &collection_and_segments.collection.tenant,
+                            database_name_typed,
+                            collection_id,
+                            0,
+                        )
+                        .await?,
                 )
-                .await? as i64
-        } else {
-            0
-        };
-        let get_result = Box::pin(self.fan_out_get(Get {
-            scan: Scan {
-                collection_and_segments,
-                shard_index: 0,
-                num_shards: 1,
-                log_upper_bound_offset,
+            } else {
+                None
+            };
+        let read_plan = Self::get_read_plan(
+            self.enable_log_scouting,
+            occ_read_mode,
+            scouted_log_upper_bound_offset,
+        )?;
+        if let Some(read_token) = read_plan.stale_read_token {
+            Self::validate_occ_read_snapshot(
+                collection_and_segments.collection.log_position,
+                read_token,
+            )?;
+        }
+        let get_result = Box::pin(self.fan_out_get(
+            Get {
+                scan: Scan {
+                    collection_and_segments,
+                    shard_index: 0,
+                    num_shards: 1,
+                    log_upper_bound_offset: read_plan.log_upper_bound_offset,
+                },
+                filter: Filter {
+                    query_ids: ids,
+                    where_clause: r#where,
+                },
+                limit: Limit { offset, limit },
+                proj: Projection {
+                    document: include.0.contains(&Include::Document),
+                    embedding: include.0.contains(&Include::Embedding),
+                    // If URI is requested, metadata is also requested so we can extract the URI.
+                    metadata: (include.0.contains(&Include::Metadata)
+                        || include.0.contains(&Include::Uri)),
+                },
             },
-            filter: Filter {
-                query_ids: ids,
-                where_clause: r#where,
-            },
-            limit: Limit { offset, limit },
-            proj: Projection {
-                document: include.0.contains(&Include::Document),
-                embedding: include.0.contains(&Include::Embedding),
-                // If URI is requested, metadata is also requested so we can extract the URI.
-                metadata: (include.0.contains(&Include::Metadata)
-                    || include.0.contains(&Include::Uri)),
-            },
-        }))
-        .await?;
+            read_plan.stale_read_token,
+        ))
+        .await
+        .map_err(|err| Self::map_occ_read_executor_error(err, read_plan.stale_read_token))?;
         let return_bytes = get_result.size_bytes();
+        let pulled_log_bytes = get_result.pulled_log_bytes;
+        let mut get_response: GetResponse = (get_result, include).into();
+        if let Some(read_token) = read_plan.response_read_token {
+            get_response.set_occ_read_token(read_token);
+        }
 
         // Attach metadata to the metering context
         chroma_metering::with_current(|context| {
             context.fts_query_length(fts_query_length);
             context.metadata_predicate_count(metadata_predicate_count);
             context.query_embedding_count(0);
-            context.pulled_log_size_bytes(get_result.pulled_log_bytes);
+            context.pulled_log_size_bytes(pulled_log_bytes);
             context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
             context.return_bytes(return_bytes);
             context.finish_request(Instant::now());
@@ -2228,7 +2782,7 @@ impl ServiceBasedFrontend {
             },
         }
 
-        Ok((get_result, include).into())
+        Ok(get_response)
     }
 
     pub async fn query(
@@ -2705,6 +3259,7 @@ impl ServiceBasedFrontend {
                 input_collection_id,
                 records,
                 cmek,
+                None,
             )
             .await
             .map_err(|e| chroma_types::AttachFunctionError::Internal(Box::new(e)))?;
@@ -2832,7 +3387,9 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             config.tenants_with_quantization_enabled.clone(),
             config.tenants_with_maxscore_enabled.clone(),
             config.tenants_with_token_bitmap_fts_enabled.clone(),
+            config.tenants_with_transactions_enabled.clone(),
             config.enable_log_scouting,
+            config.enable_transactions,
         ))
     }
 }
@@ -2848,6 +3405,285 @@ mod tests {
     use chroma_types::CreateCollectionPayload;
 
     use super::*;
+
+    fn conditional_commit_request_for_tenant(tenant_id: &str) -> ConditionalCommitRequest {
+        let add = AddCollectionRecordsRequest::try_new(
+            tenant_id.to_string(),
+            "database".to_string(),
+            CollectionUuid::default(),
+            vec!["id".to_string()],
+            vec![vec![1.0]],
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        ConditionalCommitRequest {
+            buffered_writes: vec![ConditionalBufferedWrite::Add(add)],
+            observed_log_offset: None,
+            read_ids: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn conditional_commit_record_conversion_preserves_order_and_delete_shape() {
+        let collection_id = CollectionUuid::default();
+        let add = AddCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            collection_id,
+            vec!["add-a".to_string(), "add-b".to_string()],
+            vec![vec![1.0], vec![2.0]],
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let update = UpdateCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            collection_id,
+            vec!["update".to_string()],
+            Some(vec![Some(vec![3.0])]),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let delete = DeleteCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            collection_id,
+            Some(vec!["delete".to_string()]),
+            None,
+            None,
+        )
+        .unwrap();
+
+        let mut records = Vec::new();
+        for write in [
+            ConditionalBufferedWrite::Add(add),
+            ConditionalBufferedWrite::Update(update),
+            ConditionalBufferedWrite::Delete(delete),
+        ] {
+            records.extend(buffered_write_to_records(write).unwrap().0);
+        }
+        let got = records
+            .into_iter()
+            .map(|record| {
+                (
+                    record.id,
+                    record.embedding,
+                    record.encoding,
+                    record.metadata,
+                    record.document,
+                    record.operation,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            got,
+            vec![
+                (
+                    "add-a".to_string(),
+                    Some(vec![1.0]),
+                    Some(chroma_types::ScalarEncoding::FLOAT32),
+                    Some(chroma_types::UpdateMetadata::new()),
+                    None,
+                    Operation::Add,
+                ),
+                (
+                    "add-b".to_string(),
+                    Some(vec![2.0]),
+                    Some(chroma_types::ScalarEncoding::FLOAT32),
+                    Some(chroma_types::UpdateMetadata::new()),
+                    None,
+                    Operation::Add,
+                ),
+                (
+                    "update".to_string(),
+                    Some(vec![3.0]),
+                    Some(chroma_types::ScalarEncoding::FLOAT32),
+                    Some(chroma_types::UpdateMetadata::new()),
+                    None,
+                    Operation::Update,
+                ),
+                (
+                    "delete".to_string(),
+                    None,
+                    None,
+                    None,
+                    None,
+                    Operation::Delete,
+                ),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn conditional_commit_disabled_returns_transactions_disabled() {
+        let registry = Registry::new();
+        let system = System::new();
+        let config = FrontendConfig::sqlite_in_memory();
+        let mut frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .unwrap();
+
+        let err = frontend
+            .conditional_commit(
+                ConditionalCommitRequest {
+                    buffered_writes: Vec::new(),
+                    observed_log_offset: None,
+                    read_ids: Vec::new(),
+                },
+                String::new(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, ConditionalCommitError::TransactionsDisabled));
+        assert_eq!(ErrorCodes::Unimplemented, err.code());
+    }
+
+    #[tokio::test]
+    async fn conditional_commit_unsupported_log_returns_transactions_not_supported() {
+        let registry = Registry::new();
+        let system = System::new();
+        let mut config = FrontendConfig::sqlite_in_memory();
+        config.enable_transactions = true;
+        let mut frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .unwrap();
+
+        let err = frontend
+            .conditional_commit(
+                ConditionalCommitRequest {
+                    buffered_writes: Vec::new(),
+                    observed_log_offset: None,
+                    read_ids: Vec::new(),
+                },
+                String::new(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            ConditionalCommitError::TransactionsNotSupported { ref implementation }
+                if implementation == "sqlite"
+        ));
+        assert_eq!(ErrorCodes::Unimplemented, err.code());
+    }
+
+    #[tokio::test]
+    async fn conditional_commit_non_allowlisted_tenant_returns_transactions_disabled() {
+        let registry = Registry::new();
+        let system = System::new();
+        let mut config = FrontendConfig::sqlite_in_memory();
+        config.tenants_with_transactions_enabled = vec!["enabled_tenant".to_string()];
+        let mut frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .unwrap();
+
+        let err = frontend
+            .conditional_commit(
+                conditional_commit_request_for_tenant("disabled_tenant"),
+                String::new(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, ConditionalCommitError::TransactionsDisabled));
+        assert_eq!(ErrorCodes::Unimplemented, err.code());
+    }
+
+    #[tokio::test]
+    async fn conditional_commit_allowlisted_tenant_checks_log_support() {
+        let registry = Registry::new();
+        let system = System::new();
+        let mut config = FrontendConfig::sqlite_in_memory();
+        config.tenants_with_transactions_enabled = vec!["enabled_tenant".to_string()];
+        let mut frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .unwrap();
+
+        let err = frontend
+            .conditional_commit(
+                conditional_commit_request_for_tenant("enabled_tenant"),
+                String::new(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            ConditionalCommitError::TransactionsNotSupported { ref implementation }
+                if implementation == "sqlite"
+        ));
+        assert_eq!(ErrorCodes::Unimplemented, err.code());
+    }
+
+    #[test]
+    fn occ_read_capture_plan_uses_exact_scouted_offset() {
+        let plan = ServiceBasedFrontend::get_read_plan(true, OccReadMode::Capture, Some(42))
+            .expect("capture should succeed with scouting enabled");
+        let token = OccReadToken::try_new(42).unwrap();
+        assert_eq!(plan.log_upper_bound_offset, 42);
+        assert_eq!(plan.response_read_token, Some(token));
+        assert_eq!(plan.stale_read_token, Some(token));
+    }
+
+    #[test]
+    fn occ_read_at_token_plan_uses_token_offset() {
+        let token = OccReadToken::try_new(42).unwrap();
+        let plan = ServiceBasedFrontend::get_read_plan(true, OccReadMode::AtToken(token), Some(99))
+            .expect("read at token should use the supplied token");
+        assert_eq!(plan.log_upper_bound_offset, 42);
+        assert_eq!(plan.response_read_token, None);
+        assert_eq!(plan.stale_read_token, Some(token));
+    }
+
+    #[test]
+    fn occ_read_capture_fails_when_scouting_disabled() {
+        let err = ServiceBasedFrontend::get_read_plan(false, OccReadMode::Capture, None)
+            .expect_err("capture should fail without scouting");
+        assert!(matches!(
+            err,
+            QueryError::StaleRead(StaleReadError::ReadTokenGenerationDisabled)
+        ));
+    }
+
+    #[test]
+    fn occ_read_snapshot_stale_when_compaction_reaches_token() {
+        let token = OccReadToken::try_new(42).unwrap();
+        let err = ServiceBasedFrontend::validate_occ_read_snapshot(42, token)
+            .expect_err("snapshot compacted through the token is stale");
+        assert!(matches!(
+            err,
+            QueryError::StaleRead(StaleReadError::VersionTooOld {
+                log_upper_bound_offset: 42,
+                collection_log_position: 42,
+            })
+        ));
+    }
+
+    #[test]
+    fn occ_read_purged_log_maps_to_stale_read_error() {
+        let token = OccReadToken::try_new(42).unwrap();
+        let err = ServiceBasedFrontend::map_occ_read_executor_error(
+            ExecutorError::Grpc(tonic::Status::not_found("Some entries have been purged")),
+            Some(token),
+        );
+        assert!(matches!(
+            err,
+            QueryError::StaleRead(StaleReadError::VersionPurged {
+                log_upper_bound_offset: 42,
+                ..
+            })
+        ));
+    }
 
     #[tokio::test]
     async fn test_default_sqlite_segments() {

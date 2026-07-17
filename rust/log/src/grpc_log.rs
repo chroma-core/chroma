@@ -16,7 +16,7 @@ use chroma_memberlist::memberlist_provider::{
 };
 use chroma_system::System;
 use chroma_types::chroma_proto::log_service_client::LogServiceClient;
-use chroma_types::chroma_proto::{self, GetAllCollectionInfoToCompactResponse};
+use chroma_types::chroma_proto::{self, GetAllCollectionInfoToCompactResponse, PushLogsCondition};
 use chroma_types::{
     Cmek, CollectionUuid, DatabaseName, ForkLogsResponse, LogRecord, OperationRecord,
     RecordConversionError, TopologyName,
@@ -29,14 +29,25 @@ use tower::ServiceBuilder;
 use tracing::Level;
 use uuid::Uuid;
 
-use crate::GarbageCollectError;
+use crate::{GarbageCollectError, PushLogsResult};
 
 /// The gRPC metadata key carrying the backoff reason.
 const BACKOFF_REASON_MD_KEY: &str = "backoff-reason";
+const PULL_LOGS_REASON_MD_KEY: &str = "pull-logs-reason";
+const PULL_LOGS_REASON_PURGED: &str = "purged";
 
 /// Extract the `backoff-reason` value from a `tonic::Status` metadata map.
 fn backoff_reason_from_status(status: &tonic::Status) -> Option<&str> {
     status.metadata().get(BACKOFF_REASON_MD_KEY)?.to_str().ok()
+}
+
+fn is_purged_pull_logs_status(status: &tonic::Status) -> bool {
+    status.code() == tonic::Code::NotFound
+        && status
+            .metadata()
+            .get(PULL_LOGS_REASON_MD_KEY)
+            .and_then(|value| value.to_str().ok())
+            == Some(PULL_LOGS_REASON_PURGED)
 }
 
 fn is_retryable_transport_status(status: &tonic::Status) -> bool {
@@ -65,6 +76,8 @@ fn is_retryable_transport_status(status: &tonic::Status) -> bool {
 pub enum GrpcPullLogsError {
     #[error("Please backoff exponentially and retry")]
     Backoff,
+    #[error("Requested logs have been purged")]
+    Purged,
     #[error("Failed to fetch: {0}")]
     FailedToPullLogs(#[from] tonic::Status),
     #[error("Failed to scout logs: {0}")]
@@ -79,6 +92,7 @@ impl ChromaError for GrpcPullLogsError {
     fn code(&self) -> ErrorCodes {
         match self {
             GrpcPullLogsError::Backoff => ErrorCodes::Unavailable,
+            GrpcPullLogsError::Purged => ErrorCodes::NotFound,
             GrpcPullLogsError::FailedToPullLogs(err) => err.code().into(),
             GrpcPullLogsError::FailedToScoutLogs(err) => err.code().into(),
             GrpcPullLogsError::ConversionError(_) => ErrorCodes::Internal,
@@ -456,6 +470,8 @@ impl GrpcLog {
             Err(e) => {
                 if e.code() == chroma_error::ErrorCodes::Unavailable.into() {
                     Err(GrpcPullLogsError::Backoff)
+                } else if is_purged_pull_logs_status(&e) {
+                    Err(GrpcPullLogsError::Purged)
                 } else if e.code() == chroma_error::ErrorCodes::NotFound.into() {
                     Err(GrpcPullLogsError::FailedToPullLogs(e))
                 } else {
@@ -472,7 +488,8 @@ impl GrpcLog {
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
         cmek: Option<Cmek>,
-    ) -> Result<(), GrpcPushLogsError> {
+        condition: Option<PushLogsCondition>,
+    ) -> Result<PushLogsResult, GrpcPushLogsError> {
         let num_records = records.len();
 
         // Convert Cmek to protobuf format
@@ -488,6 +505,7 @@ impl GrpcLog {
                     RecordConversionError,
                 >>()?,
             cmek: cmek_proto,
+            condition,
         };
 
         let resp = self
@@ -511,7 +529,10 @@ impl GrpcLog {
         } else {
             self.metrics.total_logs_pushed.add(num_records as u64, &[]);
 
-            Ok(())
+            Ok(PushLogsResult {
+                record_count: resp.record_count,
+                first_inserted_record_offset: resp.first_inserted_record_offset,
+            })
         }
     }
 
