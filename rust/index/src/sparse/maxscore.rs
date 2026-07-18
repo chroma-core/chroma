@@ -191,10 +191,29 @@ impl<'me> MaxScoreWriter<'me> {
             // with the directory it came from, so the suffix-rewrite arm
             // below always has both or neither.
             let old_state = match self.old_reader {
-                Some(ref reader) => reader
-                    .get_directory(encoded_dim)
-                    .await?
-                    .map(|(directory, part_count)| (reader, directory, part_count)),
+                Some(ref reader) => match reader.lookup_directory(encoded_dim).await? {
+                    DirectoryLookup::Found {
+                        directory,
+                        part_count,
+                    } => Some((reader, directory, part_count)),
+                    // Normal for a dimension first seen in this delta.
+                    DirectoryLookup::Absent => None,
+                    // Should never happen: the dimension has directory
+                    // parts on disk that we cannot decode. Fall through
+                    // to the fresh-dimension path (as before), which
+                    // rebuilds from deltas only — but alert, since old
+                    // posting blocks for this dimension may be left
+                    // stale on disk.
+                    DirectoryLookup::Undecodable => {
+                        tracing::error!(
+                            dimension = encoded_dim.as_str(),
+                            "commit found an undecodable sparse posting \
+                             directory for an existing dimension; rewriting \
+                             from deltas only, stale posting blocks may remain"
+                        );
+                        None
+                    }
+                },
                 None => None,
             };
 
@@ -449,6 +468,21 @@ pub use super::cursor::PostingCursor;
 
 // ── MaxScoreReader ───────────────────────────────────────────────
 
+/// Result of a per-dimension directory lookup, distinguishing "no
+/// directory on disk" from "directory on disk but undecodable" so the
+/// latter can alert. Internal: the public [`MaxScoreReader::get_directory`]
+/// collapses both non-`Found` cases to `None`.
+enum DirectoryLookup {
+    /// No directory parts on disk — the dimension has no postings.
+    Absent,
+    /// Directory parts exist on disk but could not be decoded.
+    Undecodable,
+    Found {
+        directory: Directory,
+        part_count: usize,
+    },
+}
+
 #[derive(Clone)]
 pub struct MaxScoreReader<'me> {
     posting_reader: BlockfileReader<'me, u32, SparsePostingBlock>,
@@ -496,20 +530,62 @@ impl<'me> MaxScoreReader<'me> {
         &self,
         encoded_dim: &str,
     ) -> Result<Option<(Directory, usize)>, MaxScoreError> {
+        Ok(match self.lookup_directory(encoded_dim).await? {
+            DirectoryLookup::Found {
+                directory,
+                part_count,
+            } => Some((directory, part_count)),
+            DirectoryLookup::Absent | DirectoryLookup::Undecodable => None,
+        })
+    }
+
+    /// Load the directory for a dimension, distinguishing a genuinely
+    /// absent directory (the dimension has no postings — normal for
+    /// unknown query terms) from one whose on-disk parts exist but
+    /// cannot be decoded (corruption — should never happen).
+    ///
+    /// Decode failures are logged here so a corrupt directory alerts
+    /// instead of silently vanishing the dimension from search, but
+    /// they are never propagated as errors: callers see `Undecodable`
+    /// and skip the dimension, same as before.
+    async fn lookup_directory(&self, encoded_dim: &str) -> Result<DirectoryLookup, MaxScoreError> {
         let dir_prefix = format!("{}{}", DIRECTORY_PREFIX, encoded_dim);
         let parts: Vec<(u32, SparsePostingBlock)> =
             self.posting_reader.get_prefix(&dir_prefix).await?.collect();
         if parts.is_empty() {
-            return Ok(None);
+            return Ok(DirectoryLookup::Absent);
         }
         let part_count = parts.len();
-        let dir_blocks: Vec<DirectoryBlock> = parts
-            .into_iter()
-            .filter_map(|(_, b)| DirectoryBlock::from_block(b).ok())
-            .collect();
-        Ok(Directory::from_parts(dir_blocks)
-            .ok()
-            .map(|d| (d, part_count)))
+        let mut dir_blocks: Vec<DirectoryBlock> = Vec::with_capacity(part_count);
+        for (seq, block) in parts {
+            match DirectoryBlock::from_block(block) {
+                Ok(dir_block) => dir_blocks.push(dir_block),
+                Err(_) => {
+                    tracing::error!(
+                        dimension = encoded_dim,
+                        part = seq,
+                        "corrupt sparse posting directory: stored part is not \
+                         a directory block; its entries are unavailable"
+                    );
+                }
+            }
+        }
+        match Directory::from_parts(dir_blocks) {
+            Ok(directory) => Ok(DirectoryLookup::Found {
+                directory,
+                part_count,
+            }),
+            Err(err) => {
+                tracing::error!(
+                    dimension = encoded_dim,
+                    part_count,
+                    error = %err,
+                    "corrupt sparse posting directory: parts exist on disk \
+                     but could not be reconstructed; dimension will be skipped"
+                );
+                Ok(DirectoryLookup::Undecodable)
+            }
+        }
     }
 
     /// Sum of `num_entries` across posting blocks `[0, end_seq)` for a
