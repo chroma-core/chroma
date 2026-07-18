@@ -1,5 +1,5 @@
 import { describe, expect, test } from "@jest/globals";
-import { validateMetadata } from "../src/utils";
+import { validateMetadata, validateWhereDocument } from "../src/utils";
 
 describe("validateMetadata", () => {
   test("accepts scalar values", () => {
@@ -86,5 +86,52 @@ describe("validateMetadata", () => {
         scores: [1, 2, 3],
       }),
     ).not.toThrow();
+  });
+});
+
+describe("validateWhereDocument", () => {
+  test("accepts document string operators", () => {
+    expect(() => validateWhereDocument({ $contains: "hello" })).not.toThrow();
+    expect(() =>
+      validateWhereDocument({ $not_contains: "hello" }),
+    ).not.toThrow();
+    expect(() => validateWhereDocument({ $regex: "hello.*" })).not.toThrow();
+    expect(() =>
+      validateWhereDocument({ $not_regex: "hello.*" }),
+    ).not.toThrow();
+  });
+
+  test("accepts nested logical operators", () => {
+    expect(() =>
+      validateWhereDocument({
+        $and: [{ $contains: "hello" }, { $not_contains: "goodbye" }],
+      }),
+    ).not.toThrow();
+  });
+
+  test("rejects non-string operands", () => {
+    expect(() => validateWhereDocument({ $contains: 2 } as any)).toThrow(
+      "Expected operand for $contains to be a non empty string",
+    );
+  });
+
+  test("rejects empty string operands", () => {
+    expect(() => validateWhereDocument({ $contains: "" })).toThrow(
+      "Expected operand for $contains to be a non empty string",
+    );
+  });
+
+  test("rejects unsupported document operators", () => {
+    expect(() => validateWhereDocument({ $matches: "hello" } as any)).toThrow(
+      "Expected 'whereDocument' operator to be one of $contains, $not_contains, $regex, $not_regex, $and, or $or",
+    );
+  });
+
+  test("rejects invalid nested operands", () => {
+    expect(() =>
+      validateWhereDocument({
+        $and: [{ $contains: "hello" }, { $contains: 2 } as any],
+      }),
+    ).toThrow("Expected operand for $contains to be a non empty string");
   });
 });

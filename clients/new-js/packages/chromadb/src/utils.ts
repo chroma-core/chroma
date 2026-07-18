@@ -664,8 +664,6 @@ export const validateWhereDocument = (whereDocument: WhereDocument) => {
     ![
       "$contains",
       "$not_contains",
-      "$matches",
-      "$not_matches",
       "$regex",
       "$not_regex",
       "$and",
@@ -673,7 +671,7 @@ export const validateWhereDocument = (whereDocument: WhereDocument) => {
     ].includes(operator)
   ) {
     throw new ChromaValueError(
-      `Expected 'whereDocument' operator to be one of $contains, $not_contains, $matches, $not_matches, $regex, $not_regex, $and, or $or, but got ${operator}`,
+      `Expected 'whereDocument' operator to be one of $contains, $not_contains, $regex, $not_regex, $and, or $or, but got ${operator}`,
     );
   }
 
@@ -691,15 +689,10 @@ export const validateWhereDocument = (whereDocument: WhereDocument) => {
     }
 
     operand.forEach((item) => validateWhereDocument(item));
+    return;
   }
 
-  if (
-    (operand === "$contains" ||
-      operand === "$not_contains" ||
-      operand === "$regex" ||
-      operand === "$not_regex") &&
-    (typeof (operator as any) !== "string" || operator.length === 0)
-  ) {
+  if (typeof operand !== "string" || operand.length === 0) {
     throw new ChromaValueError(
       `Expected operand for ${operator} to be a non empty string, but got ${operand}`,
     );

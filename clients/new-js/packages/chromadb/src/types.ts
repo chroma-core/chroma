@@ -157,8 +157,6 @@ export type Where =
 type WhereDocumentOperator =
   | "$contains"
   | "$not_contains"
-  | "$matches"
-  | "$not_matches"
   | "$regex"
   | "$not_regex"
   | LogicalOperator;
@@ -170,8 +168,6 @@ type WhereDocumentOperator =
 export type WhereDocument =
   | { $contains: string }
   | { $not_contains: string }
-  | { $matches: string }
-  | { $not_matches: string }
   | { $regex: string }
   | { $not_regex: string }
   | { $and: WhereDocument[] }
