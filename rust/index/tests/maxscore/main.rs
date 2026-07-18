@@ -20,4 +20,5 @@ mod ms_15_multi_window;
 mod ms_16_lazy_partial_load;
 mod ms_17_exact_count;
 mod ms_18_corrupt_directory;
+mod ms_19_proptest_invariants;
 mod ms_20_arrow_block_split;
