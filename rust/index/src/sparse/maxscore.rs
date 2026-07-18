@@ -60,7 +60,7 @@ impl MaxScoreFlusher {
 }
 
 /// Attach an exact posting count to a directory, if it fits in the
-/// version-1 header slot (u32).
+/// version-1 count extension (u32).
 ///
 /// A dimension holds at most one posting per u32 offset, so the count
 /// can only exceed `u32::MAX` in the degenerate case where all 2^32
@@ -77,7 +77,7 @@ fn with_exact_count(encoded_dim: &str, directory: Directory, count: u64) -> Dire
             tracing::warn!(
                 dim = encoded_dim,
                 count,
-                "exact posting count exceeds the u32 header slot; \
+                "exact posting count exceeds the u32 count field; \
                  leaving directory uncounted (readers will estimate)"
             );
             directory
@@ -1194,7 +1194,7 @@ mod tests {
 
     #[test]
     fn with_exact_count_overflow_leaves_uncounted() {
-        // A count that cannot fit in the version-1 header slot must not
+        // A count that cannot fit in the version-1 count field must not
         // be fabricated (e.g. saturated to u32::MAX, which the IDF
         // operator would treat as a real document frequency). The
         // directory stays uncounted so readers use the estimate path.
