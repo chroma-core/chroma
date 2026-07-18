@@ -475,24 +475,37 @@ impl SparseIndexReader {
                         prefix: ps.to_string(),
                         key: ks.clone(),
                     });
-                    if let Some((first_delim, _)) = forward.range(..=&start).next_back() {
-                        return forward
-                            .range(first_delim.clone()..)
-                            .take_while(|(delim, _)| match delim {
-                                SparseIndexDelimiter::Start => true,
-                                SparseIndexDelimiter::Key(k) => {
-                                    if k.prefix.as_str() != *ps {
-                                        return false;
+                    if let Some((first_delim, first_block)) = forward.range(..=&start).next_back() {
+                        // Always include the block that owns the range
+                        // start. A block boundary can split mid-prefix, so
+                        // this block's delimiter may carry an earlier
+                        // prefix (or be the Start sentinel) even though
+                        // its span extends past `start` and can contain
+                        // matching entries. Over-inclusion is safe:
+                        // consumers re-filter entries within each block.
+                        let mut result = vec![first_block.id];
+                        // Every delimiter after `first_delim` is > the
+                        // range start, so a mismatched prefix there means
+                        // a later prefix and the scan can stop.
+                        result.extend(
+                            forward
+                                .range((Bound::Excluded(first_delim), Bound::Unbounded))
+                                .take_while(|(delim, _)| match delim {
+                                    SparseIndexDelimiter::Start => true,
+                                    SparseIndexDelimiter::Key(k) => {
+                                        if k.prefix.as_str() != *ps {
+                                            return false;
+                                        }
+                                        match &key_end {
+                                            Bound::Included(ke) => k.key <= *ke,
+                                            Bound::Excluded(ke) => k.key < *ke,
+                                            Bound::Unbounded => true,
+                                        }
                                     }
-                                    match &key_end {
-                                        Bound::Included(ke) => k.key <= *ke,
-                                        Bound::Excluded(ke) => k.key < *ke,
-                                        Bound::Unbounded => true,
-                                    }
-                                }
-                            })
-                            .map(|(_, v)| v.id)
-                            .collect();
+                                })
+                                .map(|(_, v)| v.id),
+                        );
+                        return result;
                     }
                     return vec![];
                 }
@@ -1028,6 +1041,109 @@ mod tests {
         let blocks =
             reader.get_block_ids_range(""..="", (Bound::Excluded(100u32), Bound::Included(150u32)));
         assert_eq!(blocks, vec![block_id_0, block_id_1, block_id_2]);
+    }
+
+    #[test]
+    fn test_get_block_ids_range_prefix_split() {
+        // A block boundary can split mid-prefix, so the block owning a
+        // range start may begin at a delimiter carrying an EARLIER
+        // prefix. The fast path must still include that block.
+        //
+        // Layout:
+        //   block_0: [Start, ("a", 4))
+        //   block_1: [("a", 4), ("b", 5))   <- spans prefixes "a" and "b"
+        //   block_2: [("b", 5), ∞)
+        let block_id_0 = uuid::Uuid::new_v4();
+        let writer = SparseIndexWriter::new(block_id_0);
+        writer.set_count(block_id_0, 4).expect("set count");
+
+        let block_id_1 = uuid::Uuid::new_v4();
+        writer
+            .add_block(CompositeKey::new("a".to_string(), 4u32), block_id_1)
+            .expect("add block");
+        writer.set_count(block_id_1, 4).expect("set count");
+
+        let block_id_2 = uuid::Uuid::new_v4();
+        writer
+            .add_block(CompositeKey::new("b".to_string(), 5u32), block_id_2)
+            .expect("add block");
+        writer.set_count(block_id_2, 4).expect("set count");
+
+        let reader = writer.to_reader().expect("to reader");
+
+        // Range start ("b", 0) falls inside block_1, whose delimiter has
+        // prefix "a". The regression: this returned no blocks.
+        let blocks = reader.get_block_ids_range("b"..="b", 0u32..);
+        assert_eq!(blocks, vec![block_id_1, block_id_2]);
+
+        // Range start exactly on block_2's delimiter — block_1 is
+        // correctly excluded.
+        let blocks = reader.get_block_ids_range("b"..="b", 5u32..);
+        assert_eq!(blocks, vec![block_id_2]);
+
+        // Key range ends before block_2's first key — only the block
+        // spanning the prefix split.
+        let blocks = reader.get_block_ids_range("b"..="b", 0u32..=4u32);
+        assert_eq!(blocks, vec![block_id_1]);
+        let blocks = reader.get_block_ids_range("b"..="b", 0u32..5u32);
+        assert_eq!(blocks, vec![block_id_1]);
+
+        // Layout where prefix "b" lives entirely inside a block whose
+        // delimiter has an earlier prefix:
+        //   block_0: [Start, ("a", 2))
+        //   block_1: [("a", 2), ("c", 1))   <- all of "b" is in here
+        //   block_2: [("c", 1), ∞)
+        let block_id_0 = uuid::Uuid::new_v4();
+        let writer = SparseIndexWriter::new(block_id_0);
+        writer.set_count(block_id_0, 4).expect("set count");
+
+        let block_id_1 = uuid::Uuid::new_v4();
+        writer
+            .add_block(CompositeKey::new("a".to_string(), 2u32), block_id_1)
+            .expect("add block");
+        writer.set_count(block_id_1, 4).expect("set count");
+
+        let block_id_2 = uuid::Uuid::new_v4();
+        writer
+            .add_block(CompositeKey::new("c".to_string(), 1u32), block_id_2)
+            .expect("add block");
+        writer.set_count(block_id_2, 4).expect("set count");
+
+        let reader = writer.to_reader().expect("to reader");
+        let blocks = reader.get_block_ids_range("b"..="b", 0u32..);
+        assert_eq!(blocks, vec![block_id_1]);
+
+        // Layout with consecutive splits under the same earlier prefix —
+        // exactly one block needs the unconditional inclusion:
+        //   block_0: [Start, ("a", 1))
+        //   block_1: [("a", 1), ("a", 5))
+        //   block_2: [("a", 5), ("b", 7))   <- owns the range start
+        //   block_3: [("b", 7), ∞)
+        let block_id_0 = uuid::Uuid::new_v4();
+        let writer = SparseIndexWriter::new(block_id_0);
+        writer.set_count(block_id_0, 4).expect("set count");
+
+        let block_id_1 = uuid::Uuid::new_v4();
+        writer
+            .add_block(CompositeKey::new("a".to_string(), 1u32), block_id_1)
+            .expect("add block");
+        writer.set_count(block_id_1, 4).expect("set count");
+
+        let block_id_2 = uuid::Uuid::new_v4();
+        writer
+            .add_block(CompositeKey::new("a".to_string(), 5u32), block_id_2)
+            .expect("add block");
+        writer.set_count(block_id_2, 4).expect("set count");
+
+        let block_id_3 = uuid::Uuid::new_v4();
+        writer
+            .add_block(CompositeKey::new("b".to_string(), 7u32), block_id_3)
+            .expect("add block");
+        writer.set_count(block_id_3, 4).expect("set count");
+
+        let reader = writer.to_reader().expect("to reader");
+        let blocks = reader.get_block_ids_range("b"..="b", 0u32..);
+        assert_eq!(blocks, vec![block_id_2, block_id_3]);
     }
 
     #[test]
