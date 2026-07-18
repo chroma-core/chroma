@@ -705,16 +705,6 @@ const ENGINE_WINDOW_WIDTH: u32 = 4096;
 /// Offset space spanning several query windows.
 const PRUNING_NUM_WINDOWS: u32 = 5;
 const PRUNING_MAX_OFFSET: u32 = ENGINE_WINDOW_WIDTH * PRUNING_NUM_WINDOWS;
-/// Arrow block size for the pruning programs. Kept at the production
-/// size: shrinking it (e.g. to 4096, to push dimensions past
-/// MAX_VIEW_BLOCKS and exercise Lazy cursors) currently trips a
-/// pre-existing blockstore bug — `SparseIndex::get_block_ids_range`'s
-/// single-prefix fast path returns no blocks when the range's start key
-/// lands in an Arrow block whose start delimiter carries an earlier
-/// prefix, so the suffix-rewrite commit silently drops all prior
-/// postings for such dimensions. Revisit once that is fixed upstream.
-const PRUNING_ARROW_BLOCK_SIZE: usize = SPARSE_POSTING_BLOCK_SIZE_BYTES;
-
 #[derive(Debug, Clone)]
 struct PruningDimSpec {
     /// Commit 1: initial postings (distinct offsets).
@@ -733,6 +723,15 @@ struct PruningDimSpec {
 
 #[derive(Debug, Clone)]
 struct PruningProgram {
+    /// Arrow (blockfile) block size for the program's provider and
+    /// writers. Generated: the production size keeps each dimension
+    /// within a single Arrow block, while 4096 splits dimensions across
+    /// many Arrow blocks — pushing them past MAX_VIEW_BLOCKS (Lazy
+    /// cursors) and running suffix rewrites over ranges whose start key
+    /// lands mid-block next to an earlier prefix (the
+    /// `get_block_ids_range` prefix-split geometry fixed by #7460 and
+    /// pinned in ms_20).
+    arrow_block_size: usize,
     block_size: u32,
     dims: Vec<PruningDimSpec>,
 }
@@ -768,24 +767,29 @@ fn arb_pruning_dim() -> impl Strategy<Value = PruningDimSpec> {
 
 fn arb_pruning_program() -> impl Strategy<Value = PruningProgram> {
     (
+        prop_oneof![Just(4096usize), Just(SPARSE_POSTING_BLOCK_SIZE_BYTES)],
         32u32..=128u32,
         proptest::collection::vec(arb_pruning_dim(), 2..=4),
     )
-        .prop_map(|(block_size, dims)| PruningProgram { block_size, dims })
+        .prop_map(|(arrow_block_size, block_size, dims)| PruningProgram {
+            arrow_block_size,
+            block_size,
+            dims,
+        })
 }
 
 /// Open a fresh or forked writer against the pruning provider, using
-/// PRUNING_ARROW_BLOCK_SIZE for the Arrow blocks (single knob for the
-/// revisit noted on that constant; common::fork_writer hardcodes the
-/// production size).
+/// the program's Arrow block size (common::fork_writer hardcodes the
+/// production size, so pruning programs open writers directly).
 async fn pruning_writer(
     provider: &BlockfileProvider,
     fork_from: Option<&MaxScoreReader<'static>>,
     block_size: u32,
+    arrow_block_size: usize,
 ) -> MaxScoreWriter<'static> {
     let mut options = BlockfileWriterOptions::new("".to_string())
         .ordered_mutations()
-        .max_block_size_bytes(PRUNING_ARROW_BLOCK_SIZE);
+        .max_block_size_bytes(arrow_block_size);
     if let Some(reader) = fork_from {
         options = options.fork(reader.posting_id());
     }
@@ -841,7 +845,7 @@ async fn check_pruning_invariants(
 }
 
 async fn run_pruning_program(program: PruningProgram) {
-    let (_temp_dir, provider) = test_arrow_blockfile_provider(PRUNING_ARROW_BLOCK_SIZE);
+    let (_temp_dir, provider) = test_arrow_blockfile_provider(program.arrow_block_size);
     let mut oracle: BTreeMap<u32, BTreeMap<u32, f32>> = BTreeMap::new();
     let mut weight_counter = 0u32;
     let query: Vec<(u32, f32)> = program
@@ -852,7 +856,13 @@ async fn run_pruning_program(program: PruningProgram) {
         .collect();
 
     // Commit 1: base postings.
-    let writer = pruning_writer(&provider, None, program.block_size).await;
+    let writer = pruning_writer(
+        &provider,
+        None,
+        program.block_size,
+        program.arrow_block_size,
+    )
+    .await;
     for (dim, spec) in program.dims.iter().enumerate() {
         let dim = dim as u32;
         for &off in &spec.base {
@@ -868,7 +878,13 @@ async fn run_pruning_program(program: PruningProgram) {
     // Commit 2: overwrites, fresh appends, deletes (suffix rewrite at
     // multi-window scale). Sets are applied before deletes in both the
     // engine delta and the oracle, so colliding ops resolve identically.
-    let writer = pruning_writer(&provider, Some(&reader), program.block_size).await;
+    let writer = pruning_writer(
+        &provider,
+        Some(&reader),
+        program.block_size,
+        program.arrow_block_size,
+    )
+    .await;
     for (dim, spec) in program.dims.iter().enumerate() {
         let dim = dim as u32;
         let entries = oracle.entry(dim).or_default();
@@ -1014,6 +1030,7 @@ fn pinned_multi_window_threshold_pruning() {
     // honest — a deflated `window_upper_bound` makes the engine skip
     // the final window once the threshold is live and lose them.
     let program = PruningProgram {
+        arrow_block_size: SPARSE_POSTING_BLOCK_SIZE_BYTES,
         block_size: 32,
         dims: vec![
             PruningDimSpec {
@@ -1042,6 +1059,7 @@ fn pinned_budget_pruning_candidates() {
     // (filter_competitive). Commit 2 overwrites/deletes/appends to run
     // the same query over a suffix-rewritten multi-window layout.
     let program = PruningProgram {
+        arrow_block_size: SPARSE_POSTING_BLOCK_SIZE_BYTES,
         block_size: 64,
         dims: vec![
             PruningDimSpec {
