@@ -28,12 +28,12 @@ async fn recount(reader: &MaxScoreReader<'_>, dim: u32) -> usize {
 }
 
 /// Per-dimension posting blocks, each block a list of (offset, weight).
-type DimBlocks = Vec<Vec<(u32, f32)>>;
+pub(crate) type DimBlocks = Vec<Vec<(u32, f32)>>;
 
 /// Write a legacy (version-0) index directly through the blockfile:
 /// posting blocks with the given per-block entries, plus a directory
 /// carrying no posting count — the format written before counts existed.
-async fn build_legacy_index(
+pub(crate) async fn build_legacy_index(
     dims: Vec<(u32, DimBlocks)>,
 ) -> (
     tempfile::TempDir,
