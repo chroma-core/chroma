@@ -18,4 +18,5 @@ mod ms_13_cursor_lazy;
 mod ms_14_three_batch_pipeline;
 mod ms_15_multi_window;
 mod ms_16_lazy_partial_load;
+mod ms_17_exact_count;
 mod ms_20_arrow_block_split;
