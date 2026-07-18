@@ -440,6 +440,10 @@ impl SparseIndexReader {
         result_uuids
     }
 
+    /// The returned block ids may over-include — the block owning the range
+    /// start is always returned even when its delimiter carries an earlier
+    /// prefix — so callers MUST re-filter entries per block and must never
+    /// derive counts or rank arithmetic from the length of the returned list.
     pub(super) fn get_block_ids_range<'prefix, PrefixRange, K: Key, KeyRange>(
         &self,
         prefix_range: PrefixRange,
