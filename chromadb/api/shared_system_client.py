@@ -1,5 +1,6 @@
 from typing import ClassVar, Dict, Optional
 import logging
+import os
 import threading
 import uuid
 from chromadb.api import ServerAPI
@@ -60,10 +61,17 @@ class SharedSystemClient:
             "chromadb.api.rust.RustBindingsAPI",
         ]:
             if settings.is_persistent:
-                identifier = settings.persist_directory
+                # Normalize the persist directory so that different string forms
+                # of the same path (e.g. "./db1" vs "db1", trailing slashes,
+                # relative vs absolute) map to the same system identifier.
+                # Without this, creating a second PersistentClient with a
+                # different-looking but equivalent path raises KeyError from
+                # _create_system_if_not_exists (see issue #7253).
+                identifier = os.path.abspath(settings.persist_directory)
             else:
                 identifier = (
-                    "ephemeral"  # TODO: support pathing and  multiple ephemeral clients
+                    "ephemeral"  # TODO: support pathing and  multiple ephemeral
+                    # clients
                 )
         elif api_impl in [
             "chromadb.api.fastapi.FastAPI",
