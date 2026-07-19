@@ -113,6 +113,18 @@ logger = logging.getLogger(__name__)
 
 __settings = Settings()
 
+
+
+# Workaround to deal with Colab's old sqlite3 version
+def is_in_colab() -> bool:
+    try:
+        import google.colab  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 is_client = False
 try:
     from chromadb.is_thin_client import is_thin_client
