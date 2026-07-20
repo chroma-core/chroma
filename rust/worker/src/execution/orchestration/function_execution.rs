@@ -5,8 +5,7 @@ use chroma_types::{AttachedFunction, AttachedFunctionUuid, CollectionUuid, Datab
 use uuid::Uuid;
 
 use crate::execution::operators::{
-    fetch_log::FetchLogError,
-    materialize_logs::MaterializeLogOutput,
+    fetch_log::FetchLogError, materialize_logs::MaterializeLogOutput,
 };
 
 use super::{
