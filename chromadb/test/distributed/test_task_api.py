@@ -6,7 +6,6 @@ for automatically processing collections.
 """
 
 import functools
-import json
 import pytest
 import time
 import urllib.parse
@@ -85,11 +84,7 @@ def _wait_for_minio_count(
         body = _minio_get_object(parsed.netloc, key)
         if body is not None:
             last_body = body.decode("utf-8").strip()
-            payload = json.loads(last_body)
-            observed_count = (
-                payload.get("count") if isinstance(payload, dict) else payload
-            )
-            if observed_count == expected_count:
+            if last_body == str(expected_count):
                 return
         sleep(5)
 
@@ -266,10 +261,10 @@ def test_function_multiple_collections(basic_http_client: System) -> None:
     )
 
 
-def test_functions_allow_one_sync_and_one_async_per_collection(
+def test_functions_allow_one_sync_and_multiple_async_per_collection(
     basic_http_client: System,
 ) -> None:
-    """Test that a collection can have at most one sync and one async attached function"""
+    """Test that a collection can have one sync and multiple async attached functions"""
     client = ClientCreator.from_system(basic_http_client)
     client.reset()
 
@@ -291,7 +286,7 @@ def test_functions_allow_one_sync_and_one_async_per_collection(
     # A second sync function should fail because the sync slot is already occupied.
     with pytest.raises(
         ChromaError,
-        match="collection already has an attached function with the same execution mode: name=task_1, function=record_counter, output_collection=output_1",
+        match="collection already has a sync attached function: name=task_1, function=record_counter, output_collection=output_1",
     ):
         collection.attach_function(
             function=RECORD_COUNTER_FUNCTION,
@@ -311,19 +306,26 @@ def test_functions_allow_one_sync_and_one_async_per_collection(
     assert attached_async_fn is not None
     assert async_created is True
 
-    # A second async function should fail because the async slot is now occupied.
-    with pytest.raises(
-        ChromaError,
-        match="collection already has an attached function with the same execution mode: name=task_async, function=dummy_async, output_collection=output_async",
-    ):
-        collection.attach_function(
-            function=DUMMY_ASYNC_FUNCTION,
-            name="task_async_2",
-            output_collection="output_different",  # Different output collection
-            params=None,
-        )
+    # Additional async functions should be allowed up to the configured limit.
+    attached_async_fn_2, async_created_2 = collection.attach_function(
+        function=DUMMY_ASYNC_FUNCTION,
+        name="task_async_2",
+        output_collection="output_async_2",
+        params=None,
+    )
+    assert attached_async_fn_2 is not None
+    assert async_created_2 is True
 
-    # Detach both functions.
+    attached_async_fn_3, async_created_3 = collection.attach_function(
+        function=DUMMY_ASYNC_FUNCTION,
+        name="task_async_3",
+        output_collection="output_async_3",
+        params=None,
+    )
+    assert attached_async_fn_3 is not None
+    assert async_created_3 is True
+
+    # Detach all functions.
     assert (
         collection.detach_function(attached_fn1.name, delete_output_collection=True)
         is True
@@ -331,6 +333,18 @@ def test_functions_allow_one_sync_and_one_async_per_collection(
     assert (
         collection.detach_function(
             attached_async_fn.name, delete_output_collection=True
+        )
+        is True
+    )
+    assert (
+        collection.detach_function(
+            attached_async_fn_2.name, delete_output_collection=True
+        )
+        is True
+    )
+    assert (
+        collection.detach_function(
+            attached_async_fn_3.name, delete_output_collection=True
         )
         is True
     )
@@ -742,6 +756,59 @@ def test_count_to_file_async_attached_late_counts_existing_and_new_inputs(
     )
 
     _wait_for_minio_count(s3_path, 600)
+
+
+def test_multiple_count_to_file_async_functions_can_share_one_input_collection(
+    basic_http_client: System,
+) -> None:
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    collection = client.create_collection(name="multi_async_count_input_collection")
+    collection.add(ids=["seed"], documents=["seed document"])
+
+    file_key_1 = f"task-api/multi-async-count-1-{uuid.uuid4()}.txt"
+    file_key_2 = f"task-api/multi-async-count-2-{uuid.uuid4()}.txt"
+    s3_path_1 = f"s3://{MINIO_BUCKET}/{file_key_1}"
+    s3_path_2 = f"s3://{MINIO_BUCKET}/{file_key_2}"
+
+    attached_fn_1, created_1 = collection.attach_function(
+        name="multi_async_counter_1",
+        function=COUNT_TO_FILE_ASYNC_FUNCTION,
+        output_collection="multi_async_counter_output_1",
+        params={"s3_path": s3_path_1},
+    )
+    assert attached_fn_1 is not None
+    assert created_1 is True
+
+    attached_fn_2, created_2 = collection.attach_function(
+        name="multi_async_counter_2",
+        function=COUNT_TO_FILE_ASYNC_FUNCTION,
+        output_collection="multi_async_counter_output_2",
+        params={"s3_path": s3_path_2},
+    )
+    assert attached_fn_2 is not None
+    assert created_2 is True
+
+    initial_version = get_collection_version(client, collection.name)
+
+    collection.add(
+        ids=[f"doc_{i}" for i in range(300)],
+        documents=["test document"] * 300,
+    )
+
+    wait_for_version_increase(client, collection.name, initial_version)
+    _wait_for_minio_count(s3_path_1, 301)
+    _wait_for_minio_count(s3_path_2, 301)
+
+    assert (
+        collection.detach_function(attached_fn_1.name, delete_output_collection=True)
+        is True
+    )
+    assert (
+        collection.detach_function(attached_fn_2.name, delete_output_collection=True)
+        is True
+    )
 
 
 def test_sync_and_async_count_functions_can_share_one_input_collection(

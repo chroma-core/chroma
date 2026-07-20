@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -486,11 +487,11 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_AllowsAsyncAndSyncFunct
 	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), matchStringPtr(inputCollectionID), (*string)(nil), []uuid.UUID(nil), false).
 		Return([]*dbmodel.AttachedFunction{existingAsyncAttachedFunction}, nil).Twice()
 
-	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Times(4)
+	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Times(5)
 	suite.mockFunctionDb.On("GetByName", "record_counter").
 		Return(&dbmodel.Function{ID: newSyncFunctionID, Name: "record_counter", IsAsync: false}, nil).Once()
 	suite.mockFunctionDb.On("GetByIDs", []uuid.UUID{existingAsyncFunctionID}).
-		Return([]*dbmodel.Function{{ID: existingAsyncFunctionID, Name: "dummy_async", IsAsync: true}}, nil).Twice()
+		Return([]*dbmodel.Function{{ID: existingAsyncFunctionID, Name: "dummy_async", IsAsync: true}}, nil).Times(3)
 	suite.mockFunctionDb.On("GetByID", newSyncFunctionID).
 		Return(&dbmodel.Function{ID: newSyncFunctionID, Name: "record_counter", IsAsync: false}, nil).Once()
 
@@ -773,8 +774,8 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow() {
 	suite.mockMetaDomain.AssertExpectations(suite.T())
 }
 
-// TestAttachFunction_IdempotentRequest_ParameterMismatch tests when a ready attached
-// function already exists on the same collection with the same execution mode but
+// TestAttachFunction_IdempotentRequest_ParameterMismatch tests when a ready sync attached
+// function already exists on the same collection but
 // different parameters:
 // - Attached function already exists with different function_name
 // - Should return AlreadyExists error with descriptive message
@@ -848,7 +849,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 				Return([]*dbmodel.AttachedFunction{existingAttachedFunction}, nil).Once()
 
 			_ = txFunc(txCtx)
-		}).Return(status.Errorf(codes.AlreadyExists, "collection already has an attached function with the same execution mode: name=%s, function=%s, output_collection=%s", attachedFunctionName, existingOperatorName, outputCollectionName)).Once()
+		}).Return(status.Errorf(codes.AlreadyExists, "collection already has a sync attached function: name=%s, function=%s, output_collection=%s", attachedFunctionName, existingOperatorName, outputCollectionName)).Once()
 
 	// Execute AttachFunction
 	response, err := suite.coordinator.AttachFunction(ctx, request)
@@ -856,7 +857,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 	// Assertions - should fail with AlreadyExists error
 	suite.Error(err)
 	suite.Nil(response)
-	suite.Contains(err.Error(), "collection already has an attached function with the same execution mode")
+	suite.Contains(err.Error(), "collection already has a sync attached function")
 	suite.Contains(err.Error(), existingOperatorName)
 	suite.Contains(err.Error(), outputCollectionName)
 
@@ -927,13 +928,13 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_NotReadySameModeBlocksD
 				Return([]*dbmodel.AttachedFunction{existingAttachedFunction}, nil).Once()
 
 			_ = txFunc(txCtx)
-		}).Return(status.Errorf(codes.AlreadyExists, "collection already has an attached function with the same execution mode: name=%s, function=%s, output_collection=%s", attachedFunctionName, existingFunctionName, outputCollectionName)).Once()
+		}).Return(status.Errorf(codes.AlreadyExists, "collection already has a sync attached function: name=%s, function=%s, output_collection=%s", attachedFunctionName, existingFunctionName, outputCollectionName)).Once()
 
 	response, err := suite.coordinator.AttachFunction(ctx, request)
 
 	suite.Error(err)
 	suite.Nil(response)
-	suite.Contains(err.Error(), "collection already has an attached function with the same execution mode")
+	suite.Contains(err.Error(), "collection already has a sync attached function")
 	suite.Contains(err.Error(), existingFunctionName)
 	suite.Contains(err.Error(), outputCollectionName)
 
@@ -1158,4 +1159,96 @@ func TestGetAttachedFunctionsToGc_TimestampConsistency(t *testing.T) {
 
 	mockMetaDomain.AssertExpectations(t)
 	mockAttachedFunctionDb.AssertExpectations(t)
+}
+
+func TestAttachedFunctionLimitError_AllowsMultipleAsyncFunctionsBelowLimit(t *testing.T) {
+	requestedFunction := &dbmodel.Function{ID: uuid.New(), Name: "dummy_async", IsAsync: true}
+	existingFunctionsByID := make(map[uuid.UUID]*dbmodel.Function)
+	existingAttachedFunctions := make([]*dbmodel.AttachedFunction, 0, maxAsyncAttachedFunctionsPerCollection-1)
+
+	for i := 0; i < maxAsyncAttachedFunctionsPerCollection-1; i++ {
+		functionID := uuid.New()
+		existingFunctionsByID[functionID] = &dbmodel.Function{
+			ID:      functionID,
+			Name:    "dummy_async",
+			IsAsync: true,
+		}
+		existingAttachedFunctions = append(existingAttachedFunctions, &dbmodel.AttachedFunction{
+			ID:                   uuid.New(),
+			Name:                 "async-fn",
+			InputCollectionID:    "input-collection-id",
+			OutputCollectionName: "output-collection",
+			FunctionID:           functionID,
+		})
+	}
+
+	err := attachedFunctionLimitError(requestedFunction, existingAttachedFunctions, existingFunctionsByID)
+	if err != nil {
+		t.Fatalf("expected async attached function below limit to be allowed, got %v", err)
+	}
+}
+
+func TestAttachedFunctionLimitError_RejectsAsyncFunctionsAtLimit(t *testing.T) {
+	requestedFunction := &dbmodel.Function{ID: uuid.New(), Name: "dummy_async", IsAsync: true}
+	existingFunctionsByID := make(map[uuid.UUID]*dbmodel.Function)
+	existingAttachedFunctions := make([]*dbmodel.AttachedFunction, 0, maxAsyncAttachedFunctionsPerCollection)
+
+	for i := 0; i < maxAsyncAttachedFunctionsPerCollection; i++ {
+		functionID := uuid.New()
+		existingFunctionsByID[functionID] = &dbmodel.Function{
+			ID:      functionID,
+			Name:    "dummy_async",
+			IsAsync: true,
+		}
+		existingAttachedFunctions = append(existingAttachedFunctions, &dbmodel.AttachedFunction{
+			ID:                   uuid.New(),
+			Name:                 "async-fn",
+			InputCollectionID:    "input-collection-id",
+			OutputCollectionName: "output-collection",
+			FunctionID:           functionID,
+		})
+	}
+
+	err := attachedFunctionLimitError(requestedFunction, existingAttachedFunctions, existingFunctionsByID)
+	if err == nil {
+		t.Fatal("expected async attached function at limit to be rejected")
+	}
+	if status.Code(err) != codes.AlreadyExists {
+		t.Fatalf("expected AlreadyExists, got %v", status.Code(err))
+	}
+	if !strings.Contains(err.Error(), "maximum number of async attached functions") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAttachedFunctionLimitError_RejectsSecondSyncFunction(t *testing.T) {
+	requestedFunction := &dbmodel.Function{ID: uuid.New(), Name: "record_counter", IsAsync: false}
+	existingFunctionID := uuid.New()
+	existingFunctionsByID := map[uuid.UUID]*dbmodel.Function{
+		existingFunctionID: {
+			ID:      existingFunctionID,
+			Name:    "record_counter",
+			IsAsync: false,
+		},
+	}
+	existingAttachedFunctions := []*dbmodel.AttachedFunction{
+		{
+			ID:                   uuid.New(),
+			Name:                 "sync-fn",
+			InputCollectionID:    "input-collection-id",
+			OutputCollectionName: "output-collection",
+			FunctionID:           existingFunctionID,
+		},
+	}
+
+	err := attachedFunctionLimitError(requestedFunction, existingAttachedFunctions, existingFunctionsByID)
+	if err == nil {
+		t.Fatal("expected second sync attached function to be rejected")
+	}
+	if status.Code(err) != codes.AlreadyExists {
+		t.Fatalf("expected AlreadyExists, got %v", status.Code(err))
+	}
+	if !strings.Contains(err.Error(), "collection already has a sync attached function") {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
