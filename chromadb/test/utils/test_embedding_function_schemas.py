@@ -652,3 +652,25 @@ class TestEmbeddingFunctionSchemas:
 
             # Validate the actual config using the embedding function's validate_config method
             ef_class.validate_config(config)
+
+
+class TestQwenEmbeddingFunctionTaskNone:
+    """Regression tests for #7450: build_from_config should accept task=None."""
+
+    def test_build_from_config_with_task_none(self) -> None:
+        """get_config -> build_from_config round-trip should work when task=None."""
+        import os
+
+        os.environ.setdefault("CHROMA_API_KEY", "dummy")
+        from chromadb.utils.embedding_functions.chroma_cloud_qwen_embedding_function import (
+            ChromaCloudQwenEmbeddingFunction as EF,
+            ChromaCloudQwenEmbeddingModel as M,
+        )
+
+        ef = EF(model=M.QWEN3_EMBEDDING_0p6B, task=None)
+        cfg = ef.get_config()
+        # validate_config should accept task=None (schema permits null)
+        EF.validate_config(cfg)
+        # build_from_config should NOT raise AssertionError for task=None
+        rebuilt = EF.build_from_config(cfg)
+        assert rebuilt is not None
