@@ -1,23 +1,29 @@
-use std::cell::OnceCell;
-
 use chroma_error::source_chain_contains;
 use chroma_log::grpc_log::GrpcPullLogsError;
 use chroma_system::System;
 use chroma_types::{AttachedFunction, AttachedFunctionUuid, CollectionUuid, DatabaseName};
 use uuid::Uuid;
 
-use crate::execution::operators::materialize_logs::MaterializeLogOutput;
+use crate::execution::operators::{
+    fetch_log::FetchLogError, materialize_logs::MaterializeLogOutput,
+};
 
 use super::{
     compact::{CollectionCompactInfo, CompactionContext, CompactionError, CompactionResponse},
     log_fetch_orchestrator::{LogFetchOrchestratorError, LogFetchOrchestratorResponse},
 };
-use crate::execution::operators::fetch_log::FetchLogError;
+
+#[derive(Debug, Clone)]
+pub struct FunctionExecutionInput {
+    pub collection_id: CollectionUuid,
+    pub queue_compaction_offset: i64,
+}
 
 #[derive(Debug, Clone)]
 pub struct FunctionInputCollectionData {
     pub collection_info: CollectionCompactInfo,
     pub materialized_log_data: Vec<MaterializeLogOutput>,
+    pub resolved_attached_functions: Vec<AttachedFunction>,
 }
 
 #[derive(Debug, Clone)]
@@ -40,20 +46,15 @@ pub struct FunctionExecutionContext {
     compaction_context: CompactionContext,
 }
 
+fn has_reached_queue_frontier(completion_offset: i64, queue_compaction_offset: i64) -> bool {
+    completion_offset >= queue_compaction_offset
+}
+
 impl FunctionExecutionContext {
     pub fn new(compaction_context: &CompactionContext) -> Self {
         Self {
             compaction_context: compaction_context.clone(),
         }
-    }
-
-    fn build_log_fetch_context(
-        mut compaction_context: CompactionContext,
-        log_start_offset: i64,
-    ) -> CompactionContext {
-        compaction_context.collection_info = OnceCell::new();
-        compaction_context.log_start_offset = Some(log_start_offset);
-        compaction_context
     }
 
     async fn fetch_function_input_logs(
@@ -62,6 +63,7 @@ impl FunctionExecutionContext {
         database_name: chroma_types::DatabaseName,
         system: System,
         use_compacted_logs: bool,
+        attached_function_id: AttachedFunctionUuid,
     ) -> Result<LogFetchOrchestratorResponse, CompactionError> {
         Ok(log_fetch_context
             .run_get_logs(
@@ -69,76 +71,96 @@ impl FunctionExecutionContext {
                 database_name.clone(),
                 system.clone(),
                 use_compacted_logs,
+                Some(attached_function_id),
             )
             .await?)
+    }
+
+    async fn fetch_backfilled_function_input_collection_data(
+        log_fetch_context: CompactionContext,
+        collection_id: CollectionUuid,
+        attached_function_id: AttachedFunctionUuid,
+        database_name: DatabaseName,
+        system: System,
+    ) -> Result<FunctionInputCollectionData, CompactionError> {
+        match Self::fetch_function_input_logs(
+            log_fetch_context,
+            collection_id,
+            database_name,
+            system,
+            true,
+            attached_function_id,
+        )
+        .await?
+        {
+            LogFetchOrchestratorResponse::Success(success) => Ok(FunctionInputCollectionData {
+                collection_info: success.collection_info,
+                materialized_log_data: success.materialized,
+                resolved_attached_functions: success.resolved_attached_functions,
+            }),
+            LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(_)
+            | LogFetchOrchestratorResponse::RequireFunctionBackfill(_) => {
+                Err(CompactionError::InvariantViolation(
+                    "Function execution backfill fetch should only return success",
+                ))
+            }
+        }
     }
 
     async fn fetch_function_input_collection_data(
         compaction_context: CompactionContext,
         collection_id: CollectionUuid,
-        completion_offset: i64,
+        attached_function_id: AttachedFunctionUuid,
         database_name: DatabaseName,
         system: System,
     ) -> Result<FunctionInputCollectionData, CompactionError> {
-        let log_fetch_context =
-            Self::build_log_fetch_context(compaction_context, completion_offset);
+        let log_fetch_context = compaction_context;
         let result = match Self::fetch_function_input_logs(
             log_fetch_context.clone(),
             collection_id,
             database_name.clone(),
             system.clone(),
             false,
+            attached_function_id,
         )
         .await
         {
             Ok(result) => result,
             Err(err) if Self::should_backfill_on_fetch_error(&err) => {
-                match Self::fetch_function_input_logs(
+                return Box::pin(Self::fetch_backfilled_function_input_collection_data(
                     log_fetch_context,
                     collection_id,
+                    attached_function_id,
                     database_name,
                     system,
-                    true,
-                )
-                .await?
-                {
-                    LogFetchOrchestratorResponse::Success(success) => {
-                        return Ok(FunctionInputCollectionData {
-                            collection_info: success.collection_info,
-                            materialized_log_data: success.materialized,
-                        });
-                    }
-                    LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(_)
-                    | LogFetchOrchestratorResponse::RequireFunctionBackfill(_) => {
-                        return Err(CompactionError::InvariantViolation(
-                            "Function execution backfill fetch should only return success",
-                        ));
-                    }
-                }
+                ))
+                .await;
             }
             Err(err) => return Err(err),
         };
 
-        let (materialized_log_data, collection_info) = match result {
-            LogFetchOrchestratorResponse::Success(success) => {
-                (success.materialized, success.collection_info)
-            }
-            LogFetchOrchestratorResponse::RequireFunctionBackfill(backfill) => {
-                // BackfillFn forces compaction and schedules async work. Fn-consumers
-                // only backfill when their incremental log offset has been purged.
-                (backfill.materialized, backfill.collection_info)
+        match result {
+            LogFetchOrchestratorResponse::Success(success) => Ok(FunctionInputCollectionData {
+                collection_info: success.collection_info,
+                materialized_log_data: success.materialized,
+                resolved_attached_functions: success.resolved_attached_functions,
+            }),
+            LogFetchOrchestratorResponse::RequireFunctionBackfill(_) => {
+                Box::pin(Self::fetch_backfilled_function_input_collection_data(
+                    log_fetch_context,
+                    collection_id,
+                    attached_function_id,
+                    database_name,
+                    system,
+                ))
+                .await
             }
             LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(_) => {
-                return Err(CompactionError::InvariantViolation(
+                Err(CompactionError::InvariantViolation(
                     "Function execution does not support compaction offset repair",
-                ));
+                ))
             }
-        };
-
-        Ok(FunctionInputCollectionData {
-            collection_info,
-            materialized_log_data,
-        })
+        }
     }
 
     fn should_backfill_on_fetch_error(error: &CompactionError) -> bool {
@@ -157,9 +179,9 @@ impl FunctionExecutionContext {
 
     async fn resolve_shared_input_database_name(
         compaction_context: CompactionContext,
-        fn_inputs: &[(CollectionUuid, i64)],
+        fn_inputs: &[FunctionExecutionInput],
     ) -> Result<DatabaseName, CompactionError> {
-        let Some((first_input_collection_id, _)) = fn_inputs.first() else {
+        let Some(first_input) = fn_inputs.first() else {
             return Err(CompactionError::InvariantViolation(
                 "Function execution requires at least one input collection",
             ));
@@ -170,7 +192,7 @@ impl FunctionExecutionContext {
         // do not carry the database name. Pass the database name from the work queue
         // service and remove this unscoped lookup once that metadata is available.
         let collection_info = sysdb
-            .get_collection_with_segments(None, *first_input_collection_id)
+            .get_collection_with_segments(None, first_input.collection_id)
             .await
             .map_err(|_| {
                 CompactionError::InvariantViolation(
@@ -187,7 +209,7 @@ impl FunctionExecutionContext {
     pub async fn run(
         self,
         attached_function_id: AttachedFunctionUuid,
-        fn_inputs: Vec<(CollectionUuid, i64)>,
+        fn_inputs: Vec<FunctionExecutionInput>,
         system: System,
     ) -> Result<CompactionResponse, CompactionError> {
         if fn_inputs.is_empty() {
@@ -200,17 +222,42 @@ impl FunctionExecutionContext {
         let shared_database_name =
             Self::resolve_shared_input_database_name(base_context.clone(), &fn_inputs).await?;
         let mut input_collection_data = Vec::with_capacity(fn_inputs.len());
-        for (collection_id, completion_offset) in fn_inputs {
-            input_collection_data.push(
-                Box::pin(Self::fetch_function_input_collection_data(
-                    base_context.clone(),
-                    collection_id,
+        for input in fn_inputs {
+            let collection_data = Box::pin(Self::fetch_function_input_collection_data(
+                base_context.clone(),
+                input.collection_id,
+                attached_function_id,
+                shared_database_name.clone(),
+                system.clone(),
+            ))
+            .await?;
+
+            let completion_offset = collection_data
+                .resolved_attached_functions
+                .iter()
+                .find(|attached_function| attached_function.id == attached_function_id)
+                .map(|attached_function| attached_function.completion_offset as i64)
+                .ok_or(CompactionError::InvariantViolation(
+                    "Missing resolved attached function state for fn-consumer input collection",
+                ))?;
+
+            if has_reached_queue_frontier(completion_offset, input.queue_compaction_offset) {
+                tracing::info!(
+                    collection_id = %input.collection_id,
                     completion_offset,
-                    shared_database_name.clone(),
-                    system.clone(),
-                ))
-                .await?,
-            );
+                    queue_compaction_offset = input.queue_compaction_offset,
+                    "Skipping stale fn-consumer work item because attached function is already at or beyond the queued frontier"
+                );
+                continue;
+            }
+
+            input_collection_data.push(collection_data);
+        }
+
+        if input_collection_data.is_empty() {
+            return Ok(CompactionResponse::Success {
+                job_id: attached_function_id.into(),
+            });
         }
 
         let mut compaction_context = base_context;
@@ -241,7 +288,7 @@ impl FunctionExecutionContext {
 
 #[cfg(test)]
 mod tests {
-    use super::FunctionExecutionContext;
+    use super::{has_reached_queue_frontier, FunctionExecutionContext};
     use crate::execution::{
         operators::fetch_log::FetchLogError,
         orchestration::{
@@ -260,6 +307,11 @@ mod tests {
         assert!(FunctionExecutionContext::should_backfill_on_fetch_error(
             &err
         ));
+    }
+
+    #[test]
+    fn zero_queue_frontier_treats_equality_as_complete() {
+        assert!(has_reached_queue_frontier(0, 0));
     }
 
     #[test]
