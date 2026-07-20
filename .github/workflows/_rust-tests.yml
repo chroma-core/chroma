@@ -75,12 +75,17 @@ jobs:
             platform: blacksmith-16vcpu-ubuntu-2404
             partition_method: hash
             partition: 1
-            partition_total: 2
+            partition_total: 3
           - nextest_profile: ci_k8s_integration
             platform: blacksmith-16vcpu-ubuntu-2404
             partition_method: hash
             partition: 2
-            partition_total: 2
+            partition_total: 3
+          - nextest_profile: ci_k8s_integration
+            platform: blacksmith-16vcpu-ubuntu-2404
+            partition_method: hash
+            partition: 3
+            partition_total: 3
           - nextest_profile: ci_k8s_integration_slow
             platform: blacksmith-16vcpu-ubuntu-2404
             partition_method: count
