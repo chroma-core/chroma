@@ -12,12 +12,13 @@ use super::model::{ReasoningEntry, ReasoningTrajectoryFile, WriteState};
 
 /// Request body for appending complete entries to an open trajectory.
 ///
-/// `entries` uses the exact [`ReasoningEntry`] JSON shape. It must be
-/// non-empty; callers with no displayable reasoning entry to append should skip
-/// the request.
+/// `entries` uses the exact [`ReasoningEntry`] JSON shape, not raw
+/// action/observation entries. It must be non-empty; callers with no
+/// displayable reasoning entry to append should skip the request.
 #[derive(Debug, Deserialize)]
 pub struct AppendTrajectoryEntriesRequest {
-    /// Entry count the caller expects the stored open trajectory to have.
+    /// Pruned reasoning-entry count the caller expects the stored open
+    /// trajectory to have.
     pub expected_entry_index: usize,
     /// Pruned reasoning entries to append atomically.
     pub entries: Vec<ReasoningEntry>,
@@ -30,7 +31,7 @@ pub struct TrajectoryWriteResponse {
     pub trajectory_id: Uuid,
     /// Durable trajectory storage state after the write.
     pub write_state: WriteState,
-    /// Number of committed trajectory entries after the write.
+    /// Number of committed pruned reasoning entries after the write.
     pub entry_count: usize,
     /// Number of Chroma storage records committed by this transaction.
     pub record_count: usize,

@@ -299,6 +299,42 @@ fn generated_json_deserializes_to_reasoning_projection() -> TestResult {
 }
 
 #[test]
+/// Verifies empty raw observations are projection inputs, not stored entries.
+fn generated_json_drops_empty_initial_observation() -> TestResult {
+    let id = Uuid::parse_str("00000000-0000-0000-0000-000000000023")?;
+    let file: ReasoningTrajectoryFile = serde_json::from_value(json!({
+        "trajectory": {
+            "id": id,
+            "actions_and_observations": [
+                {
+                    "observations": [],
+                    "sources": [],
+                    "tool_metadata": []
+                },
+                {
+                    "tools": [],
+                    "params": [],
+                    "sources": [],
+                    "reasoning": "  kept  "
+                }
+            ]
+        }
+    }))?;
+
+    assert_eq!(
+        file,
+        ReasoningTrajectoryFile {
+            citations: None,
+            trajectory: ReasoningTrajectory {
+                id,
+                entries: vec![reasoning_entry(Some("kept".to_string()), &[])],
+            },
+        }
+    );
+    Ok(())
+}
+
+#[test]
 /// Verifies the pruned type can deserialize its own serialized JSON.
 fn reasoning_file_deserializes_from_pruned_json() -> TestResult {
     let file = sample_file(Uuid::parse_str("00000000-0000-0000-0000-000000000021")?);
