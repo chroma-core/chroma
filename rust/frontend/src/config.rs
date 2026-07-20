@@ -224,7 +224,7 @@ impl FrontendServerConfig {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::FrontendServerConfig;
+    use crate::{config::FrontendServerConfig, executor::config::ExecutorConfig};
     use chroma_cache::CacheConfig;
 
     #[test]
@@ -265,6 +265,23 @@ mod tests {
             config.frontend.tenants_with_transactions_enabled,
             vec!["default_tenant"]
         );
+        match &config.frontend.executor {
+            ExecutorConfig::Distributed(distributed_config) => {
+                assert_eq!(
+                    distributed_config.grpc.max_encoding_message_size,
+                    40 * 1024 * 1024
+                );
+                assert_eq!(
+                    distributed_config.grpc.max_decoding_message_size,
+                    40 * 1024 * 1024
+                );
+                assert_eq!(distributed_config.grpc.max_concurrent_streams, 100);
+                assert!(distributed_config
+                    .max_query_service_response_size_bytes
+                    .is_none());
+            }
+            ExecutorConfig::Local(_) => panic!("Expected distributed executor config"),
+        }
     }
 
     #[test]
