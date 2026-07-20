@@ -82,7 +82,7 @@ impl FunctionExecutionContext {
     }
 
     async fn finish_work_items(
-        &self,
+        work_queue_client: Option<crate::work_queue::work_queue_client::WorkQueueClient>,
         attached_function_id: AttachedFunctionUuid,
         work_items: Vec<FinishAsyncWorkItem>,
     ) -> Result<(), CompactionError> {
@@ -90,7 +90,7 @@ impl FunctionExecutionContext {
             return Ok(());
         }
 
-        let Some(work_queue_client) = self.compaction_context.work_queue_client.clone() else {
+        let Some(work_queue_client) = work_queue_client else {
             return Err(CompactionError::InvariantViolation(
                 "Function consumer async cleanup requires work queue client",
             ));
@@ -286,12 +286,17 @@ impl FunctionExecutionContext {
             ));
         }
 
-        let base_context = self.compaction_context;
+        let base_context = self.compaction_context.clone();
+        let work_queue_client = base_context.work_queue_client.clone();
         let (shared_database_name, mut skipped_work_items) =
             Self::resolve_shared_input_database_name(base_context.clone(), &fn_inputs).await?;
         let Some(shared_database_name) = shared_database_name else {
-            self.finish_work_items(attached_function_id, skipped_work_items)
-                .await?;
+            Self::finish_work_items(
+                work_queue_client.clone(),
+                attached_function_id,
+                skipped_work_items,
+            )
+            .await?;
             return Ok(CompactionResponse::Success {
                 job_id: attached_function_id.into(),
             });
@@ -357,7 +362,7 @@ impl FunctionExecutionContext {
             input_collection_data.push(collection_data);
         }
 
-        self.finish_work_items(attached_function_id, skipped_work_items)
+        Self::finish_work_items(work_queue_client, attached_function_id, skipped_work_items)
             .await?;
 
         if input_collection_data.is_empty() {
