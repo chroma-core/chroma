@@ -11,6 +11,7 @@ use chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationRequest;
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
 use std::time::Duration;
 use tokio::sync::oneshot;
+use tonic::Code;
 
 // Message types
 #[derive(Debug)]
@@ -232,11 +233,25 @@ impl WorkQueueManager {
             new_completion_offset: completion_offset as u64,
         };
 
-        self.sysdb
+        match self
+            .sysdb
             .try_finish_async_attached_function_invocation(request)
             .await
-            .map_err(|e| WorkQueueError::TryFinishFailed(e.message().to_string()))?;
-        Ok(())
+        {
+            Ok(_) => Ok(()),
+            Err(status) if status.code() == Code::NotFound => {
+                tracing::info!(
+                    fn_id = %fn_id,
+                    input_coll_id = %input_coll_id,
+                    completion_offset,
+                    "Ignoring missing async invocation during finish because work queue cleanup is idempotent"
+                );
+                Ok(())
+            }
+            Err(status) => Err(WorkQueueError::TryFinishFailed(
+                status.message().to_string(),
+            )),
+        }
     }
 }
 
@@ -395,7 +410,12 @@ impl Handler<PeriodicPersistMessage> for WorkQueueManager {
 mod tests {
     use super::*;
     use crate::work_queue::state::QueueState;
+    use arrow::array::{Int64Array, StringArray, UInt64Array};
+    use arrow::datatypes::{DataType, Field, Schema};
+    use arrow::record_batch::RecordBatch;
     use chroma_storage::local::LocalStorage;
+    use parquet::arrow::ArrowWriter;
+    use std::sync::Arc;
     use tempfile::TempDir;
     use uuid::Uuid;
 
@@ -458,8 +478,12 @@ mod tests {
         state.push_work(fn_id, coll_id, 100, 100);
         assert_eq!(state.pending_work.len(), 1);
 
-        // Finish work
+        // Matching the queued frontier keeps the entry queued until work
+        // advances beyond it.
         state.finish_work_success(&fn_id, &coll_id, 100);
+        assert_eq!(state.pending_work.len(), 1);
+
+        state.finish_work_success(&fn_id, &coll_id, 101);
         assert_eq!(state.pending_work.len(), 0);
         assert!(state.dirty);
     }
@@ -541,6 +565,68 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_load_state_hydrates_legacy_compaction_offsets() {
+        let (mut manager, _temp_dir) = create_test_manager().await;
+        let fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let coll_id = CollectionUuid(Uuid::new_v4());
+
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("fn_id", DataType::Utf8, false),
+            Field::new("input_coll_id", DataType::Utf8, false),
+            Field::new("completion_offset", DataType::Int64, false),
+            Field::new("insertion_order", DataType::UInt64, false),
+        ]));
+
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(StringArray::from(vec![fn_id.to_string()])),
+                Arc::new(StringArray::from(vec![coll_id.to_string()])),
+                Arc::new(Int64Array::from(vec![100])),
+                Arc::new(UInt64Array::from(vec![0])),
+            ],
+        )
+        .expect("Failed to build legacy batch");
+
+        let mut buffer = Vec::new();
+        let mut writer =
+            ArrowWriter::try_new(&mut buffer, schema, None).expect("Failed to create writer");
+        writer.write(&batch).expect("Failed to write batch");
+        writer.close().expect("Failed to close writer");
+
+        manager
+            .storage
+            .put_bytes(
+                &manager.storage_path,
+                buffer,
+                PutOptions::default().with_mode(PutMode::Upsert),
+            )
+            .await
+            .expect("Failed to persist legacy state");
+
+        manager
+            .load_state()
+            .await
+            .expect("Failed to load legacy state");
+
+        assert_eq!(manager.state.pending_work.len(), 1);
+        assert_eq!(manager.state.pending_work[0].completion_offset, 100);
+        assert_eq!(manager.state.pending_work[0].compaction_offset, 100);
+    }
+
+    #[tokio::test]
+    async fn test_try_finish_invocation_ignores_missing_attached_function() {
+        let (mut manager, _temp_dir) = create_test_manager().await;
+        let fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let coll_id = CollectionUuid(Uuid::new_v4());
+
+        manager
+            .try_finish_invocation(&fn_id, &coll_id, 101)
+            .await
+            .expect("missing attached functions should not block queue cleanup");
+    }
+
+    #[tokio::test]
     async fn test_notify_pending_responses() {
         let (mut manager, _temp_dir) = create_test_manager().await;
 
@@ -610,8 +696,12 @@ mod tests {
         assert_eq!(state.pending_work.len(), 1);
         assert_eq!(state.pending_work[0].completion_offset, 300);
 
-        // Finish remaining work
+        // Matching the queued frontier keeps the entry queued.
         state.finish_work_success(&fn_id, &coll_id, 300);
+        assert_eq!(state.pending_work.len(), 1);
+
+        // Finish remaining work
+        state.finish_work_success(&fn_id, &coll_id, 301);
         assert_eq!(state.pending_work.len(), 0);
     }
 }
