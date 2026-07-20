@@ -407,8 +407,8 @@ mod tests {
                 work_items.items.len()
             );
 
-            // The queued entry is removed because completion advanced beyond the
-            // stored queue frontier on this branch.
+            // The queued entry stays alive because completion has not yet advanced
+            // beyond the stored queue frontier.
             let our_items: Vec<_> = work_items
                 .items
                 .iter()
@@ -417,8 +417,13 @@ mod tests {
 
             assert_eq!(
                 our_items.len(),
-                0,
-                "Expected no visible work item once finish_work advances past the queued frontier"
+                1,
+                "Expected the queue item to remain visible until completion passes the queued frontier"
+            );
+            assert_eq!(our_items[0].completion_offset, new_offset);
+            assert_eq!(
+                our_items[0].compaction_offset,
+                Some(advanced_log_position)
             );
 
             // Check invocation status via sysdb
