@@ -87,7 +87,12 @@ fn search_agent(fail: bool) -> Agent {
 
 /// Drives the typed-event loop to completion and collects every event.
 async fn collect_events(agent: Agent, query: &str) -> Vec<AgentSseEvent> {
-    let stream = drive_agent(agent, query.to_string());
+    let stream = drive_agent(
+        agent,
+        query.to_string(),
+        "test-tenant".to_string(),
+        "FOUNDATION".to_string(),
+    );
     futures::pin_mut!(stream);
     let mut events = Vec::new();
     while let Some(event) = stream.next().await {
@@ -117,7 +122,7 @@ async fn drives_loop_and_emits_action_observation_done() {
     assert!(matches!(&events[2], AgentSseEvent::Action { .. }));
     assert!(matches!(
         &events[3],
-        AgentSseEvent::Done { final_text } if final_text == "final answer"
+        AgentSseEvent::Done { final_text, .. } if final_text == "final answer"
     ));
 }
 
@@ -167,7 +172,7 @@ async fn answer_without_tool_calls_emits_action_then_done() {
     }
     assert!(matches!(
         &events[1],
-        AgentSseEvent::Done { final_text } if final_text == "direct answer"
+        AgentSseEvent::Done { final_text, .. } if final_text == "direct answer"
     ));
 }
 
@@ -190,7 +195,7 @@ async fn no_actionable_inference_ends_with_empty_done() {
     assert_eq!(events.len(), 1);
     assert!(matches!(
         &events[0],
-        AgentSseEvent::Done { final_text } if final_text.is_empty()
+        AgentSseEvent::Done { final_text, .. } if final_text.is_empty()
     ));
 }
 

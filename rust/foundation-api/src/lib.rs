@@ -52,6 +52,24 @@ pub async fn foundation_service_entrypoint_with_config(
     let system = chroma_system::System::new();
     let registry = chroma_config::registry::Registry::new();
 
+    foundation_service_entrypoint_with_config_system_registry(
+        auth,
+        config,
+        init_otel_tracing,
+        system,
+        registry,
+    )
+    .await;
+}
+
+pub async fn foundation_service_entrypoint_with_config_system_registry(
+    auth: Arc<dyn auth::AuthenticateAndAuthorize>,
+    config: &FoundationApiConfig,
+    init_otel_tracing: bool,
+    system: chroma_system::System,
+    registry: chroma_config::registry::Registry,
+) {
+
     if init_otel_tracing {
         init_foundation_otel_tracing(config);
     }
