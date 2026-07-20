@@ -220,10 +220,19 @@ fn test_config_from_specific_path() {
             }
             _ => panic!("Expected DeletePercentage policy"),
         }
-        assert_eq!(config.fn_consumer_service.compactor.max_compaction_size, 321);
+        assert_eq!(
+            config.fn_consumer_service.compactor.max_compaction_size,
+            321
+        );
         assert_eq!(config.fn_consumer_service.compactor.max_partition_size, 123);
-        assert_eq!(config.fn_consumer_service.compactor.fetch_log_batch_size, 77);
-        assert_eq!(config.fn_consumer_service.compactor.fetch_log_concurrency, 9);
+        assert_eq!(
+            config.fn_consumer_service.compactor.fetch_log_batch_size,
+            77
+        );
+        assert_eq!(
+            config.fn_consumer_service.compactor.fetch_log_concurrency,
+            9
+        );
         Ok(())
     });
 }
