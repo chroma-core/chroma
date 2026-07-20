@@ -577,11 +577,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_hydrate_missing_compaction_offsets_from_sysdb() {
+    async fn test_load_state_hydrates_legacy_compaction_offsets() {
         let (mut manager, _temp_dir) = create_test_manager().await;
         let fn_id = AttachedFunctionUuid(Uuid::new_v4());
         let coll_id = CollectionUuid(Uuid::new_v4());
-        add_test_collection(&mut manager.sysdb, coll_id, 140);
 
         let schema = Arc::new(Schema::new(vec![
             Field::new("fn_id", DataType::Utf8, false),
@@ -607,18 +606,24 @@ mod tests {
         writer.write(&batch).expect("Failed to write batch");
         writer.close().expect("Failed to close writer");
 
-        manager.state =
-            QueueState::from_parquet_bytes(&buffer).expect("Failed to load legacy state");
-        assert_eq!(manager.state.count_entries_missing_compaction_offset(), 1);
-        assert_eq!(manager.state.pending_work[0].compaction_offset, 100);
+        manager
+            .storage
+            .put_bytes(
+                &manager.storage_path,
+                buffer,
+                PutOptions::default().with_mode(PutMode::Upsert),
+            )
+            .await
+            .expect("Failed to persist legacy state");
 
         manager
-            .hydrate_missing_compaction_offsets()
+            .load_state()
             .await
-            .expect("Failed to hydrate missing frontiers");
+            .expect("Failed to load legacy state");
 
-        assert_eq!(manager.state.count_entries_missing_compaction_offset(), 0);
-        assert_eq!(manager.state.pending_work[0].compaction_offset, 140);
+        assert_eq!(manager.state.pending_work.len(), 1);
+        assert_eq!(manager.state.pending_work[0].completion_offset, 100);
+        assert_eq!(manager.state.pending_work[0].compaction_offset, 100);
     }
 
     #[tokio::test]
