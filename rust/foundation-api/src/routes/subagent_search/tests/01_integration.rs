@@ -24,6 +24,7 @@ async fn streams_and_collects_final_from_mocked_sse() {
         "data: {\"type\":\"action\",\"data\":{\"tools\":[{\"name\":\"search\"}],\"params\":[{\"query\":\"rag\"}]}}\n\n",
         "data: {\"type\":\"observation\",\"data\":{\"sources\":[\"a\"]}}\n\n",
         "data: {\"type\":\"action\",\"data\":{\"tools\":[{\"name\":\"user_text\"}],\"params\":[{\"text\":\"<Document id=doc-1><Justification>Relevant to rag.</Justification></Document>\"}]}}\n\n",
+        "data: {\"type\":\"usage\",\"data\":{\"model\":\"scout\",\"input_tokens\":123,\"output_tokens\":456}}\n\n",
         "data: {\"type\":\"done\",\"data\":{}}\n\n",
     );
     let mock = server
@@ -53,7 +54,7 @@ async fn streams_and_collects_final_from_mocked_sse() {
     assert_eq!(count, 4, "action + observation + result + done");
 
     // The collect core resolves the terminal answer into ranked documents.
-    let documents = collect_subagent_search_final(
+    let result = collect_subagent_search_final(
         reqwest::Client::new(),
         server.base_url(),
         test_creds(),
@@ -62,12 +63,13 @@ async fn streams_and_collects_final_from_mocked_sse() {
     .await
     .expect("documents parse");
     assert_eq!(
-        documents,
+        result.documents,
         vec![RankedDocument {
             id: "doc-1".to_string(),
             justification: "Relevant to rag.".to_string(),
         }]
     );
+    assert_eq!(result.usage.expect("usage should be present").model, "scout");
     assert_eq!(mock.calls(), 2);
 }
 
@@ -164,7 +166,7 @@ async fn answer_with_no_documents_emits_empty_result_then_done() {
     assert!(events.iter().all(|e| e.is_ok()), "no hits is not an error");
 
     // The collect core resolves the same stream to an empty document list.
-    let documents = collect_subagent_search_final(
+    let result = collect_subagent_search_final(
         reqwest::Client::new(),
         server.base_url(),
         test_creds(),
@@ -172,7 +174,8 @@ async fn answer_with_no_documents_emits_empty_result_then_done() {
     )
     .await
     .expect("empty results are Ok");
-    assert!(documents.is_empty());
+    assert!(result.documents.is_empty());
+    assert!(result.usage.is_none());
     assert_eq!(mock.calls(), 2);
 }
 

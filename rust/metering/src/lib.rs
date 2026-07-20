@@ -9,7 +9,7 @@ pub use {
         CollectionWriteContext, Enterable, ExternalCollectionReadContext, FinishRequest,
         FtsQueryLength, LatestCollectionLogicalSizeBytes, LogSizeBytes, MetadataPredicateCount,
         MeterEvent, MeteredFutureExt, PulledLogSizeBytes, QueryEmbeddingCount, ReadAction,
-        ReturnBytes, StartRequest, WriteAction,
+        ReturnBytes, SearchAgentUsageContext, StartRequest, WriteAction,
     },
     errors::MeteringError,
     types::{MeteringAtomicU64, MeteringInstant},

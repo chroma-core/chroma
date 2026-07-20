@@ -67,7 +67,7 @@ impl Tool for SubagentSearchTool {
         params: Self::ModelSuppliedParams,
         _runtime: Self::RuntimeParams,
     ) -> Result<(String, Option<ToolCallMetadata>), AgentError> {
-        let text = subagent_search_text(
+        let (text, usage) = subagent_search_text(
             self.http.clone(),
             self.url.clone(),
             self.creds.clone(),
@@ -77,6 +77,12 @@ impl Tool for SubagentSearchTool {
         .await
         .map_err(|err| AgentError::Tool(err.to_string()))?;
 
-        Ok((text, None))
+        let metadata = usage.map(|usage| ToolCallMetadata::SubagentUsage {
+            model: usage.model,
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+        });
+
+        Ok((text, metadata))
     }
 }

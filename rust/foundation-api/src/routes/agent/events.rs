@@ -27,7 +27,7 @@ pub(crate) enum AgentSseEvent {
     },
     /// The results of the tool calls from the preceding action.
     Observation { results: Vec<AgentToolResult> },
-    /// Terminal event: the agent finished, with its final user-facing answer.
+    /// Terminal event: the agent finished with its final user-facing answer.
     Done { final_text: String },
     /// The run failed mid-flight; carries a human-readable message.
     Error { message: String },

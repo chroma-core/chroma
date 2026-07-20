@@ -27,13 +27,15 @@ mod events;
 
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::{extract::State, http::HeaderMap, Json};
+use chroma_metering::{MeterEvent, SearchAgentUsageContext};
 use chroma_error::{ChromaError, ChromaValidationError, ErrorCodes};
 use futures::{Stream, StreamExt};
 use serde::Deserialize;
 use validator::Validate;
 
 use chroma_agent::{
-    Agent, AnthropicAgentInferenceModel, AnthropicModel, ObservationBuilder, ToolSet,
+    Agent, AnthropicAgentInferenceModel, AnthropicModel, Observation, ObservationBuilder,
+    ObservationItem, ToolSet,
 };
 use events::{action_event, action_text, observation_event, AgentSseEvent};
 
@@ -153,7 +155,13 @@ pub async fn foundation_agent(
         .map_err(|_| AgentRouteError::UnknownModel(request.model.clone()))?;
 
     let agent = build_agent(&server, &headers, &tenant, &request, model).await?;
-    let stream = drive_agent(agent, request.input).map(|event| sse_event(&event));
+    let stream = drive_agent(
+        agent,
+        request.input,
+        tenant,
+        server.config.foundation.database_name.clone(),
+    )
+    .map(|event| sse_event(&event));
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
 
@@ -236,7 +244,12 @@ fn sse_event(event: &AgentSseEvent) -> Result<Event, AgentSseError> {
 /// This is the pure loop driver, kept separate from SSE framing so it can be
 /// unit-tested by collecting the typed [`AgentSseEvent`]s; the handler maps the
 /// result through [`sse_event`] to frame each event.
-fn drive_agent(mut agent: Agent, input: String) -> impl Stream<Item = AgentSseEvent> {
+fn drive_agent(
+    mut agent: Agent,
+    input: String,
+    tenant: String,
+    database: String,
+) -> impl Stream<Item = AgentSseEvent> {
     async_stream::stream! {
         agent.reset();
         let mut initial = ObservationBuilder::new();
@@ -270,6 +283,7 @@ fn drive_agent(mut agent: Agent, input: String) -> impl Stream<Item = AgentSseEv
             // observation with `is_error` set.
             match agent.act(action).await {
                 Ok(Some(observation)) => {
+                    submit_subagent_usage_events(&observation, &database, &tenant).await;
                     yield observation_event(&observation);
                     agent.observe(observation);
                 }
@@ -287,6 +301,44 @@ fn drive_agent(mut agent: Agent, input: String) -> impl Stream<Item = AgentSseEv
         }
 
         yield AgentSseEvent::Done { final_text };
+    }
+}
+
+async fn submit_subagent_usage_events(observation: &Observation, database: &str, tenant: &str) {
+    for item in &observation.items {
+        let ObservationItem::ToolResult {
+            metadata:
+                Some(chroma_agent::ToolCallMetadata::SubagentUsage {
+                    model,
+                    input_tokens,
+                    output_tokens,
+                }),
+            ..
+        } = item
+        else {
+            continue;
+        };
+
+        if let Err(error) = MeterEvent::SearchAgentUsage(SearchAgentUsageContext::new(
+            tenant.to_string(),
+            database.to_string(),
+            model.clone(),
+            *input_tokens,
+            *output_tokens,
+        ))
+        .submit()
+        .await
+        {
+            tracing::warn!(
+                error = %error,
+                tenant,
+                database,
+                model,
+                input_tokens,
+                output_tokens,
+                "failed to submit search agent usage meter event"
+            );
+        }
     }
 }
 

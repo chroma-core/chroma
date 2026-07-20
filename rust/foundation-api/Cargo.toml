@@ -34,6 +34,7 @@ chroma-agent = { workspace = true }
 chroma-api-types = { workspace = true }
 chroma-config = { workspace = true }
 chroma-error = { workspace = true, features = ["validator", "http"] }
+chroma-metering = { workspace = true }
 chroma-sysdb = { workspace = true }
 chroma-system = { workspace = true }
 chroma-tracing = { workspace = true, features = ["middleware"] }
