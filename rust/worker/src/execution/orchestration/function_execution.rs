@@ -127,13 +127,13 @@ impl FunctionExecutionContext {
         {
             Ok(result) => result,
             Err(err) if Self::should_backfill_on_fetch_error(&err) => {
-                return Self::fetch_backfilled_function_input_collection_data(
+                return Box::pin(Self::fetch_backfilled_function_input_collection_data(
                     log_fetch_context,
                     collection_id,
                     attached_function_id,
                     database_name,
                     system,
-                )
+                ))
                 .await;
             }
             Err(err) => return Err(err),
@@ -146,13 +146,13 @@ impl FunctionExecutionContext {
                 resolved_attached_functions: success.resolved_attached_functions,
             }),
             LogFetchOrchestratorResponse::RequireFunctionBackfill(_) => {
-                Self::fetch_backfilled_function_input_collection_data(
+                Box::pin(Self::fetch_backfilled_function_input_collection_data(
                     log_fetch_context,
                     collection_id,
                     attached_function_id,
                     database_name,
                     system,
-                )
+                ))
                 .await
             }
             LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(_) => {
