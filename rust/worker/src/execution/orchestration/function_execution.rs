@@ -1,5 +1,6 @@
 use chroma_error::source_chain_contains;
 use chroma_log::grpc_log::GrpcPullLogsError;
+use chroma_sysdb::SysDb;
 use std::collections::HashSet;
 
 use chroma_error::{ChromaError, ErrorCodes};
@@ -228,6 +229,37 @@ impl FunctionExecutionContext {
         }
     }
 
+    async fn fetch_attached_function_completion_offset(
+        mut sysdb: SysDb,
+        collection_id: CollectionUuid,
+        attached_function_id: AttachedFunctionUuid,
+    ) -> Result<Option<i64>, CompactionError> {
+        let attached_functions = match sysdb.list_attached_functions(collection_id).await {
+            Ok(attached_functions) => attached_functions,
+            Err(err) if err.code() == ErrorCodes::NotFound => return Ok(None),
+            Err(_) => {
+                return Err(CompactionError::InvariantViolation(
+                    "Failed to list attached functions while resolving stale work",
+                ));
+            }
+        };
+
+        let completion_offset = attached_functions
+            .into_iter()
+            .map(AttachedFunction::try_from)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| {
+                CompactionError::InvariantViolation(
+                    "Failed to convert attached function proto while resolving stale work",
+                )
+            })?
+            .into_iter()
+            .find(|attached_function| attached_function.id == attached_function_id)
+            .map(|attached_function| attached_function.completion_offset as i64);
+
+        Ok(completion_offset)
+    }
+
     async fn resolve_shared_input_database_name(
         compaction_context: CompactionContext,
         fn_inputs: &[FunctionExecutionInput],
@@ -311,6 +343,28 @@ impl FunctionExecutionContext {
         for input in fn_inputs {
             if deleted_collection_ids.contains(&input.collection_id) {
                 continue;
+            }
+
+            if let Some(completion_offset) = Self::fetch_attached_function_completion_offset(
+                base_context.sysdb.clone(),
+                input.collection_id,
+                attached_function_id,
+            )
+            .await?
+            {
+                if has_reached_queue_frontier(completion_offset, input.queue_compaction_offset) {
+                    tracing::info!(
+                        collection_id = %input.collection_id,
+                        completion_offset,
+                        queue_compaction_offset = input.queue_compaction_offset,
+                        "Skipping stale fn-consumer work item because attached function is already at or beyond the queued frontier"
+                    );
+                    skipped_work_items.push(Self::stale_input_finish_work_item(
+                        input.collection_id,
+                        completion_offset,
+                    ));
+                    continue;
+                }
             }
 
             let collection_data = match Box::pin(Self::fetch_function_input_collection_data(
