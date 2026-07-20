@@ -1239,6 +1239,60 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_u32_value_metadata_gte_operator_arrow_block_split() {
+        // Regression test: with small Arrow blocks, key2's low values
+        // share an Arrow block with key1's tail (the block boundary
+        // splits mid-prefix). The range-read fast path used to return
+        // no blocks for key2, so $gte silently matched nothing.
+        const KEY1_COUNT: u32 = 400;
+        const KEY2_COUNT: u32 = 120;
+
+        let (_dir, provider) = chroma_blockstore::test_arrow_blockfile_provider(4096);
+        let prefix_path = String::from("");
+        let blockfile_writer = provider
+            .write::<u32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
+            .await
+            .unwrap();
+        let writer_id = blockfile_writer.id();
+        let mut writer = MetadataIndexWriter::new_u32(blockfile_writer, None);
+        for i in 0..KEY1_COUNT {
+            writer.set("key1", i, i).await.unwrap();
+        }
+        for i in 0..KEY2_COUNT {
+            writer.set("key2", i, 1000 + i).await.unwrap();
+        }
+        writer.write_to_blockfile().await.unwrap();
+        let flusher = writer.commit().await.unwrap();
+        flusher.flush().await.unwrap();
+
+        let reader_options = BlockfileReaderOptions::new(writer_id, prefix_path);
+        let blockfile_reader = provider
+            .read::<u32, RoaringBitmap>(reader_options)
+            .await
+            .unwrap();
+        let reader = MetadataIndexReader::new_u32(blockfile_reader);
+
+        // $gte spanning all of key2 — the range start falls inside an
+        // Arrow block whose first record belongs to key1.
+        let bitmap = reader.gte("key2", &0.into()).await.unwrap();
+        assert_eq!(bitmap.len(), KEY2_COUNT as u64);
+        for i in 0..KEY2_COUNT {
+            assert!(bitmap.contains(1000 + i));
+        }
+
+        // A mid-range start must also see every remaining value.
+        let bitmap = reader.gte("key2", &50.into()).await.unwrap();
+        assert_eq!(bitmap.len(), (KEY2_COUNT - 50) as u64);
+        for i in 50..KEY2_COUNT {
+            assert!(bitmap.contains(1000 + i));
+        }
+
+        // key1 is unaffected.
+        let bitmap = reader.gte("key1", &0.into()).await.unwrap();
+        assert_eq!(bitmap.len(), KEY1_COUNT as u64);
+    }
+
+    #[tokio::test]
     async fn test_f32_metadata_lt_operator() {
         let provider = BlockfileProvider::new_memory();
         let prefix_path = String::from("");
