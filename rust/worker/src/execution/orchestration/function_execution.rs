@@ -52,7 +52,8 @@ pub struct FunctionExecutionContext {
 }
 
 fn has_reached_queue_frontier(completion_offset: i64, queue_compaction_offset: i64) -> bool {
-    queue_compaction_offset > 0 && completion_offset > queue_compaction_offset
+    (queue_compaction_offset == 0 && completion_offset == 0)
+        || (queue_compaction_offset > 0 && completion_offset > queue_compaction_offset)
 }
 
 impl FunctionExecutionContext {
