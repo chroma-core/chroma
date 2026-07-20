@@ -433,18 +433,6 @@ mod tests {
         SysDb::Test(chroma_sysdb::test_sysdb::TestSysDb::new())
     }
 
-    fn add_test_collection(sysdb: &mut SysDb, collection_id: CollectionUuid, log_position: i64) {
-        match sysdb {
-            SysDb::Test(test_sysdb) => test_sysdb.add_collection(chroma_types::Collection {
-                collection_id,
-                name: format!("collection-{collection_id}"),
-                log_position,
-                ..Default::default()
-            }),
-            _ => panic!("Invalid sysdb type"),
-        }
-    }
-
     async fn create_test_manager() -> (WorkQueueManager, TempDir) {
         let temp_dir = TempDir::new().unwrap();
         let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
