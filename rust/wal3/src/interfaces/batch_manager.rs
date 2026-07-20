@@ -69,43 +69,30 @@ impl ManagerState {
     }
 }
 
-fn required_fragment_start_for_selected(selected: &[AppendWork]) -> Option<LogPosition> {
-    let mut required_fragment_start = None;
-    for work in selected {
-        let Some(next_required_fragment_start) = work.required_fragment_start() else {
-            continue;
-        };
-        if let Some(required_fragment_start) = required_fragment_start {
-            debug_assert_eq!(required_fragment_start, next_required_fragment_start);
-        } else {
-            required_fragment_start = Some(next_required_fragment_start);
-        }
-    }
-    required_fragment_start
-}
-
-fn count_compatible_required_fragment_starts(selected: &[AppendWork]) -> usize {
-    let mut required_fragment_start = None;
+fn count_compatible_required_fragment_starts(
+    selected: &[AppendWork],
+) -> (usize, Option<LogPosition>) {
+    let mut required_fragment_start: Option<LogPosition> = None;
     for (index, work) in selected.iter().enumerate() {
         let Some(next_required_fragment_start) = work.required_fragment_start() else {
             continue;
         };
-        if let Some(required_fragment_start) = required_fragment_start {
-            if required_fragment_start != next_required_fragment_start {
+        if let Some(current_required_fragment_start) = required_fragment_start {
+            if current_required_fragment_start != next_required_fragment_start {
                 tracing::info!(
-                    ?required_fragment_start,
+                    required_fragment_start = ?current_required_fragment_start,
                     ?next_required_fragment_start,
                     selected_work_count = selected.len(),
                     compatible_work_count = index,
                     "splitting wal3 batch on incompatible required_fragment_start"
                 );
-                return index;
+                return (index, Some(current_required_fragment_start));
             }
         } else {
             required_fragment_start = Some(next_required_fragment_start);
         }
     }
-    selected.len()
+    (selected.len(), required_fragment_start)
 }
 
 fn take_selected_work(state: &mut ManagerState, split_off: usize) -> Vec<AppendWork> {
@@ -286,7 +273,7 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
             self.write_finished.notify_one();
             return Ok(None);
         }
-        let compatible_split_off =
+        let (compatible_split_off, required_fragment_start) =
             count_compatible_required_fragment_starts(&state.enqueued[..split_off]);
         if compatible_split_off < split_off {
             split_off = compatible_split_off;
@@ -295,8 +282,6 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
                 .map(AppendWork::record_count)
                 .sum();
         }
-        let required_fragment_start =
-            required_fragment_start_for_selected(&state.enqueued[..split_off]);
         let Some(pointer) =
             state.select_for_write(&self.options.throttle_fragment, manifest_manager, acc_count)?
         else {
