@@ -167,7 +167,7 @@ class ChromaCloudQwenEmbeddingFunction(EmbeddingFunction[Documents]):
         instructions = config.get("instructions")
         api_key_env_var = config.get("api_key_env_var")
 
-        if model is None or task is None:
+        if model is None:
             assert False, "Config is missing a required field"
 
         # Deserialize instructions dict from string keys to enum keys
