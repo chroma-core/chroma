@@ -250,10 +250,7 @@ fn reasoning_for_slug(
 
     for (index, entry) in entries.iter().enumerate() {
         if let Some(reasoning) = entry.reasoning.as_ref() {
-            let trimmed = reasoning.trim();
-            if !trimmed.is_empty() {
-                reasoning_prefix.push(trimmed.to_string());
-            }
+            reasoning_prefix.push(reasoning.clone());
         }
         let reasoning_len_after_entry = reasoning_prefix.len();
 
@@ -265,23 +262,18 @@ fn reasoning_for_slug(
     let Some((entry_index, reasoning_len)) = last_match else {
         return None;
     };
-    let other_slugs = other_written_slugs(&entries[entry_index].writes, slug);
+    let other_slugs = entries[entry_index]
+        .writes
+        .iter()
+        .filter(|write| write.slug != slug)
+        .map(|write| write.slug.clone())
+        .collect();
 
     Some(TrajectoryReasoningResponse {
         slug: slug.to_string(),
         reasoning: reasoning_prefix.into_iter().take(reasoning_len).collect(),
         other_slugs,
     })
-}
-
-fn other_written_slugs(writes: &[crate::trajectories::ReasoningWrite], slug: &str) -> Vec<String> {
-    let mut slugs = Vec::new();
-    for write in writes {
-        if write.slug != slug && !slugs.contains(&write.slug) {
-            slugs.push(write.slug.clone());
-        }
-    }
-    slugs
 }
 
 async fn trajectory_collection<'a>(
@@ -343,6 +335,8 @@ mod tests {
                 })
                 .collect(),
         }
+        .normalized()
+        .expect("test entry should have reasoning or writes after normalization")
     }
 
     #[test]
@@ -468,7 +462,6 @@ mod tests {
         let file = minimal_file(vec![
             entry(Some("  first target  "), &["target"]),
             entry(Some("intermediate"), &["other"]),
-            entry(Some("  \n  "), &[]),
             entry(Some("final target"), &["target", "sibling", "sibling"]),
             entry(Some("after final target"), &["later"]),
         ]);
