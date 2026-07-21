@@ -259,9 +259,7 @@ fn reasoning_for_slug(
         }
     }
 
-    let Some((entry_index, reasoning_len)) = last_match else {
-        return None;
-    };
+    let (entry_index, reasoning_len) = last_match?;
     let other_slugs = entries[entry_index]
         .writes
         .iter()
