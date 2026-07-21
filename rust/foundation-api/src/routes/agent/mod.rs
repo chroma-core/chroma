@@ -27,8 +27,8 @@ mod events;
 
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::{extract::State, http::HeaderMap, Json};
-use chroma_error::{ChromaError, ChromaValidationError, ErrorCodes};
 use chroma_metering::{MeterEvent, SearchAgentUsageContext};
+use chroma_error::{ChromaError, ChromaValidationError, ErrorCodes};
 use futures::{Stream, StreamExt};
 use serde::Deserialize;
 use validator::Validate;
@@ -37,7 +37,7 @@ use chroma_agent::{
     Agent, AnthropicAgentInferenceModel, AnthropicModel, InferenceUsage, Observation,
     ObservationBuilder, ObservationItem, ToolSet,
 };
-use events::{action_event, action_text, observation_event, AgentSseEvent};
+use events::{action_event, action_text, observation_event, usage_event, AgentSseEvent};
 
 use crate::agent_tools::{ReadPageTool, SearchTool, SubagentSearchTool};
 use crate::routes::subagent_search::SubagentSearchCreds;
@@ -275,6 +275,7 @@ fn drive_agent(
                 }
             };
             if let Some(usage) = step.usage.as_ref() {
+                yield usage_event(usage);
                 submit_search_agent_usage_event(usage, &database, &tenant, &collection_id).await;
             }
             let Some(action) = step.action else {
@@ -295,6 +296,7 @@ fn drive_agent(
             match agent.act(action).await {
                 Ok(Some(observation)) => {
                     for usage in extract_subagent_usages(&observation) {
+                        yield usage_event(&usage);
                         submit_search_agent_usage_event(&usage, &database, &tenant, &collection_id)
                             .await;
                     }
@@ -323,20 +325,20 @@ fn extract_subagent_usages(observation: &Observation) -> Vec<InferenceUsage> {
         .items
         .iter()
         .filter_map(|item| {
-            let ObservationItem::ToolResult {
-                metadata:
-                    Some(chroma_agent::ToolCallMetadata::SubagentUsage {
-                        model,
-                        input_tokens,
-                        output_tokens,
-                    }),
-                ..
-            } = item
-            else {
-                return None;
-            };
+        let ObservationItem::ToolResult {
+            metadata:
+                Some(chroma_agent::ToolCallMetadata::SubagentUsage {
+                    model,
+                    input_tokens,
+                    output_tokens,
+                }),
+            ..
+        } = item
+        else {
+            return None;
+        };
 
-            Some(InferenceUsage {
+        Some(InferenceUsage {
                 model: model.clone(),
                 input_tokens: *input_tokens,
                 output_tokens: *output_tokens,
