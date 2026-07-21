@@ -1,18 +1,12 @@
 //! `POST /api/upsert-page` — replace a wiki page's chunks.
 //!
 //! Acts as a Chroma *client*: it resolves the tenant's `wiki` collection through
-//! the proxying Foundation Chroma client, reads the `{slug}-0` chunk to learn whether the
-//! page exists (and to preserve `created_at` / bump `version`), deletes every
-//! chunk for the slug on update, re-chunks the new content, computes SPLADE
-//! sparse vectors with the caller's token, and re-adds the chunks in batches —
-//! letting the collection's schema-bound Qwen EF produce the dense vectors on
-//! `add`. The FE enforces auth, quota, metering, and billing on every proxied
-//! call.
-//!
-//! The replace is currently a non-atomic delete-then-add. Once the data plane
-//! exposes an atomic put-if-absent / put-if-none (compare-and-set) op, the
-//! delete-then-add below will be replaced with it to close the partial-write
-//! window and the read-then-write race on a slug.
+//! the proxying Foundation Chroma client, transactionally reads the existing
+//! chunk set for the slug to preserve `created_at` / bump `version`, re-chunks
+//! the new content, computes dense Qwen and SPLADE sparse vectors with the
+//! caller's token, and atomically upserts the replacement chunks plus deletes
+//! any stale chunk ids. The FE enforces auth, quota, metering, and billing on
+//! every proxied call.
 
 use crate::foundation_chroma::{is_not_found, FoundationChromaClient};
 use crate::routes::{caller_token, whoami::whoami_and_authorize};
@@ -23,23 +17,32 @@ use crate::wiki::WikiClientError;
 use crate::{auth::AuthzAction, errors::ServerError, server::FoundationApiServer};
 use axum::{extract::State, http::HeaderMap, Json};
 use chroma::client::ChromaHttpClientError;
+use chroma::ChromaCollection;
 use chroma_error::{ChromaError, ChromaValidationError, ErrorCodes};
 use chroma_types::{
-    Include, IncludeList, Metadata, MetadataComparison, MetadataExpression, MetadataValue,
-    PrimitiveOperator, Where,
+    GetResponse, Include, IncludeList, Metadata, MetadataComparison, MetadataExpression,
+    MetadataValue, PrimitiveOperator, UpdateMetadata, Where,
 };
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::future::Future;
 use std::sync::LazyLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use validator::{Validate, ValidationError};
 
-/// Max records per `add` request. Chroma Cloud's embedding service rejects
-/// calls with more than this many docs, and large pages can exceed it, so adds
-/// are sliced into batches of this size.
-const ADD_BATCH_SIZE: usize = 100;
+/// Max docs per dense embedding request. The replacement page is still staged
+/// as one transactional `upsert`; this only keeps Qwen embedding calls bounded
+/// and does not reduce the final commit payload size.
+const DENSE_EMBED_BATCH_SIZE: usize = 100;
+
+/// Max record writes in one conditional transaction. Replacement chunks are
+/// upsert records; stale chunks are delete records.
+const MAX_TRANSACTION_WRITES: usize = 300;
+
+/// Read one past the write cap so an oversized existing page is detected
+/// without reading arbitrarily many ids.
+const PAGE_CHUNK_READ_LIMIT: u32 = MAX_TRANSACTION_WRITES as u32 + 1;
 
 /// `^(?:[a-z0-9][a-z0-9-]*|category:[a-z0-9][a-z0-9-]*|)$` — the wiki slug
 /// shape (empty root, lowercase alnum/hyphen, or a `category:<slug>`). The
@@ -82,13 +85,6 @@ pub struct UpsertPageRequest {
     /// The version the caller expects to be replacing: the page's current
     /// `version` on an update, or `0` when the caller expects to create a new
     /// page.
-    ///
-    /// Required so clients adopt the optimistic-concurrency contract now, but
-    /// intentionally *not* enforced yet. The replace is a non-atomic
-    /// delete-then-add (see the module docs), so comparing here would be a racy
-    /// check-then-act that gives false confidence. Once the data plane exposes
-    /// an atomic compare-and-set, this becomes the precondition and a mismatch
-    /// returns `409 Conflict`; until then it is accepted and ignored.
     pub expected_version: u32,
 }
 
@@ -124,9 +120,27 @@ pub enum UpsertPageError {
     /// Computing SPLADE sparse embeddings failed.
     #[error(transparent)]
     Embed(#[from] crate::wiki::embed::WikiEmbedError),
-    /// A proxied record-I/O call (`get`/`delete`/`add`) to the FE failed.
+    /// Computing dense Qwen embeddings failed.
+    #[error("dense wiki embedding failed: {0}")]
+    DenseEmbed(ChromaHttpClientError),
+    /// A proxied record-I/O call (`get`/`upsert`/`delete`/`commit`) to the FE failed.
     #[error("chroma record I/O failed: {0}")]
     RecordIo(ChromaHttpClientError),
+    /// The caller edited a stale page version.
+    #[error("page version conflict for '{slug}': expected {expected}, current {actual}")]
+    VersionConflict {
+        slug: String,
+        expected: u32,
+        actual: u32,
+    },
+    /// The replacement would exceed the transaction write cap.
+    #[error(
+        "wiki upsert would write at least {writes} records; transaction write limit is {limit}"
+    )]
+    TooManyTransactionWrites { writes: usize, limit: usize },
+    /// The page version cannot be incremented.
+    #[error("page version for '{slug}' is too large to increment")]
+    VersionOverflow { slug: String },
 }
 
 impl ChromaError for UpsertPageError {
@@ -136,7 +150,14 @@ impl ChromaError for UpsertPageError {
             UpsertPageError::MissingToken => ErrorCodes::InvalidArgument,
             UpsertPageError::Resolve(err) => err.code(),
             UpsertPageError::Embed(err) => err.code(),
+            UpsertPageError::DenseEmbed(_) => ErrorCodes::Internal,
+            UpsertPageError::RecordIo(err) if is_conditional_conflict(err) => {
+                ErrorCodes::FailedPrecondition
+            }
             UpsertPageError::RecordIo(_) => ErrorCodes::Internal,
+            UpsertPageError::VersionConflict { .. } => ErrorCodes::FailedPrecondition,
+            UpsertPageError::TooManyTransactionWrites { .. } => ErrorCodes::ResourceExhausted,
+            UpsertPageError::VersionOverflow { .. } => ErrorCodes::FailedPrecondition,
         }
     }
 }
@@ -181,12 +202,12 @@ async fn upsert_page(
     let collection = wiki_client.wiki_collection(tenant, token).await?;
     let chunking = ChunkingConfig::from_collection_metadata(collection.metadata().as_ref());
 
-    // Read chunk-0 to learn page existence + preserve created_at / bump version.
+    let mut txn = collection.conditional();
     let chunk0 = ChunkRecordId::new(slug, 0).to_string();
-    let existing = record_op(
+    let chunk0_response = record_op(
         wiki_client,
         tenant,
-        collection.get(
+        txn.get(
             Some(vec![chunk0]),
             None,
             None,
@@ -195,14 +216,36 @@ async fn upsert_page(
         ),
     )
     .await?;
-    // Page existence is driven by chunk-0's *presence* (its id is always
-    // returned), not by whether it carries metadata: a chunk-0 row with no
-    // metadata still means the page exists and its other chunks must be
-    // cleared. Reading metadata separately lets the recovery branch below fire.
-    let exists = !existing.ids.is_empty();
-    let existing_meta = existing
-        .metadatas
-        .and_then(|metas| metas.into_iter().next().flatten());
+
+    let existing = record_op(
+        wiki_client,
+        tenant,
+        txn.get(
+            None,
+            Some(where_slug(slug)),
+            Some(PAGE_CHUNK_READ_LIMIT),
+            None,
+            Some(IncludeList(vec![Include::Metadata])),
+        ),
+    )
+    .await?;
+    if existing.ids.len() > MAX_TRANSACTION_WRITES {
+        return Err(UpsertPageError::TooManyTransactionWrites {
+            writes: existing.ids.len(),
+            limit: MAX_TRANSACTION_WRITES,
+        });
+    }
+
+    let existing_ids = existing.ids.clone();
+    let (exists, existing_meta) = existing_page_state(&existing, &chunk0_response);
+    let actual_version = current_version(exists, existing_meta.as_ref());
+    if request.expected_version != actual_version {
+        return Err(UpsertPageError::VersionConflict {
+            slug: slug.to_string(),
+            expected: request.expected_version,
+            actual: actual_version,
+        });
+    }
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -224,12 +267,18 @@ async fn upsert_page(
                     now
                 }
             };
-            let version = match meta.get("version").and_then(|v| i64::try_from(v).ok()) {
-                Some(version) => version + 1,
+            let version = match meta_version(meta) {
+                Some(version) => {
+                    version
+                        .checked_add(1)
+                        .ok_or_else(|| UpsertPageError::VersionOverflow {
+                            slug: slug.to_string(),
+                        })?
+                }
                 None => {
                     tracing::warn!(
                         slug = %slug,
-                        "existing wiki page has no integer version; resetting to 1"
+                        "existing wiki page has no positive integer version; resetting to 1"
                     );
                     1
                 }
@@ -238,9 +287,9 @@ async fn upsert_page(
         }
         (true, None) => {
             // chunk-0 exists but carries no metadata at all (corrupt or
-            // pre-versioning row). Treat it as an update so the delete-by-slug
-            // still clears any orphan chunks, but reset created_at / version
-            // since there is nothing to recover.
+            // pre-versioning row). Treat it as an update so stale chunks still
+            // get cleared by id, but reset created_at / version since there is
+            // nothing to recover.
             tracing::warn!(
                 slug = %slug,
                 "existing wiki chunk-0 has no metadata; treating as update with reset created_at/version"
@@ -250,12 +299,24 @@ async fn upsert_page(
         (false, _) => ("added", now, 1),
     };
 
-    // Re-chunk + compute sparse vectors (dense is auto-embedded on `add`).
+    // Re-chunk and determine transaction size before doing embedding work.
     let chunks = chunk_content(slug, &request.content, &chunking);
+    let ids: Vec<String> = chunks.iter().map(|chunk| chunk.id.clone()).collect();
+    let num_chunks = ids.len();
+    let replacement_ids: HashSet<&str> = ids.iter().map(String::as_str).collect();
+    let stale_ids: Vec<String> = existing_ids
+        .into_iter()
+        .filter(|id| !replacement_ids.contains(id.as_str()))
+        .collect();
+    enforce_transaction_write_limit(num_chunks, stale_ids.len())?;
+
     let documents: Vec<&str> = chunks.iter().map(|chunk| chunk.text.as_str()).collect();
     let sparse = WikiEmbedder::new(None)
         .embed_sparse(token, &documents)
         .await?;
+    let dense = embed_dense_documents(&collection, &documents)
+        .await
+        .map_err(UpsertPageError::DenseEmbed)?;
 
     let metadatas = build_metadatas(
         slug,
@@ -265,61 +326,39 @@ async fn upsert_page(
         &title_from_content(&request.content),
         created_at,
         now,
-        version,
+        i64::from(version),
         categories,
         &request.source_ids,
     );
 
-    // delete-then-add is non-atomic (see the module docstring for the planned
-    // compare-and-set replacement): a mid-flight failure can leave the page
-    // partially removed, and there is no fencing against a concurrent upsert of
-    // the same slug. We only delete when the page already exists so a brand-new
-    // page is never briefly absent.
-    if exists {
-        let where_slug = Where::Metadata(MetadataExpression {
-            key: "slug".to_string(),
-            comparison: MetadataComparison::Primitive(
-                PrimitiveOperator::Equal,
-                MetadataValue::Str(slug.to_string()),
-            ),
-        });
-        record_op(
-            wiki_client,
-            tenant,
-            collection.delete(None, Some(where_slug), None),
-        )
-        .await?;
+    let doc_batch: Vec<Option<String>> = chunks
+        .iter()
+        .map(|chunk| Some(chunk.text.clone()))
+        .collect();
+    let meta_batch: Vec<Option<UpdateMetadata>> = metadatas
+        .into_iter()
+        .map(metadata_to_update_metadata)
+        .map(Some)
+        .collect();
+    record_op(
+        wiki_client,
+        tenant,
+        txn.upsert(
+            ids.clone(),
+            Some(dense),
+            Some(doc_batch),
+            None,
+            Some(meta_batch),
+        ),
+    )
+    .await?;
+
+    if !stale_ids.is_empty() {
+        record_op(wiki_client, tenant, txn.delete(stale_ids)).await?;
     }
 
-    let ids: Vec<String> = chunks.iter().map(|chunk| chunk.id.clone()).collect();
-    let num_chunks = ids.len();
-    for start in (0..num_chunks).step_by(ADD_BATCH_SIZE) {
-        let end = (start + ADD_BATCH_SIZE).min(num_chunks);
-        let id_batch = ids[start..end].to_vec();
-        let doc_batch: Vec<Option<String>> = chunks[start..end]
-            .iter()
-            .map(|chunk| Some(chunk.text.clone()))
-            .collect();
-        let meta_batch: Vec<Option<Metadata>> =
-            metadatas[start..end].iter().cloned().map(Some).collect();
-        record_op(
-            wiki_client,
-            tenant,
-            // `embeddings = None` lets the collection's schema-bound Qwen EF
-            // embed the documents on the FE using the forwarded token.
-            collection.add(
-                id_batch,
-                None::<Vec<Vec<f32>>>,
-                Some(doc_batch),
-                None,
-                Some(meta_batch),
-            ),
-        )
-        .await?;
-    }
+    record_op(wiki_client, tenant, txn.commit()).await?;
 
-    // `request.expected_version` is intentionally not checked here yet (see its
-    // field docs): enforcing it on the non-atomic flow above would be racy.
     // `reason` is logged as a presence flag only — never its content, which can
     // be large and may leak sensitive context.
     tracing::info!(
@@ -335,7 +374,7 @@ async fn upsert_page(
     Ok(UpsertPageResponse {
         slug: slug.to_string(),
         op: op.to_string(),
-        version: version as u32,
+        version,
         created_at,
         updated_at: now,
         num_chunks,
@@ -348,10 +387,9 @@ async fn upsert_page(
 ///
 /// This request still fails; the next one re-resolves the name to the new id.
 /// We don't transparently retry in-request because a stale id is rare (it
-/// requires the collection to be recreated within the cache TTL) and a `delete`
-/// against the dead id 404s before any `add`, so failing can't half-write the
-/// live collection — a client retry is cheaper than an in-request re-resolve +
-/// re-embed.
+/// requires the collection to be recreated within the cache TTL), and the
+/// transaction will fail before commit; a client retry is cheaper than an
+/// in-request re-resolve plus re-embed.
 async fn record_op<T, F>(
     wiki_client: &FoundationChromaClient,
     tenant: &str,
@@ -366,6 +404,95 @@ where
         }
         UpsertPageError::RecordIo(err)
     })
+}
+
+fn where_slug(slug: &str) -> Where {
+    Where::Metadata(MetadataExpression {
+        key: "slug".to_string(),
+        comparison: MetadataComparison::Primitive(
+            PrimitiveOperator::Equal,
+            MetadataValue::Str(slug.to_string()),
+        ),
+    })
+}
+
+fn enforce_transaction_write_limit(
+    replacement_writes: usize,
+    stale_delete_writes: usize,
+) -> Result<(), UpsertPageError> {
+    let writes = replacement_writes + stale_delete_writes;
+    if writes > MAX_TRANSACTION_WRITES {
+        Err(UpsertPageError::TooManyTransactionWrites {
+            writes,
+            limit: MAX_TRANSACTION_WRITES,
+        })
+    } else {
+        Ok(())
+    }
+}
+
+async fn embed_dense_documents(
+    collection: &ChromaCollection,
+    documents: &[&str],
+) -> Result<Vec<Vec<f32>>, ChromaHttpClientError> {
+    let mut embeddings = Vec::with_capacity(documents.len());
+    for batch in documents.chunks(DENSE_EMBED_BATCH_SIZE) {
+        embeddings.extend(collection.embed_documents(batch).await?);
+    }
+    Ok(embeddings)
+}
+
+fn head_metadata(response: &GetResponse) -> Option<Metadata> {
+    response
+        .metadatas
+        .as_ref()?
+        .iter()
+        .filter_map(|meta| meta.as_ref())
+        .min_by_key(|meta| meta_int(meta, "chunk_id").unwrap_or(0))
+        .cloned()
+}
+
+fn existing_page_state(existing: &GetResponse, chunk0: &GetResponse) -> (bool, Option<Metadata>) {
+    (
+        !existing.ids.is_empty() || !chunk0.ids.is_empty(),
+        head_metadata(existing).or_else(|| head_metadata(chunk0)),
+    )
+}
+
+fn current_version(exists: bool, meta: Option<&Metadata>) -> u32 {
+    if exists {
+        meta.and_then(meta_version).unwrap_or(1)
+    } else {
+        0
+    }
+}
+
+fn meta_version(meta: &Metadata) -> Option<u32> {
+    meta_int(meta, "version")
+        .and_then(|version| u32::try_from(version).ok())
+        .filter(|version| *version > 0)
+}
+
+fn meta_int(meta: &Metadata, key: &str) -> Option<i64> {
+    meta.get(key).and_then(|value| i64::try_from(value).ok())
+}
+
+fn metadata_to_update_metadata(metadata: Metadata) -> UpdateMetadata {
+    metadata
+        .into_iter()
+        .map(|(key, value)| (key, value.into()))
+        .collect()
+}
+
+fn is_conditional_conflict(err: &ChromaHttpClientError) -> bool {
+    matches!(
+        err,
+        ChromaHttpClientError::ApiError(message, status)
+            if *status == reqwest::StatusCode::PRECONDITION_FAILED
+                || (*status == reqwest::StatusCode::CONFLICT
+                    && (message.contains("conditional")
+                        || message.contains("ConditionalWriteConflict")))
+    )
 }
 
 /// Validates the slug against [`SLUG_RE`].
@@ -445,6 +572,27 @@ mod tests {
         }
     }
 
+    fn chunk_meta(chunk_id: i64, version: Option<i64>) -> Metadata {
+        let mut meta = Metadata::new();
+        meta.insert("chunk_id".to_string(), MetadataValue::Int(chunk_id));
+        if let Some(version) = version {
+            meta.insert("version".to_string(), MetadataValue::Int(version));
+        }
+        meta
+    }
+
+    fn get_response(ids: &[&str], metadatas: Option<Vec<Option<Metadata>>>) -> GetResponse {
+        GetResponse {
+            ids: ids.iter().map(|id| id.to_string()).collect(),
+            embeddings: None,
+            documents: None,
+            uris: None,
+            metadatas,
+            include: vec![Include::Metadata],
+            occ_read_token: None,
+        }
+    }
+
     #[test]
     fn validate_slug_accepts_root_and_well_formed_slugs() {
         validate_slug("").unwrap();
@@ -497,6 +645,87 @@ mod tests {
             vec!["a".to_string(), "b".to_string()]
         );
         assert_eq!(normalize_categories(&[]), Vec::<String>::new());
+    }
+
+    #[test]
+    fn transaction_write_limit_counts_upserts_and_deletes() {
+        enforce_transaction_write_limit(300, 0).unwrap();
+        enforce_transaction_write_limit(1, 299).unwrap();
+
+        let err = enforce_transaction_write_limit(300, 1).unwrap_err();
+        assert!(matches!(
+            err,
+            UpsertPageError::TooManyTransactionWrites {
+                writes: 301,
+                limit: MAX_TRANSACTION_WRITES,
+            }
+        ));
+        assert_eq!(err.code(), ErrorCodes::ResourceExhausted);
+    }
+
+    #[test]
+    fn current_version_reads_metadata_and_treats_corrupt_pages_as_present() {
+        let meta = chunk_meta(0, Some(7));
+
+        assert_eq!(current_version(true, Some(&meta)), 7);
+        assert_eq!(current_version(false, Some(&meta)), 0);
+        assert_eq!(current_version(true, Some(&chunk_meta(0, None))), 1);
+        assert_eq!(current_version(true, Some(&chunk_meta(0, Some(0)))), 1);
+        assert_eq!(current_version(true, None), 1);
+    }
+
+    #[test]
+    fn existing_page_state_uses_exact_chunk0_read_for_metadata_less_rows() {
+        let existing = get_response(&[], Some(vec![]));
+        let chunk0 = get_response(&["page-0"], Some(vec![None]));
+
+        let (exists, meta) = existing_page_state(&existing, &chunk0);
+
+        assert!(exists);
+        assert!(meta.is_none());
+        assert_eq!(current_version(exists, meta.as_ref()), 1);
+    }
+
+    #[test]
+    fn existing_page_state_falls_back_to_chunk0_metadata() {
+        let existing = get_response(&[], Some(vec![]));
+        let chunk0 = get_response(&["page-0"], Some(vec![Some(chunk_meta(0, Some(4)))]));
+
+        let (exists, meta) = existing_page_state(&existing, &chunk0);
+
+        assert!(exists);
+        assert_eq!(meta.as_ref().and_then(meta_version), Some(4));
+    }
+
+    #[test]
+    fn head_metadata_picks_lowest_chunk_id() {
+        let response = get_response(
+            &["page-1", "page-0"],
+            Some(vec![
+                Some(chunk_meta(1, Some(4))),
+                Some(chunk_meta(0, Some(3))),
+            ]),
+        );
+
+        let head = head_metadata(&response).expect("head metadata");
+
+        assert_eq!(meta_int(&head, "chunk_id"), Some(0));
+        assert_eq!(meta_version(&head), Some(3));
+    }
+
+    #[test]
+    fn conditional_conflicts_map_to_failed_precondition() {
+        let err = UpsertPageError::RecordIo(ChromaHttpClientError::ApiError(
+            "ConditionalWriteConflictError".into(),
+            reqwest::StatusCode::CONFLICT,
+        ));
+        assert_eq!(err.code(), ErrorCodes::FailedPrecondition);
+
+        let err = UpsertPageError::RecordIo(ChromaHttpClientError::ApiError(
+            "stale read".into(),
+            reqwest::StatusCode::PRECONDITION_FAILED,
+        ));
+        assert_eq!(err.code(), ErrorCodes::FailedPrecondition);
     }
 
     #[test]
