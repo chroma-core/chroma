@@ -7,6 +7,7 @@ use chroma_segment::bloom_filter::BloomFilterManagerConfig;
 use chroma_sysdb::SysDbConfig;
 use chroma_system::DispatcherConfig;
 use chroma_tracing::{OtelFilter, OtelFilterLevel};
+use chroma_types::GrpcConfig;
 use figment::providers::{Env, Format, Yaml};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -269,6 +270,10 @@ pub struct QueryServiceConfig {
     #[serde(default = "QueryServiceConfig::default_my_port")]
     pub my_port: u16,
 
+    /// The configuration for the gRPC server.
+    #[serde(default)]
+    pub grpc: GrpcConfig,
+
     /// The configuration for connecting to the chroma metadata (sysdb) service.
     #[serde(default)]
     pub sysdb: SysDbConfig,
@@ -432,6 +437,10 @@ pub struct CompactionServiceConfig {
     /// The port to listen on for gRPC requests.
     #[serde(default = "CompactionServiceConfig::default_my_port")]
     pub my_port: u16,
+
+    /// The configuration for the gRPC server.
+    #[serde(default)]
+    pub grpc: GrpcConfig,
 
     /// The assignment policy to use for determining which compaction service instance
     /// should handle a given collection.

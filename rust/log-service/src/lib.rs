@@ -39,7 +39,9 @@ use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
 use chroma_types::dirty_log_path_from_hostname;
 use chroma_types::Cmek;
 use chroma_types::{CollectionUuid, DatabaseName, DirtyMarker, Topology};
-use chroma_types::{MultiCloudMultiRegionConfiguration, ProviderRegion, RegionName, TopologyName};
+use chroma_types::{
+    GrpcConfig, MultiCloudMultiRegionConfiguration, ProviderRegion, RegionName, TopologyName,
+};
 use figment::providers::{Env, Format, Yaml};
 use futures::stream::StreamExt;
 use google_cloud_gax::conn::Environment;
@@ -3823,9 +3825,18 @@ impl LogServerWrapper {
             .set_serving::<chroma_types::chroma_proto::log_service_server::LogServiceServer<Self>>()
             .await;
 
-        let max_encoding_message_size = log_server.config.max_encoding_message_size;
-        let max_decoding_message_size = log_server.config.max_decoding_message_size;
-        let max_concurrent_streams = log_server.config.grpc_max_concurrent_streams;
+        let max_encoding_message_size = log_server
+            .config
+            .max_encoding_message_size
+            .unwrap_or(log_server.config.grpc.max_encoding_message_size);
+        let max_decoding_message_size = log_server
+            .config
+            .max_decoding_message_size
+            .unwrap_or(log_server.config.grpc.max_decoding_message_size);
+        let max_concurrent_streams = log_server
+            .config
+            .grpc_max_concurrent_streams
+            .unwrap_or(log_server.config.grpc.max_concurrent_streams);
         let shutdown_grace_period = log_server.config.grpc_shutdown_grace_period;
 
         let wrapper = LogServerWrapper {
@@ -4062,9 +4073,9 @@ pub struct LogServerConfig {
     #[serde(default)]
     pub proxy_to: Option<GrpcLogConfig>,
     #[serde(default = "LogServerConfig::default_max_encoding_message_size")]
-    pub max_encoding_message_size: usize,
+    pub max_encoding_message_size: Option<usize>,
     #[serde(default = "LogServerConfig::default_max_decoding_message_size")]
-    pub max_decoding_message_size: usize,
+    pub max_decoding_message_size: Option<usize>,
     #[serde(
         rename = "grpc_shutdown_grace_period_seconds",
         deserialize_with = "deserialize_duration_from_seconds",
@@ -4073,7 +4084,7 @@ pub struct LogServerConfig {
     )]
     pub grpc_shutdown_grace_period: Duration,
     #[serde(default = "LogServerConfig::default_grpc_max_concurrent_streams")]
-    pub grpc_max_concurrent_streams: u32,
+    pub grpc_max_concurrent_streams: Option<u32>,
     #[serde(default = "LogServerConfig::default_rollup_concurrency")]
     pub rollup_concurrency: usize,
     #[serde(default = "LogServerConfig::default_rollup_concurrent_manifests")]
@@ -4081,6 +4092,8 @@ pub struct LogServerConfig {
     #[serde(default)]
     pub regions_and_topologies:
         Option<MultiCloudMultiRegionConfiguration<RegionalStorageConfig, TopologicalStorageConfig>>,
+    #[serde(default)]
+    pub grpc: GrpcConfig,
 }
 
 impl LogServerConfig {
@@ -4150,19 +4163,20 @@ impl LogServerConfig {
         86_400_000_000
     }
 
-    fn default_max_encoding_message_size() -> usize {
-        32_000_000
+    fn default_max_encoding_message_size() -> Option<usize> {
+        Some(32_000_000)
     }
 
-    fn default_max_decoding_message_size() -> usize {
-        32_000_000
+    fn default_max_decoding_message_size() -> Option<usize> {
+        Some(32_000_000)
     }
 
     fn default_grpc_shutdown_grace_period() -> Duration {
         Duration::from_secs(1)
     }
-    fn default_grpc_max_concurrent_streams() -> u32 {
-        1000
+
+    fn default_grpc_max_concurrent_streams() -> Option<u32> {
+        Some(1000)
     }
 
     /// Maximum number of concurrent tokio tasks used to enrich dirty log rollup.
@@ -4212,6 +4226,7 @@ impl Default for LogServerConfig {
             rollup_concurrency: Self::default_rollup_concurrency(),
             rollup_concurrent_manifests: Self::default_rollup_concurrent_manifests(),
             regions_and_topologies: None,
+            grpc: GrpcConfig::default(),
         }
     }
 }
@@ -5469,6 +5484,9 @@ mod tests {
         assert_eq!(Duration::from_secs(10), config.rollup_interval);
         assert_eq!(86_400_000_000, config.timeout_us);
         assert!(config.proxy_to.is_none());
+        assert_eq!(40 * 1024 * 1024, config.grpc.max_encoding_message_size);
+        assert_eq!(40 * 1024 * 1024, config.grpc.max_decoding_message_size);
+        assert_eq!(100, config.grpc.max_concurrent_streams);
     }
 
     #[test]
