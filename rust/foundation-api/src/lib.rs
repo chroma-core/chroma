@@ -69,7 +69,6 @@ pub async fn foundation_service_entrypoint_with_config_system_registry(
     system: chroma_system::System,
     registry: chroma_config::registry::Registry,
 ) {
-
     if init_otel_tracing {
         init_foundation_otel_tracing(config);
     }

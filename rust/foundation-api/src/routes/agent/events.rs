@@ -95,7 +95,6 @@ pub(crate) fn observation_event(observation: &Observation) -> AgentSseEvent {
     AgentSseEvent::Observation { results }
 }
 
-
 /// The user-facing text of an action (its `SendUserText` items joined), used to
 /// track the agent's terminal answer.
 pub(crate) fn action_text(action: &Action) -> String {

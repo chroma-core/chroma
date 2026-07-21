@@ -27,8 +27,8 @@ mod events;
 
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::{extract::State, http::HeaderMap, Json};
-use chroma_metering::{MeterEvent, SearchAgentUsageContext};
 use chroma_error::{ChromaError, ChromaValidationError, ErrorCodes};
+use chroma_metering::{MeterEvent, SearchAgentUsageContext};
 use futures::{Stream, StreamExt};
 use serde::Deserialize;
 use validator::Validate;
@@ -323,20 +323,20 @@ fn extract_subagent_usages(observation: &Observation) -> Vec<InferenceUsage> {
         .items
         .iter()
         .filter_map(|item| {
-        let ObservationItem::ToolResult {
-            metadata:
-                Some(chroma_agent::ToolCallMetadata::SubagentUsage {
-                    model,
-                    input_tokens,
-                    output_tokens,
-                }),
-            ..
-        } = item
-        else {
-            return None;
-        };
+            let ObservationItem::ToolResult {
+                metadata:
+                    Some(chroma_agent::ToolCallMetadata::SubagentUsage {
+                        model,
+                        input_tokens,
+                        output_tokens,
+                    }),
+                ..
+            } = item
+            else {
+                return None;
+            };
 
-        Some(InferenceUsage {
+            Some(InferenceUsage {
                 model: model.clone(),
                 input_tokens: *input_tokens,
                 output_tokens: *output_tokens,

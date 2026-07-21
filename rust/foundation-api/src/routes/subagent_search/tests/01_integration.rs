@@ -69,7 +69,10 @@ async fn streams_and_collects_final_from_mocked_sse() {
             justification: "Relevant to rag.".to_string(),
         }]
     );
-    assert_eq!(result.usage.expect("usage should be present").model, "scout");
+    assert_eq!(
+        result.usage.expect("usage should be present").model,
+        "scout"
+    );
     assert_eq!(mock.calls(), 2);
 }
 

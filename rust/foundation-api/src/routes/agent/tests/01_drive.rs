@@ -146,7 +146,6 @@ async fn tool_error_is_reported_as_observation_then_done() {
     assert!(matches!(events.last(), Some(AgentSseEvent::Done { .. })));
 }
 
-
 /// Answers immediately with text and never requests a tool.
 struct AnswerImmediately;
 

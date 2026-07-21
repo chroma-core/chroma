@@ -146,5 +146,4 @@ fn events_serialize_with_type_and_data_tags() {
     .expect("serialize");
     assert_eq!(done["type"], "done");
     assert_eq!(done["data"]["final_text"], "answer");
-
 }
