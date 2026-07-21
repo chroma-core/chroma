@@ -12,5 +12,6 @@ pub use {
         ReturnBytes, SearchAgentUsageContext, StartRequest, WriteAction,
     },
     errors::MeteringError,
+    receiver::meter_event_receiver_initialized,
     types::{MeteringAtomicU64, MeteringInstant},
 };
