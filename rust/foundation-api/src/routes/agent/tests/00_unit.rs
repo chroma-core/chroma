@@ -2,10 +2,10 @@
 //! the wire serialization of [`AgentSseEvent`].
 
 use super::super::events::{
-    action_event, action_text, observation_event, usage_event, AgentSseEvent, AgentToolCall,
+    action_event, action_text, observation_event, AgentSseEvent, AgentToolCall,
 };
 use super::super::{default_model, default_system_prompt, AgentRequest};
-use chroma_agent::{ActionBuilder, AnthropicModel, Call, InferenceUsage, ObservationBuilder, Reasoning};
+use chroma_agent::{ActionBuilder, AnthropicModel, Call, ObservationBuilder, Reasoning};
 use serde_json::json;
 use validator::Validate;
 
@@ -147,14 +147,4 @@ fn events_serialize_with_type_and_data_tags() {
     assert_eq!(done["type"], "done");
     assert_eq!(done["data"]["final_text"], "answer");
 
-    let usage = serde_json::to_value(usage_event(&InferenceUsage {
-        model: "scout".to_string(),
-        input_tokens: 123,
-        output_tokens: 456,
-    }))
-    .expect("serialize");
-    assert_eq!(usage["type"], "usage");
-    assert_eq!(usage["data"]["model"], "scout");
-    assert_eq!(usage["data"]["input_tokens"], 123);
-    assert_eq!(usage["data"]["output_tokens"], 456);
 }

@@ -146,35 +146,6 @@ async fn tool_error_is_reported_as_observation_then_done() {
     assert!(matches!(events.last(), Some(AgentSseEvent::Done { .. })));
 }
 
-#[tokio::test]
-async fn subagent_usage_emits_usage_event() {
-    let events = collect_events(
-        search_agent(
-            false,
-            Some(ToolCallMetadata::SubagentUsage {
-                model: "scout".to_string(),
-                input_tokens: 123,
-                output_tokens: 456,
-            }),
-        ),
-        "hello",
-    )
-    .await;
-
-    assert_eq!(events.len(), 5, "events: {events:?}");
-    assert!(matches!(&events[0], AgentSseEvent::Action { .. }));
-    assert!(matches!(
-        &events[1],
-        AgentSseEvent::Usage {
-            model,
-            input_tokens: 123,
-            output_tokens: 456,
-        } if model == "scout"
-    ));
-    assert!(matches!(&events[2], AgentSseEvent::Observation { .. }));
-    assert!(matches!(&events[3], AgentSseEvent::Action { .. }));
-    assert!(matches!(&events[4], AgentSseEvent::Done { .. }));
-}
 
 /// Answers immediately with text and never requests a tool.
 struct AnswerImmediately;

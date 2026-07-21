@@ -37,7 +37,7 @@ use chroma_agent::{
     Agent, AnthropicAgentInferenceModel, AnthropicModel, InferenceUsage, Observation,
     ObservationBuilder, ObservationItem, ToolSet,
 };
-use events::{action_event, action_text, observation_event, usage_event, AgentSseEvent};
+use events::{action_event, action_text, observation_event, AgentSseEvent};
 
 use crate::agent_tools::{ReadPageTool, SearchTool, SubagentSearchTool};
 use crate::routes::subagent_search::SubagentSearchCreds;
@@ -276,7 +276,6 @@ fn drive_agent(
             };
             if let Some(usage) = step.usage.as_ref() {
                 submit_search_agent_usage_event(usage, &database, &tenant, &collection_id).await;
-                yield usage_event(usage);
             }
             let Some(action) = step.action else {
                 break;
@@ -298,7 +297,6 @@ fn drive_agent(
                     for usage in extract_subagent_usages(&observation) {
                         submit_search_agent_usage_event(&usage, &database, &tenant, &collection_id)
                             .await;
-                        yield usage_event(&usage);
                     }
                     yield observation_event(&observation);
                     agent.observe(observation);
