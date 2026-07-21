@@ -220,7 +220,7 @@ pub async fn foundation_get_trajectory_reasoning(
     State(server): State<FoundationApiServer>,
     Path(id): Path<Uuid>,
     Query(query): Query<ReadTrajectoryReasoningQuery>,
-) -> Result<Json<Vec<TrajectoryReasoningResponse>>, ServerError> {
+) -> Result<Json<Option<TrajectoryReasoningResponse>>, ServerError> {
     let identity =
         whoami_and_authorize(&*server.auth, &headers, AuthzAction::ViewFoundation).await?;
     let tenant = identity.tenant;
@@ -243,7 +243,7 @@ pub async fn foundation_get_trajectory_reasoning(
 fn reasoning_for_slug(
     file: &ReasoningTrajectoryFile,
     slug: &str,
-) -> Vec<TrajectoryReasoningResponse> {
+) -> Option<TrajectoryReasoningResponse> {
     let entries = &file.trajectory.entries;
     let mut reasoning_prefix = Vec::new();
     let mut last_match = None;
@@ -263,15 +263,15 @@ fn reasoning_for_slug(
     }
 
     let Some((entry_index, reasoning_len)) = last_match else {
-        return Vec::new();
+        return None;
     };
     let other_slugs = other_written_slugs(&entries[entry_index].writes, slug);
 
-    vec![TrajectoryReasoningResponse {
+    Some(TrajectoryReasoningResponse {
         slug: slug.to_string(),
         reasoning: reasoning_prefix.into_iter().take(reasoning_len).collect(),
         other_slugs,
-    }]
+    })
 }
 
 fn other_written_slugs(writes: &[crate::trajectories::ReasoningWrite], slug: &str) -> Vec<String> {
@@ -457,10 +457,10 @@ mod tests {
     }
 
     #[test]
-    fn reasoning_for_slug_returns_empty_when_slug_was_not_written() {
+    fn reasoning_for_slug_returns_none_when_slug_was_not_written() {
         let file = minimal_file(vec![entry(Some("thinking"), &["other"])]);
 
-        assert_eq!(reasoning_for_slug(&file, "target"), Vec::new());
+        assert_eq!(reasoning_for_slug(&file, "target"), None);
     }
 
     #[test]
@@ -475,7 +475,7 @@ mod tests {
 
         assert_eq!(
             reasoning_for_slug(&file, "target"),
-            vec![TrajectoryReasoningResponse {
+            Some(TrajectoryReasoningResponse {
                 slug: "target".to_string(),
                 reasoning: vec![
                     "first target".to_string(),
@@ -483,7 +483,7 @@ mod tests {
                     "final target".to_string(),
                 ],
                 other_slugs: vec!["sibling".to_string()],
-            }]
+            })
         );
     }
 
@@ -497,11 +497,11 @@ mod tests {
 
         assert_eq!(
             reasoning_for_slug(&file, "target"),
-            vec![TrajectoryReasoningResponse {
+            Some(TrajectoryReasoningResponse {
                 slug: "target".to_string(),
                 reasoning: vec!["before".to_string()],
                 other_slugs: Vec::new(),
-            }]
+            })
         );
     }
 }
