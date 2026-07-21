@@ -3668,6 +3668,7 @@ dependencies = [
  "chroma-api-types",
  "chroma-config",
  "chroma-error",
+ "chroma-metering",
  "chroma-sysdb",
  "chroma-system",
  "chroma-tracing",

@@ -7,7 +7,7 @@
 //! values (from `chroma-agent`) into these events, so the stream driver in the
 //! parent module stays a thin loop.
 
-use chroma_agent::{Action, ActionItem, InferenceUsage, Observation, ObservationItem};
+use chroma_agent::{Action, ActionItem, Observation, ObservationItem};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -27,12 +27,6 @@ pub(crate) enum AgentSseEvent {
     },
     /// The results of the tool calls from the preceding action.
     Observation { results: Vec<AgentToolResult> },
-    /// Token usage reported by either the planner model or a subagent tool.
-    Usage {
-        model: String,
-        input_tokens: u64,
-        output_tokens: u64,
-    },
     /// Terminal event: the agent finished with its final user-facing answer.
     Done { final_text: String },
     /// The run failed mid-flight; carries a human-readable message.
@@ -99,16 +93,6 @@ pub(crate) fn observation_event(observation: &Observation) -> AgentSseEvent {
         })
         .collect();
     AgentSseEvent::Observation { results }
-}
-
-/// Projects provider-reported token usage into the wire event emitted on the
-/// SSE stream.
-pub(crate) fn usage_event(usage: &InferenceUsage) -> AgentSseEvent {
-    AgentSseEvent::Usage {
-        model: usage.model.clone(),
-        input_tokens: usage.input_tokens,
-        output_tokens: usage.output_tokens,
-    }
 }
 
 /// The user-facing text of an action (its `SendUserText` items joined), used to
