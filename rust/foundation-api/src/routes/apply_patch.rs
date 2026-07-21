@@ -93,6 +93,7 @@ impl ChromaError for ApplyPatchError {
 }
 
 /// `POST /api/apply-patch` handler.
+#[tracing::instrument(skip(headers, server, request))]
 pub async fn foundation_apply_patch(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
