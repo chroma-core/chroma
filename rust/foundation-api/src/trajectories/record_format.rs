@@ -12,7 +12,7 @@ use super::error::TrajectoryError;
 use super::ids::{encode_index, uuid_to_tid};
 use super::limits::{ENTRY_INDEX_WIDTH, VALUE_MAX_BYTES};
 use super::model::{ReasoningEntry, ReasoningTrajectory, ReasoningTrajectoryFile, WriteState};
-use super::validate::validate_entry;
+use super::validate::normalize_entry;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ChromaRecord {
@@ -171,10 +171,7 @@ pub(crate) fn collect_entry_records(
     index: usize,
     entry: &ReasoningEntry,
 ) -> Result<(), TrajectoryError> {
-    validate_entry(entry)?;
-    let entry = entry.normalized().ok_or_else(|| {
-        TrajectoryError::InvalidValue("reasoning entry must have reasoning or writes".to_string())
-    })?;
+    let entry = normalize_entry(entry)?;
     let entry_component = encode_index(index, ENTRY_INDEX_WIDTH)?;
     push_chunkset(
         records,

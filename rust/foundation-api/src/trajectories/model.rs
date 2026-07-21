@@ -58,24 +58,31 @@ impl<'de> Deserialize<'de> for ReasoningEntry {
         D: Deserializer<'de>,
     {
         let raw = GeneratedReasoningEntry::deserialize(deserializer)?;
-        Ok(ReasoningEntry {
-            reasoning: normalize_reasoning(raw.reasoning.as_deref()),
-            writes: dedupe_writes(raw.writes),
-        })
+        Ok(ReasoningEntry::new_normalized(
+            raw.reasoning.as_deref(),
+            raw.writes,
+        ))
     }
 }
 
 impl ReasoningEntry {
-    pub(crate) fn normalized(&self) -> Option<Self> {
-        let entry = ReasoningEntry {
-            reasoning: normalize_reasoning(self.reasoning.as_deref()),
-            writes: dedupe_writes(self.writes.clone()),
-        };
-        if entry.reasoning.is_some() || !entry.writes.is_empty() {
-            Some(entry)
-        } else {
-            None
+    fn new_normalized<I>(reasoning: Option<&str>, writes: I) -> Self
+    where
+        I: IntoIterator<Item = ReasoningWrite>,
+    {
+        ReasoningEntry {
+            reasoning: normalize_reasoning(reasoning),
+            writes: dedupe_writes(writes),
         }
+    }
+
+    pub(crate) fn normalized(&self) -> Option<Self> {
+        ReasoningEntry::new_normalized(self.reasoning.as_deref(), self.writes.iter().cloned())
+            .into_non_empty()
+    }
+
+    fn into_non_empty(self) -> Option<Self> {
+        (self.reasoning.is_some() || !self.writes.is_empty()).then_some(self)
     }
 }
 
@@ -199,8 +206,8 @@ fn project_entries(entries: Vec<GeneratedEntry>) -> Vec<ReasoningEntry> {
     for (index, entry) in entries.iter().enumerate() {
         let GeneratedEntry::Action(action) = entry else {
             if let GeneratedEntry::Reasoning(entry) = entry {
-                if entry.reasoning.is_some() || !entry.writes.is_empty() {
-                    out.push(entry.clone());
+                if let Some(entry) = entry.normalized() {
+                    out.push(entry);
                 }
             }
             continue;
@@ -210,10 +217,13 @@ fn project_entries(entries: Vec<GeneratedEntry>) -> Vec<ReasoningEntry> {
             GeneratedEntry::Action(_) | GeneratedEntry::Reasoning(_) => None,
         });
 
-        let reasoning = normalize_reasoning(action.reasoning.as_deref());
-        let writes = action_writes(action, observation);
-        if reasoning.is_some() || !writes.is_empty() {
-            out.push(ReasoningEntry { reasoning, writes });
+        if let Some(entry) = ReasoningEntry::new_normalized(
+            action.reasoning.as_deref(),
+            action_writes(action, observation),
+        )
+        .into_non_empty()
+        {
+            out.push(entry);
         }
     }
 
@@ -246,12 +256,6 @@ fn action_writes(
         let Some(slug) = slug else {
             continue;
         };
-        if writes
-            .iter()
-            .any(|write: &ReasoningWrite| write.slug == slug)
-        {
-            continue;
-        }
         writes.push(ReasoningWrite {
             slug: slug.to_string(),
         });
@@ -270,7 +274,10 @@ fn normalize_reasoning(reasoning: Option<&str>) -> Option<String> {
         .map(str::to_string)
 }
 
-fn dedupe_writes(writes: Vec<ReasoningWrite>) -> Vec<ReasoningWrite> {
+fn dedupe_writes<I>(writes: I) -> Vec<ReasoningWrite>
+where
+    I: IntoIterator<Item = ReasoningWrite>,
+{
     let mut out = Vec::new();
     for write in writes {
         if out

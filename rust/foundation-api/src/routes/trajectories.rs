@@ -14,7 +14,7 @@ use axum::{
     Json,
 };
 use chroma_error::{ChromaError, ErrorCodes};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
@@ -40,6 +40,29 @@ pub struct ReadTrajectoryQuery {
     pub require_finalized: bool,
 }
 
+/// Query parameters for `GET /api/trajectories/{id}/reasoning`.
+#[derive(Debug, Default, PartialEq, Eq, Deserialize)]
+pub struct ReadTrajectoryReasoningQuery {
+    /// Wiki page slug to find in trajectory write calls. Present-but-empty is
+    /// valid and targets the wiki root page.
+    pub slug: Option<String>,
+    /// Reject open trajectories when true. Defaults false so callers can
+    /// inspect a partial trajectory while it executes.
+    #[serde(default)]
+    pub require_finalized: bool,
+}
+
+/// Reasoning traces associated with one page write.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct TrajectoryReasoningResponse {
+    /// The requested page slug.
+    pub slug: String,
+    /// Trimmed non-empty reasoning traces through the final write action.
+    pub reasoning: Vec<String>,
+    /// Other slugs written by the same final action, excluding `slug`.
+    pub other_slugs: Vec<String>,
+}
+
 /// Errors raised while running trajectory routes after request extraction.
 #[derive(Debug, thiserror::Error)]
 pub enum TrajectoryRouteError {
@@ -55,13 +78,18 @@ pub enum TrajectoryRouteError {
     /// The trajectory operation failed.
     #[error(transparent)]
     Trajectory(#[from] TrajectoryError),
+    /// The reasoning route requires a slug query parameter.
+    #[error("missing slug query parameter")]
+    MissingSlug,
 }
 
 impl ChromaError for TrajectoryRouteError {
     fn code(&self) -> ErrorCodes {
         match self {
             TrajectoryRouteError::RouteDisabled => ErrorCodes::Internal,
-            TrajectoryRouteError::MissingToken => ErrorCodes::InvalidArgument,
+            TrajectoryRouteError::MissingToken | TrajectoryRouteError::MissingSlug => {
+                ErrorCodes::InvalidArgument
+            }
             TrajectoryRouteError::Resolve(err) if err.is_not_found() => ErrorCodes::NotFound,
             TrajectoryRouteError::Resolve(err) => err.code(),
             TrajectoryRouteError::Trajectory(err) => err.code(),
@@ -186,6 +214,66 @@ pub async fn foundation_get_trajectory(
     Ok(Json(response))
 }
 
+/// `GET /api/trajectories/{id}/reasoning` returns reasoning for one page write.
+pub async fn foundation_get_trajectory_reasoning(
+    headers: HeaderMap,
+    State(server): State<FoundationApiServer>,
+    Path(id): Path<Uuid>,
+    Query(query): Query<ReadTrajectoryReasoningQuery>,
+) -> Result<Json<Option<TrajectoryReasoningResponse>>, ServerError> {
+    let identity =
+        whoami_and_authorize(&*server.auth, &headers, AuthzAction::ViewFoundation).await?;
+    let tenant = identity.tenant;
+    let _guard = server.scorecard_request(&[
+        "op:foundation_get_trajectory_reasoning",
+        &format!("tenant:{tenant}"),
+    ])?;
+    let slug = query.slug.ok_or(TrajectoryRouteError::MissingSlug)?;
+
+    let (client, collection) = trajectory_collection(&server, &headers, &tenant).await?;
+    let file = trajectory_op(
+        client,
+        &tenant,
+        load_generate_trajectory(&collection, id, query.require_finalized),
+    )
+    .await?;
+    Ok(Json(reasoning_for_slug(&file, &slug)))
+}
+
+fn reasoning_for_slug(
+    file: &ReasoningTrajectoryFile,
+    slug: &str,
+) -> Option<TrajectoryReasoningResponse> {
+    let entries = &file.trajectory.entries;
+    let mut reasoning_prefix = Vec::new();
+    let mut last_match = None;
+
+    for (index, entry) in entries.iter().enumerate() {
+        if let Some(reasoning) = entry.reasoning.as_ref() {
+            reasoning_prefix.push(reasoning.clone());
+        }
+        let reasoning_len_after_entry = reasoning_prefix.len();
+
+        if entry.writes.iter().any(|write| write.slug == slug) {
+            last_match = Some((index, reasoning_len_after_entry));
+        }
+    }
+
+    let (entry_index, reasoning_len) = last_match?;
+    let other_slugs = entries[entry_index]
+        .writes
+        .iter()
+        .filter(|write| write.slug != slug)
+        .map(|write| write.slug.clone())
+        .collect();
+
+    Some(TrajectoryReasoningResponse {
+        slug: slug.to_string(),
+        reasoning: reasoning_prefix.into_iter().take(reasoning_len).collect(),
+        other_slugs,
+    })
+}
+
 async fn trajectory_collection<'a>(
     server: &'a FoundationApiServer,
     headers: &HeaderMap,
@@ -219,8 +307,35 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::trajectories::{
+        ReasoningEntry, ReasoningTrajectory, ReasoningTrajectoryFile, ReasoningWrite,
+    };
     use chroma::client::ChromaHttpClientError;
     use serde_json::json;
+
+    fn minimal_file(entries: Vec<ReasoningEntry>) -> ReasoningTrajectoryFile {
+        ReasoningTrajectoryFile {
+            citations: None,
+            trajectory: ReasoningTrajectory {
+                id: Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+                entries,
+            },
+        }
+    }
+
+    fn entry(reasoning: Option<&str>, slugs: &[&str]) -> ReasoningEntry {
+        ReasoningEntry {
+            reasoning: reasoning.map(str::to_string),
+            writes: slugs
+                .iter()
+                .map(|slug| ReasoningWrite {
+                    slug: (*slug).to_string(),
+                })
+                .collect(),
+        }
+        .normalized()
+        .expect("test entry should have reasoning or writes after normalization")
+    }
 
     #[test]
     fn route_errors_map_complete_contract_codes() {
@@ -229,6 +344,7 @@ mod tests {
             vec![
                 TrajectoryRouteError::RouteDisabled.code(),
                 TrajectoryRouteError::MissingToken.code(),
+                TrajectoryRouteError::MissingSlug.code(),
                 TrajectoryRouteError::Resolve(FoundationChromaClientError::InvalidToken(
                     "bad token".to_string(),
                 ))
@@ -264,6 +380,7 @@ mod tests {
             ],
             vec![
                 ErrorCodes::Internal,
+                ErrorCodes::InvalidArgument,
                 ErrorCodes::InvalidArgument,
                 ErrorCodes::InvalidArgument,
                 ErrorCodes::NotFound,
@@ -304,6 +421,78 @@ mod tests {
             ReadTrajectoryQuery {
                 require_finalized: true,
             }
+        );
+    }
+
+    #[test]
+    fn reasoning_query_requires_slug_but_allows_root_slug() {
+        assert_eq!(
+            serde_json::from_value::<ReadTrajectoryReasoningQuery>(json!({
+                "require_finalized": true
+            }))
+            .unwrap(),
+            ReadTrajectoryReasoningQuery {
+                slug: None,
+                require_finalized: true,
+            }
+        );
+        assert_eq!(
+            serde_json::from_value::<ReadTrajectoryReasoningQuery>(json!({
+                "slug": "",
+            }))
+            .unwrap(),
+            ReadTrajectoryReasoningQuery {
+                slug: Some(String::new()),
+                require_finalized: false,
+            }
+        );
+    }
+
+    #[test]
+    fn reasoning_for_slug_returns_none_when_slug_was_not_written() {
+        let file = minimal_file(vec![entry(Some("thinking"), &["other"])]);
+
+        assert_eq!(reasoning_for_slug(&file, "target"), None);
+    }
+
+    #[test]
+    fn reasoning_for_slug_uses_latest_write_and_prefix_reasoning() {
+        let file = minimal_file(vec![
+            entry(Some("  first target  "), &["target"]),
+            entry(Some("intermediate"), &["other"]),
+            entry(Some("final target"), &["target", "sibling", "sibling"]),
+            entry(Some("after final target"), &["later"]),
+        ]);
+
+        assert_eq!(
+            reasoning_for_slug(&file, "target"),
+            Some(TrajectoryReasoningResponse {
+                slug: "target".to_string(),
+                reasoning: vec![
+                    "first target".to_string(),
+                    "intermediate".to_string(),
+                    "final target".to_string(),
+                ],
+                other_slugs: vec!["sibling".to_string()],
+            })
+        );
+    }
+
+    #[test]
+    fn reasoning_for_slug_returns_written_slug_without_reasoning() {
+        let file = minimal_file(vec![
+            entry(Some("before"), &["other"]),
+            entry(None, &["target"]),
+            entry(Some("after target"), &["other"]),
+        ]);
+
+        assert_eq!(
+            reasoning_for_slug(&file, "target"),
+            Some(TrajectoryReasoningResponse {
+                slug: "target".to_string(),
+                reasoning: vec!["before".to_string()],
+                other_slugs: Vec::new(),
+            })
         );
     }
 }

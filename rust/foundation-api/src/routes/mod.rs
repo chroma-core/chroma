@@ -81,6 +81,10 @@ pub(crate) fn router() -> Router<FoundationApiServer> {
             post(trajectories::foundation_finalize_trajectory),
         )
         .route(
+            "/api/trajectories/{id}/reasoning",
+            get(trajectories::foundation_get_trajectory_reasoning),
+        )
+        .route(
             "/api/trajectories/{id}",
             get(trajectories::foundation_get_trajectory),
         )
