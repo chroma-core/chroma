@@ -5,7 +5,9 @@ use super::super::events::{
     action_event, action_text, observation_event, usage_event, AgentSseEvent, AgentToolCall,
 };
 use super::super::{default_model, default_system_prompt, AgentRequest};
-use chroma_agent::{ActionBuilder, AnthropicModel, Call, InferenceUsage, ObservationBuilder, Reasoning};
+use chroma_agent::{
+    ActionBuilder, AnthropicModel, Call, InferenceUsage, ObservationBuilder, Reasoning,
+};
 use serde_json::json;
 use validator::Validate;
 
