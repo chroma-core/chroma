@@ -99,6 +99,10 @@ pub struct FnConsumerServiceConfig {
     #[serde(default)]
     pub fn_consumer: crate::fn_consumer::config::FnConsumerConfig,
 
+    /// The configuration for compactor-derived sizing and batching behavior.
+    #[serde(default)]
+    pub compactor: crate::compactor::config::CompactorConfig,
+
     /// The configuration for connecting to the log service.
     #[serde(default)]
     pub log: LogConfig,
