@@ -271,7 +271,7 @@ class CollectionCommon(Generic[ClientT]):
             validate_ids(ids=unpacked_ids)
 
         validate_filter_set(filter_set=filters)
-        validate_include(include=include, dissalowed=["distances"])
+        validate_include(include=include, dissallowed=["distances"])
 
         if "data" in include and self._data_loader is None:
             raise ValueError(
