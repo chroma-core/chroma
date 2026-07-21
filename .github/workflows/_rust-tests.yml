@@ -75,12 +75,17 @@ jobs:
             platform: blacksmith-16vcpu-ubuntu-2404
             partition_method: hash
             partition: 1
-            partition_total: 2
+            partition_total: 3
           - nextest_profile: ci_k8s_integration
             platform: blacksmith-16vcpu-ubuntu-2404
             partition_method: hash
             partition: 2
-            partition_total: 2
+            partition_total: 3
+          - nextest_profile: ci_k8s_integration
+            platform: blacksmith-16vcpu-ubuntu-2404
+            partition_method: hash
+            partition: 3
+            partition_total: 3
           - nextest_profile: ci_k8s_integration_slow
             platform: blacksmith-16vcpu-ubuntu-2404
             partition_method: count
@@ -122,7 +127,7 @@ jobs:
       - name: Build CLI
         run: cargo build --bin chroma
       - name: Run tests
-        run: cargo nextest run --profile ${{ matrix.nextest_profile }} --partition ${{ matrix.partition_method }}:${{ matrix.partition }}/${{ matrix.partition_total }} --no-tests warn
+        run: cargo nextest run --jobs 8 --profile ${{ matrix.nextest_profile }} --partition ${{ matrix.partition_method }}:${{ matrix.partition }}/${{ matrix.partition_total }} --no-tests warn
       - name: Save service logs to artifact
         if: always()
         uses: ./.github/actions/export-tilt-logs
