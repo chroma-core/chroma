@@ -55,6 +55,7 @@ pub struct DistributedExecutorConfig {
 #[derive(Deserialize, Clone, Serialize, Debug)]
 pub struct LocalExecutorConfig {}
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Deserialize, Clone, Serialize, Debug)]
 pub enum ExecutorConfig {
     #[serde(alias = "distributed")]
