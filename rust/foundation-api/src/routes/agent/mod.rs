@@ -34,10 +34,10 @@ use serde::Deserialize;
 use validator::Validate;
 
 use chroma_agent::{
-    Agent, AnthropicAgentInferenceModel, AnthropicModel, Observation, ObservationBuilder,
-    ObservationItem, ToolSet,
+    Agent, AnthropicAgentInferenceModel, AnthropicModel, InferenceUsage, Observation,
+    ObservationBuilder, ObservationItem, ToolSet,
 };
-use events::{action_event, action_text, observation_event, AgentSseEvent};
+use events::{action_event, action_text, observation_event, usage_event, AgentSseEvent};
 
 use crate::agent_tools::{ReadPageTool, SearchTool, SubagentSearchTool};
 use crate::routes::subagent_search::SubagentSearchCreds;
@@ -154,12 +154,13 @@ pub async fn foundation_agent(
         .parse::<AnthropicModel>()
         .map_err(|_| AgentRouteError::UnknownModel(request.model.clone()))?;
 
-    let agent = build_agent(&server, &headers, &tenant, &request, model).await?;
+    let (agent, collection_id) = build_agent(&server, &headers, &tenant, &request, model).await?;
     let stream = drive_agent(
         agent,
         request.input,
         tenant,
         server.config.foundation.database_name.clone(),
+        collection_id,
     )
     .map(|event| sse_event(&event));
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
@@ -179,7 +180,7 @@ async fn build_agent(
     tenant: &str,
     request: &AgentRequest,
     model: AnthropicModel,
-) -> Result<Agent, AgentRouteError> {
+) -> Result<(Agent, String), AgentRouteError> {
     let wiki_client = server
         .wiki_client
         .as_ref()
@@ -188,6 +189,7 @@ async fn build_agent(
         .ok_or(AgentRouteError::MissingToken)?
         .to_string();
     let collection = wiki_client.wiki_collection(tenant, &token).await?;
+    let collection_id = collection.id().to_string();
 
     let ui_origin = server.config.foundation.foundation_ui_origin.clone();
 
@@ -221,7 +223,10 @@ async fn build_agent(
         .map_err(|err| AgentRouteError::Inference(err.to_string()))?
         .with_client(server.shared_http_client.clone());
 
-    Ok(Agent::new(toolset, Box::new(inference)).with_system_prompt(request.system.clone()))
+    Ok((
+        Agent::new(toolset, Box::new(inference)).with_system_prompt(request.system.clone()),
+        collection_id,
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -249,6 +254,7 @@ fn drive_agent(
     input: String,
     tenant: String,
     database: String,
+    collection_id: String,
 ) -> impl Stream<Item = AgentSseEvent> {
     async_stream::stream! {
         agent.reset();
@@ -260,14 +266,20 @@ fn drive_agent(
         let mut final_text = String::new();
 
         loop {
-            let action = match agent.infer().await {
-                Ok(Some(action)) => action,
+            let step = match agent.infer_with_usage().await {
+                Ok(step) => step,
                 // Nothing actionable: end with whatever answer we have.
-                Ok(None) => break,
                 Err(err) => {
                     yield AgentSseEvent::Error { message: err.to_string() };
                     return;
                 }
+            };
+            if let Some(usage) = step.usage.as_ref() {
+                submit_search_agent_usage_event(usage, &database, &tenant, &collection_id).await;
+                yield usage_event(usage);
+            }
+            let Some(action) = step.action else {
+                break;
             };
 
             let text = action_text(&action);
@@ -283,7 +295,11 @@ fn drive_agent(
             // observation with `is_error` set.
             match agent.act(action).await {
                 Ok(Some(observation)) => {
-                    submit_subagent_usage_events(&observation, &database, &tenant).await;
+                    for usage in extract_subagent_usages(&observation) {
+                        submit_search_agent_usage_event(&usage, &database, &tenant, &collection_id)
+                            .await;
+                        yield usage_event(&usage);
+                    }
                     yield observation_event(&observation);
                     agent.observe(observation);
                 }
@@ -304,8 +320,11 @@ fn drive_agent(
     }
 }
 
-async fn submit_subagent_usage_events(observation: &Observation, database: &str, tenant: &str) {
-    for item in &observation.items {
+fn extract_subagent_usages(observation: &Observation) -> Vec<InferenceUsage> {
+    observation
+        .items
+        .iter()
+        .filter_map(|item| {
         let ObservationItem::ToolResult {
             metadata:
                 Some(chroma_agent::ToolCallMetadata::SubagentUsage {
@@ -316,29 +335,44 @@ async fn submit_subagent_usage_events(observation: &Observation, database: &str,
             ..
         } = item
         else {
-            continue;
+            return None;
         };
 
-        if let Err(error) = MeterEvent::SearchAgentUsage(SearchAgentUsageContext::new(
-            tenant.to_string(),
-            database.to_string(),
-            model.clone(),
-            *input_tokens,
-            *output_tokens,
-        ))
-        .submit()
-        .await
-        {
-            tracing::warn!(
-                error = %error,
-                tenant,
-                database,
-                model,
-                input_tokens,
-                output_tokens,
-                "failed to submit search agent usage meter event"
-            );
-        }
+        Some(InferenceUsage {
+                model: model.clone(),
+                input_tokens: *input_tokens,
+                output_tokens: *output_tokens,
+            })
+        })
+        .collect()
+}
+
+async fn submit_search_agent_usage_event(
+    usage: &InferenceUsage,
+    database: &str,
+    tenant: &str,
+    collection_id: &str,
+) {
+    if let Err(error) = MeterEvent::SearchAgentUsage(SearchAgentUsageContext::new(
+        tenant.to_string(),
+        database.to_string(),
+        collection_id.to_string(),
+        usage.model.clone(),
+        usage.input_tokens,
+        usage.output_tokens,
+    ))
+    .submit()
+    .await
+    {
+        tracing::warn!(
+            error = %error,
+            tenant,
+            database,
+            model = usage.model,
+            input_tokens = usage.input_tokens,
+            output_tokens = usage.output_tokens,
+            "failed to submit search agent usage meter event"
+        );
     }
 }
 

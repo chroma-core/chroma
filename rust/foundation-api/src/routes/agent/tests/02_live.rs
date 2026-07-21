@@ -76,6 +76,7 @@ async fn live_agent_calls_tool_then_answers() {
         "When was Chroma founded?".to_string(),
         "test-tenant".to_string(),
         "FOUNDATION".to_string(),
+        "00000000-0000-0000-0000-000000000000".to_string(),
     );
     futures::pin_mut!(stream);
 

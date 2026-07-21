@@ -18,6 +18,7 @@ use serde_json::json;
 struct StubTool {
     name: &'static str,
     fail: bool,
+    usage: Option<ToolCallMetadata>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -45,7 +46,7 @@ impl Tool for StubTool {
         if self.fail {
             Err(AgentError::Tool("stub tool failed".to_string()))
         } else {
-            Ok(("stub result".to_string(), None))
+            Ok(("stub result".to_string(), self.usage.clone()))
         }
     }
 }
@@ -76,11 +77,12 @@ impl AgentInferenceModel for CallThenAnswer {
     }
 }
 
-fn search_agent(fail: bool) -> Agent {
+fn search_agent(fail: bool, usage: Option<ToolCallMetadata>) -> Agent {
     let mut toolset = ToolSet::new();
     toolset.add(StubTool {
         name: "search",
         fail,
+        usage,
     });
     Agent::new(toolset, Box::new(CallThenAnswer))
 }
@@ -92,6 +94,7 @@ async fn collect_events(agent: Agent, query: &str) -> Vec<AgentSseEvent> {
         query.to_string(),
         "test-tenant".to_string(),
         "FOUNDATION".to_string(),
+        "00000000-0000-0000-0000-000000000000".to_string(),
     );
     futures::pin_mut!(stream);
     let mut events = Vec::new();
@@ -103,7 +106,7 @@ async fn collect_events(agent: Agent, query: &str) -> Vec<AgentSseEvent> {
 
 #[tokio::test]
 async fn drives_loop_and_emits_action_observation_done() {
-    let events = collect_events(search_agent(false), "hello").await;
+    let events = collect_events(search_agent(false, None), "hello").await;
 
     // action(call) -> observation -> action(text) -> done.
     assert_eq!(events.len(), 4, "events: {events:?}");
@@ -128,7 +131,7 @@ async fn drives_loop_and_emits_action_observation_done() {
 
 #[tokio::test]
 async fn tool_error_is_reported_as_observation_then_done() {
-    let events = collect_events(search_agent(true), "hello").await;
+    let events = collect_events(search_agent(true, None), "hello").await;
 
     // The failed call still yields an observation (is_error) and the run
     // continues to a terminal answer rather than aborting.
@@ -141,6 +144,36 @@ async fn tool_error_is_reported_as_observation_then_done() {
         other => panic!("expected observation, got {other:?}"),
     }
     assert!(matches!(events.last(), Some(AgentSseEvent::Done { .. })));
+}
+
+#[tokio::test]
+async fn subagent_usage_emits_usage_event() {
+    let events = collect_events(
+        search_agent(
+            false,
+            Some(ToolCallMetadata::SubagentUsage {
+                model: "scout".to_string(),
+                input_tokens: 123,
+                output_tokens: 456,
+            }),
+        ),
+        "hello",
+    )
+    .await;
+
+    assert_eq!(events.len(), 5, "events: {events:?}");
+    assert!(matches!(&events[0], AgentSseEvent::Action { .. }));
+    assert!(matches!(
+        &events[1],
+        AgentSseEvent::Usage {
+            model,
+            input_tokens: 123,
+            output_tokens: 456,
+        } if model == "scout"
+    ));
+    assert!(matches!(&events[2], AgentSseEvent::Observation { .. }));
+    assert!(matches!(&events[3], AgentSseEvent::Action { .. }));
+    assert!(matches!(&events[4], AgentSseEvent::Done { .. }));
 }
 
 /// Answers immediately with text and never requests a tool.

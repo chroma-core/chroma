@@ -538,6 +538,7 @@ initialize_metering! {
     pub struct SearchAgentUsageContext {
         pub tenant: String,
         pub database: String,
+        pub collection_id: String,
         pub model: String,
         pub input_tokens: u64,
         pub output_tokens: u64,
@@ -547,6 +548,7 @@ initialize_metering! {
         pub fn new(
             tenant: String,
             database: String,
+            collection_id: String,
             model: String,
             input_tokens: u64,
             output_tokens: u64,
@@ -554,6 +556,7 @@ initialize_metering! {
             SearchAgentUsageContext {
                 tenant,
                 database,
+                collection_id,
                 model,
                 input_tokens,
                 output_tokens,
@@ -618,6 +621,7 @@ mod tests {
         let event = MeterEvent::SearchAgentUsage(SearchAgentUsageContext::new(
             "test_tenant".to_string(),
             "FOUNDATION".to_string(),
+            "test_collection".to_string(),
             "context-1".to_string(),
             123,
             456,
