@@ -299,6 +299,42 @@ fn generated_json_deserializes_to_reasoning_projection() -> TestResult {
 }
 
 #[test]
+/// Verifies empty raw observations are projection inputs, not stored entries.
+fn generated_json_drops_empty_initial_observation() -> TestResult {
+    let id = Uuid::parse_str("00000000-0000-0000-0000-000000000023")?;
+    let file: ReasoningTrajectoryFile = serde_json::from_value(json!({
+        "trajectory": {
+            "id": id,
+            "actions_and_observations": [
+                {
+                    "observations": [],
+                    "sources": [],
+                    "tool_metadata": []
+                },
+                {
+                    "tools": [],
+                    "params": [],
+                    "sources": [],
+                    "reasoning": "  kept  "
+                }
+            ]
+        }
+    }))?;
+
+    assert_eq!(
+        file,
+        ReasoningTrajectoryFile {
+            citations: None,
+            trajectory: ReasoningTrajectory {
+                id,
+                entries: vec![reasoning_entry(Some("kept".to_string()), &[])],
+            },
+        }
+    );
+    Ok(())
+}
+
+#[test]
 /// Verifies the pruned type can deserialize its own serialized JSON.
 fn reasoning_file_deserializes_from_pruned_json() -> TestResult {
     let file = sample_file(Uuid::parse_str("00000000-0000-0000-0000-000000000021")?);
@@ -857,6 +893,171 @@ async fn create_open_trajectory_reads_absence_before_add() -> TestResult {
     assert_eq!(result.record_count, 1);
     assert_eq!(get_mock.calls(), 1);
     assert_eq!(commit_mock.calls(), 1);
+    Ok(())
+}
+
+#[tokio::test]
+/// Verifies route-facing open writes return the complete compact response.
+async fn create_open_generate_trajectory_returns_complete_write_response() -> TestResult {
+    let server = MockServer::start_async().await;
+    let collection = mocked_collection(&server);
+    let mut file = sample_file(Uuid::parse_str("00000000-0000-0000-0000-00000000000d")?);
+    file.trajectory.entries.clear();
+    file.citations = None;
+
+    let header_key = trajectory_header_key(file.trajectory.id)?;
+    let get_path = collection_path(&collection, "conditional/get");
+    let commit_path = collection_path(&collection, "conditional/commit");
+
+    let get_mock = server
+        .mock_async(|when, then| {
+            when.method("POST").path(get_path).json_body(json!({
+                "ids": [header_key],
+                "where": null,
+                "where_document": null,
+                "limit": null,
+                "offset": 0,
+                "include": [],
+                "read_token": null,
+            }));
+            then.status(200).json_body(json!({
+                "ids": [],
+                "embeddings": null,
+                "documents": null,
+                "uris": null,
+                "metadatas": null,
+                "include": [],
+                "read_token": 42,
+            }));
+        })
+        .await;
+    let commit_mock = server
+        .mock_async(|when, then| {
+            when.method("POST").path(commit_path);
+            then.status(200).json_body(json!({
+                "first_inserted_record_offset": 17,
+                "record_count": 1,
+            }));
+        })
+        .await;
+
+    assert_eq!(
+        create_open_generate_trajectory(&collection, &file).await?,
+        TrajectoryWriteResponse {
+            trajectory_id: file.trajectory.id,
+            write_state: WriteState::Open,
+            entry_count: 0,
+            record_count: 1,
+            first_inserted_record_offset: Some(17),
+        }
+    );
+    assert_eq!(get_mock.calls(), 1);
+    assert_eq!(commit_mock.calls(), 1);
+    Ok(())
+}
+
+#[tokio::test]
+/// Verifies complete saves return finalized compact write metadata.
+async fn save_generate_trajectory_returns_complete_write_response() -> TestResult {
+    let server = MockServer::start_async().await;
+    let collection = mocked_collection(&server);
+    let file = sample_file(Uuid::parse_str("00000000-0000-0000-0000-00000000000e")?);
+    let commit_path = collection_path(&collection, "conditional/commit");
+
+    let commit_mock = server
+        .mock_async(|when, then| {
+            when.method("POST").path(commit_path);
+            then.status(200).json_body(json!({
+                "first_inserted_record_offset": 23,
+                "record_count": 99,
+            }));
+        })
+        .await;
+
+    assert_eq!(
+        save_generate_trajectory(&collection, &file).await?,
+        TrajectoryWriteResponse {
+            trajectory_id: file.trajectory.id,
+            write_state: WriteState::Finalized,
+            entry_count: file.trajectory.entries.len(),
+            record_count: 99,
+            first_inserted_record_offset: Some(23),
+        }
+    );
+    assert_eq!(commit_mock.calls(), 1);
+    Ok(())
+}
+
+#[tokio::test]
+/// Verifies create-only open writes report an existing trajectory id.
+async fn create_open_trajectory_existing_record_is_already_exists() -> TestResult {
+    let server = MockServer::start_async().await;
+    let collection = mocked_collection(&server);
+    let mut file = sample_file(Uuid::parse_str("00000000-0000-0000-0000-00000000000f")?);
+    file.trajectory.entries.clear();
+    file.citations = None;
+
+    let header_key = trajectory_header_key(file.trajectory.id)?;
+    let get_path = collection_path(&collection, "conditional/get");
+
+    let get_mock = server
+        .mock_async(|when, then| {
+            when.method("POST").path(get_path);
+            then.status(200).json_body(json!({
+                "ids": [header_key],
+                "embeddings": null,
+                "documents": null,
+                "uris": null,
+                "metadatas": null,
+                "include": [],
+                "read_token": 42,
+            }));
+        })
+        .await;
+
+    let mut txn = collection.conditional();
+    let error = chroma_create_open_trajectory(&mut txn, &file)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        &error,
+        TrajectoryError::AlreadyExists { tid } if *tid == file.trajectory.id
+    ));
+    assert_eq!(get_mock.calls(), 1);
+    Ok(())
+}
+
+#[tokio::test]
+/// Verifies filtered trajectory reads with no header map to NotFound.
+async fn load_generate_trajectory_missing_header_is_not_found() -> TestResult {
+    let server = MockServer::start_async().await;
+    let collection = mocked_collection(&server);
+    let trajectory_id = Uuid::parse_str("00000000-0000-0000-0000-000000000010")?;
+    let get_path = collection_path(&collection, "conditional/get");
+
+    let get_mock = server
+        .mock_async(|when, then| {
+            when.method("POST").path(get_path);
+            then.status(200).json_body(json!({
+                "ids": [],
+                "embeddings": null,
+                "documents": null,
+                "uris": null,
+                "metadatas": null,
+                "include": ["documents", "metadatas"],
+                "read_token": 42,
+            }));
+        })
+        .await;
+
+    let error = load_generate_trajectory(&collection, trajectory_id, false)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        &error,
+        TrajectoryError::NotFound { tid } if *tid == trajectory_id
+    ));
+    assert_eq!(get_mock.calls(), 1);
     Ok(())
 }
 

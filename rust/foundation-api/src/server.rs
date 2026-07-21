@@ -25,9 +25,9 @@ use crate::{
     auth::AuthenticateAndAuthorize,
     config::FoundationApiConfig,
     errors::ServerError,
+    foundation_chroma::{FoundationChromaClient, FoundationChromaClientError},
     routes,
     server_middleware::{always_json_errors_middleware, default_json_content_type_middleware},
-    wiki::{WikiClient, WikiClientError},
 };
 
 /// Placeholder batch limit reported by `/api/v2/pre-flight-checks`.
@@ -54,12 +54,11 @@ pub struct FoundationApiServer {
     pub(crate) scorecard: Arc<Scorecard<'static>>,
     pub(crate) system: System,
     pub(crate) metrics: Arc<SystemMetrics>,
-    /// Proxying Chroma client for wiki record I/O, shared across requests so
-    /// its per-tenant collection cache persists. `None` when
-    /// `frontend_ingress_url` is unset or invalid, which disables wiki routes.
-    // Read by the wiki record-I/O routes added later in the stack.
-    #[allow(dead_code)]
-    pub(crate) wiki_client: Option<WikiClient>,
+    /// Proxying Chroma client for Foundation record I/O, shared across requests
+    /// so its per-tenant/per-collection cache persists. `None` when
+    /// `frontend_ingress_url` is unset or invalid, which disables dependent
+    /// routes.
+    pub(crate) foundation_chroma_client: Option<FoundationChromaClient>,
     /// Process-wide HTTP client (one shared connection pool) for outbound calls
     /// that don't go through the Chroma client
     pub(crate) shared_http_client: reqwest::Client,
@@ -80,18 +79,17 @@ impl FoundationApiServer {
         // SAFETY(rescrv): This is safe because 128 is non-zero.
         let scorecard = Arc::new(Scorecard::new(&(), rules, 128.try_into().unwrap()));
         let metrics = Arc::new(SystemMetrics::new(&global::meter("foundation-api")));
-        let wiki_client = match WikiClient::from_config(&config.foundation) {
+        let foundation_chroma_client = match FoundationChromaClient::from_config(&config.foundation)
+        {
             Ok(client) => Some(client),
-            Err(WikiClientError::MissingIngressUrl) => {
-                tracing::info!(
-                    "foundation frontend_ingress_url unset; wiki record-I/O routes disabled",
-                );
+            Err(FoundationChromaClientError::MissingIngressUrl) => {
+                tracing::info!("foundation frontend_ingress_url unset; record-I/O routes disabled",);
                 None
             }
             Err(err) => {
                 tracing::error!(
                     error = %err,
-                    "invalid foundation frontend_ingress_url; wiki record-I/O routes disabled",
+                    "invalid foundation frontend_ingress_url; record-I/O routes disabled",
                 );
                 None
             }
@@ -104,7 +102,7 @@ impl FoundationApiServer {
             scorecard,
             system,
             metrics,
-            wiki_client,
+            foundation_chroma_client,
             shared_http_client: reqwest::Client::new(),
         }
     }

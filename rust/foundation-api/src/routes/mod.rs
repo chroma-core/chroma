@@ -1,6 +1,10 @@
 use crate::server::FoundationApiServer;
 use axum::response::sse::Event;
-use axum::{http::HeaderMap, routing::post, Router};
+use axum::{
+    http::HeaderMap,
+    routing::{get, post},
+    Router,
+};
 use serde::Serialize;
 
 /// HTTP header carrying the caller's Chroma Cloud token, forwarded to the FE
@@ -47,6 +51,7 @@ pub(crate) mod mcp;
 pub(crate) mod read_page;
 pub(crate) mod search;
 pub(crate) mod subagent_search;
+pub(crate) mod trajectories;
 pub(crate) mod upsert_page;
 pub(super) mod whoami;
 
@@ -59,6 +64,26 @@ pub(crate) fn router() -> Router<FoundationApiServer> {
         )
         .route("/api/search", post(search::foundation_search))
         .route("/api/read-page", post(read_page::foundation_read_page))
+        .route(
+            "/api/trajectories/save",
+            post(trajectories::foundation_save_trajectory),
+        )
+        .route(
+            "/api/trajectories/open",
+            post(trajectories::foundation_open_trajectory),
+        )
+        .route(
+            "/api/trajectories/{id}/entries",
+            post(trajectories::foundation_append_trajectory_entries),
+        )
+        .route(
+            "/api/trajectories/{id}/finalize",
+            post(trajectories::foundation_finalize_trajectory),
+        )
+        .route(
+            "/api/trajectories/{id}",
+            get(trajectories::foundation_get_trajectory),
+        )
         .route(
             "/api/subagent_search",
             post(subagent_search::foundation_subagent_search),

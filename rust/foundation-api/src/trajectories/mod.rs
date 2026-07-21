@@ -23,6 +23,7 @@
 //! # }
 //! ```
 
+mod api;
 mod chroma_store;
 mod chunkset;
 mod citations;
@@ -34,6 +35,11 @@ mod model;
 mod record_format;
 mod validate;
 
+pub use api::{
+    append_open_generate_trajectory, create_open_generate_trajectory,
+    finalize_open_generate_trajectory, load_generate_trajectory, save_generate_trajectory,
+    AppendTrajectoryEntriesRequest, TrajectoryWriteResponse,
+};
 pub use chroma_store::{
     chroma_create_open_trajectory, chroma_extend_open_trajectory, chroma_extend_open_trajectory_at,
     chroma_finalize_open_trajectory, chroma_load_generate_trajectory,

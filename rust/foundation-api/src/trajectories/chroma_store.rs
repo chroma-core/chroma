@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use super::chunkset::{push_json_record, read_json};
 use super::error::TrajectoryError;
-use super::ids::uuid_to_tid;
+use super::ids::{tid_to_uuid, uuid_to_tid};
 use super::limits::VALUE_MAX_BYTES;
 use super::metadata::update_metadata_from_metadata;
 use super::model::{ReasoningEntry, ReasoningTrajectoryFile, WriteState};
@@ -37,6 +37,10 @@ pub async fn chroma_load_generate_trajectory(
     require_finalized: bool,
 ) -> Result<ReasoningTrajectoryFile, TrajectoryError> {
     let records = chroma_records_for_tid(txn, tid).await?;
+    let header_key = trajectory_header_key(tid)?;
+    if !records.contains_key(&header_key) {
+        return Err(TrajectoryError::NotFound { tid });
+    }
     load_one_from_documents(&records, tid, require_finalized)
 }
 
@@ -291,7 +295,7 @@ async fn chroma_read_trajectory_header(
         )
         .await?;
     if response.ids.is_empty() {
-        return Err(TrajectoryError::MissingKey(key));
+        return Err(TrajectoryError::NotFound { tid: tid_uuid });
     }
     let documents = documents_from_get_response(response.ids, response.documents)?;
     read_json(&documents, &key)
@@ -350,11 +354,24 @@ async fn ensure_ids_absent(
         .get(Some(ids), None, None, Some(0), Some(IncludeList::empty()))
         .await?;
     if let Some(id) = response.ids.into_iter().next() {
-        return Err(TrajectoryError::InvalidValue(format!(
-            "Chroma record {id} already exists"
-        )));
+        return Err(TrajectoryError::AlreadyExists {
+            tid: trajectory_id_from_key(&id)?,
+        });
     }
     Ok(())
+}
+
+/// Decode the trajectory UUID from a generated Chroma record key.
+fn trajectory_id_from_key(key: &str) -> Result<Uuid, TrajectoryError> {
+    let Some(tid) = key
+        .strip_prefix("gt/")
+        .and_then(|rest| rest.split('/').next())
+    else {
+        return Err(TrajectoryError::InvalidKey(format!(
+            "record key {key} is not under gt/<tid>"
+        )));
+    };
+    tid_to_uuid(tid)
 }
 
 /// Upsert records into Chroma, replacing existing ids when present.
