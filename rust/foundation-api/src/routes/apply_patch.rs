@@ -43,9 +43,17 @@ pub struct ApplyPatchRequest {
     /// patches the current version it just read.
     pub expected_version: Option<u32>,
     /// Optional caller-supplied reason for this change. Forwarded to
-    /// `/api/upsert-page`, which logs only presence.
+    /// `/api/upsert-page` but not persisted on the page.
     #[validate(length(max = 350, message = "reason must be at most 350 characters"))]
     pub reason: Option<String>,
+    /// Identifier of the trajectory that produced this patch. Forwarded to
+    /// `/api/upsert-page` and stamped onto page and revision metadata.
+    #[validate(length(
+        min = 1,
+        max = 128,
+        message = "last_written_by must be 1 to 128 characters"
+    ))]
+    pub last_written_by: String,
 }
 
 /// Response body for `POST /api/apply-patch`.
@@ -142,6 +150,7 @@ pub(crate) async fn run_apply_patch(
         source_ids: patched.source_ids,
         categories: patched.categories,
         reason: request.reason.clone(),
+        last_written_by: request.last_written_by.clone(),
         expected_version: request.expected_version.unwrap_or(patched.base_version),
     };
     let categories = normalize_categories(&upsert.categories);
@@ -225,6 +234,7 @@ mod tests {
             source_ids: vec!["slack_master:old".to_string()],
             version: 7,
             updated_at: Some(1700),
+            last_written_by: Some("00000000-0000-0000-0000-000000000000".to_string()),
             content: content.to_string(),
             url: None,
         }
@@ -242,6 +252,7 @@ mod tests {
             categories: vec!["product".to_string(), "infra".to_string()],
             expected_version: None,
             reason: None,
+            last_written_by: "00000000-0000-0000-0000-000000000001".to_string(),
         }
     }
 
@@ -299,5 +310,9 @@ mod tests {
         let mut invalid_category = request("Old", "New");
         invalid_category.categories = vec!["BadCategory".to_string()];
         assert!(invalid_category.validate().is_err());
+
+        let mut missing_writer = request("Old", "New");
+        missing_writer.last_written_by.clear();
+        assert!(missing_writer.validate().is_err());
     }
 }

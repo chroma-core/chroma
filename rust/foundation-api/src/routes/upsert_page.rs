@@ -80,10 +80,17 @@ pub struct UpsertPageRequest {
     pub categories: Vec<String>,
     /// Optional caller-supplied reason for this change. Deliberately not
     /// persisted on the page: the text can be large and may carry sensitive
-    /// context, so we only log that a reason was supplied (not its content) as
-    /// an audit signal.
+    /// context.
     #[validate(length(max = 350, message = "reason must be at most 350 characters"))]
     pub reason: Option<String>,
+    /// Identifier of the trajectory that produced this page write. Stamped on
+    /// every chunk as `last_written_by` and copied into revision history.
+    #[validate(length(
+        min = 1,
+        max = 128,
+        message = "last_written_by must be 1 to 128 characters"
+    ))]
+    pub last_written_by: String,
     /// The version the caller expects to be replacing: the page's current
     /// `version` on an update, or `0` when the caller expects to create a new
     /// page.
@@ -359,6 +366,7 @@ pub(crate) async fn run_upsert_page(
         i64::from(version),
         categories,
         &request.source_ids,
+        &request.last_written_by,
     );
 
     let doc_batch: Vec<Option<String>> = chunks
@@ -388,18 +396,6 @@ pub(crate) async fn run_upsert_page(
     }
 
     record_op(wiki_client, tenant, txn.commit()).await?;
-
-    // `reason` is logged as a presence flag only — never its content, which can
-    // be large and may leak sensitive context.
-    tracing::info!(
-        slug = %slug,
-        op,
-        version,
-        num_chunks,
-        expected_version = request.expected_version,
-        reason_provided = request.reason.is_some(),
-        "wiki upsert-page complete"
-    );
 
     Ok(UpsertPageResponse {
         slug: slug.to_string(),
@@ -607,6 +603,7 @@ mod tests {
             source_ids: source_ids.iter().map(|s| s.to_string()).collect(),
             categories: categories.iter().map(|s| s.to_string()).collect(),
             reason: None,
+            last_written_by: "00000000-0000-0000-0000-000000000001".to_string(),
             expected_version: 0,
         }
     }
@@ -963,6 +960,13 @@ mod tests {
         req.validate().unwrap();
 
         req.reason = Some("a".repeat(351));
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn request_validate_requires_last_written_by() {
+        let mut req = request("foo", "body", &[], &[]);
+        req.last_written_by.clear();
         assert!(req.validate().is_err());
     }
 }
