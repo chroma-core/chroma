@@ -387,10 +387,12 @@ def _fastapi_fixture(
         yield from run(args)
 
 
+@pytest.fixture(scope="function")
 def fastapi() -> Generator[System, None, None]:
     return _fastapi_fixture(is_persistent=False)
 
 
+@pytest.fixture(scope="function")
 def async_fastapi() -> Generator[System, None, None]:
     return _fastapi_fixture(
         is_persistent=False,
@@ -398,6 +400,7 @@ def async_fastapi() -> Generator[System, None, None]:
     )
 
 
+@pytest.fixture(scope="function")
 def fastapi_persistent() -> Generator[System, None, None]:
     return _fastapi_fixture(is_persistent=True)
 
@@ -753,7 +756,7 @@ def filtered_fixture_names() -> List[str]:
         "fastapi",
         "async_fastapi",
         "fastapi_persistent",
-        "sqlite_fixture",
+        "sqlite",
         "sqlite_persistent",
     ]
 
