@@ -12,6 +12,7 @@ use chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationRequest;
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
 use std::time::Duration;
 use tokio::sync::oneshot;
+use tonic::Code;
 
 // Message types
 #[derive(Debug)]
@@ -240,13 +241,17 @@ impl WorkQueueManager {
     }
 
     // Update sysdb's completion offset for an async attached function invocation.
+    fn is_stale_async_invocation_not_found(status: &tonic::Status) -> bool {
+        status.code() == Code::NotFound
+    }
+
     #[tracing::instrument(name = "WorkQueueManager::try_finish_invocation", skip(self))]
     async fn try_finish_invocation(
         &mut self,
         fn_id: &AttachedFunctionUuid,
         input_coll_id: &CollectionUuid,
         completion_offset: i64,
-    ) -> Result<(), WorkQueueError> {
+    ) -> Result<FinishResult, WorkQueueError> {
         let request = TryFinishAsyncAttachedFunctionInvocationRequest {
             attached_function_id: fn_id.to_string(),
             collection_id: input_coll_id.to_string(),
@@ -256,8 +261,20 @@ impl WorkQueueManager {
         self.sysdb
             .try_finish_async_attached_function_invocation(request)
             .await
-            .map_err(|e| WorkQueueError::TryFinishFailed(e.message().to_string()))?;
-        Ok(())
+            .map(|_| FinishResult::Success)
+            .or_else(|status| {
+                if Self::is_stale_async_invocation_not_found(&status) {
+                    tracing::info!(
+                        fn_id = %fn_id,
+                        input_coll_id = %input_coll_id,
+                        status = %status,
+                        "Dropping stale fn-consumer work item after SysDB reported deleted invocation"
+                    );
+                    Ok(FinishResult::Success)
+                } else {
+                    Err(WorkQueueError::TryFinishFailed(status.message().to_string()))
+                }
+            })
     }
 }
 
@@ -332,26 +349,28 @@ impl Handler<FinishWorkMessage> for WorkQueueManager {
 
     async fn handle(&mut self, msg: FinishWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
         // Call sysdb
-        if let Err(e) = self
+        let finish_result = match self
             .try_finish_invocation(&msg.fn_id, &msg.input_coll_id, msg.new_completion_offset)
             .await
         {
-            if msg.response_tx.send(Err(e)).is_err() {
-                tracing::error!("Failed to send error response");
+            Ok(finish_result) => finish_result,
+            Err(e) => {
+                if msg.response_tx.send(Err(e)).is_err() {
+                    tracing::error!("Failed to send error response");
+                }
+                return;
             }
-            return;
-        }
+        };
 
         // Use the queued compaction frontier to decide whether to remove or advance the entry.
         self.state
             .finish_work_success(&msg.fn_id, &msg.input_coll_id, msg.new_completion_offset);
 
         // Send immediate success response
-        if msg.response_tx.send(Ok(FinishResult::Success)).is_err() {
-            tracing::error!("Failed to send finish work success response - receiver dropped");
+        if msg.response_tx.send(Ok(finish_result)).is_err() {
+            tracing::error!("Failed to send error response");
         }
 
-        // Check if persist needed
         if self.should_persist() {
             let _ = self.persist().await;
         }
@@ -653,5 +672,19 @@ mod tests {
         // Finish remaining work
         state.finish_work_success(&fn_id, &coll_id, 300);
         assert_eq!(state.pending_work.len(), 0);
+    }
+
+    #[test]
+    fn not_found_finish_error_is_treated_as_stale_invocation() {
+        assert!(WorkQueueManager::is_stale_async_invocation_not_found(
+            &tonic::Status::not_found("collection not found")
+        ));
+    }
+
+    #[test]
+    fn internal_finish_error_is_not_treated_as_stale_invocation() {
+        assert!(!WorkQueueManager::is_stale_async_invocation_not_found(
+            &tonic::Status::internal("boom")
+        ));
     }
 }
