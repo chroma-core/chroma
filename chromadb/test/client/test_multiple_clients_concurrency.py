@@ -21,7 +21,7 @@ def test_multiple_clients_concurrently(client_factories: ClientFactories) -> Non
 
     collections = [f"collection{i}" for i in range(COLLECTION_COUNT)]
 
-    # Create N clients, each on a seperate thread, each with their own database
+    # Create N clients, each on a separate thread, each with their own database
     def run_target(n: int) -> None:
         thread_client = client_factories.create_client(
             tenant=DEFAULT_TENANT,
