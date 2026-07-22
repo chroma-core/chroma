@@ -52,7 +52,10 @@ impl Handler<MeterEvent> for LoggingMeterEventReceiver {
     type Result = ();
 
     async fn handle(&mut self, message: MeterEvent, _ctx: &ComponentContext<Self>) -> Self::Result {
-        tracing::info!(event = ?message, "processed foundation-api meter event");
+        tracing::warn!(
+            event = ?message,
+            "processed foundation-api meter event via fallback receiver; no billing ingestion receiver is installed"
+        );
     }
 }
 
@@ -105,8 +108,8 @@ pub async fn foundation_service_entrypoint_with_config_system_registry(
 
     if !meter_event_receiver_initialized() {
         system.start_component(LoggingMeterEventReceiver);
-        tracing::info!(
-            "Initialized default foundation-api meter-event receiver; hosted deployments can override this by installing a receiver before startup"
+        tracing::warn!(
+            "Initialized fallback foundation-api meter-event receiver; search-agent usage events will be logged but not forwarded to billing ingestion"
         );
     }
 
