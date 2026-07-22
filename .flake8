@@ -1,0 +1,2 @@
+[flake8]
+ban-relative-imports = True
