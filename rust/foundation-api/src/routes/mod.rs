@@ -44,6 +44,7 @@ where
 }
 
 pub(crate) mod agent;
+pub(crate) mod apply_patch;
 pub(crate) mod init;
 pub(crate) mod init_schema;
 pub(crate) mod links;
@@ -61,6 +62,10 @@ pub(crate) fn router() -> Router<FoundationApiServer> {
         .route(
             "/api/upsert-page",
             post(upsert_page::foundation_upsert_page),
+        )
+        .route(
+            "/api/apply-patch",
+            post(apply_patch::foundation_apply_patch),
         )
         .route("/api/search", post(search::foundation_search))
         .route("/api/read-page", post(read_page::foundation_read_page))
