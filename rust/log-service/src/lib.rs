@@ -101,8 +101,7 @@ struct ConditionalWriteRequest {
 
 /// Construct a `tonic::Status` with a `backoff-reason` metadata entry.
 ///
-/// `reason` should be `"batching"` for normal write backpressure or
-/// `"compaction"` for compaction-induced backpressure.
+/// `reason` should be a stable ASCII token understood by log clients.
 fn status_with_backoff_reason(
     code: tonic::Code,
     message: impl Into<String>,
@@ -215,6 +214,11 @@ fn push_append_error_to_status(err: wal3::Error) -> Status {
         err @ wal3::Error::Backoff => {
             status_with_backoff_reason(tonic::Code::ResourceExhausted, err.to_string(), "batching")
         }
+        err @ wal3::Error::LogContentionRetry => status_with_backoff_reason(
+            tonic::Code::ResourceExhausted,
+            err.to_string(),
+            "contention",
+        ),
         err => {
             tracing::error!(err = %err, "append_many failure");
             Status::new(err.code().into(), err.to_string())
@@ -8419,6 +8423,20 @@ mod tests {
                 .get(PULL_LOGS_REASON_MD_KEY)
                 .and_then(|value| value.to_str().ok()),
             Some(PULL_LOGS_REASON_PURGED)
+        );
+    }
+
+    #[test]
+    fn log_contention_retry_maps_to_resource_exhausted_backoff() {
+        let status = push_append_error_to_status(wal3::Error::LogContentionRetry);
+
+        assert_eq!(Code::ResourceExhausted, status.code());
+        assert_eq!(
+            Some("contention"),
+            status
+                .metadata()
+                .get(BACKOFF_REASON_MD_KEY)
+                .and_then(|value| value.to_str().ok())
         );
     }
 
