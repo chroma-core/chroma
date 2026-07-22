@@ -97,6 +97,7 @@
 //! - `native-tls` - Use native system TLS (OpenSSL on Linux, Secure Transport on macOS)
 //! - `rustls` - Use pure-Rust TLS implementation
 //! - `opentelemetry` - Enable metrics collection for request latency and retry counts
+//! - `server` - Enable running a local Chroma server (adds significant dependencies)
 
 #![deny(missing_docs)]
 
@@ -105,6 +106,8 @@ pub mod client;
 mod collection;
 mod conditional_transaction;
 pub mod embed;
+#[cfg(feature = "server")]
+pub mod server;
 pub mod types;
 
 pub use attached_function::ChromaAttachedFunction;
